@@ -4,9 +4,32 @@ import { storage } from "./storage";
 import { initializeDatabase, isDatabaseAvailable } from "./db";
 import { api } from "@shared/routes";
 import { z } from "zod";
-import YahooFinance from 'yahoo-finance2';
 
-const yahooFinance = new YahooFinance();
+// Dynamic import to handle ESM/CJS compatibility
+let yahooFinance: any = null;
+
+async function getYahooFinance() {
+  if (!yahooFinance) {
+    try {
+      const YahooFinanceModule = await import('yahoo-finance2');
+      // Handle both ESM default export and CJS module.exports
+      const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
+      if (typeof YahooFinance === 'function') {
+        yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+      } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
+        yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey'] });
+      } else {
+        // Fallback for older API style
+        yahooFinance = YahooFinance;
+      }
+      console.log("Yahoo Finance initialized successfully");
+    } catch (error) {
+      console.error("Failed to initialize Yahoo Finance:", error);
+      throw error;
+    }
+  }
+  return yahooFinance;
+}
 
 // Simulated universe of stocks for the scanner
 const STOCK_UNIVERSE = [
@@ -102,8 +125,9 @@ export async function registerRoutes(
   app.get(api.stocks.history.path, async (req, res) => {
     const { symbol } = req.params;
     try {
+      const yf = await getYahooFinance();
       const queryOptions = { period1: '2023-01-01' }; // Fetch last year
-      const result = await yahooFinance.historical(symbol, queryOptions);
+      const result = await yf.historical(symbol, queryOptions);
       
       const history = result.map((item: any) => ({
         date: item.date.toISOString().split('T')[0],
@@ -125,7 +149,8 @@ export async function registerRoutes(
   app.get(api.stocks.quote.path, async (req, res) => {
     const { symbol } = req.params;
     try {
-      const quote = await yahooFinance.quote(symbol);
+      const yf = await getYahooFinance();
+      const quote = await yf.quote(symbol);
       res.json({
         symbol: quote.symbol,
         price: quote.regularMarketPrice,
@@ -143,6 +168,7 @@ export async function registerRoutes(
   // --- Scanner ---
   app.post(api.scanner.run.path, async (req, res) => {
     try {
+      const yf = await getYahooFinance();
       const input = api.scanner.run.input.parse(req.body);
       const results = [];
 
@@ -153,7 +179,7 @@ export async function registerRoutes(
       for (const symbol of universe) {
         try {
           // Get quote for price/volume filter
-          const quote = await yahooFinance.quote(symbol);
+          const quote = await yf.quote(symbol);
           
           // Filter by Price
           if (input.minPrice && quote.regularMarketPrice < input.minPrice) continue;
@@ -165,7 +191,7 @@ export async function registerRoutes(
           // Filter by Pattern
           let matchedPattern = undefined;
           if (input.pattern && input.pattern !== 'All') {
-            const history = await yahooFinance.historical(symbol, { period1: '1mo' }); // Get last month
+            const history = await yf.historical(symbol, { period1: '1mo' }); // Get last month
             const candles = history.map((item: any) => ({
               date: item.date.toISOString().split('T')[0],
               open: item.open,
