@@ -6,18 +6,22 @@ const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
 let db: NodePgDatabase<typeof schema> | null = null;
+let initializationAttempted = false;
 
-function initializeDatabase() {
+function initializeDatabase(): NodePgDatabase<typeof schema> | null {
   if (db) return db;
+  if (initializationAttempted) return null;
   
+  initializationAttempted = true;
   const databaseUrl = process.env.DATABASE_URL;
   
   if (!databaseUrl) {
-    console.error("DATABASE_URL is not set. Database features will be unavailable.");
+    console.warn("DATABASE_URL is not set. Database features will be unavailable.");
     return null;
   }
   
   try {
+    console.log("Initializing database connection...");
     pool = new Pool({ 
       connectionString: databaseUrl,
       max: 10,
@@ -30,7 +34,7 @@ function initializeDatabase() {
     });
     
     db = drizzle(pool, { schema });
-    console.log("Database connection initialized successfully");
+    console.log("Database connection pool created successfully");
     return db;
   } catch (error) {
     console.error("Failed to initialize database connection:", error);
@@ -38,22 +42,19 @@ function initializeDatabase() {
   }
 }
 
-export function getDb() {
-  if (!db) {
+export function getDb(): NodePgDatabase<typeof schema> | null {
+  if (!db && !initializationAttempted) {
     return initializeDatabase();
   }
   return db;
 }
 
-export function getPool() {
-  if (!pool) {
+export function getPool(): pg.Pool | null {
+  if (!pool && !initializationAttempted) {
     initializeDatabase();
   }
   return pool;
 }
 
-// For backward compatibility - lazy initialization
+// Export for backward compatibility - these will be null until getDb() is called
 export { pool, db };
-
-// Initialize on first import
-initializeDatabase();
