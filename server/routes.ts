@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { initializeDatabase, isDatabaseAvailable } from "./db";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import YahooFinance from 'yahoo-finance2';
@@ -86,6 +87,16 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  
+  // Initialize database connection (non-blocking, app works without it)
+  console.log("Attempting database connection...");
+  await initializeDatabase();
+  
+  if (isDatabaseAvailable()) {
+    console.log("Database is available");
+  } else {
+    console.warn("Database is not available - watchlist features will be limited");
+  }
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
@@ -218,18 +229,20 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
-  // Seed default watchlist if empty (wrapped in try-catch for production safety)
-  try {
-    const watchlist = await storage.getWatchlist();
-    if (watchlist.length === 0) {
-      const defaultSymbols = ['AAPL', 'MSFT', 'SPY', 'NVDA'];
-      for (const symbol of defaultSymbols) {
-        await storage.addToWatchlist({ symbol });
+  // Seed default watchlist if empty (only if database is available)
+  if (isDatabaseAvailable()) {
+    try {
+      const watchlist = await storage.getWatchlist();
+      if (watchlist.length === 0) {
+        const defaultSymbols = ['AAPL', 'MSFT', 'SPY', 'NVDA'];
+        for (const symbol of defaultSymbols) {
+          await storage.addToWatchlist({ symbol });
+        }
+        console.log('Seeded default watchlist');
       }
-      console.log('Seeded default watchlist');
+    } catch (error) {
+      console.error('Failed to seed watchlist:', error);
     }
-  } catch (error) {
-    console.error('Failed to seed watchlist (database may not be ready):', error);
   }
 
   return httpServer;

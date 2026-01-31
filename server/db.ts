@@ -7,10 +7,16 @@ const { Pool } = pg;
 let pool: pg.Pool | null = null;
 let db: NodePgDatabase<typeof schema> | null = null;
 let initializationAttempted = false;
+let initializationError: Error | null = null;
 
-function initializeDatabase(): NodePgDatabase<typeof schema> | null {
+export async function initializeDatabase(): Promise<NodePgDatabase<typeof schema> | null> {
   if (db) return db;
-  if (initializationAttempted) return null;
+  if (initializationAttempted) {
+    if (initializationError) {
+      console.warn("Database initialization previously failed:", initializationError.message);
+    }
+    return null;
+  }
   
   initializationAttempted = true;
   const databaseUrl = process.env.DATABASE_URL;
@@ -33,28 +39,42 @@ function initializeDatabase(): NodePgDatabase<typeof schema> | null {
       console.error('Unexpected database pool error:', err);
     });
     
+    // Test the connection
+    console.log("Testing database connection...");
+    const client = await pool.connect();
+    client.release();
+    console.log("Database connection test successful");
+    
     db = drizzle(pool, { schema });
     console.log("Database connection pool created successfully");
     return db;
   } catch (error) {
+    initializationError = error as Error;
     console.error("Failed to initialize database connection:", error);
+    // Clean up the pool if it was created
+    if (pool) {
+      try {
+        await pool.end();
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      pool = null;
+    }
     return null;
   }
 }
 
 export function getDb(): NodePgDatabase<typeof schema> | null {
-  if (!db && !initializationAttempted) {
-    return initializeDatabase();
-  }
   return db;
 }
 
 export function getPool(): pg.Pool | null {
-  if (!pool && !initializationAttempted) {
-    initializeDatabase();
-  }
   return pool;
 }
 
-// Export for backward compatibility - these will be null until getDb() is called
+export function isDatabaseAvailable(): boolean {
+  return db !== null;
+}
+
+// Export for backward compatibility
 export { pool, db };
