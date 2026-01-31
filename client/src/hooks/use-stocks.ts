@@ -2,11 +2,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl, type ScannerRunInput } from "@shared/routes";
 
 // GET /api/stocks/:symbol/history
-export function useStockHistory(symbol: string) {
+export function useStockHistory(symbol: string, interval: string = '1d') {
   return useQuery({
-    queryKey: [api.stocks.history.path, symbol],
+    queryKey: [api.stocks.history.path, symbol, interval],
     queryFn: async () => {
-      const url = buildUrl(api.stocks.history.path, { symbol });
+      const baseUrl = buildUrl(api.stocks.history.path, { symbol });
+      const url = `${baseUrl}?interval=${interval}`;
       const res = await fetch(url);
       if (res.status === 404) throw new Error("Stock history not found");
       if (!res.ok) throw new Error("Failed to fetch history");

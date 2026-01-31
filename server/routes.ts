@@ -40,22 +40,25 @@ function getPeriodStartDate(period: string): Date {
     case '6mo':
       return new Date(now.setMonth(now.getMonth() - 6));
     case '1y':
+      return new Date(now.setFullYear(now.getFullYear() - 1));
+    case '2y':
+      return new Date(now.setFullYear(now.getFullYear() - 2));
     default:
       return new Date(now.setFullYear(now.getFullYear() - 1));
   }
 }
 
 // Helper to get chart data (historical data)
-async function getChartData(yf: any, symbol: string, period: string = '1y'): Promise<Candle[]> {
+async function getChartData(yf: any, symbol: string, period: string = '1y', interval: string = '1d'): Promise<Candle[]> {
   const startDate = getPeriodStartDate(period);
-  const result = await yf.chart(symbol, { period1: startDate, period2: new Date(), interval: '1d' });
+  const result = await yf.chart(symbol, { period1: startDate, period2: new Date(), interval });
   if (!result.quotes || result.quotes.length === 0) {
     return [];
   }
   return result.quotes
     .filter((item: any) => item.open != null && item.close != null)
     .map((item: any) => ({
-      date: new Date(item.date).toISOString().split('T')[0],
+      date: interval.includes('m') ? new Date(item.date).toISOString() : new Date(item.date).toISOString().split('T')[0],
       open: item.open,
       high: item.high,
       low: item.low,
@@ -64,12 +67,34 @@ async function getChartData(yf: any, symbol: string, period: string = '1y'): Pro
     }));
 }
 
-// Simulated universe of stocks for the scanner
+// S&P 100 stocks for the scanner
 const STOCK_UNIVERSE = [
-  'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'AMD', 'NFLX', 'INTC',
-  'SPY', 'QQQ', 'IWM', 'DIA', 'BA', 'DIS', 'JPM', 'GS', 'V', 'MA',
-  'CSCO', 'PEP', 'KO', 'WMT', 'TGT', 'COST', 'CVX', 'XOM', 'PFE', 'MRNA'
+  'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'UNH',
+  'XOM', 'JNJ', 'JPM', 'V', 'PG', 'MA', 'HD', 'CVX', 'MRK', 'LLY',
+  'ABBV', 'PEP', 'KO', 'AVGO', 'COST', 'TMO', 'MCD', 'WMT', 'CSCO', 'ABT',
+  'ACN', 'CRM', 'DHR', 'NEE', 'LIN', 'ADBE', 'TXN', 'AMD', 'PM', 'NFLX',
+  'WFC', 'RTX', 'CMCSA', 'HON', 'T', 'UNP', 'LOW', 'BA', 'ORCL', 'AMGN',
+  'IBM', 'SPGI', 'QCOM', 'GE', 'CAT', 'INTC', 'INTU', 'SBUX', 'PLD', 'MDLZ',
+  'GILD', 'GS', 'AXP', 'BLK', 'DE', 'ADI', 'CVS', 'ISRG', 'BKNG', 'SYK',
+  'REGN', 'MMC', 'VRTX', 'TJX', 'SCHW', 'CB', 'PGR', 'CI', 'MO', 'DUK',
+  'SO', 'LRCX', 'BDX', 'BSX', 'CME', 'COP', 'EOG', 'EQIX', 'FIS', 'ICE',
+  'MMM', 'MU', 'NSC', 'PNC', 'USB', 'SPY', 'QQQ', 'IWM', 'DIA', 'GLD'
 ];
+
+// Sector ETF mappings
+const SECTOR_ETFS: Record<string, string[]> = {
+  'Technology': ['XLK', 'QQQ', 'VGT'],
+  'Healthcare': ['XLV', 'VHT', 'IBB'],
+  'Financial Services': ['XLF', 'VFH', 'KBE'],
+  'Consumer Cyclical': ['XLY', 'VCR', 'FDIS'],
+  'Consumer Defensive': ['XLP', 'VDC', 'FSTA'],
+  'Energy': ['XLE', 'VDE', 'OIH'],
+  'Industrials': ['XLI', 'VIS', 'FIDU'],
+  'Basic Materials': ['XLB', 'VAW', 'FMAT'],
+  'Real Estate': ['XLRE', 'VNQ', 'IYR'],
+  'Utilities': ['XLU', 'VPU', 'FUTY'],
+  'Communication Services': ['XLC', 'VOX', 'FCOM'],
+};
 
 interface Candle {
   date: string;
@@ -376,9 +401,19 @@ export async function registerRoutes(
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
     const { symbol } = req.params;
+    const interval = String(req.query.interval || '1d');
+    let period = String(req.query.period || '2y'); // Default to 2 years for SMA 200
+    
+    // For intraday, use shorter periods
+    if (['5m', '15m', '30m'].includes(interval)) {
+      period = '1mo'; // Yahoo limits intraday to ~60 days
+    } else if (interval === '60m') {
+      period = '3mo';
+    }
+    
     try {
       const yf = await getYahooFinance();
-      const history = await getChartData(yf, symbol, '1y');
+      const history = await getChartData(yf, symbol, period, interval);
       
       if (history.length === 0) {
         res.status(404).json({ message: `No data available for ${symbol}` });
@@ -398,6 +433,30 @@ export async function registerRoutes(
     try {
       const yf = await getYahooFinance();
       const quote = await yf.quote(symbol);
+      
+      // Get sector info and related stocks
+      const sector = quote.sector || 'Unknown';
+      const sectorETFs = SECTOR_ETFS[sector] || [];
+      
+      // Find other stocks in the same sector from our universe
+      const relatedStocks: { symbol: string; name: string }[] = [];
+      if (sector !== 'Unknown') {
+        for (const sym of STOCK_UNIVERSE.slice(0, 20)) {
+          if (sym !== symbol) {
+            try {
+              const q = await yf.quote(sym);
+              if (q.sector === sector) {
+                relatedStocks.push({ 
+                  symbol: q.symbol, 
+                  name: q.shortName || q.symbol 
+                });
+                if (relatedStocks.length >= 5) break;
+              }
+            } catch {}
+          }
+        }
+      }
+      
       res.json({
         symbol: quote.symbol,
         price: quote.regularMarketPrice,
@@ -405,6 +464,13 @@ export async function registerRoutes(
         changePercent: quote.regularMarketChangePercent,
         volume: quote.regularMarketVolume,
         companyName: quote.longName || quote.shortName,
+        marketCap: quote.marketCap,
+        peRatio: quote.trailingPE || quote.forwardPE,
+        sector: sector,
+        industry: quote.industry || 'Unknown',
+        description: quote.longBusinessSummary || `${quote.longName || quote.shortName} is a publicly traded company.`,
+        sectorETFs,
+        relatedStocks,
       });
     } catch (error) {
       console.error(`Error fetching quote for ${symbol}:`, error);
@@ -421,7 +487,7 @@ export async function registerRoutes(
 
       // Note: In a production app, we wouldn't loop 30+ HTTP requests sequentially.
       // We would cache data or use a bulk API. For MVP, we limit the universe.
-      const universe = STOCK_UNIVERSE.slice(0, 20); // Limit to 20 to speed up MVP response
+      const universe = STOCK_UNIVERSE.slice(0, 100); // S&P 100 universe
 
       for (const symbol of universe) {
         try {

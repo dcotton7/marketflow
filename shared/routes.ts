@@ -25,6 +25,10 @@ export const api = {
     history: {
       method: 'GET' as const,
       path: '/api/stocks/:symbol/history',
+      queryParams: z.object({
+        interval: z.enum(['5m', '15m', '30m', '60m', '1d', '1wk', '1mo']).optional(),
+        period: z.enum(['1mo', '3mo', '6mo', '1y', '2y']).optional(),
+      }).optional(),
       responses: {
         200: z.array(z.object({
           date: z.string(),
@@ -48,6 +52,16 @@ export const api = {
           changePercent: z.number(),
           volume: z.number(),
           companyName: z.string().optional(),
+          marketCap: z.number().optional(),
+          peRatio: z.number().optional(),
+          sector: z.string().optional(),
+          industry: z.string().optional(),
+          description: z.string().optional(),
+          sectorETFs: z.array(z.string()).optional(),
+          relatedStocks: z.array(z.object({
+            symbol: z.string(),
+            name: z.string(),
+          })).optional(),
         }),
         404: errorSchemas.notFound,
       },

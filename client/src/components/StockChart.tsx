@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStockHistory } from "@/hooks/use-stocks";
 import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { 
   createChart, 
   IChartApi, 
@@ -16,6 +17,16 @@ import {
 interface StockChartProps {
   symbol: string;
 }
+
+const TIMEFRAMES = [
+  { label: '5m', value: '5m' },
+  { label: '15m', value: '15m' },
+  { label: '30m', value: '30m' },
+  { label: '60m', value: '60m' },
+  { label: 'Daily', value: '1d' },
+  { label: 'Weekly', value: '1wk' },
+  { label: 'Monthly', value: '1mo' },
+];
 
 interface ConsolidationChannel {
   startTime: number;
@@ -120,8 +131,9 @@ export function StockChart({ symbol }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
+  const [interval, setInterval] = useState('1d');
   
-  const { data: history, isLoading, error } = useStockHistory(symbol);
+  const { data: history, isLoading, error } = useStockHistory(symbol, interval);
 
   useEffect(() => {
     if (!chartContainerRef.current || !history || history.length === 0) return;
@@ -194,67 +206,72 @@ export function StockChart({ symbol }: StockChartProps) {
     }));
     volumeSeries.setData(volumeData);
 
-    const sma5 = calculateSMA(history, 5);
-    const sma20 = calculateSMA(history, 20);
-    const sma50 = calculateSMA(history, 50);
-    const sma200 = calculateSMA(history, 200);
+    // Only show SMAs for daily/weekly/monthly timeframes
+    const shouldShowSMAs = interval === '1d' || interval === '1wk' || interval === '1mo';
+    
+    if (shouldShowSMAs) {
+      const sma5 = calculateSMA(history, 5);
+      const sma20 = calculateSMA(history, 20);
+      const sma50 = calculateSMA(history, 50);
+      const sma200 = calculateSMA(history, 200);
 
-    const sma5Series = chart.addSeries(LineSeries, {
-      color: '#3b82f6',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma5Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma5[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma5Series.setData(sma5Data);
+      const sma5Series = chart.addSeries(LineSeries, {
+        color: '#3b82f6',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const sma5Data = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: sma5[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      sma5Series.setData(sma5Data);
 
-    const sma20Series = chart.addSeries(LineSeries, {
-      color: '#ec4899',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma20Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma20[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma20Series.setData(sma20Data);
+      const sma20Series = chart.addSeries(LineSeries, {
+        color: '#ec4899',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const sma20Data = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: sma20[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      sma20Series.setData(sma20Data);
 
-    const sma50Series = chart.addSeries(LineSeries, {
-      color: '#dc2626',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma50Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma50[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma50Series.setData(sma50Data);
+      const sma50Series = chart.addSeries(LineSeries, {
+        color: '#dc2626',
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const sma50Data = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: sma50[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      sma50Series.setData(sma50Data);
 
-    const sma200Series = chart.addSeries(LineSeries, {
-      color: isDark ? '#ffffff' : '#000000',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma200Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma200[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma200Series.setData(sma200Data);
+      const sma200Series = chart.addSeries(LineSeries, {
+        color: isDark ? '#ffffff' : '#000000',
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const sma200Data = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: sma200[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      sma200Series.setData(sma200Data);
+    }
 
-    const detectedChannels = detectConsolidationChannels(history);
+    const detectedChannels = shouldShowSMAs ? detectConsolidationChannels(history) : [];
     setChannels(detectedChannels);
 
     detectedChannels.forEach(channel => {
       const topLine = chart.addSeries(LineSeries, {
-        color: '#000000',
+        color: '#3b82f6',
         lineWidth: 2,
-        lineStyle: LineStyle.Solid,
+        lineStyle: LineStyle.Dashed,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -264,9 +281,9 @@ export function StockChart({ symbol }: StockChartProps) {
       ]);
 
       const bottomLine = chart.addSeries(LineSeries, {
-        color: '#000000',
+        color: '#3b82f6',
         lineWidth: 2,
-        lineStyle: LineStyle.Solid,
+        lineStyle: LineStyle.Dashed,
         priceLineVisible: false,
         lastValueVisible: false,
       });
@@ -289,7 +306,7 @@ export function StockChart({ symbol }: StockChartProps) {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history]);
+  }, [history, interval]);
 
   if (isLoading) {
     return (
@@ -313,43 +330,63 @@ export function StockChart({ symbol }: StockChartProps) {
     );
   }
 
+  const showSMAs = interval === '1d' || interval === '1wk' || interval === '1mo';
+
   return (
     <div className="w-full bg-card p-4 rounded-xl border border-border shadow-sm" data-testid="stock-chart">
       <div className="mb-4 flex justify-between items-center flex-wrap gap-2">
         <h3 className="font-semibold text-foreground">Price History</h3>
         <div className="flex gap-4 items-center flex-wrap">
-          <div className="flex gap-3 text-xs">
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-              <span className="text-muted-foreground">SMA 5</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
-              <span className="text-muted-foreground">SMA 20</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
-              <span className="text-muted-foreground">SMA 50</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
-              <span className="text-muted-foreground">SMA 200</span>
-            </span>
-          </div>
+          {showSMAs && (
+            <div className="flex gap-3 text-xs">
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
+                <span className="text-muted-foreground">SMA 5</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
+                <span className="text-muted-foreground">SMA 20</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
+                <span className="text-muted-foreground">SMA 50</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
+                <span className="text-muted-foreground">SMA 200</span>
+              </span>
+            </div>
+          )}
           {channels.length > 0 && (
             <div className="flex gap-2 text-xs">
               {channels.map((ch, i) => (
-                <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded border border-black dark:border-white bg-green-100 dark:bg-green-900/30">
+                <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded border border-blue-500 bg-blue-100 dark:bg-blue-900/30">
+                  <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
                   <span className="text-foreground font-medium">{ch.type}</span>
                 </span>
               ))}
             </div>
           )}
-          <span className="text-xs text-muted-foreground font-mono">Daily</span>
         </div>
       </div>
       
       <div ref={chartContainerRef} className="w-full" data-testid="chart-container" />
+      
+      {/* Timeframe Selector */}
+      <div className="mt-4 flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-muted-foreground mr-2">Timeframe:</span>
+        {TIMEFRAMES.map((tf) => (
+          <Button
+            key={tf.value}
+            variant={interval === tf.value ? "default" : "outline"}
+            size="sm"
+            onClick={() => setInterval(tf.value)}
+            data-testid={`button-timeframe-${tf.value}`}
+          >
+            {tf.label}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }

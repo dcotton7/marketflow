@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, LineChart, Search, Menu } from "lucide-react";
+import { LayoutDashboard, LineChart, Search, Menu, Star } from "lucide-react";
 import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { href: "/", label: "Scanner", icon: Search },
-    // We can add more nav items here later, like /portfolio or /news
+    { href: "/watchlist", label: "Watchlist", icon: Star },
   ];
 
   return (
@@ -20,7 +20,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <header className="md:hidden border-b bg-card p-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-2 font-bold text-xl text-primary">
           <LineChart className="w-6 h-6" />
-          <span>TradeScan</span>
+          <span>AI Swing Scanner</span>
         </div>
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetTrigger asChild>
@@ -32,7 +32,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div className="p-6">
               <div className="flex items-center gap-2 font-bold text-2xl text-primary mb-8">
                 <LineChart className="w-8 h-8" />
-                <span>TradeScan</span>
+                <span>AI Swing Scanner</span>
               </div>
               <nav className="flex flex-col gap-2">
                 {navItems.map((item) => (
@@ -64,7 +64,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="p-6 border-b border-border/50">
           <div className="flex items-center gap-2 font-bold text-2xl text-primary tracking-tight">
             <LineChart className="w-7 h-7" />
-            <span>TradeScan</span>
+            <span>AI Swing Scanner</span>
           </div>
         </div>
 

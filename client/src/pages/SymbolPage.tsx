@@ -1,10 +1,13 @@
 import { useParams, useLocation } from "wouter";
+import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { StockChart } from "@/components/StockChart";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useAddToWatchlist } from "@/hooks/use-watchlist";
-import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 export default function SymbolPage() {
   const { symbol } = useParams();
@@ -109,20 +112,23 @@ export default function SymbolPage() {
           </div>
           <div className="text-xl font-mono font-semibold">${quote.price.toFixed(2)}</div>
         </div>
-        {/* Placeholders for other stats since API is minimal */}
-        <div className="bg-card p-4 rounded-xl border border-border opacity-70">
+        <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <BarChart3 className="w-4 h-4" />
             <span className="text-sm font-medium">Market Cap</span>
           </div>
-          <div className="text-xl font-mono font-semibold">---</div>
+          <div className="text-xl font-mono font-semibold">
+            {quote.marketCap ? formatMarketCap(quote.marketCap) : '---'}
+          </div>
         </div>
-        <div className="bg-card p-4 rounded-xl border border-border opacity-70">
+        <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
-            <Activity className="w-4 h-4" />
+            <PieChart className="w-4 h-4" />
             <span className="text-sm font-medium">PE Ratio</span>
           </div>
-          <div className="text-xl font-mono font-semibold">---</div>
+          <div className="text-xl font-mono font-semibold">
+            {quote.peRatio ? quote.peRatio.toFixed(2) : '---'}
+          </div>
         </div>
       </div>
 
@@ -130,6 +136,85 @@ export default function SymbolPage() {
       <div className="mt-8">
         <StockChart symbol={safeSymbol} />
       </div>
+
+      {/* Company Description */}
+      {quote.description && (
+        <Card className="mt-6">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Building2 className="w-5 h-5" />
+              About {quote.companyName || quote.symbol}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {quote.description.slice(0, 500)}{quote.description.length > 500 ? '...' : ''}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Sector Info */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+        {/* Sector & ETFs */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Sector Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <span className="text-sm text-muted-foreground">Sector:</span>
+              <span className="ml-2 font-medium">{quote.sector || 'Unknown'}</span>
+            </div>
+            <div>
+              <span className="text-sm text-muted-foreground">Industry:</span>
+              <span className="ml-2 font-medium">{quote.industry || 'Unknown'}</span>
+            </div>
+            {quote.sectorETFs && quote.sectorETFs.length > 0 && (
+              <div>
+                <span className="text-sm text-muted-foreground block mb-2">Sector ETFs:</span>
+                <div className="flex gap-2 flex-wrap">
+                  {quote.sectorETFs.map((etf) => (
+                    <Badge key={etf} variant="secondary" className="font-mono">
+                      {etf}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Related Stocks */}
+        {quote.relatedStocks && quote.relatedStocks.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Related Companies</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {quote.relatedStocks.map((stock) => (
+                  <div 
+                    key={stock.symbol} 
+                    className="flex items-center justify-between p-2 rounded hover-elevate cursor-pointer"
+                    onClick={() => setLocation(`/symbol/${stock.symbol}`)}
+                  >
+                    <span className="font-mono font-bold text-primary">{stock.symbol}</span>
+                    <span className="text-sm text-muted-foreground truncate ml-2">{stock.name}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </Layout>
   );
+}
+
+function formatMarketCap(value: number): string {
+  if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+  return `$${value.toLocaleString()}`;
 }
