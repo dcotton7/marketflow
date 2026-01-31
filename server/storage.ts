@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { getDb } from "./db";
 import {
   savedScans,
   watchlistItems,
@@ -22,32 +22,50 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  private get db() {
+    const db = getDb();
+    if (!db) {
+      throw new Error("Database not available");
+    }
+    return db;
+  }
+
   // Watchlist
   async getWatchlist(): Promise<WatchlistItem[]> {
-    return await db.select().from(watchlistItems);
+    try {
+      return await this.db.select().from(watchlistItems);
+    } catch (error) {
+      console.error("Failed to get watchlist:", error);
+      return [];
+    }
   }
 
   async addToWatchlist(item: InsertWatchlistItem): Promise<WatchlistItem> {
-    const [newItem] = await db.insert(watchlistItems).values(item).returning();
+    const [newItem] = await this.db.insert(watchlistItems).values(item).returning();
     return newItem;
   }
 
   async removeFromWatchlist(id: number): Promise<void> {
-    await db.delete(watchlistItems).where(eq(watchlistItems.id, id));
+    await this.db.delete(watchlistItems).where(eq(watchlistItems.id, id));
   }
 
   // Scans
   async getSavedScans(): Promise<SavedScan[]> {
-    return await db.select().from(savedScans);
+    try {
+      return await this.db.select().from(savedScans);
+    } catch (error) {
+      console.error("Failed to get saved scans:", error);
+      return [];
+    }
   }
 
   async saveScan(scan: InsertScan): Promise<SavedScan> {
-    const [newScan] = await db.insert(savedScans).values(scan).returning();
+    const [newScan] = await this.db.insert(savedScans).values(scan).returning();
     return newScan;
   }
 
   async deleteScan(id: number): Promise<void> {
-    await db.delete(savedScans).where(eq(savedScans.id, id));
+    await this.db.delete(savedScans).where(eq(savedScans.id, id));
   }
 }
 

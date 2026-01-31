@@ -218,14 +218,18 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
-  // Seed default watchlist if empty
-  const watchlist = await storage.getWatchlist();
-  if (watchlist.length === 0) {
-    const defaultSymbols = ['AAPL', 'MSFT', 'SPY', 'NVDA'];
-    for (const symbol of defaultSymbols) {
-      await storage.addToWatchlist({ symbol });
+  // Seed default watchlist if empty (wrapped in try-catch for production safety)
+  try {
+    const watchlist = await storage.getWatchlist();
+    if (watchlist.length === 0) {
+      const defaultSymbols = ['AAPL', 'MSFT', 'SPY', 'NVDA'];
+      for (const symbol of defaultSymbols) {
+        await storage.addToWatchlist({ symbol });
+      }
+      console.log('Seeded default watchlist');
     }
-    console.log('Seeded default watchlist');
+  } catch (error) {
+    console.error('Failed to seed watchlist (database may not be ready):', error);
   }
 
   return httpServer;
