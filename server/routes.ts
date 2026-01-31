@@ -186,6 +186,135 @@ function detectVCP(candles: Candle[]): boolean {
   return rangeContracting && volumeDecreasing && inUpperHalf;
 }
 
+// Detect VCP with loose rules (more variance allowed)
+function detectVCPLoose(candles: Candle[]): boolean {
+  if (candles.length < 30) return false;
+  
+  const recentCandles = candles.slice(-30);
+  const period1 = recentCandles.slice(0, 10);
+  const period2 = recentCandles.slice(10, 20);
+  const period3 = recentCandles.slice(20, 30);
+  
+  const getRange = (c: Candle[]) => {
+    const highs = c.map(x => x.high);
+    const lows = c.map(x => x.low);
+    const maxHigh = Math.max(...highs);
+    const minLow = Math.min(...lows);
+    const avgPrice = c.reduce((sum, x) => sum + x.close, 0) / c.length;
+    return (maxHigh - minLow) / avgPrice;
+  };
+  
+  const getAvgVolume = (c: Candle[]) => c.reduce((sum, x) => sum + x.volume, 0) / c.length;
+  
+  const range1 = getRange(period1);
+  const range2 = getRange(period2);
+  const range3 = getRange(period3);
+  
+  const vol1 = getAvgVolume(period1);
+  const vol2 = getAvgVolume(period2);
+  const vol3 = getAvgVolume(period3);
+  
+  // Loose: Allow more variance (1.0 instead of 0.9, 1.3 instead of 1.1)
+  const rangeContracting = range3 < range1 * 1.0; // Just need overall contraction
+  const volumeStable = vol3 <= vol1 * 1.3;
+  
+  const consolidationHigh = Math.max(...recentCandles.map(c => c.high));
+  const consolidationLow = Math.min(...recentCandles.map(c => c.low));
+  const currentClose = recentCandles[recentCandles.length - 1].close;
+  const inUpperThird = currentClose > consolidationLow + (consolidationHigh - consolidationLow) * 0.4;
+  
+  return rangeContracting && volumeStable && inUpperThird;
+}
+
+// Weekly Tight: 1-4 weeks of tight consolidation (current)
+function detectWeeklyTight(candles: Candle[], loose: boolean = false): boolean {
+  if (candles.length < 5) return false;
+  
+  // Look at last 5-20 trading days (1-4 weeks)
+  const recentCandles = candles.slice(-20);
+  if (recentCandles.length < 5) return false;
+  
+  // Calculate the price range as percentage of average price
+  const highs = recentCandles.map(c => c.high);
+  const lows = recentCandles.map(c => c.low);
+  const maxHigh = Math.max(...highs);
+  const minLow = Math.min(...lows);
+  const avgPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
+  const rangePercent = ((maxHigh - minLow) / avgPrice) * 100;
+  
+  // Tight threshold: price range < 8% (tight) or < 12% (loose)
+  const threshold = loose ? 12 : 8;
+  
+  // Must be current (last bar within range)
+  const lastClose = recentCandles[recentCandles.length - 1].close;
+  const isCurrent = lastClose >= minLow && lastClose <= maxHigh;
+  
+  // Volume should be decreasing or stable
+  const firstHalfVol = recentCandles.slice(0, Math.floor(recentCandles.length / 2))
+    .reduce((sum, c) => sum + c.volume, 0);
+  const secondHalfVol = recentCandles.slice(Math.floor(recentCandles.length / 2))
+    .reduce((sum, c) => sum + c.volume, 0);
+  const volumeStable = secondHalfVol <= firstHalfVol * (loose ? 1.5 : 1.2);
+  
+  return rangePercent <= threshold && isCurrent && volumeStable;
+}
+
+// Monthly Tight: 1-4 months of tight consolidation (current)
+function detectMonthlyTight(candles: Candle[], loose: boolean = false): boolean {
+  if (candles.length < 20) return false;
+  
+  // Look at last 20-80 trading days (1-4 months)
+  const recentCandles = candles.slice(-80);
+  if (recentCandles.length < 20) return false;
+  
+  // Calculate the price range as percentage of average price
+  const highs = recentCandles.map(c => c.high);
+  const lows = recentCandles.map(c => c.low);
+  const maxHigh = Math.max(...highs);
+  const minLow = Math.min(...lows);
+  const avgPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
+  const rangePercent = ((maxHigh - minLow) / avgPrice) * 100;
+  
+  // Monthly tight threshold: price range < 15% (tight) or < 22% (loose)
+  const threshold = loose ? 22 : 15;
+  
+  // Must be current (last bar within range)
+  const lastClose = recentCandles[recentCandles.length - 1].close;
+  const isCurrent = lastClose >= minLow && lastClose <= maxHigh;
+  
+  // Volume should be lower in recent period
+  const firstHalfVol = recentCandles.slice(0, Math.floor(recentCandles.length / 2))
+    .reduce((sum, c) => sum + c.volume, 0);
+  const secondHalfVol = recentCandles.slice(Math.floor(recentCandles.length / 2))
+    .reduce((sum, c) => sum + c.volume, 0);
+  const volumeStable = secondHalfVol <= firstHalfVol * (loose ? 1.5 : 1.2);
+  
+  return rangePercent <= threshold && isCurrent && volumeStable;
+}
+
+// Detect chart patterns with strictness setting
+function detectChartPattern(candles: Candle[], pattern: string, strictness: string = 'tight'): boolean {
+  const useTight = strictness === 'tight' || strictness === 'both';
+  const useLoose = strictness === 'loose' || strictness === 'both';
+  
+  switch (pattern) {
+    case 'VCP':
+      if (useTight && detectVCP(candles)) return true;
+      if (useLoose && detectVCPLoose(candles)) return true;
+      return false;
+    case 'Weekly Tight':
+      if (useTight && detectWeeklyTight(candles, false)) return true;
+      if (useLoose && detectWeeklyTight(candles, true)) return true;
+      return false;
+    case 'Monthly Tight':
+      if (useTight && detectMonthlyTight(candles, false)) return true;
+      if (useLoose && detectMonthlyTight(candles, true)) return true;
+      return false;
+    default:
+      return false;
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -263,17 +392,35 @@ export async function registerRoutes(
           // Filter by Volume
           if (input.minVolume && quote.regularMarketVolume < input.minVolume) continue;
 
-          // Filter by Pattern
-          let matchedPattern = undefined;
-          if (input.pattern && input.pattern !== 'All') {
-            // VCP needs more history (at least 30 days), others need less
-            const period = input.pattern === 'VCP' ? '3mo' : '1mo';
+          // Filter by Candlestick Pattern
+          let matchedPattern: string | undefined = undefined;
+          const hasCandlestickFilter = input.candlestickPattern && input.candlestickPattern !== 'All';
+          const hasChartFilter = input.chartPattern && input.chartPattern !== 'All';
+          
+          if (hasCandlestickFilter || hasChartFilter) {
+            // Get history for pattern detection
+            const period = hasChartFilter ? '3mo' : '1mo';
             const candles = await getChartData(yf, symbol, period);
-
-            if (candles.length >= 5 && detectPattern(candles, input.pattern)) {
-              matchedPattern = input.pattern;
-            } else {
-              continue; // Pattern didn't match
+            
+            if (candles.length < 5) continue;
+            
+            // Check candlestick pattern
+            if (hasCandlestickFilter) {
+              if (!detectPattern(candles, input.candlestickPattern!)) {
+                continue;
+              }
+              matchedPattern = input.candlestickPattern;
+            }
+            
+            // Check chart pattern
+            if (hasChartFilter) {
+              const strictness = input.patternStrictness || 'tight';
+              if (!detectChartPattern(candles, input.chartPattern!, strictness)) {
+                continue;
+              }
+              matchedPattern = matchedPattern 
+                ? `${matchedPattern}, ${input.chartPattern}` 
+                : input.chartPattern;
             }
           }
 
@@ -283,7 +430,7 @@ export async function registerRoutes(
             changePercent: quote.regularMarketChangePercent,
             volume: quote.regularMarketVolume,
             matchedPattern,
-            sector: 'Technology' // Placeholder, would need detailed profile data
+            sector: 'Technology'
           });
 
         } catch (err) {

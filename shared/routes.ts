@@ -61,7 +61,9 @@ export const api = {
         minPrice: z.number().optional(),
         maxPrice: z.number().optional(),
         minVolume: z.number().optional(),
-        pattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star', 'VCP']).optional(),
+        candlestickPattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star']).optional(),
+        chartPattern: z.enum(['All', 'VCP', 'Weekly Tight', 'Monthly Tight']).optional(),
+        patternStrictness: z.enum(['tight', 'loose', 'both']).optional(),
       }),
       responses: {
         200: z.array(z.object({

@@ -14,24 +14,25 @@ export default function ScannerPage() {
   const [, setLocation] = useLocation();
   const { mutate: runScan, data: results, isPending } = useScanner();
 
-  // Form State
   const [filters, setFilters] = useState<ScannerRunInput>({
     minPrice: undefined,
     maxPrice: undefined,
     minVolume: undefined,
-    pattern: "All",
+    candlestickPattern: "All",
+    chartPattern: "All",
+    patternStrictness: "tight",
   });
 
   const handleScan = () => {
     runScan(filters);
   };
 
-  const patterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star", "VCP"];
+  const candlestickPatterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star"];
+  const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight"];
 
   return (
     <Layout>
       <div className="flex flex-col lg:flex-row gap-8 items-start">
-        {/* Scanner Controls Sidebar */}
         <div className="w-full lg:w-80 shrink-0">
           <Card className="sticky top-24 border-border shadow-xl shadow-black/5 bg-card/50 backdrop-blur-sm">
             <CardHeader className="pb-4">
@@ -45,20 +46,57 @@ export default function ScannerPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label>Pattern Type</Label>
+                <Label>Candlestick Pattern</Label>
                 <Select 
-                  value={filters.pattern} 
-                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, pattern: val }))}
+                  value={filters.candlestickPattern} 
+                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, candlestickPattern: val }))}
                 >
-                  <SelectTrigger className="bg-background">
+                  <SelectTrigger className="bg-background" data-testid="select-candlestick-pattern">
                     <SelectValue placeholder="Select Pattern" />
                   </SelectTrigger>
                   <SelectContent>
-                    {patterns.map(p => (
+                    {candlestickPatterns.map(p => (
                       <SelectItem key={p} value={p}>{p}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Chart Pattern</Label>
+                <Select 
+                  value={filters.chartPattern} 
+                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, chartPattern: val }))}
+                >
+                  <SelectTrigger className="bg-background" data-testid="select-chart-pattern">
+                    <SelectValue placeholder="Select Chart Pattern" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {chartPatterns.map(p => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Pattern Strictness</Label>
+                <Select 
+                  value={filters.patternStrictness} 
+                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, patternStrictness: val }))}
+                >
+                  <SelectTrigger className="bg-background" data-testid="select-strictness">
+                    <SelectValue placeholder="Select Strictness" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tight">Tight (Strict)</SelectItem>
+                    <SelectItem value="loose">Loose (Relaxed)</SelectItem>
+                    <SelectItem value="both">Both</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Loose rules allow more variance for better match chances.
+                </p>
               </div>
 
               <div className="space-y-4">
@@ -68,12 +106,14 @@ export default function ScannerPage() {
                     type="number" 
                     placeholder="Min" 
                     className="bg-background font-mono"
+                    data-testid="input-min-price"
                     onChange={(e) => setFilters(prev => ({ ...prev, minPrice: e.target.value ? Number(e.target.value) : undefined }))}
                   />
                   <Input 
                     type="number" 
                     placeholder="Max" 
                     className="bg-background font-mono"
+                    data-testid="input-max-price"
                     onChange={(e) => setFilters(prev => ({ ...prev, maxPrice: e.target.value ? Number(e.target.value) : undefined }))}
                   />
                 </div>
@@ -85,6 +125,7 @@ export default function ScannerPage() {
                   type="number" 
                   placeholder="e.g. 1000000" 
                   className="bg-background font-mono"
+                  data-testid="input-min-volume"
                   onChange={(e) => setFilters(prev => ({ ...prev, minVolume: e.target.value ? Number(e.target.value) : undefined }))}
                 />
               </div>
@@ -94,6 +135,7 @@ export default function ScannerPage() {
                 size="lg"
                 onClick={handleScan}
                 disabled={isPending}
+                data-testid="button-run-scan"
               >
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Search className="w-4 h-4 mr-2" />}
                 Run Scan
@@ -102,7 +144,6 @@ export default function ScannerPage() {
           </Card>
         </div>
 
-        {/* Results Area */}
         <div className="flex-1 w-full space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
@@ -156,6 +197,7 @@ export default function ScannerPage() {
                           key={stock.symbol} 
                           className="hover:bg-muted/30 transition-colors group cursor-pointer"
                           onClick={() => setLocation(`/symbol/${stock.symbol}`)}
+                          data-testid={`row-stock-${stock.symbol}`}
                         >
                           <td className="px-6 py-4 font-bold font-mono text-primary group-hover:text-primary/80">
                             {stock.symbol}
