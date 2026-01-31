@@ -24,77 +24,84 @@ interface ConsolidationChannel {
 }
 
 function detectConsolidationChannels(
-  data: { date: string; high: number; low: number; close: number; volume: number }[]
+  data: { date: string; high: number; low: number; close: number; volume: number }[],
+  patternTimeframe: string
 ): ConsolidationChannel[] {
   const channels: ConsolidationChannel[] = [];
   
   if (data.length < 5) return channels;
   
-  const weeklyData = data.slice(-20);
-  if (weeklyData.length >= 5) {
-    const weeklyHigh = Math.max(...weeklyData.map(c => c.high));
-    const weeklyLow = Math.min(...weeklyData.map(c => c.low));
-    const avgPrice = weeklyData.reduce((sum, c) => sum + c.close, 0) / weeklyData.length;
-    const rangePercent = ((weeklyHigh - weeklyLow) / avgPrice) * 100;
-    
-    if (rangePercent <= 12) {
-      channels.push({
-        startDate: weeklyData[0].date,
-        endDate: weeklyData[weeklyData.length - 1].date,
-        high: weeklyHigh,
-        low: weeklyLow,
-        type: 'Weekly Tight'
-      });
-    }
-  }
-  
-  if (data.length >= 20) {
-    const monthlyData = data.slice(-60);
-    if (monthlyData.length >= 20) {
-      const monthlyHigh = Math.max(...monthlyData.map(c => c.high));
-      const monthlyLow = Math.min(...monthlyData.map(c => c.low));
-      const avgPrice = monthlyData.reduce((sum, c) => sum + c.close, 0) / monthlyData.length;
-      const rangePercent = ((monthlyHigh - monthlyLow) / avgPrice) * 100;
+  if (patternTimeframe === '20D' || patternTimeframe === 'all') {
+    const weeklyData = data.slice(-20);
+    if (weeklyData.length >= 5) {
+      const weeklyHigh = Math.max(...weeklyData.map(c => c.high));
+      const weeklyLow = Math.min(...weeklyData.map(c => c.low));
+      const avgPrice = weeklyData.reduce((sum, c) => sum + c.close, 0) / weeklyData.length;
+      const rangePercent = ((weeklyHigh - weeklyLow) / avgPrice) * 100;
       
-      if (rangePercent <= 22 && !channels.some(c => c.type === 'Weekly Tight' && 
-          Math.abs(c.high - monthlyHigh) < 1 && Math.abs(c.low - monthlyLow) < 1)) {
+      if (rangePercent <= 12) {
         channels.push({
-          startDate: monthlyData[0].date,
-          endDate: monthlyData[monthlyData.length - 1].date,
-          high: monthlyHigh,
-          low: monthlyLow,
-          type: 'Monthly Tight'
+          startDate: weeklyData[0].date,
+          endDate: weeklyData[weeklyData.length - 1].date,
+          high: weeklyHigh,
+          low: weeklyLow,
+          type: 'Weekly Tight'
         });
       }
     }
   }
   
-  if (data.length >= 30) {
-    const vcpData = data.slice(-30);
-    const period1 = vcpData.slice(0, 10);
-    const period3 = vcpData.slice(20, 30);
-    
-    const getRange = (c: typeof period1) => {
-      const maxHigh = Math.max(...c.map(x => x.high));
-      const minLow = Math.min(...c.map(x => x.low));
-      const avgPrice = c.reduce((sum, x) => sum + x.close, 0) / c.length;
-      return (maxHigh - minLow) / avgPrice;
-    };
-    
-    const range1 = getRange(period1);
-    const range3 = getRange(period3);
-    
-    if (range3 < range1) {
-      const vcpHigh = Math.max(...period3.map(c => c.high));
-      const vcpLow = Math.min(...period3.map(c => c.low));
+  if (patternTimeframe === '60D' || patternTimeframe === 'all') {
+    if (data.length >= 20) {
+      const monthlyData = data.slice(-60);
+      if (monthlyData.length >= 20) {
+        const monthlyHigh = Math.max(...monthlyData.map(c => c.high));
+        const monthlyLow = Math.min(...monthlyData.map(c => c.low));
+        const avgPrice = monthlyData.reduce((sum, c) => sum + c.close, 0) / monthlyData.length;
+        const rangePercent = ((monthlyHigh - monthlyLow) / avgPrice) * 100;
+        
+        if (rangePercent <= 22 && !channels.some(c => c.type === 'Weekly Tight' && 
+            Math.abs(c.high - monthlyHigh) < 1 && Math.abs(c.low - monthlyLow) < 1)) {
+          channels.push({
+            startDate: monthlyData[0].date,
+            endDate: monthlyData[monthlyData.length - 1].date,
+            high: monthlyHigh,
+            low: monthlyLow,
+            type: 'Monthly Tight'
+          });
+        }
+      }
+    }
+  }
+  
+  if (patternTimeframe === '30D' || patternTimeframe === 'all') {
+    if (data.length >= 30) {
+      const vcpData = data.slice(-30);
+      const period1 = vcpData.slice(0, 10);
+      const period3 = vcpData.slice(20, 30);
       
-      channels.push({
-        startDate: period3[0].date,
-        endDate: period3[period3.length - 1].date,
-        high: vcpHigh,
-        low: vcpLow,
-        type: 'VCP'
-      });
+      const getRange = (c: typeof period1) => {
+        const maxHigh = Math.max(...c.map(x => x.high));
+        const minLow = Math.min(...c.map(x => x.low));
+        const avgPrice = c.reduce((sum, x) => sum + x.close, 0) / c.length;
+        return (maxHigh - minLow) / avgPrice;
+      };
+      
+      const range1 = getRange(period1);
+      const range3 = getRange(period3);
+      
+      if (range3 < range1) {
+        const vcpHigh = Math.max(...period3.map(c => c.high));
+        const vcpLow = Math.min(...period3.map(c => c.low));
+        
+        channels.push({
+          startDate: period3[0].date,
+          endDate: period3[period3.length - 1].date,
+          high: vcpHigh,
+          low: vcpLow,
+          type: 'VCP'
+        });
+      }
     }
   }
   
@@ -126,17 +133,22 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
     );
   }
 
-  // Slice data based on timeframe (aligned with detection windows)
-  let slicedHistory = history;
+  let displayDays = 90;
+  let patternTimeframe = 'all';
+  
   if (timeframe === '20D') {
-    slicedHistory = history.slice(-20);
+    displayDays = 60;
+    patternTimeframe = '20D';
   } else if (timeframe === '30D') {
-    slicedHistory = history.slice(-30);
+    displayDays = 90;
+    patternTimeframe = '30D';
   } else if (timeframe === '60D') {
-    slicedHistory = history.slice(-60);
+    displayDays = 120;
+    patternTimeframe = '60D';
   }
 
-  const channels = detectConsolidationChannels(slicedHistory);
+  const slicedHistory = history.slice(-displayDays);
+  const channels = detectConsolidationChannels(slicedHistory, patternTimeframe);
 
   const chartData = slicedHistory.map((item) => ({
     ...item,

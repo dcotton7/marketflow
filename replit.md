@@ -16,7 +16,7 @@ Preferred communication style: Simple, everyday language.
 - **State Management**: TanStack React Query for server state, caching, and data fetching
 - **Styling**: Tailwind CSS with CSS variables for theming (dark financial theme)
 - **Component Library**: shadcn/ui components built on Radix UI primitives
-- **Charts**: Recharts for stock data visualization
+- **Charts**: TradingView Lightweight Charts (v5) for detailed candlestick charts, Recharts for mini chart snapshots
 - **Build Tool**: Vite with HMR support
 
 ### Backend Architecture
@@ -55,7 +55,7 @@ Preferred communication style: Simple, everyday language.
 ### API Endpoints
 - `GET /api/stocks/:symbol/history` - Historical OHLCV data
 - `GET /api/stocks/:symbol/quote` - Real-time quote data
-- `POST /api/scanner/run` - Run stock scanner with filters (candlestickPattern, chartPattern, patternStrictness)
+- `POST /api/scanner/run` - Run stock scanner with filters (candlestickPattern, chartPattern, patternStrictness, smaFilter, priceWithin50dPct)
 - `GET /api/watchlist` - Get user's watchlist
 - `POST /api/watchlist` - Add symbol to watchlist
 - `DELETE /api/watchlist/:id` - Remove from watchlist

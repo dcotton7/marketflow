@@ -64,6 +64,8 @@ export const api = {
         candlestickPattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star']).optional(),
         chartPattern: z.enum(['All', 'VCP', 'Weekly Tight', 'Monthly Tight']).optional(),
         patternStrictness: z.enum(['tight', 'loose', 'both']).optional(),
+        smaFilter: z.enum(['none', 'stacked', 'above50_200']).optional(),
+        priceWithin50dPct: z.number().min(0).max(100).optional(),
       }),
       responses: {
         200: z.array(z.object({

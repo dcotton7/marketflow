@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useLocation } from "wouter";
 import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -25,6 +26,8 @@ export default function ScannerPage() {
     candlestickPattern: "All",
     chartPattern: "All",
     patternStrictness: "tight",
+    smaFilter: "none",
+    priceWithin50dPct: undefined,
   });
 
   const handleScan = () => {
@@ -124,6 +127,53 @@ export default function ScannerPage() {
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   Loose rules allow more variance for better match chances.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <Label>SMA Filter</Label>
+                <RadioGroup 
+                  value={filters.smaFilter || "none"} 
+                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, smaFilter: val }))}
+                  className="space-y-2"
+                  data-testid="radio-sma-filter"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="none" id="sma-none" data-testid="radio-sma-none" />
+                    <Label htmlFor="sma-none" className="text-sm font-normal cursor-pointer">
+                      No SMA Restriction
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="stacked" id="sma-stacked" data-testid="radio-sma-stacked" />
+                    <Label htmlFor="sma-stacked" className="text-sm font-normal cursor-pointer">
+                      Price &gt; 5d &gt; 20d &gt; 50d &gt; 200d SMA
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="above50_200" id="sma-above" data-testid="radio-sma-above" />
+                    <Label htmlFor="sma-above" className="text-sm font-normal cursor-pointer">
+                      Price &gt; 50d &gt; 200d SMA
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Price Within % of 50d SMA</Label>
+                <Input 
+                  type="number" 
+                  step="0.1"
+                  placeholder="e.g. 2.5" 
+                  className="bg-background font-mono"
+                  data-testid="input-price-proximity"
+                  onChange={(e) => setFilters(prev => ({ 
+                    ...prev, 
+                    priceWithin50dPct: e.target.value ? Number(e.target.value) : undefined 
+                  }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Filter stocks where current price is within X% of 50-day SMA.
                 </p>
               </div>
 

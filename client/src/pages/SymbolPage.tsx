@@ -1,17 +1,22 @@
-import { useParams } from "wouter";
+import { useParams, useLocation } from "wouter";
 import { Layout } from "@/components/Layout";
 import { StockChart } from "@/components/StockChart";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useAddToWatchlist } from "@/hooks/use-watchlist";
-import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3 } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function SymbolPage() {
   const { symbol } = useParams();
+  const [, setLocation] = useLocation();
   const safeSymbol = symbol || "";
   
   const { data: quote, isLoading } = useStockQuote(safeSymbol);
   const { mutate: addToWatchlist, isPending: isAdding } = useAddToWatchlist();
+  
+  const handleBackToResults = () => {
+    setLocation("/");
+  };
 
   if (isLoading) {
     return (
@@ -38,6 +43,19 @@ export default function SymbolPage() {
 
   return (
     <Layout>
+      {/* Back Button */}
+      <div className="mb-4">
+        <Button 
+          variant="ghost" 
+          onClick={handleBackToResults}
+          className="gap-2"
+          data-testid="button-back-to-results"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Return to Results
+        </Button>
+      </div>
+
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
         <div>

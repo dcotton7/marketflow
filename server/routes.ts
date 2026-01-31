@@ -315,6 +315,49 @@ function detectChartPattern(candles: Candle[], pattern: string, strictness: stri
   }
 }
 
+// Calculate Simple Moving Average
+function calculateSMA(candles: Candle[], period: number): number | null {
+  if (candles.length < period) return null;
+  const recentCandles = candles.slice(-period);
+  const sum = recentCandles.reduce((acc, c) => acc + c.close, 0);
+  return sum / period;
+}
+
+// Check SMA filter conditions
+function checkSMAFilter(candles: Candle[], smaFilter: string, currentPrice: number): boolean {
+  if (!smaFilter || smaFilter === 'none') return true;
+  
+  const sma5 = calculateSMA(candles, 5);
+  const sma20 = calculateSMA(candles, 20);
+  const sma50 = calculateSMA(candles, 50);
+  const sma200 = calculateSMA(candles, 200);
+  
+  if (smaFilter === 'stacked') {
+    // Price > 5d SMA > 20d SMA > 50d SMA > 200d SMA
+    if (!sma5 || !sma20 || !sma50 || !sma200) return false;
+    return currentPrice > sma5 && sma5 > sma20 && sma20 > sma50 && sma50 > sma200;
+  }
+  
+  if (smaFilter === 'above50_200') {
+    // Price > 50d SMA > 200d SMA
+    if (!sma50 || !sma200) return false;
+    return currentPrice > sma50 && sma50 > sma200;
+  }
+  
+  return true;
+}
+
+// Check price proximity to 50d SMA
+function checkPriceProximity(candles: Candle[], currentPrice: number, maxPct: number | undefined): boolean {
+  if (maxPct === undefined) return true;
+  
+  const sma50 = calculateSMA(candles, 50);
+  if (!sma50) return true; // Skip filter if not enough data
+  
+  const pctDiff = Math.abs((currentPrice - sma50) / sma50) * 100;
+  return pctDiff <= maxPct;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -396,13 +439,32 @@ export async function registerRoutes(
           let matchedPattern: string | undefined = undefined;
           const hasCandlestickFilter = input.candlestickPattern && input.candlestickPattern !== 'All';
           const hasChartFilter = input.chartPattern && input.chartPattern !== 'All';
+          const hasSMAFilter = input.smaFilter && input.smaFilter !== 'none';
+          const hasProximityFilter = input.priceWithin50dPct !== undefined;
           
-          if (hasCandlestickFilter || hasChartFilter) {
-            // Get history for pattern detection
-            const period = hasChartFilter ? '3mo' : '1mo';
+          // Determine if we need historical data
+          const needsHistory = hasCandlestickFilter || hasChartFilter || hasSMAFilter || hasProximityFilter;
+          
+          if (needsHistory) {
+            // Get history for pattern detection (1y for SMA 200)
+            const period = (hasSMAFilter || hasProximityFilter) ? '1y' : (hasChartFilter ? '3mo' : '1mo');
             const candles = await getChartData(yf, symbol, period);
             
             if (candles.length < 5) continue;
+            
+            // Check SMA filter
+            if (hasSMAFilter) {
+              if (!checkSMAFilter(candles, input.smaFilter!, quote.regularMarketPrice)) {
+                continue;
+              }
+            }
+            
+            // Check price proximity to 50d SMA
+            if (hasProximityFilter) {
+              if (!checkPriceProximity(candles, quote.regularMarketPrice, input.priceWithin50dPct)) {
+                continue;
+              }
+            }
             
             // Check candlestick pattern
             if (hasCandlestickFilter) {
