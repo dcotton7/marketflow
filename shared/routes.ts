@@ -79,6 +79,7 @@ export const api = {
       method: 'POST' as const,
       path: '/api/scanner/run',
       input: z.object({
+        scannerIndex: z.enum(['sp500', 'sp100', 'nasdaq100', 'dow30', 'all']).optional(),
         minPrice: z.number().optional(),
         maxPrice: z.number().optional(),
         minVolume: z.number().optional(),
@@ -90,8 +91,9 @@ export const api = {
         maxChannelHeightPct: z.number().min(1).max(50).optional(),
         htfMinGainPct: z.number().min(1).max(500).optional(),
         pbMinGainPct: z.number().min(1).max(200).optional(),
-        pbCandleCount: z.number().min(3).max(100).optional(),
-        pbTimeframe: z.enum(['15m', '1d']).optional(),
+        pbUpPeriodCandles: z.number().min(1).max(100).optional(),
+        pbMinCandles: z.number().min(1).max(50).optional(),
+        pbMaxCandles: z.number().min(1).max(50).optional(),
       }),
       responses: {
         200: z.array(z.object({

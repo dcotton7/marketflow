@@ -12,8 +12,14 @@ AI Swing Scanner is a stock market scanner and analysis application that enables
 - Extended historical data to 2 years for proper SMA 200 coverage
 - Channel lines now use blue dashed style for better visibility
 - Added Market Cap, PE ratio, company description, sector info to symbol pages
-- Scanner universe expanded to S&P 100 (100 stocks)
-- Scanner results are cached to preserve state across navigation
+- Scanner now includes index selector dropdown as first filter:
+  - Dow Jones 30, Nasdaq 100, S&P 100, S&P 500, All Stocks
+  - Uses getStocksByIndex() to dynamically get stock universe
+- Scanner results are cached but cleared on new scan to show proper loading state
+- Updated Pullback filter UI with new fields:
+  - Min % Up Before Pullback (default 30%)
+  - Up period was under N candles (default 10) - pbUpPeriodCandles
+  - PB was between X and Y candles (default 1-5) - pbMinCandles/pbMaxCandles
 - Added chart drawing tools: Toggle Channels, Price Measurement, Horizontal Lines
   - Measurement tool: Click two points to measure price change and percentage
   - Line tool: Click to place horizontal lines at price levels

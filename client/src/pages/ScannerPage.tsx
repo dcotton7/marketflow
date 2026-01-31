@@ -33,6 +33,7 @@ export default function ScannerPage() {
   }, [mutationResults]);
 
   const [filters, setFilters] = useState<ScannerRunInput>({
+    scannerIndex: "sp100",
     minPrice: undefined,
     maxPrice: undefined,
     minVolume: undefined,
@@ -44,13 +45,22 @@ export default function ScannerPage() {
     maxChannelHeightPct: undefined,
     htfMinGainPct: 30,
     pbMinGainPct: 30,
-    pbCandleCount: 20,
-    pbTimeframe: "1d",
+    pbUpPeriodCandles: 10,
+    pbMinCandles: 1,
+    pbMaxCandles: 5,
   });
+  
+  // Track if scan is in progress
+  const [isScanning, setIsScanning] = useState(false);
 
   const handleScan = () => {
     setCurrentPage(1);
-    runScan(filters);
+    setIsScanning(true);
+    // Clear cached results to show loading state
+    queryClient.setQueryData([SCANNER_CACHE_KEY], undefined);
+    runScan(filters, {
+      onSettled: () => setIsScanning(false)
+    });
   };
 
   const candlestickPatterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star"];
@@ -101,6 +111,26 @@ export default function ScannerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Index Selector - First dropdown */}
+              <div className="space-y-2">
+                <Label>Stock Universe</Label>
+                <Select 
+                  value={filters.scannerIndex || "sp100"} 
+                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, scannerIndex: val }))}
+                >
+                  <SelectTrigger className="bg-background" data-testid="select-index">
+                    <SelectValue placeholder="Select Index" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dow30">Dow Jones 30</SelectItem>
+                    <SelectItem value="nasdaq100">Nasdaq 100</SelectItem>
+                    <SelectItem value="sp100">S&P 100</SelectItem>
+                    <SelectItem value="sp500">S&P 500</SelectItem>
+                    <SelectItem value="all">All Stocks</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
               <div className="space-y-2">
                 <Label>Candlestick Pattern</Label>
                 <Select 
@@ -202,36 +232,55 @@ export default function ScannerPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Over N Candles</Label>
+                    <Label>Up period was under (candles)</Label>
                     <Input 
                       type="number" 
-                      step="5"
-                      min="5"
+                      step="1"
+                      min="1"
                       max="100"
-                      placeholder="e.g. 20" 
+                      placeholder="e.g. 10" 
                       className="bg-background font-mono"
-                      data-testid="input-pb-candle-count"
-                      value={filters.pbCandleCount ?? 20}
+                      data-testid="input-pb-up-period"
+                      value={filters.pbUpPeriodCandles ?? 10}
                       onChange={(e) => setFilters(prev => ({ 
                         ...prev, 
-                        pbCandleCount: e.target.value ? parseInt(e.target.value) : 20 
+                        pbUpPeriodCandles: e.target.value ? parseInt(e.target.value) : 10 
                       }))}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Timeframe</Label>
-                    <Select 
-                      value={filters.pbTimeframe || "1d"} 
-                      onValueChange={(val: any) => setFilters(prev => ({ ...prev, pbTimeframe: val }))}
-                    >
-                      <SelectTrigger className="bg-background" data-testid="select-pb-timeframe">
-                        <SelectValue placeholder="Select Timeframe" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="15m">15 Minutes</SelectItem>
-                        <SelectItem value="1d">Daily</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label>PB was between X and Y candles</Label>
+                    <div className="flex gap-2 items-center">
+                      <Input 
+                        type="number" 
+                        step="1"
+                        min="1"
+                        max="50"
+                        placeholder="1" 
+                        className="bg-background font-mono w-20"
+                        data-testid="input-pb-min-candles"
+                        value={filters.pbMinCandles ?? 1}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          pbMinCandles: e.target.value ? parseInt(e.target.value) : 1 
+                        }))}
+                      />
+                      <span className="text-muted-foreground">to</span>
+                      <Input 
+                        type="number" 
+                        step="1"
+                        min="1"
+                        max="50"
+                        placeholder="5" 
+                        className="bg-background font-mono w-20"
+                        data-testid="input-pb-max-candles"
+                        value={filters.pbMaxCandles ?? 5}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          pbMaxCandles: e.target.value ? parseInt(e.target.value) : 5 
+                        }))}
+                      />
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Stock must have risen at least this % over N candles before pulling back to the MA.

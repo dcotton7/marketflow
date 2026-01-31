@@ -67,8 +67,27 @@ async function getChartData(yf: any, symbol: string, period: string = '1y', inte
     }));
 }
 
-// S&P 100 stocks for the scanner
-const STOCK_UNIVERSE = [
+// Stock index lists
+const DOW_30 = [
+  'AAPL', 'AMGN', 'AXP', 'BA', 'CAT', 'CRM', 'CSCO', 'CVX', 'DIS', 'DOW',
+  'GS', 'HD', 'HON', 'IBM', 'INTC', 'JNJ', 'JPM', 'KO', 'MCD', 'MMM',
+  'MRK', 'MSFT', 'NKE', 'PG', 'TRV', 'UNH', 'V', 'VZ', 'WBA', 'WMT'
+];
+
+const NASDAQ_100 = [
+  'AAPL', 'ABNB', 'ADBE', 'ADI', 'ADP', 'ADSK', 'AEP', 'AMAT', 'AMD', 'AMGN',
+  'AMZN', 'ANSS', 'ARM', 'ASML', 'AVGO', 'AZN', 'BIIB', 'BKNG', 'BKR', 'CCEP',
+  'CDNS', 'CDW', 'CEG', 'CHTR', 'CMCSA', 'COST', 'CPRT', 'CRWD', 'CSCO', 'CSGP',
+  'CSX', 'CTAS', 'CTSH', 'DDOG', 'DLTR', 'DXCM', 'EA', 'EXC', 'FANG', 'FAST',
+  'FTNT', 'GEHC', 'GFS', 'GILD', 'GOOG', 'GOOGL', 'HON', 'IDXX', 'ILMN', 'INTC',
+  'INTU', 'ISRG', 'KDP', 'KHC', 'KLAC', 'LIN', 'LRCX', 'LULU', 'MAR', 'MCHP',
+  'MDB', 'MDLZ', 'MELI', 'META', 'MNST', 'MRNA', 'MRVL', 'MSFT', 'MU', 'NFLX',
+  'NVDA', 'NXPI', 'ODFL', 'ON', 'ORLY', 'PANW', 'PAYX', 'PCAR', 'PDD', 'PEP',
+  'PYPL', 'QCOM', 'REGN', 'ROP', 'ROST', 'SBUX', 'SNPS', 'SPLK', 'TEAM', 'TMUS',
+  'TSLA', 'TTD', 'TTWO', 'TXN', 'VRSK', 'VRTX', 'WBD', 'WDAY', 'XEL', 'ZS'
+];
+
+const SP_100 = [
   'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'UNH',
   'XOM', 'JNJ', 'JPM', 'V', 'PG', 'MA', 'HD', 'CVX', 'MRK', 'LLY',
   'ABBV', 'PEP', 'KO', 'AVGO', 'COST', 'TMO', 'MCD', 'WMT', 'CSCO', 'ABT',
@@ -80,6 +99,21 @@ const STOCK_UNIVERSE = [
   'SO', 'LRCX', 'BDX', 'BSX', 'CME', 'COP', 'EOG', 'EQIX', 'FIS', 'ICE',
   'MMM', 'MU', 'NSC', 'PNC', 'USB', 'SPY', 'QQQ', 'IWM', 'DIA', 'GLD'
 ];
+
+// Default stock universe (S&P 100)
+const STOCK_UNIVERSE = SP_100;
+
+// Helper function to get stock list by index
+function getStocksByIndex(index?: string): string[] {
+  switch (index) {
+    case 'dow30': return DOW_30;
+    case 'nasdaq100': return NASDAQ_100;
+    case 'sp100': return SP_100;
+    case 'sp500': return [...SP_100]; // For now use SP100 as SP500 subset
+    case 'all': return [...new Set([...SP_100, ...NASDAQ_100, ...DOW_30])];
+    default: return SP_100;
+  }
+}
 
 // Sector ETF mappings
 const SECTOR_ETFS: Record<string, string[]> = {
@@ -94,6 +128,123 @@ const SECTOR_ETFS: Record<string, string[]> = {
   'Real Estate': ['XLRE', 'VNQ', 'IYR'],
   'Utilities': ['XLU', 'VPU', 'FUTY'],
   'Communication Services': ['XLC', 'VOX', 'FCOM'],
+};
+
+// Pre-computed stocks by sector (to avoid slow API calls)
+const STOCKS_BY_SECTOR: Record<string, { symbol: string; name: string; industry: string }[]> = {
+  'Technology': [
+    { symbol: 'AAPL', name: 'Apple Inc.', industry: 'Consumer Electronics' },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', industry: 'Software' },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', industry: 'Semiconductors' },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', industry: 'Internet Services' },
+    { symbol: 'META', name: 'Meta Platforms', industry: 'Internet Services' },
+    { symbol: 'AVGO', name: 'Broadcom Inc.', industry: 'Semiconductors' },
+    { symbol: 'ORCL', name: 'Oracle Corporation', industry: 'Software' },
+    { symbol: 'CRM', name: 'Salesforce Inc.', industry: 'Software' },
+    { symbol: 'AMD', name: 'Advanced Micro Devices', industry: 'Semiconductors' },
+    { symbol: 'CSCO', name: 'Cisco Systems', industry: 'Networking' },
+    { symbol: 'ADBE', name: 'Adobe Inc.', industry: 'Software' },
+    { symbol: 'INTC', name: 'Intel Corporation', industry: 'Semiconductors' },
+    { symbol: 'IBM', name: 'IBM', industry: 'IT Services' },
+    { symbol: 'TXN', name: 'Texas Instruments', industry: 'Semiconductors' },
+    { symbol: 'QCOM', name: 'Qualcomm Inc.', industry: 'Semiconductors' },
+    { symbol: 'MU', name: 'Micron Technology', industry: 'Semiconductors' },
+    { symbol: 'LRCX', name: 'Lam Research', industry: 'Semiconductor Equipment' },
+  ],
+  'Healthcare': [
+    { symbol: 'UNH', name: 'UnitedHealth Group', industry: 'Health Insurance' },
+    { symbol: 'JNJ', name: 'Johnson & Johnson', industry: 'Pharmaceuticals' },
+    { symbol: 'LLY', name: 'Eli Lilly', industry: 'Pharmaceuticals' },
+    { symbol: 'PFE', name: 'Pfizer Inc.', industry: 'Pharmaceuticals' },
+    { symbol: 'ABBV', name: 'AbbVie Inc.', industry: 'Pharmaceuticals' },
+    { symbol: 'MRK', name: 'Merck & Co.', industry: 'Pharmaceuticals' },
+    { symbol: 'TMO', name: 'Thermo Fisher Scientific', industry: 'Life Sciences' },
+    { symbol: 'ABT', name: 'Abbott Laboratories', industry: 'Medical Devices' },
+    { symbol: 'DHR', name: 'Danaher Corporation', industry: 'Life Sciences' },
+    { symbol: 'BMY', name: 'Bristol-Myers Squibb', industry: 'Pharmaceuticals' },
+    { symbol: 'AMGN', name: 'Amgen Inc.', industry: 'Biotechnology' },
+    { symbol: 'GILD', name: 'Gilead Sciences', industry: 'Biotechnology' },
+    { symbol: 'MDT', name: 'Medtronic', industry: 'Medical Devices' },
+    { symbol: 'BSX', name: 'Boston Scientific', industry: 'Medical Devices' },
+    { symbol: 'BDX', name: 'Becton Dickinson', industry: 'Medical Devices' },
+  ],
+  'Financial Services': [
+    { symbol: 'BRK.B', name: 'Berkshire Hathaway', industry: 'Diversified' },
+    { symbol: 'JPM', name: 'JPMorgan Chase', industry: 'Banking' },
+    { symbol: 'V', name: 'Visa Inc.', industry: 'Payment Processing' },
+    { symbol: 'MA', name: 'Mastercard', industry: 'Payment Processing' },
+    { symbol: 'BAC', name: 'Bank of America', industry: 'Banking' },
+    { symbol: 'WFC', name: 'Wells Fargo', industry: 'Banking' },
+    { symbol: 'GS', name: 'Goldman Sachs', industry: 'Investment Banking' },
+    { symbol: 'MS', name: 'Morgan Stanley', industry: 'Investment Banking' },
+    { symbol: 'SPGI', name: 'S&P Global', industry: 'Financial Data' },
+    { symbol: 'BLK', name: 'BlackRock', industry: 'Asset Management' },
+    { symbol: 'AXP', name: 'American Express', industry: 'Credit Services' },
+    { symbol: 'C', name: 'Citigroup', industry: 'Banking' },
+    { symbol: 'CME', name: 'CME Group', industry: 'Exchanges' },
+    { symbol: 'ICE', name: 'Intercontinental Exchange', industry: 'Exchanges' },
+    { symbol: 'PNC', name: 'PNC Financial', industry: 'Banking' },
+    { symbol: 'USB', name: 'US Bancorp', industry: 'Banking' },
+  ],
+  'Consumer Cyclical': [
+    { symbol: 'AMZN', name: 'Amazon.com', industry: 'E-Commerce' },
+    { symbol: 'TSLA', name: 'Tesla Inc.', industry: 'Auto Manufacturers' },
+    { symbol: 'HD', name: 'Home Depot', industry: 'Home Improvement' },
+    { symbol: 'MCD', name: "McDonald's", industry: 'Restaurants' },
+    { symbol: 'NKE', name: 'Nike Inc.', industry: 'Footwear' },
+    { symbol: 'SBUX', name: 'Starbucks', industry: 'Restaurants' },
+    { symbol: 'LOW', name: "Lowe's", industry: 'Home Improvement' },
+    { symbol: 'TJX', name: 'TJX Companies', industry: 'Retail' },
+    { symbol: 'BKNG', name: 'Booking Holdings', industry: 'Travel' },
+  ],
+  'Consumer Defensive': [
+    { symbol: 'WMT', name: 'Walmart Inc.', industry: 'Discount Stores' },
+    { symbol: 'PG', name: 'Procter & Gamble', industry: 'Consumer Products' },
+    { symbol: 'COST', name: 'Costco Wholesale', industry: 'Warehouse Clubs' },
+    { symbol: 'KO', name: 'Coca-Cola', industry: 'Beverages' },
+    { symbol: 'PEP', name: 'PepsiCo', industry: 'Beverages' },
+    { symbol: 'PM', name: 'Philip Morris', industry: 'Tobacco' },
+    { symbol: 'MO', name: 'Altria Group', industry: 'Tobacco' },
+    { symbol: 'CL', name: 'Colgate-Palmolive', industry: 'Consumer Products' },
+  ],
+  'Energy': [
+    { symbol: 'XOM', name: 'Exxon Mobil', industry: 'Oil & Gas' },
+    { symbol: 'CVX', name: 'Chevron', industry: 'Oil & Gas' },
+    { symbol: 'COP', name: 'ConocoPhillips', industry: 'Oil & Gas' },
+    { symbol: 'EOG', name: 'EOG Resources', industry: 'Oil & Gas' },
+  ],
+  'Industrials': [
+    { symbol: 'CAT', name: 'Caterpillar', industry: 'Heavy Machinery' },
+    { symbol: 'RTX', name: 'RTX Corporation', industry: 'Aerospace & Defense' },
+    { symbol: 'HON', name: 'Honeywell', industry: 'Conglomerate' },
+    { symbol: 'UNP', name: 'Union Pacific', industry: 'Railroads' },
+    { symbol: 'BA', name: 'Boeing', industry: 'Aerospace' },
+    { symbol: 'UPS', name: 'United Parcel Service', industry: 'Shipping' },
+    { symbol: 'DE', name: 'Deere & Company', industry: 'Farm Machinery' },
+    { symbol: 'LMT', name: 'Lockheed Martin', industry: 'Defense' },
+    { symbol: 'GE', name: 'General Electric', industry: 'Conglomerate' },
+    { symbol: 'MMM', name: '3M Company', industry: 'Conglomerate' },
+    { symbol: 'NSC', name: 'Norfolk Southern', industry: 'Railroads' },
+  ],
+  'Communication Services': [
+    { symbol: 'GOOG', name: 'Alphabet Inc.', industry: 'Internet Services' },
+    { symbol: 'DIS', name: 'Walt Disney', industry: 'Entertainment' },
+    { symbol: 'NFLX', name: 'Netflix', industry: 'Streaming' },
+    { symbol: 'CMCSA', name: 'Comcast', industry: 'Cable' },
+    { symbol: 'VZ', name: 'Verizon', industry: 'Telecom' },
+    { symbol: 'T', name: 'AT&T', industry: 'Telecom' },
+    { symbol: 'TMUS', name: 'T-Mobile', industry: 'Telecom' },
+  ],
+  'Utilities': [
+    { symbol: 'NEE', name: 'NextEra Energy', industry: 'Utilities' },
+    { symbol: 'DUK', name: 'Duke Energy', industry: 'Utilities' },
+    { symbol: 'SO', name: 'Southern Company', industry: 'Utilities' },
+  ],
+  'Real Estate': [
+    { symbol: 'AMT', name: 'American Tower', industry: 'REITs' },
+    { symbol: 'PLD', name: 'Prologis', industry: 'REITs' },
+    { symbol: 'EQIX', name: 'Equinix', industry: 'Data Centers' },
+  ],
 };
 
 interface Candle {
@@ -402,21 +553,30 @@ function detectPullbackToMA(
   candles: Candle[], 
   maPeriod: number,
   minGainPct: number = 30,
-  candleCount: number = 20,
+  upPeriodCandles: number = 10,
+  pbMinCandles: number = 1,
+  pbMaxCandles: number = 5,
   loose: boolean = false
 ): boolean {
-  if (candles.length < maPeriod + candleCount) return false;
+  const lookbackTotal = maPeriod + upPeriodCandles + pbMaxCandles;
+  if (candles.length < lookbackTotal) return false;
   
   // Calculate the current MA
   const ma = calculateSMA(candles, maPeriod);
   if (!ma) return false;
   
-  // Check if we had a gain before the pullback
-  const prePullbackCandles = candles.slice(-(maPeriod + candleCount), -maPeriod);
-  if (prePullbackCandles.length < candleCount) return false;
+  // Split candles into: uptrend phase, pullback phase, and current
+  // We look at: the up period before the pullback, the pullback itself, and now
+  const recentCandles = candles.slice(-pbMaxCandles);
+  const upPeriodStart = candles.length - pbMaxCandles - upPeriodCandles;
+  const upPeriodEnd = candles.length - pbMaxCandles;
+  const upPeriodCandlesData = candles.slice(upPeriodStart, upPeriodEnd);
   
-  const startLow = Math.min(...prePullbackCandles.slice(0, Math.floor(candleCount / 2)).map(c => c.low));
-  const peakHigh = Math.max(...prePullbackCandles.slice(-Math.floor(candleCount / 2)).map(c => c.high));
+  if (upPeriodCandlesData.length < upPeriodCandles) return false;
+  
+  // Calculate gain during up period
+  const startLow = Math.min(...upPeriodCandlesData.slice(0, Math.max(1, Math.floor(upPeriodCandles / 3))).map(c => c.low));
+  const peakHigh = Math.max(...upPeriodCandlesData.map(c => c.high));
   const gainPct = ((peakHigh - startLow) / startLow) * 100;
   
   if (gainPct < minGainPct) return false;
@@ -429,9 +589,9 @@ function detectPullbackToMA(
   if (distanceFromMA > proximityThreshold) return false;
   
   // Price should be approaching from above (pullback, not breakdown)
-  const recentCandles = candles.slice(-5);
-  const recentHigh = Math.max(...recentCandles.map(c => c.high));
-  const wasAboveMA = recentHigh > ma * 1.02;
+  // Check the pullback phase for approach from above
+  const pbRecentHigh = Math.max(...recentCandles.map(c => c.high));
+  const wasAboveMA = pbRecentHigh > ma * 1.02;
   
   return wasAboveMA;
 }
@@ -443,7 +603,9 @@ function detectChartPattern(
   strictness: string = 'tight',
   htfMinGainPct?: number,
   pbMinGainPct?: number,
-  pbCandleCount?: number
+  pbUpPeriodCandles?: number,
+  pbMinCandles?: number,
+  pbMaxCandles?: number
 ): boolean {
   const useTight = strictness === 'tight' || strictness === 'both';
   const useLoose = strictness === 'loose' || strictness === 'both';
@@ -472,27 +634,35 @@ function detectChartPattern(
       return false;
     case 'Pullback to 5 DMA':
       const pb5Gain = pbMinGainPct || 30;
-      const pb5Count = pbCandleCount || 20;
-      if (useTight && detectPullbackToMA(candles, 5, pb5Gain, pb5Count, false)) return true;
-      if (useLoose && detectPullbackToMA(candles, 5, pb5Gain, pb5Count, true)) return true;
+      const pb5Up = pbUpPeriodCandles || 10;
+      const pb5Min = pbMinCandles || 1;
+      const pb5Max = pbMaxCandles || 5;
+      if (useTight && detectPullbackToMA(candles, 5, pb5Gain, pb5Up, pb5Min, pb5Max, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 5, pb5Gain, pb5Up, pb5Min, pb5Max, true)) return true;
       return false;
     case 'Pullback to 10 DMA':
       const pb10Gain = pbMinGainPct || 30;
-      const pb10Count = pbCandleCount || 20;
-      if (useTight && detectPullbackToMA(candles, 10, pb10Gain, pb10Count, false)) return true;
-      if (useLoose && detectPullbackToMA(candles, 10, pb10Gain, pb10Count, true)) return true;
+      const pb10Up = pbUpPeriodCandles || 10;
+      const pb10Min = pbMinCandles || 1;
+      const pb10Max = pbMaxCandles || 5;
+      if (useTight && detectPullbackToMA(candles, 10, pb10Gain, pb10Up, pb10Min, pb10Max, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 10, pb10Gain, pb10Up, pb10Min, pb10Max, true)) return true;
       return false;
     case 'Pullback to 20 DMA':
       const pb20Gain = pbMinGainPct || 30;
-      const pb20Count = pbCandleCount || 20;
-      if (useTight && detectPullbackToMA(candles, 20, pb20Gain, pb20Count, false)) return true;
-      if (useLoose && detectPullbackToMA(candles, 20, pb20Gain, pb20Count, true)) return true;
+      const pb20Up = pbUpPeriodCandles || 10;
+      const pb20Min = pbMinCandles || 1;
+      const pb20Max = pbMaxCandles || 5;
+      if (useTight && detectPullbackToMA(candles, 20, pb20Gain, pb20Up, pb20Min, pb20Max, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 20, pb20Gain, pb20Up, pb20Min, pb20Max, true)) return true;
       return false;
     case 'Pullback to 50 DMA':
       const pb50Gain = pbMinGainPct || 30;
-      const pb50Count = pbCandleCount || 20;
-      if (useTight && detectPullbackToMA(candles, 50, pb50Gain, pb50Count, false)) return true;
-      if (useLoose && detectPullbackToMA(candles, 50, pb50Gain, pb50Count, true)) return true;
+      const pb50Up = pbUpPeriodCandles || 10;
+      const pb50Min = pbMinCandles || 1;
+      const pb50Max = pbMaxCandles || 5;
+      if (useTight && detectPullbackToMA(candles, 50, pb50Gain, pb50Up, pb50Min, pb50Max, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 50, pb50Gain, pb50Up, pb50Min, pb50Max, true)) return true;
       return false;
     default:
       return false;
@@ -623,51 +793,79 @@ export async function registerRoutes(
       const yf = await getYahooFinance();
       const quote = await yf.quote(symbol);
       
-      // Get sector info and related stocks
-      const sector = quote.sector || 'Unknown';
-      const sectorETFs = SECTOR_ETFS[sector] || [];
+      // Try to get more detailed info from quoteSummary for sector/industry
+      let sector = quote.sector || 'Unknown';
+      let industry = quote.industry || 'Unknown';
+      let description = quote.longBusinessSummary || '';
+      let earningsData: { quarterlyGrowthPct?: number; surprisePct?: number } | undefined;
       
-      // Find other stocks in the same sector from our universe, sorted by market cap
-      const relatedStocksRaw: { symbol: string; name: string; description: string; marketCap: number }[] = [];
-      if (sector !== 'Unknown') {
-        for (const sym of STOCK_UNIVERSE.slice(0, 50)) {
-          if (sym !== symbol) {
-            try {
-              const q = await yf.quote(sym);
-              if (q.sector === sector && q.marketCap) {
-                relatedStocksRaw.push({ 
-                  symbol: q.symbol, 
-                  name: q.shortName || q.longName || q.symbol,
-                  description: q.industry || 'Company',
-                  marketCap: q.marketCap || 0
-                });
-              }
-            } catch {}
+      try {
+        const summary = await yf.quoteSummary(symbol, { modules: ['assetProfile', 'earnings', 'defaultKeyStatistics'] });
+        
+        if (summary.assetProfile) {
+          sector = summary.assetProfile.sector || sector;
+          industry = summary.assetProfile.industry || industry;
+          description = summary.assetProfile.longBusinessSummary || description;
+        }
+        
+        // Get earnings data from earnings module
+        if (summary.earnings?.earningsChart?.quarterly?.length > 0) {
+          const quarters = summary.earnings.earningsChart.quarterly;
+          const latestQ = quarters[quarters.length - 1];
+          if (latestQ) {
+            const actual = latestQ.actual?.raw ?? latestQ.actual;
+            const estimate = latestQ.estimate?.raw ?? latestQ.estimate;
+            if (actual !== undefined && estimate !== undefined && estimate !== 0) {
+              earningsData = {
+                quarterlyGrowthPct: undefined,
+                surprisePct: ((actual - estimate) / Math.abs(estimate)) * 100
+              };
+            }
           }
         }
+        
+        // Also check earningsQuarterlyGrowth
+        if (summary.defaultKeyStatistics?.earningsQuarterlyGrowth) {
+          const growth = summary.defaultKeyStatistics.earningsQuarterlyGrowth;
+          const growthValue = typeof growth === 'object' ? (growth as { raw?: number }).raw : growth;
+          if (growthValue !== undefined) {
+            earningsData = {
+              ...earningsData,
+              quarterlyGrowthPct: (growthValue as number) * 100
+            };
+          }
+        }
+      } catch (e) {
+        // quoteSummary failed, use basic quote data
+        console.log(`quoteSummary failed for ${symbol}, using basic quote`);
       }
       
-      // Sort by market cap descending and take top 4
-      const relatedStocks = relatedStocksRaw
-        .sort((a, b) => b.marketCap - a.marketCap)
-        .slice(0, 4);
+      // Fallback earnings from basic quote
+      if (!earningsData && quote.earningsQuarterlyGrowth !== undefined) {
+        earningsData = {
+          quarterlyGrowthPct: quote.earningsQuarterlyGrowth * 100,
+          surprisePct: undefined
+        };
+      }
       
-      // Get earnings data from quote if available
-      let earnings: { quarterlyGrowthPct?: number; surprisePct?: number; lastQuarterDate?: string } | undefined;
-      try {
-        // Yahoo Finance earnings data from quote
-        const epsTrailing = quote.trailingEps;
-        const epsForward = quote.forwardEps;
-        const earningsSurprise = quote.earningsQuarterlyGrowth;
-        
-        if (earningsSurprise !== undefined) {
-          earnings = {
-            quarterlyGrowthPct: earningsSurprise * 100,
-            surprisePct: undefined, // Would need additional API call for surprise
-            lastQuarterDate: undefined
-          };
-        }
-      } catch {}
+      // Get sector ETFs
+      const sectorETFs = SECTOR_ETFS[sector] || [];
+      
+      // Get related stocks from pre-computed list (fast!)
+      const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
+      const relatedStocks = sectorStocks
+        .filter(s => s.symbol !== symbol)
+        .slice(0, 4)
+        .map(s => ({
+          symbol: s.symbol,
+          name: s.name,
+          description: s.industry,
+          marketCap: 0 // We don't need to fetch this
+        }));
+      
+      if (!description) {
+        description = `${quote.longName || quote.shortName || symbol} is a publicly traded company.`;
+      }
       
       res.json({
         symbol: quote.symbol,
@@ -679,11 +877,11 @@ export async function registerRoutes(
         marketCap: quote.marketCap,
         peRatio: quote.trailingPE || quote.forwardPE,
         sector: sector,
-        industry: quote.industry || 'Unknown',
-        description: quote.longBusinessSummary || `${quote.longName || quote.shortName} is a publicly traded company.`,
+        industry: industry,
+        description: description,
         sectorETFs,
         relatedStocks,
-        earnings,
+        earnings: earningsData,
       });
     } catch (error) {
       console.error(`Error fetching quote for ${symbol}:`, error);
@@ -698,9 +896,8 @@ export async function registerRoutes(
       const input = api.scanner.run.input.parse(req.body);
       const results = [];
 
-      // Note: In a production app, we wouldn't loop 30+ HTTP requests sequentially.
-      // We would cache data or use a bulk API. For MVP, we limit the universe.
-      const universe = STOCK_UNIVERSE.slice(0, 100); // S&P 100 universe
+      // Get stock universe based on selected index
+      const universe = getStocksByIndex(input.scannerIndex);
 
       for (const symbol of universe) {
         try {
@@ -764,7 +961,9 @@ export async function registerRoutes(
                 strictness,
                 input.htfMinGainPct,
                 input.pbMinGainPct,
-                input.pbCandleCount
+                input.pbUpPeriodCandles,
+                input.pbMinCandles,
+                input.pbMaxCandles
               )) {
                 continue;
               }

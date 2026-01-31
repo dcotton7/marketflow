@@ -150,28 +150,31 @@ interface HighTightFlagData {
 function detectHighTightFlag(
   data: { date: string; high: number; low: number; close: number; volume: number }[]
 ): HighTightFlagData | null {
-  if (data.length < 20) return null;
+  if (data.length < 15) return null;
   
-  // Look for a strong uptrend followed by a tight consolidation in the last 10-15 bars
-  const flagBars = data.slice(-12);
-  const preFlagBars = data.slice(-30, -12);
+  // For visualization purposes, show the consolidation in last 10-15 bars
+  // with relaxed thresholds to show something useful on the chart
+  const flagBars = data.slice(-15);
+  const preFlagBars = data.slice(-40, -15);
   
-  if (preFlagBars.length < 10) return null;
+  if (preFlagBars.length < 5) return null;
   
-  // Check if pre-flag period had a strong move (>30% gain)
+  // Check if pre-flag period had any upward move (>10% gain is enough for visualization)
   const preFlagStart = preFlagBars[0].close;
   const preFlagEnd = preFlagBars[preFlagBars.length - 1].close;
   const gain = ((preFlagEnd - preFlagStart) / preFlagStart) * 100;
   
-  if (gain < 30) return null;
+  // Relaxed: show if there was any meaningful gain
+  if (gain < 10) return null;
   
-  // Check if flag period is tight (less than 10% range)
+  // Flag period consolidation range
   const flagHigh = Math.max(...flagBars.map(c => c.high));
   const flagLow = Math.min(...flagBars.map(c => c.low));
   const avgPrice = flagBars.reduce((sum, c) => sum + c.close, 0) / flagBars.length;
   const rangePercent = ((flagHigh - flagLow) / avgPrice) * 100;
   
-  if (rangePercent > 12) return null;
+  // Relaxed: allow up to 20% range in the flag
+  if (rangePercent > 20) return null;
   
   return {
     flagStart: new Date(flagBars[0].date).getTime() / 1000,
@@ -193,11 +196,11 @@ interface CupAndHandleData {
 function detectCupAndHandle(
   data: { date: string; high: number; low: number; close: number; volume: number }[]
 ): CupAndHandleData | null {
-  if (data.length < 30) return null;
+  if (data.length < 25) return null;
   
-  // Look for cup pattern - left lip, bottom, right lip, then handle
+  // For visualization, look for any cup-like pattern with more relaxed thresholds
   const lookback = data.slice(-60);
-  if (lookback.length < 30) return null;
+  if (lookback.length < 25) return null;
   
   // Find the highest point in first third as left lip
   const leftThird = lookback.slice(0, Math.floor(lookback.length / 3));
@@ -211,15 +214,15 @@ function detectCupAndHandle(
   const rightThird = lookback.slice(Math.floor(lookback.length * 2 / 3));
   const rightHighest = Math.max(...rightThird.map(c => c.high));
   
-  // Validate cup shape - bottom should be at least 15% below lip
+  // Relaxed: cup depth 8-50% (was 15-40%)
   const cupDepth = ((leftLipHigh - cupBottom) / leftLipHigh) * 100;
-  if (cupDepth < 15 || cupDepth > 40) return null;
+  if (cupDepth < 8 || cupDepth > 50) return null;
   
-  // Right side should get close to left lip (within 5%)
-  if (rightHighest < leftLipHigh * 0.95) return null;
+  // Relaxed: right side within 15% of left lip (was 5%)
+  if (rightHighest < leftLipHigh * 0.85) return null;
   
-  // Last few bars should be a handle (slight pullback)
-  const handleBars = lookback.slice(-8);
+  // Last few bars as handle
+  const handleBars = lookback.slice(-10);
   const handleHigh = Math.max(...handleBars.map(c => c.high));
   const handleLow = Math.min(...handleBars.map(c => c.low));
   
