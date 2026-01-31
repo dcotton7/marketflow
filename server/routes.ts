@@ -383,6 +383,36 @@ function checkPriceProximity(candles: Candle[], currentPrice: number, maxPct: nu
   return pctDiff <= maxPct;
 }
 
+// Calculate channel height percentage for consolidation patterns
+function calculateChannelHeightPct(candles: Candle[], pattern: string): number | null {
+  let lookbackDays: number;
+  
+  switch (pattern) {
+    case 'VCP':
+      lookbackDays = 30;
+      break;
+    case 'Weekly Tight':
+      lookbackDays = 20;
+      break;
+    case 'Monthly Tight':
+      lookbackDays = 80;
+      break;
+    default:
+      return null;
+  }
+  
+  if (candles.length < lookbackDays) return null;
+  
+  const recentCandles = candles.slice(-lookbackDays);
+  const highs = recentCandles.map(c => c.high);
+  const lows = recentCandles.map(c => c.low);
+  const maxHigh = Math.max(...highs);
+  const minLow = Math.min(...lows);
+  const avgPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
+  
+  return ((maxHigh - minLow) / avgPrice) * 100;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -503,10 +533,12 @@ export async function registerRoutes(
 
           // Filter by Candlestick Pattern
           let matchedPattern: string | undefined = undefined;
+          let channelHeightPct: number | undefined = undefined;
           const hasCandlestickFilter = input.candlestickPattern && input.candlestickPattern !== 'All';
           const hasChartFilter = input.chartPattern && input.chartPattern !== 'All';
           const hasSMAFilter = input.smaFilter && input.smaFilter !== 'none';
           const hasProximityFilter = input.priceWithin50dPct !== undefined;
+          const hasChannelHeightFilter = input.maxChannelHeightPct !== undefined && hasChartFilter;
           
           // Determine if we need historical data
           const needsHistory = hasCandlestickFilter || hasChartFilter || hasSMAFilter || hasProximityFilter;
@@ -546,6 +578,17 @@ export async function registerRoutes(
               if (!detectChartPattern(candles, input.chartPattern!, strictness)) {
                 continue;
               }
+              
+              // Calculate channel height for chart patterns
+              channelHeightPct = calculateChannelHeightPct(candles, input.chartPattern!) ?? undefined;
+              
+              // Filter by max channel height if specified
+              if (hasChannelHeightFilter && channelHeightPct !== undefined) {
+                if (channelHeightPct > input.maxChannelHeightPct!) {
+                  continue;
+                }
+              }
+              
               matchedPattern = matchedPattern 
                 ? `${matchedPattern}, ${input.chartPattern}` 
                 : input.chartPattern;
@@ -558,7 +601,8 @@ export async function registerRoutes(
             changePercent: quote.regularMarketChangePercent,
             volume: quote.regularMarketVolume,
             matchedPattern,
-            sector: 'Technology'
+            sector: 'Technology',
+            channelHeightPct
           });
 
         } catch (err) {

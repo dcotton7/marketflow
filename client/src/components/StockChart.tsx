@@ -16,6 +16,7 @@ import {
 
 interface StockChartProps {
   symbol: string;
+  showChannels?: boolean;
 }
 
 const TIMEFRAMES = [
@@ -127,7 +128,7 @@ function detectConsolidationChannels(
   return channels;
 }
 
-export function StockChart({ symbol }: StockChartProps) {
+export function StockChart({ symbol, showChannels = false }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
@@ -264,11 +265,12 @@ export function StockChart({ symbol }: StockChartProps) {
       sma200Series.setData(sma200Data);
     }
 
-    // Channels are always detected for all timeframes
-    const detectedChannels = detectConsolidationChannels(history);
-    setChannels(detectedChannels);
+    // Only detect and draw channels if explicitly requested
+    if (showChannels) {
+      const detectedChannels = detectConsolidationChannels(history);
+      setChannels(detectedChannels);
 
-    detectedChannels.forEach(channel => {
+      detectedChannels.forEach(channel => {
       const topLine = chart.addSeries(LineSeries, {
         color: '#3b82f6',
         lineWidth: 2,
@@ -292,7 +294,10 @@ export function StockChart({ symbol }: StockChartProps) {
         { time: channel.startTime as Time, value: channel.low },
         { time: channel.endTime as Time, value: channel.low },
       ]);
-    });
+      });
+    } else {
+      setChannels([]);
+    }
 
     chart.timeScale().fitContent();
 
@@ -307,7 +312,7 @@ export function StockChart({ symbol }: StockChartProps) {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval]);
+  }, [history, interval, showChannels]);
 
   if (isLoading) {
     return (

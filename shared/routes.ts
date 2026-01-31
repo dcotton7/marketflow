@@ -80,6 +80,7 @@ export const api = {
         patternStrictness: z.enum(['tight', 'loose', 'both']).optional(),
         smaFilter: z.enum(['none', 'stacked', 'above50_200']).optional(),
         priceWithin50dPct: z.number().min(0).max(100).optional(),
+        maxChannelHeightPct: z.number().min(1).max(50).optional(),
       }),
       responses: {
         200: z.array(z.object({
@@ -89,6 +90,7 @@ export const api = {
           volume: z.number(),
           matchedPattern: z.string().optional(),
           sector: z.string().optional(),
+          channelHeightPct: z.number().optional(),
         })),
       },
     },

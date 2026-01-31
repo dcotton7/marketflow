@@ -41,6 +41,7 @@ export default function ScannerPage() {
     patternStrictness: "tight",
     smaFilter: "none",
     priceWithin50dPct: undefined,
+    maxChannelHeightPct: undefined,
   });
 
   const handleScan = () => {
@@ -122,6 +123,29 @@ export default function ScannerPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {filters.chartPattern && filters.chartPattern !== 'All' && (
+                <div className="space-y-2">
+                  <Label>Max Channel Height %</Label>
+                  <Input 
+                    type="number" 
+                    step="1"
+                    min="1"
+                    max="50"
+                    placeholder="e.g. 15" 
+                    className="bg-background font-mono"
+                    data-testid="input-max-channel-height"
+                    value={filters.maxChannelHeightPct ?? ''}
+                    onChange={(e) => setFilters(prev => ({ 
+                      ...prev, 
+                      maxChannelHeightPct: e.target.value ? parseFloat(e.target.value) : undefined 
+                    }))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Filter stocks by consolidation range. Lower = tighter channel.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Pattern Strictness</Label>
