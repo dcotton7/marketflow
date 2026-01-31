@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useStockHistory } from "@/hooks/use-stocks";
-import { Loader2 } from "lucide-react";
+import { Loader2, Layers, Ruler, Minus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { 
   createChart, 
@@ -11,12 +11,23 @@ import {
   CandlestickData, 
   HistogramData, 
   Time, 
-  LineStyle 
+  LineStyle,
+  ISeriesApi,
+  SeriesType
 } from "lightweight-charts";
 
 interface StockChartProps {
   symbol: string;
   showChannels?: boolean;
+}
+
+interface HorizontalLineDefinition {
+  id: string;
+  price: number;
+}
+
+interface MeasurePoint {
+  price: number;
 }
 
 const TIMEFRAMES = [
@@ -128,13 +139,26 @@ function detectConsolidationChannels(
   return channels;
 }
 
-export function StockChart({ symbol, showChannels = false }: StockChartProps) {
+type ToolMode = 'none' | 'measure' | 'line';
+
+export function StockChart({ symbol, showChannels: initialShowChannels = false }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
   const [interval, setInterval] = useState('1d');
+  const [showChannels, setShowChannels] = useState(initialShowChannels);
+  const [toolMode, setToolMode] = useState<ToolMode>('none');
+  const [lineDefinitions, setLineDefinitions] = useState<HorizontalLineDefinition[]>([]);
+  const [measureStart, setMeasureStart] = useState<MeasurePoint | null>(null);
+  const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number } | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   
   const { data: history, isLoading, error } = useStockHistory(symbol, interval);
+  
+  // Update showChannels when prop changes
+  useEffect(() => {
+    setShowChannels(initialShowChannels);
+  }, [initialShowChannels]);
 
   useEffect(() => {
     if (!chartContainerRef.current || !history || history.length === 0) return;
@@ -184,6 +208,7 @@ export function StockChart({ symbol, showChannels = false }: StockChartProps) {
       close: item.close,
     }));
     candlestickSeries.setData(candleData);
+    candlestickSeriesRef.current = candlestickSeries;
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       color: '#26a69a',
@@ -298,6 +323,26 @@ export function StockChart({ symbol, showChannels = false }: StockChartProps) {
     } else {
       setChannels([]);
     }
+    
+    // Recreate horizontal lines from definitions
+    lineDefinitions.forEach(lineDef => {
+      const lineSeries = chart.addSeries(LineSeries, {
+        color: '#ef4444',
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: true,
+        crosshairMarkerVisible: false,
+      });
+      
+      const firstTime = (new Date(history[0].date).getTime() / 1000) as Time;
+      const lastTime = (new Date(history[history.length - 1].date).getTime() / 1000) as Time;
+      
+      lineSeries.setData([
+        { time: firstTime, value: lineDef.price },
+        { time: lastTime, value: lineDef.price },
+      ]);
+    });
 
     chart.timeScale().fitContent();
 
@@ -312,7 +357,68 @@ export function StockChart({ symbol, showChannels = false }: StockChartProps) {
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels]);
+  }, [history, interval, showChannels, lineDefinitions]);
+  
+  // Handle chart clicks for tools
+  const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!chartRef.current || !candlestickSeriesRef.current || !history || history.length === 0) return;
+    
+    const chart = chartRef.current;
+    const series = candlestickSeriesRef.current;
+    const rect = chartContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Use chart API to convert coordinates to price/time
+    const timeScale = chart.timeScale();
+    
+    // Get price using series coordinate conversion
+    let priceAtClick = series.coordinateToPrice(y);
+    
+    // Fallback: calculate price from y position if API returns null
+    if (priceAtClick === null) {
+      const chartHeight = 450;
+      const allPrices = history.map(h => [h.high, h.low]).flat();
+      const minPrice = Math.min(...allPrices);
+      const maxPrice = Math.max(...allPrices);
+      const priceRange = maxPrice - minPrice;
+      const padding = priceRange * 0.1;
+      const adjustedMin = minPrice - padding;
+      const adjustedMax = maxPrice + padding;
+      const adjustedRange = adjustedMax - adjustedMin;
+      priceAtClick = adjustedMax - (y / chartHeight) * adjustedRange;
+    }
+    
+    if (toolMode === 'line') {
+      // Add horizontal line at clicked price - chart will recreate it via useEffect
+      const lineId = `line-${Date.now()}`;
+      setLineDefinitions(prev => [...prev, { id: lineId, price: priceAtClick }]);
+      setToolMode('none');
+    } else if (toolMode === 'measure') {
+      if (!measureStart) {
+        setMeasureStart({ price: priceAtClick });
+        setMeasureResult(null);
+      } else {
+        const priceDiff = priceAtClick - measureStart.price;
+        const pctChange = (priceDiff / measureStart.price) * 100;
+        setMeasureResult({ priceDiff, pctChange });
+        setMeasureStart(null);
+        setToolMode('none');
+      }
+    }
+  }, [toolMode, history, measureStart]);
+  
+  // Delete a horizontal line (just remove from definitions, chart will rebuild)
+  const deleteLine = useCallback((lineId: string) => {
+    setLineDefinitions(prev => prev.filter(l => l.id !== lineId));
+  }, []);
+  
+  // Clear all lines
+  const clearAllLines = useCallback(() => {
+    setLineDefinitions([]);
+  }, []);
 
   if (isLoading) {
     return (
@@ -340,43 +446,147 @@ export function StockChart({ symbol, showChannels = false }: StockChartProps) {
 
   return (
     <div className="w-full bg-card p-4 rounded-xl border border-border shadow-sm" data-testid="stock-chart">
-      <div className="mb-4 flex justify-between items-center flex-wrap gap-2">
-        <h3 className="font-semibold text-foreground">Price History</h3>
-        <div className="flex gap-4 items-center flex-wrap">
-          {showSMAs && (
-            <div className="flex gap-3 text-xs">
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                <span className="text-muted-foreground">SMA 5</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
-                <span className="text-muted-foreground">SMA 20</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
-                <span className="text-muted-foreground">SMA 50</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
-                <span className="text-muted-foreground">SMA 200</span>
-              </span>
-            </div>
-          )}
-          {channels.length > 0 && (
-            <div className="flex gap-2 text-xs">
-              {channels.map((ch, i) => (
-                <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded border border-blue-500 bg-blue-100 dark:bg-blue-900/30">
+      {/* Header with legend and tools */}
+      <div className="mb-4 flex justify-between items-start flex-wrap gap-4">
+        <div>
+          <h3 className="font-semibold text-foreground mb-2">Price History</h3>
+          <div className="flex gap-4 items-center flex-wrap">
+            {showSMAs && (
+              <div className="flex gap-3 text-xs">
+                <span className="flex items-center gap-1">
                   <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                  <span className="text-foreground font-medium">{ch.type}</span>
+                  <span className="text-muted-foreground">SMA 5</span>
                 </span>
-              ))}
-            </div>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
+                  <span className="text-muted-foreground">SMA 20</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
+                  <span className="text-muted-foreground">SMA 50</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
+                  <span className="text-muted-foreground">SMA 200</span>
+                </span>
+              </div>
+            )}
+            {channels.length > 0 && (
+              <div className="flex gap-2 text-xs">
+                {channels.map((ch, i) => (
+                  <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded border border-blue-500 bg-blue-100 dark:bg-blue-900/30">
+                    <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
+                    <span className="text-foreground font-medium">{ch.type}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Drawing Tools */}
+        <div className="flex gap-2 items-center flex-wrap">
+          <Button
+            variant={showChannels ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowChannels(!showChannels)}
+            className="gap-1"
+            data-testid="button-toggle-channels"
+          >
+            <Layers className="w-4 h-4" />
+            Channels
+          </Button>
+          <Button
+            variant={toolMode === 'measure' ? "default" : "outline"}
+            size="sm"
+            onClick={() => {
+              setToolMode(toolMode === 'measure' ? 'none' : 'measure');
+              setMeasureStart(null);
+              setMeasureResult(null);
+            }}
+            className="gap-1"
+            data-testid="button-measure"
+          >
+            <Ruler className="w-4 h-4" />
+            Measure
+          </Button>
+          <Button
+            variant={toolMode === 'line' ? "default" : "outline"}
+            size="sm"
+            onClick={() => setToolMode(toolMode === 'line' ? 'none' : 'line')}
+            className="gap-1"
+            data-testid="button-line"
+          >
+            <Minus className="w-4 h-4" />
+            Line
+          </Button>
+          {lineDefinitions.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearAllLines}
+              className="gap-1 text-destructive"
+              data-testid="button-clear-lines"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear Lines
+            </Button>
           )}
         </div>
       </div>
       
-      <div ref={chartContainerRef} className="w-full" data-testid="chart-container" />
+      {/* Tool status messages */}
+      {toolMode === 'measure' && (
+        <div className="mb-2 text-sm text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+          {measureStart ? "Click second point to complete measurement" : "Click first point to start measuring"}
+        </div>
+      )}
+      {toolMode === 'line' && (
+        <div className="mb-2 text-sm text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+          Click on chart to place a horizontal line
+        </div>
+      )}
+      {measureResult && (
+        <div className="mb-2 text-sm bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg flex gap-4">
+          <span>
+            <span className="text-muted-foreground">Change:</span>{' '}
+            <span className={measureResult.priceDiff >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
+              {measureResult.priceDiff >= 0 ? '+' : ''}{measureResult.priceDiff.toFixed(2)}
+            </span>
+          </span>
+          <span>
+            <span className="text-muted-foreground">Percent:</span>{' '}
+            <span className={measureResult.pctChange >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
+              {measureResult.pctChange >= 0 ? '+' : ''}{measureResult.pctChange.toFixed(2)}%
+            </span>
+          </span>
+        </div>
+      )}
+      
+      {/* Horizontal lines list for deletion */}
+      {lineDefinitions.length > 0 && (
+        <div className="mb-2 flex gap-2 flex-wrap items-center">
+          <span className="text-xs text-muted-foreground">Lines:</span>
+          {lineDefinitions.map((line) => (
+            <span
+              key={line.id}
+              onClick={() => deleteLine(line.id)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-red-500/50 bg-red-50 dark:bg-red-900/20 text-xs cursor-pointer hover-elevate"
+              data-testid={`line-delete-${line.id}`}
+            >
+              <span className="text-red-500 font-mono">${line.price.toFixed(2)}</span>
+              <Trash2 className="w-3 h-3 text-muted-foreground" />
+            </span>
+          ))}
+        </div>
+      )}
+      
+      <div 
+        ref={chartContainerRef} 
+        className={`w-full ${toolMode !== 'none' ? 'cursor-crosshair' : ''}`}
+        onClick={handleChartClick}
+        data-testid="chart-container" 
+      />
       
       {/* Timeframe Selector */}
       <div className="mt-4 flex items-center gap-2 flex-wrap">

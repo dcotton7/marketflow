@@ -14,6 +14,11 @@ AI Swing Scanner is a stock market scanner and analysis application that enables
 - Added Market Cap, PE ratio, company description, sector info to symbol pages
 - Scanner universe expanded to S&P 100 (100 stocks)
 - Scanner results are cached to preserve state across navigation
+- Added chart drawing tools: Toggle Channels, Price Measurement, Horizontal Lines
+  - Measurement tool: Click two points to measure price change and percentage
+  - Line tool: Click to place horizontal lines at price levels
+  - Lines are stored as definitions and recreated on chart rebuild
+- Max channel height filter only shows when VCP/Channel patterns selected
 
 ## User Preferences
 
