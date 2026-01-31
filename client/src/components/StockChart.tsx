@@ -264,7 +264,8 @@ export function StockChart({ symbol }: StockChartProps) {
       sma200Series.setData(sma200Data);
     }
 
-    const detectedChannels = shouldShowSMAs ? detectConsolidationChannels(history) : [];
+    // Channels are always detected for all timeframes
+    const detectedChannels = detectConsolidationChannels(history);
     setChannels(detectedChannels);
 
     detectedChannels.forEach(channel => {

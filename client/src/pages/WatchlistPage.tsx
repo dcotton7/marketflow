@@ -50,7 +50,7 @@ function WatchlistItem({ item, onRemove }: {
             }}
             data-testid={`button-remove-${item.symbol}`}
           >
-            <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+            <Trash2 className="w-4 h-4 text-muted-foreground" />
           </Button>
         </div>
         {quote?.companyName && (

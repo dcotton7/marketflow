@@ -30,7 +30,7 @@ export function WatchlistWidget() {
           {watchlist.map((item) => (
             <div
               key={item.id}
-              className="group flex items-center justify-between px-4 py-2 hover:bg-muted/50 rounded-lg transition-colors"
+              className="group flex items-center justify-between px-4 py-2 rounded-lg hover-elevate"
             >
               <Link href={`/symbol/${item.symbol}`}>
                 <div className="flex items-center gap-3 cursor-pointer flex-1">
@@ -45,7 +45,7 @@ export function WatchlistWidget() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground"
                 onClick={() => remove(item.id)}
                 disabled={isRemoving}
               >
