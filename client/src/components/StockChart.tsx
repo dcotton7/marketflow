@@ -141,6 +141,10 @@ function detectConsolidationChannels(
 }
 
 interface HighTightFlagData {
+  poleStart: number;
+  poleLow: number;
+  poleEnd: number;
+  poleHigh: number;
   flagStart: number;
   flagEnd: number;
   flagHigh: number;
@@ -150,21 +154,31 @@ interface HighTightFlagData {
 function detectHighTightFlag(
   data: { date: string; high: number; low: number; close: number; volume: number }[]
 ): HighTightFlagData | null {
-  if (data.length < 15) return null;
+  if (data.length < 20) return null;
   
   // For visualization purposes, show the consolidation in last 10-15 bars
   // with relaxed thresholds to show something useful on the chart
   const flagBars = data.slice(-15);
-  const preFlagBars = data.slice(-40, -15);
+  const preFlagBars = data.slice(-45, -15);
   
-  if (preFlagBars.length < 5) return null;
+  if (preFlagBars.length < 10) return null;
   
-  // Check if pre-flag period had any upward move (>10% gain is enough for visualization)
-  const preFlagStart = preFlagBars[0].close;
-  const preFlagEnd = preFlagBars[preFlagBars.length - 1].close;
-  const gain = ((preFlagEnd - preFlagStart) / preFlagStart) * 100;
+  // Find the pole: look for the strong upward move before the flag
+  // Find lowest point in first half of pre-flag and highest in second half
+  const firstHalf = preFlagBars.slice(0, Math.floor(preFlagBars.length / 2));
+  const secondHalf = preFlagBars.slice(Math.floor(preFlagBars.length / 2));
   
-  // Relaxed: show if there was any meaningful gain
+  const poleLowIdx = firstHalf.reduce((minIdx, c, i, arr) => c.low < arr[minIdx].low ? i : minIdx, 0);
+  const poleLow = firstHalf[poleLowIdx].low;
+  const poleLowDate = firstHalf[poleLowIdx].date;
+  
+  const poleHighIdx = secondHalf.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
+  const poleHigh = secondHalf[poleHighIdx].high;
+  const poleHighDate = secondHalf[poleHighIdx].date;
+  
+  const gain = ((poleHigh - poleLow) / poleLow) * 100;
+  
+  // Relaxed: show if there was any meaningful gain (10%+)
   if (gain < 10) return null;
   
   // Flag period consolidation range
@@ -173,10 +187,14 @@ function detectHighTightFlag(
   const avgPrice = flagBars.reduce((sum, c) => sum + c.close, 0) / flagBars.length;
   const rangePercent = ((flagHigh - flagLow) / avgPrice) * 100;
   
-  // Relaxed: allow up to 20% range in the flag
-  if (rangePercent > 20) return null;
+  // Relaxed: allow up to 25% range in the flag
+  if (rangePercent > 25) return null;
   
   return {
+    poleStart: new Date(poleLowDate).getTime() / 1000,
+    poleLow,
+    poleEnd: new Date(poleHighDate).getTime() / 1000,
+    poleHigh,
     flagStart: new Date(flagBars[0].date).getTime() / 1000,
     flagEnd: new Date(flagBars[flagBars.length - 1].date).getTime() / 1000,
     flagHigh,
@@ -187,6 +205,9 @@ function detectHighTightFlag(
 interface CupAndHandleData {
   cupStart: number;
   lipLevel: number;
+  cupBottomTime: number;
+  cupBottomPrice: number;
+  cupRightTime: number;
   handleStart: number;
   handleEnd: number;
   handleHigh: number;
@@ -204,15 +225,22 @@ function detectCupAndHandle(
   
   // Find the highest point in first third as left lip
   const leftThird = lookback.slice(0, Math.floor(lookback.length / 3));
-  const leftLipHigh = Math.max(...leftThird.map(c => c.high));
+  const leftLipIdx = leftThird.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
+  const leftLipHigh = leftThird[leftLipIdx].high;
   
   // Find the lowest point in middle third as cup bottom
-  const middleThird = lookback.slice(Math.floor(lookback.length / 3), Math.floor(lookback.length * 2 / 3));
-  const cupBottom = Math.min(...middleThird.map(c => c.low));
+  const middleStart = Math.floor(lookback.length / 3);
+  const middleEnd = Math.floor(lookback.length * 2 / 3);
+  const middleThird = lookback.slice(middleStart, middleEnd);
+  const cupBottomIdx = middleThird.reduce((minIdx, c, i, arr) => c.low < arr[minIdx].low ? i : minIdx, 0);
+  const cupBottom = middleThird[cupBottomIdx].low;
+  const cupBottomDate = middleThird[cupBottomIdx].date;
   
   // Right third should approach the left lip level
   const rightThird = lookback.slice(Math.floor(lookback.length * 2 / 3));
-  const rightHighest = Math.max(...rightThird.map(c => c.high));
+  const rightHighIdx = rightThird.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
+  const rightHighest = rightThird[rightHighIdx].high;
+  const rightHighDate = rightThird[rightHighIdx].date;
   
   // Relaxed: cup depth 8-50% (was 15-40%)
   const cupDepth = ((leftLipHigh - cupBottom) / leftLipHigh) * 100;
@@ -229,6 +257,9 @@ function detectCupAndHandle(
   return {
     cupStart: new Date(lookback[0].date).getTime() / 1000,
     lipLevel: leftLipHigh,
+    cupBottomTime: new Date(cupBottomDate).getTime() / 1000,
+    cupBottomPrice: cupBottom,
+    cupRightTime: new Date(rightHighDate).getTime() / 1000,
     handleStart: new Date(handleBars[0].date).getTime() / 1000,
     handleEnd: new Date(handleBars[handleBars.length - 1].date).getTime() / 1000,
     handleHigh,
@@ -437,7 +468,20 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     if (showPatternViz && selectedPattern === 'High Tight Flag' && history.length > 20) {
       const htfData = detectHighTightFlag(history);
       if (htfData) {
-        // Draw consolidation channel (the "flag" part)
+        // Draw the pole (diagonal line showing strong upward move)
+        const poleLine = chart.addSeries(LineSeries, {
+          color: '#3b82f6',
+          lineWidth: 3,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        poleLine.setData([
+          { time: htfData.poleStart as Time, value: htfData.poleLow },
+          { time: htfData.poleEnd as Time, value: htfData.poleHigh },
+        ]);
+        
+        // Draw consolidation channel (the "flag" part) - horizontal lines
         const flagTopLine = chart.addSeries(LineSeries, {
           color: '#22c55e',
           lineWidth: 2,
@@ -478,8 +522,38 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         cupLipLine.setData([
           { time: cupData.cupStart as Time, value: cupData.lipLevel },
-          { time: cupData.handleEnd as Time, value: cupData.lipLevel },
+          { time: cupData.cupRightTime as Time, value: cupData.lipLevel },
         ]);
+        
+        // Draw the cup arc (U-shape from left lip to bottom to right side)
+        // Create smooth arc using multiple points
+        const arcPoints: { time: Time; value: number }[] = [];
+        const totalDuration = cupData.cupRightTime - cupData.cupStart;
+        const arcSegments = 20; // Number of segments for smooth curve
+        
+        for (let i = 0; i <= arcSegments; i++) {
+          const t = i / arcSegments; // 0 to 1
+          const timePoint = cupData.cupStart + (totalDuration * t);
+          
+          // Parabolic curve: y = 4 * depth * t * (1-t) where t is 0-1
+          // This creates a U-shape going from lipLevel down to cupBottomPrice and back up
+          const depth = cupData.lipLevel - cupData.cupBottomPrice;
+          const curveValue = cupData.lipLevel - (4 * depth * t * (1 - t));
+          
+          arcPoints.push({
+            time: timePoint as Time,
+            value: curveValue
+          });
+        }
+        
+        const cupArcLine = chart.addSeries(LineSeries, {
+          color: '#f59e0b',
+          lineWidth: 3,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        cupArcLine.setData(arcPoints);
         
         // Draw handle channel
         const handleTopLine = chart.addSeries(LineSeries, {
@@ -528,7 +602,18 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       ]);
     });
 
-    chart.timeScale().fitContent();
+    // For daily timeframe, zoom to ~8-9 months (about 180-200 candles) for better pattern visibility
+    // For other timeframes, fit all content
+    if (interval === '1d' && candleData.length > 200) {
+      // Show last 200 candles for daily charts
+      const visibleBars = 200;
+      chart.timeScale().setVisibleLogicalRange({
+        from: candleData.length - visibleBars,
+        to: candleData.length
+      });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     const handleResize = () => {
       if (chartContainerRef.current) {
@@ -559,7 +644,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     const timeScale = chart.timeScale();
     
     // Get price using series coordinate conversion
-    let priceAtClick = series.coordinateToPrice(y);
+    let priceAtClick: number | null = series.coordinateToPrice(y) as number | null;
     
     // Fallback: calculate price from y position if API returns null
     if (priceAtClick === null) {
@@ -575,17 +660,21 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       priceAtClick = adjustedMax - (y / chartHeight) * adjustedRange;
     }
     
+    if (priceAtClick === null) return;
+    
+    const finalPrice = priceAtClick as number;
+    
     if (toolMode === 'line') {
       // Add horizontal line at clicked price - chart will recreate it via useEffect
       const lineId = `line-${Date.now()}`;
-      setLineDefinitions(prev => [...prev, { id: lineId, price: priceAtClick }]);
+      setLineDefinitions(prev => [...prev, { id: lineId, price: finalPrice }]);
       setToolMode('none');
     } else if (toolMode === 'measure') {
       if (!measureStart) {
-        setMeasureStart({ price: priceAtClick });
+        setMeasureStart({ price: finalPrice });
         setMeasureResult(null);
       } else {
-        const priceDiff = priceAtClick - measureStart.price;
+        const priceDiff = finalPrice - measureStart.price;
         const pctChange = (priceDiff / measureStart.price) * 100;
         setMeasureResult({ priceDiff, pctChange });
         setMeasureStart(null);
