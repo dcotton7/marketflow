@@ -1,8 +1,19 @@
-# TradeScan
+# AI Swing Scanner
 
 ## Overview
 
-TradeScan is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
+AI Swing Scanner is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
+
+## Recent Changes (January 2026)
+- Renamed application from "TradeScan" to "AI Swing Scanner"
+- Added dedicated Watchlist page with navigation in sidebar
+- Implemented multi-timeframe chart selector (5m, 15m, 30m, 60m, daily, weekly, monthly)
+- SMAs only display for daily/weekly/monthly timeframes (not intraday)
+- Extended historical data to 2 years for proper SMA 200 coverage
+- Channel lines now use blue dashed style for better visibility
+- Added Market Cap, PE ratio, company description, sector info to symbol pages
+- Scanner universe expanded to S&P 100 (100 stocks)
+- Scanner results are cached to preserve state across navigation
 
 ## User Preferences
 
