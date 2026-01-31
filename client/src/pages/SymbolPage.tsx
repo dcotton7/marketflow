@@ -196,7 +196,13 @@ export default function SymbolPage() {
                 <span className="text-sm text-muted-foreground block mb-2">Sector ETFs:</span>
                 <div className="flex gap-2 flex-wrap">
                   {quote.sectorETFs.map((etf) => (
-                    <Badge key={etf} variant="secondary" className="font-mono">
+                    <Badge 
+                      key={etf} 
+                      variant="secondary" 
+                      className="font-mono cursor-pointer hover-elevate"
+                      onClick={() => setLocation(`/symbol/${etf}`)}
+                      data-testid={`badge-etf-${etf}`}
+                    >
                       {etf}
                     </Badge>
                   ))}
@@ -206,8 +212,42 @@ export default function SymbolPage() {
           </CardContent>
         </Card>
 
-        {/* Related Stocks - Top by Market Cap */}
-        {quote.relatedStocks && quote.relatedStocks.length > 0 && (
+        {/* ETF Holdings - for ETFs */}
+        {quote.isETF && quote.etfHoldings && quote.etfHoldings.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Top Holdings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {quote.etfHoldings.map((holding) => (
+                  <div 
+                    key={holding.symbol} 
+                    className="flex items-center justify-between p-3 rounded border border-border hover-elevate cursor-pointer"
+                    onClick={() => setLocation(`/symbol/${holding.symbol}`)}
+                    data-testid={`link-holding-${holding.symbol}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-bold text-primary min-w-[60px]">{holding.symbol}</span>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{holding.name}</span>
+                        {holding.weight && (
+                          <span className="text-xs text-muted-foreground">Weight: {holding.weight.toFixed(1)}%</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-sm font-mono text-muted-foreground" data-testid={`text-mktcap-${holding.symbol}`}>
+                      {holding.marketCap && holding.marketCap > 0 ? formatMarketCap(holding.marketCap) : '---'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Related Stocks - Top by Market Cap (for non-ETFs) */}
+        {!quote.isETF && quote.relatedStocks && quote.relatedStocks.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Top {quote.sector} Companies</CardTitle>
@@ -219,6 +259,7 @@ export default function SymbolPage() {
                     key={stock.symbol} 
                     className="flex items-center justify-between p-3 rounded border border-border hover-elevate cursor-pointer"
                     onClick={() => setLocation(`/symbol/${stock.symbol}`)}
+                    data-testid={`link-related-${stock.symbol}`}
                   >
                     <div className="flex items-center gap-3">
                       <span className="font-mono font-bold text-primary min-w-[60px]">{stock.symbol}</span>
@@ -227,8 +268,8 @@ export default function SymbolPage() {
                         <span className="text-xs text-muted-foreground">{stock.description}</span>
                       </div>
                     </div>
-                    <span className="text-sm font-mono text-muted-foreground">
-                      {stock.marketCap ? formatMarketCap(stock.marketCap) : '---'}
+                    <span className="text-sm font-mono text-muted-foreground" data-testid={`text-mktcap-${stock.symbol}`}>
+                      {stock.marketCap && stock.marketCap > 0 ? formatMarketCap(stock.marketCap) : '---'}
                     </span>
                   </div>
                 ))}

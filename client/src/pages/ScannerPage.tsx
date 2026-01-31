@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import { useScanner } from "@/hooks/use-stocks";
 import { Button } from "@/components/ui/button";
@@ -10,55 +9,33 @@ import { useLocation } from "wouter";
 import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MiniChart } from "@/components/MiniChart";
-import { type ScannerRunInput, type ScannerResult } from "@shared/routes";
-import { queryClient } from "@/lib/queryClient";
+import { useScannerContext } from "@/context/ScannerContext";
 
 const CHARTS_PER_PAGE = 10;
-const SCANNER_CACHE_KEY = 'scanner-results';
 
 export default function ScannerPage() {
   const [, setLocation] = useLocation();
-  const { mutate: runScan, data: mutationResults, isPending } = useScanner();
-  const [currentPage, setCurrentPage] = useState(1);
+  const { mutate: runScan, isPending } = useScanner();
   
-  // Restore cached results on mount
-  const cachedResults = queryClient.getQueryData<ScannerResult>([SCANNER_CACHE_KEY]);
-  const results = mutationResults || cachedResults;
-  
-  // Cache results when mutation succeeds
-  useEffect(() => {
-    if (mutationResults) {
-      queryClient.setQueryData([SCANNER_CACHE_KEY], mutationResults);
-    }
-  }, [mutationResults]);
-
-  const [filters, setFilters] = useState<ScannerRunInput>({
-    scannerIndex: "sp100",
-    minPrice: undefined,
-    maxPrice: undefined,
-    minVolume: undefined,
-    candlestickPattern: "All",
-    chartPattern: "All",
-    patternStrictness: "tight",
-    smaFilter: "none",
-    priceWithin50dPct: undefined,
-    maxChannelHeightPct: undefined,
-    htfMinGainPct: 30,
-    pbMinGainPct: 30,
-    pbUpPeriodCandles: 10,
-    pbMinCandles: 1,
-    pbMaxCandles: 5,
-  });
-  
-  // Track if scan is in progress
-  const [isScanning, setIsScanning] = useState(false);
+  const { 
+    filters, 
+    setFilters, 
+    results, 
+    setResults, 
+    currentPage, 
+    setCurrentPage,
+    isScanning,
+    setIsScanning
+  } = useScannerContext();
 
   const handleScan = () => {
     setCurrentPage(1);
     setIsScanning(true);
-    // Clear cached results to show loading state
-    queryClient.setQueryData([SCANNER_CACHE_KEY], undefined);
+    setResults(null);
     runScan(filters, {
+      onSuccess: (data) => {
+        setResults(data);
+      },
       onSettled: () => setIsScanning(false)
     });
   };

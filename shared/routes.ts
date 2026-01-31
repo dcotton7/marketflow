@@ -64,6 +64,13 @@ export const api = {
             description: z.string().optional(),
             marketCap: z.number().optional(),
           })).optional(),
+          isETF: z.boolean().optional(),
+          etfHoldings: z.array(z.object({
+            symbol: z.string(),
+            name: z.string(),
+            weight: z.number().optional(),
+            marketCap: z.number().optional(),
+          })).optional(),
           earnings: z.object({
             quarterlyGrowthPct: z.number().optional(),
             surprisePct: z.number().optional(),

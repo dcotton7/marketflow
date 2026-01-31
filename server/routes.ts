@@ -130,122 +130,222 @@ const SECTOR_ETFS: Record<string, string[]> = {
   'Communication Services': ['XLC', 'VOX', 'FCOM'],
 };
 
-// Pre-computed stocks by sector (to avoid slow API calls)
-const STOCKS_BY_SECTOR: Record<string, { symbol: string; name: string; industry: string }[]> = {
+// Pre-computed stocks by sector with market caps (in billions, approximate)
+const STOCKS_BY_SECTOR: Record<string, { symbol: string; name: string; industry: string; marketCap: number }[]> = {
   'Technology': [
-    { symbol: 'AAPL', name: 'Apple Inc.', industry: 'Consumer Electronics' },
-    { symbol: 'MSFT', name: 'Microsoft Corporation', industry: 'Software' },
-    { symbol: 'NVDA', name: 'NVIDIA Corporation', industry: 'Semiconductors' },
-    { symbol: 'GOOGL', name: 'Alphabet Inc.', industry: 'Internet Services' },
-    { symbol: 'META', name: 'Meta Platforms', industry: 'Internet Services' },
-    { symbol: 'AVGO', name: 'Broadcom Inc.', industry: 'Semiconductors' },
-    { symbol: 'ORCL', name: 'Oracle Corporation', industry: 'Software' },
-    { symbol: 'CRM', name: 'Salesforce Inc.', industry: 'Software' },
-    { symbol: 'AMD', name: 'Advanced Micro Devices', industry: 'Semiconductors' },
-    { symbol: 'CSCO', name: 'Cisco Systems', industry: 'Networking' },
-    { symbol: 'ADBE', name: 'Adobe Inc.', industry: 'Software' },
-    { symbol: 'INTC', name: 'Intel Corporation', industry: 'Semiconductors' },
-    { symbol: 'IBM', name: 'IBM', industry: 'IT Services' },
-    { symbol: 'TXN', name: 'Texas Instruments', industry: 'Semiconductors' },
-    { symbol: 'QCOM', name: 'Qualcomm Inc.', industry: 'Semiconductors' },
-    { symbol: 'MU', name: 'Micron Technology', industry: 'Semiconductors' },
-    { symbol: 'LRCX', name: 'Lam Research', industry: 'Semiconductor Equipment' },
+    { symbol: 'AAPL', name: 'Apple Inc.', industry: 'Consumer Electronics', marketCap: 3000e9 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', industry: 'Software', marketCap: 2800e9 },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', industry: 'Semiconductors', marketCap: 1200e9 },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', industry: 'Internet Services', marketCap: 1800e9 },
+    { symbol: 'META', name: 'Meta Platforms', industry: 'Internet Services', marketCap: 900e9 },
+    { symbol: 'AVGO', name: 'Broadcom Inc.', industry: 'Semiconductors', marketCap: 350e9 },
+    { symbol: 'ORCL', name: 'Oracle Corporation', industry: 'Software', marketCap: 320e9 },
+    { symbol: 'CRM', name: 'Salesforce Inc.', industry: 'Software', marketCap: 250e9 },
+    { symbol: 'AMD', name: 'Advanced Micro Devices', industry: 'Semiconductors', marketCap: 200e9 },
+    { symbol: 'CSCO', name: 'Cisco Systems', industry: 'Networking', marketCap: 200e9 },
+    { symbol: 'ADBE', name: 'Adobe Inc.', industry: 'Software', marketCap: 240e9 },
+    { symbol: 'INTC', name: 'Intel Corporation', industry: 'Semiconductors', marketCap: 150e9 },
+    { symbol: 'IBM', name: 'IBM', industry: 'IT Services', marketCap: 150e9 },
+    { symbol: 'TXN', name: 'Texas Instruments', industry: 'Semiconductors', marketCap: 160e9 },
+    { symbol: 'QCOM', name: 'Qualcomm Inc.', industry: 'Semiconductors', marketCap: 170e9 },
+    { symbol: 'MU', name: 'Micron Technology', industry: 'Semiconductors', marketCap: 90e9 },
+    { symbol: 'LRCX', name: 'Lam Research', industry: 'Semiconductor Equipment', marketCap: 100e9 },
   ],
   'Healthcare': [
-    { symbol: 'UNH', name: 'UnitedHealth Group', industry: 'Health Insurance' },
-    { symbol: 'JNJ', name: 'Johnson & Johnson', industry: 'Pharmaceuticals' },
-    { symbol: 'LLY', name: 'Eli Lilly', industry: 'Pharmaceuticals' },
-    { symbol: 'PFE', name: 'Pfizer Inc.', industry: 'Pharmaceuticals' },
-    { symbol: 'ABBV', name: 'AbbVie Inc.', industry: 'Pharmaceuticals' },
-    { symbol: 'MRK', name: 'Merck & Co.', industry: 'Pharmaceuticals' },
-    { symbol: 'TMO', name: 'Thermo Fisher Scientific', industry: 'Life Sciences' },
-    { symbol: 'ABT', name: 'Abbott Laboratories', industry: 'Medical Devices' },
-    { symbol: 'DHR', name: 'Danaher Corporation', industry: 'Life Sciences' },
-    { symbol: 'BMY', name: 'Bristol-Myers Squibb', industry: 'Pharmaceuticals' },
-    { symbol: 'AMGN', name: 'Amgen Inc.', industry: 'Biotechnology' },
-    { symbol: 'GILD', name: 'Gilead Sciences', industry: 'Biotechnology' },
-    { symbol: 'MDT', name: 'Medtronic', industry: 'Medical Devices' },
-    { symbol: 'BSX', name: 'Boston Scientific', industry: 'Medical Devices' },
-    { symbol: 'BDX', name: 'Becton Dickinson', industry: 'Medical Devices' },
+    { symbol: 'UNH', name: 'UnitedHealth Group', industry: 'Health Insurance', marketCap: 500e9 },
+    { symbol: 'JNJ', name: 'Johnson & Johnson', industry: 'Pharmaceuticals', marketCap: 400e9 },
+    { symbol: 'LLY', name: 'Eli Lilly', industry: 'Pharmaceuticals', marketCap: 550e9 },
+    { symbol: 'PFE', name: 'Pfizer Inc.', industry: 'Pharmaceuticals', marketCap: 160e9 },
+    { symbol: 'ABBV', name: 'AbbVie Inc.', industry: 'Pharmaceuticals', marketCap: 280e9 },
+    { symbol: 'MRK', name: 'Merck & Co.', industry: 'Pharmaceuticals', marketCap: 280e9 },
+    { symbol: 'TMO', name: 'Thermo Fisher Scientific', industry: 'Life Sciences', marketCap: 210e9 },
+    { symbol: 'ABT', name: 'Abbott Laboratories', industry: 'Medical Devices', marketCap: 190e9 },
+    { symbol: 'DHR', name: 'Danaher Corporation', industry: 'Life Sciences', marketCap: 180e9 },
+    { symbol: 'BMY', name: 'Bristol-Myers Squibb', industry: 'Pharmaceuticals', marketCap: 120e9 },
+    { symbol: 'AMGN', name: 'Amgen Inc.', industry: 'Biotechnology', marketCap: 150e9 },
+    { symbol: 'GILD', name: 'Gilead Sciences', industry: 'Biotechnology', marketCap: 100e9 },
+    { symbol: 'MDT', name: 'Medtronic', industry: 'Medical Devices', marketCap: 110e9 },
+    { symbol: 'BSX', name: 'Boston Scientific', industry: 'Medical Devices', marketCap: 90e9 },
+    { symbol: 'BDX', name: 'Becton Dickinson', industry: 'Medical Devices', marketCap: 70e9 },
   ],
   'Financial Services': [
-    { symbol: 'BRK.B', name: 'Berkshire Hathaway', industry: 'Diversified' },
-    { symbol: 'JPM', name: 'JPMorgan Chase', industry: 'Banking' },
-    { symbol: 'V', name: 'Visa Inc.', industry: 'Payment Processing' },
-    { symbol: 'MA', name: 'Mastercard', industry: 'Payment Processing' },
-    { symbol: 'BAC', name: 'Bank of America', industry: 'Banking' },
-    { symbol: 'WFC', name: 'Wells Fargo', industry: 'Banking' },
-    { symbol: 'GS', name: 'Goldman Sachs', industry: 'Investment Banking' },
-    { symbol: 'MS', name: 'Morgan Stanley', industry: 'Investment Banking' },
-    { symbol: 'SPGI', name: 'S&P Global', industry: 'Financial Data' },
-    { symbol: 'BLK', name: 'BlackRock', industry: 'Asset Management' },
-    { symbol: 'AXP', name: 'American Express', industry: 'Credit Services' },
-    { symbol: 'C', name: 'Citigroup', industry: 'Banking' },
-    { symbol: 'CME', name: 'CME Group', industry: 'Exchanges' },
-    { symbol: 'ICE', name: 'Intercontinental Exchange', industry: 'Exchanges' },
-    { symbol: 'PNC', name: 'PNC Financial', industry: 'Banking' },
-    { symbol: 'USB', name: 'US Bancorp', industry: 'Banking' },
+    { symbol: 'BRK.B', name: 'Berkshire Hathaway', industry: 'Diversified', marketCap: 800e9 },
+    { symbol: 'JPM', name: 'JPMorgan Chase', industry: 'Banking', marketCap: 500e9 },
+    { symbol: 'V', name: 'Visa Inc.', industry: 'Payment Processing', marketCap: 500e9 },
+    { symbol: 'MA', name: 'Mastercard', industry: 'Payment Processing', marketCap: 400e9 },
+    { symbol: 'BAC', name: 'Bank of America', industry: 'Banking', marketCap: 280e9 },
+    { symbol: 'WFC', name: 'Wells Fargo', industry: 'Banking', marketCap: 180e9 },
+    { symbol: 'GS', name: 'Goldman Sachs', industry: 'Investment Banking', marketCap: 140e9 },
+    { symbol: 'MS', name: 'Morgan Stanley', industry: 'Investment Banking', marketCap: 150e9 },
+    { symbol: 'SPGI', name: 'S&P Global', industry: 'Financial Data', marketCap: 130e9 },
+    { symbol: 'BLK', name: 'BlackRock', industry: 'Asset Management', marketCap: 120e9 },
+    { symbol: 'AXP', name: 'American Express', industry: 'Credit Services', marketCap: 170e9 },
+    { symbol: 'C', name: 'Citigroup', industry: 'Banking', marketCap: 100e9 },
+    { symbol: 'CME', name: 'CME Group', industry: 'Exchanges', marketCap: 80e9 },
+    { symbol: 'ICE', name: 'Intercontinental Exchange', industry: 'Exchanges', marketCap: 70e9 },
+    { symbol: 'PNC', name: 'PNC Financial', industry: 'Banking', marketCap: 65e9 },
+    { symbol: 'USB', name: 'US Bancorp', industry: 'Banking', marketCap: 60e9 },
   ],
   'Consumer Cyclical': [
-    { symbol: 'AMZN', name: 'Amazon.com', industry: 'E-Commerce' },
-    { symbol: 'TSLA', name: 'Tesla Inc.', industry: 'Auto Manufacturers' },
-    { symbol: 'HD', name: 'Home Depot', industry: 'Home Improvement' },
-    { symbol: 'MCD', name: "McDonald's", industry: 'Restaurants' },
-    { symbol: 'NKE', name: 'Nike Inc.', industry: 'Footwear' },
-    { symbol: 'SBUX', name: 'Starbucks', industry: 'Restaurants' },
-    { symbol: 'LOW', name: "Lowe's", industry: 'Home Improvement' },
-    { symbol: 'TJX', name: 'TJX Companies', industry: 'Retail' },
-    { symbol: 'BKNG', name: 'Booking Holdings', industry: 'Travel' },
+    { symbol: 'AMZN', name: 'Amazon.com', industry: 'E-Commerce', marketCap: 1500e9 },
+    { symbol: 'TSLA', name: 'Tesla Inc.', industry: 'Auto Manufacturers', marketCap: 700e9 },
+    { symbol: 'HD', name: 'Home Depot', industry: 'Home Improvement', marketCap: 350e9 },
+    { symbol: 'MCD', name: "McDonald's", industry: 'Restaurants', marketCap: 210e9 },
+    { symbol: 'NKE', name: 'Nike Inc.', industry: 'Footwear', marketCap: 140e9 },
+    { symbol: 'SBUX', name: 'Starbucks', industry: 'Restaurants', marketCap: 110e9 },
+    { symbol: 'LOW', name: "Lowe's", industry: 'Home Improvement', marketCap: 140e9 },
+    { symbol: 'TJX', name: 'TJX Companies', industry: 'Retail', marketCap: 110e9 },
+    { symbol: 'BKNG', name: 'Booking Holdings', industry: 'Travel', marketCap: 130e9 },
   ],
   'Consumer Defensive': [
-    { symbol: 'WMT', name: 'Walmart Inc.', industry: 'Discount Stores' },
-    { symbol: 'PG', name: 'Procter & Gamble', industry: 'Consumer Products' },
-    { symbol: 'COST', name: 'Costco Wholesale', industry: 'Warehouse Clubs' },
-    { symbol: 'KO', name: 'Coca-Cola', industry: 'Beverages' },
-    { symbol: 'PEP', name: 'PepsiCo', industry: 'Beverages' },
-    { symbol: 'PM', name: 'Philip Morris', industry: 'Tobacco' },
-    { symbol: 'MO', name: 'Altria Group', industry: 'Tobacco' },
-    { symbol: 'CL', name: 'Colgate-Palmolive', industry: 'Consumer Products' },
+    { symbol: 'WMT', name: 'Walmart Inc.', industry: 'Discount Stores', marketCap: 420e9 },
+    { symbol: 'PG', name: 'Procter & Gamble', industry: 'Consumer Products', marketCap: 380e9 },
+    { symbol: 'COST', name: 'Costco Wholesale', industry: 'Warehouse Clubs', marketCap: 300e9 },
+    { symbol: 'KO', name: 'Coca-Cola', industry: 'Beverages', marketCap: 270e9 },
+    { symbol: 'PEP', name: 'PepsiCo', industry: 'Beverages', marketCap: 240e9 },
+    { symbol: 'PM', name: 'Philip Morris', industry: 'Tobacco', marketCap: 150e9 },
+    { symbol: 'MO', name: 'Altria Group', industry: 'Tobacco', marketCap: 80e9 },
+    { symbol: 'CL', name: 'Colgate-Palmolive', industry: 'Consumer Products', marketCap: 75e9 },
   ],
   'Energy': [
-    { symbol: 'XOM', name: 'Exxon Mobil', industry: 'Oil & Gas' },
-    { symbol: 'CVX', name: 'Chevron', industry: 'Oil & Gas' },
-    { symbol: 'COP', name: 'ConocoPhillips', industry: 'Oil & Gas' },
-    { symbol: 'EOG', name: 'EOG Resources', industry: 'Oil & Gas' },
+    { symbol: 'XOM', name: 'Exxon Mobil', industry: 'Oil & Gas', marketCap: 450e9 },
+    { symbol: 'CVX', name: 'Chevron', industry: 'Oil & Gas', marketCap: 280e9 },
+    { symbol: 'COP', name: 'ConocoPhillips', industry: 'Oil & Gas', marketCap: 130e9 },
+    { symbol: 'EOG', name: 'EOG Resources', industry: 'Oil & Gas', marketCap: 70e9 },
   ],
   'Industrials': [
-    { symbol: 'CAT', name: 'Caterpillar', industry: 'Heavy Machinery' },
-    { symbol: 'RTX', name: 'RTX Corporation', industry: 'Aerospace & Defense' },
-    { symbol: 'HON', name: 'Honeywell', industry: 'Conglomerate' },
-    { symbol: 'UNP', name: 'Union Pacific', industry: 'Railroads' },
-    { symbol: 'BA', name: 'Boeing', industry: 'Aerospace' },
-    { symbol: 'UPS', name: 'United Parcel Service', industry: 'Shipping' },
-    { symbol: 'DE', name: 'Deere & Company', industry: 'Farm Machinery' },
-    { symbol: 'LMT', name: 'Lockheed Martin', industry: 'Defense' },
-    { symbol: 'GE', name: 'General Electric', industry: 'Conglomerate' },
-    { symbol: 'MMM', name: '3M Company', industry: 'Conglomerate' },
-    { symbol: 'NSC', name: 'Norfolk Southern', industry: 'Railroads' },
+    { symbol: 'CAT', name: 'Caterpillar', industry: 'Heavy Machinery', marketCap: 170e9 },
+    { symbol: 'RTX', name: 'RTX Corporation', industry: 'Aerospace & Defense', marketCap: 150e9 },
+    { symbol: 'HON', name: 'Honeywell', industry: 'Conglomerate', marketCap: 140e9 },
+    { symbol: 'UNP', name: 'Union Pacific', industry: 'Railroads', marketCap: 150e9 },
+    { symbol: 'BA', name: 'Boeing', industry: 'Aerospace', marketCap: 130e9 },
+    { symbol: 'UPS', name: 'United Parcel Service', industry: 'Shipping', marketCap: 120e9 },
+    { symbol: 'DE', name: 'Deere & Company', industry: 'Farm Machinery', marketCap: 120e9 },
+    { symbol: 'LMT', name: 'Lockheed Martin', industry: 'Defense', marketCap: 120e9 },
+    { symbol: 'GE', name: 'General Electric', industry: 'Conglomerate', marketCap: 170e9 },
+    { symbol: 'MMM', name: '3M Company', industry: 'Conglomerate', marketCap: 60e9 },
+    { symbol: 'NSC', name: 'Norfolk Southern', industry: 'Railroads', marketCap: 55e9 },
   ],
   'Communication Services': [
-    { symbol: 'GOOG', name: 'Alphabet Inc.', industry: 'Internet Services' },
-    { symbol: 'DIS', name: 'Walt Disney', industry: 'Entertainment' },
-    { symbol: 'NFLX', name: 'Netflix', industry: 'Streaming' },
-    { symbol: 'CMCSA', name: 'Comcast', industry: 'Cable' },
-    { symbol: 'VZ', name: 'Verizon', industry: 'Telecom' },
-    { symbol: 'T', name: 'AT&T', industry: 'Telecom' },
-    { symbol: 'TMUS', name: 'T-Mobile', industry: 'Telecom' },
+    { symbol: 'GOOG', name: 'Alphabet Inc.', industry: 'Internet Services', marketCap: 1800e9 },
+    { symbol: 'DIS', name: 'Walt Disney', industry: 'Entertainment', marketCap: 200e9 },
+    { symbol: 'NFLX', name: 'Netflix', industry: 'Streaming', marketCap: 250e9 },
+    { symbol: 'CMCSA', name: 'Comcast', industry: 'Cable', marketCap: 160e9 },
+    { symbol: 'VZ', name: 'Verizon', industry: 'Telecom', marketCap: 170e9 },
+    { symbol: 'T', name: 'AT&T', industry: 'Telecom', marketCap: 140e9 },
+    { symbol: 'TMUS', name: 'T-Mobile', industry: 'Telecom', marketCap: 200e9 },
   ],
   'Utilities': [
-    { symbol: 'NEE', name: 'NextEra Energy', industry: 'Utilities' },
-    { symbol: 'DUK', name: 'Duke Energy', industry: 'Utilities' },
-    { symbol: 'SO', name: 'Southern Company', industry: 'Utilities' },
+    { symbol: 'NEE', name: 'NextEra Energy', industry: 'Utilities', marketCap: 150e9 },
+    { symbol: 'DUK', name: 'Duke Energy', industry: 'Utilities', marketCap: 80e9 },
+    { symbol: 'SO', name: 'Southern Company', industry: 'Utilities', marketCap: 85e9 },
   ],
   'Real Estate': [
-    { symbol: 'AMT', name: 'American Tower', industry: 'REITs' },
-    { symbol: 'PLD', name: 'Prologis', industry: 'REITs' },
-    { symbol: 'EQIX', name: 'Equinix', industry: 'Data Centers' },
+    { symbol: 'AMT', name: 'American Tower', industry: 'REITs', marketCap: 100e9 },
+    { symbol: 'PLD', name: 'Prologis', industry: 'REITs', marketCap: 110e9 },
+    { symbol: 'EQIX', name: 'Equinix', industry: 'Data Centers', marketCap: 75e9 },
   ],
 };
+
+// Pre-computed ETF holdings (top stocks by weight)
+const ETF_HOLDINGS: Record<string, { symbol: string; name: string; weight: number; marketCap: number }[]> = {
+  'SPY': [
+    { symbol: 'AAPL', name: 'Apple Inc.', weight: 7.2, marketCap: 3000e9 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', weight: 6.8, marketCap: 2800e9 },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', weight: 3.5, marketCap: 1200e9 },
+    { symbol: 'AMZN', name: 'Amazon.com', weight: 3.3, marketCap: 1500e9 },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', weight: 2.2, marketCap: 1800e9 },
+    { symbol: 'META', name: 'Meta Platforms', weight: 2.0, marketCap: 900e9 },
+  ],
+  'QQQ': [
+    { symbol: 'AAPL', name: 'Apple Inc.', weight: 11.5, marketCap: 3000e9 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', weight: 10.2, marketCap: 2800e9 },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', weight: 7.8, marketCap: 1200e9 },
+    { symbol: 'AMZN', name: 'Amazon.com', weight: 5.5, marketCap: 1500e9 },
+    { symbol: 'META', name: 'Meta Platforms', weight: 4.2, marketCap: 900e9 },
+    { symbol: 'GOOGL', name: 'Alphabet Inc.', weight: 3.8, marketCap: 1800e9 },
+  ],
+  'XLK': [
+    { symbol: 'AAPL', name: 'Apple Inc.', weight: 22.0, marketCap: 3000e9 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', weight: 21.0, marketCap: 2800e9 },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', weight: 6.5, marketCap: 1200e9 },
+    { symbol: 'AVGO', name: 'Broadcom Inc.', weight: 4.8, marketCap: 350e9 },
+    { symbol: 'CRM', name: 'Salesforce Inc.', weight: 2.5, marketCap: 250e9 },
+  ],
+  'XLV': [
+    { symbol: 'LLY', name: 'Eli Lilly', weight: 12.0, marketCap: 550e9 },
+    { symbol: 'UNH', name: 'UnitedHealth Group', weight: 10.5, marketCap: 500e9 },
+    { symbol: 'JNJ', name: 'Johnson & Johnson', weight: 8.0, marketCap: 400e9 },
+    { symbol: 'MRK', name: 'Merck & Co.', weight: 5.5, marketCap: 280e9 },
+    { symbol: 'ABBV', name: 'AbbVie Inc.', weight: 5.2, marketCap: 280e9 },
+  ],
+  'XLF': [
+    { symbol: 'BRK.B', name: 'Berkshire Hathaway', weight: 14.0, marketCap: 800e9 },
+    { symbol: 'JPM', name: 'JPMorgan Chase', weight: 10.5, marketCap: 500e9 },
+    { symbol: 'V', name: 'Visa Inc.', weight: 8.0, marketCap: 500e9 },
+    { symbol: 'MA', name: 'Mastercard', weight: 6.5, marketCap: 400e9 },
+    { symbol: 'BAC', name: 'Bank of America', weight: 5.0, marketCap: 280e9 },
+  ],
+  'XLE': [
+    { symbol: 'XOM', name: 'Exxon Mobil', weight: 23.0, marketCap: 450e9 },
+    { symbol: 'CVX', name: 'Chevron', weight: 18.0, marketCap: 280e9 },
+    { symbol: 'COP', name: 'ConocoPhillips', weight: 7.5, marketCap: 130e9 },
+    { symbol: 'EOG', name: 'EOG Resources', weight: 4.5, marketCap: 70e9 },
+  ],
+  'XLY': [
+    { symbol: 'AMZN', name: 'Amazon.com', weight: 22.0, marketCap: 1500e9 },
+    { symbol: 'TSLA', name: 'Tesla Inc.', weight: 12.0, marketCap: 700e9 },
+    { symbol: 'HD', name: 'Home Depot', weight: 9.5, marketCap: 350e9 },
+    { symbol: 'MCD', name: "McDonald's", weight: 5.0, marketCap: 210e9 },
+    { symbol: 'LOW', name: "Lowe's", weight: 4.0, marketCap: 140e9 },
+  ],
+  'XLP': [
+    { symbol: 'PG', name: 'Procter & Gamble', weight: 15.0, marketCap: 380e9 },
+    { symbol: 'COST', name: 'Costco Wholesale', weight: 12.0, marketCap: 300e9 },
+    { symbol: 'KO', name: 'Coca-Cola', weight: 10.0, marketCap: 270e9 },
+    { symbol: 'WMT', name: 'Walmart Inc.', weight: 9.5, marketCap: 420e9 },
+    { symbol: 'PEP', name: 'PepsiCo', weight: 9.0, marketCap: 240e9 },
+  ],
+  'XLI': [
+    { symbol: 'GE', name: 'General Electric', weight: 5.5, marketCap: 170e9 },
+    { symbol: 'CAT', name: 'Caterpillar', weight: 5.2, marketCap: 170e9 },
+    { symbol: 'UNP', name: 'Union Pacific', weight: 5.0, marketCap: 150e9 },
+    { symbol: 'RTX', name: 'RTX Corporation', weight: 4.8, marketCap: 150e9 },
+    { symbol: 'HON', name: 'Honeywell', weight: 4.5, marketCap: 140e9 },
+  ],
+  'XLU': [
+    { symbol: 'NEE', name: 'NextEra Energy', weight: 15.0, marketCap: 150e9 },
+    { symbol: 'SO', name: 'Southern Company', weight: 8.5, marketCap: 85e9 },
+    { symbol: 'DUK', name: 'Duke Energy', weight: 8.0, marketCap: 80e9 },
+  ],
+  'XLC': [
+    { symbol: 'META', name: 'Meta Platforms', weight: 23.0, marketCap: 900e9 },
+    { symbol: 'GOOG', name: 'Alphabet Inc.', weight: 22.0, marketCap: 1800e9 },
+    { symbol: 'NFLX', name: 'Netflix', weight: 6.0, marketCap: 250e9 },
+    { symbol: 'DIS', name: 'Walt Disney', weight: 5.0, marketCap: 200e9 },
+    { symbol: 'TMUS', name: 'T-Mobile', weight: 4.5, marketCap: 200e9 },
+  ],
+  'DIA': [
+    { symbol: 'UNH', name: 'UnitedHealth Group', weight: 9.5, marketCap: 500e9 },
+    { symbol: 'GS', name: 'Goldman Sachs', weight: 7.5, marketCap: 140e9 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', weight: 6.5, marketCap: 2800e9 },
+    { symbol: 'HD', name: 'Home Depot', weight: 6.0, marketCap: 350e9 },
+    { symbol: 'CAT', name: 'Caterpillar', weight: 5.5, marketCap: 170e9 },
+  ],
+  'IWM': [
+    { symbol: 'SMCI', name: 'Super Micro Computer', weight: 0.8, marketCap: 30e9 },
+    { symbol: 'MARA', name: 'Marathon Digital', weight: 0.6, marketCap: 5e9 },
+    { symbol: 'CELH', name: 'Celsius Holdings', weight: 0.5, marketCap: 10e9 },
+    { symbol: 'CIEN', name: 'Ciena Corporation', weight: 0.4, marketCap: 8e9 },
+  ],
+};
+
+// List of known ETF symbols
+const ETF_SYMBOLS = new Set(Object.keys(ETF_HOLDINGS).concat([
+  'VOO', 'IVV', 'VTI', 'VTV', 'VUG', 'VIG', 'VYM', 'SCHD', 'ARKK', 'ARKG',
+  'VGT', 'VHT', 'VFH', 'VDE', 'VIS', 'VNQ', 'VNQI', 'BND', 'AGG', 'TLT',
+  'GLD', 'SLV', 'USO', 'EEM', 'EFA', 'IEMG', 'VWO', 'VEA', 'VXUS',
+]));
 
 interface Candle {
   date: string;
@@ -851,21 +951,35 @@ export async function registerRoutes(
       // Get sector ETFs
       const sectorETFs = SECTOR_ETFS[sector] || [];
       
-      // Get related stocks from pre-computed list (fast!)
+      // Get related stocks from pre-computed list (fast!) - sorted by market cap
       const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
       const relatedStocks = sectorStocks
         .filter(s => s.symbol !== symbol)
+        .sort((a, b) => b.marketCap - a.marketCap)
         .slice(0, 4)
         .map(s => ({
           symbol: s.symbol,
           name: s.name,
           description: s.industry,
-          marketCap: 0 // We don't need to fetch this
+          marketCap: s.marketCap,
         }));
       
       if (!description) {
         description = `${quote.longName || quote.shortName || symbol} is a publicly traded company.`;
       }
+      
+      // Check if this symbol is an ETF
+      const isETF = ETF_SYMBOLS.has(symbol.toUpperCase()) || 
+                    quote.quoteType === 'ETF' ||
+                    (quote.longName && quote.longName.toLowerCase().includes('etf'));
+      
+      // Get ETF holdings if this is an ETF
+      const etfHoldings = isETF ? (ETF_HOLDINGS[symbol.toUpperCase()] || []).map(h => ({
+        symbol: h.symbol,
+        name: h.name,
+        weight: h.weight,
+        marketCap: h.marketCap,
+      })) : undefined;
       
       res.json({
         symbol: quote.symbol,
@@ -881,6 +995,8 @@ export async function registerRoutes(
         description: description,
         sectorETFs,
         relatedStocks,
+        isETF,
+        etfHoldings,
         earnings: earningsData,
       });
     } catch (error) {
