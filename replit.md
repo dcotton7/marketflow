@@ -29,9 +29,12 @@ AI Swing Scanner is a stock market scanner and analysis application that enables
   - When clicking a scanner result with a chart pattern selected, pattern name is passed via URL query param
   - StockChart displays pattern-specific visualizations with toggle control
   - VCP/Weekly Tight/Monthly Tight: Blue dashed channel lines
-  - High Tight Flag: Green dashed consolidation lines
-  - Cup and Handle: Orange lip level and handle channel lines
+  - High Tight Flag: Blue diagonal pole line (showing steep upward move) + green dashed flag consolidation lines at top
+  - Cup and Handle: Orange parabolic curved arc at cup bottom (U-shape using 20 points) + horizontal lip line + handle channel lines
   - Pattern toggle button (with Eye icon) is on by default and controls visibility
+- Daily chart timeframe now zooms to show ~200 candles (8-9 months) for better pattern visibility
+  - Uses setVisibleLogicalRange instead of fitContent for daily interval
+  - Other timeframes still use fitContent to show all data
 
 ## User Preferences
 
