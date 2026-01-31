@@ -55,7 +55,7 @@ Preferred communication style: Simple, everyday language.
 ### API Endpoints
 - `GET /api/stocks/:symbol/history` - Historical OHLCV data
 - `GET /api/stocks/:symbol/quote` - Real-time quote data
-- `POST /api/scanner/run` - Run stock scanner with filters
+- `POST /api/scanner/run` - Run stock scanner with filters (candlestickPattern, chartPattern, patternStrictness)
 - `GET /api/watchlist` - Get user's watchlist
 - `POST /api/watchlist` - Add symbol to watchlist
 - `DELETE /api/watchlist/:id` - Remove from watchlist
