@@ -1,38 +1,54 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import {
+  savedScans,
+  watchlistItems,
+  type InsertScan,
+  type InsertWatchlistItem,
+  type SavedScan,
+  type WatchlistItem,
+} from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Watchlist
+  getWatchlist(): Promise<WatchlistItem[]>;
+  addToWatchlist(item: InsertWatchlistItem): Promise<WatchlistItem>;
+  removeFromWatchlist(id: number): Promise<void>;
+
+  // Scans
+  getSavedScans(): Promise<SavedScan[]>;
+  saveScan(scan: InsertScan): Promise<SavedScan>;
+  deleteScan(id: number): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  // Watchlist
+  async getWatchlist(): Promise<WatchlistItem[]> {
+    return await db.select().from(watchlistItems);
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async addToWatchlist(item: InsertWatchlistItem): Promise<WatchlistItem> {
+    const [newItem] = await db.insert(watchlistItems).values(item).returning();
+    return newItem;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async removeFromWatchlist(id: number): Promise<void> {
+    await db.delete(watchlistItems).where(eq(watchlistItems.id, id));
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  // Scans
+  async getSavedScans(): Promise<SavedScan[]> {
+    return await db.select().from(savedScans);
+  }
+
+  async saveScan(scan: InsertScan): Promise<SavedScan> {
+    const [newScan] = await db.insert(savedScans).values(scan).returning();
+    return newScan;
+  }
+
+  async deleteScan(id: number): Promise<void> {
+    await db.delete(savedScans).where(eq(savedScans.id, id));
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
