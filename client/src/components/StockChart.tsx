@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
-  ReferenceLine
+  ReferenceArea
 } from "recharts";
 import { format } from "date-fns";
 
@@ -30,6 +30,98 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
     }
   }
   return sma;
+}
+
+interface ConsolidationChannel {
+  startDate: string;
+  endDate: string;
+  high: number;
+  low: number;
+  type: 'VCP' | 'Weekly Tight' | 'Monthly Tight';
+}
+
+// Detect consolidation channels for visualization
+function detectConsolidationChannels(
+  data: { date: string; high: number; low: number; close: number; volume: number }[]
+): ConsolidationChannel[] {
+  const channels: ConsolidationChannel[] = [];
+  
+  if (data.length < 5) return channels;
+  
+  // Weekly Tight: Last 20 trading days (1-4 weeks)
+  const weeklyData = data.slice(-20);
+  if (weeklyData.length >= 5) {
+    const weeklyHigh = Math.max(...weeklyData.map(c => c.high));
+    const weeklyLow = Math.min(...weeklyData.map(c => c.low));
+    const avgPrice = weeklyData.reduce((sum, c) => sum + c.close, 0) / weeklyData.length;
+    const rangePercent = ((weeklyHigh - weeklyLow) / avgPrice) * 100;
+    
+    if (rangePercent <= 12) { // Loose threshold
+      channels.push({
+        startDate: weeklyData[0].date,
+        endDate: weeklyData[weeklyData.length - 1].date,
+        high: weeklyHigh,
+        low: weeklyLow,
+        type: 'Weekly Tight'
+      });
+    }
+  }
+  
+  // Monthly Tight: Last 60 trading days (3 months)
+  if (data.length >= 20) {
+    const monthlyData = data.slice(-60);
+    if (monthlyData.length >= 20) {
+      const monthlyHigh = Math.max(...monthlyData.map(c => c.high));
+      const monthlyLow = Math.min(...monthlyData.map(c => c.low));
+      const avgPrice = monthlyData.reduce((sum, c) => sum + c.close, 0) / monthlyData.length;
+      const rangePercent = ((monthlyHigh - monthlyLow) / avgPrice) * 100;
+      
+      // Only add if not overlapping with weekly tight or if it's different range
+      if (rangePercent <= 22 && !channels.some(c => c.type === 'Weekly Tight' && 
+          Math.abs(c.high - monthlyHigh) < 1 && Math.abs(c.low - monthlyLow) < 1)) {
+        channels.push({
+          startDate: monthlyData[0].date,
+          endDate: monthlyData[monthlyData.length - 1].date,
+          high: monthlyHigh,
+          low: monthlyLow,
+          type: 'Monthly Tight'
+        });
+      }
+    }
+  }
+  
+  // VCP: Last 30 trading days with contracting ranges
+  if (data.length >= 30) {
+    const vcpData = data.slice(-30);
+    const period1 = vcpData.slice(0, 10);
+    const period3 = vcpData.slice(20, 30);
+    
+    const getRange = (c: typeof period1) => {
+      const maxHigh = Math.max(...c.map(x => x.high));
+      const minLow = Math.min(...c.map(x => x.low));
+      const avgPrice = c.reduce((sum, x) => sum + x.close, 0) / c.length;
+      return (maxHigh - minLow) / avgPrice;
+    };
+    
+    const range1 = getRange(period1);
+    const range3 = getRange(period3);
+    
+    // Check for contraction
+    if (range3 < range1) {
+      const vcpHigh = Math.max(...period3.map(c => c.high));
+      const vcpLow = Math.min(...period3.map(c => c.low));
+      
+      channels.push({
+        startDate: period3[0].date,
+        endDate: period3[period3.length - 1].date,
+        high: vcpHigh,
+        low: vcpLow,
+        type: 'VCP'
+      });
+    }
+  }
+  
+  return channels;
 }
 
 export function StockChart({ symbol }: StockChartProps) {
@@ -55,6 +147,9 @@ export function StockChart({ symbol }: StockChartProps) {
   const sma20 = calculateSMA(history, 20);
   const sma50 = calculateSMA(history, 50);
   const sma200 = calculateSMA(history, 200);
+
+  // Detect consolidation channels
+  const channels = detectConsolidationChannels(history);
 
   // Format data for Recharts with SMAs
   const chartData = history.map((item, index) => ({
@@ -110,9 +205,9 @@ export function StockChart({ symbol }: StockChartProps) {
 
   return (
     <div className="w-full bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-      <div className="mb-4 flex justify-between items-center">
+      <div className="mb-4 flex justify-between items-center flex-wrap gap-2">
         <h3 className="font-semibold text-gray-900">Price History</h3>
-        <div className="flex gap-4 items-center">
+        <div className="flex gap-4 items-center flex-wrap">
           <div className="flex gap-3 text-xs">
             <span className="flex items-center gap-1">
               <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
@@ -127,6 +222,15 @@ export function StockChart({ symbol }: StockChartProps) {
               <span className="text-gray-600">SMA 200</span>
             </span>
           </div>
+          {channels.length > 0 && (
+            <div className="flex gap-2 text-xs">
+              {channels.map((ch, i) => (
+                <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded border border-black bg-green-100">
+                  <span className="text-gray-700 font-medium">{ch.type}</span>
+                </span>
+              ))}
+            </div>
+          )}
           <span className="text-xs text-gray-500 font-mono">Daily</span>
         </div>
       </div>
@@ -155,6 +259,22 @@ export function StockChart({ symbol }: StockChartProps) {
               orientation="right"
             />
             <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '4 4' }} />
+            
+            {/* Consolidation Channel Overlays */}
+            {channels.map((channel, index) => (
+              <ReferenceArea
+                key={`channel-${index}`}
+                x1={channel.startDate}
+                x2={channel.endDate}
+                y1={channel.low}
+                y2={channel.high}
+                fill="#86efac"
+                fillOpacity={0.4}
+                stroke="#000000"
+                strokeWidth={2}
+                strokeDasharray="0"
+              />
+            ))}
             
             {/* Candlestick bars */}
             <Bar 
