@@ -1,4 +1,4 @@
-import { useParams, useLocation } from "wouter";
+import { useParams, useLocation, useSearch } from "wouter";
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { StockChart } from "@/components/StockChart";
@@ -12,6 +12,9 @@ import { Badge } from "@/components/ui/badge";
 export default function SymbolPage() {
   const { symbol } = useParams();
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
+  const urlParams = new URLSearchParams(searchString);
+  const selectedPattern = urlParams.get('pattern') || undefined;
   const safeSymbol = symbol || "";
   
   const { data: quote, isLoading } = useStockQuote(safeSymbol);
@@ -97,7 +100,7 @@ export default function SymbolPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <Activity className="w-4 h-4" />
@@ -130,11 +133,29 @@ export default function SymbolPage() {
             {quote.peRatio ? quote.peRatio.toFixed(2) : '---'}
           </div>
         </div>
+        <div className="bg-card p-4 rounded-xl border border-border">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <TrendingUp className="w-4 h-4" />
+            <span className="text-sm font-medium">Q Earnings</span>
+          </div>
+          <div className="text-xl font-mono font-semibold">
+            {quote.earnings?.quarterlyGrowthPct !== undefined ? (
+              <span className={quote.earnings.quarterlyGrowthPct >= 0 ? "text-green-500" : "text-red-500"}>
+                {quote.earnings.quarterlyGrowthPct >= 0 ? '+' : ''}{quote.earnings.quarterlyGrowthPct.toFixed(1)}%
+              </span>
+            ) : '---'}
+          </div>
+          {quote.earnings?.surprisePct !== undefined && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Surprise: {quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Chart Section */}
       <div className="mt-8">
-        <StockChart symbol={safeSymbol} />
+        <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
       </div>
 
       {/* Company Description */}
@@ -185,22 +206,30 @@ export default function SymbolPage() {
           </CardContent>
         </Card>
 
-        {/* Related Stocks */}
+        {/* Related Stocks - Top by Market Cap */}
         {quote.relatedStocks && quote.relatedStocks.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Related Companies</CardTitle>
+              <CardTitle className="text-lg">Top {quote.sector} Companies</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {quote.relatedStocks.map((stock) => (
                   <div 
                     key={stock.symbol} 
-                    className="flex items-center justify-between p-2 rounded hover-elevate cursor-pointer"
+                    className="flex items-center justify-between p-3 rounded border border-border hover-elevate cursor-pointer"
                     onClick={() => setLocation(`/symbol/${stock.symbol}`)}
                   >
-                    <span className="font-mono font-bold text-primary">{stock.symbol}</span>
-                    <span className="text-sm text-muted-foreground truncate ml-2">{stock.name}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-bold text-primary min-w-[60px]">{stock.symbol}</span>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{stock.name}</span>
+                        <span className="text-xs text-muted-foreground">{stock.description}</span>
+                      </div>
+                    </div>
+                    <span className="text-sm font-mono text-muted-foreground">
+                      {stock.marketCap ? formatMarketCap(stock.marketCap) : '---'}
+                    </span>
                   </div>
                 ))}
               </div>

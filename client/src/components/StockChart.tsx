@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useStockHistory } from "@/hooks/use-stocks";
-import { Loader2, Layers, Ruler, Minus, Trash2 } from "lucide-react";
+import { Loader2, Layers, Ruler, Minus, Trash2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { 
   createChart, 
@@ -19,6 +19,7 @@ import {
 interface StockChartProps {
   symbol: string;
   showChannels?: boolean;
+  selectedPattern?: string;
 }
 
 interface HorizontalLineDefinition {
@@ -139,19 +140,116 @@ function detectConsolidationChannels(
   return channels;
 }
 
+interface HighTightFlagData {
+  flagStart: number;
+  flagEnd: number;
+  flagHigh: number;
+  flagLow: number;
+}
+
+function detectHighTightFlag(
+  data: { date: string; high: number; low: number; close: number; volume: number }[]
+): HighTightFlagData | null {
+  if (data.length < 20) return null;
+  
+  // Look for a strong uptrend followed by a tight consolidation in the last 10-15 bars
+  const flagBars = data.slice(-12);
+  const preFlagBars = data.slice(-30, -12);
+  
+  if (preFlagBars.length < 10) return null;
+  
+  // Check if pre-flag period had a strong move (>30% gain)
+  const preFlagStart = preFlagBars[0].close;
+  const preFlagEnd = preFlagBars[preFlagBars.length - 1].close;
+  const gain = ((preFlagEnd - preFlagStart) / preFlagStart) * 100;
+  
+  if (gain < 30) return null;
+  
+  // Check if flag period is tight (less than 10% range)
+  const flagHigh = Math.max(...flagBars.map(c => c.high));
+  const flagLow = Math.min(...flagBars.map(c => c.low));
+  const avgPrice = flagBars.reduce((sum, c) => sum + c.close, 0) / flagBars.length;
+  const rangePercent = ((flagHigh - flagLow) / avgPrice) * 100;
+  
+  if (rangePercent > 12) return null;
+  
+  return {
+    flagStart: new Date(flagBars[0].date).getTime() / 1000,
+    flagEnd: new Date(flagBars[flagBars.length - 1].date).getTime() / 1000,
+    flagHigh,
+    flagLow
+  };
+}
+
+interface CupAndHandleData {
+  cupStart: number;
+  lipLevel: number;
+  handleStart: number;
+  handleEnd: number;
+  handleHigh: number;
+  handleLow: number;
+}
+
+function detectCupAndHandle(
+  data: { date: string; high: number; low: number; close: number; volume: number }[]
+): CupAndHandleData | null {
+  if (data.length < 30) return null;
+  
+  // Look for cup pattern - left lip, bottom, right lip, then handle
+  const lookback = data.slice(-60);
+  if (lookback.length < 30) return null;
+  
+  // Find the highest point in first third as left lip
+  const leftThird = lookback.slice(0, Math.floor(lookback.length / 3));
+  const leftLipHigh = Math.max(...leftThird.map(c => c.high));
+  
+  // Find the lowest point in middle third as cup bottom
+  const middleThird = lookback.slice(Math.floor(lookback.length / 3), Math.floor(lookback.length * 2 / 3));
+  const cupBottom = Math.min(...middleThird.map(c => c.low));
+  
+  // Right third should approach the left lip level
+  const rightThird = lookback.slice(Math.floor(lookback.length * 2 / 3));
+  const rightHighest = Math.max(...rightThird.map(c => c.high));
+  
+  // Validate cup shape - bottom should be at least 15% below lip
+  const cupDepth = ((leftLipHigh - cupBottom) / leftLipHigh) * 100;
+  if (cupDepth < 15 || cupDepth > 40) return null;
+  
+  // Right side should get close to left lip (within 5%)
+  if (rightHighest < leftLipHigh * 0.95) return null;
+  
+  // Last few bars should be a handle (slight pullback)
+  const handleBars = lookback.slice(-8);
+  const handleHigh = Math.max(...handleBars.map(c => c.high));
+  const handleLow = Math.min(...handleBars.map(c => c.low));
+  
+  return {
+    cupStart: new Date(lookback[0].date).getTime() / 1000,
+    lipLevel: leftLipHigh,
+    handleStart: new Date(handleBars[0].date).getTime() / 1000,
+    handleEnd: new Date(handleBars[handleBars.length - 1].date).getTime() / 1000,
+    handleHigh,
+    handleLow
+  };
+}
+
 type ToolMode = 'none' | 'measure' | 'line';
 
-export function StockChart({ symbol, showChannels: initialShowChannels = false }: StockChartProps) {
+export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
   const [interval, setInterval] = useState('1d');
   const [showChannels, setShowChannels] = useState(initialShowChannels);
+  const [showPatternViz, setShowPatternViz] = useState(!!selectedPattern);
   const [toolMode, setToolMode] = useState<ToolMode>('none');
   const [lineDefinitions, setLineDefinitions] = useState<HorizontalLineDefinition[]>([]);
   const [measureStart, setMeasureStart] = useState<MeasurePoint | null>(null);
   const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  
+  // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
+  const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
   
   const { data: history, isLoading, error } = useStockHistory(symbol, interval);
   
@@ -159,6 +257,11 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false }
   useEffect(() => {
     setShowChannels(initialShowChannels);
   }, [initialShowChannels]);
+  
+  // Update showPatternViz when selectedPattern changes
+  useEffect(() => {
+    setShowPatternViz(!!selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern));
+  }, [selectedPattern]);
 
   useEffect(() => {
     if (!chartContainerRef.current || !history || history.length === 0) return;
@@ -290,38 +393,116 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false }
       sma200Series.setData(sma200Data);
     }
 
-    // Only detect and draw channels if explicitly requested
-    if (showChannels) {
+    // Detect and draw channels if explicitly requested OR if pattern visualization is on for channel patterns
+    const shouldShowChannelPatterns = showChannels || 
+      (showPatternViz && selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight'].includes(selectedPattern));
+    
+    if (shouldShowChannelPatterns) {
       const detectedChannels = detectConsolidationChannels(history);
       setChannels(detectedChannels);
 
       detectedChannels.forEach(channel => {
-      const topLine = chart.addSeries(LineSeries, {
-        color: '#3b82f6',
-        lineWidth: 2,
-        lineStyle: LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      topLine.setData([
-        { time: channel.startTime as Time, value: channel.high },
-        { time: channel.endTime as Time, value: channel.high },
-      ]);
+        const topLine = chart.addSeries(LineSeries, {
+          color: '#3b82f6',
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        topLine.setData([
+          { time: channel.startTime as Time, value: channel.high },
+          { time: channel.endTime as Time, value: channel.high },
+        ]);
 
-      const bottomLine = chart.addSeries(LineSeries, {
-        color: '#3b82f6',
-        lineWidth: 2,
-        lineStyle: LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      bottomLine.setData([
-        { time: channel.startTime as Time, value: channel.low },
-        { time: channel.endTime as Time, value: channel.low },
-      ]);
+        const bottomLine = chart.addSeries(LineSeries, {
+          color: '#3b82f6',
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        bottomLine.setData([
+          { time: channel.startTime as Time, value: channel.low },
+          { time: channel.endTime as Time, value: channel.low },
+        ]);
       });
     } else {
       setChannels([]);
+    }
+    
+    // Draw High Tight Flag visualization (strong uptrend + consolidation)
+    if (showPatternViz && selectedPattern === 'High Tight Flag' && history.length > 20) {
+      const htfData = detectHighTightFlag(history);
+      if (htfData) {
+        // Draw consolidation channel (the "flag" part)
+        const flagTopLine = chart.addSeries(LineSeries, {
+          color: '#22c55e',
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        flagTopLine.setData([
+          { time: htfData.flagStart as Time, value: htfData.flagHigh },
+          { time: htfData.flagEnd as Time, value: htfData.flagHigh },
+        ]);
+
+        const flagBottomLine = chart.addSeries(LineSeries, {
+          color: '#22c55e',
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        flagBottomLine.setData([
+          { time: htfData.flagStart as Time, value: htfData.flagLow },
+          { time: htfData.flagEnd as Time, value: htfData.flagLow },
+        ]);
+      }
+    }
+    
+    // Draw Cup and Handle visualization
+    if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
+      const cupData = detectCupAndHandle(history);
+      if (cupData) {
+        // Draw the cup lip level (horizontal resistance)
+        const cupLipLine = chart.addSeries(LineSeries, {
+          color: '#f59e0b',
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        cupLipLine.setData([
+          { time: cupData.cupStart as Time, value: cupData.lipLevel },
+          { time: cupData.handleEnd as Time, value: cupData.lipLevel },
+        ]);
+        
+        // Draw handle channel
+        const handleTopLine = chart.addSeries(LineSeries, {
+          color: '#f59e0b',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        handleTopLine.setData([
+          { time: cupData.handleStart as Time, value: cupData.handleHigh },
+          { time: cupData.handleEnd as Time, value: cupData.handleHigh },
+        ]);
+        
+        const handleBottomLine = chart.addSeries(LineSeries, {
+          color: '#f59e0b',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        handleBottomLine.setData([
+          { time: cupData.handleStart as Time, value: cupData.handleLow },
+          { time: cupData.handleEnd as Time, value: cupData.handleLow },
+        ]);
+      }
     }
     
     // Recreate horizontal lines from definitions
@@ -357,7 +538,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false }
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels, lineDefinitions]);
+  }, [history, interval, showChannels, showPatternViz, selectedPattern, lineDefinitions]);
   
   // Handle chart clicks for tools
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -496,6 +677,20 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false }
             <Layers className="w-4 h-4" />
             Channels
           </Button>
+          {patternNeedsViz && (
+            <Button
+              variant={showPatternViz ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowPatternViz(!showPatternViz)}
+              className="gap-1"
+              data-testid="button-toggle-pattern"
+              aria-pressed={showPatternViz}
+              data-state={showPatternViz ? "on" : "off"}
+            >
+              {showPatternViz ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              {selectedPattern}
+            </Button>
+          )}
           <Button
             variant={toolMode === 'measure' ? "default" : "outline"}
             size="sm"

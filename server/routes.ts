@@ -317,8 +317,134 @@ function detectMonthlyTight(candles: Candle[], loose: boolean = false): boolean 
   return rangePercent <= threshold && isCurrent && volumeStable;
 }
 
+// High Tight Flag: Stock has risen sharply (configurable %) then consolidated tightly
+function detectHighTightFlag(candles: Candle[], minGainPct: number = 30, loose: boolean = false): boolean {
+  if (candles.length < 40) return false;
+  
+  // Look at last 40 candles: first 25 for the advance, last 15 for the flag
+  const advanceCandles = candles.slice(-40, -15);
+  const flagCandles = candles.slice(-15);
+  
+  if (advanceCandles.length < 20) return false;
+  
+  // Calculate the advance: find the low at start and high at end of advance
+  const advanceLow = Math.min(...advanceCandles.slice(0, 10).map(c => c.low));
+  const advanceHigh = Math.max(...advanceCandles.slice(-10).map(c => c.high));
+  const advanceGainPct = ((advanceHigh - advanceLow) / advanceLow) * 100;
+  
+  if (advanceGainPct < minGainPct) return false;
+  
+  // Flag should be tight: price range < 10% (tight) or < 15% (loose)
+  const flagHigh = Math.max(...flagCandles.map(c => c.high));
+  const flagLow = Math.min(...flagCandles.map(c => c.low));
+  const avgFlagPrice = flagCandles.reduce((sum, c) => sum + c.close, 0) / flagCandles.length;
+  const flagRangePct = ((flagHigh - flagLow) / avgFlagPrice) * 100;
+  
+  const flagThreshold = loose ? 15 : 10;
+  if (flagRangePct > flagThreshold) return false;
+  
+  // Flag should be near the highs (not breaking down)
+  const currentClose = flagCandles[flagCandles.length - 1].close;
+  const nearHighs = currentClose >= advanceHigh * 0.85; // Within 15% of advance high
+  
+  return nearHighs;
+}
+
+// Cup and Handle: U-shaped price pattern followed by a small pullback (handle)
+function detectCupAndHandle(candles: Candle[], loose: boolean = false): boolean {
+  if (candles.length < 50) return false;
+  
+  // Look at last 50-100 candles for cup formation
+  const lookback = Math.min(candles.length, 100);
+  const recentCandles = candles.slice(-lookback);
+  
+  // Find the cup: left high, low point, right high
+  const leftSection = recentCandles.slice(0, 20);
+  const middleSection = recentCandles.slice(20, lookback - 20);
+  const rightSection = recentCandles.slice(-20);
+  
+  const leftHigh = Math.max(...leftSection.map(c => c.high));
+  const cupLow = Math.min(...middleSection.map(c => c.low));
+  const rightHigh = Math.max(...rightSection.map(c => c.high));
+  
+  // Cup depth: should be 12-35% (tight) or 10-50% (loose)
+  const avgCupPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
+  const cupDepthPct = ((leftHigh - cupLow) / leftHigh) * 100;
+  
+  const minDepth = loose ? 10 : 12;
+  const maxDepth = loose ? 50 : 35;
+  
+  if (cupDepthPct < minDepth || cupDepthPct > maxDepth) return false;
+  
+  // Right side should recover to near left high
+  const symmetryThreshold = loose ? 0.85 : 0.92;
+  if (rightHigh < leftHigh * symmetryThreshold) return false;
+  
+  // Handle: small pullback from right high (last 5-10 candles)
+  const handleCandles = recentCandles.slice(-10);
+  const handleLow = Math.min(...handleCandles.map(c => c.low));
+  const handleDepthPct = ((rightHigh - handleLow) / rightHigh) * 100;
+  
+  // Handle should be shallow: < 15% (tight) or < 20% (loose)
+  const handleThreshold = loose ? 20 : 15;
+  if (handleDepthPct > handleThreshold) return false;
+  
+  // Current price should be near handle high
+  const currentClose = recentCandles[recentCandles.length - 1].close;
+  const handleHigh = Math.max(...handleCandles.map(c => c.high));
+  const nearHandleHigh = currentClose >= handleHigh * 0.95;
+  
+  return nearHandleHigh;
+}
+
+// Pullback to Moving Average: Stock that had a gain then pulled back to MA
+function detectPullbackToMA(
+  candles: Candle[], 
+  maPeriod: number,
+  minGainPct: number = 30,
+  candleCount: number = 20,
+  loose: boolean = false
+): boolean {
+  if (candles.length < maPeriod + candleCount) return false;
+  
+  // Calculate the current MA
+  const ma = calculateSMA(candles, maPeriod);
+  if (!ma) return false;
+  
+  // Check if we had a gain before the pullback
+  const prePullbackCandles = candles.slice(-(maPeriod + candleCount), -maPeriod);
+  if (prePullbackCandles.length < candleCount) return false;
+  
+  const startLow = Math.min(...prePullbackCandles.slice(0, Math.floor(candleCount / 2)).map(c => c.low));
+  const peakHigh = Math.max(...prePullbackCandles.slice(-Math.floor(candleCount / 2)).map(c => c.high));
+  const gainPct = ((peakHigh - startLow) / startLow) * 100;
+  
+  if (gainPct < minGainPct) return false;
+  
+  // Current price should be near the MA (within 2-5%)
+  const currentClose = candles[candles.length - 1].close;
+  const distanceFromMA = Math.abs((currentClose - ma) / ma) * 100;
+  
+  const proximityThreshold = loose ? 5 : 2;
+  if (distanceFromMA > proximityThreshold) return false;
+  
+  // Price should be approaching from above (pullback, not breakdown)
+  const recentCandles = candles.slice(-5);
+  const recentHigh = Math.max(...recentCandles.map(c => c.high));
+  const wasAboveMA = recentHigh > ma * 1.02;
+  
+  return wasAboveMA;
+}
+
 // Detect chart patterns with strictness setting
-function detectChartPattern(candles: Candle[], pattern: string, strictness: string = 'tight'): boolean {
+function detectChartPattern(
+  candles: Candle[], 
+  pattern: string, 
+  strictness: string = 'tight',
+  htfMinGainPct?: number,
+  pbMinGainPct?: number,
+  pbCandleCount?: number
+): boolean {
   const useTight = strictness === 'tight' || strictness === 'both';
   const useLoose = strictness === 'loose' || strictness === 'both';
   
@@ -334,6 +460,39 @@ function detectChartPattern(candles: Candle[], pattern: string, strictness: stri
     case 'Monthly Tight':
       if (useTight && detectMonthlyTight(candles, false)) return true;
       if (useLoose && detectMonthlyTight(candles, true)) return true;
+      return false;
+    case 'High Tight Flag':
+      const htfGain = htfMinGainPct || 30;
+      if (useTight && detectHighTightFlag(candles, htfGain, false)) return true;
+      if (useLoose && detectHighTightFlag(candles, htfGain, true)) return true;
+      return false;
+    case 'Cup and Handle':
+      if (useTight && detectCupAndHandle(candles, false)) return true;
+      if (useLoose && detectCupAndHandle(candles, true)) return true;
+      return false;
+    case 'Pullback to 5 DMA':
+      const pb5Gain = pbMinGainPct || 30;
+      const pb5Count = pbCandleCount || 20;
+      if (useTight && detectPullbackToMA(candles, 5, pb5Gain, pb5Count, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 5, pb5Gain, pb5Count, true)) return true;
+      return false;
+    case 'Pullback to 10 DMA':
+      const pb10Gain = pbMinGainPct || 30;
+      const pb10Count = pbCandleCount || 20;
+      if (useTight && detectPullbackToMA(candles, 10, pb10Gain, pb10Count, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 10, pb10Gain, pb10Count, true)) return true;
+      return false;
+    case 'Pullback to 20 DMA':
+      const pb20Gain = pbMinGainPct || 30;
+      const pb20Count = pbCandleCount || 20;
+      if (useTight && detectPullbackToMA(candles, 20, pb20Gain, pb20Count, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 20, pb20Gain, pb20Count, true)) return true;
+      return false;
+    case 'Pullback to 50 DMA':
+      const pb50Gain = pbMinGainPct || 30;
+      const pb50Count = pbCandleCount || 20;
+      if (useTight && detectPullbackToMA(candles, 50, pb50Gain, pb50Count, false)) return true;
+      if (useLoose && detectPullbackToMA(candles, 50, pb50Gain, pb50Count, true)) return true;
       return false;
     default:
       return false;
@@ -468,24 +627,47 @@ export async function registerRoutes(
       const sector = quote.sector || 'Unknown';
       const sectorETFs = SECTOR_ETFS[sector] || [];
       
-      // Find other stocks in the same sector from our universe
-      const relatedStocks: { symbol: string; name: string }[] = [];
+      // Find other stocks in the same sector from our universe, sorted by market cap
+      const relatedStocksRaw: { symbol: string; name: string; description: string; marketCap: number }[] = [];
       if (sector !== 'Unknown') {
-        for (const sym of STOCK_UNIVERSE.slice(0, 20)) {
+        for (const sym of STOCK_UNIVERSE.slice(0, 50)) {
           if (sym !== symbol) {
             try {
               const q = await yf.quote(sym);
-              if (q.sector === sector) {
-                relatedStocks.push({ 
+              if (q.sector === sector && q.marketCap) {
+                relatedStocksRaw.push({ 
                   symbol: q.symbol, 
-                  name: q.shortName || q.symbol 
+                  name: q.shortName || q.longName || q.symbol,
+                  description: q.industry || 'Company',
+                  marketCap: q.marketCap || 0
                 });
-                if (relatedStocks.length >= 5) break;
               }
             } catch {}
           }
         }
       }
+      
+      // Sort by market cap descending and take top 4
+      const relatedStocks = relatedStocksRaw
+        .sort((a, b) => b.marketCap - a.marketCap)
+        .slice(0, 4);
+      
+      // Get earnings data from quote if available
+      let earnings: { quarterlyGrowthPct?: number; surprisePct?: number; lastQuarterDate?: string } | undefined;
+      try {
+        // Yahoo Finance earnings data from quote
+        const epsTrailing = quote.trailingEps;
+        const epsForward = quote.forwardEps;
+        const earningsSurprise = quote.earningsQuarterlyGrowth;
+        
+        if (earningsSurprise !== undefined) {
+          earnings = {
+            quarterlyGrowthPct: earningsSurprise * 100,
+            surprisePct: undefined, // Would need additional API call for surprise
+            lastQuarterDate: undefined
+          };
+        }
+      } catch {}
       
       res.json({
         symbol: quote.symbol,
@@ -501,6 +683,7 @@ export async function registerRoutes(
         description: quote.longBusinessSummary || `${quote.longName || quote.shortName} is a publicly traded company.`,
         sectorETFs,
         relatedStocks,
+        earnings,
       });
     } catch (error) {
       console.error(`Error fetching quote for ${symbol}:`, error);
@@ -575,7 +758,14 @@ export async function registerRoutes(
             // Check chart pattern
             if (hasChartFilter) {
               const strictness = input.patternStrictness || 'tight';
-              if (!detectChartPattern(candles, input.chartPattern!, strictness)) {
+              if (!detectChartPattern(
+                candles, 
+                input.chartPattern!, 
+                strictness,
+                input.htfMinGainPct,
+                input.pbMinGainPct,
+                input.pbCandleCount
+              )) {
                 continue;
               }
               

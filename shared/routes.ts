@@ -61,7 +61,14 @@ export const api = {
           relatedStocks: z.array(z.object({
             symbol: z.string(),
             name: z.string(),
+            description: z.string().optional(),
+            marketCap: z.number().optional(),
           })).optional(),
+          earnings: z.object({
+            quarterlyGrowthPct: z.number().optional(),
+            surprisePct: z.number().optional(),
+            lastQuarterDate: z.string().optional(),
+          }).optional(),
         }),
         404: errorSchemas.notFound,
       },
@@ -76,11 +83,15 @@ export const api = {
         maxPrice: z.number().optional(),
         minVolume: z.number().optional(),
         candlestickPattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star']).optional(),
-        chartPattern: z.enum(['All', 'VCP', 'Weekly Tight', 'Monthly Tight']).optional(),
+        chartPattern: z.enum(['All', 'VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle', 'Pullback to 5 DMA', 'Pullback to 10 DMA', 'Pullback to 20 DMA', 'Pullback to 50 DMA']).optional(),
         patternStrictness: z.enum(['tight', 'loose', 'both']).optional(),
         smaFilter: z.enum(['none', 'stacked', 'above50_200']).optional(),
         priceWithin50dPct: z.number().min(0).max(100).optional(),
         maxChannelHeightPct: z.number().min(1).max(50).optional(),
+        htfMinGainPct: z.number().min(1).max(500).optional(),
+        pbMinGainPct: z.number().min(1).max(200).optional(),
+        pbCandleCount: z.number().min(3).max(100).optional(),
+        pbTimeframe: z.enum(['15m', '1d']).optional(),
       }),
       responses: {
         200: z.array(z.object({

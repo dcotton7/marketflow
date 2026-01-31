@@ -19,6 +19,13 @@ AI Swing Scanner is a stock market scanner and analysis application that enables
   - Line tool: Click to place horizontal lines at price levels
   - Lines are stored as definitions and recreated on chart rebuild
 - Max channel height filter only shows when VCP/Channel patterns selected
+- Pattern visualization on symbol detail pages:
+  - When clicking a scanner result with a chart pattern selected, pattern name is passed via URL query param
+  - StockChart displays pattern-specific visualizations with toggle control
+  - VCP/Weekly Tight/Monthly Tight: Blue dashed channel lines
+  - High Tight Flag: Green dashed consolidation lines
+  - Cup and Handle: Orange lip level and handle channel lines
+  - Pattern toggle button (with Eye icon) is on by default and controls visibility
 
 ## User Preferences
 

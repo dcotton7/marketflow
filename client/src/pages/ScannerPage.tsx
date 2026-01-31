@@ -42,6 +42,10 @@ export default function ScannerPage() {
     smaFilter: "none",
     priceWithin50dPct: undefined,
     maxChannelHeightPct: undefined,
+    htfMinGainPct: 30,
+    pbMinGainPct: 30,
+    pbCandleCount: 20,
+    pbTimeframe: "1d",
   });
 
   const handleScan = () => {
@@ -50,7 +54,14 @@ export default function ScannerPage() {
   };
 
   const candlestickPatterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star"];
-  const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight"];
+  const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight", "High Tight Flag", "Cup and Handle", "Pullback to 5 DMA", "Pullback to 10 DMA", "Pullback to 20 DMA", "Pullback to 50 DMA"];
+  
+  // Check if pattern requires channel height filter
+  const showChannelHeightFilter = ["VCP", "Weekly Tight", "Monthly Tight"].includes(filters.chartPattern || '');
+  // Check if pattern is High Tight Flag
+  const showHTFFilter = filters.chartPattern === 'High Tight Flag';
+  // Check if pattern is a Pullback pattern
+  const showPullbackFilter = (filters.chartPattern || '').startsWith('Pullback to');
 
   // Determine timeframe based on selected pattern (match detection windows)
   const getTimeframe = () => {
@@ -124,7 +135,7 @@ export default function ScannerPage() {
                 </Select>
               </div>
 
-              {filters.chartPattern && filters.chartPattern !== 'All' && (
+              {showChannelHeightFilter && (
                 <div className="space-y-2">
                   <Label>Max Channel Height %</Label>
                   <Input 
@@ -143,6 +154,87 @@ export default function ScannerPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Filter stocks by consolidation range. Lower = tighter channel.
+                  </p>
+                </div>
+              )}
+
+              {showHTFFilter && (
+                <div className="space-y-2">
+                  <Label>Min Gain % Before Flag</Label>
+                  <Input 
+                    type="number" 
+                    step="5"
+                    min="10"
+                    max="500"
+                    placeholder="e.g. 30" 
+                    className="bg-background font-mono"
+                    data-testid="input-htf-min-gain"
+                    value={filters.htfMinGainPct ?? 30}
+                    onChange={(e) => setFilters(prev => ({ 
+                      ...prev, 
+                      htfMinGainPct: e.target.value ? parseFloat(e.target.value) : 30 
+                    }))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Minimum % gain required before the tight flag formation.
+                  </p>
+                </div>
+              )}
+
+              {showPullbackFilter && (
+                <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/30">
+                  <p className="text-sm font-medium">Pullback Criteria</p>
+                  <div className="space-y-2">
+                    <Label>Min % Up Before Pullback</Label>
+                    <Input 
+                      type="number" 
+                      step="5"
+                      min="5"
+                      max="200"
+                      placeholder="e.g. 30" 
+                      className="bg-background font-mono"
+                      data-testid="input-pb-min-gain"
+                      value={filters.pbMinGainPct ?? 30}
+                      onChange={(e) => setFilters(prev => ({ 
+                        ...prev, 
+                        pbMinGainPct: e.target.value ? parseFloat(e.target.value) : 30 
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Over N Candles</Label>
+                    <Input 
+                      type="number" 
+                      step="5"
+                      min="5"
+                      max="100"
+                      placeholder="e.g. 20" 
+                      className="bg-background font-mono"
+                      data-testid="input-pb-candle-count"
+                      value={filters.pbCandleCount ?? 20}
+                      onChange={(e) => setFilters(prev => ({ 
+                        ...prev, 
+                        pbCandleCount: e.target.value ? parseInt(e.target.value) : 20 
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Timeframe</Label>
+                    <Select 
+                      value={filters.pbTimeframe || "1d"} 
+                      onValueChange={(val: any) => setFilters(prev => ({ ...prev, pbTimeframe: val }))}
+                    >
+                      <SelectTrigger className="bg-background" data-testid="select-pb-timeframe">
+                        <SelectValue placeholder="Select Timeframe" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="15m">15 Minutes</SelectItem>
+                        <SelectItem value="1d">Daily</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Stock must have risen at least this % over N candles before pulling back to the MA.
                   </p>
                 </div>
               )}
@@ -299,7 +391,12 @@ export default function ScannerPage() {
                     <Card 
                       key={stock.symbol}
                       className="cursor-pointer hover-elevate transition-all"
-                      onClick={() => setLocation(`/symbol/${stock.symbol}`)}
+                      onClick={() => {
+                        const patternParam = filters.chartPattern && filters.chartPattern !== 'All' 
+                          ? `?pattern=${encodeURIComponent(filters.chartPattern)}` 
+                          : '';
+                        setLocation(`/symbol/${stock.symbol}${patternParam}`);
+                      }}
                       data-testid={`card-stock-${stock.symbol}`}
                     >
                       <CardHeader className="pb-2">
