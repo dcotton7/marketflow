@@ -24,7 +24,9 @@ Preferred communication style: Simple, everyday language.
 - **Language**: TypeScript with ESM modules
 - **API Design**: RESTful endpoints defined in shared route contracts (`shared/routes.ts`)
 - **Data Validation**: Zod schemas for request/response validation
-- **Market Data**: Yahoo Finance API (yahoo-finance2) for stock quotes, history, and scanner functionality
+- **Market Data**: Yahoo Finance API (yahoo-finance2) for stock quotes, chart data, and scanner functionality
+  - Uses `chart()` API method for historical data (the `historical()` method is deprecated)
+  - Dynamic imports used for ESM/CJS compatibility in production builds
 
 ### Data Storage
 - **Database**: PostgreSQL via Drizzle ORM
