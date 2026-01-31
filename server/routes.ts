@@ -12,14 +12,12 @@ async function getYahooFinance() {
   if (!yahooFinance) {
     try {
       const YahooFinanceModule = await import('yahoo-finance2');
-      // Handle both ESM default export and CJS module.exports
       const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
       if (typeof YahooFinance === 'function') {
-        yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+        yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
       } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-        yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey'] });
+        yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
       } else {
-        // Fallback for older API style
         yahooFinance = YahooFinance;
       }
       console.log("Yahoo Finance initialized successfully");
@@ -29,6 +27,41 @@ async function getYahooFinance() {
     }
   }
   return yahooFinance;
+}
+
+// Helper to calculate date for period
+function getPeriodStartDate(period: string): Date {
+  const now = new Date();
+  switch (period) {
+    case '1mo':
+      return new Date(now.setMonth(now.getMonth() - 1));
+    case '3mo':
+      return new Date(now.setMonth(now.getMonth() - 3));
+    case '6mo':
+      return new Date(now.setMonth(now.getMonth() - 6));
+    case '1y':
+    default:
+      return new Date(now.setFullYear(now.getFullYear() - 1));
+  }
+}
+
+// Helper to get chart data (historical data)
+async function getChartData(yf: any, symbol: string, period: string = '1y'): Promise<Candle[]> {
+  const startDate = getPeriodStartDate(period);
+  const result = await yf.chart(symbol, { period1: startDate, period2: new Date(), interval: '1d' });
+  if (!result.quotes || result.quotes.length === 0) {
+    return [];
+  }
+  return result.quotes
+    .filter((item: any) => item.open != null && item.close != null)
+    .map((item: any) => ({
+      date: new Date(item.date).toISOString().split('T')[0],
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+      volume: item.volume || 0,
+    }));
 }
 
 // Simulated universe of stocks for the scanner
@@ -61,19 +94,15 @@ function detectPattern(candles: Candle[], patternType: string): boolean {
 
   switch (patternType) {
     case 'Doji':
-      // Very small body relative to range
       return bodySize(current) <= (current.high - current.low) * 0.1;
     
     case 'Hammer':
-      // Small body, long lower shadow (at least 2x body), little/no upper shadow
-      // Usually found in downtrend (simplified here to just shape)
       return (
         lowerShadow(current) >= bodySize(current) * 2 &&
         upperShadow(current) <= bodySize(current) * 0.5
       );
 
     case 'Bullish Engulfing':
-      // Prev red, Current green, Current body covers Prev body
       return (
         isRed(prev) &&
         isGreen(current) &&
@@ -82,7 +111,6 @@ function detectPattern(candles: Candle[], patternType: string): boolean {
       );
 
     case 'Bearish Engulfing':
-       // Prev green, Current red, Current body covers Prev body
        return (
         isGreen(prev) &&
         isRed(current) &&
@@ -91,19 +119,71 @@ function detectPattern(candles: Candle[], patternType: string): boolean {
        );
        
     case 'Morning Star':
-      // 3 candle pattern: Red, Small Body, Green
-      // Simplified check
       const first = candles[candles.length - 3];
       return (
         isRed(first) &&
-        bodySize(prev) < bodySize(first) * 0.5 && // Middle is small
+        bodySize(prev) < bodySize(first) * 0.5 &&
         isGreen(current) &&
-        current.close > (first.open + first.close) / 2 // Closes above midpoint of first
+        current.close > (first.open + first.close) / 2
       );
+
+    case 'VCP':
+      return detectVCP(candles);
 
     default:
       return false;
   }
+}
+
+// VCP (Volatility Contraction Pattern) Detection
+// Looks for progressively tightening price ranges with decreasing volume
+function detectVCP(candles: Candle[]): boolean {
+  if (candles.length < 30) return false;
+  
+  // Get last 30 days of data
+  const recentCandles = candles.slice(-30);
+  
+  // Divide into 3 periods to check for contraction
+  const period1 = recentCandles.slice(0, 10);
+  const period2 = recentCandles.slice(10, 20);
+  const period3 = recentCandles.slice(20, 30);
+  
+  // Calculate price range (volatility) for each period
+  const getRange = (c: Candle[]) => {
+    const highs = c.map(x => x.high);
+    const lows = c.map(x => x.low);
+    const maxHigh = Math.max(...highs);
+    const minLow = Math.min(...lows);
+    const avgPrice = c.reduce((sum, x) => sum + x.close, 0) / c.length;
+    return (maxHigh - minLow) / avgPrice; // Normalized range as percentage
+  };
+  
+  // Calculate average volume for each period
+  const getAvgVolume = (c: Candle[]) => c.reduce((sum, x) => sum + x.volume, 0) / c.length;
+  
+  const range1 = getRange(period1);
+  const range2 = getRange(period2);
+  const range3 = getRange(period3);
+  
+  const vol1 = getAvgVolume(period1);
+  const vol2 = getAvgVolume(period2);
+  const vol3 = getAvgVolume(period3);
+  
+  // VCP characteristics:
+  // 1. Price range should be contracting (each period smaller than previous)
+  // 2. Volume should be decreasing or stable
+  // 3. Price should be near highs of the consolidation (not breaking down)
+  
+  const rangeContracting = range2 < range1 * 0.9 && range3 < range2 * 0.9;
+  const volumeDecreasing = vol2 <= vol1 * 1.1 && vol3 <= vol2 * 1.1;
+  
+  // Check if current price is in upper half of consolidation range
+  const consolidationHigh = Math.max(...recentCandles.map(c => c.high));
+  const consolidationLow = Math.min(...recentCandles.map(c => c.low));
+  const currentClose = recentCandles[recentCandles.length - 1].close;
+  const inUpperHalf = currentClose > (consolidationHigh + consolidationLow) / 2;
+  
+  return rangeContracting && volumeDecreasing && inUpperHalf;
 }
 
 export async function registerRoutes(
@@ -126,17 +206,12 @@ export async function registerRoutes(
     const { symbol } = req.params;
     try {
       const yf = await getYahooFinance();
-      const queryOptions = { period1: '2023-01-01' }; // Fetch last year
-      const result = await yf.historical(symbol, queryOptions);
+      const history = await getChartData(yf, symbol, '1y');
       
-      const history = result.map((item: any) => ({
-        date: item.date.toISOString().split('T')[0],
-        open: item.open,
-        high: item.high,
-        low: item.low,
-        close: item.close,
-        volume: item.volume,
-      }));
+      if (history.length === 0) {
+        res.status(404).json({ message: `No data available for ${symbol}` });
+        return;
+      }
       
       res.json(history);
     } catch (error) {
@@ -191,17 +266,11 @@ export async function registerRoutes(
           // Filter by Pattern
           let matchedPattern = undefined;
           if (input.pattern && input.pattern !== 'All') {
-            const history = await yf.historical(symbol, { period1: '1mo' }); // Get last month
-            const candles = history.map((item: any) => ({
-              date: item.date.toISOString().split('T')[0],
-              open: item.open,
-              high: item.high,
-              low: item.low,
-              close: item.close,
-              volume: item.volume
-            }));
+            // VCP needs more history (at least 30 days), others need less
+            const period = input.pattern === 'VCP' ? '3mo' : '1mo';
+            const candles = await getChartData(yf, symbol, period);
 
-            if (detectPattern(candles, input.pattern)) {
+            if (candles.length >= 5 && detectPattern(candles, input.pattern)) {
               matchedPattern = input.pattern;
             } else {
               continue; // Pattern didn't match

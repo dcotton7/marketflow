@@ -61,7 +61,7 @@ export const api = {
         minPrice: z.number().optional(),
         maxPrice: z.number().optional(),
         minVolume: z.number().optional(),
-        pattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star']).optional(),
+        pattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star', 'VCP']).optional(),
       }),
       responses: {
         200: z.array(z.object({

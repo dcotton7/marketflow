@@ -26,7 +26,7 @@ export default function ScannerPage() {
     runScan(filters);
   };
 
-  const patterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star"];
+  const patterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star", "VCP"];
 
   return (
     <Layout>
