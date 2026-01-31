@@ -35,6 +35,18 @@ AI Swing Scanner is a stock market scanner and analysis application that enables
 - Daily chart timeframe now zooms to show ~200 candles (8-9 months) for better pattern visibility
   - Uses setVisibleLogicalRange instead of fitContent for daily interval
   - Other timeframes still use fitContent to show all data
+- Scanner state persistence via ScannerContext:
+  - Filters, results, currentPage preserved when navigating between pages
+  - "Return to Results" button works correctly, doesn't reset scan
+- ETF detection and holdings display:
+  - When viewing ETF (SPY, QQQ, sector ETFs), shows "Top Holdings" instead of sector companies
+  - Holdings include weight percentages and market cap values
+  - ETF badges are clickable links to ETF symbol pages
+- Related stocks improvements:
+  - Pre-computed sector data with market caps (in billions)
+  - Sorted by market cap descending (largest first)
+  - Clickable links navigate to symbol pages
+- Pattern visualization passes through URL query params when clicking scanner results
 
 ## User Preferences
 
