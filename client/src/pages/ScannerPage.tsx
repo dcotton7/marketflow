@@ -6,13 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLocation } from "wouter";
-import { Loader2, Search, Filter, ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { MiniChart } from "@/components/MiniChart";
 import { type ScannerRunInput } from "@shared/routes";
+
+const CHARTS_PER_PAGE = 10;
 
 export default function ScannerPage() {
   const [, setLocation] = useLocation();
   const { mutate: runScan, data: results, isPending } = useScanner();
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [filters, setFilters] = useState<ScannerRunInput>({
     minPrice: undefined,
@@ -24,11 +28,35 @@ export default function ScannerPage() {
   });
 
   const handleScan = () => {
+    setCurrentPage(1);
     runScan(filters);
   };
 
   const candlestickPatterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star"];
   const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight"];
+
+  // Determine timeframe based on selected pattern (match detection windows)
+  const getTimeframe = () => {
+    if (filters.chartPattern === "Weekly Tight") return "20D"; // 20 trading days
+    if (filters.chartPattern === "Monthly Tight") return "60D"; // 60 trading days
+    if (filters.chartPattern === "VCP") return "30D"; // 30 trading days
+    return "30D"; // Default
+  };
+
+  const getTimeframeLabel = () => {
+    const tf = getTimeframe();
+    if (tf === "20D") return "4 Weeks";
+    if (tf === "30D") return "6 Weeks";
+    if (tf === "60D") return "3 Months";
+    return "Daily";
+  };
+
+  // Pagination logic
+  const totalResults = results?.length || 0;
+  const totalPages = Math.ceil(totalResults / CHARTS_PER_PAGE);
+  const startIndex = (currentPage - 1) * CHARTS_PER_PAGE;
+  const endIndex = startIndex + CHARTS_PER_PAGE;
+  const paginatedResults = results?.slice(startIndex, endIndex) || [];
 
   return (
     <Layout>
@@ -145,7 +173,7 @@ export default function ScannerPage() {
         </div>
 
         <div className="flex-1 w-full space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
             {results && (
               <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
@@ -176,65 +204,95 @@ export default function ScannerPage() {
           )}
 
           {results && results.length > 0 && (
-            <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-muted/50 text-muted-foreground text-xs uppercase font-medium">
-                    <tr>
-                      <th className="px-6 py-4">Symbol</th>
-                      <th className="px-6 py-4 text-right">Price</th>
-                      <th className="px-6 py-4 text-right">Change</th>
-                      <th className="px-6 py-4 text-right">Volume</th>
-                      <th className="px-6 py-4">Pattern</th>
-                      <th className="px-6 py-4 text-center">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/50">
-                    {results.map((stock) => {
-                      const isPositive = stock.changePercent >= 0;
-                      return (
-                        <tr 
-                          key={stock.symbol} 
-                          className="hover:bg-muted/30 transition-colors group cursor-pointer"
-                          onClick={() => setLocation(`/symbol/${stock.symbol}`)}
-                          data-testid={`row-stock-${stock.symbol}`}
-                        >
-                          <td className="px-6 py-4 font-bold font-mono text-primary group-hover:text-primary/80">
-                            {stock.symbol}
-                          </td>
-                          <td className="px-6 py-4 text-right font-mono">
-                            ${stock.price.toFixed(2)}
-                          </td>
-                          <td className={`px-6 py-4 text-right font-mono font-medium ${isPositive ? "text-green-500" : "text-red-500"}`}>
-                            <div className="flex items-center justify-end gap-1">
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {paginatedResults.map((stock) => {
+                  const isPositive = stock.changePercent >= 0;
+                  return (
+                    <Card 
+                      key={stock.symbol}
+                      className="cursor-pointer hover-elevate transition-all"
+                      onClick={() => setLocation(`/symbol/${stock.symbol}`)}
+                      data-testid={`card-stock-${stock.symbol}`}
+                    >
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span 
+                              className="font-bold font-mono text-xl text-primary"
+                              data-testid={`text-ticker-${stock.symbol}`}
+                            >
+                              {stock.symbol}
+                            </span>
+                            <span 
+                              className="font-mono text-lg"
+                              data-testid={`text-price-${stock.symbol}`}
+                            >
+                              ${stock.price.toFixed(2)}
+                            </span>
+                            <span 
+                              className={`flex items-center gap-1 text-sm font-mono ${isPositive ? "text-green-500" : "text-red-500"}`}
+                              data-testid={`text-change-${stock.symbol}`}
+                            >
                               {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                               {stock.changePercent.toFixed(2)}%
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-right font-mono text-muted-foreground">
-                            {(stock.volume / 1000000).toFixed(2)}M
-                          </td>
-                          <td className="px-6 py-4">
-                            {stock.matchedPattern ? (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                                {stock.matchedPattern}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                              <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            </span>
+                          </div>
+                          <span 
+                            className="text-xs text-muted-foreground font-mono bg-muted px-2 py-1 rounded"
+                            data-testid={`text-timeframe-${stock.symbol}`}
+                          >
+                            {getTimeframeLabel()}
+                          </span>
+                        </div>
+                        {stock.matchedPattern && (
+                          <span 
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-black dark:border-green-600 w-fit mt-1"
+                            data-testid={`badge-pattern-${stock.symbol}`}
+                          >
+                            {stock.matchedPattern}
+                          </span>
+                        )}
+                      </CardHeader>
+                      <CardContent className="pt-0">
+                        <MiniChart symbol={stock.symbol} timeframe={getTimeframe()} />
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
-            </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 pt-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    data-testid="button-prev-page"
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Previous
+                  </Button>
+                  <span 
+                    className="text-sm text-muted-foreground font-mono"
+                    data-testid="text-pagination"
+                  >
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    data-testid="button-next-page"
+                  >
+                    Next
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
