@@ -108,55 +108,38 @@ export default function ScannerPage() {
                 </Select>
               </div>
               
-              <div className="space-y-2">
-                <Label>Candlestick Pattern</Label>
-                <Select 
-                  value={filters.candlestickPattern} 
-                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, candlestickPattern: val }))}
-                >
-                  <SelectTrigger className="bg-background" data-testid="select-candlestick-pattern">
-                    <SelectValue placeholder="Select Pattern" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {candlestickPatterns.map(p => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Chart Pattern</Label>
-                <Select 
-                  value={filters.chartPattern} 
-                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, chartPattern: val }))}
-                >
-                  <SelectTrigger className="bg-background" data-testid="select-chart-pattern">
-                    <SelectValue placeholder="Select Chart Pattern" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {chartPatterns.map(p => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Chart Pattern Box */}
+              <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/20">
+                <p className="text-sm font-semibold text-primary">Chart Pattern</p>
+                <div className="space-y-2">
+                  <Select 
+                    value={filters.chartPattern} 
+                    onValueChange={(val: any) => setFilters(prev => ({ ...prev, chartPattern: val }))}
+                  >
+                    <SelectTrigger className="bg-background" data-testid="select-chart-pattern">
+                      <SelectValue placeholder="Select Chart Pattern" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {chartPatterns.map(p => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
               {showChannelHeightFilter && (
                 <div className="space-y-2">
                   <Label>Max Channel Height %</Label>
                   <Input 
-                    type="number" 
-                    step="1"
-                    min="1"
-                    max="50"
+                    type="text" 
+                    inputMode="decimal"
                     placeholder="e.g. 15" 
                     className="bg-background font-mono"
                     data-testid="input-max-channel-height"
                     value={filters.maxChannelHeightPct ?? ''}
                     onChange={(e) => setFilters(prev => ({ 
                       ...prev, 
-                      maxChannelHeightPct: e.target.value ? parseFloat(e.target.value) : undefined 
+                      maxChannelHeightPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
                     }))}
                   />
                   <p className="text-xs text-muted-foreground">
@@ -169,17 +152,15 @@ export default function ScannerPage() {
                 <div className="space-y-2">
                   <Label>Min Gain % Before Flag</Label>
                   <Input 
-                    type="number" 
-                    step="5"
-                    min="10"
-                    max="500"
+                    type="text" 
+                    inputMode="decimal"
                     placeholder="e.g. 30" 
                     className="bg-background font-mono"
                     data-testid="input-htf-min-gain"
-                    value={filters.htfMinGainPct ?? 30}
+                    value={filters.htfMinGainPct ?? ''}
                     onChange={(e) => setFilters(prev => ({ 
                       ...prev, 
-                      htfMinGainPct: e.target.value ? parseFloat(e.target.value) : 30 
+                      htfMinGainPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
                     }))}
                   />
                   <p className="text-xs text-muted-foreground">
@@ -194,34 +175,30 @@ export default function ScannerPage() {
                   <div className="space-y-2">
                     <Label>Min % Up Before Pullback</Label>
                     <Input 
-                      type="number" 
-                      step="5"
-                      min="5"
-                      max="200"
+                      type="text" 
+                      inputMode="decimal"
                       placeholder="e.g. 30" 
                       className="bg-background font-mono"
                       data-testid="input-pb-min-gain"
-                      value={filters.pbMinGainPct ?? 30}
+                      value={filters.pbMinGainPct ?? ''}
                       onChange={(e) => setFilters(prev => ({ 
                         ...prev, 
-                        pbMinGainPct: e.target.value ? parseFloat(e.target.value) : 30 
+                        pbMinGainPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
                       }))}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Up period was under (candles)</Label>
                     <Input 
-                      type="number" 
-                      step="1"
-                      min="1"
-                      max="100"
+                      type="text" 
+                      inputMode="numeric"
                       placeholder="e.g. 10" 
                       className="bg-background font-mono"
                       data-testid="input-pb-up-period"
-                      value={filters.pbUpPeriodCandles ?? 10}
+                      value={filters.pbUpPeriodCandles ?? ''}
                       onChange={(e) => setFilters(prev => ({ 
                         ...prev, 
-                        pbUpPeriodCandles: e.target.value ? parseInt(e.target.value) : 10 
+                        pbUpPeriodCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
                       }))}
                     />
                   </div>
@@ -229,32 +206,28 @@ export default function ScannerPage() {
                     <Label>PB was between X and Y candles</Label>
                     <div className="flex gap-2 items-center">
                       <Input 
-                        type="number" 
-                        step="1"
-                        min="1"
-                        max="50"
+                        type="text" 
+                        inputMode="numeric"
                         placeholder="1" 
                         className="bg-background font-mono w-20"
                         data-testid="input-pb-min-candles"
-                        value={filters.pbMinCandles ?? 1}
+                        value={filters.pbMinCandles ?? ''}
                         onChange={(e) => setFilters(prev => ({ 
                           ...prev, 
-                          pbMinCandles: e.target.value ? parseInt(e.target.value) : 1 
+                          pbMinCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
                         }))}
                       />
                       <span className="text-muted-foreground">to</span>
                       <Input 
-                        type="number" 
-                        step="1"
-                        min="1"
-                        max="50"
+                        type="text" 
+                        inputMode="numeric"
                         placeholder="5" 
                         className="bg-background font-mono w-20"
                         data-testid="input-pb-max-candles"
-                        value={filters.pbMaxCandles ?? 5}
+                        value={filters.pbMaxCandles ?? ''}
                         onChange={(e) => setFilters(prev => ({ 
                           ...prev, 
-                          pbMaxCandles: e.target.value ? parseInt(e.target.value) : 5 
+                          pbMaxCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
                         }))}
                       />
                     </div>
@@ -265,24 +238,45 @@ export default function ScannerPage() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label>Pattern Strictness</Label>
-                <Select 
-                  value={filters.patternStrictness} 
-                  onValueChange={(val: any) => setFilters(prev => ({ ...prev, patternStrictness: val }))}
-                >
-                  <SelectTrigger className="bg-background" data-testid="select-strictness">
-                    <SelectValue placeholder="Select Strictness" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="tight">Tight (Strict)</SelectItem>
-                    <SelectItem value="loose">Loose (Relaxed)</SelectItem>
-                    <SelectItem value="both">Both</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Loose rules allow more variance for better match chances.
-                </p>
+                <div className="space-y-2">
+                  <Label>Pattern Strictness</Label>
+                  <Select 
+                    value={filters.patternStrictness} 
+                    onValueChange={(val: any) => setFilters(prev => ({ ...prev, patternStrictness: val }))}
+                  >
+                    <SelectTrigger className="bg-background" data-testid="select-strictness">
+                      <SelectValue placeholder="Select Strictness" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tight">Tight (Strict)</SelectItem>
+                      <SelectItem value="loose">Loose (Relaxed)</SelectItem>
+                      <SelectItem value="both">Both</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Loose rules allow more variance for better match chances.
+                  </p>
+                </div>
+              </div>
+
+              {/* Candlestick Pattern Box */}
+              <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/20">
+                <p className="text-sm font-semibold text-primary">Candlestick Pattern</p>
+                <div className="space-y-2">
+                  <Select 
+                    value={filters.candlestickPattern} 
+                    onValueChange={(val: any) => setFilters(prev => ({ ...prev, candlestickPattern: val }))}
+                  >
+                    <SelectTrigger className="bg-background" data-testid="select-candlestick-pattern">
+                      <SelectValue placeholder="Select Candlestick Pattern" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {candlestickPatterns.map(p => (
+                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -379,7 +373,10 @@ export default function ScannerPage() {
 
         <div className="flex-1 w-full space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
+              <span className="text-sm text-pink-400">(SMA 21 in pink)</span>
+            </div>
             {results && (
               <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
                 {results.length} matches found
@@ -418,10 +415,12 @@ export default function ScannerPage() {
                       key={stock.symbol}
                       className="cursor-pointer hover-elevate transition-all"
                       onClick={() => {
-                        const patternParam = filters.chartPattern && filters.chartPattern !== 'All' 
-                          ? `?pattern=${encodeURIComponent(filters.chartPattern)}` 
-                          : '';
-                        setLocation(`/symbol/${stock.symbol}${patternParam}`);
+                        const params = new URLSearchParams();
+                        params.set('fromScanner', 'true');
+                        if (filters.chartPattern && filters.chartPattern !== 'All' && filters.chartPattern !== 'Any') {
+                          params.set('pattern', filters.chartPattern);
+                        }
+                        setLocation(`/symbol/${stock.symbol}?${params.toString()}`);
                       }}
                       data-testid={`card-stock-${stock.symbol}`}
                     >

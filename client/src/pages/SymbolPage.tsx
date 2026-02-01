@@ -1,9 +1,10 @@
 import { useParams, useLocation, useSearch } from "wouter";
-import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { StockChart } from "@/components/StockChart";
+import { TradeRiskRating } from "@/components/TradeRiskRating";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useAddToWatchlist } from "@/hooks/use-watchlist";
+import { useScannerContext } from "@/context/ScannerContext";
 import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,10 +16,34 @@ export default function SymbolPage() {
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
   const selectedPattern = urlParams.get('pattern') || undefined;
+  const fromScanner = urlParams.get('fromScanner') === 'true';
   const safeSymbol = symbol || "";
   
   const { data: quote, isLoading } = useStockQuote(safeSymbol);
   const { mutate: addToWatchlist, isPending: isAdding } = useAddToWatchlist();
+  const { filters, results } = useScannerContext();
+  
+  // Build criteria list from filters when coming from scanner
+  const getCriteriaList = (): string[] => {
+    if (!fromScanner && !selectedPattern) return [];
+    const criteria: string[] = [];
+    if (filters.chartPattern && filters.chartPattern !== 'Any') criteria.push(`Pattern: ${filters.chartPattern}`);
+    if (filters.candlestickPattern && filters.candlestickPattern !== 'Any') criteria.push(`Candlestick: ${filters.candlestickPattern}`);
+    if (filters.smaFilter && filters.smaFilter !== 'none') {
+      if (filters.smaFilter === 'stacked') criteria.push('SMA Stacked (5>20>50>200)');
+      if (filters.smaFilter === 'above50_200') criteria.push('Price > 50d > 200d');
+    }
+    if (filters.patternStrictness && filters.patternStrictness !== 'both') {
+      criteria.push(`Strictness: ${filters.patternStrictness}`);
+    }
+    if (filters.priceWithin50dPct) criteria.push(`Within ${filters.priceWithin50dPct}% of 50d`);
+    if (filters.minPrice) criteria.push(`Min $${filters.minPrice}`);
+    if (filters.maxPrice) criteria.push(`Max $${filters.maxPrice}`);
+    if (filters.minVolume) criteria.push(`Vol > ${(filters.minVolume / 1000000).toFixed(1)}M`);
+    return criteria;
+  };
+  
+  const criteriaList = getCriteriaList();
   
   const handleBackToResults = () => {
     setLocation("/");
@@ -146,16 +171,38 @@ export default function SymbolPage() {
             ) : '---'}
           </div>
           {quote.earnings?.surprisePct !== undefined && (
-            <div className="text-xs text-muted-foreground mt-1">
-              Surprise: {quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%
+            <div className="text-xl font-mono font-semibold mt-1">
+              <span className={quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}>
+                ({quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%)
+              </span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Chart Section */}
+      {/* Chart Section with Trade Risk Rating */}
       <div className="mt-8">
-        <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
+        {/* Scanner Criteria - shown when coming from scanner */}
+        {criteriaList.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted-foreground">Criteria:</span>
+            <div className="flex flex-wrap gap-2">
+              {criteriaList.map((criterion, index) => (
+                <span key={index} className="text-sm text-white bg-muted/50 px-2 py-0.5 rounded">
+                  {criterion}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex gap-4">
+          <div className="flex-1 min-w-0">
+            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
+          </div>
+          <div className="w-64 flex-shrink-0 hidden lg:block">
+            <TradeRiskRating symbol={safeSymbol} currentPrice={quote.price} />
+          </div>
+        </div>
       </div>
 
       {/* Company Description */}
@@ -250,7 +297,7 @@ export default function SymbolPage() {
         {!quote.isETF && quote.relatedStocks && quote.relatedStocks.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Top {quote.sector} Companies</CardTitle>
+              <CardTitle className="text-lg">Top {quote.industry || quote.sector} Companies</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">

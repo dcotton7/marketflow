@@ -216,15 +216,21 @@ const STOCKS_BY_SECTOR: Record<string, { symbol: string; name: string; industry:
   'Industrials': [
     { symbol: 'CAT', name: 'Caterpillar', industry: 'Heavy Machinery', marketCap: 170e9 },
     { symbol: 'RTX', name: 'RTX Corporation', industry: 'Aerospace & Defense', marketCap: 150e9 },
-    { symbol: 'HON', name: 'Honeywell', industry: 'Conglomerate', marketCap: 140e9 },
+    { symbol: 'HON', name: 'Honeywell', industry: 'Aerospace & Defense', marketCap: 140e9 },
     { symbol: 'UNP', name: 'Union Pacific', industry: 'Railroads', marketCap: 150e9 },
-    { symbol: 'BA', name: 'Boeing', industry: 'Aerospace', marketCap: 130e9 },
+    { symbol: 'BA', name: 'Boeing', industry: 'Aerospace & Defense', marketCap: 130e9 },
     { symbol: 'UPS', name: 'United Parcel Service', industry: 'Shipping', marketCap: 120e9 },
     { symbol: 'DE', name: 'Deere & Company', industry: 'Farm Machinery', marketCap: 120e9 },
-    { symbol: 'LMT', name: 'Lockheed Martin', industry: 'Defense', marketCap: 120e9 },
-    { symbol: 'GE', name: 'General Electric', industry: 'Conglomerate', marketCap: 170e9 },
+    { symbol: 'LMT', name: 'Lockheed Martin', industry: 'Aerospace & Defense', marketCap: 120e9 },
+    { symbol: 'GE', name: 'General Electric', industry: 'Aerospace & Defense', marketCap: 170e9 },
     { symbol: 'MMM', name: '3M Company', industry: 'Conglomerate', marketCap: 60e9 },
     { symbol: 'NSC', name: 'Norfolk Southern', industry: 'Railroads', marketCap: 55e9 },
+    { symbol: 'NOC', name: 'Northrop Grumman', industry: 'Aerospace & Defense', marketCap: 75e9 },
+    { symbol: 'GD', name: 'General Dynamics', industry: 'Aerospace & Defense', marketCap: 80e9 },
+    { symbol: 'TDG', name: 'TransDigm Group', industry: 'Aerospace & Defense', marketCap: 65e9 },
+    { symbol: 'HII', name: 'Huntington Ingalls', industry: 'Aerospace & Defense', marketCap: 12e9 },
+    { symbol: 'LHX', name: 'L3Harris Technologies', industry: 'Aerospace & Defense', marketCap: 45e9 },
+    { symbol: 'TXT', name: 'Textron Inc.', industry: 'Aerospace & Defense', marketCap: 18e9 },
   ],
   'Communication Services': [
     { symbol: 'GOOG', name: 'Alphabet Inc.', industry: 'Internet Services', marketCap: 1800e9 },
@@ -951,12 +957,26 @@ export async function registerRoutes(
       // Get sector ETFs
       const sectorETFs = SECTOR_ETFS[sector] || [];
       
-      // Get related stocks from pre-computed list (fast!) - sorted by market cap
+      // Get related stocks - prioritize same industry (sub-sector) over sector
+      // First get all stocks from the sector
       const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
-      const relatedStocks = sectorStocks
-        .filter(s => s.symbol !== symbol)
-        .sort((a, b) => b.marketCap - a.marketCap)
-        .slice(0, 4)
+      
+      // Filter for same industry first (e.g., Aerospace & Defense, not just Industrials)
+      const sameIndustryStocks = sectorStocks
+        .filter(s => s.symbol !== symbol && s.industry === industry)
+        .sort((a, b) => b.marketCap - a.marketCap);
+      
+      // Get other sector stocks (different industry) as backup
+      const otherSectorStocks = sectorStocks
+        .filter(s => s.symbol !== symbol && s.industry !== industry)
+        .sort((a, b) => b.marketCap - a.marketCap);
+      
+      // Combine: same industry first, then fill with other sector stocks
+      // Minimum 5, more if same industry is large
+      const minCount = 5;
+      const combined = [...sameIndustryStocks, ...otherSectorStocks];
+      const relatedStocks = combined
+        .slice(0, Math.max(minCount, sameIndustryStocks.length))
         .map(s => ({
           symbol: s.symbol,
           name: s.name,

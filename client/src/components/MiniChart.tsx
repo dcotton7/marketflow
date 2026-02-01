@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import {
   ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   ResponsiveContainer,
@@ -13,6 +14,19 @@ import {
 interface MiniChartProps {
   symbol: string;
   timeframe: string;
+}
+
+function calculateSMA(data: { close: number }[], period: number): (number | null)[] {
+  const sma: (number | null)[] = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      sma.push(null);
+    } else {
+      const sum = data.slice(i - period + 1, i + 1).reduce((acc, d) => acc + d.close, 0);
+      sma.push(sum / period);
+    }
+  }
+  return sma;
 }
 
 interface ConsolidationChannel {
@@ -149,10 +163,14 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
 
   const slicedHistory = history.slice(-displayDays);
   const channels = detectConsolidationChannels(slicedHistory, patternTimeframe);
+  
+  // Calculate SMA 21
+  const sma21Values = calculateSMA(slicedHistory, 21);
 
-  const chartData = slicedHistory.map((item) => ({
+  const chartData = slicedHistory.map((item, index) => ({
     ...item,
     color: item.close >= item.open ? "#22c55e" : "#ef4444",
+    sma21: sma21Values[index],
   }));
 
   const allPrices = slicedHistory.flatMap(d => [d.high, d.low]);
@@ -160,45 +178,70 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
   const maxPrice = Math.max(...allPrices);
   const priceRange = maxPrice - minPrice;
   const pricePadding = priceRange * 0.05;
+  
+  // Calculate daily % change (last candle vs previous)
+  const lastCandle = slicedHistory[slicedHistory.length - 1];
+  const prevCandle = slicedHistory[slicedHistory.length - 2];
+  const dailyChange = prevCandle ? ((lastCandle.close - prevCandle.close) / prevCandle.close) * 100 : 0;
 
   return (
     <div 
-      className="h-[180px] w-full bg-card rounded-lg border border-border p-2"
+      className="w-full bg-card rounded-lg border border-border p-2"
       data-testid={`chart-${symbol}`}
     >
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-          <XAxis dataKey="date" hide />
-          <YAxis 
-            domain={[minPrice - pricePadding, maxPrice + pricePadding]}
-            hide
-          />
-          
-          {channels.map((channel, index) => (
-            <ReferenceArea
-              key={`channel-${index}`}
-              x1={channel.startDate}
-              x2={channel.endDate}
-              y1={channel.low}
-              y2={channel.high}
-              fill="#86efac"
-              fillOpacity={0.4}
-              stroke="#000000"
-              strokeWidth={2}
+      <div className="h-[160px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+            <XAxis dataKey="date" hide />
+            <YAxis 
+              domain={[minPrice - pricePadding, maxPrice + pricePadding]}
+              hide
             />
-          ))}
-          
-          <Bar 
-            dataKey={(item) => [item.open, item.close]} 
-            fill="currentColor"
-            isAnimationActive={false}
-          >
-            {chartData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.color} />
+            
+            {channels.map((channel, index) => (
+              <ReferenceArea
+                key={`channel-${index}`}
+                x1={channel.startDate}
+                x2={channel.endDate}
+                y1={channel.low}
+                y2={channel.high}
+                fill="#86efac"
+                fillOpacity={0.4}
+                stroke="#000000"
+                strokeWidth={2}
+              />
             ))}
-          </Bar>
-        </ComposedChart>
-      </ResponsiveContainer>
+            
+            <Bar 
+              dataKey={(item) => [item.open, item.close]} 
+              fill="currentColor"
+              isAnimationActive={false}
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.color} />
+              ))}
+            </Bar>
+            
+            <Line
+              type="monotone"
+              dataKey="sma21"
+              stroke="#f472b6"
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls={false}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="text-center pt-1">
+        <span 
+          className={`text-sm font-mono font-semibold ${dailyChange >= 0 ? 'text-green-500' : 'text-red-500'}`}
+          data-testid={`change-${symbol}`}
+        >
+          {dailyChange >= 0 ? '+' : ''}{dailyChange.toFixed(2)}%
+        </span>
+      </div>
     </div>
   );
 }

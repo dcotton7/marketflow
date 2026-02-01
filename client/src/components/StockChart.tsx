@@ -62,6 +62,37 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
   return sma;
 }
 
+// Calculate Daily VWAP (resets each day for intraday, cumulative for daily+)
+function calculateVWAP(data: { date: string; high: number; low: number; close: number; volume: number }[], isIntraday: boolean): (number | null)[] {
+  const vwap: (number | null)[] = [];
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  let currentDay = '';
+  
+  for (let i = 0; i < data.length; i++) {
+    const itemDate = new Date(data[i].date);
+    const dayKey = isIntraday ? itemDate.toDateString() : '';
+    
+    // Reset cumulative values at start of new day for intraday data
+    if (isIntraday && dayKey !== currentDay) {
+      cumulativeTPV = 0;
+      cumulativeVolume = 0;
+      currentDay = dayKey;
+    }
+    
+    const typicalPrice = (data[i].high + data[i].low + data[i].close) / 3;
+    cumulativeTPV += typicalPrice * data[i].volume;
+    cumulativeVolume += data[i].volume;
+    
+    if (cumulativeVolume > 0) {
+      vwap.push(cumulativeTPV / cumulativeVolume);
+    } else {
+      vwap.push(null);
+    }
+  }
+  return vwap;
+}
+
 function detectConsolidationChannels(
   data: { date: string; high: number; low: number; close: number; volume: number }[]
 ): ConsolidationChannel[] {
@@ -425,6 +456,22 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         value: sma200[i] ?? undefined,
       })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
       sma200Series.setData(sma200Data);
+      
+      // Add VWAP line - orange thicker dotted line
+      const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
+      const vwap = calculateVWAP(history, isIntraday);
+      const vwapSeries = chart.addSeries(LineSeries, {
+        color: '#f97316', // Orange
+        lineWidth: 2,
+        lineStyle: LineStyle.Dotted,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const vwapData = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: vwap[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      vwapSeries.setData(vwapData);
     }
 
     // Detect and draw channels if explicitly requested OR if pattern visualization is on for channel patterns
@@ -464,7 +511,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       setChannels([]);
     }
     
-    // Draw High Tight Flag visualization (strong uptrend + consolidation)
+    // Draw High Tight Flag visualization (strong uptrend + pennant consolidation)
     if (showPatternViz && selectedPattern === 'High Tight Flag' && history.length > 20) {
       const htfData = detectHighTightFlag(history);
       if (htfData) {
@@ -481,7 +528,11 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
           { time: htfData.poleEnd as Time, value: htfData.poleHigh },
         ]);
         
-        // Draw consolidation channel (the "flag" part) - horizontal lines
+        // Draw pennant consolidation - converging lines that meet at apex
+        // Calculate the convergence point (where the lines meet)
+        const midPrice = (htfData.flagHigh + htfData.flagLow) / 2;
+        
+        // Top line: starts at flagHigh, slopes down to midPrice at end
         const flagTopLine = chart.addSeries(LineSeries, {
           color: '#22c55e',
           lineWidth: 2,
@@ -491,9 +542,10 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         flagTopLine.setData([
           { time: htfData.flagStart as Time, value: htfData.flagHigh },
-          { time: htfData.flagEnd as Time, value: htfData.flagHigh },
+          { time: htfData.flagEnd as Time, value: midPrice },
         ]);
 
+        // Bottom line: starts at flagLow, slopes up to midPrice at end
         const flagBottomLine = chart.addSeries(LineSeries, {
           color: '#22c55e',
           lineWidth: 2,
@@ -503,7 +555,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         flagBottomLine.setData([
           { time: htfData.flagStart as Time, value: htfData.flagLow },
-          { time: htfData.flagEnd as Time, value: htfData.flagLow },
+          { time: htfData.flagEnd as Time, value: midPrice },
         ]);
       }
     }
