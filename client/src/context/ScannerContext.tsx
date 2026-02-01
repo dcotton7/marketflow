@@ -16,9 +16,9 @@ interface ScannerContextType {
 
 const defaultFilters: ScannerRunInput = {
   scannerIndex: "sp100",
-  minPrice: undefined,
+  minPrice: 7,
   maxPrice: undefined,
-  minVolume: undefined,
+  minVolume: 500000,
   candlestickPattern: "All",
   chartPattern: "All",
   patternStrictness: "tight",

@@ -1184,6 +1184,50 @@ export async function registerRoutes(
     }
   });
 
+  // --- Market Indicators ---
+  app.get('/api/market/indicators', async (req, res) => {
+    try {
+      const yf = await getYahooFinance();
+      const symbols = [
+        { symbol: 'SPY', label: 'S&P 500' },
+        { symbol: 'QQQ', label: 'NASDAQ' },
+        { symbol: 'DIA', label: 'Dow' },
+        { symbol: 'IWM', label: 'Russell 2K' },
+        { symbol: 'GLD', label: 'Gold' },
+        { symbol: '^VIX', label: 'VIX' },
+        { symbol: 'RSP', label: 'S&P EW' },
+        { symbol: 'QQQE', label: 'NDX EW' },
+      ];
+      
+      const results = await Promise.all(
+        symbols.map(async ({ symbol, label }) => {
+          try {
+            const quote = await yf.quote(symbol);
+            return {
+              symbol,
+              label,
+              price: quote.regularMarketPrice || 0,
+              changePercent: quote.regularMarketChangePercent || 0,
+            };
+          } catch (error) {
+            console.error(`Failed to fetch quote for ${symbol}:`, error);
+            return {
+              symbol,
+              label,
+              price: 0,
+              changePercent: 0,
+            };
+          }
+        })
+      );
+      
+      res.json(results);
+    } catch (error) {
+      console.error('Market indicators error:', error);
+      res.status(500).json({ message: 'Failed to fetch market indicators' });
+    }
+  });
+
   // --- Watchlist ---
   app.get(api.watchlist.list.path, async (req, res) => {
     const items = await storage.getWatchlist();

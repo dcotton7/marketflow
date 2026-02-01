@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { WatchlistWidget } from "./WatchlistWidget";
+import { MarketIndicators } from "./MarketIndicators";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -54,6 +55,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <div className="mt-8">
                 <WatchlistWidget />
               </div>
+              <div className="mt-6 pt-4 border-t border-border/50">
+                <MarketIndicators />
+              </div>
             </div>
           </SheetContent>
         </Sheet>
@@ -89,8 +93,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </nav>
 
-        <div className="p-4 border-t border-border/50 text-xs text-muted-foreground text-center">
-          Market Data Delayed 15m
+        <div className="p-4 border-t border-border/50">
+          <MarketIndicators />
+        </div>
+        <div className="p-2 border-t border-border/50 text-xs text-muted-foreground text-center">
+          Data Delayed 15m
         </div>
       </aside>
 
