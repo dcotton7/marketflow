@@ -6,16 +6,24 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useLocation } from "wouter";
-import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Save } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MiniChart } from "@/components/MiniChart";
 import { useScannerContext } from "@/context/ScannerContext";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 const CHARTS_PER_PAGE = 10;
 
 export default function ScannerPage() {
   const [, setLocation] = useLocation();
   const { mutate: runScan, isPending } = useScanner();
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [scanName, setScanName] = useState("");
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   
   const { 
     filters, 
@@ -30,6 +38,54 @@ export default function ScannerPage() {
     setHasScanned,
     clearAll
   } = useScannerContext();
+  
+  // Generate default scan name from criteria
+  const generateScanTitle = () => {
+    const parts: string[] = [];
+    if (filters.chartPattern && filters.chartPattern !== 'All') parts.push(filters.chartPattern);
+    if (filters.technicalSignal && filters.technicalSignal !== 'none') {
+      const signalNames: Record<string, string> = {
+        '6_20_cross': filters.crossDirection === 'up' ? '6/20 Cross Up' : '6/20 Cross Down',
+        'ride_21_ema': 'Ride 21 EMA',
+        'pullback_5_dma': 'PB to 5 DMA',
+        'pullback_10_dma': 'PB to 10 DMA',
+        'pullback_20_dma': 'PB to 20 DMA',
+        'pullback_50_dma': 'PB to 50 DMA',
+      };
+      parts.push(signalNames[filters.technicalSignal] || filters.technicalSignal);
+    }
+    if (filters.scannerIndex) {
+      const indexNames: Record<string, string> = {
+        'sp500': 'S&P 500',
+        'sp100': 'S&P 100',
+        'nasdaq100': 'NASDAQ 100',
+        'dow30': 'DOW 30',
+        'all': 'All Stocks',
+      };
+      parts.push(indexNames[filters.scannerIndex] || filters.scannerIndex);
+    }
+    return parts.join(' + ') || 'Custom Scan';
+  };
+
+  const saveScanMutation = useMutation({
+    mutationFn: async ({ name, criteria }: { name: string; criteria: Record<string, unknown> }) => {
+      return apiRequest('POST', '/api/saved-scans', { name, criteria });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/saved-scans'] });
+      toast({ title: 'Scan saved', description: `"${scanName || generateScanTitle()}" has been saved.` });
+      setShowSaveDialog(false);
+      setScanName("");
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to save scan.', variant: 'destructive' });
+    },
+  });
+  
+  const handleSaveScan = () => {
+    const name = scanName.trim() || generateScanTitle();
+    saveScanMutation.mutate({ name, criteria: filters as Record<string, unknown> });
+  };
 
   // Get thumbnail indicator label based on selected signal/pattern
   const getThumbnailIndicatorLabel = () => {
@@ -344,7 +400,15 @@ export default function ScannerPage() {
           </div>
           
           <div className="w-full lg:w-80 shrink-0">
-          <Card className="sticky top-24 border-border shadow-xl shadow-black/5 bg-card/50 backdrop-blur-sm">
+          <Card 
+            className="sticky top-24 border-border shadow-xl shadow-black/5 bg-card/50 backdrop-blur-sm"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !isPending) {
+                e.preventDefault();
+                handleScan();
+              }
+            }}
+          >
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">
                 <Filter className="w-5 h-5 text-primary" />
@@ -808,7 +872,7 @@ export default function ScannerPage() {
               )}
             </div>
             
-            {/* Criteria summary with Clear All button - only show after first scan */}
+            {/* Criteria summary with Clear All and Save Scan buttons - only show after first scan */}
             {hasScanned && getCriteriaSummary().length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-white/80">
@@ -820,6 +884,13 @@ export default function ScannerPage() {
                   data-testid="button-clear-criteria"
                 >
                   [Clear All]
+                </button>
+                <button 
+                  onClick={() => setShowSaveDialog(true)}
+                  className="text-sm font-bold text-green-400 hover:text-green-300 transition-colors"
+                  data-testid="button-save-scan"
+                >
+                  [Save Scan]
                 </button>
               </div>
             )}
@@ -860,6 +931,10 @@ export default function ScannerPage() {
                         params.set('fromScanner', 'true');
                         if (filters.chartPattern && filters.chartPattern !== 'All') {
                           params.set('pattern', filters.chartPattern);
+                          // Monthly Tight should open weekly chart
+                          if (filters.chartPattern === 'Monthly Tight') {
+                            params.set('interval', '1wk');
+                          }
                         }
                         if (filters.technicalSignal && filters.technicalSignal !== 'none') {
                           params.set('technicalSignal', filters.technicalSignal);
@@ -955,6 +1030,60 @@ export default function ScannerPage() {
           )}
         </div>
       </div>
+      
+      {/* Save Scan Dialog */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-lg p-6 w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Save Scan</h3>
+              <button 
+                onClick={() => setShowSaveDialog(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="scan-name">Scan Name</Label>
+                <Input
+                  id="scan-name"
+                  value={scanName}
+                  onChange={(e) => setScanName(e.target.value)}
+                  placeholder={generateScanTitle()}
+                  className="mt-1"
+                  data-testid="input-scan-name"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveScan();
+                  }}
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave blank to use auto-generated name
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleSaveScan} 
+                  disabled={saveScanMutation.isPending}
+                  data-testid="button-confirm-save"
+                >
+                  {saveScanMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="w-4 h-4 mr-2" />
+                  )}
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

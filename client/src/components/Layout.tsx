@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { WatchlistWidget } from "./WatchlistWidget";
+import { SavedScansWidget } from "./SavedScansWidget";
 import { MarketIndicators } from "./MarketIndicators";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -56,6 +57,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <WatchlistWidget />
               </div>
               <div className="mt-6 pt-4 border-t border-border/50">
+                <SavedScansWidget />
+              </div>
+              <div className="mt-6 pt-4 border-t border-border/50">
                 <MarketIndicators />
               </div>
             </div>
@@ -90,6 +94,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
           <div className="pt-8">
             <WatchlistWidget />
+          </div>
+          <div className="pt-4">
+            <SavedScansWidget />
           </div>
         </nav>
 

@@ -150,6 +150,35 @@ export const api = {
       },
     },
   },
+  savedScans: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/saved-scans',
+      responses: {
+        200: z.array(z.custom<typeof savedScans.$inferSelect>()),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/saved-scans',
+      input: z.object({
+        name: z.string().min(1).max(100),
+        criteria: z.record(z.unknown()),
+      }),
+      responses: {
+        201: z.custom<typeof savedScans.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/saved-scans/:id',
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+      },
+    },
+  },
 };
 
 // ============================================

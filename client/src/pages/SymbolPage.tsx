@@ -18,6 +18,7 @@ export default function SymbolPage() {
   const selectedPattern = urlParams.get('pattern') || undefined;
   const technicalSignal = urlParams.get('technicalSignal') || undefined;
   const fromScanner = urlParams.get('fromScanner') === 'true';
+  const initialInterval = urlParams.get('interval') as '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo' | null;
   const safeSymbol = symbol || "";
   
   const { data: quote, isLoading } = useStockQuote(safeSymbol);
@@ -209,13 +210,13 @@ export default function SymbolPage() {
             ) : '---'}
           </div>
           {quote.earnings?.surprisePct !== undefined && (
-            <div className="text-sm font-mono mt-2">
+            <div className="text-lg font-mono mt-3">
               <span className="text-white">Surprise </span>
               <span className="text-yellow-400">+</span>
               <span className="text-white">/</span>
               <span className="text-red-500">-</span>
               <span className="text-white"> %: </span>
-              <span className={`font-semibold ${quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}`}>
+              <span className={`font-bold text-xl ${quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}`}>
                 {quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%
               </span>
             </div>
@@ -240,7 +241,7 @@ export default function SymbolPage() {
         )}
         <div className="flex gap-4 items-start">
           <div className="flex-1 min-w-0">
-            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} technicalSignal={technicalSignal} />
+            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} technicalSignal={technicalSignal} initialInterval={initialInterval || undefined} />
           </div>
           <div className="w-64 flex-shrink-0 hidden lg:block pt-8">
             <TradeRiskRating symbol={safeSymbol} currentPrice={quote.price} />

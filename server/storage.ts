@@ -14,8 +14,8 @@ export interface IStorage {
   addToWatchlist(item: InsertWatchlistItem): Promise<WatchlistItem>;
   removeFromWatchlist(id: number): Promise<void>;
   getSavedScans(): Promise<SavedScan[]>;
-  saveScan(scan: InsertScan): Promise<SavedScan>;
-  deleteScan(id: number): Promise<void>;
+  createSavedScan(name: string, criteria: Record<string, unknown>): Promise<SavedScan>;
+  deleteSavedScan(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -62,12 +62,15 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async saveScan(scan: InsertScan): Promise<SavedScan> {
-    const [newScan] = await this.getDatabase().insert(savedScans).values(scan).returning();
+  async createSavedScan(name: string, criteria: Record<string, unknown>): Promise<SavedScan> {
+    const [newScan] = await this.getDatabase().insert(savedScans).values({ 
+      name, 
+      criteria: criteria as any 
+    }).returning();
     return newScan;
   }
 
-  async deleteScan(id: number): Promise<void> {
+  async deleteSavedScan(id: number): Promise<void> {
     await this.getDatabase().delete(savedScans).where(eq(savedScans.id, id));
   }
 }

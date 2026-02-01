@@ -17,11 +17,12 @@ export const stockDataCache = pgTable("stock_data_cache", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Saved scans/screens
+// Saved scans/screens (supports multi-user via userId for future expansion)
 export const savedScans = pgTable("saved_scans", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   criteria: jsonb("criteria").notNull(), // Store filter settings
+  userId: text("user_id"), // For future multi-user/group support (null = admin/global)
   createdAt: timestamp("created_at").defaultNow(),
 });
 

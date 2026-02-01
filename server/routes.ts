@@ -629,72 +629,81 @@ function detectHighTightFlag(
 
 // Cup and Handle: U-shaped price pattern followed by a small pullback (handle)
 function detectCupAndHandle(candles: Candle[], loose: boolean = false): boolean {
-  if (candles.length < 65) return false;
+  if (candles.length < 40) return false;
   
-  // Look at last 65-130 candles for cup formation (standard cup takes 7-65 weeks)
+  // Look at last 40-130 candles for cup formation
   const lookback = Math.min(candles.length, 130);
   const recentCandles = candles.slice(-lookback);
   
   // Find potential cup boundaries by looking for distinct highs and lows
-  // Left lip: find highest point in first 30% of data
-  const leftPortion = Math.floor(lookback * 0.3);
+  // Left lip: find highest point in first 40% of data
+  const leftPortion = Math.floor(lookback * 0.4);
   const leftSection = recentCandles.slice(0, leftPortion);
   const leftHighIdx = leftSection.reduce((maxIdx, c, idx, arr) => 
     c.high > arr[maxIdx].high ? idx : maxIdx, 0);
   const leftHigh = leftSection[leftHighIdx].high;
   
-  // Find the cup bottom: lowest point between left lip and last 15 candles
-  const middleSection = recentCandles.slice(leftHighIdx + 5, lookback - 15);
-  if (middleSection.length < 10) return false;
+  // Find the cup bottom: lowest point between left lip and last 10 candles
+  const middleStart = Math.max(leftHighIdx + 3, 0);
+  const middleEnd = Math.max(lookback - 10, middleStart + 5);
+  const middleSection = recentCandles.slice(middleStart, middleEnd);
+  if (middleSection.length < 5) return false;
   
   const cupLowIdx = middleSection.reduce((minIdx, c, idx, arr) => 
     c.low < arr[minIdx].low ? idx : minIdx, 0);
   const cupLow = middleSection[cupLowIdx].low;
   
   // Right lip: highest point after cup bottom
-  const rightSection = recentCandles.slice(leftHighIdx + 5 + cupLowIdx + 1, -5);
-  if (rightSection.length < 5) return false;
+  const rightStart = middleStart + cupLowIdx + 1;
+  const rightEnd = lookback - 3;
+  if (rightEnd <= rightStart) return false;
+  const rightSection = recentCandles.slice(rightStart, rightEnd);
+  if (rightSection.length < 3) return false;
   const rightHigh = Math.max(...rightSection.map(c => c.high));
   
-  // Cup depth: should be 15-35% (tight) or 12-50% (loose)
+  // Cup depth: should be 10-50% (tight) or 8-60% (loose)
   const cupDepthPct = ((leftHigh - cupLow) / leftHigh) * 100;
   
-  const minDepth = loose ? 12 : 15;
-  const maxDepth = loose ? 50 : 35;
+  const minDepth = loose ? 8 : 10;
+  const maxDepth = loose ? 60 : 50;
   
   if (cupDepthPct < minDepth || cupDepthPct > maxDepth) return false;
   
-  // Cup should be U-shaped, not V-shaped
-  // Check that there are multiple candles near the bottom (within 5% of low)
-  const bottomThreshold = cupLow * 1.05;
+  // Cup should be U-shaped (relaxed in loose mode)
+  // Check that there are multiple candles near the bottom (within 8% of low)
+  const bottomThreshold = cupLow * (loose ? 1.10 : 1.08);
   const candlesNearBottom = middleSection.filter(c => c.low <= bottomThreshold).length;
-  const minBottomCandles = loose ? 3 : 5;
+  const minBottomCandles = loose ? 2 : 3;
   if (candlesNearBottom < minBottomCandles) return false;
   
-  // Right side should recover to near left high (symmetry)
-  const symmetryThreshold = loose ? 0.88 : 0.93;
+  // Right side should recover to near left high (relaxed symmetry)
+  const symmetryThreshold = loose ? 0.80 : 0.85;
   if (rightHigh < leftHigh * symmetryThreshold) return false;
   
-  // Handle: small pullback from right high (last 5-15 candles)
+  // Handle: small pullback from right high (last 3-15 candles)
   const handleCandles = recentCandles.slice(-15);
   const handleHigh = Math.max(...handleCandles.map(c => c.high));
   const handleLow = Math.min(...handleCandles.map(c => c.low));
   const handleDepthPct = ((handleHigh - handleLow) / handleHigh) * 100;
   
-  // Handle should be shallow: < 12% (tight) or < 18% (loose)
-  const handleThreshold = loose ? 18 : 12;
+  // Handle should be shallow: < 15% (tight) or < 25% (loose)
+  const handleThreshold = loose ? 25 : 15;
   if (handleDepthPct > handleThreshold) return false;
   
-  // Handle should form after right lip reaches near left lip level
-  // Current price should be in upper portion of handle
+  // Current price should be in upper portion of handle (relaxed in loose)
   const currentClose = recentCandles[recentCandles.length - 1].close;
-  const handleMid = (handleHigh + handleLow) / 2;
-  const inUpperHandle = currentClose >= handleMid;
+  const handleThird = handleLow + (handleHigh - handleLow) * (loose ? 0.33 : 0.5);
+  const inUpperHandle = currentClose >= handleThird;
+  
+  // Skip volume check in loose mode
+  if (loose) {
+    return inUpperHandle;
+  }
   
   // Volume should decrease in handle compared to cup formation
   const handleAvgVol = handleCandles.reduce((sum, c) => sum + c.volume, 0) / handleCandles.length;
   const cupAvgVol = middleSection.reduce((sum, c) => sum + c.volume, 0) / middleSection.length;
-  const volumeContracted = handleAvgVol <= cupAvgVol * (loose ? 1.2 : 1.0);
+  const volumeContracted = handleAvgVol <= cupAvgVol * 1.3;
   
   return inUpperHandle && volumeContracted;
 }
@@ -1507,6 +1516,29 @@ export async function registerRoutes(
   app.delete(api.watchlist.delete.path, async (req, res) => {
     const { id } = req.params;
     await storage.removeFromWatchlist(Number(id));
+    res.status(204).send();
+  });
+
+  // --- Saved Scans ---
+  app.get(api.savedScans.list.path, async (req, res) => {
+    const scans = await storage.getSavedScans();
+    res.json(scans);
+  });
+
+  app.post(api.savedScans.create.path, async (req, res) => {
+    try {
+      const input = api.savedScans.create.input.parse(req.body);
+      const scan = await storage.createSavedScan(input.name, input.criteria);
+      res.status(201).json(scan);
+    } catch (err) {
+      console.error('Failed to save scan:', err);
+      res.status(400).json({ message: 'Invalid scan data' });
+    }
+  });
+
+  app.delete(api.savedScans.delete.path, async (req, res) => {
+    const { id } = req.params;
+    await storage.deleteSavedScan(Number(id));
     res.status(204).send();
   });
 

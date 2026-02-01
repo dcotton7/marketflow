@@ -21,6 +21,7 @@ interface StockChartProps {
   showChannels?: boolean;
   selectedPattern?: string;
   technicalSignal?: string;
+  initialInterval?: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo';
 }
 
 interface HorizontalLineDefinition {
@@ -419,14 +420,19 @@ function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string
   return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
 }
 
-export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal }: StockChartProps) {
+export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal, initialInterval }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
   // Track if user has manually changed the interval
   const [userSelectedInterval, setUserSelectedInterval] = useState(false);
-  // Auto-select 5-minute timeframe for 6/20 Cross signal on initial load
-  const [interval, setIntervalState] = useState(technicalSignal === '6_20_cross' ? '5m' : '1d');
+  // Auto-select timeframe based on: URL param > technicalSignal > default
+  const getDefaultInterval = () => {
+    if (initialInterval) return initialInterval;
+    if (technicalSignal === '6_20_cross') return '5m';
+    return '1d';
+  };
+  const [interval, setIntervalState] = useState(getDefaultInterval());
   const [showChannels, setShowChannels] = useState(initialShowChannels);
   const [showPatternViz, setShowPatternViz] = useState(!!selectedPattern);
   const [toolMode, setToolMode] = useState<ToolMode>('none');
@@ -468,9 +474,10 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     setUserSelectedInterval(false);
   }, [technicalSignal, selectedPattern]);
   
-  // Auto-switch timeframe based on signal/pattern (only if user hasn't manually changed it)
+  // Auto-switch timeframe based on signal/pattern (only if user hasn't manually changed it AND no initialInterval was provided)
   useEffect(() => {
-    if (userSelectedInterval) return;
+    // Skip auto-switch if user manually changed interval or if an initialInterval was provided via URL
+    if (userSelectedInterval || initialInterval) return;
     
     if (technicalSignal === '6_20_cross') {
       setIntervalState('5m');
@@ -479,7 +486,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     } else {
       setIntervalState('1d'); // Daily for everything else
     }
-  }, [technicalSignal, selectedPattern, userSelectedInterval]);
+  }, [technicalSignal, selectedPattern, userSelectedInterval, initialInterval]);
   
   // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
   const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
@@ -980,8 +987,15 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     
     if (toolMode === 'line') {
       // Add horizontal line at clicked price - chart will recreate it via useEffect
+      // Limit to max 2 lines - if adding 3rd, remove the first one
       const lineId = `line-${Date.now()}`;
-      setLineDefinitions(prev => [...prev, { id: lineId, price: finalPrice }]);
+      setLineDefinitions(prev => {
+        if (prev.length >= 2) {
+          // Remove the oldest line (first one) when adding a 3rd
+          return [...prev.slice(1), { id: lineId, price: finalPrice }];
+        }
+        return [...prev, { id: lineId, price: finalPrice }];
+      });
       setToolMode('none');
     } else if (toolMode === 'measure') {
       if (!measureStart) {
@@ -1267,7 +1281,8 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         </div>
       )}
       {measureResult && (
-        <div className="mb-2 text-sm bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg flex gap-4">
+        <div className="mb-2 text-sm bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg flex gap-4 items-center">
+          <span className="text-muted-foreground font-semibold">Measure Results:</span>
           <span>
             <span className="text-muted-foreground">Change:</span>{' '}
             <span className={measureResult.priceDiff >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
@@ -1283,7 +1298,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         </div>
       )}
       
-      {/* Horizontal lines list for deletion */}
+      {/* Horizontal lines list with diff calculation */}
       {lineDefinitions.length > 0 && (
         <div className="mb-2 flex gap-2 flex-wrap items-center">
           <span className="text-xs text-muted-foreground">Lines:</span>
@@ -1291,13 +1306,31 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
             <span
               key={line.id}
               onClick={() => deleteLine(line.id)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-red-500/50 bg-red-50 dark:bg-red-900/20 text-xs cursor-pointer hover-elevate"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-border bg-muted/50 text-xs cursor-pointer hover-elevate"
               data-testid={`line-delete-${line.id}`}
             >
-              <span className="text-red-500 font-mono">${line.price.toFixed(2)}</span>
+              <span className="text-foreground font-mono">${line.price.toFixed(2)}</span>
               <Trash2 className="w-3 h-3 text-muted-foreground" />
             </span>
           ))}
+          {/* Show diff calculation when exactly 2 lines exist */}
+          {lineDefinitions.length === 2 && (() => {
+            const [line1, line2] = lineDefinitions;
+            const dollarDiff = line2.price - line1.price;
+            const percentDiff = (dollarDiff / line1.price) * 100;
+            const isPositive = dollarDiff >= 0;
+            return (
+              <span className={`inline-flex items-center gap-2 px-2 py-1 rounded border text-xs font-mono ${
+                isPositive 
+                  ? 'border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-500 font-bold' 
+                  : 'border-red-500/50 bg-red-50 dark:bg-red-900/20 text-red-500 font-bold'
+              }`}>
+                <span>Dollar Diff: {isPositive ? '+' : ''}{dollarDiff.toFixed(2)}</span>
+                <span>•</span>
+                <span>Pct: {isPositive ? '+' : ''}{percentDiff.toFixed(2)}%</span>
+              </span>
+            );
+          })()}
         </div>
       )}
       
