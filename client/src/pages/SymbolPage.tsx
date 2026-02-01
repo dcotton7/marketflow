@@ -195,7 +195,7 @@ export default function SymbolPage() {
             </div>
           </div>
         )}
-        <div className="flex gap-4 items-stretch">
+        <div className="flex gap-4 items-start">
           <div className="flex-1 min-w-0">
             <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
           </div>
@@ -306,9 +306,12 @@ export default function SymbolPage() {
         {!quote.isETF && quote.relatedStocks && quote.relatedStocks.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Top {quote.industry || quote.sector} Companies</CardTitle>
+              <CardTitle className="text-lg">Top Companies in: {quote.sector || 'Sector'}</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="flex justify-end mb-2">
+                <span className="text-xs text-muted-foreground font-medium">Market Cap</span>
+              </div>
               <div className="space-y-3">
                 {quote.relatedStocks.map((stock) => (
                   <div 

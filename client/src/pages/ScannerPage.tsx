@@ -149,22 +149,55 @@ export default function ScannerPage() {
               )}
 
               {showHTFFilter && (
-                <div className="space-y-2">
-                  <Label>Min Gain % Before Flag</Label>
-                  <Input 
-                    type="text" 
-                    inputMode="decimal"
-                    placeholder="e.g. 30" 
-                    className="bg-background font-mono"
-                    data-testid="input-htf-min-gain"
-                    value={filters.htfMinGainPct ?? ''}
-                    onChange={(e) => setFilters(prev => ({ 
-                      ...prev, 
-                      htfMinGainPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
-                    }))}
-                  />
+                <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/30">
+                  <p className="text-sm font-medium">High Tight Flag Criteria</p>
+                  <div className="space-y-2">
+                    <Label>Timeframe</Label>
+                    <Select 
+                      value={filters.htfTimeframe || "weekly"} 
+                      onValueChange={(val: any) => setFilters(prev => ({ ...prev, htfTimeframe: val }))}
+                    >
+                      <SelectTrigger className="bg-background" data-testid="select-htf-timeframe">
+                        <SelectValue placeholder="Select Timeframe" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Weekly (2-8 bars lift, 2-8 bars PB)</SelectItem>
+                        <SelectItem value="daily">Daily (3-10 bars lift, 2-6 bars PB)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Price Lift % (min)</Label>
+                    <Input 
+                      type="text" 
+                      inputMode="decimal"
+                      placeholder="65" 
+                      className="bg-background font-mono"
+                      data-testid="input-htf-min-gain"
+                      value={filters.htfMinGainPct ?? ''}
+                      onChange={(e) => setFilters(prev => ({ 
+                        ...prev, 
+                        htfMinGainPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Pullback % (max)</Label>
+                    <Input 
+                      type="text" 
+                      inputMode="decimal"
+                      placeholder="8" 
+                      className="bg-background font-mono"
+                      data-testid="input-htf-pullback"
+                      value={filters.htfPullbackPct ?? ''}
+                      onChange={(e) => setFilters(prev => ({ 
+                        ...prev, 
+                        htfPullbackPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
+                      }))}
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Minimum % gain required before the tight flag formation.
+                    Stock must gain at least the lift %, then consolidate within the pullback %.
                   </p>
                 </div>
               )}

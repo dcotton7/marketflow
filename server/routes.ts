@@ -575,36 +575,72 @@ function detectMonthlyTight(candles: Candle[], loose: boolean = false): boolean 
 }
 
 // High Tight Flag: Stock has risen sharply (configurable %) then consolidated tightly
-function detectHighTightFlag(candles: Candle[], minGainPct: number = 30, loose: boolean = false): boolean {
-  if (candles.length < 40) return false;
+// New configurable rules:
+// - timeframe: 'weekly' or 'daily' (affects bar ranges)
+// - minGainPct: minimum price lift % (default 65%)
+// - pullbackPct: maximum pullback % (default 8%)
+// Weekly: Lift within 2-8 bars, pullback within 2-8 bars
+// Daily: Lift within 3-10 bars, pullback within 2-6 bars
+function detectHighTightFlag(
+  candles: Candle[], 
+  timeframe: 'weekly' | 'daily' = 'weekly',
+  minGainPct: number = 65, 
+  pullbackPct: number = 8,
+  loose: boolean = false
+): boolean {
+  // Define bar ranges based on timeframe
+  const liftMinBars = timeframe === 'weekly' ? 2 : 3;
+  const liftMaxBars = timeframe === 'weekly' ? 8 : 10;
+  const pbMinBars = 2;
+  const pbMaxBars = timeframe === 'weekly' ? 8 : 6;
   
-  // Look at last 40 candles: first 25 for the advance, last 15 for the flag
-  const advanceCandles = candles.slice(-40, -15);
-  const flagCandles = candles.slice(-15);
+  const totalBarsNeeded = liftMaxBars + pbMaxBars;
+  if (candles.length < totalBarsNeeded) return false;
   
-  if (advanceCandles.length < 20) return false;
+  // Allow loose mode to expand lift range slightly
+  const effectiveLiftMax = loose ? liftMaxBars + 2 : liftMaxBars;
+  const effectivePbMax = loose ? pbMaxBars + 2 : pbMaxBars;
+  const effectivePullbackPct = loose ? pullbackPct * 1.5 : pullbackPct;
   
-  // Calculate the advance: find the low at start and high at end of advance
-  const advanceLow = Math.min(...advanceCandles.slice(0, 10).map(c => c.low));
-  const advanceHigh = Math.max(...advanceCandles.slice(-10).map(c => c.high));
-  const advanceGainPct = ((advanceHigh - advanceLow) / advanceLow) * 100;
+  // Try different lift period lengths to find a valid HTF pattern
+  for (let liftLen = liftMinBars; liftLen <= effectiveLiftMax; liftLen++) {
+    for (let pbLen = pbMinBars; pbLen <= effectivePbMax; pbLen++) {
+      const totalLen = liftLen + pbLen;
+      if (candles.length < totalLen) continue;
+      
+      // Get the lift candles and pullback candles
+      const liftCandles = candles.slice(-(totalLen), -(pbLen));
+      const pbCandles = candles.slice(-(pbLen));
+      
+      if (liftCandles.length < liftMinBars) continue;
+      
+      // Calculate the lift: low at start, high at end
+      const liftLow = Math.min(...liftCandles.map(c => c.low));
+      const liftHigh = Math.max(...liftCandles.map(c => c.high));
+      const liftGainPct = ((liftHigh - liftLow) / liftLow) * 100;
+      
+      // Check if lift meets minimum gain threshold
+      if (liftGainPct < minGainPct) continue;
+      
+      // Calculate pullback from the high
+      const pbLow = Math.min(...pbCandles.map(c => c.low));
+      const pbHigh = Math.max(...pbCandles.map(c => c.high));
+      const actualPullbackPct = ((liftHigh - pbLow) / liftHigh) * 100;
+      
+      // Check if pullback is within threshold (tight consolidation)
+      if (actualPullbackPct > effectivePullbackPct) continue;
+      
+      // Current price should be near highs (not breaking down)
+      const currentClose = pbCandles[pbCandles.length - 1].close;
+      const nearHighs = currentClose >= liftHigh * 0.92; // Within 8% of lift high
+      
+      if (nearHighs) {
+        return true;
+      }
+    }
+  }
   
-  if (advanceGainPct < minGainPct) return false;
-  
-  // Flag should be tight: price range < 10% (tight) or < 15% (loose)
-  const flagHigh = Math.max(...flagCandles.map(c => c.high));
-  const flagLow = Math.min(...flagCandles.map(c => c.low));
-  const avgFlagPrice = flagCandles.reduce((sum, c) => sum + c.close, 0) / flagCandles.length;
-  const flagRangePct = ((flagHigh - flagLow) / avgFlagPrice) * 100;
-  
-  const flagThreshold = loose ? 15 : 10;
-  if (flagRangePct > flagThreshold) return false;
-  
-  // Flag should be near the highs (not breaking down)
-  const currentClose = flagCandles[flagCandles.length - 1].close;
-  const nearHighs = currentClose >= advanceHigh * 0.85; // Within 15% of advance high
-  
-  return nearHighs;
+  return false;
 }
 
 // Cup and Handle: U-shaped price pattern followed by a small pullback (handle)
@@ -707,7 +743,9 @@ function detectChartPattern(
   candles: Candle[], 
   pattern: string, 
   strictness: string = 'tight',
+  htfTimeframe?: 'weekly' | 'daily',
   htfMinGainPct?: number,
+  htfPullbackPct?: number,
   pbMinGainPct?: number,
   pbUpPeriodCandles?: number,
   pbMinCandles?: number,
@@ -730,9 +768,11 @@ function detectChartPattern(
       if (useLoose && detectMonthlyTight(candles, true)) return true;
       return false;
     case 'High Tight Flag':
-      const htfGain = htfMinGainPct || 30;
-      if (useTight && detectHighTightFlag(candles, htfGain, false)) return true;
-      if (useLoose && detectHighTightFlag(candles, htfGain, true)) return true;
+      const htfTf = htfTimeframe || 'weekly';
+      const htfGain = htfMinGainPct || 65;
+      const htfPb = htfPullbackPct || 8;
+      if (useTight && detectHighTightFlag(candles, htfTf, htfGain, htfPb, false)) return true;
+      if (useLoose && detectHighTightFlag(candles, htfTf, htfGain, htfPb, true)) return true;
       return false;
     case 'Cup and Handle':
       if (useTight && detectCupAndHandle(candles, false)) return true;
@@ -1095,7 +1135,9 @@ export async function registerRoutes(
                 candles, 
                 input.chartPattern!, 
                 strictness,
+                input.htfTimeframe as 'weekly' | 'daily' | undefined,
                 input.htfMinGainPct,
+                input.htfPullbackPct,
                 input.pbMinGainPct,
                 input.pbUpPeriodCandles,
                 input.pbMinCandles,

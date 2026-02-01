@@ -419,7 +419,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     sma5Series.setData(sma5Data);
 
     const sma20Series = chart.addSeries(LineSeries, {
-      color: '#ec4899',
+      color: 'rgba(236, 72, 153, 0.7)',
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -432,7 +432,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
 
     const sma50Series = chart.addSeries(LineSeries, {
       color: '#dc2626',
-      lineWidth: 1,
+      lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
     });
@@ -770,26 +770,26 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         <div>
           <h3 className="font-semibold text-foreground mb-2">Price History</h3>
           <div className="flex gap-4 items-center flex-wrap">
-            <div className="flex gap-3 text-xs">
+            <div className="flex gap-3 text-xs bg-white/90 dark:bg-white/10 px-2 py-1 rounded">
               <span className="flex items-center gap-1">
                 <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                <span className="text-muted-foreground">SMA 5</span>
+                <span className="text-gray-700 dark:text-gray-300">SMA 5</span>
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
-                <span className="text-muted-foreground">SMA 20</span>
+                <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: 'rgba(236, 72, 153, 0.7)' }}></span>
+                <span className="text-gray-700 dark:text-gray-300">SMA 20</span>
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
-                <span className="text-muted-foreground">SMA 50</span>
+                <span className="w-3 h-1 bg-red-600 inline-block"></span>
+                <span className="text-gray-700 dark:text-gray-300">SMA 50</span>
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
-                <span className="text-muted-foreground">SMA 200</span>
+                <span className="w-3 h-0.5 bg-black inline-block"></span>
+                <span className="text-gray-700 dark:text-gray-300">SMA 200</span>
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-6 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
-                <span className="text-muted-foreground">VWAP</span>
+                <span className="text-gray-700 dark:text-gray-300">VWAP</span>
               </span>
             </div>
           </div>
