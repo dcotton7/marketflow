@@ -2,22 +2,24 @@
 
 export interface CupAndHandleResult {
   detected: boolean;
+  cupOnly?: boolean; // True when right rim extended past left rim threshold
   // Visualization data (only present if detected)
-  cupStartIdx?: number;
-  cupStartTime?: number;
-  lipLevel?: number;
+  leftPeakIdx?: number;
+  leftPeakTime?: number;
+  leftPeakPrice?: number;
   cupBottomIdx?: number;
   cupBottomTime?: number;
   cupBottomPrice?: number;
-  cupRightIdx?: number;
-  cupRightTime?: number;
+  rightRimIdx?: number;
+  rightRimTime?: number;
+  rightRimPrice?: number;
   handleStartIdx?: number;
   handleStartTime?: number;
   handleEndIdx?: number;
   handleEndTime?: number;
-  handleHigh?: number;
-  handleLow?: number;
+  handleLows?: { time: number; price: number }[]; // Actual candle lows for handle
   completionPct?: number;
+  extensionPct?: number; // How much right rim exceeds left peak (%)
 }
 
 export interface Candle {
@@ -30,11 +32,25 @@ export interface Candle {
 }
 
 /**
- * Detect Cup and Handle pattern with consistent algorithm
- * Used by both scanner (for filtering) and chart (for visualization)
+ * Detect Cup and Handle pattern with correct visualization logic
+ * 
+ * Cup Shape:
+ * - Left Peak: The highest high before the decline begins
+ * - Cup Bottom: The lowest low in the formation
+ * - Right Rim: Where price recovers before handle pullback
+ * 
+ * Handle:
+ * - Follows actual candle LOWS from right rim, sloping down
+ * 
+ * Strictness Filter:
+ * - Tight: Shows cups up to 6% extended above left peak
+ * - Loose: Shows cups up to 11% extended above left peak
+ * 
+ * Cup Only:
+ * - When right rim exceeds left peak by threshold, show "Cup Only" instead of %
  * 
  * @param candles - Array of OHLCV candles
- * @param loose - Whether to use relaxed thresholds
+ * @param loose - Whether to use relaxed thresholds (affects extension limit)
  * @returns Detection result with visualization metadata if pattern found
  */
 export function detectCupAndHandle(candles: Candle[], loose: boolean = false): CupAndHandleResult {
@@ -42,119 +58,159 @@ export function detectCupAndHandle(candles: Candle[], loose: boolean = false): C
     return { detected: false };
   }
 
+  // Extension threshold: Tight = 6%, Loose = 11%
+  const maxExtensionPct = loose ? 11 : 6;
+
   // Try multiple lookback windows to find the best pattern
-  const lookbackOptions = [60, 90, 120, 45];
+  const lookbackOptions = [60, 90, 120, 45, 150];
   
   for (const lookbackSize of lookbackOptions) {
     const lookback = Math.min(lookbackSize, candles.length);
     const recentCandles = candles.slice(-lookback);
     
-    // Find potential cup boundaries
-    // Left lip: find highest point in first 40% of data
-    const leftPortion = Math.floor(lookback * 0.4);
+    // Step 1: Find the LEFT PEAK - highest high in first 50% of data
+    // This is where the cup starts (top left of the cup)
+    const leftPortion = Math.floor(lookback * 0.5);
     const leftSection = recentCandles.slice(0, leftPortion);
-    const leftHighIdx = leftSection.reduce((maxIdx, c, idx, arr) => 
+    const leftPeakIdxInSection = leftSection.reduce((maxIdx, c, idx, arr) => 
       c.high > arr[maxIdx].high ? idx : maxIdx, 0);
-    const leftHigh = leftSection[leftHighIdx].high;
+    const leftPeakPrice = leftSection[leftPeakIdxInSection].high;
+    const leftPeakIdx = leftPeakIdxInSection;
     
-    // Find the cup bottom: lowest point between left lip and last 10 candles
-    const middleStart = Math.max(leftHighIdx + 3, 0);
-    const middleEnd = Math.max(lookback - 10, middleStart + 5);
-    const middleSection = recentCandles.slice(middleStart, middleEnd);
-    if (middleSection.length < 5) continue;
+    // Step 2: Find the CUP BOTTOM - lowest low after left peak
+    const bottomSearchStart = leftPeakIdx + 2;
+    const bottomSearchEnd = lookback - 5; // Leave room for handle
+    if (bottomSearchEnd <= bottomSearchStart + 3) continue;
     
-    const cupLowIdxInMiddle = middleSection.reduce((minIdx, c, idx, arr) => 
+    const bottomSection = recentCandles.slice(bottomSearchStart, bottomSearchEnd);
+    if (bottomSection.length < 5) continue;
+    
+    const cupBottomIdxInSection = bottomSection.reduce((minIdx, c, idx, arr) => 
       c.low < arr[minIdx].low ? idx : minIdx, 0);
-    const cupLow = middleSection[cupLowIdxInMiddle].low;
-    const cupLowIdx = middleStart + cupLowIdxInMiddle;
+    const cupBottomPrice = bottomSection[cupBottomIdxInSection].low;
+    const cupBottomIdx = bottomSearchStart + cupBottomIdxInSection;
     
-    // Right lip: highest point after cup bottom
-    const rightStart = cupLowIdx + 1;
-    const rightEnd = lookback - 3;
-    if (rightEnd <= rightStart) continue;
-    const rightSection = recentCandles.slice(rightStart, rightEnd);
+    // Step 3: Find the RIGHT RIM - highest high after cup bottom (before handle)
+    // The right rim is where the price recovers before the handle pullback
+    const rightSearchStart = cupBottomIdx + 3;
+    const rightSearchEnd = lookback - 3;
+    if (rightSearchEnd <= rightSearchStart) continue;
+    
+    const rightSection = recentCandles.slice(rightSearchStart, rightSearchEnd);
     if (rightSection.length < 3) continue;
     
-    const rightHighIdxInSection = rightSection.reduce((maxIdx, c, idx, arr) =>
+    const rightRimIdxInSection = rightSection.reduce((maxIdx, c, idx, arr) =>
       c.high > arr[maxIdx].high ? idx : maxIdx, 0);
-    const rightHigh = rightSection[rightHighIdxInSection].high;
-    const cupRightIdx = rightStart + rightHighIdxInSection;
+    const rightRimPrice = rightSection[rightRimIdxInSection].high;
+    const rightRimIdx = rightSearchStart + rightRimIdxInSection;
     
-    // Cup depth: should be 10-50% (tight) or 8-60% (loose)
-    const cupDepthPct = ((leftHigh - cupLow) / leftHigh) * 100;
+    // Step 4: Validate cup shape
     
-    const minDepth = loose ? 8 : 10;
+    // Cup depth: should be 12-50% (tight) or 10-60% (loose)
+    const cupDepthPct = ((leftPeakPrice - cupBottomPrice) / leftPeakPrice) * 100;
+    const minDepth = loose ? 10 : 12;
     const maxDepth = loose ? 60 : 50;
-    
     if (cupDepthPct < minDepth || cupDepthPct > maxDepth) continue;
     
-    // Cup should be U-shaped: check that there are multiple candles near the bottom
-    const bottomThreshold = cupLow * (loose ? 1.10 : 1.08);
-    const candlesNearBottom = middleSection.filter(c => c.low <= bottomThreshold).length;
-    const minBottomCandles = loose ? 2 : 3;
-    if (candlesNearBottom < minBottomCandles) continue;
+    // Cup should be U-shaped: check that bottom is roughly centered
+    const leftToBottom = cupBottomIdx - leftPeakIdx;
+    const bottomToRight = rightRimIdx - cupBottomIdx;
+    const symmetryRatio = Math.min(leftToBottom, bottomToRight) / Math.max(leftToBottom, bottomToRight);
+    const minSymmetry = loose ? 0.25 : 0.3; // Cup doesn't need to be perfectly symmetric
+    if (symmetryRatio < minSymmetry) continue;
     
-    // Right side should recover to near left high (symmetry check)
-    const symmetryThreshold = loose ? 0.80 : 0.85;
-    if (rightHigh < leftHigh * symmetryThreshold) continue;
+    // Minimum cup width: at least 15 bars
+    const cupWidth = rightRimIdx - leftPeakIdx;
+    if (cupWidth < 15) continue;
     
-    // Minimum pattern duration: from cup bottom to current must be at least 10 bars
-    const barsFromCupBottom = lookback - cupLowIdx;
-    if (barsFromCupBottom < 10) continue;
+    // Step 5: Calculate extension - how much right rim exceeds left peak
+    const extensionPct = ((rightRimPrice - leftPeakPrice) / leftPeakPrice) * 100;
     
-    // Handle: small pullback from right high (last 3-15 candles)
-    const handleCandles = recentCandles.slice(-15);
-    const handleHigh = Math.max(...handleCandles.map(c => c.high));
-    const handleLow = Math.min(...handleCandles.map(c => c.low));
-    const handleDepthPct = ((handleHigh - handleLow) / handleHigh) * 100;
+    // Filter by extension based on strictness
+    // If right rim is below left peak, extension is negative (forming cup)
+    // If right rim exceeds left peak by more than threshold, skip
+    if (extensionPct > maxExtensionPct) continue;
     
-    // Handle should be shallow: < 15% (tight) or < 25% (loose)
-    const handleThreshold = loose ? 25 : 15;
-    if (handleDepthPct > handleThreshold) continue;
+    // Determine if this is "Cup Only" (right rim exceeded left peak)
+    const cupOnly = extensionPct >= 5; // 5% or more = Cup Only
     
-    // Current price should be in upper portion of handle
+    // Step 6: Handle detection - look at candles after right rim
+    const handleStartIdx = rightRimIdx + 1;
+    const handleEndIdx = lookback - 1;
+    
+    if (handleEndIdx <= handleStartIdx) continue;
+    
+    const handleCandles = recentCandles.slice(handleStartIdx, handleEndIdx + 1);
+    if (handleCandles.length < 2) continue;
+    
+    // Collect actual candle lows for handle visualization
+    const handleLows: { time: number; price: number }[] = handleCandles.map((c, idx) => ({
+      time: new Date(c.date).getTime() / 1000,
+      price: c.low
+    }));
+    
+    // Handle should be a pullback - highest low shouldn't exceed right rim too much
+    const handleHighestHigh = Math.max(...handleCandles.map(c => c.high));
+    const handleLowestLow = Math.min(...handleCandles.map(c => c.low));
+    
+    // Handle shouldn't exceed right rim significantly
+    if (handleHighestHigh > rightRimPrice * 1.03) continue; // Max 3% above right rim
+    
+    // Handle depth: should be shallow (< 15% tight, < 20% loose from right rim)
+    const handleDepthPct = ((rightRimPrice - handleLowestLow) / rightRimPrice) * 100;
+    const maxHandleDepth = loose ? 20 : 15;
+    if (handleDepthPct > maxHandleDepth) continue;
+    
+    // Current price should be recovering (in upper portion of handle)
     const currentClose = recentCandles[recentCandles.length - 1].close;
-    const handleThird = handleLow + (handleHigh - handleLow) * (loose ? 0.33 : 0.5);
-    const inUpperHandle = currentClose >= handleThird;
+    const handleRange = rightRimPrice - handleLowestLow;
+    const currentRecovery = (currentClose - handleLowestLow) / handleRange;
+    if (currentRecovery < 0.3) continue; // Should be at least 30% recovered
     
-    if (!inUpperHandle) continue;
-    
-    // Volume check (skip in loose mode)
-    if (!loose) {
-      const handleAvgVol = handleCandles.reduce((sum, c) => sum + c.volume, 0) / handleCandles.length;
-      const cupAvgVol = middleSection.reduce((sum, c) => sum + c.volume, 0) / middleSection.length;
-      const volumeContracted = handleAvgVol <= cupAvgVol * 1.3;
-      if (!volumeContracted) continue;
+    // Step 7: Calculate completion percentage
+    // Based on how close current price is to breaking out above right rim
+    let completionPct: number;
+    if (cupOnly) {
+      completionPct = 100; // Cup is complete, no handle expected
+    } else if (currentClose >= rightRimPrice) {
+      completionPct = 100; // Breakout achieved
+    } else {
+      // Calculate based on position in cup formation
+      const totalRange = rightRimPrice - cupBottomPrice;
+      const recovered = currentClose - cupBottomPrice;
+      completionPct = totalRange > 0 
+        ? Math.min(99, Math.max(0, Math.round((recovered / totalRange) * 100)))
+        : 0;
+      
+      // If we're past the right rim time but haven't broken out, we're in handle
+      if (handleCandles.length > 0) {
+        // In handle phase - scale from 85-99%
+        completionPct = Math.max(85, completionPct);
+      }
     }
-    
-    // Calculate completion percentage
-    const lipLevel = Math.max(leftHigh, rightHigh);
-    const totalRange = lipLevel - cupLow;
-    const recovered = currentClose - cupLow;
-    const completionPct = totalRange > 0 
-      ? Math.min(100, Math.max(0, Math.round((recovered / totalRange) * 100)))
-      : 0;
     
     // Pattern detected! Return with visualization data
     const dataStartIdx = candles.length - lookback;
     
     return {
       detected: true,
-      cupStartIdx: dataStartIdx,
-      cupStartTime: new Date(recentCandles[0].date).getTime() / 1000,
-      lipLevel,
-      cupBottomIdx: dataStartIdx + cupLowIdx,
-      cupBottomTime: new Date(recentCandles[cupLowIdx].date).getTime() / 1000,
-      cupBottomPrice: cupLow,
-      cupRightIdx: dataStartIdx + cupRightIdx,
-      cupRightTime: new Date(recentCandles[cupRightIdx].date).getTime() / 1000,
-      handleStartIdx: dataStartIdx + lookback - 15,
-      handleStartTime: new Date(handleCandles[0].date).getTime() / 1000,
-      handleEndIdx: dataStartIdx + lookback - 1,
-      handleEndTime: new Date(handleCandles[handleCandles.length - 1].date).getTime() / 1000,
-      handleHigh,
-      handleLow,
-      completionPct
+      cupOnly,
+      leftPeakIdx: dataStartIdx + leftPeakIdx,
+      leftPeakTime: new Date(recentCandles[leftPeakIdx].date).getTime() / 1000,
+      leftPeakPrice,
+      cupBottomIdx: dataStartIdx + cupBottomIdx,
+      cupBottomTime: new Date(recentCandles[cupBottomIdx].date).getTime() / 1000,
+      cupBottomPrice,
+      rightRimIdx: dataStartIdx + rightRimIdx,
+      rightRimTime: new Date(recentCandles[rightRimIdx].date).getTime() / 1000,
+      rightRimPrice,
+      handleStartIdx: dataStartIdx + handleStartIdx,
+      handleStartTime: new Date(recentCandles[handleStartIdx].date).getTime() / 1000,
+      handleEndIdx: dataStartIdx + handleEndIdx,
+      handleEndTime: new Date(recentCandles[handleEndIdx].date).getTime() / 1000,
+      handleLows,
+      completionPct,
+      extensionPct
     };
   }
   

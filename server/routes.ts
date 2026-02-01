@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { initializeDatabase, isDatabaseAvailable } from "./db";
 import { api } from "@shared/routes";
 import { z } from "zod";
+import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } from "@shared/patternDetection";
 
 // Dynamic import to handle ESM/CJS compatibility
 let yahooFinance: any = null;
@@ -737,130 +738,42 @@ function detectHighTightFlag(
   return false;
 }
 
-// Cup and Handle completion percentage calculation
-function calculateCupAndHandleCompletion(candles: Candle[]): number | null {
-  if (candles.length < 40) return null;
-  
-  const lookback = Math.min(candles.length, 130);
-  const recentCandles = candles.slice(-lookback);
-  
-  // Find left lip (highest point in first 40%)
-  const leftPortion = Math.floor(lookback * 0.4);
-  const leftSection = recentCandles.slice(0, leftPortion);
-  const leftHighIdx = leftSection.reduce((maxIdx, c, idx, arr) => 
-    c.high > arr[maxIdx].high ? idx : maxIdx, 0);
-  const leftHigh = leftSection[leftHighIdx].high;
-  
-  // Find cup bottom
-  const middleStart = Math.max(leftHighIdx + 3, 0);
-  const middleEnd = Math.max(lookback - 10, middleStart + 5);
-  const middleSection = recentCandles.slice(middleStart, middleEnd);
-  if (middleSection.length < 5) return null;
-  
-  const cupLowIdx = middleSection.reduce((minIdx, c, idx, arr) => 
-    c.low < arr[minIdx].low ? idx : minIdx, 0);
-  const cupLow = middleSection[cupLowIdx].low;
-  
-  // Current price
-  const currentClose = recentCandles[recentCandles.length - 1].close;
-  
-  // Completion = how much of the cup has been recovered (from bottom to lip)
-  // 0% = at cup bottom, 100% = at left lip level
-  const totalRange = leftHigh - cupLow;
-  if (totalRange <= 0) return null;
-  
-  const recovered = currentClose - cupLow;
-  const completion = Math.min(100, Math.max(0, (recovered / totalRange) * 100));
-  
-  return Math.round(completion);
+// Cup and Handle detection using shared module
+// Returns completion percentage, cupOnly flag, and detection status
+interface CupAndHandleDetectionResult {
+  detected: boolean;
+  completionPct: number | null;
+  cupOnly: boolean;
+  extensionPct: number;
 }
 
-// Cup and Handle: U-shaped price pattern followed by a small pullback (handle)
-function detectCupAndHandle(candles: Candle[], loose: boolean = false): boolean {
-  if (candles.length < 40) return false;
+function detectCupAndHandleWithDetails(candles: Candle[], loose: boolean = false): CupAndHandleDetectionResult {
+  // Use shared detection algorithm with proper strictness filtering
+  // Tight: shows cups up to 6% extended above left peak
+  // Loose: shows cups up to 11% extended above left peak
+  const result = sharedDetectCupAndHandle(candles, loose);
   
-  // Look at last 40-130 candles for cup formation
-  const lookback = Math.min(candles.length, 130);
-  const recentCandles = candles.slice(-lookback);
-  
-  // Find potential cup boundaries by looking for distinct highs and lows
-  // Left lip: find highest point in first 40% of data
-  const leftPortion = Math.floor(lookback * 0.4);
-  const leftSection = recentCandles.slice(0, leftPortion);
-  const leftHighIdx = leftSection.reduce((maxIdx, c, idx, arr) => 
-    c.high > arr[maxIdx].high ? idx : maxIdx, 0);
-  const leftHigh = leftSection[leftHighIdx].high;
-  
-  // Find the cup bottom: lowest point between left lip and last 10 candles
-  const middleStart = Math.max(leftHighIdx + 3, 0);
-  const middleEnd = Math.max(lookback - 10, middleStart + 5);
-  const middleSection = recentCandles.slice(middleStart, middleEnd);
-  if (middleSection.length < 5) return false;
-  
-  const cupLowIdx = middleSection.reduce((minIdx, c, idx, arr) => 
-    c.low < arr[minIdx].low ? idx : minIdx, 0);
-  const cupLow = middleSection[cupLowIdx].low;
-  
-  // Right lip: highest point after cup bottom
-  const rightStart = middleStart + cupLowIdx + 1;
-  const rightEnd = lookback - 3;
-  if (rightEnd <= rightStart) return false;
-  const rightSection = recentCandles.slice(rightStart, rightEnd);
-  if (rightSection.length < 3) return false;
-  const rightHigh = Math.max(...rightSection.map(c => c.high));
-  
-  // Cup depth: should be 10-50% (tight) or 8-60% (loose)
-  const cupDepthPct = ((leftHigh - cupLow) / leftHigh) * 100;
-  
-  const minDepth = loose ? 8 : 10;
-  const maxDepth = loose ? 60 : 50;
-  
-  if (cupDepthPct < minDepth || cupDepthPct > maxDepth) return false;
-  
-  // Cup should be U-shaped (relaxed in loose mode)
-  // Check that there are multiple candles near the bottom (within 8% of low)
-  const bottomThreshold = cupLow * (loose ? 1.10 : 1.08);
-  const candlesNearBottom = middleSection.filter(c => c.low <= bottomThreshold).length;
-  const minBottomCandles = loose ? 2 : 3;
-  if (candlesNearBottom < minBottomCandles) return false;
-  
-  // Right side should recover to near left high (relaxed symmetry)
-  const symmetryThreshold = loose ? 0.80 : 0.85;
-  if (rightHigh < leftHigh * symmetryThreshold) return false;
-  
-  // Minimum pattern duration: from cup bottom to current position must be at least 10 bars
-  // This ensures Cup and Handle patterns have adequate cup + handle formation time
-  // The cup bottom index is relative to middleSection, so actual index is middleStart + cupLowIdx
-  const actualCupBottomIdx = middleStart + cupLowIdx;
-  const barsFromCupBottom = lookback - actualCupBottomIdx;
-  if (barsFromCupBottom < 10) return false;
-  
-  // Handle: small pullback from right high (last 3-15 candles)
-  const handleCandles = recentCandles.slice(-15);
-  const handleHigh = Math.max(...handleCandles.map(c => c.high));
-  const handleLow = Math.min(...handleCandles.map(c => c.low));
-  const handleDepthPct = ((handleHigh - handleLow) / handleHigh) * 100;
-  
-  // Handle should be shallow: < 15% (tight) or < 25% (loose)
-  const handleThreshold = loose ? 25 : 15;
-  if (handleDepthPct > handleThreshold) return false;
-  
-  // Current price should be in upper portion of handle (relaxed in loose)
-  const currentClose = recentCandles[recentCandles.length - 1].close;
-  const handleThird = handleLow + (handleHigh - handleLow) * (loose ? 0.33 : 0.5);
-  const inUpperHandle = currentClose >= handleThird;
-  
-  // Skip volume check in loose mode
-  if (loose) {
-    return inUpperHandle;
+  if (!result.detected) {
+    return { detected: false, completionPct: null, cupOnly: false, extensionPct: 0 };
   }
   
-  // Volume should decrease in handle compared to cup formation
-  const handleAvgVol = handleCandles.reduce((sum, c) => sum + c.volume, 0) / handleCandles.length;
-  const cupAvgVol = middleSection.reduce((sum, c) => sum + c.volume, 0) / middleSection.length;
-  const volumeContracted = handleAvgVol <= cupAvgVol * 1.3;
-  
-  return inUpperHandle && volumeContracted;
+  return {
+    detected: true,
+    completionPct: result.completionPct ?? null,
+    cupOnly: result.cupOnly ?? false,
+    extensionPct: result.extensionPct ?? 0
+  };
+}
+
+// Wrapper for backward compatibility - just returns detection boolean
+function detectCupAndHandle(candles: Candle[], loose: boolean = false): boolean {
+  return detectCupAndHandleWithDetails(candles, loose).detected;
+}
+
+// Cup and Handle completion percentage calculation
+function calculateCupAndHandleCompletion(candles: Candle[]): { pct: number | null; cupOnly: boolean } {
+  const result = detectCupAndHandleWithDetails(candles, true); // Use loose for completion calc
+  return { pct: result.completionPct, cupOnly: result.cupOnly };
 }
 
 // Pullback to Moving Average: Stock that had a gain then pulled back to MA
@@ -1496,6 +1409,7 @@ export async function registerRoutes(
           let matchedPattern: string | undefined = undefined;
           let channelHeightPct: number | undefined = undefined;
           let completionPct: number | undefined = undefined;
+          let isCupOnly: boolean = false;
           
           const hasChartFilter = input.chartPattern && input.chartPattern !== 'All';
           const hasTechnicalSignal = input.technicalSignal && input.technicalSignal !== 'none';
@@ -1568,7 +1482,9 @@ export async function registerRoutes(
               
               // Calculate completion percentage for Cup and Handle
               if (input.chartPattern === 'Cup and Handle') {
-                completionPct = calculateCupAndHandleCompletion(candles) ?? undefined;
+                const cupResult = calculateCupAndHandleCompletion(candles);
+                completionPct = cupResult.pct ?? undefined;
+                isCupOnly = cupResult.cupOnly;
               }
             }
             
@@ -1601,7 +1517,8 @@ export async function registerRoutes(
             matchedPattern,
             sector: 'Technology',
             channelHeightPct,
-            completionPct
+            completionPct,
+            cupOnly: isCupOnly
           });
 
         } catch (err) {

@@ -9,8 +9,10 @@ import {
   YAxis,
   ResponsiveContainer,
   Cell,
-  ReferenceArea
+  ReferenceArea,
+  ReferenceLine
 } from "recharts";
+import { detectCupAndHandle } from "@shared/patternDetection";
 
 interface MiniChartProps {
   symbol: string;
@@ -178,7 +180,8 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
   const isRide21EMA = technicalSignal === 'ride_21_ema';
   const isPullback = technicalSignal?.startsWith('pullback_');
   const isMonthlyTight = chartPattern === 'Monthly Tight';
-  const isPatternWithSMA21 = ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(chartPattern || '');
+  const isCupAndHandle = chartPattern === 'Cup and Handle';
+  const isPatternWithSMA21 = ['VCP', 'Weekly Tight', 'High Tight Flag'].includes(chartPattern || '');
   
   let displayDays = 90;
   let patternTimeframe = 'all';
@@ -190,6 +193,9 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
   } else if (isMonthlyTight) {
     displayDays = 120;
     patternTimeframe = '60D';
+  } else if (isCupAndHandle) {
+    displayDays = 130; // Show 6 months for cup and handle
+    patternTimeframe = 'none'; // No channel overlay
   } else if (timeframe === '20D') {
     displayDays = 60;
     patternTimeframe = '20D';
@@ -202,7 +208,75 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
   }
 
   const slicedHistory = history.slice(-displayDays);
-  const channels = (is620Cross || isRide21EMA || isPullback) ? [] : detectConsolidationChannels(slicedHistory, patternTimeframe);
+  
+  // No channels for Cup and Handle - we draw the cup arc instead
+  const channels = (is620Cross || isRide21EMA || isPullback || isCupAndHandle) ? [] : detectConsolidationChannels(slicedHistory, patternTimeframe);
+  
+  // Detect cup and handle pattern for thumbnail visualization
+  let cupArcData: { date: string; cupArc: number | null }[] = [];
+  let handleLineData: { date: string; handleLine: number | null }[] = [];
+  
+  if (isCupAndHandle && slicedHistory.length > 30) {
+    const cupResult = detectCupAndHandle(slicedHistory, true);
+    if (cupResult.detected && 
+        cupResult.leftPeakIdx !== undefined && 
+        cupResult.cupBottomIdx !== undefined && 
+        cupResult.rightRimIdx !== undefined &&
+        cupResult.leftPeakPrice !== undefined &&
+        cupResult.cupBottomPrice !== undefined &&
+        cupResult.rightRimPrice !== undefined) {
+      
+      // Use indices directly from detection result
+      // Since we sliced the history, the indices are relative to the full candle array
+      // We need to adjust for sliced data - detection indices are relative to slicedHistory
+      const leftIdx = cupResult.leftPeakIdx;
+      const bottomIdx = cupResult.cupBottomIdx;
+      const rightIdx = cupResult.rightRimIdx;
+      
+      // Validate indices are within slicedHistory bounds
+      if (leftIdx >= 0 && bottomIdx > leftIdx && rightIdx > bottomIdx && rightIdx < slicedHistory.length) {
+        // Calculate arc values for each data point
+        cupArcData = slicedHistory.map((candle, idx) => {
+          if (idx < leftIdx || idx > rightIdx) {
+            return { date: candle.date, cupArc: null };
+          }
+          
+          // Interpolate the cup arc
+          const cupDuration = rightIdx - leftIdx;
+          const bottomOffset = bottomIdx - leftIdx;
+          const t = (idx - leftIdx) / cupDuration; // 0 to 1
+          const bottomFraction = bottomOffset / cupDuration;
+          
+          let arcValue: number;
+          if (t <= bottomFraction) {
+            // Left side of cup
+            const leftT = t / bottomFraction;
+            arcValue = cupResult.leftPeakPrice! - (cupResult.leftPeakPrice! - cupResult.cupBottomPrice!) * Math.pow(leftT, 0.8);
+          } else {
+            // Right side of cup
+            const rightT = (t - bottomFraction) / (1 - bottomFraction);
+            arcValue = cupResult.cupBottomPrice! + (cupResult.rightRimPrice! - cupResult.cupBottomPrice!) * Math.pow(rightT, 0.8);
+          }
+          
+          return { date: candle.date, cupArc: arcValue };
+        });
+        
+        // Generate handle line data (follows candle lows after right rim)
+        // Only draw handle if we have handle data and it's not a "Cup Only" pattern
+        if (!cupResult.cupOnly) {
+          const handleStartIdx = cupResult.handleStartIdx !== undefined ? cupResult.handleStartIdx : rightIdx + 1;
+          
+          handleLineData = slicedHistory.map((candle, idx) => {
+            if (idx <= rightIdx || idx < handleStartIdx) {
+              return { date: candle.date, handleLine: null };
+            }
+            // Use actual candle low for handle line
+            return { date: candle.date, handleLine: candle.low };
+          });
+        }
+      }
+    }
+  }
   
   // Calculate indicators based on signal type
   // Thumbnail indicators per spreadsheet:
@@ -252,7 +326,15 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
       baseData.ema21 = ema21Values[index];
     } else if (isMonthlyTight) {
       baseData.sma3Month = sma3MonthValues[index];
-    } else {
+    } else if (isCupAndHandle) {
+      // Add cup arc and handle line data
+      if (cupArcData[index]) {
+        baseData.cupArc = cupArcData[index].cupArc;
+      }
+      if (handleLineData[index]) {
+        baseData.handleLine = handleLineData[index].handleLine;
+      }
+    } else if (isPatternWithSMA21) {
       baseData.sma21 = sma21Values[index];
     }
     
@@ -371,8 +453,32 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
               />
             )}
             
-            {/* Default: SMA 21 for pullbacks, patterns (VCP, Weekly Tight, High Tight Flag, Cup Handle) */}
-            {!is620Cross && !isRide21EMA && !isMonthlyTight && (
+            {/* Cup and Handle: Draw cup arc and handle line in bright blue */}
+            {isCupAndHandle && (
+              <>
+                <Line
+                  type="monotone"
+                  dataKey="cupArc"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="handleLine"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              </>
+            )}
+            
+            {/* Default: SMA 21 for pullbacks, patterns (VCP, Weekly Tight, High Tight Flag) */}
+            {!is620Cross && !isRide21EMA && !isMonthlyTight && !isCupAndHandle && isPatternWithSMA21 && (
               <Line
                 type="monotone"
                 dataKey="sma21"

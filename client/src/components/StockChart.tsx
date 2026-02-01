@@ -318,41 +318,55 @@ function detectHighTightFlag(
 }
 
 // Cup and Handle detection using shared module
+// New interface matches the corrected pattern spec:
+// - Cup starts at left peak (highest high before decline)
+// - Cup arcs down to bottom (lowest low)
+// - Cup arcs up to right rim (where handle pullback starts)
+// - Handle follows candle LOWS
 interface CupAndHandleData {
-  cupStart: number;
-  lipLevel: number;
+  leftPeakTime: number;
+  leftPeakPrice: number;
   cupBottomTime: number;
   cupBottomPrice: number;
-  cupRightTime: number;
-  handleStart: number;
-  handleEnd: number;
-  handleHigh: number;
-  handleLow: number;
+  rightRimTime: number;
+  rightRimPrice: number;
+  handleStartTime: number;
+  handleEndTime: number;
+  handleLows: { time: number; price: number }[];
+  cupOnly: boolean;
+  completionPct: number;
+  extensionPct: number;
 }
 
-function detectCupAndHandle(
-  data: { date: string; open: number; high: number; low: number; close: number; volume: number }[]
+function detectCupAndHandleForChart(
+  data: { date: string; open: number; high: number; low: number; close: number; volume: number }[],
+  loose: boolean = true
 ): CupAndHandleData | null {
-  // Use shared detection algorithm (try loose mode for better coverage)
-  const result = sharedDetectCupAndHandle(data, true);
+  // Use shared detection algorithm
+  const result = sharedDetectCupAndHandle(data, loose);
   
-  if (!result.detected || !result.cupStartTime || !result.lipLevel || 
-      !result.cupBottomTime || !result.cupBottomPrice || !result.cupRightTime ||
+  if (!result.detected || 
+      !result.leftPeakTime || result.leftPeakPrice === undefined ||
+      !result.cupBottomTime || result.cupBottomPrice === undefined ||
+      !result.rightRimTime || result.rightRimPrice === undefined ||
       !result.handleStartTime || !result.handleEndTime || 
-      result.handleHigh === undefined || result.handleLow === undefined) {
+      !result.handleLows || result.handleLows.length === 0) {
     return null;
   }
   
   return {
-    cupStart: result.cupStartTime,
-    lipLevel: result.lipLevel,
+    leftPeakTime: result.leftPeakTime,
+    leftPeakPrice: result.leftPeakPrice,
     cupBottomTime: result.cupBottomTime,
     cupBottomPrice: result.cupBottomPrice,
-    cupRightTime: result.cupRightTime,
-    handleStart: result.handleStartTime,
-    handleEnd: result.handleEndTime,
-    handleHigh: result.handleHigh,
-    handleLow: result.handleLow
+    rightRimTime: result.rightRimTime,
+    rightRimPrice: result.rightRimPrice,
+    handleStartTime: result.handleStartTime,
+    handleEndTime: result.handleEndTime,
+    handleLows: result.handleLows,
+    cupOnly: result.cupOnly || false,
+    completionPct: result.completionPct || 0,
+    extensionPct: result.extensionPct || 0
   };
 }
 
@@ -816,35 +830,35 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     const CUP_HANDLE_COLOR = '#3b82f6'; // Bright blue to distinguish from VWAP lines
     
     if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
-      const cupData = detectCupAndHandle(history);
+      const cupData = detectCupAndHandleForChart(history);
       if (cupData) {
-        // Draw the cup lip level (horizontal resistance)
-        const cupLipLine = chart.addSeries(LineSeries, {
-          color: CUP_HANDLE_COLOR,
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        cupLipLine.setData([
-          { time: cupData.cupStart as Time, value: cupData.lipLevel },
-          { time: cupData.cupRightTime as Time, value: cupData.lipLevel },
-        ]);
-        
-        // Draw the cup arc (U-shape from left lip to bottom to right side)
-        // Create smooth arc using multiple points
+        // Draw the cup arc: Left Peak → Cup Bottom → Right Rim
+        // Arc goes from left peak (start of decline) down to bottom and up to right rim
         const arcPoints: { time: Time; value: number }[] = [];
-        const totalDuration = cupData.cupRightTime - cupData.cupStart;
-        const arcSegments = 20; // Number of segments for smooth curve
+        const totalDuration = cupData.rightRimTime - cupData.leftPeakTime;
+        const arcSegments = 25; // Number of segments for smooth curve
+        
+        // Calculate where the bottom should be in the arc (as fraction of time)
+        const bottomTimeOffset = cupData.cupBottomTime - cupData.leftPeakTime;
+        const bottomFraction = bottomTimeOffset / totalDuration;
         
         for (let i = 0; i <= arcSegments; i++) {
           const t = i / arcSegments; // 0 to 1
-          const timePoint = cupData.cupStart + (totalDuration * t);
+          const timePoint = cupData.leftPeakTime + (totalDuration * t);
           
-          // Parabolic curve: y = 4 * depth * t * (1-t) where t is 0-1
-          // This creates a U-shape going from lipLevel down to cupBottomPrice and back up
-          const depth = cupData.lipLevel - cupData.cupBottomPrice;
-          const curveValue = cupData.lipLevel - (4 * depth * t * (1 - t));
+          // Use a modified parabola that goes through left peak, cup bottom, and right rim
+          // The formula creates an asymmetric U-shape
+          let curveValue: number;
+          
+          if (t <= bottomFraction) {
+            // Left side: interpolate from left peak down to cup bottom
+            const leftT = t / bottomFraction;
+            curveValue = cupData.leftPeakPrice - (cupData.leftPeakPrice - cupData.cupBottomPrice) * Math.pow(leftT, 0.8);
+          } else {
+            // Right side: interpolate from cup bottom up to right rim
+            const rightT = (t - bottomFraction) / (1 - bottomFraction);
+            curveValue = cupData.cupBottomPrice + (cupData.rightRimPrice - cupData.cupBottomPrice) * Math.pow(rightT, 0.8);
+          }
           
           arcPoints.push({
             time: timePoint as Time,
@@ -861,54 +875,39 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         cupArcLine.setData(arcPoints);
         
-        // Draw connector line from cup right side to handle start (makes pattern connected)
-        // Only draw if both times are valid and in ascending order
-        if (cupData.cupRightTime && cupData.handleStart && 
-            typeof cupData.cupRightTime === 'number' && typeof cupData.handleStart === 'number' &&
-            cupData.cupRightTime < cupData.handleStart) {
-          const connectorLine = chart.addSeries(LineSeries, {
+        // Draw handle: follows actual candle LOWS from right rim down
+        // Only draw if we have handle data and it's not a "Cup Only" pattern
+        if (!cupData.cupOnly && cupData.handleLows.length > 1) {
+          // Sort handle lows by time to ensure ascending order
+          const sortedHandleLows = [...cupData.handleLows].sort((a, b) => a.time - b.time);
+          
+          // Connect right rim to first handle low
+          if (cupData.rightRimTime < sortedHandleLows[0].time) {
+            const connectorLine = chart.addSeries(LineSeries, {
+              color: CUP_HANDLE_COLOR,
+              lineWidth: 2,
+              lineStyle: LineStyle.Solid,
+              priceLineVisible: false,
+              lastValueVisible: false,
+            });
+            connectorLine.setData([
+              { time: cupData.rightRimTime as Time, value: cupData.rightRimPrice },
+              { time: sortedHandleLows[0].time as Time, value: sortedHandleLows[0].price },
+            ]);
+          }
+          
+          // Draw line along handle lows
+          const handleLine = chart.addSeries(LineSeries, {
             color: CUP_HANDLE_COLOR,
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
             priceLineVisible: false,
             lastValueVisible: false,
           });
-          // Sort data points to ensure ascending time order
-          const connectorData = [
-            { time: cupData.cupRightTime as Time, value: cupData.lipLevel },
-            { time: cupData.handleStart as Time, value: cupData.handleHigh },
-          ].sort((a, b) => (a.time as number) - (b.time as number));
-          connectorLine.setData(connectorData);
+          handleLine.setData(
+            sortedHandleLows.map(h => ({ time: h.time as Time, value: h.price }))
+          );
         }
-        
-        // Draw handle channel - slopes slightly DOWN (typical handle pattern)
-        // Calculate a slight downward slope for the handle lines (15% of handle range)
-        const handleRange = cupData.handleHigh - cupData.handleLow;
-        const slopeAmount = handleRange * 0.15; // 15% of handle range as slight downward slope
-        
-        const handleTopLine = chart.addSeries(LineSeries, {
-          color: CUP_HANDLE_COLOR,
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        handleTopLine.setData([
-          { time: cupData.handleStart as Time, value: cupData.handleHigh },
-          { time: cupData.handleEnd as Time, value: cupData.handleHigh - slopeAmount },
-        ]);
-        
-        const handleBottomLine = chart.addSeries(LineSeries, {
-          color: CUP_HANDLE_COLOR,
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        handleBottomLine.setData([
-          { time: cupData.handleStart as Time, value: cupData.handleLow },
-          { time: cupData.handleEnd as Time, value: cupData.handleLow - slopeAmount },
-        ]);
       }
     }
     
@@ -941,11 +940,14 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
     const isPullbackSignal = technicalSignal?.startsWith('pullback_');
     
+    // Add right padding to ensure last bar is visible (add 3 bars of padding)
+    const rightPadding = 3;
+    
     if (interval === '5m' && technicalSignal === '6_20_cross' && candleData.length > 117) {
       const visibleBars = 117;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
-        to: candleData.length
+        to: candleData.length + rightPadding
       });
     } else if (isPullbackSignal && interval === '1d') {
       // Pullback patterns: show (upPeriodCandles × 5), minimum 30 bars
@@ -953,28 +955,28 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       const visibleBars = Math.max(30, upPeriod * 5);
       chart.timeScale().setVisibleLogicalRange({
         from: Math.max(0, candleData.length - visibleBars),
-        to: candleData.length
+        to: candleData.length + rightPadding
       });
     } else if (interval === '1mo' && selectedPattern === 'Monthly Tight' && candleData.length > 24) {
       // Monthly Tight: 24 months viewable
       const visibleBars = 24;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
-        to: candleData.length
+        to: candleData.length + rightPadding
       });
     } else if (interval === '1d' && isPatternMode && candleData.length > 130) {
       // Patterns: 6 months viewable (~130 trading days)
       const visibleBars = 130;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
-        to: candleData.length
+        to: candleData.length + rightPadding
       });
     } else if (interval === '1d' && candleData.length > 200) {
       // Default daily: 200 candles
       const visibleBars = 200;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
-        to: candleData.length
+        to: candleData.length + rightPadding
       });
     } else {
       chart.timeScale().fitContent();

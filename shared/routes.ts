@@ -121,6 +121,7 @@ export const api = {
           sector: z.string().optional(),
           channelHeightPct: z.number().optional(),
           completionPct: z.number().optional(),
+          cupOnly: z.boolean().optional(),
         })),
       },
     },
