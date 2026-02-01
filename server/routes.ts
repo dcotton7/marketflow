@@ -1274,6 +1274,19 @@ export async function registerRoutes(
 
       // Get stock universe based on selected index
       const universe = getStocksByIndex(input.scannerIndex);
+      
+      // Debug log scan filters
+      console.log('[Scanner] Running scan with filters:', {
+        index: input.scannerIndex,
+        chartPattern: input.chartPattern,
+        maxChannelHeightPct: input.maxChannelHeightPct,
+        minPrice: input.minPrice,
+        maxPrice: input.maxPrice,
+        minVolume: input.minVolume,
+        smaFilter: input.smaFilter,
+        patternStrictness: input.patternStrictness,
+        technicalSignal: input.technicalSignal
+      });
 
       for (const symbol of universe) {
         try {
@@ -1281,11 +1294,20 @@ export async function registerRoutes(
           const quote = await yf.quote(symbol);
           
           // Filter by Price
-          if (input.minPrice && quote.regularMarketPrice < input.minPrice) continue;
-          if (input.maxPrice && quote.regularMarketPrice > input.maxPrice) continue;
+          if (input.minPrice && quote.regularMarketPrice < input.minPrice) {
+            console.log(`[Scanner] ${symbol} filtered: price ${quote.regularMarketPrice} < minPrice ${input.minPrice}`);
+            continue;
+          }
+          if (input.maxPrice && quote.regularMarketPrice > input.maxPrice) {
+            console.log(`[Scanner] ${symbol} filtered: price ${quote.regularMarketPrice} > maxPrice ${input.maxPrice}`);
+            continue;
+          }
           
           // Filter by Volume
-          if (input.minVolume && quote.regularMarketVolume < input.minVolume) continue;
+          if (input.minVolume && quote.regularMarketVolume < input.minVolume) {
+            console.log(`[Scanner] ${symbol} filtered: volume ${quote.regularMarketVolume} < minVolume ${input.minVolume}`);
+            continue;
+          }
 
           let matchedPattern: string | undefined = undefined;
           let channelHeightPct: number | undefined = undefined;
@@ -1340,6 +1362,7 @@ export async function registerRoutes(
               // Filter by max channel height if specified
               if (hasChannelHeightFilter && channelHeightPct !== undefined) {
                 if (channelHeightPct > input.maxChannelHeightPct!) {
+                  console.log(`[Scanner] ${symbol} filtered: channelHeight ${channelHeightPct.toFixed(1)}% > maxChannelHeight ${input.maxChannelHeightPct}%`);
                   continue;
                 }
               }

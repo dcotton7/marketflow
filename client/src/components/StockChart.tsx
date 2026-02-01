@@ -407,8 +407,12 @@ function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string
   }
   
   if (isPatternMode) {
-    // Patterns: Full set + 3 Month SMA + 12 Week VWAP
-    return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap', 'sma3Month', 'vwap12Week'] as IndicatorKey[]);
+    // Patterns: Full set + 3 Month SMA (VCP doesn't get 12W VWAP)
+    const patternIndicators: IndicatorKey[] = ['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap', 'sma3Month'];
+    if (selectedPattern !== 'VCP') {
+      patternIndicators.push('vwap12Week');
+    }
+    return new Set(patternIndicators);
   }
   
   // Default: Full SMA set + VWAPs
@@ -497,6 +501,15 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
 
     const isDark = document.documentElement.classList.contains('dark');
     
+    // Get timeframe label for watermark
+    const getTimeframeLabel = (tf: string) => {
+      const labels: Record<string, string> = {
+        '1m': '1 Min', '5m': '5 Min', '15m': '15 Min', '30m': '30 Min', '60m': '1 Hour',
+        '1d': 'Daily', '1wk': 'Weekly', '1mo': 'Monthly'
+      };
+      return labels[tf] || tf;
+    };
+    
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
       height: 450,
@@ -520,6 +533,27 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         secondsVisible: false,
       },
     });
+    
+    // Create watermark overlay
+    const watermarkDiv = document.createElement('div');
+    watermarkDiv.style.cssText = `
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      font-weight: bold;
+      color: ${isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(0, 0, 0, 0.07)'};
+      pointer-events: none;
+      user-select: none;
+      z-index: 1;
+    `;
+    watermarkDiv.textContent = `${symbol} • ${getTimeframeLabel(interval)}`;
+    watermarkDiv.className = 'chart-watermark';
+    chartContainerRef.current.style.position = 'relative';
+    // Remove any existing watermark
+    chartContainerRef.current.querySelectorAll('.chart-watermark').forEach(el => el.remove());
+    chartContainerRef.current.appendChild(watermarkDiv);
 
     chartRef.current = chart;
 
@@ -906,7 +940,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators]);
+  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators, symbol]);
   
   // Handle chart clicks for tools
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1090,7 +1124,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
               </>
             )}
             
-            {/* Pattern-specific indicators: 3 Month SMA and 12 Week VWAP */}
+            {/* Pattern-specific indicators: 3 Month SMA and 12 Week VWAP (VCP doesn't get 12W VWAP) */}
             {selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern) && (
               <>
                 <Button
@@ -1103,16 +1137,18 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
                   <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#f472b6' }}></span>
                   <span className="text-xs">3M SMA</span>
                 </Button>
-                <Button
-                  variant={enabledIndicators.has('vwap12Week') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('vwap12Week')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-vwap12week"
-                >
-                  <span className="w-3 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.9)' }}></span>
-                  <span className="text-xs">12W VWAP</span>
-                </Button>
+                {selectedPattern !== 'VCP' && (
+                  <Button
+                    variant={enabledIndicators.has('vwap12Week') ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => toggleIndicator('vwap12Week')}
+                    className="gap-1 h-7 px-2"
+                    data-testid="toggle-vwap12week"
+                  >
+                    <span className="w-3 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.9)' }}></span>
+                    <span className="text-xs">12W VWAP</span>
+                  </Button>
+                )}
               </>
             )}
             
@@ -1138,7 +1174,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
                 data-testid="toggle-anchoredvwap"
               >
                 <span className="w-4 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.7)' }}></span>
-                <span className="text-xs">A-VWAP</span>
+                <span className="text-xs">AVWAP LOW 6MOS</span>
               </Button>
             )}
           </div>
@@ -1196,10 +1232,10 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
           </Button>
           {lineDefinitions.length > 0 && (
             <Button
-              variant="outline"
+              variant="destructive"
               size="sm"
               onClick={clearAllLines}
-              className="gap-1 text-destructive"
+              className="gap-1"
               data-testid="button-clear-lines"
             >
               <Trash2 className="w-4 h-4" />
@@ -1211,12 +1247,12 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       
       {/* Tool status messages */}
       {toolMode === 'measure' && (
-        <div className="mb-2 text-sm text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+        <div className="mb-2 text-sm text-white bg-white/20 border border-white/30 px-3 py-2 rounded-lg backdrop-blur-sm">
           {measureStart ? "Click second point to complete measurement" : "Click first point to start measuring"}
         </div>
       )}
       {toolMode === 'line' && (
-        <div className="mb-2 text-sm text-muted-foreground bg-muted/50 px-3 py-2 rounded-lg">
+        <div className="mb-2 text-sm text-white bg-white/20 border border-white/30 px-3 py-2 rounded-lg backdrop-blur-sm">
           Click on chart to place a horizontal line
         </div>
       )}

@@ -26,6 +26,8 @@ export default function ScannerPage() {
     setCurrentPage,
     isScanning,
     setIsScanning,
+    hasScanned,
+    setHasScanned,
     clearAll
   } = useScannerContext();
 
@@ -114,12 +116,33 @@ export default function ScannerPage() {
     setCurrentPage(1);
     setIsScanning(true);
     setResults(null);
-    runScan(filters, {
+    // Apply sensible defaults if not set
+    const scanFilters = {
+      ...filters,
+      minPrice: filters.minPrice ?? 7,
+      minVolume: filters.minVolume ?? 500000,
+    };
+    runScan(scanFilters, {
       onSuccess: (data) => {
         setResults(data);
+        setHasScanned(true);
       },
       onSettled: () => setIsScanning(false)
     });
+  };
+  
+  // Set VCP defaults when VCP is selected
+  const handlePatternChange = (val: "All" | "VCP" | "Weekly Tight" | "Monthly Tight" | "High Tight Flag" | "Cup and Handle") => {
+    if (val === 'VCP') {
+      setFilters(prev => ({ 
+        ...prev, 
+        chartPattern: val,
+        maxChannelHeightPct: prev.maxChannelHeightPct ?? 15,
+        smaFilter: prev.smaFilter === 'none' ? 'above50_200' : prev.smaFilter,
+      }));
+    } else {
+      setFilters(prev => ({ ...prev, chartPattern: val }));
+    }
   };
 
   const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight", "High Tight Flag", "Cup and Handle"];
@@ -146,6 +169,118 @@ export default function ScannerPage() {
     if (tf === "30D") return "6 Weeks";
     if (tf === "60D") return "3 Months";
     return "Daily";
+  };
+  
+  // Generate detailed search criteria explanations
+  const getDetailedCriteria = () => {
+    const details: { label: string; value: string; explanation: string }[] = [];
+    
+    // Stock Universe
+    const indexLabels: Record<string, { name: string; count: string }> = {
+      'dow30': { name: 'Dow Jones 30', count: '30 large-cap blue chips' },
+      'nasdaq100': { name: 'Nasdaq 100', count: '100 tech-heavy stocks' },
+      'sp100': { name: 'S&P 100', count: '100 mega-cap stocks' },
+      'sp500': { name: 'S&P 500', count: '~100 largest US stocks (subset)' },
+      'all': { name: 'All Stocks', count: 'Combined list of all indices' }
+    };
+    const indexInfo = indexLabels[filters.scannerIndex || 'sp100'] || { name: 'S&P 100', count: '100 stocks' };
+    details.push({
+      label: 'Stock Universe',
+      value: indexInfo.name,
+      explanation: `Scanning ${indexInfo.count}`
+    });
+    
+    // Chart Pattern
+    if (filters.chartPattern && filters.chartPattern !== 'All') {
+      const patternExplanations: Record<string, string> = {
+        'VCP': 'Volatility Contraction Pattern - Price consolidates in tightening range with decreasing volume before breakout. Looks for 2+ contractions.',
+        'Weekly Tight': 'Price closes within 1.5-3% range over 4-5 consecutive weeks. Indicates accumulation phase.',
+        'Monthly Tight': 'Price closes within 5-10% range over 2-3 consecutive months. Major base formation.',
+        'High Tight Flag': 'Stock rises 65%+ then consolidates 8-25% in flag pattern. Very powerful continuation setup.',
+        'Cup and Handle': 'U-shaped base followed by smaller consolidation handle. Classic breakout pattern.'
+      };
+      details.push({
+        label: 'Chart Pattern',
+        value: filters.chartPattern,
+        explanation: patternExplanations[filters.chartPattern] || ''
+      });
+    }
+    
+    // Pattern Strictness
+    if (filters.chartPattern && filters.chartPattern !== 'All') {
+      const strictnessExplanations: Record<string, string> = {
+        'tight': 'Strict criteria - VCP requires 3+ contractions, Weekly Tight needs 4+ tight weeks, HTF needs 65%+ gain',
+        'loose': 'Relaxed criteria - VCP requires 2+ contractions, Weekly Tight needs 3+ tight weeks, allows more variance',
+        'both': 'Match either strict OR loose criteria - maximizes potential matches'
+      };
+      details.push({
+        label: 'Pattern Strictness',
+        value: filters.patternStrictness === 'tight' ? 'Tight (Strict)' : filters.patternStrictness === 'loose' ? 'Loose (Relaxed)' : 'Both',
+        explanation: strictnessExplanations[filters.patternStrictness || 'tight'] || ''
+      });
+    }
+    
+    // Max Channel Height
+    if (filters.maxChannelHeightPct !== undefined && showChannelHeightFilter) {
+      details.push({
+        label: 'Max Channel Height',
+        value: `${filters.maxChannelHeightPct}%`,
+        explanation: `Filter out stocks with consolidation range >>${filters.maxChannelHeightPct}% of average price. Lower = tighter consolidation.`
+      });
+    }
+    
+    // Technical Signal
+    if (filters.technicalSignal && filters.technicalSignal !== 'none') {
+      const signalExplanations: Record<string, string> = {
+        '6_20_cross': `6 SMA and 20 SMA crossed ${filters.crossDirection === 'up' ? 'upward (bullish)' : 'downward (bearish)'} within last 3 bars on 5-min chart`,
+        'ride_21_ema': `Price has been riding 21 EMA without breaking >${filters.emaBreakThresholdPct || 1}% below, and pulled back >${filters.emaPbThresholdPct || 2.5}% from recent high`,
+        'pullback_5_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 5 DMA`,
+        'pullback_10_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 10 DMA`,
+        'pullback_20_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 20 DMA`,
+        'pullback_50_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 50 DMA`
+      };
+      details.push({
+        label: 'Technical Signal',
+        value: filters.technicalSignal === '6_20_cross' ? `6/20 Cross ${filters.crossDirection === 'up' ? 'Up' : 'Down'}` : 
+               filters.technicalSignal === 'ride_21_ema' ? 'Ride 21 EMA' : 
+               filters.technicalSignal.replace('pullback_', 'Pullback to ').replace('_dma', ' DMA'),
+        explanation: signalExplanations[filters.technicalSignal] || ''
+      });
+    }
+    
+    // SMA Filter
+    if (filters.smaFilter && filters.smaFilter !== 'none') {
+      const smaExplanations: Record<string, string> = {
+        'stacked': 'Price > 5d SMA > 20d SMA > 50d SMA > 200d SMA. All moving averages perfectly aligned bullish.',
+        'above50_200': 'Price > 50d SMA > 200d SMA. Stock in confirmed uptrend above key support levels.'
+      };
+      details.push({
+        label: 'SMA Filter',
+        value: filters.smaFilter === 'stacked' ? 'Stacked SMAs' : 'Above 50/200 SMA',
+        explanation: smaExplanations[filters.smaFilter] || ''
+      });
+    }
+    
+    // Price Range
+    if (filters.minPrice || filters.maxPrice) {
+      details.push({
+        label: 'Price Range',
+        value: filters.minPrice && filters.maxPrice ? `$${filters.minPrice} - $${filters.maxPrice}` : 
+               filters.minPrice ? `> $${filters.minPrice}` : `< $${filters.maxPrice}`,
+        explanation: 'Filter stocks by current market price. Helps exclude penny stocks or expensive names.'
+      });
+    }
+    
+    // Volume
+    if (filters.minVolume) {
+      details.push({
+        label: 'Min Volume',
+        value: filters.minVolume >= 1000000 ? `${(filters.minVolume / 1000000).toFixed(1)}M` : `${(filters.minVolume / 1000).toFixed(0)}K`,
+        explanation: 'Minimum average daily volume. Ensures adequate liquidity for entry/exit.'
+      });
+    }
+    
+    return details;
   };
 
   const totalResults = results?.length || 0;
@@ -195,7 +330,7 @@ export default function ScannerPage() {
                 <div className="space-y-2">
                   <Select 
                     value={filters.chartPattern} 
-                    onValueChange={(val: any) => setFilters(prev => ({ ...prev, chartPattern: val }))}
+                    onValueChange={handlePatternChange}
                   >
                     <SelectTrigger className="bg-background" data-testid="select-chart-pattern">
                       <SelectValue placeholder="Select Chart Pattern" />
@@ -556,6 +691,22 @@ export default function ScannerPage() {
               </Button>
             </CardContent>
           </Card>
+          
+          {/* Detailed Search Criteria Panel */}
+          <div className="mt-4 p-3 border border-white/20 rounded-lg bg-muted/10">
+            <p className="text-sm font-semibold text-white/80 mb-3">Detailed Search Criteria</p>
+            <ul className="space-y-2 text-xs">
+              {getDetailedCriteria().map((item, idx) => (
+                <li key={idx} className="border-b border-white/10 pb-2 last:border-b-0">
+                  <div className="flex justify-between items-center">
+                    <span className="text-white/60">{item.label}:</span>
+                    <span className="text-white font-medium">{item.value}</span>
+                  </div>
+                  <p className="text-white/40 mt-1 leading-relaxed">{item.explanation}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
 
         <div className="flex-1 w-full space-y-6">
@@ -563,9 +714,11 @@ export default function ScannerPage() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-3">
                 <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
-                <span className={`text-sm ${getThumbnailIndicatorLabel().color}`}>
-                  ({getThumbnailIndicatorLabel().text})
-                </span>
+                {hasScanned && (
+                  <span className={`text-sm ${getThumbnailIndicatorLabel().color}`}>
+                    ({getThumbnailIndicatorLabel().text})
+                  </span>
+                )}
               </div>
               {results && (
                 <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
@@ -574,8 +727,8 @@ export default function ScannerPage() {
               )}
             </div>
             
-            {/* Criteria summary with CLEAR button */}
-            {getCriteriaSummary().length > 0 && (
+            {/* Criteria summary with CLEAR button - only show after first scan */}
+            {hasScanned && getCriteriaSummary().length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-white/80">
                   {getCriteriaSummary().join(' • ')}

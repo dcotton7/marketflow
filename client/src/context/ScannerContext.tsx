@@ -12,14 +12,17 @@ interface ScannerContextType {
   setCurrentPage: Dispatch<SetStateAction<number>>;
   isScanning: boolean;
   setIsScanning: Dispatch<SetStateAction<boolean>>;
+  hasScanned: boolean;
+  setHasScanned: Dispatch<SetStateAction<boolean>>;
   clearAll: () => void;
 }
 
-const defaultFilters: ScannerRunInput = {
+// Initial blank state - no filters selected until user makes a choice
+const blankFilters: ScannerRunInput = {
   scannerIndex: "sp100",
-  minPrice: 7,
+  minPrice: undefined,
   maxPrice: undefined,
-  minVolume: 500000,
+  minVolume: undefined,
   chartPattern: "All",
   patternStrictness: "tight",
   smaFilter: "none",
@@ -28,30 +31,38 @@ const defaultFilters: ScannerRunInput = {
   htfTimeframe: "weekly",
   htfMinGainPct: 65,
   htfPullbackPct: 8,
-  // Technical Indicator Signals
   technicalSignal: "none",
   crossDirection: "up",
   emaBreakThresholdPct: 1,
   emaPbThresholdPct: 2.5,
-  // Pullback settings
   pbMinGainPct: 30,
   pbUpPeriodCandles: 10,
   pbMinCandles: 1,
   pbMaxCandles: 5,
 };
 
+// Default filters when starting a scan (with sensible defaults)
+const defaultFilters: ScannerRunInput = {
+  ...blankFilters,
+  minPrice: 7,
+  minVolume: 500000,
+};
+
 const ScannerContext = createContext<ScannerContextType | undefined>(undefined);
 
 export function ScannerProvider({ children }: { children: ReactNode }) {
-  const [filters, setFilters] = useState<ScannerRunInput>(defaultFilters);
+  // Start with blank filters (no results, no criteria shown)
+  const [filters, setFilters] = useState<ScannerRunInput>(blankFilters);
   const [results, setResults] = useState<ScannerResult | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [isScanning, setIsScanning] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
 
   const clearAll = () => {
-    setFilters(defaultFilters);
+    setFilters(blankFilters);
     setResults(null);
     setCurrentPage(1);
+    setHasScanned(false);
   };
 
   return (
@@ -65,6 +76,8 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
         setCurrentPage,
         isScanning,
         setIsScanning,
+        hasScanned,
+        setHasScanned,
         clearAll,
       }}
     >
