@@ -120,6 +120,7 @@ export const api = {
           matchedPattern: z.string().optional(),
           sector: z.string().optional(),
           channelHeightPct: z.number().optional(),
+          completionPct: z.number().optional(),
         })),
       },
     },

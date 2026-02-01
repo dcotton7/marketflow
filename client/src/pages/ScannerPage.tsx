@@ -987,7 +987,7 @@ export default function ScannerPage() {
                             >
                               {stock.matchedPattern}
                             </span>
-                            {stock.completionPct !== undefined && stock.matchedPattern.includes('Cup and Handle') && (
+                            {stock.completionPct !== undefined && stock.matchedPattern?.includes('Cup and Handle') && (
                               <span 
                                 className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border border-blue-600"
                                 data-testid={`badge-completion-${stock.symbol}`}

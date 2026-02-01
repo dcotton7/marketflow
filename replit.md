@@ -5,6 +5,19 @@
 AI Swing Scanner is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
 
 ## Recent Changes (February 2026)
+- Fixed chart layout: measure/line tools now positioned below chart with fixed h-[500px] container to prevent layout shift
+- Cup and Handle improvements:
+  - Added completion percentage badge on scanner result thumbnails (e.g. "85% complete")
+  - Handle visualization now slopes slightly DOWN (15% of handle range) instead of horizontal
+  - Added minimum 10-bar duration requirement (from cup bottom to current position)
+  - Improved detection with multiple lookback windows (60, 90, 120, 45 bars) and relaxed thresholds
+- ETF holdings expanded: Added VGT, VHT, VFH, VDE to ETF_HOLDINGS map with top 5 holdings
+- Scanner improvements:
+  - Enter key now triggers Run Scan button via form onSubmit handler
+  - Fixed stock universe description to show accurate counts ("100 top S&P stocks", "~150 unique stocks")
+  - Pullback chart zoom shows (upPeriodCandles × 5) bars with minimum 30 bars
+  - Pullback defaults adjusted: 5/10 DMA at 15% (was 30%), 20 DMA at 20%, 50 DMA at 25%
+  - 5/10 DMA pullbacks use loose mode (5% proximity threshold)
 - Replaced Candlestick Patterns section with new "Technical Indicator Signals" section
 - Added 6/20 Cross signal: detects 6 SMA and 20 SMA crossover within last 3 bars
   - Cross Up/Down direction selector
