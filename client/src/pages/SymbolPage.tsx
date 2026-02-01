@@ -19,6 +19,7 @@ export default function SymbolPage() {
   const technicalSignal = urlParams.get('technicalSignal') || undefined;
   const fromScanner = urlParams.get('fromScanner') === 'true';
   const initialInterval = urlParams.get('interval') as '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo' | null;
+  const pbUpPeriodCandles = urlParams.get('pbUpPeriodCandles') ? Number(urlParams.get('pbUpPeriodCandles')) : undefined;
   const safeSymbol = symbol || "";
   
   const { data: quote, isLoading } = useStockQuote(safeSymbol);
@@ -241,7 +242,7 @@ export default function SymbolPage() {
         )}
         <div className="flex gap-4 items-start">
           <div className="flex-1 min-w-0">
-            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} technicalSignal={technicalSignal} initialInterval={initialInterval || undefined} />
+            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} technicalSignal={technicalSignal} initialInterval={initialInterval || undefined} pullbackUpPeriod={pbUpPeriodCandles} />
           </div>
           <div className="w-64 flex-shrink-0 hidden lg:block pt-8">
             <TradeRiskRating symbol={safeSymbol} currentPrice={quote.price} />

@@ -264,11 +264,11 @@ export default function ScannerPage() {
     
     // Stock Universe
     const indexLabels: Record<string, { name: string; count: string }> = {
-      'dow30': { name: 'Dow Jones 30', count: '30 large-cap blue chips' },
-      'nasdaq100': { name: 'Nasdaq 100', count: '100 tech-heavy stocks' },
+      'dow30': { name: 'Dow Jones 30', count: '30 blue-chip stocks' },
+      'nasdaq100': { name: 'Nasdaq 100', count: '100 tech stocks' },
       'sp100': { name: 'S&P 100', count: '100 mega-cap stocks' },
-      'sp500': { name: 'S&P 500', count: '~100 largest US stocks (subset)' },
-      'all': { name: 'All Stocks', count: 'Combined list of all indices' }
+      'sp500': { name: 'S&P 500', count: '100 top S&P stocks (subset)' },
+      'all': { name: 'All Indices', count: '~150 unique stocks' }
     };
     const indexInfo = indexLabels[filters.scannerIndex || 'sp100'] || { name: 'S&P 100', count: '100 stocks' };
     details.push({
@@ -402,12 +402,6 @@ export default function ScannerPage() {
           <div className="w-full lg:w-80 shrink-0">
           <Card 
             className="sticky top-24 border-border shadow-xl shadow-black/5 bg-card/50 backdrop-blur-sm"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isPending) {
-                e.preventDefault();
-                handleScan();
-              }
-            }}
           >
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">
@@ -418,6 +412,10 @@ export default function ScannerPage() {
                 Define criteria to find trading opportunities.
               </CardDescription>
             </CardHeader>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!isPending) handleScan();
+            }}>
             <CardContent className="space-y-6">
               {/* Index Selector */}
               <div className="space-y-2">
@@ -840,9 +838,9 @@ export default function ScannerPage() {
               </div>
 
               <Button 
+                type="submit"
                 className="w-full font-semibold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all" 
                 size="lg"
-                onClick={handleScan}
                 disabled={isPending}
                 data-testid="button-run-scan"
               >
@@ -850,6 +848,7 @@ export default function ScannerPage() {
                 Run Scan
               </Button>
             </CardContent>
+            </form>
           </Card>
           </div>
         </div>
@@ -940,6 +939,10 @@ export default function ScannerPage() {
                           params.set('technicalSignal', filters.technicalSignal);
                           if (filters.crossDirection) {
                             params.set('crossDirection', filters.crossDirection);
+                          }
+                          // Pass pullback up period for chart zoom calculation
+                          if (filters.technicalSignal.startsWith('pullback_') && filters.pbUpPeriodCandles) {
+                            params.set('pbUpPeriodCandles', filters.pbUpPeriodCandles.toString());
                           }
                         }
                         setLocation(`/symbol/${stock.symbol}?${params.toString()}`);

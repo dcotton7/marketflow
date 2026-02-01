@@ -22,6 +22,7 @@ interface StockChartProps {
   selectedPattern?: string;
   technicalSignal?: string;
   initialInterval?: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo';
+  pullbackUpPeriod?: number; // For pullback patterns: number of candles in the up period
 }
 
 interface HorizontalLineDefinition {
@@ -33,7 +34,9 @@ interface MeasurePoint {
   price: number;
 }
 
-const TIMEFRAMES = [
+type TimeframeValue = '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo';
+
+const TIMEFRAMES: { label: string; value: TimeframeValue }[] = [
   { label: '5m', value: '5m' },
   { label: '15m', value: '15m' },
   { label: '30m', value: '30m' },
@@ -328,54 +331,63 @@ interface CupAndHandleData {
 function detectCupAndHandle(
   data: { date: string; high: number; low: number; close: number; volume: number }[]
 ): CupAndHandleData | null {
-  if (data.length < 25) return null;
+  if (data.length < 20) return null;
   
-  // For visualization, look for any cup-like pattern with more relaxed thresholds
-  const lookback = data.slice(-60);
-  if (lookback.length < 25) return null;
+  // For visualization, look for any cup-like pattern with very relaxed thresholds
+  // Try multiple lookback windows to find a valid pattern
+  const lookbackOptions = [60, 90, 120, 45];
   
-  // Find the highest point in first third as left lip
-  const leftThird = lookback.slice(0, Math.floor(lookback.length / 3));
-  const leftLipIdx = leftThird.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
-  const leftLipHigh = leftThird[leftLipIdx].high;
+  for (const lookbackSize of lookbackOptions) {
+    const lookback = data.slice(-Math.min(lookbackSize, data.length));
+    if (lookback.length < 20) continue;
+    
+    // Find the highest point in first half as left lip candidate
+    const leftHalf = lookback.slice(0, Math.floor(lookback.length / 2));
+    const leftLipIdx = leftHalf.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
+    const leftLipHigh = leftHalf[leftLipIdx].high;
+    
+    // Find the lowest point as cup bottom (can be anywhere in the data)
+    const cupBottomIdx = lookback.reduce((minIdx, c, i, arr) => c.low < arr[minIdx].low ? i : minIdx, 0);
+    const cupBottom = lookback[cupBottomIdx].low;
+    const cupBottomDate = lookback[cupBottomIdx].date;
+    
+    // Right side: find highest point after cup bottom
+    const rightPortion = lookback.slice(Math.max(cupBottomIdx + 1, Math.floor(lookback.length / 2)));
+    if (rightPortion.length < 5) continue;
+    
+    const rightHighIdx = rightPortion.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
+    const rightHighest = rightPortion[rightHighIdx].high;
+    const rightHighDate = rightPortion[rightHighIdx].date;
+    
+    // Very relaxed: cup depth 5-65% 
+    const cupDepth = ((leftLipHigh - cupBottom) / leftLipHigh) * 100;
+    if (cupDepth < 5 || cupDepth > 65) continue;
+    
+    // Very relaxed: right side within 25% of left lip (can still be building)
+    if (rightHighest < leftLipHigh * 0.75) continue;
+    
+    // Use the higher of left lip or right high as the lip level
+    const lipLevel = Math.max(leftLipHigh, rightHighest);
+    
+    // Last few bars as handle
+    const handleBars = lookback.slice(-10);
+    const handleHigh = Math.max(...handleBars.map(c => c.high));
+    const handleLow = Math.min(...handleBars.map(c => c.low));
+    
+    return {
+      cupStart: new Date(lookback[0].date).getTime() / 1000,
+      lipLevel: lipLevel,
+      cupBottomTime: new Date(cupBottomDate).getTime() / 1000,
+      cupBottomPrice: cupBottom,
+      cupRightTime: new Date(rightHighDate).getTime() / 1000,
+      handleStart: new Date(handleBars[0].date).getTime() / 1000,
+      handleEnd: new Date(handleBars[handleBars.length - 1].date).getTime() / 1000,
+      handleHigh,
+      handleLow
+    };
+  }
   
-  // Find the lowest point in middle third as cup bottom
-  const middleStart = Math.floor(lookback.length / 3);
-  const middleEnd = Math.floor(lookback.length * 2 / 3);
-  const middleThird = lookback.slice(middleStart, middleEnd);
-  const cupBottomIdx = middleThird.reduce((minIdx, c, i, arr) => c.low < arr[minIdx].low ? i : minIdx, 0);
-  const cupBottom = middleThird[cupBottomIdx].low;
-  const cupBottomDate = middleThird[cupBottomIdx].date;
-  
-  // Right third should approach the left lip level
-  const rightThird = lookback.slice(Math.floor(lookback.length * 2 / 3));
-  const rightHighIdx = rightThird.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
-  const rightHighest = rightThird[rightHighIdx].high;
-  const rightHighDate = rightThird[rightHighIdx].date;
-  
-  // Relaxed: cup depth 8-50% (was 15-40%)
-  const cupDepth = ((leftLipHigh - cupBottom) / leftLipHigh) * 100;
-  if (cupDepth < 8 || cupDepth > 50) return null;
-  
-  // Relaxed: right side within 15% of left lip (was 5%)
-  if (rightHighest < leftLipHigh * 0.85) return null;
-  
-  // Last few bars as handle
-  const handleBars = lookback.slice(-10);
-  const handleHigh = Math.max(...handleBars.map(c => c.high));
-  const handleLow = Math.min(...handleBars.map(c => c.low));
-  
-  return {
-    cupStart: new Date(lookback[0].date).getTime() / 1000,
-    lipLevel: leftLipHigh,
-    cupBottomTime: new Date(cupBottomDate).getTime() / 1000,
-    cupBottomPrice: cupBottom,
-    cupRightTime: new Date(rightHighDate).getTime() / 1000,
-    handleStart: new Date(handleBars[0].date).getTime() / 1000,
-    handleEnd: new Date(handleBars[handleBars.length - 1].date).getTime() / 1000,
-    handleHigh,
-    handleLow
-  };
+  return null;
 }
 
 type ToolMode = 'none' | 'measure' | 'line';
@@ -420,7 +432,7 @@ function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string
   return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
 }
 
-export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal, initialInterval }: StockChartProps) {
+export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal, initialInterval, pullbackUpPeriod }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
@@ -464,7 +476,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   };
   
   // Wrapper to track user manual interval changes
-  const setInterval = (newInterval: string) => {
+  const setInterval = (newInterval: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo') => {
     setUserSelectedInterval(true);
     setIntervalState(newInterval);
   };
@@ -900,15 +912,25 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
 
     // Adjust visible range based on signal/pattern type
     // 6/20 Cross @ 5min: ~1.5 days (117 bars)
+    // Pullback patterns: (upPeriodCandles × 5), minimum 30 bars
     // VCP/Weekly Tight/High Tight Flag/Cup Handle @ daily: 6 months (~130 bars)
     // Monthly Tight @ monthly: 24 months (24 bars)
     // Default daily: ~8-9 months (200 bars)
     const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
+    const isPullbackSignal = technicalSignal?.startsWith('pullback_');
     
     if (interval === '5m' && technicalSignal === '6_20_cross' && candleData.length > 117) {
       const visibleBars = 117;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
+        to: candleData.length
+      });
+    } else if (isPullbackSignal && interval === '1d') {
+      // Pullback patterns: show (upPeriodCandles × 5), minimum 30 bars
+      const upPeriod = pullbackUpPeriod || 10; // Default to 10 if not provided
+      const visibleBars = Math.max(30, upPeriod * 5);
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, candleData.length - visibleBars),
         to: candleData.length
       });
     } else if (interval === '1mo' && selectedPattern === 'Monthly Tight' && candleData.length > 24) {
@@ -947,7 +969,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators, symbol]);
+  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators, symbol, pullbackUpPeriod]);
   
   // Handle chart clicks for tools
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1269,19 +1291,27 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         </div>
       </div>
       
-      {/* Tool status messages */}
+      {/* Chart container - fixed height to prevent layout shift */}
+      <div 
+        ref={chartContainerRef} 
+        className={`w-full h-[500px] ${toolMode !== 'none' ? 'cursor-crosshair' : ''}`}
+        onClick={handleChartClick}
+        data-testid="chart-container" 
+      />
+      
+      {/* Tool status messages - moved BELOW chart to prevent layout shift */}
       {toolMode === 'measure' && (
-        <div className="mb-2 text-sm text-white bg-white/20 border border-white/30 px-3 py-2 rounded-lg backdrop-blur-sm">
+        <div className="mt-2 text-sm text-white bg-white/20 border border-white/30 px-3 py-2 rounded-lg backdrop-blur-sm">
           {measureStart ? "Click second point to complete measurement" : "Click first point to start measuring"}
         </div>
       )}
       {toolMode === 'line' && (
-        <div className="mb-2 text-sm text-white bg-white/20 border border-white/30 px-3 py-2 rounded-lg backdrop-blur-sm">
+        <div className="mt-2 text-sm text-white bg-white/20 border border-white/30 px-3 py-2 rounded-lg backdrop-blur-sm">
           Click on chart to place a horizontal line
         </div>
       )}
       {measureResult && (
-        <div className="mb-2 text-sm bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg flex gap-4 items-center">
+        <div className="mt-2 text-sm bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg flex gap-4 items-center">
           <span className="text-muted-foreground font-semibold">Measure Results:</span>
           <span>
             <span className="text-muted-foreground">Change:</span>{' '}
@@ -1300,7 +1330,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       
       {/* Horizontal lines list with diff calculation */}
       {lineDefinitions.length > 0 && (
-        <div className="mb-2 flex gap-2 flex-wrap items-center">
+        <div className="mt-2 flex gap-2 flex-wrap items-center">
           <span className="text-xs text-muted-foreground">Lines:</span>
           {lineDefinitions.map((line) => (
             <span
@@ -1333,13 +1363,6 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
           })()}
         </div>
       )}
-      
-      <div 
-        ref={chartContainerRef} 
-        className={`w-full ${toolMode !== 'none' ? 'cursor-crosshair' : ''}`}
-        onClick={handleChartClick}
-        data-testid="chart-container" 
-      />
       
       {/* Timeframe Selector */}
       <div className="mt-4 flex items-center gap-2 flex-wrap">
