@@ -25,8 +25,90 @@ export default function ScannerPage() {
     currentPage, 
     setCurrentPage,
     isScanning,
-    setIsScanning
+    setIsScanning,
+    clearAll
   } = useScannerContext();
+
+  // Get thumbnail indicator label based on selected signal/pattern
+  const getThumbnailIndicatorLabel = () => {
+    if (filters.technicalSignal === '6_20_cross') {
+      return { text: 'SMA 6 Pink, SMA 20 Blue', color: 'text-white' };
+    }
+    if (filters.technicalSignal === 'ride_21_ema') {
+      return { text: 'EMA 21 Pink', color: 'text-pink-400' };
+    }
+    if (filters.technicalSignal?.startsWith('pullback_')) {
+      return { text: 'SMA 21 Pink', color: 'text-pink-400' };
+    }
+    if (filters.chartPattern === 'Monthly Tight') {
+      return { text: '3 Month SMA Pink', color: 'text-pink-400' };
+    }
+    if (['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(filters.chartPattern || '')) {
+      return { text: 'SMA 21 Pink', color: 'text-pink-400' };
+    }
+    return { text: 'SMA 21 Pink', color: 'text-pink-400' };
+  };
+
+  // Build criteria summary for display
+  const getCriteriaSummary = () => {
+    const criteria: string[] = [];
+    
+    // Stock Universe
+    const indexLabels: Record<string, string> = {
+      'dow30': 'Dow 30',
+      'nasdaq100': 'Nasdaq 100', 
+      'sp100': 'S&P 100',
+      'sp500': 'S&P 500',
+      'all': 'All Stocks'
+    };
+    if (filters.scannerIndex) {
+      criteria.push(indexLabels[filters.scannerIndex] || filters.scannerIndex);
+    }
+    
+    // Chart Pattern
+    if (filters.chartPattern && filters.chartPattern !== 'All') {
+      criteria.push(filters.chartPattern);
+    }
+    
+    // Technical Signal
+    const signalLabels: Record<string, string> = {
+      '6_20_cross': `6/20 Cross ${filters.crossDirection === 'up' ? 'Up' : 'Down'}`,
+      'ride_21_ema': 'Ride 21 EMA',
+      'pullback_5dma': 'Pullback to 5 DMA',
+      'pullback_10dma': 'Pullback to 10 DMA',
+      'pullback_20dma': 'Pullback to 20 DMA',
+      'pullback_50dma': 'Pullback to 50 DMA'
+    };
+    if (filters.technicalSignal && filters.technicalSignal !== 'none') {
+      criteria.push(signalLabels[filters.technicalSignal] || filters.technicalSignal);
+    }
+    
+    // SMA Filter
+    if (filters.smaFilter && filters.smaFilter !== 'none') {
+      const smaLabels: Record<string, string> = {
+        'stacked': 'SMAs Stacked',
+        'above50_200': 'Above 50/200 SMA'
+      };
+      criteria.push(smaLabels[filters.smaFilter] || filters.smaFilter);
+    }
+    
+    // Price range
+    if (filters.minPrice || filters.maxPrice) {
+      const priceStr = filters.minPrice && filters.maxPrice 
+        ? `$${filters.minPrice}-$${filters.maxPrice}`
+        : filters.minPrice 
+          ? `>$${filters.minPrice}` 
+          : `<$${filters.maxPrice}`;
+      criteria.push(priceStr);
+    }
+    
+    // Volume
+    if (filters.minVolume) {
+      criteria.push(`Vol >${(filters.minVolume / 1000000).toFixed(1)}M`);
+    }
+    
+    return criteria;
+  };
 
   const handleScan = () => {
     setCurrentPage(1);
@@ -477,15 +559,35 @@ export default function ScannerPage() {
         </div>
 
         <div className="flex-1 w-full space-y-6">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
-              <span className="text-sm text-pink-400">(SMA 21 in pink)</span>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <h2 className="text-2xl font-bold tracking-tight">Scan Results</h2>
+                <span className={`text-sm ${getThumbnailIndicatorLabel().color}`}>
+                  ({getThumbnailIndicatorLabel().text})
+                </span>
+              </div>
+              {results && (
+                <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
+                  {results.length} matches found
+                </span>
+              )}
             </div>
-            {results && (
-              <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
-                {results.length} matches found
-              </span>
+            
+            {/* Criteria summary with CLEAR button */}
+            {getCriteriaSummary().length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm text-white/80">
+                  {getCriteriaSummary().join(' • ')}
+                </span>
+                <button 
+                  onClick={clearAll}
+                  className="text-sm font-bold text-primary hover:text-primary/80 transition-colors"
+                  data-testid="button-clear-criteria"
+                >
+                  [CLEAR]
+                </button>
+              </div>
             )}
           </div>
 
@@ -579,6 +681,7 @@ export default function ScannerPage() {
                           symbol={stock.symbol} 
                           technicalSignal={filters.technicalSignal}
                           crossDirection={filters.crossDirection}
+                          chartPattern={filters.chartPattern}
                         />
                       </CardContent>
                     </Card>

@@ -379,6 +379,42 @@ function detectCupAndHandle(
 
 type ToolMode = 'none' | 'measure' | 'line';
 
+// Define available indicators for toggle functionality
+type IndicatorKey = 'sma5' | 'sma10' | 'sma6' | 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'sma3Month' | 'autoVwap' | 'anchoredVwap' | 'vwap12Week';
+
+interface IndicatorConfig {
+  key: IndicatorKey;
+  label: string;
+  color: string;
+  colorClass: string;
+}
+
+// Get default enabled indicators based on signal/pattern
+function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string): Set<IndicatorKey> {
+  const is620Cross = technicalSignal === '6_20_cross';
+  const isRide21EMA = technicalSignal === 'ride_21_ema';
+  const isPullback = technicalSignal?.startsWith('pullback_');
+  const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
+  
+  if (is620Cross) {
+    // 6/20 Cross: SMA 6 Pink, SMA 20 Blue, Session VWAP only
+    return new Set(['sma6', 'sma20', 'autoVwap'] as IndicatorKey[]);
+  }
+  
+  if (isRide21EMA || isPullback) {
+    // Ride 21 EMA / Pullback: EMA 21 Pink, SMA 5 Green, SMA 10 Blue, SMA 50 Red, SMA 200 Black, AutoVWAP, Anchored VWAP
+    return new Set(['ema21', 'sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+  }
+  
+  if (isPatternMode) {
+    // Patterns: Full set + 3 Month SMA + 12 Week VWAP
+    return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap', 'sma3Month', 'vwap12Week'] as IndicatorKey[]);
+  }
+  
+  // Default: Full SMA set + VWAPs
+  return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+}
+
 export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -395,21 +431,51 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   
+  // Indicator toggles - initialized based on signal type
+  const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorKey>>(() => 
+    getDefaultIndicators(technicalSignal, selectedPattern)
+  );
+  
+  // Update enabled indicators when signal/pattern changes
+  useEffect(() => {
+    setEnabledIndicators(getDefaultIndicators(technicalSignal, selectedPattern));
+  }, [technicalSignal, selectedPattern]);
+  
+  const toggleIndicator = (key: IndicatorKey) => {
+    setEnabledIndicators(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
+      }
+      return newSet;
+    });
+  };
+  
   // Wrapper to track user manual interval changes
   const setInterval = (newInterval: string) => {
     setUserSelectedInterval(true);
     setIntervalState(newInterval);
   };
   
-  // Auto-switch to 5-minute when 6/20 Cross is detected (only if user hasn't manually changed it)
+  // Reset userSelectedInterval when signal/pattern changes to allow auto-switching
   useEffect(() => {
-    if (technicalSignal === '6_20_cross' && !userSelectedInterval) {
+    setUserSelectedInterval(false);
+  }, [technicalSignal, selectedPattern]);
+  
+  // Auto-switch timeframe based on signal/pattern (only if user hasn't manually changed it)
+  useEffect(() => {
+    if (userSelectedInterval) return;
+    
+    if (technicalSignal === '6_20_cross') {
       setIntervalState('5m');
-    } else if (technicalSignal !== '6_20_cross' && !userSelectedInterval) {
-      // Reset to daily when not 6/20 Cross (only if user hasn't manually changed)
-      setIntervalState('1d');
+    } else if (selectedPattern === 'Monthly Tight') {
+      setIntervalState('1mo'); // Monthly chart for Monthly Tight
+    } else {
+      setIntervalState('1d'); // Daily for everything else
     }
-  }, [technicalSignal, userSelectedInterval]);
+  }, [technicalSignal, selectedPattern, userSelectedInterval]);
   
   // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
   const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
@@ -498,137 +564,118 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     }));
     volumeSeries.setData(volumeData);
 
-    // Show SMAs for all timeframes (SMA periods are in bars, so 5-period SMA on 5min chart = 5 bars)
+    // Calculate all indicators (will only display those that are enabled)
     const sma5 = calculateSMA(history, 5);
+    const sma6 = calculateSMA(history, 6);
+    const sma10 = calculateSMA(history, 10);
     const sma20 = calculateSMA(history, 20);
     const sma50 = calculateSMA(history, 50);
     const sma200 = calculateSMA(history, 200);
-
-    const sma5Series = chart.addSeries(LineSeries, {
-      color: '#3b82f6',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma5Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma5[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma5Series.setData(sma5Data);
-
-    const sma20Series = chart.addSeries(LineSeries, {
-      color: 'rgba(236, 72, 153, 0.7)',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma20Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma20[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma20Series.setData(sma20Data);
-
-    const sma50Series = chart.addSeries(LineSeries, {
-      color: '#dc2626',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma50Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma50[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma50Series.setData(sma50Data);
-
-    const sma200Series = chart.addSeries(LineSeries, {
-      color: isDark ? '#ffffff' : '#000000',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const sma200Data = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: sma200[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    sma200Series.setData(sma200Data);
-    
-    // Add signal-specific overlays
-    if (technicalSignal === 'ride_21_ema') {
-      // EMA 21 line - pink thicker line
-      const ema21 = calculateEMA(history, 21);
-      const ema21Series = chart.addSeries(LineSeries, {
-        color: '#f472b6', // Pink
-        lineWidth: 3,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const ema21Data = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: ema21[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      ema21Series.setData(ema21Data);
-    }
-    
-    if (technicalSignal === '6_20_cross') {
-      // 6 SMA line - pink
-      const sma6ForCross = calculateSMA(history, 6);
-      const sma6CrossSeries = chart.addSeries(LineSeries, {
-        color: '#f472b6', // Pink
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const sma6CrossData = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: sma6ForCross[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      sma6CrossSeries.setData(sma6CrossData);
-      
-      // 20 SMA line - blue (thicker for emphasis)
-      const sma20ForCross = calculateSMA(history, 20);
-      const sma20CrossSeries = chart.addSeries(LineSeries, {
-        color: '#3b82f6', // Blue
-        lineWidth: 3,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const sma20CrossData = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: sma20ForCross[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      sma20CrossSeries.setData(sma20CrossData);
-    }
-    
-    // Add VWAP line - orange thicker dotted line (Auto VWAP)
+    const ema21 = calculateEMA(history, 21);
+    const sma3Month = calculateSMA(history, 63); // ~3 months of trading days
     const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
     const vwap = calculateVWAP(history, isIntraday);
-    const vwapSeries = chart.addSeries(LineSeries, {
-      color: '#f97316', // Orange
-      lineWidth: 2,
-      lineStyle: LineStyle.Dotted,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const vwapData = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: vwap[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    vwapSeries.setData(vwapData);
-    
-    // Add Anchored VWAP from 6-month low - solid yellow, thicker, 30% transparent
     const anchoredVwapResult = calculateAnchoredVWAP(history);
-    const anchoredVwapSeries = chart.addSeries(LineSeries, {
-      color: 'rgba(234, 179, 8, 0.7)', // Yellow with 30% transparency
-      lineWidth: 3,
-      lineStyle: LineStyle.Solid,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    const anchoredVwapData = history.map((item, i) => ({
-      time: (new Date(item.date).getTime() / 1000) as Time,
-      value: anchoredVwapResult.values[i] ?? undefined,
-    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-    anchoredVwapSeries.setData(anchoredVwapData);
+    
+    // Helper function to add indicator series
+    const addIndicatorSeries = (values: (number | null)[], color: string, lineWidth: 1 | 2 | 3 | 4 = 1, lineStyle: number = LineStyle.Solid) => {
+      const series = chart.addSeries(LineSeries, {
+        color,
+        lineWidth,
+        lineStyle,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const data = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: values[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      series.setData(data);
+      return series;
+    };
+    
+    // Add indicators based on enabledIndicators state
+    // SMA 5 - Green
+    if (enabledIndicators.has('sma5')) {
+      addIndicatorSeries(sma5, '#22c55e', 1); // Green
+    }
+    
+    // SMA 6 - Pink (for 6/20 Cross)
+    if (enabledIndicators.has('sma6')) {
+      addIndicatorSeries(sma6, '#f472b6', 2); // Pink
+    }
+    
+    // SMA 10 - Blue
+    if (enabledIndicators.has('sma10')) {
+      addIndicatorSeries(sma10, '#3b82f6', 1); // Blue
+    }
+    
+    // SMA 20 - Blue (thicker for 6/20 Cross)
+    if (enabledIndicators.has('sma20')) {
+      addIndicatorSeries(sma20, '#3b82f6', 3); // Blue, thick
+    }
+    
+    // SMA 50 - Red
+    if (enabledIndicators.has('sma50')) {
+      addIndicatorSeries(sma50, '#dc2626', 2); // Red
+    }
+    
+    // SMA 200 - Black/White
+    if (enabledIndicators.has('sma200')) {
+      addIndicatorSeries(sma200, isDark ? '#ffffff' : '#000000', 2);
+    }
+    
+    // EMA 21 - Pink (thicker)
+    if (enabledIndicators.has('ema21')) {
+      addIndicatorSeries(ema21, '#f472b6', 3); // Pink, thick
+    }
+    
+    // 3 Month SMA - Pink
+    if (enabledIndicators.has('sma3Month')) {
+      addIndicatorSeries(sma3Month, '#f472b6', 2); // Pink
+    }
+    
+    // Auto VWAP - Orange dotted
+    if (enabledIndicators.has('autoVwap')) {
+      addIndicatorSeries(vwap, '#f97316', 2, LineStyle.Dotted);
+    }
+    
+    // Anchored VWAP (6-month low) - Yellow solid thick
+    if (enabledIndicators.has('anchoredVwap')) {
+      addIndicatorSeries(anchoredVwapResult.values, 'rgba(234, 179, 8, 0.7)', 3);
+    }
+    
+    // 12 Week VWAP (anchored to 8-month low) - Yellow thick
+    if (enabledIndicators.has('vwap12Week')) {
+      // Calculate 12-week VWAP anchored to 8-month low
+      const eightMonthsAgo = new Date();
+      eightMonthsAgo.setMonth(eightMonthsAgo.getMonth() - 8);
+      let lowestPrice = Infinity;
+      let anchorIdx = -1;
+      for (let i = 0; i < history.length; i++) {
+        const itemDate = new Date(history[i].date);
+        if (itemDate >= eightMonthsAgo && history[i].low < lowestPrice) {
+          lowestPrice = history[i].low;
+          anchorIdx = i;
+        }
+      }
+      if (anchorIdx !== -1) {
+        const vwap12Week: (number | null)[] = [];
+        let cumulativeTPV = 0;
+        let cumulativeVolume = 0;
+        for (let i = 0; i < history.length; i++) {
+          if (i < anchorIdx) {
+            vwap12Week.push(null);
+          } else {
+            const tp = (history[i].high + history[i].low + history[i].close) / 3;
+            cumulativeTPV += tp * history[i].volume;
+            cumulativeVolume += history[i].volume;
+            vwap12Week.push(cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null);
+          }
+        }
+        addIndicatorSeries(vwap12Week, 'rgba(234, 179, 8, 0.9)', 3);
+      }
+    }
 
     // Detect and draw channels if explicitly requested OR if pattern visualization is on for channel patterns
     const shouldShowChannelPatterns = showChannels || 
@@ -810,18 +857,35 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       ]);
     });
 
-    // For daily timeframe, zoom to ~8-9 months (about 180-200 candles) for better pattern visibility
-    // For 5-minute 6/20 Cross, show ~1.5 days (about 117 5-min bars: 78 bars/day * 1.5)
-    // For other timeframes, fit all content
+    // Adjust visible range based on signal/pattern type
+    // 6/20 Cross @ 5min: ~1.5 days (117 bars)
+    // VCP/Weekly Tight/High Tight Flag/Cup Handle @ daily: 6 months (~130 bars)
+    // Monthly Tight @ monthly: 24 months (24 bars)
+    // Default daily: ~8-9 months (200 bars)
+    const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
+    
     if (interval === '5m' && technicalSignal === '6_20_cross' && candleData.length > 117) {
-      // Show last 1.5 days for 6/20 Cross 5-minute charts
       const visibleBars = 117;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
         to: candleData.length
       });
+    } else if (interval === '1mo' && selectedPattern === 'Monthly Tight' && candleData.length > 24) {
+      // Monthly Tight: 24 months viewable
+      const visibleBars = 24;
+      chart.timeScale().setVisibleLogicalRange({
+        from: candleData.length - visibleBars,
+        to: candleData.length
+      });
+    } else if (interval === '1d' && isPatternMode && candleData.length > 130) {
+      // Patterns: 6 months viewable (~130 trading days)
+      const visibleBars = 130;
+      chart.timeScale().setVisibleLogicalRange({
+        from: candleData.length - visibleBars,
+        to: candleData.length
+      });
     } else if (interval === '1d' && candleData.length > 200) {
-      // Show last 200 candles for daily charts
+      // Default daily: 200 candles
       const visibleBars = 200;
       chart.timeScale().setVisibleLogicalRange({
         from: candleData.length - visibleBars,
@@ -842,7 +906,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions]);
+  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators]);
   
   // Handle chart clicks for tools
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -933,64 +997,150 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
 
   return (
     <div className="w-full bg-card p-4 rounded-xl border border-border shadow-sm" data-testid="stock-chart">
-      {/* Header with legend and tools */}
+      {/* Header with legend toggle buttons and tools */}
       <div className="mb-4 flex justify-between items-start flex-wrap gap-4">
         <div>
           <h3 className="font-semibold text-foreground mb-2">Price History</h3>
-          <div className="flex gap-4 items-center flex-wrap">
-            <div className="flex gap-3 text-xs bg-white/90 dark:bg-white/10 px-2 py-1 rounded">
-              {/* Dynamic legend based on what's shown */}
-              {technicalSignal === '6_20_cross' ? (
-                <>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: '#f472b6' }}></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 6</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-1 bg-blue-500 inline-block"></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 20</span>
-                  </span>
-                </>
-              ) : technicalSignal === 'ride_21_ema' ? (
-                <>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-1 inline-block" style={{ backgroundColor: '#f472b6' }}></span>
-                    <span className="text-gray-700 dark:text-gray-300">EMA 21</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-1 bg-red-600 inline-block"></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 50</span>
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 5</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: 'rgba(236, 72, 153, 0.7)' }}></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 20</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-1 bg-red-600 inline-block"></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 50</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
-                    <span className="text-gray-700 dark:text-gray-300">SMA 200</span>
-                  </span>
-                </>
-              )}
-              <span className="flex items-center gap-1">
-                <span className="w-6 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
-                <span className="text-gray-700 dark:text-gray-300">Auto VWAP</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-6 h-1 inline-block" style={{ backgroundColor: 'rgba(234, 179, 8, 0.7)' }}></span>
-                <span className="text-gray-700 dark:text-gray-300">Anchored VWAP (Low)</span>
-              </span>
-            </div>
+          <div className="flex gap-1 items-center flex-wrap">
+            {/* Indicator toggle buttons - driven by enabledIndicators and signal/pattern context */}
+            
+            {/* 6/20 Cross specific: SMA 6 and SMA 20 */}
+            {technicalSignal === '6_20_cross' && (
+              <>
+                <Button
+                  variant={enabledIndicators.has('sma6') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma6')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma6"
+                >
+                  <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: '#f472b6' }}></span>
+                  <span className="text-xs">SMA 6</span>
+                </Button>
+                <Button
+                  variant={enabledIndicators.has('sma20') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma20')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma20"
+                >
+                  <span className="w-3 h-1 rounded" style={{ backgroundColor: '#3b82f6' }}></span>
+                  <span className="text-xs">SMA 20</span>
+                </Button>
+              </>
+            )}
+            
+            {/* EMA 21 for Ride 21 EMA and Pullback signals */}
+            {(technicalSignal === 'ride_21_ema' || technicalSignal?.startsWith('pullback_')) && (
+              <Button
+                variant={enabledIndicators.has('ema21') ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => toggleIndicator('ema21')}
+                className="gap-1 h-7 px-2"
+                data-testid="toggle-ema21"
+              >
+                <span className="w-3 h-1 rounded" style={{ backgroundColor: '#f472b6' }}></span>
+                <span className="text-xs">EMA 21</span>
+              </Button>
+            )}
+            
+            {/* Standard SMAs for non-6/20 Cross modes */}
+            {technicalSignal !== '6_20_cross' && (
+              <>
+                <Button
+                  variant={enabledIndicators.has('sma5') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma5')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma5"
+                >
+                  <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#22c55e' }}></span>
+                  <span className="text-xs">SMA 5</span>
+                </Button>
+                <Button
+                  variant={enabledIndicators.has('sma10') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma10')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma10"
+                >
+                  <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#3b82f6' }}></span>
+                  <span className="text-xs">SMA 10</span>
+                </Button>
+                <Button
+                  variant={enabledIndicators.has('sma50') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma50')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma50"
+                >
+                  <span className="w-3 h-1 rounded" style={{ backgroundColor: '#dc2626' }}></span>
+                  <span className="text-xs">SMA 50</span>
+                </Button>
+                <Button
+                  variant={enabledIndicators.has('sma200') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma200')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma200"
+                >
+                  <span className="w-3 h-0.5 rounded bg-black dark:bg-white"></span>
+                  <span className="text-xs">SMA 200</span>
+                </Button>
+              </>
+            )}
+            
+            {/* Pattern-specific indicators: 3 Month SMA and 12 Week VWAP */}
+            {selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern) && (
+              <>
+                <Button
+                  variant={enabledIndicators.has('sma3Month') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('sma3Month')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-sma3month"
+                >
+                  <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#f472b6' }}></span>
+                  <span className="text-xs">3M SMA</span>
+                </Button>
+                <Button
+                  variant={enabledIndicators.has('vwap12Week') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => toggleIndicator('vwap12Week')}
+                  className="gap-1 h-7 px-2"
+                  data-testid="toggle-vwap12week"
+                >
+                  <span className="w-3 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.9)' }}></span>
+                  <span className="text-xs">12W VWAP</span>
+                </Button>
+              </>
+            )}
+            
+            {/* VWAP (always shown) */}
+            <Button
+              variant={enabledIndicators.has('autoVwap') ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => toggleIndicator('autoVwap')}
+              className="gap-1 h-7 px-2"
+              data-testid="toggle-autovwap"
+            >
+              <span className="w-4 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
+              <span className="text-xs">VWAP</span>
+            </Button>
+            
+            {/* Anchored VWAP (not for 6/20 Cross) */}
+            {technicalSignal !== '6_20_cross' && (
+              <Button
+                variant={enabledIndicators.has('anchoredVwap') ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => toggleIndicator('anchoredVwap')}
+                className="gap-1 h-7 px-2"
+                data-testid="toggle-anchoredvwap"
+              >
+                <span className="w-4 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.7)' }}></span>
+                <span className="text-xs">A-VWAP</span>
+              </Button>
+            )}
           </div>
         </div>
         

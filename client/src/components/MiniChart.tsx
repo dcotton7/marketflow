@@ -17,6 +17,7 @@ interface MiniChartProps {
   timeframe?: string;
   technicalSignal?: string;
   crossDirection?: string;
+  chartPattern?: string;
 }
 
 function calculateSMA(data: { close: number }[], period: number): (number | null)[] {
@@ -147,7 +148,7 @@ function detectConsolidationChannels(
   return channels;
 }
 
-export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDirection }: MiniChartProps) {
+export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDirection, chartPattern }: MiniChartProps) {
   const { data: history, isLoading, error } = useStockHistory(symbol);
 
   if (isLoading) {
@@ -172,17 +173,23 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
     );
   }
 
-  // Determine display parameters based on signal type
+  // Determine indicator type based on signal/pattern
   const is620Cross = technicalSignal === '6_20_cross';
   const isRide21EMA = technicalSignal === 'ride_21_ema';
+  const isPullback = technicalSignal?.startsWith('pullback_');
+  const isMonthlyTight = chartPattern === 'Monthly Tight';
+  const isPatternWithSMA21 = ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(chartPattern || '');
   
   let displayDays = 90;
   let patternTimeframe = 'all';
   
   if (is620Cross) {
-    displayDays = 60; // Show more data for intraday-based signal
-  } else if (isRide21EMA) {
+    displayDays = 60;
+  } else if (isRide21EMA || isPullback) {
     displayDays = 90;
+  } else if (isMonthlyTight) {
+    displayDays = 120;
+    patternTimeframe = '60D';
   } else if (timeframe === '20D') {
     displayDays = 60;
     patternTimeframe = '20D';
@@ -195,22 +202,31 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
   }
 
   const slicedHistory = history.slice(-displayDays);
-  const channels = (is620Cross || isRide21EMA) ? [] : detectConsolidationChannels(slicedHistory, patternTimeframe);
+  const channels = (is620Cross || isRide21EMA || isPullback) ? [] : detectConsolidationChannels(slicedHistory, patternTimeframe);
   
   // Calculate indicators based on signal type
+  // Thumbnail indicators per spreadsheet:
+  // - 6/20 Cross: SMA 6 Pink, SMA 20 Blue
+  // - Ride 21 EMA: EMA 21 Pink only
+  // - Pullback / VCP / Weekly Tight / High Tight Flag / Cup Handle: SMA 21 Pink
+  // - Monthly Tight: 3 Month SMA (approx 63 trading days) Pink
   let sma6Values: (number | null)[] = [];
   let sma20Values: (number | null)[] = [];
   let sma21Values: (number | null)[] = [];
   let ema21Values: (number | null)[] = [];
-  let sma50Values: (number | null)[] = [];
+  let sma3MonthValues: (number | null)[] = [];
   
   if (is620Cross) {
     sma6Values = calculateSMA(slicedHistory, 6);
     sma20Values = calculateSMA(slicedHistory, 20);
   } else if (isRide21EMA) {
+    // Only show EMA 21 Pink on thumbnail
     ema21Values = calculateEMA(slicedHistory, 21);
-    sma50Values = calculateSMA(slicedHistory, 50);
+  } else if (isMonthlyTight) {
+    // 3 Month SMA = approximately 63 trading days
+    sma3MonthValues = calculateSMA(slicedHistory, 63);
   } else {
+    // Default: SMA 21 for pullbacks, patterns, etc.
     sma21Values = calculateSMA(slicedHistory, 21);
   }
 
@@ -234,7 +250,8 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
       }
     } else if (isRide21EMA) {
       baseData.ema21 = ema21Values[index];
-      baseData.sma50 = sma50Values[index];
+    } else if (isMonthlyTight) {
+      baseData.sma3Month = sma3MonthValues[index];
     } else {
       baseData.sma21 = sma21Values[index];
     }
@@ -328,32 +345,34 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
               </>
             )}
             
-            {/* Ride 21 EMA indicators */}
+            {/* Ride 21 EMA: Only EMA 21 Pink on thumbnail */}
             {isRide21EMA && (
-              <>
-                <Line
-                  type="monotone"
-                  dataKey="ema21"
-                  stroke="#f472b6"
-                  strokeWidth={1.5}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="sma50"
-                  stroke="#ef4444"
-                  strokeWidth={1.5}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              </>
+              <Line
+                type="monotone"
+                dataKey="ema21"
+                stroke="#f472b6"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
             )}
             
-            {/* Default: SMA 21 */}
-            {!is620Cross && !isRide21EMA && (
+            {/* Monthly Tight: 3 Month SMA Pink */}
+            {isMonthlyTight && (
+              <Line
+                type="monotone"
+                dataKey="sma3Month"
+                stroke="#f472b6"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            
+            {/* Default: SMA 21 for pullbacks, patterns (VCP, Weekly Tight, High Tight Flag, Cup Handle) */}
+            {!is620Cross && !isRide21EMA && !isMonthlyTight && (
               <Line
                 type="monotone"
                 dataKey="sma21"

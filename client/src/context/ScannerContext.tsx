@@ -12,6 +12,7 @@ interface ScannerContextType {
   setCurrentPage: Dispatch<SetStateAction<number>>;
   isScanning: boolean;
   setIsScanning: Dispatch<SetStateAction<boolean>>;
+  clearAll: () => void;
 }
 
 const defaultFilters: ScannerRunInput = {
@@ -47,6 +48,12 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [isScanning, setIsScanning] = useState(false);
 
+  const clearAll = () => {
+    setFilters(defaultFilters);
+    setResults(null);
+    setCurrentPage(1);
+  };
+
   return (
     <ScannerContext.Provider
       value={{
@@ -58,6 +65,7 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
         setCurrentPage,
         isScanning,
         setIsScanning,
+        clearAll,
       }}
     >
       {children}
