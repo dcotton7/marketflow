@@ -65,50 +65,25 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
     sma50Rising: isSMAFlatOrRising(history, 50),
     sma200Rising: isSMAFlatOrRising(history, 200),
     within4PctOf50: sma50 !== null && currentPrice <= sma50 * 1.04 && currentPrice >= sma50,
-    within7PctOf50: sma50 !== null && currentPrice <= sma50 * 1.07 && currentPrice >= sma50,
+    priceAbove6PctOf50: sma50 !== null && currentPrice > sma50 * 1.06,
     spy5Rising: spyHistory ? isSMAFlatOrRising(spyHistory, 5) : false,
-    vixBelow3: vixHistory && vixHistory.length > 0 ? vixHistory[vixHistory.length - 1].close < 20 : false,
+    vixBelow3: vixHistory && vixHistory.length > 0 ? vixHistory[vixHistory.length - 1].close < 3 : false,
   };
 
   const checkCount = Object.values(checks).filter(Boolean).length;
 
-  let riskLevel: string;
-  let riskColor: string;
-  let lightColor: string;
-  
-  if (checkCount >= 9) {
-    riskLevel = "Low Risk Trade";
-    riskColor = "text-green-500";
-    lightColor = "bg-green-500";
-  } else if (checkCount === 8) {
-    riskLevel = "Moderate Risk";
-    riskColor = "text-lime-400";
-    lightColor = "bg-lime-400";
-  } else if (checkCount === 7) {
-    riskLevel = "Elevated Risk";
-    riskColor = "text-yellow-400";
-    lightColor = "bg-yellow-400";
-  } else if (checkCount === 6) {
-    riskLevel = "High Risk";
-    riskColor = "text-orange-500";
-    lightColor = "bg-orange-500";
-  } else {
-    riskLevel = "Look for Short Opportunities";
-    riskColor = "text-red-500";
-    lightColor = "bg-red-500";
-  }
-
-  const CheckIcon = ({ passed }: { passed: boolean }) => (
-    passed ? (
+  const CheckIcon = ({ passed, noCheck }: { passed: boolean, noCheck?: boolean }) => {
+    if (noCheck) return <Circle className="w-4 h-4 text-muted-foreground opacity-20" />;
+    return passed ? (
       <Check className="w-4 h-4 text-green-500" />
     ) : (
       <X className="w-4 h-4 text-red-500" />
-    )
-  );
+    );
+  };
 
   return (
-    <Card className="h-fit">
-      <CardHeader className="pb-2">
+    <Card className="h-full">
+      <CardHeader className="pb-2 pt-0">
         <CardTitle className="text-lg flex items-center gap-2">
           Trade Risk Assessment
         </CardTitle>
@@ -127,35 +102,35 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.sma5Rising} />
-            <span>5d SMA Flat/Rising</span>
+            <span>Flat or rising 5d SMA</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.sma20Rising} />
-            <span>20d SMA Flat/Rising</span>
+            <span>Flat or rising 20d SMA</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.sma50Rising} />
-            <span>50d SMA Flat/Rising</span>
+            <span>Flat or rising 50d SMA</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.sma200Rising} />
-            <span>200d SMA Flat/Rising</span>
+            <span>Flat or rising 200d SMA</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.within4PctOf50} />
-            <span>Within 4% above 50d</span>
+            <span>Price Distance above 50-day ≤ 4%</span>
           </div>
           <div className="flex items-center gap-2">
-            <CheckIcon passed={checks.within7PctOf50} />
-            <span>Within 7% above 50d</span>
+            <CheckIcon passed={checks.priceAbove6PctOf50} noCheck />
+            <span>Price Distance above 50-day &gt; 6%</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.spy5Rising} />
-            <span>S&P 500 5d SMA Rising</span>
+            <span>S&P 500 5d SMA flat or rising</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.vixBelow3} />
-            <span>VIX Below 20</span>
+            <span>VIX below 3 for the day</span>
           </div>
         </div>
       </CardContent>

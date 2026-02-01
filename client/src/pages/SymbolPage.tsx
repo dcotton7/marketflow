@@ -173,7 +173,7 @@ export default function SymbolPage() {
           {quote.earnings?.surprisePct !== undefined && (
             <div className="text-xl font-mono font-semibold mt-1">
               <span className={quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}>
-                ({quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%)
+                Surprise: ({quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%)
               </span>
             </div>
           )}
@@ -195,7 +195,7 @@ export default function SymbolPage() {
             </div>
           </div>
         )}
-        <div className="flex gap-4">
+        <div className="flex gap-4 items-stretch">
           <div className="flex-1 min-w-0">
             <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
           </div>
