@@ -533,8 +533,9 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
     sma200Series.setData(sma200Data);
     
-    // Add EMA 21 line when ride_21_ema signal is active (pink thicker line)
+    // Add signal-specific overlays
     if (technicalSignal === 'ride_21_ema') {
+      // EMA 21 line - pink thicker line
       const ema21 = calculateEMA(history, 21);
       const ema21Series = chart.addSeries(LineSeries, {
         color: '#f472b6', // Pink
@@ -547,6 +548,36 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         value: ema21[i] ?? undefined,
       })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
       ema21Series.setData(ema21Data);
+    }
+    
+    if (technicalSignal === '6_20_cross') {
+      // 6 SMA line - pink
+      const sma6ForCross = calculateSMA(history, 6);
+      const sma6CrossSeries = chart.addSeries(LineSeries, {
+        color: '#f472b6', // Pink
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const sma6CrossData = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: sma6ForCross[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      sma6CrossSeries.setData(sma6CrossData);
+      
+      // 20 SMA line - blue (thicker for emphasis)
+      const sma20ForCross = calculateSMA(history, 20);
+      const sma20CrossSeries = chart.addSeries(LineSeries, {
+        color: '#3b82f6', // Blue
+        lineWidth: 3,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const sma20CrossData = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: sma20ForCross[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      sma20CrossSeries.setData(sma20CrossData);
     }
     
     // Add VWAP line - orange thicker dotted line (Auto VWAP)

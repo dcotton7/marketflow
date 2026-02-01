@@ -24,26 +24,40 @@ export default function SymbolPage() {
   const { mutate: addToWatchlist, isPending: isAdding } = useAddToWatchlist();
   const { filters, results } = useScannerContext();
   
-  // Build criteria list from filters when coming from scanner
+  // Build criteria list from URL params first, then context filters as fallback
   const getCriteriaList = (): string[] => {
     if (!fromScanner && !selectedPattern && !technicalSignal) return [];
     const criteria: string[] = [];
-    if (filters.chartPattern && filters.chartPattern !== 'All') criteria.push(`Pattern: ${filters.chartPattern}`);
-    if (filters.technicalSignal && filters.technicalSignal !== 'none') {
-      const signalName = getSignalDisplayName(filters.technicalSignal, filters.crossDirection);
+    
+    // Use URL params first (for direct links)
+    if (selectedPattern) criteria.push(`Pattern: ${selectedPattern}`);
+    if (technicalSignal && technicalSignal !== 'none') {
+      const crossDirection = urlParams.get('crossDirection') || undefined;
+      const signalName = getSignalDisplayName(technicalSignal, crossDirection);
       criteria.push(`Signal: ${signalName}`);
     }
-    if (filters.smaFilter && filters.smaFilter !== 'none') {
-      if (filters.smaFilter === 'stacked') criteria.push('SMA Stacked (5>20>50>200)');
-      if (filters.smaFilter === 'above50_200') criteria.push('Price > 50d > 200d');
+    
+    // Add additional context filters if coming from scanner
+    if (fromScanner) {
+      if (!selectedPattern && filters.chartPattern && filters.chartPattern !== 'All') {
+        criteria.push(`Pattern: ${filters.chartPattern}`);
+      }
+      if (!technicalSignal && filters.technicalSignal && filters.technicalSignal !== 'none') {
+        const signalName = getSignalDisplayName(filters.technicalSignal, filters.crossDirection);
+        criteria.push(`Signal: ${signalName}`);
+      }
+      if (filters.smaFilter && filters.smaFilter !== 'none') {
+        if (filters.smaFilter === 'stacked') criteria.push('SMA Stacked (5>20>50>200)');
+        if (filters.smaFilter === 'above50_200') criteria.push('Price > 50d > 200d');
+      }
+      if (filters.patternStrictness && filters.patternStrictness !== 'both') {
+        criteria.push(`Strictness: ${filters.patternStrictness}`);
+      }
+      if (filters.priceWithin50dPct) criteria.push(`Within ${filters.priceWithin50dPct}% of 50d`);
+      if (filters.minPrice) criteria.push(`Min $${filters.minPrice}`);
+      if (filters.maxPrice) criteria.push(`Max $${filters.maxPrice}`);
+      if (filters.minVolume) criteria.push(`Vol > ${(filters.minVolume / 1000000).toFixed(1)}M`);
     }
-    if (filters.patternStrictness && filters.patternStrictness !== 'both') {
-      criteria.push(`Strictness: ${filters.patternStrictness}`);
-    }
-    if (filters.priceWithin50dPct) criteria.push(`Within ${filters.priceWithin50dPct}% of 50d`);
-    if (filters.minPrice) criteria.push(`Min $${filters.minPrice}`);
-    if (filters.maxPrice) criteria.push(`Max $${filters.maxPrice}`);
-    if (filters.minVolume) criteria.push(`Vol > ${(filters.minVolume / 1000000).toFixed(1)}M`);
     return criteria;
   };
   

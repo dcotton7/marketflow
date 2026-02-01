@@ -4,7 +4,21 @@
 
 AI Swing Scanner is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
 
-## Recent Changes (January 2026)
+## Recent Changes (February 2026)
+- Replaced Candlestick Patterns section with new "Technical Indicator Signals" section
+- Added 6/20 Cross signal: detects 6 SMA and 20 SMA crossover within last 3 bars
+  - Cross Up/Down direction selector
+  - Thumbnail shows pink 6 SMA, blue 20 SMA with green/red shaded area
+  - Detail chart shows 6/20 SMA lines with thicker styling
+- Added "Ride the 21 EMA" signal with configurable thresholds:
+  - EMA Break Threshold (default ≤1%)
+  - Pullback Threshold (default >2.5%)
+  - Thumbnail shows pink 21 EMA and red 50 SMA
+  - Detail chart shows thicker pink EMA 21 line
+- Moved pullback patterns (5/10/20/50 DMA) from Chart Patterns into Technical Indicator Signals section
+- URL params now pass technicalSignal and crossDirection to symbol page for criteria display
+
+## Changes (January 2026)
 - Renamed application from "TradeScan" to "AI Swing Scanner"
 - Added dedicated Watchlist page with navigation in sidebar
 - Implemented multi-timeframe chart selector (5m, 15m, 30m, 60m, daily, weekly, monthly)
