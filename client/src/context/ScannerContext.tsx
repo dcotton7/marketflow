@@ -17,12 +17,12 @@ interface ScannerContextType {
   clearAll: () => void;
 }
 
-// Initial blank state - no filters selected until user makes a choice
+// Initial filters with sensible defaults that show in the UI
 const blankFilters: ScannerRunInput = {
   scannerIndex: "sp100",
-  minPrice: undefined,
+  minPrice: 7,
   maxPrice: undefined,
-  minVolume: undefined,
+  minVolume: 500000,
   chartPattern: "All",
   patternStrictness: "tight",
   smaFilter: "none",
@@ -35,17 +35,10 @@ const blankFilters: ScannerRunInput = {
   crossDirection: "up",
   emaBreakThresholdPct: 1,
   emaPbThresholdPct: 2.5,
-  pbMinGainPct: 30,
+  pbMinGainPct: 15, // Default for 5/10 DMA (will be adjusted per signal)
   pbUpPeriodCandles: 10,
   pbMinCandles: 1,
   pbMaxCandles: 5,
-};
-
-// Default filters when starting a scan (with sensible defaults)
-const defaultFilters: ScannerRunInput = {
-  ...blankFilters,
-  minPrice: 7,
-  minVolume: 500000,
 };
 
 const ScannerContext = createContext<ScannerContextType | undefined>(undefined);

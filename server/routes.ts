@@ -100,17 +100,99 @@ const SP_100 = [
   'MMM', 'MU', 'NSC', 'PNC', 'USB', 'SPY', 'QQQ', 'IWM', 'DIA', 'GLD'
 ];
 
+// Full S&P 500 list (all ~500 stocks)
+const SP_500 = [
+  // S&P 100 (top 100)
+  ...SP_100,
+  // Additional S&P 500 stocks (remaining ~400)
+  'A', 'AAL', 'AAP', 'AFRM', 'AFL', 'AIG', 'AIZ', 'AJG', 'AKAM', 'ALB',
+  'ALGN', 'ALK', 'ALL', 'ALLE', 'AMAT', 'AMCR', 'AME', 'AMP', 'AMT', 'ANSS',
+  'AON', 'AOS', 'APA', 'APD', 'APH', 'APTV', 'ARE', 'ATO', 'ATVI', 'AVB',
+  'AVY', 'AWK', 'AZO', 'BAC', 'BALL', 'BAX', 'BBWI', 'BBY', 'BEN', 'BF.B',
+  'BG', 'BIO', 'BK', 'BKNG', 'BMY', 'BR', 'BRO', 'BWA', 'BXP', 'C',
+  'CAG', 'CAH', 'CARR', 'CCL', 'CDAY', 'CDNS', 'CDW', 'CE', 'CEG', 'CF',
+  'CFG', 'CHD', 'CHRW', 'CHTR', 'CINF', 'CL', 'CLX', 'CMA', 'CMCSA', 'CMG',
+  'CMI', 'CMS', 'CNC', 'CNP', 'COF', 'COO', 'CPAY', 'CPRT', 'CPT', 'CRL',
+  'CRM', 'CRWD', 'CSCO', 'CSGP', 'CSX', 'CTAS', 'CTLT', 'CTRA', 'CTSH', 'CTVA',
+  'D', 'DAL', 'DD', 'DECK', 'DFS', 'DG', 'DGX', 'DHI', 'DIS', 'DLR',
+  'DLTR', 'DOV', 'DOW', 'DPZ', 'DRI', 'DTE', 'DVA', 'DVN', 'DXCM', 'EA',
+  'EBAY', 'ECL', 'ED', 'EFX', 'EG', 'EIX', 'EL', 'ELV', 'EMN', 'EMR',
+  'ENPH', 'EPAM', 'EPD', 'ES', 'ESS', 'ETN', 'ETR', 'EVRG', 'EW', 'EXC',
+  'EXPD', 'EXPE', 'EXR', 'F', 'FANG', 'FAST', 'FCX', 'FDS', 'FDX', 'FE',
+  'FFIV', 'FI', 'FICO', 'FIS', 'FITB', 'FLT', 'FMC', 'FOX', 'FOXA', 'FRC',
+  'FRT', 'FSLR', 'FTNT', 'FTV', 'GD', 'GDDY', 'GEN', 'GILD', 'GIS', 'GL',
+  'GLW', 'GM', 'GNRC', 'GPC', 'GPN', 'GPS', 'GRMN', 'GWW', 'HAL', 'HAS',
+  'HBAN', 'HCA', 'HD', 'HES', 'HIG', 'HII', 'HLT', 'HOLX', 'HPE', 'HPQ',
+  'HRL', 'HSIC', 'HST', 'HSY', 'HUM', 'HWM', 'IDXX', 'IEX', 'IFF', 'ILMN',
+  'INCY', 'INTC', 'IP', 'IPG', 'IQV', 'IR', 'IRM', 'IT', 'ITW', 'IVZ',
+  'J', 'JBHT', 'JCI', 'JKHY', 'JNPR', 'K', 'KDP', 'KEY', 'KEYS', 'KHC',
+  'KIM', 'KLAC', 'KMB', 'KMI', 'KMX', 'KO', 'KR', 'L', 'LDOS', 'LEN',
+  'LH', 'LHX', 'LKQ', 'LMT', 'LNC', 'LNT', 'LUMN', 'LUV', 'LVS', 'LW',
+  'LYB', 'LYV', 'MAA', 'MAS', 'MCD', 'MCHP', 'MCK', 'MCO', 'MDLZ', 'MDT',
+  'MET', 'MGM', 'MHK', 'MKC', 'MKTX', 'MLM', 'MMM', 'MNST', 'MOS', 'MPC',
+  'MPWR', 'MRO', 'MS', 'MSCI', 'MSI', 'MTB', 'MTCH', 'MTD', 'NCLH', 'NDAQ',
+  'NDSN', 'NEM', 'NI', 'NKE', 'NOC', 'NOW', 'NRG', 'NUE', 'NVR', 'NWL',
+  'NWS', 'NWSA', 'NXPI', 'O', 'ODFL', 'OGN', 'OKE', 'OMC', 'ON', 'ORCL',
+  'ORLY', 'OTIS', 'OXY', 'PARA', 'PAYC', 'PAYX', 'PCAR', 'PCG', 'PEAK', 'PEG',
+  'PFE', 'PFG', 'PH', 'PHM', 'PKG', 'PKI', 'PLD', 'PNR', 'PNW', 'PODD',
+  'POOL', 'PPG', 'PPL', 'PRU', 'PSA', 'PSX', 'PTC', 'PVH', 'PWR', 'PYPL',
+  'QRVO', 'RCL', 'RE', 'REG', 'RF', 'RHI', 'RJF', 'RL', 'RMD', 'ROK',
+  'ROL', 'ROP', 'ROST', 'RSG', 'RTX', 'SBAC', 'SBNY', 'SBUX', 'SEE', 'SHW',
+  'SIVB', 'SJM', 'SLB', 'SNA', 'SNPS', 'SO', 'SPG', 'SRE', 'STE', 'STT',
+  'STX', 'STZ', 'SWK', 'SWKS', 'SYF', 'SYK', 'SYY', 'TAP', 'TDG', 'TDY',
+  'TECH', 'TEL', 'TER', 'TFC', 'TFX', 'TGT', 'TMO', 'TMUS', 'TPR', 'TRGP',
+  'TRMB', 'TROW', 'TRV', 'TSCO', 'TSN', 'TT', 'TTWO', 'TXN', 'TXT', 'TYL',
+  'UAL', 'UDR', 'UHS', 'ULTA', 'UNP', 'UPS', 'URI', 'USB', 'V', 'VFC',
+  'VICI', 'VLO', 'VMC', 'VNO', 'VRSK', 'VRSN', 'VRTX', 'VTR', 'VTRS', 'VZ',
+  'WAB', 'WAT', 'WBA', 'WBD', 'WDC', 'WEC', 'WELL', 'WFC', 'WHR', 'WM',
+  'WMB', 'WMT', 'WRB', 'WRK', 'WST', 'WTW', 'WY', 'WYNN', 'XEL', 'XOM',
+  'XRAY', 'XYL', 'YUM', 'ZBH', 'ZBRA', 'ZION', 'ZTS'
+];
+
+// Russell 2000 - Top 300 small cap stocks (representative sample)
+const RUSSELL_2000 = [
+  'SMCI', 'MARA', 'RIOT', 'CELH', 'CIEN', 'UPST', 'PLUG', 'LCID', 'RIVN', 'SOFI',
+  'HOOD', 'AFRM', 'COIN', 'RBLX', 'U', 'DKNG', 'CHWY', 'ETSY', 'PINS', 'SNAP',
+  'ROKU', 'SQ', 'TWLO', 'ZM', 'DOCU', 'CRSR', 'LMND', 'GOEV', 'OPEN', 'WISH',
+  'SPCE', 'PLTR', 'SKLZ', 'CLOV', 'WKHS', 'RIDE', 'NKLA', 'HYLN', 'LAZR', 'VLDR',
+  'ASTS', 'IONQ', 'DNA', 'MTTR', 'BBIG', 'AMC', 'GME', 'BB', 'NOK', 'SNDL',
+  'TLRY', 'ACB', 'CGC', 'CRON', 'HEXO', 'VFF', 'GRWG', 'CURLF', 'GTBIF', 'TCNNF',
+  'CRSP', 'BEAM', 'EDIT', 'NTLA', 'VERV', 'ARKG', 'PATH', 'CFLT', 'MDB', 'SNOW',
+  'NET', 'BILL', 'HUBS', 'VEEV', 'TTD', 'OKTA', 'ZS', 'CRWD', 'DDOG', 'SPLK',
+  'ESTC', 'NEWR', 'SUMO', 'PD', 'DT', 'RPD', 'TENB', 'QLYS', 'VRNS', 'CYBR',
+  'PANW', 'FTNT', 'S', 'SAIL', 'AI', 'BBAI', 'SOUN', 'GFAI', 'AGFY', 'BIGC',
+  'CLVT', 'RSKD', 'FLYW', 'RELY', 'DV', 'BRZE', 'DOCN', 'GTLB', 'MNDY', 'FROG',
+  'APP', 'IS', 'MGNI', 'PUBM', 'DSP', 'TBLA', 'ZETA', 'KARO', 'IRNT', 'CWAN',
+  'BLND', 'NOTV', 'VERA', 'VZIO', 'PLTK', 'BGFV', 'PRPL', 'LOVE', 'SNBR', 'LESL',
+  'RVLV', 'CURV', 'POSH', 'REAL', 'ACCD', 'OSH', 'BROS', 'SHAK', 'WING', 'CAVA',
+  'TXRH', 'PLAY', 'EAT', 'BJRI', 'BLMN', 'DIN', 'CAKE', 'CHUY', 'TACO', 'JACK',
+  'LOCO', 'RRGB', 'NDLS', 'HABT', 'FAT', 'ARKR', 'DENN', 'FRGI', 'PTLO', 'KRUS',
+  'KURA', 'PCYO', 'RICK', 'RCI', 'VSTO', 'SWBI', 'RGR', 'AOUT', 'AXON', 'DGII',
+  'VIAV', 'LITE', 'COHR', 'IIVI', 'LSCC', 'SLAB', 'MXIM', 'IDCC', 'POWI', 'DIOD',
+  'OLED', 'KOPN', 'EMAN', 'KLIC', 'UCTT', 'AEHR', 'ONTO', 'ACLS', 'BRKS', 'CRUS',
+  'SITM', 'PLAB', 'RMBS', 'AOSL', 'ALGM', 'NVTS', 'WOLF', 'AMBA', 'HIMX', 'SGH',
+  'PSTG', 'NTAP', 'NEOG', 'VRNT', 'CDXS', 'HLIT', 'MITK', 'PRGS', 'PING', 'JAMF',
+  'SMAR', 'FRSH', 'APPF', 'EGHT', 'TOST', 'NCNO', 'ALTR', 'SMTC', 'FORM', 'AMSC',
+  'SATS', 'MAXN', 'ARRY', 'SEDG', 'ENPH', 'RUN', 'NOVA', 'SHLS', 'CSIQ', 'JKS',
+  'DQ', 'SPWR', 'FSLR', 'FLNC', 'STEM', 'BLNK', 'CHPT', 'EVGO', 'VLTA', 'DCFC',
+  'ARVL', 'FSR', 'PTRA', 'XL', 'WKHS', 'GOEV', 'REE', 'SOLO', 'ELMS', 'CENN',
+  'MULN', 'FFIE', 'NKLA', 'RIDE', 'HYLN', 'LEV', 'HYZN', 'CLVR', 'NIO', 'XPEV',
+  'LI', 'BYDDF', 'TSLA', 'RIVN', 'LCID', 'F', 'GM', 'STLA', 'TM', 'HMC'
+];
+
 // Default stock universe (S&P 100)
 const STOCK_UNIVERSE = SP_100;
 
 // Helper function to get stock list by index
-function getStocksByIndex(index?: string): string[] {
+function getStocksByIndex(index?: string, watchlistSymbols?: string[]): string[] {
   switch (index) {
     case 'dow30': return DOW_30;
     case 'nasdaq100': return NASDAQ_100;
     case 'sp100': return SP_100;
-    case 'sp500': return [...SP_100]; // For now use SP100 as SP500 subset
-    case 'all': return [...new Set([...SP_100, ...NASDAQ_100, ...DOW_30])];
+    case 'sp500': return [...new Set(SP_500)]; // Full S&P 500
+    case 'russell2000': return RUSSELL_2000;
+    case 'watchlist': return watchlistSymbols || [];
+    case 'all': return [...new Set([...SP_500, ...NASDAQ_100, ...DOW_30, ...RUSSELL_2000])];
     default: return SP_100;
   }
 }
@@ -1370,7 +1452,12 @@ export async function registerRoutes(
       const results = [];
 
       // Get stock universe based on selected index
-      const universe = getStocksByIndex(input.scannerIndex);
+      let watchlistSymbols: string[] = [];
+      if (input.scannerIndex === 'watchlist') {
+        const watchlistItems = await storage.getWatchlist();
+        watchlistSymbols = watchlistItems.map(item => item.symbol);
+      }
+      const universe = getStocksByIndex(input.scannerIndex, watchlistSymbols);
       
       // Debug log scan filters
       console.log('[Scanner] Running scan with filters:', {

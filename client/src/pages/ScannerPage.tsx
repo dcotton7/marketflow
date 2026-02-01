@@ -56,10 +56,12 @@ export default function ScannerPage() {
     }
     if (filters.scannerIndex) {
       const indexNames: Record<string, string> = {
-        'sp500': 'S&P 500',
+        'dow30': 'Dow 30',
+        'nasdaq100': 'Nasdaq 100',
         'sp100': 'S&P 100',
-        'nasdaq100': 'NASDAQ 100',
-        'dow30': 'DOW 30',
+        'sp500': 'S&P 500',
+        'russell2000': 'Russell 2000',
+        'watchlist': 'My Watchlist',
         'all': 'All Stocks',
       };
       parts.push(indexNames[filters.scannerIndex] || filters.scannerIndex);
@@ -117,6 +119,8 @@ export default function ScannerPage() {
       'nasdaq100': 'Nasdaq 100', 
       'sp100': 'S&P 100',
       'sp500': 'S&P 500',
+      'russell2000': 'Russell 2000',
+      'watchlist': 'My Watchlist',
       'all': 'All Stocks'
     };
     if (filters.scannerIndex) {
@@ -265,10 +269,12 @@ export default function ScannerPage() {
     // Stock Universe
     const indexLabels: Record<string, { name: string; count: string }> = {
       'dow30': { name: 'Dow Jones 30', count: '30 blue-chip stocks' },
-      'nasdaq100': { name: 'Nasdaq 100', count: '100 tech stocks' },
+      'nasdaq100': { name: 'Nasdaq 100', count: '100 tech-heavy stocks' },
       'sp100': { name: 'S&P 100', count: '100 mega-cap stocks' },
-      'sp500': { name: 'S&P 500', count: '100 top S&P stocks (subset)' },
-      'all': { name: 'All Indices', count: '~150 unique stocks' }
+      'sp500': { name: 'S&P 500', count: '~500 large-cap stocks' },
+      'russell2000': { name: 'Russell 2000', count: '~300 small-cap stocks' },
+      'watchlist': { name: 'My Watchlist', count: 'your saved stocks' },
+      'all': { name: 'All Indices', count: '~900 unique stocks' }
     };
     const indexInfo = indexLabels[filters.scannerIndex || 'sp100'] || { name: 'S&P 100', count: '100 stocks' };
     details.push({
@@ -430,8 +436,10 @@ export default function ScannerPage() {
                   <SelectContent>
                     <SelectItem value="dow30">Dow Jones 30</SelectItem>
                     <SelectItem value="nasdaq100">Nasdaq 100</SelectItem>
-                    <SelectItem value="sp100">S&P 100</SelectItem>
+                    <SelectItem value="sp100">S&P 100 (default)</SelectItem>
                     <SelectItem value="sp500">S&P 500</SelectItem>
+                    <SelectItem value="russell2000">Russell 2000</SelectItem>
+                    <SelectItem value="watchlist">My Watchlist</SelectItem>
                     <SelectItem value="all">All Stocks</SelectItem>
                   </SelectContent>
                 </Select>
@@ -579,11 +587,23 @@ export default function ScannerPage() {
                 <div className="space-y-2">
                   <Select 
                     value={filters.technicalSignal || "none"} 
-                    onValueChange={(val: any) => setFilters(prev => ({ 
-                      ...prev, 
-                      technicalSignal: val,
-                      crossDirection: val === '6_20_cross' ? 'up' : prev.crossDirection
-                    }))}
+                    onValueChange={(val: any) => {
+                      // Set appropriate defaults based on signal type
+                      const pullbackDefaults: Record<string, { pbMinGainPct: number; pbUpPeriodCandles: number }> = {
+                        'pullback_5_dma': { pbMinGainPct: 15, pbUpPeriodCandles: 10 },
+                        'pullback_10_dma': { pbMinGainPct: 15, pbUpPeriodCandles: 10 },
+                        'pullback_20_dma': { pbMinGainPct: 20, pbUpPeriodCandles: 15 },
+                        'pullback_50_dma': { pbMinGainPct: 25, pbUpPeriodCandles: 20 },
+                      };
+                      const defaults = pullbackDefaults[val] || {};
+                      setFilters(prev => ({ 
+                        ...prev, 
+                        technicalSignal: val,
+                        crossDirection: val === '6_20_cross' ? 'up' : prev.crossDirection,
+                        pbMinGainPct: defaults.pbMinGainPct ?? prev.pbMinGainPct,
+                        pbUpPeriodCandles: defaults.pbUpPeriodCandles ?? prev.pbUpPeriodCandles,
+                      }));
+                    }}
                   >
                     <SelectTrigger className="bg-background" data-testid="select-technical-signal">
                       <SelectValue placeholder="Select Signal" />
