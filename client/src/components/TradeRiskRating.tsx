@@ -93,7 +93,7 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
     riskColor = "text-orange-500";
     lightColor = "bg-orange-500";
   } else {
-    riskLevel = "Look for Short Opportunities";
+    riskLevel = "Very High Risk Long Setup";
     riskColor = "text-red-500";
     lightColor = "bg-red-500";
   }

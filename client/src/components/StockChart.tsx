@@ -400,79 +400,75 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     }));
     volumeSeries.setData(volumeData);
 
-    // Only show SMAs for daily/weekly/monthly timeframes
-    const shouldShowSMAs = interval === '1d' || interval === '1wk' || interval === '1mo';
+    // Show SMAs for all timeframes (SMA periods are in bars, so 5-period SMA on 5min chart = 5 bars)
+    const sma5 = calculateSMA(history, 5);
+    const sma20 = calculateSMA(history, 20);
+    const sma50 = calculateSMA(history, 50);
+    const sma200 = calculateSMA(history, 200);
+
+    const sma5Series = chart.addSeries(LineSeries, {
+      color: '#3b82f6',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const sma5Data = history.map((item, i) => ({
+      time: (new Date(item.date).getTime() / 1000) as Time,
+      value: sma5[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    sma5Series.setData(sma5Data);
+
+    const sma20Series = chart.addSeries(LineSeries, {
+      color: '#ec4899',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const sma20Data = history.map((item, i) => ({
+      time: (new Date(item.date).getTime() / 1000) as Time,
+      value: sma20[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    sma20Series.setData(sma20Data);
+
+    const sma50Series = chart.addSeries(LineSeries, {
+      color: '#dc2626',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const sma50Data = history.map((item, i) => ({
+      time: (new Date(item.date).getTime() / 1000) as Time,
+      value: sma50[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    sma50Series.setData(sma50Data);
+
+    const sma200Series = chart.addSeries(LineSeries, {
+      color: isDark ? '#ffffff' : '#000000',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const sma200Data = history.map((item, i) => ({
+      time: (new Date(item.date).getTime() / 1000) as Time,
+      value: sma200[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    sma200Series.setData(sma200Data);
     
-    if (shouldShowSMAs) {
-      const sma5 = calculateSMA(history, 5);
-      const sma20 = calculateSMA(history, 20);
-      const sma50 = calculateSMA(history, 50);
-      const sma200 = calculateSMA(history, 200);
-
-      const sma5Series = chart.addSeries(LineSeries, {
-        color: '#3b82f6',
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const sma5Data = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: sma5[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      sma5Series.setData(sma5Data);
-
-      const sma20Series = chart.addSeries(LineSeries, {
-        color: '#ec4899',
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const sma20Data = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: sma20[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      sma20Series.setData(sma20Data);
-
-      const sma50Series = chart.addSeries(LineSeries, {
-        color: '#dc2626',
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const sma50Data = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: sma50[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      sma50Series.setData(sma50Data);
-
-      const sma200Series = chart.addSeries(LineSeries, {
-        color: isDark ? '#ffffff' : '#000000',
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const sma200Data = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: sma200[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      sma200Series.setData(sma200Data);
-      
-      // Add VWAP line - orange thicker dotted line
-      const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
-      const vwap = calculateVWAP(history, isIntraday);
-      const vwapSeries = chart.addSeries(LineSeries, {
-        color: '#f97316', // Orange
-        lineWidth: 2,
-        lineStyle: LineStyle.Dotted,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const vwapData = history.map((item, i) => ({
-        time: (new Date(item.date).getTime() / 1000) as Time,
-        value: vwap[i] ?? undefined,
-      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
-      vwapSeries.setData(vwapData);
-    }
+    // Add VWAP line - orange thicker dotted line
+    const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
+    const vwap = calculateVWAP(history, isIntraday);
+    const vwapSeries = chart.addSeries(LineSeries, {
+      color: '#f97316', // Orange
+      lineWidth: 2,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const vwapData = history.map((item, i) => ({
+      time: (new Date(item.date).getTime() / 1000) as Time,
+      value: vwap[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    vwapSeries.setData(vwapData);
 
     // Detect and draw channels if explicitly requested OR if pattern visualization is on for channel patterns
     const shouldShowChannelPatterns = showChannels || 
@@ -767,8 +763,6 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     );
   }
 
-  const showSMAs = interval === '1d' || interval === '1wk' || interval === '1mo';
-
   return (
     <div className="w-full bg-card p-4 rounded-xl border border-border shadow-sm" data-testid="stock-chart">
       {/* Header with legend and tools */}
@@ -776,36 +770,28 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         <div>
           <h3 className="font-semibold text-foreground mb-2">Price History</h3>
           <div className="flex gap-4 items-center flex-wrap">
-            {showSMAs && (
-              <div className="flex gap-3 text-xs">
-                <span className="flex items-center gap-1">
-                  <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                  <span className="text-muted-foreground">SMA 5</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
-                  <span className="text-muted-foreground">SMA 20</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
-                  <span className="text-muted-foreground">SMA 50</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
-                  <span className="text-muted-foreground">SMA 200</span>
-                </span>
-              </div>
-            )}
-            {channels.length > 0 && (
-              <div className="flex gap-2 text-xs">
-                {channels.map((ch, i) => (
-                  <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded border border-blue-500 bg-blue-100 dark:bg-blue-900/30">
-                    <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                    <span className="text-foreground font-medium">{ch.type}</span>
-                  </span>
-                ))}
-              </div>
-            )}
+            <div className="flex gap-3 text-xs">
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
+                <span className="text-muted-foreground">SMA 5</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-pink-500 inline-block"></span>
+                <span className="text-muted-foreground">SMA 20</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-red-600 inline-block"></span>
+                <span className="text-muted-foreground">SMA 50</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
+                <span className="text-muted-foreground">SMA 200</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-6 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
+                <span className="text-muted-foreground">VWAP</span>
+              </span>
+            </div>
           </div>
         </div>
         
