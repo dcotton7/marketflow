@@ -19,7 +19,6 @@ const defaultFilters: ScannerRunInput = {
   minPrice: 7,
   maxPrice: undefined,
   minVolume: 500000,
-  candlestickPattern: "All",
   chartPattern: "All",
   patternStrictness: "tight",
   smaFilter: "none",
@@ -28,6 +27,12 @@ const defaultFilters: ScannerRunInput = {
   htfTimeframe: "weekly",
   htfMinGainPct: 65,
   htfPullbackPct: 8,
+  // Technical Indicator Signals
+  technicalSignal: "none",
+  crossDirection: "up",
+  emaBreakThresholdPct: 1,
+  emaPbThresholdPct: 2.5,
+  // Pullback settings
   pbMinGainPct: 30,
   pbUpPeriodCandles: 10,
   pbMinCandles: 1,

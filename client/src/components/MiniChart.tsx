@@ -4,6 +4,7 @@ import {
   ComposedChart,
   Bar,
   Line,
+  Area,
   XAxis,
   YAxis,
   ResponsiveContainer,
@@ -13,7 +14,9 @@ import {
 
 interface MiniChartProps {
   symbol: string;
-  timeframe: string;
+  timeframe?: string;
+  technicalSignal?: string;
+  crossDirection?: string;
 }
 
 function calculateSMA(data: { close: number }[], period: number): (number | null)[] {
@@ -27,6 +30,28 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
     }
   }
   return sma;
+}
+
+function calculateEMA(data: { close: number }[], period: number): (number | null)[] {
+  const ema: (number | null)[] = [];
+  const multiplier = 2 / (period + 1);
+  
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      ema.push(null);
+    } else if (i === period - 1) {
+      const sum = data.slice(0, period).reduce((acc, d) => acc + d.close, 0);
+      ema.push(sum / period);
+    } else {
+      const prevEma = ema[i - 1];
+      if (prevEma !== null) {
+        ema.push((data[i].close - prevEma) * multiplier + prevEma);
+      } else {
+        ema.push(null);
+      }
+    }
+  }
+  return ema;
 }
 
 interface ConsolidationChannel {
@@ -122,7 +147,7 @@ function detectConsolidationChannels(
   return channels;
 }
 
-export function MiniChart({ symbol, timeframe }: MiniChartProps) {
+export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDirection }: MiniChartProps) {
   const { data: history, isLoading, error } = useStockHistory(symbol);
 
   if (isLoading) {
@@ -147,10 +172,18 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
     );
   }
 
+  // Determine display parameters based on signal type
+  const is620Cross = technicalSignal === '6_20_cross';
+  const isRide21EMA = technicalSignal === 'ride_21_ema';
+  
   let displayDays = 90;
   let patternTimeframe = 'all';
   
-  if (timeframe === '20D') {
+  if (is620Cross) {
+    displayDays = 60; // Show more data for intraday-based signal
+  } else if (isRide21EMA) {
+    displayDays = 90;
+  } else if (timeframe === '20D') {
     displayDays = 60;
     patternTimeframe = '20D';
   } else if (timeframe === '30D') {
@@ -162,16 +195,52 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
   }
 
   const slicedHistory = history.slice(-displayDays);
-  const channels = detectConsolidationChannels(slicedHistory, patternTimeframe);
+  const channels = (is620Cross || isRide21EMA) ? [] : detectConsolidationChannels(slicedHistory, patternTimeframe);
   
-  // Calculate SMA 21
-  const sma21Values = calculateSMA(slicedHistory, 21);
+  // Calculate indicators based on signal type
+  let sma6Values: (number | null)[] = [];
+  let sma20Values: (number | null)[] = [];
+  let sma21Values: (number | null)[] = [];
+  let ema21Values: (number | null)[] = [];
+  let sma50Values: (number | null)[] = [];
+  
+  if (is620Cross) {
+    sma6Values = calculateSMA(slicedHistory, 6);
+    sma20Values = calculateSMA(slicedHistory, 20);
+  } else if (isRide21EMA) {
+    ema21Values = calculateEMA(slicedHistory, 21);
+    sma50Values = calculateSMA(slicedHistory, 50);
+  } else {
+    sma21Values = calculateSMA(slicedHistory, 21);
+  }
 
-  const chartData = slicedHistory.map((item, index) => ({
-    ...item,
-    color: item.close >= item.open ? "#22c55e" : "#ef4444",
-    sma21: sma21Values[index],
-  }));
+  // Determine cross direction for shading
+  const isCrossUp = crossDirection === 'up';
+  const shadeFill = isCrossUp ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+
+  const chartData = slicedHistory.map((item, index) => {
+    const baseData: any = {
+      ...item,
+      color: item.close >= item.open ? "#22c55e" : "#ef4444",
+    };
+    
+    if (is620Cross) {
+      baseData.sma6 = sma6Values[index];
+      baseData.sma20 = sma20Values[index];
+      // Calculate area between SMAs for shading
+      if (sma6Values[index] !== null && sma20Values[index] !== null) {
+        baseData.areaTop = Math.max(sma6Values[index]!, sma20Values[index]!);
+        baseData.areaBottom = Math.min(sma6Values[index]!, sma20Values[index]!);
+      }
+    } else if (isRide21EMA) {
+      baseData.ema21 = ema21Values[index];
+      baseData.sma50 = sma50Values[index];
+    } else {
+      baseData.sma21 = sma21Values[index];
+    }
+    
+    return baseData;
+  });
 
   const allPrices = slicedHistory.flatMap(d => [d.high, d.low]);
   const minPrice = Math.min(...allPrices);
@@ -179,7 +248,6 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
   const priceRange = maxPrice - minPrice;
   const pricePadding = priceRange * 0.05;
   
-  // Calculate daily % change (last candle vs previous)
   const lastCandle = slicedHistory[slicedHistory.length - 1];
   const prevCandle = slicedHistory[slicedHistory.length - 2];
   const dailyChange = prevCandle ? ((lastCandle.close - prevCandle.close) / prevCandle.close) * 100 : 0;
@@ -198,6 +266,7 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
               hide
             />
             
+            {/* Channel overlays for pattern detection */}
             {channels.map((channel, index) => (
               <ReferenceArea
                 key={`channel-${index}`}
@@ -212,6 +281,19 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
               />
             ))}
             
+            {/* 6/20 Cross: Shaded area between SMAs */}
+            {is620Cross && (
+              <Area
+                type="monotone"
+                dataKey="areaTop"
+                stroke="none"
+                fill={shadeFill}
+                baseLine={chartData.map(d => d.areaBottom)}
+                isAnimationActive={false}
+              />
+            )}
+            
+            {/* Candlestick bars */}
             <Bar 
               dataKey={(item) => [item.open, item.close]} 
               fill="currentColor"
@@ -222,15 +304,66 @@ export function MiniChart({ symbol, timeframe }: MiniChartProps) {
               ))}
             </Bar>
             
-            <Line
-              type="monotone"
-              dataKey="sma21"
-              stroke="#f472b6"
-              strokeWidth={1.5}
-              dot={false}
-              isAnimationActive={false}
-              connectNulls={false}
-            />
+            {/* 6/20 Cross indicators */}
+            {is620Cross && (
+              <>
+                <Line
+                  type="monotone"
+                  dataKey="sma6"
+                  stroke="#f472b6"
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="sma20"
+                  stroke="#3b82f6"
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              </>
+            )}
+            
+            {/* Ride 21 EMA indicators */}
+            {isRide21EMA && (
+              <>
+                <Line
+                  type="monotone"
+                  dataKey="ema21"
+                  stroke="#f472b6"
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="sma50"
+                  stroke="#ef4444"
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              </>
+            )}
+            
+            {/* Default: SMA 21 */}
+            {!is620Cross && !isRide21EMA && (
+              <Line
+                type="monotone"
+                dataKey="sma21"
+                stroke="#f472b6"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

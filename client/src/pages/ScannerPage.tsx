@@ -40,33 +40,32 @@ export default function ScannerPage() {
     });
   };
 
-  const candlestickPatterns = ["All", "Doji", "Hammer", "Bullish Engulfing", "Bearish Engulfing", "Morning Star"];
-  const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight", "High Tight Flag", "Cup and Handle", "Pullback to 5 DMA", "Pullback to 10 DMA", "Pullback to 20 DMA", "Pullback to 50 DMA"];
+  const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight", "High Tight Flag", "Cup and Handle"];
   
-  // Check if pattern requires channel height filter
   const showChannelHeightFilter = ["VCP", "Weekly Tight", "Monthly Tight"].includes(filters.chartPattern || '');
-  // Check if pattern is High Tight Flag
   const showHTFFilter = filters.chartPattern === 'High Tight Flag';
-  // Check if pattern is a Pullback pattern
-  const showPullbackFilter = (filters.chartPattern || '').startsWith('Pullback to');
+  
+  const isPullbackSignal = (filters.technicalSignal || '').startsWith('pullback_');
+  const is620CrossSignal = filters.technicalSignal === '6_20_cross';
+  const isRide21EMASignal = filters.technicalSignal === 'ride_21_ema';
 
-  // Determine timeframe based on selected pattern (match detection windows)
   const getTimeframe = () => {
-    if (filters.chartPattern === "Weekly Tight") return "20D"; // 20 trading days
-    if (filters.chartPattern === "Monthly Tight") return "60D"; // 60 trading days
-    if (filters.chartPattern === "VCP") return "30D"; // 30 trading days
-    return "30D"; // Default
+    if (filters.chartPattern === "Weekly Tight") return "20D";
+    if (filters.chartPattern === "Monthly Tight") return "60D";
+    if (filters.chartPattern === "VCP") return "30D";
+    if (is620CrossSignal) return "5m";
+    return "30D";
   };
 
   const getTimeframeLabel = () => {
     const tf = getTimeframe();
+    if (tf === "5m") return "5 Min";
     if (tf === "20D") return "4 Weeks";
     if (tf === "30D") return "6 Weeks";
     if (tf === "60D") return "3 Months";
     return "Daily";
   };
 
-  // Pagination logic
   const totalResults = results?.length || 0;
   const totalPages = Math.ceil(totalResults / CHARTS_PER_PAGE);
   const startIndex = (currentPage - 1) * CHARTS_PER_PAGE;
@@ -88,7 +87,7 @@ export default function ScannerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Index Selector - First dropdown */}
+              {/* Index Selector */}
               <div className="space-y-2">
                 <Label>Stock Universe</Label>
                 <Select 
@@ -202,75 +201,6 @@ export default function ScannerPage() {
                 </div>
               )}
 
-              {showPullbackFilter && (
-                <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/30">
-                  <p className="text-sm font-medium">Pullback Criteria</p>
-                  <div className="space-y-2">
-                    <Label>Min % Up Before Pullback</Label>
-                    <Input 
-                      type="text" 
-                      inputMode="decimal"
-                      placeholder="e.g. 30" 
-                      className="bg-background font-mono"
-                      data-testid="input-pb-min-gain"
-                      value={filters.pbMinGainPct ?? ''}
-                      onChange={(e) => setFilters(prev => ({ 
-                        ...prev, 
-                        pbMinGainPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
-                      }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Up period was under (candles)</Label>
-                    <Input 
-                      type="text" 
-                      inputMode="numeric"
-                      placeholder="e.g. 10" 
-                      className="bg-background font-mono"
-                      data-testid="input-pb-up-period"
-                      value={filters.pbUpPeriodCandles ?? ''}
-                      onChange={(e) => setFilters(prev => ({ 
-                        ...prev, 
-                        pbUpPeriodCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
-                      }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>PB was between X and Y candles</Label>
-                    <div className="flex gap-2 items-center">
-                      <Input 
-                        type="text" 
-                        inputMode="numeric"
-                        placeholder="1" 
-                        className="bg-background font-mono w-20"
-                        data-testid="input-pb-min-candles"
-                        value={filters.pbMinCandles ?? ''}
-                        onChange={(e) => setFilters(prev => ({ 
-                          ...prev, 
-                          pbMinCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
-                        }))}
-                      />
-                      <span className="text-muted-foreground">to</span>
-                      <Input 
-                        type="text" 
-                        inputMode="numeric"
-                        placeholder="5" 
-                        className="bg-background font-mono w-20"
-                        data-testid="input-pb-max-candles"
-                        value={filters.pbMaxCandles ?? ''}
-                        onChange={(e) => setFilters(prev => ({ 
-                          ...prev, 
-                          pbMaxCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
-                        }))}
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Stock must have risen at least this % over N candles before pulling back to the MA.
-                  </p>
-                </div>
-              )}
-
                 <div className="space-y-2">
                   <Label>Pattern Strictness</Label>
                   <Select 
@@ -292,24 +222,163 @@ export default function ScannerPage() {
                 </div>
               </div>
 
-              {/* Candlestick Pattern Box */}
+              {/* Technical Indicator Signals Box */}
               <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/20">
-                <p className="text-sm font-semibold text-primary">Candlestick Pattern</p>
+                <p className="text-sm font-semibold text-primary">Technical Indicator Signals</p>
                 <div className="space-y-2">
                   <Select 
-                    value={filters.candlestickPattern} 
-                    onValueChange={(val: any) => setFilters(prev => ({ ...prev, candlestickPattern: val }))}
+                    value={filters.technicalSignal || "none"} 
+                    onValueChange={(val: any) => setFilters(prev => ({ 
+                      ...prev, 
+                      technicalSignal: val,
+                      crossDirection: val === '6_20_cross' ? 'up' : prev.crossDirection
+                    }))}
                   >
-                    <SelectTrigger className="bg-background" data-testid="select-candlestick-pattern">
-                      <SelectValue placeholder="Select Candlestick Pattern" />
+                    <SelectTrigger className="bg-background" data-testid="select-technical-signal">
+                      <SelectValue placeholder="Select Signal" />
                     </SelectTrigger>
                     <SelectContent>
-                      {candlestickPatterns.map(p => (
-                        <SelectItem key={p} value={p}>{p}</SelectItem>
-                      ))}
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="6_20_cross">6/20 Cross</SelectItem>
+                      <SelectItem value="ride_21_ema">Ride the 21 EMA</SelectItem>
+                      <SelectItem value="pullback_5_dma">Pullback to 5 DMA</SelectItem>
+                      <SelectItem value="pullback_10_dma">Pullback to 10 DMA</SelectItem>
+                      <SelectItem value="pullback_20_dma">Pullback to 20 DMA</SelectItem>
+                      <SelectItem value="pullback_50_dma">Pullback to 50 DMA</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* 6/20 Cross Settings */}
+                {is620CrossSignal && (
+                  <div className="space-y-2 p-3 border border-border rounded-lg bg-muted/30">
+                    <Label>Cross Direction</Label>
+                    <Select 
+                      value={filters.crossDirection || "up"} 
+                      onValueChange={(val: any) => setFilters(prev => ({ ...prev, crossDirection: val }))}
+                    >
+                      <SelectTrigger className="bg-background" data-testid="select-cross-direction">
+                        <SelectValue placeholder="Select Direction" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="up">Cross Up</SelectItem>
+                        <SelectItem value="down">Cross Down</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      6 SMA and 20 SMA crossed within last 3 bars on 5-min chart.
+                    </p>
+                  </div>
+                )}
+
+                {/* Ride the 21 EMA Settings */}
+                {isRide21EMASignal && (
+                  <div className="space-y-3 p-3 border border-border rounded-lg bg-muted/30">
+                    <div className="space-y-2">
+                      <Label>Breaks through EMA ≤ (%)</Label>
+                      <Input 
+                        type="text" 
+                        inputMode="decimal"
+                        placeholder="1" 
+                        className="bg-background font-mono"
+                        data-testid="input-ema-break"
+                        value={filters.emaBreakThresholdPct ?? ''}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          emaBreakThresholdPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
+                        }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>PB of EMA for Signal &gt; (%)</Label>
+                      <Input 
+                        type="text" 
+                        inputMode="decimal"
+                        placeholder="2.5" 
+                        className="bg-background font-mono"
+                        data-testid="input-ema-pb"
+                        value={filters.emaPbThresholdPct ?? ''}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          emaPbThresholdPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
+                        }))}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Price rides 21 EMA without breaking by more than the threshold.
+                    </p>
+                  </div>
+                )}
+
+                {/* Pullback Settings */}
+                {isPullbackSignal && (
+                  <div className="space-y-3 p-3 border border-border rounded-lg bg-muted/30">
+                    <p className="text-sm font-medium">Pullback Criteria</p>
+                    <div className="space-y-2">
+                      <Label>Min % Up Before Pullback</Label>
+                      <Input 
+                        type="text" 
+                        inputMode="decimal"
+                        placeholder="e.g. 30" 
+                        className="bg-background font-mono"
+                        data-testid="input-pb-min-gain"
+                        value={filters.pbMinGainPct ?? ''}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          pbMinGainPct: e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined
+                        }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Up period was under (candles)</Label>
+                      <Input 
+                        type="text" 
+                        inputMode="numeric"
+                        placeholder="e.g. 10" 
+                        className="bg-background font-mono"
+                        data-testid="input-pb-up-period"
+                        value={filters.pbUpPeriodCandles ?? ''}
+                        onChange={(e) => setFilters(prev => ({ 
+                          ...prev, 
+                          pbUpPeriodCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
+                        }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>PB was between X and Y candles</Label>
+                      <div className="flex gap-2 items-center">
+                        <Input 
+                          type="text" 
+                          inputMode="numeric"
+                          placeholder="1" 
+                          className="bg-background font-mono w-20"
+                          data-testid="input-pb-min-candles"
+                          value={filters.pbMinCandles ?? ''}
+                          onChange={(e) => setFilters(prev => ({ 
+                            ...prev, 
+                            pbMinCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
+                          }))}
+                        />
+                        <span className="text-muted-foreground">to</span>
+                        <Input 
+                          type="text" 
+                          inputMode="numeric"
+                          placeholder="5" 
+                          className="bg-background font-mono w-20"
+                          data-testid="input-pb-max-candles"
+                          value={filters.pbMaxCandles ?? ''}
+                          onChange={(e) => setFilters(prev => ({ 
+                            ...prev, 
+                            pbMaxCandles: e.target.value === '' ? undefined : parseInt(e.target.value) || undefined
+                          }))}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Stock must have risen at least this % over N candles before pulling back to the MA.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -453,8 +522,14 @@ export default function ScannerPage() {
                       onClick={() => {
                         const params = new URLSearchParams();
                         params.set('fromScanner', 'true');
-                        if (filters.chartPattern && filters.chartPattern !== 'All' && filters.chartPattern !== 'Any') {
+                        if (filters.chartPattern && filters.chartPattern !== 'All') {
                           params.set('pattern', filters.chartPattern);
+                        }
+                        if (filters.technicalSignal && filters.technicalSignal !== 'none') {
+                          params.set('signal', filters.technicalSignal);
+                          if (filters.crossDirection) {
+                            params.set('crossDirection', filters.crossDirection);
+                          }
                         }
                         setLocation(`/symbol/${stock.symbol}?${params.toString()}`);
                       }}
@@ -500,13 +575,20 @@ export default function ScannerPage() {
                         )}
                       </CardHeader>
                       <CardContent className="pt-0">
-                        <MiniChart symbol={stock.symbol} timeframe={getTimeframe()} />
+                        <div className="h-32">
+                          <MiniChart 
+                            symbol={stock.symbol} 
+                            technicalSignal={filters.technicalSignal}
+                            crossDirection={filters.crossDirection}
+                          />
+                        </div>
                       </CardContent>
                     </Card>
                   );
                 })}
               </div>
 
+              {/* Pagination */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-center gap-4 pt-4">
                   <Button
@@ -519,10 +601,7 @@ export default function ScannerPage() {
                     <ChevronLeft className="w-4 h-4 mr-1" />
                     Previous
                   </Button>
-                  <span 
-                    className="text-sm text-muted-foreground font-mono"
-                    data-testid="text-pagination"
-                  >
+                  <span className="text-sm text-muted-foreground font-mono">
                     Page {currentPage} of {totalPages}
                   </span>
                   <Button

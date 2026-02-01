@@ -90,8 +90,7 @@ export const api = {
         minPrice: z.number().optional(),
         maxPrice: z.number().optional(),
         minVolume: z.number().optional(),
-        candlestickPattern: z.enum(['All', 'Doji', 'Hammer', 'Bullish Engulfing', 'Bearish Engulfing', 'Morning Star']).optional(),
-        chartPattern: z.enum(['All', 'VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle', 'Pullback to 5 DMA', 'Pullback to 10 DMA', 'Pullback to 20 DMA', 'Pullback to 50 DMA']).optional(),
+        chartPattern: z.enum(['All', 'VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle']).optional(),
         patternStrictness: z.enum(['tight', 'loose', 'both']).optional(),
         smaFilter: z.enum(['none', 'stacked', 'above50_200']).optional(),
         priceWithin50dPct: z.number().min(0).max(100).optional(),
@@ -99,6 +98,14 @@ export const api = {
         htfTimeframe: z.enum(['weekly', 'daily']).optional(),
         htfMinGainPct: z.number().min(1).max(500).optional(),
         htfPullbackPct: z.number().min(1).max(50).optional(),
+        // Technical Indicator Signals
+        technicalSignal: z.enum(['none', '6_20_cross', 'ride_21_ema', 'pullback_5_dma', 'pullback_10_dma', 'pullback_20_dma', 'pullback_50_dma']).optional(),
+        // 6/20 Cross settings
+        crossDirection: z.enum(['up', 'down']).optional(),
+        // Ride the 21 EMA settings
+        emaBreakThresholdPct: z.number().min(0.1).max(10).optional(),
+        emaPbThresholdPct: z.number().min(0.5).max(20).optional(),
+        // Pullback settings (moved from chart patterns)
         pbMinGainPct: z.number().min(1).max(200).optional(),
         pbUpPeriodCandles: z.number().min(1).max(100).optional(),
         pbMinCandles: z.number().min(1).max(50).optional(),

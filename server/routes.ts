@@ -888,6 +888,206 @@ function calculateChannelHeightPct(candles: Candle[], pattern: string): number |
   return ((maxHigh - minLow) / avgPrice) * 100;
 }
 
+// Calculate EMA
+function calculateEMA(candles: Candle[], period: number): number | null {
+  if (candles.length < period) return null;
+  const multiplier = 2 / (period + 1);
+  let ema = candles.slice(0, period).reduce((sum, c) => sum + c.close, 0) / period;
+  
+  for (let i = period; i < candles.length; i++) {
+    ema = (candles[i].close - ema) * multiplier + ema;
+  }
+  return ema;
+}
+
+// Detect 6/20 SMA Cross (on daily data approximating 5-min signal)
+// Looks for 6 SMA and 20 SMA crossover within last 3 bars
+function detect620Cross(candles: Candle[], direction: 'up' | 'down' = 'up'): boolean {
+  if (candles.length < 25) return false;
+  
+  // Calculate 6 SMA and 20 SMA for recent bars
+  const getSMA = (data: Candle[], period: number): number | null => {
+    if (data.length < period) return null;
+    const slice = data.slice(-period);
+    return slice.reduce((sum, c) => sum + c.close, 0) / period;
+  };
+  
+  // Check last 3 bars for a crossover
+  for (let i = 2; i >= 0; i--) {
+    const currentData = candles.slice(0, candles.length - i);
+    const prevData = candles.slice(0, candles.length - i - 1);
+    
+    if (currentData.length < 20 || prevData.length < 20) continue;
+    
+    const currentSMA6 = getSMA(currentData, 6);
+    const currentSMA20 = getSMA(currentData, 20);
+    const prevSMA6 = getSMA(prevData, 6);
+    const prevSMA20 = getSMA(prevData, 20);
+    
+    if (!currentSMA6 || !currentSMA20 || !prevSMA6 || !prevSMA20) continue;
+    
+    if (direction === 'up') {
+      // Cross Up: SMA6 was below SMA20, now above
+      if (prevSMA6 <= prevSMA20 && currentSMA6 > currentSMA20) {
+        return true;
+      }
+    } else {
+      // Cross Down: SMA6 was above SMA20, now below
+      if (prevSMA6 >= prevSMA20 && currentSMA6 < currentSMA20) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+// Detect "Ride the 21 EMA" pattern
+// Price has been riding the 21 EMA without breaking through by more than breakThreshold%
+// and has pulled back by at least pbThreshold% from a recent high
+function detectRide21EMA(
+  candles: Candle[], 
+  breakThresholdPct: number = 1, 
+  pbThresholdPct: number = 2.5
+): boolean {
+  if (candles.length < 30) return false;
+  
+  const recentCandles = candles.slice(-30);
+  
+  // Calculate 21 EMA for each day
+  const emas: number[] = [];
+  const multiplier = 2 / (21 + 1);
+  let ema = candles.slice(candles.length - 30 - 21, candles.length - 30).reduce((sum, c) => sum + c.close, 0) / 21;
+  
+  for (const c of recentCandles) {
+    ema = (c.close - ema) * multiplier + ema;
+    emas.push(ema);
+  }
+  
+  // Check if price has stayed close to EMA (riding it)
+  let ridingCount = 0;
+  let breakCount = 0;
+  
+  for (let i = 0; i < recentCandles.length; i++) {
+    const price = recentCandles[i].close;
+    const emaValue = emas[i];
+    const distancePct = ((price - emaValue) / emaValue) * 100;
+    
+    // Check if price broke below EMA by more than threshold
+    if (distancePct < -breakThresholdPct) {
+      breakCount++;
+    }
+    
+    // Check if price is near EMA (within 3%)
+    if (Math.abs(distancePct) <= 3) {
+      ridingCount++;
+    }
+  }
+  
+  // Price should be riding the EMA most of the time
+  const isRiding = ridingCount >= recentCandles.length * 0.5;
+  // Should not have broken below EMA too many times
+  const notBroken = breakCount <= 3;
+  
+  // Check for pullback from high
+  const recentHigh = Math.max(...recentCandles.map(c => c.high));
+  const currentPrice = recentCandles[recentCandles.length - 1].close;
+  const pullbackPct = ((recentHigh - currentPrice) / recentHigh) * 100;
+  const hasPullback = pullbackPct >= pbThresholdPct;
+  
+  return isRiding && notBroken && hasPullback;
+}
+
+// Detect technical signals
+function detectTechnicalSignal(
+  candles: Candle[],
+  signal: string,
+  options: {
+    crossDirection?: 'up' | 'down';
+    emaBreakThresholdPct?: number;
+    emaPbThresholdPct?: number;
+    pbMinGainPct?: number;
+    pbUpPeriodCandles?: number;
+    pbMinCandles?: number;
+    pbMaxCandles?: number;
+  } = {}
+): boolean {
+  switch (signal) {
+    case '6_20_cross':
+      return detect620Cross(candles, options.crossDirection || 'up');
+    
+    case 'ride_21_ema':
+      return detectRide21EMA(
+        candles, 
+        options.emaBreakThresholdPct || 1, 
+        options.emaPbThresholdPct || 2.5
+      );
+    
+    case 'pullback_5_dma':
+      return detectPullbackToMA(
+        candles, 5, 
+        options.pbMinGainPct || 30,
+        options.pbUpPeriodCandles || 10,
+        options.pbMinCandles || 1,
+        options.pbMaxCandles || 5,
+        false
+      );
+    
+    case 'pullback_10_dma':
+      return detectPullbackToMA(
+        candles, 10, 
+        options.pbMinGainPct || 30,
+        options.pbUpPeriodCandles || 10,
+        options.pbMinCandles || 1,
+        options.pbMaxCandles || 5,
+        false
+      );
+    
+    case 'pullback_20_dma':
+      return detectPullbackToMA(
+        candles, 20, 
+        options.pbMinGainPct || 30,
+        options.pbUpPeriodCandles || 10,
+        options.pbMinCandles || 1,
+        options.pbMaxCandles || 5,
+        false
+      );
+    
+    case 'pullback_50_dma':
+      return detectPullbackToMA(
+        candles, 50, 
+        options.pbMinGainPct || 30,
+        options.pbUpPeriodCandles || 10,
+        options.pbMinCandles || 1,
+        options.pbMaxCandles || 5,
+        false
+      );
+    
+    default:
+      return false;
+  }
+}
+
+// Get signal display name
+function getSignalDisplayName(signal: string, direction?: string): string {
+  switch (signal) {
+    case '6_20_cross':
+      return `6/20 Cross ${direction === 'down' ? 'Down' : 'Up'}`;
+    case 'ride_21_ema':
+      return 'Ride 21 EMA';
+    case 'pullback_5_dma':
+      return 'Pullback to 5 DMA';
+    case 'pullback_10_dma':
+      return 'Pullback to 10 DMA';
+    case 'pullback_20_dma':
+      return 'Pullback to 20 DMA';
+    case 'pullback_50_dma':
+      return 'Pullback to 50 DMA';
+    default:
+      return signal;
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -905,7 +1105,7 @@ export async function registerRoutes(
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
-    const { symbol } = req.params;
+    const symbol = String(req.params.symbol);
     const interval = String(req.query.interval || '1d');
     let period = String(req.query.period || '2y'); // Default to 2 years for SMA 200
     
@@ -934,7 +1134,7 @@ export async function registerRoutes(
 
   // --- Stock Quote ---
   app.get(api.stocks.quote.path, async (req, res) => {
-    const { symbol } = req.params;
+    const symbol = String(req.params.symbol);
     try {
       const yf = await getYahooFinance();
       const quote = await yf.quote(symbol);
@@ -1087,21 +1287,21 @@ export async function registerRoutes(
           // Filter by Volume
           if (input.minVolume && quote.regularMarketVolume < input.minVolume) continue;
 
-          // Filter by Candlestick Pattern
           let matchedPattern: string | undefined = undefined;
           let channelHeightPct: number | undefined = undefined;
-          const hasCandlestickFilter = input.candlestickPattern && input.candlestickPattern !== 'All';
+          
           const hasChartFilter = input.chartPattern && input.chartPattern !== 'All';
+          const hasTechnicalSignal = input.technicalSignal && input.technicalSignal !== 'none';
           const hasSMAFilter = input.smaFilter && input.smaFilter !== 'none';
           const hasProximityFilter = input.priceWithin50dPct !== undefined;
           const hasChannelHeightFilter = input.maxChannelHeightPct !== undefined && hasChartFilter;
           
           // Determine if we need historical data
-          const needsHistory = hasCandlestickFilter || hasChartFilter || hasSMAFilter || hasProximityFilter;
+          const needsHistory = hasChartFilter || hasTechnicalSignal || hasSMAFilter || hasProximityFilter;
           
           if (needsHistory) {
             // Get history for pattern detection (1y for SMA 200)
-            const period = (hasSMAFilter || hasProximityFilter) ? '1y' : (hasChartFilter ? '3mo' : '1mo');
+            const period = (hasSMAFilter || hasProximityFilter) ? '1y' : '3mo';
             const candles = await getChartData(yf, symbol, period);
             
             if (candles.length < 5) continue;
@@ -1120,14 +1320,6 @@ export async function registerRoutes(
               }
             }
             
-            // Check candlestick pattern
-            if (hasCandlestickFilter) {
-              if (!detectPattern(candles, input.candlestickPattern!)) {
-                continue;
-              }
-              matchedPattern = input.candlestickPattern;
-            }
-            
             // Check chart pattern
             if (hasChartFilter) {
               const strictness = input.patternStrictness || 'tight';
@@ -1137,11 +1329,7 @@ export async function registerRoutes(
                 strictness,
                 input.htfTimeframe as 'weekly' | 'daily' | undefined,
                 input.htfMinGainPct,
-                input.htfPullbackPct,
-                input.pbMinGainPct,
-                input.pbUpPeriodCandles,
-                input.pbMinCandles,
-                input.pbMaxCandles
+                input.htfPullbackPct
               )) {
                 continue;
               }
@@ -1156,9 +1344,27 @@ export async function registerRoutes(
                 }
               }
               
+              matchedPattern = input.chartPattern;
+            }
+            
+            // Check technical signal
+            if (hasTechnicalSignal) {
+              const signalMatched = detectTechnicalSignal(candles, input.technicalSignal!, {
+                crossDirection: input.crossDirection as 'up' | 'down' | undefined,
+                emaBreakThresholdPct: input.emaBreakThresholdPct,
+                emaPbThresholdPct: input.emaPbThresholdPct,
+                pbMinGainPct: input.pbMinGainPct,
+                pbUpPeriodCandles: input.pbUpPeriodCandles,
+                pbMinCandles: input.pbMinCandles,
+                pbMaxCandles: input.pbMaxCandles,
+              });
+              
+              if (!signalMatched) continue;
+              
+              const signalName = getSignalDisplayName(input.technicalSignal!, input.crossDirection);
               matchedPattern = matchedPattern 
-                ? `${matchedPattern}, ${input.chartPattern}` 
-                : input.chartPattern;
+                ? `${matchedPattern}, ${signalName}` 
+                : signalName;
             }
           }
 
