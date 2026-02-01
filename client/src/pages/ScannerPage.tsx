@@ -153,6 +153,37 @@ export default function ScannerPage() {
   const isPullbackSignal = (filters.technicalSignal || '').startsWith('pullback_');
   const is620CrossSignal = filters.technicalSignal === '6_20_cross';
   const isRide21EMASignal = filters.technicalSignal === 'ride_21_ema';
+  
+  // Check if either section has an active selection (for mutual exclusivity)
+  const hasActivePattern = filters.chartPattern && filters.chartPattern !== 'All';
+  const hasActiveSignal = filters.technicalSignal && filters.technicalSignal !== 'none';
+  
+  // Section-specific clear functions
+  const clearChartPatternSection = () => {
+    setFilters(prev => ({
+      ...prev,
+      chartPattern: 'All',
+      patternStrictness: 'tight',
+      maxChannelHeightPct: undefined,
+      htfTimeframe: undefined,
+      htfMinGainPct: undefined,
+      htfPullbackPct: undefined,
+    }));
+  };
+  
+  const clearTechnicalSignalSection = () => {
+    setFilters(prev => ({
+      ...prev,
+      technicalSignal: 'none',
+      crossDirection: undefined,
+      emaBreakThresholdPct: undefined,
+      emaPbThresholdPct: undefined,
+      pbMinGainPct: undefined,
+      pbUpPeriodCandles: undefined,
+      pbMinCandles: undefined,
+      pbMaxCandles: undefined,
+    }));
+  };
 
   const getTimeframe = () => {
     if (filters.chartPattern === "Weekly Tight") return "20D";
@@ -325,12 +356,13 @@ export default function ScannerPage() {
               </div>
               
               {/* Chart Pattern Box */}
-              <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/20">
+              <div className={`relative space-y-4 p-3 border rounded-lg transition-all ${hasActiveSignal ? 'border-border/50 bg-muted/10 opacity-50 pointer-events-none' : 'border-border bg-muted/20'}`}>
                 <p className="text-sm font-semibold text-primary">Chart Pattern</p>
                 <div className="space-y-2">
                   <Select 
                     value={filters.chartPattern} 
                     onValueChange={handlePatternChange}
+                    disabled={hasActiveSignal}
                   >
                     <SelectTrigger className="bg-background" data-testid="select-chart-pattern">
                       <SelectValue placeholder="Select Chart Pattern" />
@@ -423,6 +455,7 @@ export default function ScannerPage() {
                   <Select 
                     value={filters.patternStrictness} 
                     onValueChange={(val: any) => setFilters(prev => ({ ...prev, patternStrictness: val }))}
+                    disabled={hasActiveSignal}
                   >
                     <SelectTrigger className="bg-background" data-testid="select-strictness">
                       <SelectValue placeholder="Select Strictness" />
@@ -437,10 +470,29 @@ export default function ScannerPage() {
                     Loose rules allow more variance for better match chances.
                   </p>
                 </div>
+                
+                {/* Section Clear Link */}
+                {hasActivePattern && (
+                  <button 
+                    onClick={clearChartPatternSection}
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                    data-testid="button-clear-pattern"
+                  >
+                    [Clear]
+                  </button>
+                )}
+              </div>
+              
+              {/* OR Divider */}
+              <div className="relative flex items-center justify-center py-2">
+                <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-border/50" />
+                <span className="relative bg-card px-3 py-1 text-sm font-bold text-primary border border-primary/30 rounded-md">
+                  OR
+                </span>
               </div>
 
               {/* Technical Indicator Signals Box */}
-              <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/20">
+              <div className={`relative space-y-4 p-3 border rounded-lg transition-all ${hasActivePattern ? 'border-border/50 bg-muted/10 opacity-50 pointer-events-none' : 'border-border bg-muted/20'}`}>
                 <p className="text-sm font-semibold text-primary">Technical Indicator Signals</p>
                 <div className="space-y-2">
                   <Select 
@@ -596,7 +648,30 @@ export default function ScannerPage() {
                     </p>
                   </div>
                 )}
+                
+                {/* Section Clear Link */}
+                {hasActiveSignal && (
+                  <button 
+                    onClick={clearTechnicalSignalSection}
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                    data-testid="button-clear-signal"
+                  >
+                    [Clear]
+                  </button>
+                )}
               </div>
+              
+              {/* AND Divider */}
+              <div className="relative flex items-center justify-center py-2">
+                <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-border/50" />
+                <span className="relative bg-card px-3 py-1 text-sm font-bold text-green-500 border border-green-500/30 rounded-md">
+                  AND
+                </span>
+              </div>
+              
+              {/* Additional Filters Box */}
+              <div className="space-y-4 p-3 border border-border rounded-lg bg-muted/20">
+                <p className="text-sm font-semibold text-muted-foreground">Additional Filters</p>
 
               <div className="space-y-3">
                 <Label>SMA Filter</Label>
@@ -678,6 +753,7 @@ export default function ScannerPage() {
                   onChange={(e) => setFilters(prev => ({ ...prev, minVolume: e.target.value ? Number(e.target.value) : undefined }))}
                 />
               </div>
+              </div>
 
               <Button 
                 className="w-full font-semibold shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all" 
@@ -727,7 +803,7 @@ export default function ScannerPage() {
               )}
             </div>
             
-            {/* Criteria summary with CLEAR button - only show after first scan */}
+            {/* Criteria summary with Clear All button - only show after first scan */}
             {hasScanned && getCriteriaSummary().length > 0 && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-white/80">
@@ -738,7 +814,7 @@ export default function ScannerPage() {
                   className="text-sm font-bold text-primary hover:text-primary/80 transition-colors"
                   data-testid="button-clear-criteria"
                 >
-                  [CLEAR]
+                  [Clear All]
                 </button>
               </div>
             )}

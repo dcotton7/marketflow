@@ -1124,7 +1124,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
               </>
             )}
             
-            {/* Pattern-specific indicators: 3 Month SMA and 12 Week VWAP (VCP doesn't get 12W VWAP) */}
+            {/* Pattern-specific indicators: 3 Month SMA (for patterns) and 12 Week VWAP (only on weekly charts, not VCP) */}
             {selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern) && (
               <>
                 <Button
@@ -1137,7 +1137,8 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
                   <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#f472b6' }}></span>
                   <span className="text-xs">3M SMA</span>
                 </Button>
-                {selectedPattern !== 'VCP' && (
+                {/* 12W VWAP only shows on weekly timeframe and not for VCP */}
+                {interval === '1wk' && selectedPattern !== 'VCP' && (
                   <Button
                     variant={enabledIndicators.has('vwap12Week') ? 'default' : 'outline'}
                     size="sm"

@@ -645,49 +645,74 @@ function detectHighTightFlag(
 
 // Cup and Handle: U-shaped price pattern followed by a small pullback (handle)
 function detectCupAndHandle(candles: Candle[], loose: boolean = false): boolean {
-  if (candles.length < 50) return false;
+  if (candles.length < 65) return false;
   
-  // Look at last 50-100 candles for cup formation
-  const lookback = Math.min(candles.length, 100);
+  // Look at last 65-130 candles for cup formation (standard cup takes 7-65 weeks)
+  const lookback = Math.min(candles.length, 130);
   const recentCandles = candles.slice(-lookback);
   
-  // Find the cup: left high, low point, right high
-  const leftSection = recentCandles.slice(0, 20);
-  const middleSection = recentCandles.slice(20, lookback - 20);
-  const rightSection = recentCandles.slice(-20);
+  // Find potential cup boundaries by looking for distinct highs and lows
+  // Left lip: find highest point in first 30% of data
+  const leftPortion = Math.floor(lookback * 0.3);
+  const leftSection = recentCandles.slice(0, leftPortion);
+  const leftHighIdx = leftSection.reduce((maxIdx, c, idx, arr) => 
+    c.high > arr[maxIdx].high ? idx : maxIdx, 0);
+  const leftHigh = leftSection[leftHighIdx].high;
   
-  const leftHigh = Math.max(...leftSection.map(c => c.high));
-  const cupLow = Math.min(...middleSection.map(c => c.low));
+  // Find the cup bottom: lowest point between left lip and last 15 candles
+  const middleSection = recentCandles.slice(leftHighIdx + 5, lookback - 15);
+  if (middleSection.length < 10) return false;
+  
+  const cupLowIdx = middleSection.reduce((minIdx, c, idx, arr) => 
+    c.low < arr[minIdx].low ? idx : minIdx, 0);
+  const cupLow = middleSection[cupLowIdx].low;
+  
+  // Right lip: highest point after cup bottom
+  const rightSection = recentCandles.slice(leftHighIdx + 5 + cupLowIdx + 1, -5);
+  if (rightSection.length < 5) return false;
   const rightHigh = Math.max(...rightSection.map(c => c.high));
   
-  // Cup depth: should be 12-35% (tight) or 10-50% (loose)
-  const avgCupPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
+  // Cup depth: should be 15-35% (tight) or 12-50% (loose)
   const cupDepthPct = ((leftHigh - cupLow) / leftHigh) * 100;
   
-  const minDepth = loose ? 10 : 12;
+  const minDepth = loose ? 12 : 15;
   const maxDepth = loose ? 50 : 35;
   
   if (cupDepthPct < minDepth || cupDepthPct > maxDepth) return false;
   
-  // Right side should recover to near left high
-  const symmetryThreshold = loose ? 0.85 : 0.92;
+  // Cup should be U-shaped, not V-shaped
+  // Check that there are multiple candles near the bottom (within 5% of low)
+  const bottomThreshold = cupLow * 1.05;
+  const candlesNearBottom = middleSection.filter(c => c.low <= bottomThreshold).length;
+  const minBottomCandles = loose ? 3 : 5;
+  if (candlesNearBottom < minBottomCandles) return false;
+  
+  // Right side should recover to near left high (symmetry)
+  const symmetryThreshold = loose ? 0.88 : 0.93;
   if (rightHigh < leftHigh * symmetryThreshold) return false;
   
-  // Handle: small pullback from right high (last 5-10 candles)
-  const handleCandles = recentCandles.slice(-10);
+  // Handle: small pullback from right high (last 5-15 candles)
+  const handleCandles = recentCandles.slice(-15);
+  const handleHigh = Math.max(...handleCandles.map(c => c.high));
   const handleLow = Math.min(...handleCandles.map(c => c.low));
-  const handleDepthPct = ((rightHigh - handleLow) / rightHigh) * 100;
+  const handleDepthPct = ((handleHigh - handleLow) / handleHigh) * 100;
   
-  // Handle should be shallow: < 15% (tight) or < 20% (loose)
-  const handleThreshold = loose ? 20 : 15;
+  // Handle should be shallow: < 12% (tight) or < 18% (loose)
+  const handleThreshold = loose ? 18 : 12;
   if (handleDepthPct > handleThreshold) return false;
   
-  // Current price should be near handle high
+  // Handle should form after right lip reaches near left lip level
+  // Current price should be in upper portion of handle
   const currentClose = recentCandles[recentCandles.length - 1].close;
-  const handleHigh = Math.max(...handleCandles.map(c => c.high));
-  const nearHandleHigh = currentClose >= handleHigh * 0.95;
+  const handleMid = (handleHigh + handleLow) / 2;
+  const inUpperHandle = currentClose >= handleMid;
   
-  return nearHandleHigh;
+  // Volume should decrease in handle compared to cup formation
+  const handleAvgVol = handleCandles.reduce((sum, c) => sum + c.volume, 0) / handleCandles.length;
+  const cupAvgVol = middleSection.reduce((sum, c) => sum + c.volume, 0) / middleSection.length;
+  const volumeContracted = handleAvgVol <= cupAvgVol * (loose ? 1.2 : 1.0);
+  
+  return inUpperHandle && volumeContracted;
 }
 
 // Pullback to Moving Average: Stock that had a gain then pulled back to MA
@@ -871,6 +896,12 @@ function calculateChannelHeightPct(candles: Candle[], pattern: string): number |
       break;
     case 'Monthly Tight':
       lookbackDays = 80;
+      break;
+    case 'High Tight Flag':
+      lookbackDays = 20; // Look at consolidation portion
+      break;
+    case 'Cup and Handle':
+      lookbackDays = 50; // Look at recent portion including handle
       break;
     default:
       return null;
@@ -1344,6 +1375,18 @@ export async function registerRoutes(
             
             // Check chart pattern
             if (hasChartFilter) {
+              // FIRST: Calculate channel height and filter by max channel height
+              // This happens BEFORE pattern detection so the filter is effective
+              channelHeightPct = calculateChannelHeightPct(candles, input.chartPattern!) ?? undefined;
+              
+              if (hasChannelHeightFilter && channelHeightPct !== undefined) {
+                if (channelHeightPct > input.maxChannelHeightPct!) {
+                  console.log(`[Scanner] ${symbol} filtered: channelHeight ${channelHeightPct.toFixed(1)}% > maxChannelHeight ${input.maxChannelHeightPct}%`);
+                  continue;
+                }
+              }
+              
+              // THEN: Run pattern detection on stocks that pass channel height filter
               const strictness = input.patternStrictness || 'tight';
               if (!detectChartPattern(
                 candles, 
@@ -1353,18 +1396,8 @@ export async function registerRoutes(
                 input.htfMinGainPct,
                 input.htfPullbackPct
               )) {
+                console.log(`[Scanner] ${symbol} filtered: pattern detection failed for ${input.chartPattern}`);
                 continue;
-              }
-              
-              // Calculate channel height for chart patterns
-              channelHeightPct = calculateChannelHeightPct(candles, input.chartPattern!) ?? undefined;
-              
-              // Filter by max channel height if specified
-              if (hasChannelHeightFilter && channelHeightPct !== undefined) {
-                if (channelHeightPct > input.maxChannelHeightPct!) {
-                  console.log(`[Scanner] ${symbol} filtered: channelHeight ${channelHeightPct.toFixed(1)}% > maxChannelHeight ${input.maxChannelHeightPct}%`);
-                  continue;
-                }
               }
               
               matchedPattern = input.chartPattern;
