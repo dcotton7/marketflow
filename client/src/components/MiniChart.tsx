@@ -227,51 +227,61 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
         cupResult.rightRimPrice !== undefined) {
       
       // Use indices directly from detection result
-      // Since we sliced the history, the indices are relative to the full candle array
-      // We need to adjust for sliced data - detection indices are relative to slicedHistory
+      // Detection indices are relative to slicedHistory
       const leftIdx = cupResult.leftPeakIdx;
       const bottomIdx = cupResult.cupBottomIdx;
       const rightIdx = cupResult.rightRimIdx;
       
       // Validate indices are within slicedHistory bounds
       if (leftIdx >= 0 && bottomIdx > leftIdx && rightIdx > bottomIdx && rightIdx < slicedHistory.length) {
-        // Calculate arc values for each data point
+        // Calculate arc values using PIECEWISE COSINE that passes through actual cup bottom
+        const cupDuration = rightIdx - leftIdx;
+        const bottomOffset = bottomIdx - leftIdx;
+        const bottomFraction = bottomOffset / cupDuration;
+        
         cupArcData = slicedHistory.map((candle, idx) => {
           if (idx < leftIdx || idx > rightIdx) {
             return { date: candle.date, cupArc: null };
           }
           
-          // Interpolate the cup arc
-          const cupDuration = rightIdx - leftIdx;
-          const bottomOffset = bottomIdx - leftIdx;
           const t = (idx - leftIdx) / cupDuration; // 0 to 1
-          const bottomFraction = bottomOffset / cupDuration;
-          
           let arcValue: number;
+          
           if (t <= bottomFraction) {
-            // Left side of cup
-            const leftT = t / bottomFraction;
-            arcValue = cupResult.leftPeakPrice! - (cupResult.leftPeakPrice! - cupResult.cupBottomPrice!) * Math.pow(leftT, 0.8);
+            // Left side: idx goes from leftIdx to bottomIdx
+            // Curve goes from left peak down to cup bottom using cos
+            const normalizedT = t / bottomFraction; // 0 to 1
+            const cosValue = Math.cos(normalizedT * Math.PI / 2); // 1 to 0
+            arcValue = cupResult.cupBottomPrice! + (cupResult.leftPeakPrice! - cupResult.cupBottomPrice!) * cosValue;
           } else {
-            // Right side of cup
-            const rightT = (t - bottomFraction) / (1 - bottomFraction);
-            arcValue = cupResult.cupBottomPrice! + (cupResult.rightRimPrice! - cupResult.cupBottomPrice!) * Math.pow(rightT, 0.8);
+            // Right side: idx goes from bottomIdx to rightIdx
+            // Curve goes from cup bottom up to right rim using sin
+            const normalizedT = (t - bottomFraction) / (1 - bottomFraction); // 0 to 1
+            const sinValue = Math.sin(normalizedT * Math.PI / 2); // 0 to 1
+            arcValue = cupResult.cupBottomPrice! + (cupResult.rightRimPrice! - cupResult.cupBottomPrice!) * sinValue;
           }
           
           return { date: candle.date, cupArc: arcValue };
         });
         
-        // Generate handle line data (follows candle lows after right rim)
+        // Generate SIMPLE handle line (just right rim to handle low, then swing up)
         // Only draw handle if we have handle data and it's not a "Cup Only" pattern
-        if (!cupResult.cupOnly) {
-          const handleStartIdx = cupResult.handleStartIdx !== undefined ? cupResult.handleStartIdx : rightIdx + 1;
+        if (!cupResult.cupOnly && cupResult.handleLows && cupResult.handleLows.length > 0) {
+          // Find the lowest handle point
+          const handleLow = cupResult.handleLows.reduce((min, h) => h.price < min.price ? h : min, cupResult.handleLows[0]);
+          const handleLowIdx = slicedHistory.findIndex(c => new Date(c.date).getTime() / 1000 === handleLow.time);
           
           handleLineData = slicedHistory.map((candle, idx) => {
-            if (idx <= rightIdx || idx < handleStartIdx) {
-              return { date: candle.date, handleLine: null };
+            // Only draw for right rim, handle low, and last bar
+            if (idx === rightIdx) {
+              return { date: candle.date, handleLine: cupResult.rightRimPrice! };
+            } else if (handleLowIdx >= 0 && idx === handleLowIdx) {
+              return { date: candle.date, handleLine: handleLow.price };
+            } else if (idx === slicedHistory.length - 1 && idx > handleLowIdx) {
+              // Last bar - slight uptick from low to show swing up
+              return { date: candle.date, handleLine: candle.low * 1.01 };
             }
-            // Use actual candle low for handle line
-            return { date: candle.date, handleLine: candle.low };
+            return { date: candle.date, handleLine: null };
           });
         }
       }
