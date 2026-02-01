@@ -266,18 +266,22 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
         </div>
         
         {/* Additional Metrics below risk box */}
-        <div className="pt-3 border-t border-border space-y-2 text-sm">
+        <div className="pt-3 border-t border-border space-y-3 text-sm">
           {priceExtension50 !== null && (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Price Extended from 50 DSMA:</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground leading-tight">
+                Price Extended<br />from 50 DSMA:
+              </span>
               <span className={`font-mono font-medium ${priceExtension50 >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                 {priceExtension50 >= 0 ? '+' : ''}{priceExtension50.toFixed(1)}%
               </span>
             </div>
           )}
           {avgRange5 !== null && avgRange20 !== null && (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Avg Trade Range (5/20 Days):</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground leading-tight">
+                Avg Trade Range<br />(5/20 Days):
+              </span>
               <span className="font-mono font-medium text-foreground">
                 {avgRange5.toFixed(1)}% / {avgRange20.toFixed(1)}%
               </span>

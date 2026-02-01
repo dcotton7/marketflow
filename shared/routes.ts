@@ -86,7 +86,7 @@ export const api = {
       method: 'POST' as const,
       path: '/api/scanner/run',
       input: z.object({
-        scannerIndex: z.enum(['sp500', 'sp100', 'nasdaq100', 'dow30', 'all']).optional(),
+        scannerIndex: z.enum(['sp500', 'sp100', 'nasdaq100', 'dow30', 'russell2000', 'watchlist', 'all']).optional(),
         minPrice: z.number().optional(),
         maxPrice: z.number().optional(),
         minVolume: z.number().optional(),

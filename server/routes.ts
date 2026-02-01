@@ -1666,6 +1666,42 @@ export async function registerRoutes(
     res.json(items);
   });
 
+  // Watchlist quotes - get change percent for all watchlist symbols
+  app.get('/api/watchlist/quotes', async (req, res) => {
+    try {
+      const yf = await getYahooFinance();
+      const symbols = (req.query.symbols as string || '').split(',').filter(Boolean);
+      
+      if (symbols.length === 0) {
+        // If no symbols provided, get from watchlist
+        const watchlistItems = await storage.getWatchlist();
+        symbols.push(...watchlistItems.map(item => item.symbol));
+      }
+      
+      if (symbols.length === 0) {
+        return res.json([]);
+      }
+
+      const quotes = await Promise.all(
+        symbols.map(async (symbol) => {
+          try {
+            const quote = await yf.quote(symbol);
+            return {
+              symbol,
+              changePercent: quote.regularMarketChangePercent || 0,
+            };
+          } catch (err) {
+            return { symbol, changePercent: 0 };
+          }
+        })
+      );
+      res.json(quotes);
+    } catch (error) {
+      console.error('Failed to fetch watchlist quotes:', error);
+      res.status(500).json({ message: 'Failed to fetch watchlist quotes' });
+    }
+  });
+
   app.post(api.watchlist.add.path, async (req, res) => {
     try {
       const input = api.watchlist.add.input.parse(req.body);

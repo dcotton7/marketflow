@@ -1227,6 +1227,21 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
                 <span className="text-xs">AVWAP LOW 6MOS</span>
               </Button>
             )}
+            
+            {/* Timeframe Selector - moved here after indicator toggles */}
+            <span className="text-xs text-muted-foreground mx-2">|</span>
+            {TIMEFRAMES.map((tf) => (
+              <Button
+                key={tf.value}
+                variant={interval === tf.value ? "default" : "outline"}
+                size="sm"
+                onClick={() => setInterval(tf.value)}
+                className="h-7 px-2"
+                data-testid={`button-timeframe-${tf.value}`}
+              >
+                <span className="text-xs">{tf.label}</span>
+              </Button>
+            ))}
           </div>
         </div>
         
@@ -1368,21 +1383,6 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         </div>
       )}
       
-      {/* Timeframe Selector */}
-      <div className="mt-4 flex items-center gap-2 flex-wrap">
-        <span className="text-sm text-muted-foreground mr-2">Timeframe:</span>
-        {TIMEFRAMES.map((tf) => (
-          <Button
-            key={tf.value}
-            variant={interval === tf.value ? "default" : "outline"}
-            size="sm"
-            onClick={() => setInterval(tf.value)}
-            data-testid={`button-timeframe-${tf.value}`}
-          >
-            {tf.label}
-          </Button>
-        ))}
-      </div>
     </div>
   );
 }

@@ -28,7 +28,7 @@ export function MarketIndicators() {
   if (isLoading) {
     return (
       <div className="space-y-1">
-        <p className="text-xs font-medium text-muted-foreground mb-2">Market</p>
+        <p className="text-sm font-bold text-foreground mb-2">Market</p>
         {MARKET_SYMBOLS.map((item) => (
           <div key={item.symbol} className="flex justify-between items-center text-xs py-0.5">
             <span className="text-muted-foreground">{item.label}</span>
@@ -41,7 +41,7 @@ export function MarketIndicators() {
 
   return (
     <div className="space-y-1">
-      <p className="text-xs font-medium text-muted-foreground mb-2">Market</p>
+      <p className="text-sm font-bold text-foreground mb-2">Market</p>
       {quotes?.map((quote) => {
         const isPositive = quote.changePercent >= 0;
         const colorClass = isPositive ? "text-green-500" : "text-red-500";
