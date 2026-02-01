@@ -863,7 +863,11 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         cupArcLine.setData(arcPoints);
         
-        // Draw handle channel
+        // Draw handle channel - slopes slightly DOWN (typical handle pattern)
+        // Calculate a slight downward slope for the handle lines (15% of handle range)
+        const handleRange = cupData.handleHigh - cupData.handleLow;
+        const slopeAmount = handleRange * 0.15; // 15% of handle range as slight downward slope
+        
         const handleTopLine = chart.addSeries(LineSeries, {
           color: '#f59e0b',
           lineWidth: 2,
@@ -873,7 +877,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         handleTopLine.setData([
           { time: cupData.handleStart as Time, value: cupData.handleHigh },
-          { time: cupData.handleEnd as Time, value: cupData.handleHigh },
+          { time: cupData.handleEnd as Time, value: cupData.handleHigh - slopeAmount },
         ]);
         
         const handleBottomLine = chart.addSeries(LineSeries, {
@@ -885,7 +889,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         handleBottomLine.setData([
           { time: cupData.handleStart as Time, value: cupData.handleLow },
-          { time: cupData.handleEnd as Time, value: cupData.handleLow },
+          { time: cupData.handleEnd as Time, value: cupData.handleLow - slopeAmount },
         ]);
       }
     }

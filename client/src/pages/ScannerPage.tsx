@@ -980,12 +980,22 @@ export default function ScannerPage() {
                           </span>
                         </div>
                         {stock.matchedPattern && (
-                          <span 
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-black dark:border-green-600 w-fit mt-1"
-                            data-testid={`badge-pattern-${stock.symbol}`}
-                          >
-                            {stock.matchedPattern}
-                          </span>
+                          <div className="flex items-center gap-2 flex-wrap mt-1">
+                            <span 
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-black dark:border-green-600"
+                              data-testid={`badge-pattern-${stock.symbol}`}
+                            >
+                              {stock.matchedPattern}
+                            </span>
+                            {stock.completionPct !== undefined && stock.matchedPattern.includes('Cup and Handle') && (
+                              <span 
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border border-blue-600"
+                                data-testid={`badge-completion-${stock.symbol}`}
+                              >
+                                {stock.completionPct}% complete
+                              </span>
+                            )}
+                          </div>
                         )}
                       </CardHeader>
                       <CardContent className="pt-0">
