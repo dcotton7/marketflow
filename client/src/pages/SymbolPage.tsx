@@ -16,6 +16,7 @@ export default function SymbolPage() {
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
   const selectedPattern = urlParams.get('pattern') || undefined;
+  const technicalSignal = urlParams.get('technicalSignal') || undefined;
   const fromScanner = urlParams.get('fromScanner') === 'true';
   const safeSymbol = symbol || "";
   
@@ -25,10 +26,13 @@ export default function SymbolPage() {
   
   // Build criteria list from filters when coming from scanner
   const getCriteriaList = (): string[] => {
-    if (!fromScanner && !selectedPattern) return [];
+    if (!fromScanner && !selectedPattern && !technicalSignal) return [];
     const criteria: string[] = [];
-    if (filters.chartPattern && filters.chartPattern !== 'Any') criteria.push(`Pattern: ${filters.chartPattern}`);
-    if (filters.candlestickPattern && filters.candlestickPattern !== 'Any') criteria.push(`Candlestick: ${filters.candlestickPattern}`);
+    if (filters.chartPattern && filters.chartPattern !== 'All') criteria.push(`Pattern: ${filters.chartPattern}`);
+    if (filters.technicalSignal && filters.technicalSignal !== 'none') {
+      const signalName = getSignalDisplayName(filters.technicalSignal, filters.crossDirection);
+      criteria.push(`Signal: ${signalName}`);
+    }
     if (filters.smaFilter && filters.smaFilter !== 'none') {
       if (filters.smaFilter === 'stacked') criteria.push('SMA Stacked (5>20>50>200)');
       if (filters.smaFilter === 'above50_200') criteria.push('Price > 50d > 200d');
@@ -41,6 +45,26 @@ export default function SymbolPage() {
     if (filters.maxPrice) criteria.push(`Max $${filters.maxPrice}`);
     if (filters.minVolume) criteria.push(`Vol > ${(filters.minVolume / 1000000).toFixed(1)}M`);
     return criteria;
+  };
+  
+  // Get display name for technical signals
+  const getSignalDisplayName = (signal: string, direction?: string): string => {
+    switch (signal) {
+      case '6_20_cross':
+        return `6/20 Cross ${direction === 'down' ? 'Down' : 'Up'}`;
+      case 'ride_21_ema':
+        return 'Ride 21 EMA';
+      case 'pullback_5_dma':
+        return 'Pullback to 5 DMA';
+      case 'pullback_10_dma':
+        return 'Pullback to 10 DMA';
+      case 'pullback_20_dma':
+        return 'Pullback to 20 DMA';
+      case 'pullback_50_dma':
+        return 'Pullback to 50 DMA';
+      default:
+        return signal;
+    }
   };
   
   const criteriaList = getCriteriaList();
@@ -202,7 +226,7 @@ export default function SymbolPage() {
         )}
         <div className="flex gap-4 items-start">
           <div className="flex-1 min-w-0">
-            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
+            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} technicalSignal={technicalSignal} />
           </div>
           <div className="w-64 flex-shrink-0 hidden lg:block pt-8">
             <TradeRiskRating symbol={safeSymbol} currentPrice={quote.price} />

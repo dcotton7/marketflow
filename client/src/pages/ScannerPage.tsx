@@ -526,7 +526,7 @@ export default function ScannerPage() {
                           params.set('pattern', filters.chartPattern);
                         }
                         if (filters.technicalSignal && filters.technicalSignal !== 'none') {
-                          params.set('signal', filters.technicalSignal);
+                          params.set('technicalSignal', filters.technicalSignal);
                           if (filters.crossDirection) {
                             params.set('crossDirection', filters.crossDirection);
                           }

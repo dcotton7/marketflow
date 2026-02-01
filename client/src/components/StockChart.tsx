@@ -20,6 +20,7 @@ interface StockChartProps {
   symbol: string;
   showChannels?: boolean;
   selectedPattern?: string;
+  technicalSignal?: string;
 }
 
 interface HorizontalLineDefinition {
@@ -60,6 +61,28 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
     }
   }
   return sma;
+}
+
+function calculateEMA(data: { close: number }[], period: number): (number | null)[] {
+  const ema: (number | null)[] = [];
+  const multiplier = 2 / (period + 1);
+  
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      ema.push(null);
+    } else if (i === period - 1) {
+      const sum = data.slice(0, period).reduce((acc, d) => acc + d.close, 0);
+      ema.push(sum / period);
+    } else {
+      const prevEma = ema[i - 1];
+      if (prevEma !== null) {
+        ema.push((data[i].close - prevEma) * multiplier + prevEma);
+      } else {
+        ema.push(null);
+      }
+    }
+  }
+  return ema;
 }
 
 // Calculate VWAP using TradingView Auto settings approach
@@ -356,7 +379,7 @@ function detectCupAndHandle(
 
 type ToolMode = 'none' | 'measure' | 'line';
 
-export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern }: StockChartProps) {
+export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
@@ -509,6 +532,22 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       value: sma200[i] ?? undefined,
     })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
     sma200Series.setData(sma200Data);
+    
+    // Add EMA 21 line when ride_21_ema signal is active (pink thicker line)
+    if (technicalSignal === 'ride_21_ema') {
+      const ema21 = calculateEMA(history, 21);
+      const ema21Series = chart.addSeries(LineSeries, {
+        color: '#f472b6', // Pink
+        lineWidth: 3,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      const ema21Data = history.map((item, i) => ({
+        time: (new Date(item.date).getTime() / 1000) as Time,
+        value: ema21[i] ?? undefined,
+      })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+      ema21Series.setData(ema21Data);
+    }
     
     // Add VWAP line - orange thicker dotted line (Auto VWAP)
     const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
@@ -745,7 +784,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels, showPatternViz, selectedPattern, lineDefinitions]);
+  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions]);
   
   // Handle chart clicks for tools
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
