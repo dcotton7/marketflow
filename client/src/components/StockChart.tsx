@@ -62,7 +62,8 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
   return sma;
 }
 
-// Calculate Daily VWAP (resets each day for intraday, cumulative for daily+)
+// Calculate VWAP using TradingView Auto settings approach
+// Resets daily for both intraday and daily timeframes (session-based)
 function calculateVWAP(data: { date: string; high: number; low: number; close: number; volume: number }[], isIntraday: boolean): (number | null)[] {
   const vwap: (number | null)[] = [];
   let cumulativeTPV = 0;
@@ -71,10 +72,10 @@ function calculateVWAP(data: { date: string; high: number; low: number; close: n
   
   for (let i = 0; i < data.length; i++) {
     const itemDate = new Date(data[i].date);
-    const dayKey = isIntraday ? itemDate.toDateString() : '';
+    const dayKey = itemDate.toDateString();
     
-    // Reset cumulative values at start of new day for intraday data
-    if (isIntraday && dayKey !== currentDay) {
+    // Reset cumulative values at start of new day (session reset)
+    if (dayKey !== currentDay) {
       cumulativeTPV = 0;
       cumulativeVolume = 0;
       currentDay = dayKey;
@@ -91,6 +92,61 @@ function calculateVWAP(data: { date: string; high: number; low: number; close: n
     }
   }
   return vwap;
+}
+
+// Get the current Auto VWAP value (last value from session-based VWAP)
+function getCurrentAutoVWAP(data: { date: string; high: number; low: number; close: number; volume: number }[]): number | null {
+  if (data.length === 0) return null;
+  const vwapValues = calculateVWAP(data, false);
+  return vwapValues[vwapValues.length - 1];
+}
+
+// Calculate Anchored VWAP from 6-month low
+function calculateAnchoredVWAP(data: { date: string; high: number; low: number; close: number; volume: number }[]): { values: (number | null)[], anchorIndex: number } {
+  if (data.length === 0) return { values: [], anchorIndex: -1 };
+  
+  // Find data from last 6 months
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  
+  // Find the index of the lowest price within last 6 months
+  let lowestPrice = Infinity;
+  let anchorIndex = -1;
+  
+  for (let i = 0; i < data.length; i++) {
+    const itemDate = new Date(data[i].date);
+    if (itemDate >= sixMonthsAgo && data[i].low < lowestPrice) {
+      lowestPrice = data[i].low;
+      anchorIndex = i;
+    }
+  }
+  
+  if (anchorIndex === -1) {
+    // Fallback: use lowest in entire dataset
+    for (let i = 0; i < data.length; i++) {
+      if (data[i].low < lowestPrice) {
+        lowestPrice = data[i].low;
+        anchorIndex = i;
+      }
+    }
+  }
+  
+  // Calculate VWAP from anchor point forward
+  const anchoredVwap: (number | null)[] = new Array(data.length).fill(null);
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  
+  for (let i = anchorIndex; i < data.length; i++) {
+    const typicalPrice = (data[i].high + data[i].low + data[i].close) / 3;
+    cumulativeTPV += typicalPrice * data[i].volume;
+    cumulativeVolume += data[i].volume;
+    
+    if (cumulativeVolume > 0) {
+      anchoredVwap[i] = cumulativeTPV / cumulativeVolume;
+    }
+  }
+  
+  return { values: anchoredVwap, anchorIndex };
 }
 
 function detectConsolidationChannels(
@@ -454,7 +510,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
     sma200Series.setData(sma200Data);
     
-    // Add VWAP line - orange thicker dotted line
+    // Add VWAP line - orange thicker dotted line (Auto VWAP)
     const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
     const vwap = calculateVWAP(history, isIntraday);
     const vwapSeries = chart.addSeries(LineSeries, {
@@ -469,6 +525,21 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       value: vwap[i] ?? undefined,
     })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
     vwapSeries.setData(vwapData);
+    
+    // Add Anchored VWAP from 6-month low - solid yellow, thicker, 30% transparent
+    const anchoredVwapResult = calculateAnchoredVWAP(history);
+    const anchoredVwapSeries = chart.addSeries(LineSeries, {
+      color: 'rgba(234, 179, 8, 0.7)', // Yellow with 30% transparency
+      lineWidth: 3,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    const anchoredVwapData = history.map((item, i) => ({
+      time: (new Date(item.date).getTime() / 1000) as Time,
+      value: anchoredVwapResult.values[i] ?? undefined,
+    })).filter(d => d.value !== undefined) as { time: Time; value: number }[];
+    anchoredVwapSeries.setData(anchoredVwapData);
 
     // Detect and draw channels if explicitly requested OR if pattern visualization is on for channel patterns
     const shouldShowChannelPatterns = showChannels || 
@@ -789,7 +860,11 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-6 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
-                <span className="text-gray-700 dark:text-gray-300">VWAP</span>
+                <span className="text-gray-700 dark:text-gray-300">Auto VWAP</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-6 h-1 inline-block" style={{ backgroundColor: 'rgba(234, 179, 8, 0.7)' }}></span>
+                <span className="text-gray-700 dark:text-gray-300">Anchored VWAP (Low)</span>
               </span>
             </div>
           </div>

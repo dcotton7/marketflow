@@ -1,6 +1,6 @@
 import { useStockHistory } from "@/hooks/use-stocks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, X, Circle } from "lucide-react";
+import { Check, X } from "lucide-react";
 
 interface TradeRiskRatingProps {
   symbol: string;
@@ -14,23 +14,70 @@ function calculateSMA(data: { close: number }[], period: number): number | null 
   return sum / period;
 }
 
-function calculateDailyVWAP(data: { date: string; high: number; low: number; close: number; volume: number }[]): number | null {
+// Same VWAP calculation as StockChart - session-based, resets daily
+function calculateAutoVWAP(data: { date: string; high: number; low: number; close: number; volume: number }[]): number | null {
   if (data.length === 0) return null;
   
-  // Get bars from the most recent trading day
+  // Get the last day's data for session VWAP
   const lastDate = new Date(data[data.length - 1].date).toDateString();
-  const todayBars = data.filter(d => new Date(d.date).toDateString() === lastDate);
-  
-  // If we only have daily bars, use the last bar
-  const barsToUse = todayBars.length > 1 ? todayBars : [data[data.length - 1]];
   
   let cumulativeTPV = 0;
   let cumulativeVolume = 0;
-  for (const d of barsToUse) {
-    const typicalPrice = (d.high + d.low + d.close) / 3;
-    cumulativeTPV += typicalPrice * d.volume;
-    cumulativeVolume += d.volume;
+  
+  for (const d of data) {
+    const itemDate = new Date(d.date).toDateString();
+    if (itemDate === lastDate) {
+      const typicalPrice = (d.high + d.low + d.close) / 3;
+      cumulativeTPV += typicalPrice * d.volume;
+      cumulativeVolume += d.volume;
+    }
   }
+  
+  return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null;
+}
+
+// Same Anchored VWAP calculation as StockChart - anchored to 6-month low
+function calculateAnchoredVWAPFromLow(data: { date: string; high: number; low: number; close: number; volume: number }[]): number | null {
+  if (data.length === 0) return null;
+  
+  // Find data from last 6 months
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  
+  // Find the index of the lowest price within last 6 months
+  let lowestPrice = Infinity;
+  let anchorIndex = -1;
+  
+  for (let i = 0; i < data.length; i++) {
+    const itemDate = new Date(data[i].date);
+    if (itemDate >= sixMonthsAgo && data[i].low < lowestPrice) {
+      lowestPrice = data[i].low;
+      anchorIndex = i;
+    }
+  }
+  
+  if (anchorIndex === -1) {
+    // Fallback: use lowest in entire dataset
+    for (let i = 0; i < data.length; i++) {
+      if (data[i].low < lowestPrice) {
+        lowestPrice = data[i].low;
+        anchorIndex = i;
+      }
+    }
+  }
+  
+  if (anchorIndex === -1) return null;
+  
+  // Calculate VWAP from anchor point to end
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  
+  for (let i = anchorIndex; i < data.length; i++) {
+    const typicalPrice = (data[i].high + data[i].low + data[i].close) / 3;
+    cumulativeTPV += typicalPrice * data[i].volume;
+    cumulativeVolume += data[i].volume;
+  }
+  
   return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null;
 }
 
@@ -52,14 +99,17 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
     return null;
   }
 
-  const vwap = calculateDailyVWAP(history);
+  const autoVwap = calculateAutoVWAP(history);
+  const anchoredVwap = calculateAnchoredVWAPFromLow(history);
   const sma5 = calculateSMA(history, 5);
   const sma20 = calculateSMA(history, 20);
   const sma50 = calculateSMA(history, 50);
   const sma200 = calculateSMA(history, 200);
 
+  // 10 criteria for 10 bar sections
   const checks = {
-    aboveVWAP: vwap !== null && currentPrice > vwap,
+    aboveAutoVWAP: autoVwap !== null && currentPrice > autoVwap,
+    aboveAnchoredVWAP: anchoredVwap !== null && currentPrice > anchoredVwap,
     sma5Rising: isSMAFlatOrRising(history, 5),
     sma20Rising: isSMAFlatOrRising(history, 20),
     sma50Rising: isSMAFlatOrRising(history, 50),
@@ -71,41 +121,28 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
   };
 
   const checkCount = Object.values(checks).filter(Boolean).length;
+  const totalChecks = 10;
+  
+  // Arrow position: 0 checks = far left (0%), 10 checks = far right (100%)
+  const arrowPosition = (checkCount / totalChecks) * 100;
 
-  let riskLevel: string;
-  let riskColor: string;
-  let lightColor: string;
-
-  if (checkCount >= 9) {
-    riskLevel = "Low Risk Trade";
-    riskColor = "text-green-500";
-    lightColor = "bg-green-500";
-  } else if (checkCount === 8) {
-    riskLevel = "Moderate Risk";
-    riskColor = "text-lime-400";
-    lightColor = "bg-lime-400";
-  } else if (checkCount === 7) {
-    riskLevel = "Elevated Risk";
-    riskColor = "text-yellow-400";
-    lightColor = "bg-yellow-400";
-  } else if (checkCount === 6) {
-    riskLevel = "High Risk";
-    riskColor = "text-orange-500";
-    lightColor = "bg-orange-500";
-  } else {
-    riskLevel = "Very High Risk Long Setup";
-    riskColor = "text-red-500";
-    lightColor = "bg-red-500";
-  }
-
-  const CheckIcon = ({ passed, noCheck }: { passed: boolean, noCheck?: boolean }) => {
-    if (noCheck) return <Circle className="w-4 h-4 text-muted-foreground opacity-20" />;
+  const CheckIcon = ({ passed }: { passed: boolean }) => {
     return passed ? (
       <Check className="w-4 h-4 text-green-500" />
     ) : (
       <X className="w-4 h-4 text-red-500" />
     );
   };
+
+  // Gradient segments: RED -> ORANGE -> YELLOW -> YELLOW-GREEN -> LIME -> GREEN
+  const gradientColors = [
+    '#ef4444', // Red (0-1)
+    '#f97316', // Orange (2)
+    '#eab308', // Yellow (3-4)
+    '#84cc16', // Yellow-Green (5-6)
+    '#22c55e', // Lime (7-8)
+    '#16a34a', // Green (9)
+  ];
 
   return (
     <Card className="h-full">
@@ -115,16 +152,58 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex items-center gap-2 pb-2 border-b border-border">
-          <div className={`w-4 h-4 rounded-full ${lightColor}`} />
-          <span className={`font-bold ${riskColor}`}>{riskLevel}</span>
-          <span className="text-sm text-muted-foreground ml-auto">{checkCount}/9</span>
+        {/* Gradient Bar with Arrow */}
+        <div className="pb-3 border-b border-border">
+          {/* Arrow indicator */}
+          <div className="relative h-4 mb-1">
+            <div 
+              className="absolute transition-all duration-300"
+              style={{ 
+                left: `${arrowPosition}%`,
+                transform: 'translateX(-50%)'
+              }}
+            >
+              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white" />
+            </div>
+          </div>
+          
+          {/* Gradient bar - 10 equal sections */}
+          <div className="flex h-4 rounded-sm overflow-hidden">
+            {Array.from({ length: 10 }).map((_, i) => {
+              let colorIndex: number;
+              if (i <= 1) colorIndex = 0; // Red
+              else if (i === 2) colorIndex = 1; // Orange
+              else if (i <= 4) colorIndex = 2; // Yellow
+              else if (i <= 6) colorIndex = 3; // Yellow-Green
+              else if (i <= 8) colorIndex = 4; // Lime
+              else colorIndex = 5; // Green
+              
+              return (
+                <div 
+                  key={i} 
+                  className="flex-1"
+                  style={{ backgroundColor: gradientColors[colorIndex] }}
+                />
+              );
+            })}
+          </div>
+          
+          {/* Score display */}
+          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+            <span>High Risk</span>
+            <span className="font-medium">{checkCount}/{totalChecks}</span>
+            <span>Low Risk</span>
+          </div>
         </div>
         
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2">
-            <CheckIcon passed={checks.aboveVWAP} />
-            <span>Price Above Daily VWAP</span>
+            <CheckIcon passed={checks.aboveAutoVWAP} />
+            <span>Price Above Auto VWAP</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <CheckIcon passed={checks.aboveAnchoredVWAP} />
+            <span>Price Above Anchored VWAP (Low)</span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.sma5Rising} />
