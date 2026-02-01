@@ -1079,6 +1079,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
             )}
             
             {/* Standard SMAs for non-6/20 Cross modes */}
+            {/* SMA 5 and 10 shown on all timeframes; SMA 50 and 200 only on daily/weekly/monthly */}
             {technicalSignal !== '6_20_cross' && (
               <>
                 <Button
@@ -1101,42 +1102,50 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
                   <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#3b82f6' }}></span>
                   <span className="text-xs">SMA 10</span>
                 </Button>
-                <Button
-                  variant={enabledIndicators.has('sma50') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('sma50')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma50"
-                >
-                  <span className="w-3 h-1 rounded" style={{ backgroundColor: '#dc2626' }}></span>
-                  <span className="text-xs">SMA 50</span>
-                </Button>
-                <Button
-                  variant={enabledIndicators.has('sma200') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('sma200')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma200"
-                >
-                  <span className="w-3 h-0.5 rounded bg-black dark:bg-white"></span>
-                  <span className="text-xs">SMA 200</span>
-                </Button>
+                {/* SMA 50 and 200 only on daily/weekly/monthly - NOT on intraday (5m, 15m, 30m, 60m) */}
+                {['1d', '1wk', '1mo'].includes(interval) && (
+                  <>
+                    <Button
+                      variant={enabledIndicators.has('sma50') ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => toggleIndicator('sma50')}
+                      className="gap-1 h-7 px-2"
+                      data-testid="toggle-sma50"
+                    >
+                      <span className="w-3 h-1 rounded" style={{ backgroundColor: '#dc2626' }}></span>
+                      <span className="text-xs">SMA 50</span>
+                    </Button>
+                    <Button
+                      variant={enabledIndicators.has('sma200') ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => toggleIndicator('sma200')}
+                      className="gap-1 h-7 px-2"
+                      data-testid="toggle-sma200"
+                    >
+                      <span className="w-3 h-0.5 rounded bg-black dark:bg-white"></span>
+                      <span className="text-xs">SMA 200</span>
+                    </Button>
+                  </>
+                )}
               </>
             )}
             
-            {/* Pattern-specific indicators: 3 Month SMA (for patterns) and 12 Week VWAP (only on weekly charts, not VCP) */}
+            {/* Pattern-specific indicators: 3 Month SMA (only on weekly/monthly), 12 Week VWAP (only on weekly, not VCP) */}
             {selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern) && (
               <>
-                <Button
-                  variant={enabledIndicators.has('sma3Month') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('sma3Month')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma3month"
-                >
-                  <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#f472b6' }}></span>
-                  <span className="text-xs">3M SMA</span>
-                </Button>
+                {/* 3M SMA only on weekly or monthly timeframes - NOT on daily or intraday */}
+                {['1wk', '1mo'].includes(interval) && (
+                  <Button
+                    variant={enabledIndicators.has('sma3Month') ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => toggleIndicator('sma3Month')}
+                    className="gap-1 h-7 px-2"
+                    data-testid="toggle-sma3month"
+                  >
+                    <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#f472b6' }}></span>
+                    <span className="text-xs">3M SMA</span>
+                  </Button>
+                )}
                 {/* 12W VWAP only shows on weekly timeframe and not for VCP */}
                 {interval === '1wk' && selectedPattern !== 'VCP' && (
                   <Button

@@ -1380,9 +1380,19 @@ export async function registerRoutes(
               channelHeightPct = calculateChannelHeightPct(candles, input.chartPattern!) ?? undefined;
               
               if (hasChannelHeightFilter && channelHeightPct !== undefined) {
-                if (channelHeightPct > input.maxChannelHeightPct!) {
-                  console.log(`[Scanner] ${symbol} filtered: channelHeight ${channelHeightPct.toFixed(1)}% > maxChannelHeight ${input.maxChannelHeightPct}%`);
+                // Explicit numeric conversion to prevent string comparison issues
+                const channelNum = Number(channelHeightPct);
+                const maxChannelNum = Number(input.maxChannelHeightPct!);
+                
+                console.log(`[Scanner] ${symbol} channel height check: ${channelNum.toFixed(2)}% vs max ${maxChannelNum}%`);
+                
+                // Filter OUT stocks where channel height EXCEEDS the max
+                // Higher max = more permissive, lower max = tighter filter
+                if (channelNum > maxChannelNum) {
+                  console.log(`[Scanner] ${symbol} FILTERED OUT: channelHeight ${channelNum.toFixed(2)}% > maxChannelHeight ${maxChannelNum}%`);
                   continue;
+                } else {
+                  console.log(`[Scanner] ${symbol} PASSED: channelHeight ${channelNum.toFixed(2)}% <= maxChannelHeight ${maxChannelNum}%`);
                 }
               }
               

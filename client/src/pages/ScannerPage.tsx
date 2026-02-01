@@ -323,7 +323,27 @@ export default function ScannerPage() {
   return (
     <Layout>
       <div className="flex flex-col lg:flex-row gap-8 items-start">
-        <div className="w-full lg:w-80 shrink-0">
+        {/* Left column: Debug Panel + Scanner Settings side by side */}
+        <div className="flex gap-4 shrink-0">
+          {/* Detailed Search Criteria Panel - positioned to the left of Scanner Settings */}
+          <div className="hidden lg:block w-64 shrink-0">
+            <div className="sticky top-24 p-3 border border-white/20 rounded-lg bg-muted/10">
+              <p className="text-sm font-semibold text-white/80 mb-3">Detailed Search Criteria</p>
+              <ul className="space-y-2 text-xs max-h-[calc(100vh-150px)] overflow-y-auto">
+                {getDetailedCriteria().map((item, idx) => (
+                  <li key={idx} className="border-b border-white/10 pb-2 last:border-b-0">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-white/60">{item.label}:</span>
+                      <span className="text-white font-medium text-right">{item.value}</span>
+                    </div>
+                    <p className="text-white/40 mt-1 leading-relaxed">{item.explanation}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          
+          <div className="w-full lg:w-80 shrink-0">
           <Card className="sticky top-24 border-border shadow-xl shadow-black/5 bg-card/50 backdrop-blur-sm">
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2">
@@ -767,21 +787,6 @@ export default function ScannerPage() {
               </Button>
             </CardContent>
           </Card>
-          
-          {/* Detailed Search Criteria Panel */}
-          <div className="mt-4 p-3 border border-white/20 rounded-lg bg-muted/10">
-            <p className="text-sm font-semibold text-white/80 mb-3">Detailed Search Criteria</p>
-            <ul className="space-y-2 text-xs">
-              {getDetailedCriteria().map((item, idx) => (
-                <li key={idx} className="border-b border-white/10 pb-2 last:border-b-0">
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/60">{item.label}:</span>
-                    <span className="text-white font-medium">{item.value}</span>
-                  </div>
-                  <p className="text-white/40 mt-1 leading-relaxed">{item.explanation}</p>
-                </li>
-              ))}
-            </ul>
           </div>
         </div>
 
