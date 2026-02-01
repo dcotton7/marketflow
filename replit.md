@@ -5,6 +5,19 @@
 AI Swing Scanner is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
 
 ## Recent Changes (February 2026)
+- Chart timeframe improvements:
+  - Added TimeframeContext to preserve selected timeframe when navigating between symbols
+  - Clicking ETF holdings, related stocks, watchlist, or Market items now keeps the current timeframe
+  - Updated visible bar counts per timeframe to match user preferences:
+    - 5m: 117 bars (~1.5 trading days)
+    - 15m: 200 bars (~5-6 trading days)
+    - 30m: 160 bars (~10-12 trading days)
+    - 60m: 130 bars (~3-4 weeks)
+    - Daily: 200 bars (~8-9 months)
+    - Weekly: 156 bars (~3 years)
+    - Monthly: all available data
+  - Extended historical data fetch: 3 years for daily, 5 years for weekly/monthly
+  - Market List items (SPY, QQQ, DIA, etc.) are now clickable links to symbol pages
 - Fixed chart layout: measure/line tools now positioned below chart with fixed h-[500px] container to prevent layout shift
 - Cup and Handle improvements:
   - Added completion percentage badge on scanner result thumbnails (e.g. "85% complete")

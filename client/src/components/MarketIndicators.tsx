@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { TrendingUp, TrendingDown } from "lucide-react";
 
 interface MarketQuote {
@@ -20,10 +21,17 @@ const MARKET_SYMBOLS = [
 ];
 
 export function MarketIndicators() {
+  const [, setLocation] = useLocation();
   const { data: quotes, isLoading } = useQuery<MarketQuote[]>({
     queryKey: ["/api/market/indicators"],
     refetchInterval: 60000,
   });
+
+  const handleClick = (symbol: string) => {
+    // Remove ^ prefix for navigation (VIX has ^VIX symbol)
+    const navSymbol = symbol.startsWith('^') ? symbol.slice(1) : symbol;
+    setLocation(`/symbol/${navSymbol}`);
+  };
 
   if (isLoading) {
     return (
@@ -48,8 +56,9 @@ export function MarketIndicators() {
         return (
           <div 
             key={quote.symbol} 
-            className="flex justify-between items-center text-xs py-0.5"
+            className="flex justify-between items-center text-xs py-0.5 cursor-pointer hover-elevate rounded px-1 -mx-1"
             data-testid={`market-${quote.symbol.replace('^', '')}`}
+            onClick={() => handleClick(quote.symbol)}
           >
             <span className="text-muted-foreground">{quote.label}</span>
             <span className={`font-mono flex items-center gap-1 ${colorClass}`}>

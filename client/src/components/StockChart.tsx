@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useStockHistory } from "@/hooks/use-stocks";
 import { Loader2, Layers, Ruler, Minus, Trash2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTimeframeContext } from "@/context/TimeframeContext";
 import { 
   createChart, 
   IChartApi, 
@@ -446,13 +447,16 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
+  const { globalTimeframe, setGlobalTimeframe } = useTimeframeContext();
+  
   // Track if user has manually changed the interval
   const [userSelectedInterval, setUserSelectedInterval] = useState(false);
-  // Auto-select timeframe based on: URL param > technicalSignal > default
+  // Auto-select timeframe based on: URL param > globalTimeframe > technicalSignal > default
   const getDefaultInterval = () => {
     if (initialInterval) return initialInterval;
     if (technicalSignal === '6_20_cross') return '5m';
-    return '1d';
+    // Use global timeframe if no special signal/pattern dictates otherwise
+    return globalTimeframe;
   };
   const [interval, setIntervalState] = useState(getDefaultInterval());
   const [showChannels, setShowChannels] = useState(initialShowChannels);
@@ -485,10 +489,11 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     });
   };
   
-  // Wrapper to track user manual interval changes
+  // Wrapper to track user manual interval changes AND sync to global context
   const setInterval = (newInterval: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo') => {
     setUserSelectedInterval(true);
     setIntervalState(newInterval);
+    setGlobalTimeframe(newInterval); // Sync to global context
   };
   
   // Reset userSelectedInterval when signal/pattern changes to allow auto-switching
@@ -506,9 +511,10 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     } else if (selectedPattern === 'Monthly Tight') {
       setIntervalState('1mo'); // Monthly chart for Monthly Tight
     } else {
-      setIntervalState('1d'); // Daily for everything else
+      // Use global timeframe when no pattern/signal dictates otherwise
+      setIntervalState(globalTimeframe);
     }
-  }, [technicalSignal, selectedPattern, userSelectedInterval, initialInterval]);
+  }, [technicalSignal, selectedPattern, userSelectedInterval, initialInterval, globalTimeframe]);
   
   // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
   const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
@@ -931,25 +937,37 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       ]);
     });
 
-    // Adjust visible range based on signal/pattern type
-    // 6/20 Cross @ 5min: ~1.5 days (117 bars)
-    // Pullback patterns: (upPeriodCandles × 5), minimum 30 bars
-    // VCP/Weekly Tight/High Tight Flag/Cup Handle @ daily: 6 months (~130 bars)
-    // Monthly Tight @ monthly: 24 months (24 bars)
-    // Default daily: ~8-9 months (200 bars)
+    // Adjust visible range based on interval/signal/pattern type
+    // Based on user screenshots:
+    // 5m: ~117 bars (~1.5 trading days)
+    // 15m: ~200 bars (~5-6 trading days)
+    // 30m: ~160 bars (~10-12 trading days)
+    // 60m: ~130 bars (~3-4 weeks)
+    // Daily: ~200 bars (~8-9 months)
+    // Weekly: ~156 bars (~3 years)
+    // Monthly: show all available
     const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
     const isPullbackSignal = technicalSignal?.startsWith('pullback_');
     
     // Add right padding to ensure last bar is visible (add 3 bars of padding)
     const rightPadding = 3;
     
-    if (interval === '5m' && technicalSignal === '6_20_cross' && candleData.length > 117) {
-      const visibleBars = 117;
-      chart.timeScale().setVisibleLogicalRange({
-        from: candleData.length - visibleBars,
-        to: candleData.length + rightPadding
-      });
-    } else if (isPullbackSignal && interval === '1d') {
+    // Determine visible bars based on timeframe
+    const getVisibleBarsForInterval = (): number => {
+      switch (interval) {
+        case '5m': return 117;   // ~1.5 trading days
+        case '15m': return 200;  // ~5-6 trading days
+        case '30m': return 160;  // ~10-12 trading days
+        case '60m': return 130;  // ~3-4 weeks
+        case '1d': return 200;   // ~8-9 months
+        case '1wk': return 156;  // ~3 years
+        case '1mo': return candleData.length; // Show all for monthly
+        default: return 200;
+      }
+    };
+    
+    // Special cases for signals/patterns
+    if (isPullbackSignal && interval === '1d') {
       // Pullback patterns: show (upPeriodCandles × 5), minimum 30 bars
       const upPeriod = pullbackUpPeriod || 10; // Default to 10 if not provided
       const visibleBars = Math.max(30, upPeriod * 5);
@@ -971,15 +989,17 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         from: candleData.length - visibleBars,
         to: candleData.length + rightPadding
       });
-    } else if (interval === '1d' && candleData.length > 200) {
-      // Default daily: 200 candles
-      const visibleBars = 200;
-      chart.timeScale().setVisibleLogicalRange({
-        from: candleData.length - visibleBars,
-        to: candleData.length + rightPadding
-      });
     } else {
-      chart.timeScale().fitContent();
+      // Use default visible bars for the interval
+      const visibleBars = getVisibleBarsForInterval();
+      if (candleData.length > visibleBars) {
+        chart.timeScale().setVisibleLogicalRange({
+          from: candleData.length - visibleBars,
+          to: candleData.length + rightPadding
+        });
+      } else {
+        chart.timeScale().fitContent();
+      }
     }
 
     const handleResize = () => {

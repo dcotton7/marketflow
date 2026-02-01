@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ScannerProvider } from "@/context/ScannerContext";
+import { TimeframeProvider } from "@/context/TimeframeContext";
 import NotFound from "@/pages/not-found";
 import ScannerPage from "@/pages/ScannerPage";
 import SymbolPage from "@/pages/SymbolPage";
@@ -24,10 +25,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <ScannerProvider>
-          <Toaster />
-          <Router />
-        </ScannerProvider>
+        <TimeframeProvider>
+          <ScannerProvider>
+            <Toaster />
+            <Router />
+          </ScannerProvider>
+        </TimeframeProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

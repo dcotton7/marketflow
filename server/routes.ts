@@ -1199,13 +1199,15 @@ export async function registerRoutes(
   app.get(api.stocks.history.path, async (req, res) => {
     const symbol = String(req.params.symbol);
     const interval = String(req.query.interval || '1d');
-    let period = String(req.query.period || '2y'); // Default to 2 years for SMA 200
+    let period = String(req.query.period || '3y'); // Default to 3 years for scrollback history
     
-    // For intraday, use shorter periods
+    // For intraday, use shorter periods (Yahoo API limits)
     if (['5m', '15m', '30m'].includes(interval)) {
       period = '1mo'; // Yahoo limits intraday to ~60 days
     } else if (interval === '60m') {
       period = '3mo';
+    } else if (interval === '1wk' || interval === '1mo') {
+      period = '5y'; // Weekly/monthly can have longer history
     }
     
     try {
