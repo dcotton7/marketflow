@@ -320,6 +320,9 @@ export default function SymbolPage() {
               <CardTitle className="text-lg">Top 5 Holdings</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="flex justify-end mb-2">
+                <span className="text-xs text-muted-foreground font-medium">Weight</span>
+              </div>
               <div className="space-y-3">
                 {quote.etfHoldings.slice(0, 5).map((holding) => (
                   <div 
@@ -332,13 +335,10 @@ export default function SymbolPage() {
                       <span className="font-mono font-bold text-primary min-w-[60px]">{holding.symbol}</span>
                       <div className="flex flex-col">
                         <span className="text-sm font-medium">{holding.name}</span>
-                        {holding.weight && (
-                          <span className="text-xs text-muted-foreground">Weight: {holding.weight.toFixed(1)}%</span>
-                        )}
                       </div>
                     </div>
-                    <span className="text-sm font-mono text-muted-foreground" data-testid={`text-mktcap-${holding.symbol}`}>
-                      {holding.weight ? `${holding.weight.toFixed(1)}%` : (holding.marketCap && holding.marketCap > 0 ? formatMarketCap(holding.marketCap) : '---')}
+                    <span className="text-sm font-mono text-muted-foreground" data-testid={`text-weight-${holding.symbol}`}>
+                      {holding.weight ? `${holding.weight.toFixed(1)}%` : '---'}
                     </span>
                   </div>
                 ))}
@@ -354,9 +354,6 @@ export default function SymbolPage() {
               <CardTitle className="text-lg">Top Companies in: {quote.industry || 'Industry'}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex justify-end mb-2">
-                <span className="text-xs text-muted-foreground font-medium">Market Cap</span>
-              </div>
               <div className="space-y-3">
                 {quote.relatedStocks.map((stock) => (
                   <div 
@@ -372,9 +369,6 @@ export default function SymbolPage() {
                         <span className="text-xs text-muted-foreground">{stock.description}</span>
                       </div>
                     </div>
-                    <span className="text-sm font-mono text-muted-foreground" data-testid={`text-mktcap-${stock.symbol}`}>
-                      {stock.marketCap && stock.marketCap > 0 ? formatMarketCap(stock.marketCap) : '---'}
-                    </span>
                   </div>
                 ))}
               </div>

@@ -15,6 +15,7 @@ import {
   ISeriesApi,
   SeriesType
 } from "lightweight-charts";
+import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } from "@shared/patternDetection";
 
 interface StockChartProps {
   symbol: string;
@@ -316,6 +317,7 @@ function detectHighTightFlag(
   };
 }
 
+// Cup and Handle detection using shared module
 interface CupAndHandleData {
   cupStart: number;
   lipLevel: number;
@@ -329,65 +331,29 @@ interface CupAndHandleData {
 }
 
 function detectCupAndHandle(
-  data: { date: string; high: number; low: number; close: number; volume: number }[]
+  data: { date: string; open: number; high: number; low: number; close: number; volume: number }[]
 ): CupAndHandleData | null {
-  if (data.length < 20) return null;
+  // Use shared detection algorithm (try loose mode for better coverage)
+  const result = sharedDetectCupAndHandle(data, true);
   
-  // For visualization, look for any cup-like pattern with very relaxed thresholds
-  // Try multiple lookback windows to find a valid pattern
-  const lookbackOptions = [60, 90, 120, 45];
-  
-  for (const lookbackSize of lookbackOptions) {
-    const lookback = data.slice(-Math.min(lookbackSize, data.length));
-    if (lookback.length < 20) continue;
-    
-    // Find the highest point in first half as left lip candidate
-    const leftHalf = lookback.slice(0, Math.floor(lookback.length / 2));
-    const leftLipIdx = leftHalf.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
-    const leftLipHigh = leftHalf[leftLipIdx].high;
-    
-    // Find the lowest point as cup bottom (can be anywhere in the data)
-    const cupBottomIdx = lookback.reduce((minIdx, c, i, arr) => c.low < arr[minIdx].low ? i : minIdx, 0);
-    const cupBottom = lookback[cupBottomIdx].low;
-    const cupBottomDate = lookback[cupBottomIdx].date;
-    
-    // Right side: find highest point after cup bottom
-    const rightPortion = lookback.slice(Math.max(cupBottomIdx + 1, Math.floor(lookback.length / 2)));
-    if (rightPortion.length < 5) continue;
-    
-    const rightHighIdx = rightPortion.reduce((maxIdx, c, i, arr) => c.high > arr[maxIdx].high ? i : maxIdx, 0);
-    const rightHighest = rightPortion[rightHighIdx].high;
-    const rightHighDate = rightPortion[rightHighIdx].date;
-    
-    // Very relaxed: cup depth 5-65% 
-    const cupDepth = ((leftLipHigh - cupBottom) / leftLipHigh) * 100;
-    if (cupDepth < 5 || cupDepth > 65) continue;
-    
-    // Very relaxed: right side within 25% of left lip (can still be building)
-    if (rightHighest < leftLipHigh * 0.75) continue;
-    
-    // Use the higher of left lip or right high as the lip level
-    const lipLevel = Math.max(leftLipHigh, rightHighest);
-    
-    // Last few bars as handle
-    const handleBars = lookback.slice(-10);
-    const handleHigh = Math.max(...handleBars.map(c => c.high));
-    const handleLow = Math.min(...handleBars.map(c => c.low));
-    
-    return {
-      cupStart: new Date(lookback[0].date).getTime() / 1000,
-      lipLevel: lipLevel,
-      cupBottomTime: new Date(cupBottomDate).getTime() / 1000,
-      cupBottomPrice: cupBottom,
-      cupRightTime: new Date(rightHighDate).getTime() / 1000,
-      handleStart: new Date(handleBars[0].date).getTime() / 1000,
-      handleEnd: new Date(handleBars[handleBars.length - 1].date).getTime() / 1000,
-      handleHigh,
-      handleLow
-    };
+  if (!result.detected || !result.cupStartTime || !result.lipLevel || 
+      !result.cupBottomTime || !result.cupBottomPrice || !result.cupRightTime ||
+      !result.handleStartTime || !result.handleEndTime || 
+      result.handleHigh === undefined || result.handleLow === undefined) {
+    return null;
   }
   
-  return null;
+  return {
+    cupStart: result.cupStartTime,
+    lipLevel: result.lipLevel,
+    cupBottomTime: result.cupBottomTime,
+    cupBottomPrice: result.cupBottomPrice,
+    cupRightTime: result.cupRightTime,
+    handleStart: result.handleStartTime,
+    handleEnd: result.handleEndTime,
+    handleHigh: result.handleHigh,
+    handleLow: result.handleLow
+  };
 }
 
 type ToolMode = 'none' | 'measure' | 'line';
@@ -402,13 +368,20 @@ interface IndicatorConfig {
   colorClass: string;
 }
 
-// Get default enabled indicators based on signal/pattern
-function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string): Set<IndicatorKey> {
+// Get default enabled indicators based on signal/pattern AND timeframe
+// Timeframe-specific defaults from user specs:
+// 5min: 6,20,vwap dotted
+// 15min: 20,5D
+// 30min: 5d off,21d,50d off,vwap dotted
+// 60min: 5d off,21d,50d,vwap dotted,AVWAP 6MOS
+// Daily: 5,10 off,50,200,vwap dotted,AVWAP 6MOS
+function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string, timeframe?: string): Set<IndicatorKey> {
   const is620Cross = technicalSignal === '6_20_cross';
   const isRide21EMA = technicalSignal === 'ride_21_ema';
   const isPullback = technicalSignal?.startsWith('pullback_');
   const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
   
+  // If specific signal type, use signal-based defaults
   if (is620Cross) {
     // 6/20 Cross: SMA 6 Pink, SMA 20 Blue, Session VWAP only
     return new Set(['sma6', 'sma20', 'autoVwap'] as IndicatorKey[]);
@@ -428,8 +401,31 @@ function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string
     return new Set(patternIndicators);
   }
   
-  // Default: Full SMA set + VWAPs
-  return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+  // Timeframe-specific defaults when no specific signal/pattern
+  switch (timeframe) {
+    case '5m':
+      // 5min: SMA 6, SMA 20, VWAP (dotted)
+      return new Set(['sma6', 'sma20', 'autoVwap'] as IndicatorKey[]);
+    case '15m':
+      // 15min: SMA 20, SMA 5 (no VWAP by default)
+      return new Set(['sma5', 'sma20'] as IndicatorKey[]);
+    case '30m':
+      // 30min: EMA 21, VWAP (5d and 50d available but off by default)
+      return new Set(['ema21', 'autoVwap'] as IndicatorKey[]);
+    case '60m':
+      // 60min: EMA 21, SMA 50, VWAP, AVWAP 6MOS (5d available but off)
+      return new Set(['ema21', 'sma50', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+    case '1d':
+      // Daily: SMA 5, SMA 50, SMA 200, VWAP, AVWAP 6MOS (SMA 10 available but off)
+      return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+    case '1wk':
+    case '1mo':
+      // Weekly/Monthly: Full set
+      return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+    default:
+      // Default: Daily set
+      return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+  }
 }
 
 export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal, initialInterval, pullbackUpPeriod }: StockChartProps) {
@@ -449,19 +445,19 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const [showPatternViz, setShowPatternViz] = useState(!!selectedPattern);
   const [toolMode, setToolMode] = useState<ToolMode>('none');
   const [lineDefinitions, setLineDefinitions] = useState<HorizontalLineDefinition[]>([]);
-  const [measureStart, setMeasureStart] = useState<MeasurePoint | null>(null);
-  const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number } | null>(null);
+  const [measureStart, setMeasureStart] = useState<{ price: number; barIndex: number } | null>(null);
+  const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number; barCount: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   
-  // Indicator toggles - initialized based on signal type
+  // Indicator toggles - initialized based on signal type and timeframe
   const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorKey>>(() => 
-    getDefaultIndicators(technicalSignal, selectedPattern)
+    getDefaultIndicators(technicalSignal, selectedPattern, interval)
   );
   
-  // Update enabled indicators when signal/pattern changes
+  // Update enabled indicators when signal/pattern/timeframe changes
   useEffect(() => {
-    setEnabledIndicators(getDefaultIndicators(technicalSignal, selectedPattern));
-  }, [technicalSignal, selectedPattern]);
+    setEnabledIndicators(getDefaultIndicators(technicalSignal, selectedPattern, interval));
+  }, [technicalSignal, selectedPattern, interval]);
   
   const toggleIndicator = (key: IndicatorKey) => {
     setEnabledIndicators(prev => {
@@ -816,13 +812,15 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       }
     }
     
-    // Draw Cup and Handle visualization
+    // Draw Cup and Handle visualization - BRIGHT BLUE color for all elements
+    const CUP_HANDLE_COLOR = '#3b82f6'; // Bright blue to distinguish from VWAP lines
+    
     if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
       const cupData = detectCupAndHandle(history);
       if (cupData) {
         // Draw the cup lip level (horizontal resistance)
         const cupLipLine = chart.addSeries(LineSeries, {
-          color: '#f59e0b',
+          color: CUP_HANDLE_COLOR,
           lineWidth: 2,
           lineStyle: LineStyle.Dashed,
           priceLineVisible: false,
@@ -855,7 +853,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         }
         
         const cupArcLine = chart.addSeries(LineSeries, {
-          color: '#f59e0b',
+          color: CUP_HANDLE_COLOR,
           lineWidth: 3,
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
@@ -863,13 +861,33 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         cupArcLine.setData(arcPoints);
         
+        // Draw connector line from cup right side to handle start (makes pattern connected)
+        // Only draw if both times are valid and in ascending order
+        if (cupData.cupRightTime && cupData.handleStart && 
+            typeof cupData.cupRightTime === 'number' && typeof cupData.handleStart === 'number' &&
+            cupData.cupRightTime < cupData.handleStart) {
+          const connectorLine = chart.addSeries(LineSeries, {
+            color: CUP_HANDLE_COLOR,
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+          });
+          // Sort data points to ensure ascending time order
+          const connectorData = [
+            { time: cupData.cupRightTime as Time, value: cupData.lipLevel },
+            { time: cupData.handleStart as Time, value: cupData.handleHigh },
+          ].sort((a, b) => (a.time as number) - (b.time as number));
+          connectorLine.setData(connectorData);
+        }
+        
         // Draw handle channel - slopes slightly DOWN (typical handle pattern)
         // Calculate a slight downward slope for the handle lines (15% of handle range)
         const handleRange = cupData.handleHigh - cupData.handleLow;
         const slopeAmount = handleRange * 0.15; // 15% of handle range as slight downward slope
         
         const handleTopLine = chart.addSeries(LineSeries, {
-          color: '#f59e0b',
+          color: CUP_HANDLE_COLOR,
           lineWidth: 2,
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
@@ -881,7 +899,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         ]);
         
         const handleBottomLine = chart.addSeries(LineSeries, {
-          color: '#f59e0b',
+          color: CUP_HANDLE_COLOR,
           lineWidth: 2,
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
@@ -1024,13 +1042,20 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       });
       setToolMode('none');
     } else if (toolMode === 'measure') {
+      // Get bar index from time coordinate
+      const timeScale = chart.timeScale();
+      const coordinate = timeScale.coordinateToLogical(x);
+      const barIndex = Math.round(coordinate ?? 0);
+      
       if (!measureStart) {
-        setMeasureStart({ price: finalPrice });
+        setMeasureStart({ price: finalPrice, barIndex });
         setMeasureResult(null);
       } else {
         const priceDiff = finalPrice - measureStart.price;
         const pctChange = (priceDiff / measureStart.price) * 100;
-        setMeasureResult({ priceDiff, pctChange });
+        // Inclusive count: from first click to last click includes both bars
+        const barCount = Math.abs(barIndex - measureStart.barIndex) + 1;
+        setMeasureResult({ priceDiff, pctChange, barCount });
         setMeasureStart(null);
         setToolMode('none');
       }
@@ -1074,7 +1099,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       {/* Header with legend toggle buttons and tools */}
       <div className="mb-4 flex justify-between items-start flex-wrap gap-4">
         <div>
-          <h3 className="font-semibold text-foreground mb-2">Price History</h3>
+          <h3 className="font-semibold text-foreground mb-2">Indicator Toggles</h3>
           <div className="flex gap-1 items-center flex-wrap">
             {/* Indicator toggle buttons - driven by enabledIndicators and signal/pattern context */}
             
@@ -1331,15 +1356,19 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       )}
       {measureResult && (
         <div className="mt-2 text-sm bg-primary/10 border border-primary/20 px-3 py-2 rounded-lg flex gap-4 items-center">
-          <span className="text-muted-foreground font-semibold">Measure Results:</span>
+          <span className="text-muted-foreground font-semibold">Measure:</span>
           <span>
-            <span className="text-muted-foreground">Change:</span>{' '}
+            <span className="text-muted-foreground"># Bars:</span>{' '}
+            <span className="text-foreground font-mono">{measureResult.barCount}</span>
+          </span>
+          <span>
+            <span className="text-muted-foreground">Change$:</span>{' '}
             <span className={measureResult.priceDiff >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
               {measureResult.priceDiff >= 0 ? '+' : ''}{measureResult.priceDiff.toFixed(2)}
             </span>
           </span>
           <span>
-            <span className="text-muted-foreground">Percent:</span>{' '}
+            <span className="text-muted-foreground">Change%:</span>{' '}
             <span className={measureResult.pctChange >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
               {measureResult.pctChange >= 0 ? '+' : ''}{measureResult.pctChange.toFixed(2)}%
             </span>
@@ -1350,7 +1379,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       {/* Horizontal lines list with diff calculation */}
       {lineDefinitions.length > 0 && (
         <div className="mt-2 flex gap-2 flex-wrap items-center">
-          <span className="text-xs text-muted-foreground">Lines:</span>
+          <span className="text-sm font-bold text-foreground">Lines:</span>
           {lineDefinitions.map((line) => (
             <span
               key={line.id}
