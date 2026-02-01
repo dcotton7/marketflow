@@ -1,6 +1,6 @@
 import { useStockHistory } from "@/hooks/use-stocks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, X } from "lucide-react";
+import { Check, X, Circle } from "lucide-react";
 
 interface TradeRiskRatingProps {
   symbol: string;
@@ -71,6 +71,32 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
   };
 
   const checkCount = Object.values(checks).filter(Boolean).length;
+
+  let riskLevel: string;
+  let riskColor: string;
+  let lightColor: string;
+
+  if (checkCount >= 9) {
+    riskLevel = "Low Risk Trade";
+    riskColor = "text-green-500";
+    lightColor = "bg-green-500";
+  } else if (checkCount === 8) {
+    riskLevel = "Moderate Risk";
+    riskColor = "text-lime-400";
+    lightColor = "bg-lime-400";
+  } else if (checkCount === 7) {
+    riskLevel = "Elevated Risk";
+    riskColor = "text-yellow-400";
+    lightColor = "bg-yellow-400";
+  } else if (checkCount === 6) {
+    riskLevel = "High Risk";
+    riskColor = "text-orange-500";
+    lightColor = "bg-orange-500";
+  } else {
+    riskLevel = "Look for Short Opportunities";
+    riskColor = "text-red-500";
+    lightColor = "bg-red-500";
+  }
 
   const CheckIcon = ({ passed, noCheck }: { passed: boolean, noCheck?: boolean }) => {
     if (noCheck) return <Circle className="w-4 h-4 text-muted-foreground opacity-20" />;

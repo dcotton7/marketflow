@@ -227,17 +227,26 @@ export default function SymbolPage() {
         {/* Sector & ETFs */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Sector Information</CardTitle>
+            <CardTitle className="text-lg">{quote.isETF ? "ETF Details" : "Sector Information"}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <span className="text-sm text-muted-foreground">Sector:</span>
-              <span className="ml-2 font-medium">{quote.sector || 'Unknown'}</span>
-            </div>
-            <div>
-              <span className="text-sm text-muted-foreground">Industry:</span>
-              <span className="ml-2 font-medium">{quote.industry || 'Unknown'}</span>
-            </div>
+            {quote.isETF ? (
+              <div>
+                <span className="text-sm text-muted-foreground">Full Sector Name:</span>
+                <span className="ml-2 font-medium">{quote.sector || 'Various Sectors'}</span>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <span className="text-sm text-muted-foreground">Sector:</span>
+                  <span className="ml-2 font-medium">{quote.sector || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-sm text-muted-foreground">Industry:</span>
+                  <span className="ml-2 font-medium">{quote.industry || 'Unknown'}</span>
+                </div>
+              </>
+            )}
             {quote.sectorETFs && quote.sectorETFs.length > 0 && (
               <div>
                 <span className="text-sm text-muted-foreground block mb-2">Sector ETFs:</span>
@@ -263,11 +272,11 @@ export default function SymbolPage() {
         {quote.isETF && quote.etfHoldings && quote.etfHoldings.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Top Holdings</CardTitle>
+              <CardTitle className="text-lg">Top 5 Holdings</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {quote.etfHoldings.map((holding) => (
+                {quote.etfHoldings.slice(0, 5).map((holding) => (
                   <div 
                     key={holding.symbol} 
                     className="flex items-center justify-between p-3 rounded border border-border hover-elevate cursor-pointer"
@@ -284,7 +293,7 @@ export default function SymbolPage() {
                       </div>
                     </div>
                     <span className="text-sm font-mono text-muted-foreground" data-testid={`text-mktcap-${holding.symbol}`}>
-                      {holding.marketCap && holding.marketCap > 0 ? formatMarketCap(holding.marketCap) : '---'}
+                      {holding.weight ? `${holding.weight.toFixed(1)}%` : (holding.marketCap && holding.marketCap > 0 ? formatMarketCap(holding.marketCap) : '---')}
                     </span>
                   </div>
                 ))}
