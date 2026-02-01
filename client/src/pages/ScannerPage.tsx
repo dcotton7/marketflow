@@ -321,10 +321,10 @@ export default function ScannerPage() {
       const signalExplanations: Record<string, string> = {
         '6_20_cross': `6 SMA and 20 SMA crossed ${filters.crossDirection === 'up' ? 'upward (bullish)' : 'downward (bearish)'} within last 3 bars on 5-min chart`,
         'ride_21_ema': `Price has been riding 21 EMA without breaking >${filters.emaBreakThresholdPct || 1}% below, and pulled back >${filters.emaPbThresholdPct || 2.5}% from recent high`,
-        'pullback_5_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 5 DMA`,
-        'pullback_10_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 10 DMA`,
-        'pullback_20_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 20 DMA`,
-        'pullback_50_dma': `Stock rose >${filters.pbMinGainPct || 30}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 50 DMA`
+        'pullback_5_dma': `Stock rose >${filters.pbMinGainPct || 15}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 5 DMA`,
+        'pullback_10_dma': `Stock rose >${filters.pbMinGainPct || 15}% in <${filters.pbUpPeriodCandles || 10} bars, now pulling back to 10 DMA`,
+        'pullback_20_dma': `Stock rose >${filters.pbMinGainPct || 20}% in <${filters.pbUpPeriodCandles || 15} bars, now pulling back to 20 DMA`,
+        'pullback_50_dma': `Stock rose >${filters.pbMinGainPct || 25}% in <${filters.pbUpPeriodCandles || 20} bars, now pulling back to 50 DMA`
       };
       details.push({
         label: 'Technical Signal',
@@ -670,7 +670,7 @@ export default function ScannerPage() {
                       <Input 
                         type="text" 
                         inputMode="decimal"
-                        placeholder="e.g. 30" 
+                        placeholder="e.g. 15" 
                         className="bg-background font-mono"
                         data-testid="input-pb-min-gain"
                         value={filters.pbMinGainPct ?? ''}

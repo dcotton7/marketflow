@@ -344,6 +344,34 @@ const ETF_HOLDINGS: Record<string, { symbol: string; name: string; weight: numbe
     { symbol: 'CELH', name: 'Celsius Holdings', weight: 0.5, marketCap: 10e9 },
     { symbol: 'CIEN', name: 'Ciena Corporation', weight: 0.4, marketCap: 8e9 },
   ],
+  'VGT': [
+    { symbol: 'AAPL', name: 'Apple Inc.', weight: 17.5, marketCap: 3000e9 },
+    { symbol: 'MSFT', name: 'Microsoft Corporation', weight: 16.0, marketCap: 2800e9 },
+    { symbol: 'NVDA', name: 'NVIDIA Corporation', weight: 8.5, marketCap: 1200e9 },
+    { symbol: 'AVGO', name: 'Broadcom Inc.', weight: 4.2, marketCap: 350e9 },
+    { symbol: 'CRM', name: 'Salesforce Inc.', weight: 2.8, marketCap: 250e9 },
+  ],
+  'VHT': [
+    { symbol: 'LLY', name: 'Eli Lilly', weight: 10.5, marketCap: 550e9 },
+    { symbol: 'UNH', name: 'UnitedHealth Group', weight: 9.0, marketCap: 500e9 },
+    { symbol: 'JNJ', name: 'Johnson & Johnson', weight: 7.5, marketCap: 400e9 },
+    { symbol: 'MRK', name: 'Merck & Co.', weight: 5.0, marketCap: 280e9 },
+    { symbol: 'ABBV', name: 'AbbVie Inc.', weight: 4.8, marketCap: 280e9 },
+  ],
+  'VFH': [
+    { symbol: 'BRK.B', name: 'Berkshire Hathaway', weight: 12.5, marketCap: 800e9 },
+    { symbol: 'JPM', name: 'JPMorgan Chase', weight: 9.5, marketCap: 500e9 },
+    { symbol: 'V', name: 'Visa Inc.', weight: 7.0, marketCap: 500e9 },
+    { symbol: 'MA', name: 'Mastercard', weight: 5.5, marketCap: 400e9 },
+    { symbol: 'BAC', name: 'Bank of America', weight: 4.5, marketCap: 280e9 },
+  ],
+  'VDE': [
+    { symbol: 'XOM', name: 'Exxon Mobil', weight: 20.0, marketCap: 450e9 },
+    { symbol: 'CVX', name: 'Chevron', weight: 15.0, marketCap: 280e9 },
+    { symbol: 'COP', name: 'ConocoPhillips', weight: 6.5, marketCap: 130e9 },
+    { symbol: 'SLB', name: 'Schlumberger', weight: 4.0, marketCap: 60e9 },
+    { symbol: 'EOG', name: 'EOG Resources', weight: 3.8, marketCap: 70e9 },
+  ],
 };
 
 // List of known ETF symbols
@@ -1050,28 +1078,28 @@ function detectTechnicalSignal(
     case 'pullback_5_dma':
       return detectPullbackToMA(
         candles, 5, 
-        options.pbMinGainPct || 30,
+        options.pbMinGainPct || 15,
         options.pbUpPeriodCandles || 10,
         options.pbMinCandles || 1,
         options.pbMaxCandles || 5,
-        false
+        true  // loose mode for faster MAs
       );
     
     case 'pullback_10_dma':
       return detectPullbackToMA(
         candles, 10, 
-        options.pbMinGainPct || 30,
+        options.pbMinGainPct || 15,
         options.pbUpPeriodCandles || 10,
         options.pbMinCandles || 1,
         options.pbMaxCandles || 5,
-        false
+        true  // loose mode for faster MAs
       );
     
     case 'pullback_20_dma':
       return detectPullbackToMA(
         candles, 20, 
-        options.pbMinGainPct || 30,
-        options.pbUpPeriodCandles || 10,
+        options.pbMinGainPct || 20,
+        options.pbUpPeriodCandles || 15,
         options.pbMinCandles || 1,
         options.pbMaxCandles || 5,
         false
@@ -1080,10 +1108,10 @@ function detectTechnicalSignal(
     case 'pullback_50_dma':
       return detectPullbackToMA(
         candles, 50, 
-        options.pbMinGainPct || 30,
-        options.pbUpPeriodCandles || 10,
+        options.pbMinGainPct || 25,
+        options.pbUpPeriodCandles || 20,
         options.pbMinCandles || 1,
-        options.pbMaxCandles || 5,
+        options.pbMaxCandles || 8,
         false
       );
     
