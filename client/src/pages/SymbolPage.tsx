@@ -204,7 +204,7 @@ export default function SymbolPage() {
           <div className="flex-1 min-w-0">
             <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} />
           </div>
-          <div className="w-64 flex-shrink-0 hidden lg:block">
+          <div className="w-64 flex-shrink-0 hidden lg:block pt-8">
             <TradeRiskRating symbol={safeSymbol} currentPrice={quote.price} />
           </div>
         </div>
@@ -311,7 +311,7 @@ export default function SymbolPage() {
         {!quote.isETF && quote.relatedStocks && quote.relatedStocks.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Top Companies in: {quote.sector || 'Sector'}</CardTitle>
+              <CardTitle className="text-lg">Top Companies in: {quote.industry || 'Industry'}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex justify-end mb-2">

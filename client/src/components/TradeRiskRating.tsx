@@ -147,7 +147,7 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
             <span>Price Distance above 50-day ≤ 4%</span>
           </div>
           <div className="flex items-center gap-2">
-            <CheckIcon passed={checks.priceAbove6PctOf50} noCheck />
+            <CheckIcon passed={checks.priceAbove6PctOf50} />
             <span>Price Distance above 50-day &gt; 6%</span>
           </div>
           <div className="flex items-center gap-2">

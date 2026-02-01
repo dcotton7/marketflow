@@ -367,6 +367,7 @@ export default function ScannerPage() {
                     placeholder="Min" 
                     className="bg-background font-mono"
                     data-testid="input-min-price"
+                    value={filters.minPrice ?? ''}
                     onChange={(e) => setFilters(prev => ({ ...prev, minPrice: e.target.value ? Number(e.target.value) : undefined }))}
                   />
                   <Input 
@@ -374,6 +375,7 @@ export default function ScannerPage() {
                     placeholder="Max" 
                     className="bg-background font-mono"
                     data-testid="input-max-price"
+                    value={filters.maxPrice ?? ''}
                     onChange={(e) => setFilters(prev => ({ ...prev, maxPrice: e.target.value ? Number(e.target.value) : undefined }))}
                   />
                 </div>
@@ -386,6 +388,7 @@ export default function ScannerPage() {
                   placeholder="e.g. 1000000" 
                   className="bg-background font-mono"
                   data-testid="input-min-volume"
+                  value={filters.minVolume ?? ''}
                   onChange={(e) => setFilters(prev => ({ ...prev, minVolume: e.target.value ? Number(e.target.value) : undefined }))}
                 />
               </div>
