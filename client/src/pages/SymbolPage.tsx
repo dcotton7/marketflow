@@ -171,9 +171,14 @@ export default function SymbolPage() {
             ) : '---'}
           </div>
           {quote.earnings?.surprisePct !== undefined && (
-            <div className="text-xl font-mono font-semibold mt-1">
-              <span className={quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}>
-                Surprise: ({quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%)
+            <div className="text-sm font-mono mt-2">
+              <span className="text-white">Surprise </span>
+              <span className="text-yellow-400">+</span>
+              <span className="text-white">/</span>
+              <span className="text-red-500">-</span>
+              <span className="text-white"> %: </span>
+              <span className={`font-semibold ${quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}`}>
+                {quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%
               </span>
             </div>
           )}
