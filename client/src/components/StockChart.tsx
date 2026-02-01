@@ -374,7 +374,7 @@ function detectCupAndHandleForChart(
 type ToolMode = 'none' | 'measure' | 'line';
 
 // Define available indicators for toggle functionality
-type IndicatorKey = 'sma5' | 'sma10' | 'sma6' | 'sma20' | 'sma50' | 'sma200' | 'ema21' | 'sma3Month' | 'autoVwap' | 'anchoredVwap' | 'vwap12Week';
+type IndicatorKey = 'sma5' | 'sma10' | 'sma6' | 'sma20' | 'sma21' | 'sma50' | 'sma200' | 'ema21' | 'sma3Month' | 'autoVwap' | 'anchoredVwap' | 'vwap12Week' | 'vwap40Week';
 
 interface IndicatorConfig {
   key: IndicatorKey;
@@ -383,62 +383,56 @@ interface IndicatorConfig {
   colorClass: string;
 }
 
-// Get default enabled indicators based on signal/pattern AND timeframe
-// Timeframe-specific defaults from user specs:
-// 5min: 6,20,vwap dotted
-// 15min: 20,5D
-// 30min: 5d off,21d,50d off,vwap dotted
-// 60min: 5d off,21d,50d,vwap dotted,AVWAP 6MOS
-// Daily: 5,10 off,50,200,vwap dotted,AVWAP 6MOS
-function getDefaultIndicators(technicalSignal?: string, selectedPattern?: string, timeframe?: string): Set<IndicatorKey> {
-  const is620Cross = technicalSignal === '6_20_cross';
-  const isRide21EMA = technicalSignal === 'ride_21_ema';
-  const isPullback = technicalSignal?.startsWith('pullback_');
-  const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
-  
-  // If specific signal type, use signal-based defaults
-  if (is620Cross) {
-    // 6/20 Cross: SMA 6 Pink, SMA 20 Blue, Session VWAP only
-    return new Set(['sma6', 'sma20', 'autoVwap'] as IndicatorKey[]);
-  }
-  
-  if (isRide21EMA || isPullback) {
-    // Ride 21 EMA / Pullback: EMA 21 Pink, SMA 5 Green, SMA 10 Blue, SMA 50 Red, SMA 200 Black, AutoVWAP, Anchored VWAP
-    return new Set(['ema21', 'sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
-  }
-  
-  if (isPatternMode) {
-    // Patterns: Full set + 3 Month SMA (VCP doesn't get 12W VWAP)
-    const patternIndicators: IndicatorKey[] = ['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap', 'sma3Month'];
-    if (selectedPattern !== 'VCP') {
-      patternIndicators.push('vwap12Week');
-    }
-    return new Set(patternIndicators);
-  }
-  
-  // Timeframe-specific defaults when no specific signal/pattern
+// Get available indicators (visible toggles) per timeframe
+function getAvailableIndicators(timeframe: string): IndicatorKey[] {
   switch (timeframe) {
     case '5m':
-      // 5min: SMA 6, SMA 20, VWAP (dotted)
+      // 5min: SMA 6, SMA 20, VWAP
+      return ['sma6', 'sma20', 'autoVwap'];
+    case '15m':
+      // 15min: SMA 5, SMA 20, SMA 50 (daily)
+      return ['sma5', 'sma20', 'sma50'];
+    case '30m':
+      // 30min: SMA 5D, EMA 21, VWAP, SMA 50d
+      return ['sma5', 'ema21', 'autoVwap', 'sma50'];
+    case '60m':
+      // 60min: SMA 5d, EMA 21d, SMA 50d, SMA 200d, VWAP, AVWAP 6MOS
+      return ['sma5', 'ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+    case '1d':
+      // Daily: SMA 5, SMA 10, SMA 20 (pink), SMA 50, SMA 200, VWAP, AVWAP 6MOS
+      return ['sma5', 'sma10', 'sma20', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+    case '1wk':
+    case '1mo':
+      // Weekly/Monthly: SMA 21d, SMA 50d, SMA 200d, 40W VWAP, AVWAP 6mos low
+      return ['sma21', 'sma50', 'sma200', 'vwap40Week', 'anchoredVwap'];
+    default:
+      return ['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+  }
+}
+
+// Get default enabled indicators (ON by default) per timeframe
+function getDefaultIndicators(timeframe?: string): Set<IndicatorKey> {
+  switch (timeframe) {
+    case '5m':
+      // 5min: SMA 6, SMA 20, VWAP - all ON
       return new Set(['sma6', 'sma20', 'autoVwap'] as IndicatorKey[]);
     case '15m':
-      // 15min: SMA 20, SMA 5 (no VWAP by default)
+      // 15min: SMA 5, SMA 20 ON; SMA 50 OFF
       return new Set(['sma5', 'sma20'] as IndicatorKey[]);
     case '30m':
-      // 30min: EMA 21, VWAP (5d and 50d available but off by default)
-      return new Set(['ema21', 'autoVwap'] as IndicatorKey[]);
+      // 30min: SMA 5D, EMA 21, VWAP ON; SMA 50d OFF
+      return new Set(['sma5', 'ema21', 'autoVwap'] as IndicatorKey[]);
     case '60m':
-      // 60min: EMA 21, SMA 50, VWAP, AVWAP 6MOS (5d available but off)
-      return new Set(['ema21', 'sma50', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+      // 60min: EMA 21d, SMA 50d, SMA 200d, VWAP, AVWAP ON; SMA 5d OFF
+      return new Set(['ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
     case '1d':
-      // Daily: SMA 5, SMA 50, SMA 200, VWAP, AVWAP 6MOS (SMA 10 available but off)
+      // Daily: SMA 5, SMA 50, SMA 200, VWAP, AVWAP ON; SMA 10, SMA 20 OFF
       return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
     case '1wk':
     case '1mo':
-      // Weekly/Monthly: Full set
-      return new Set(['sma5', 'sma10', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
+      // Weekly/Monthly: SMA 21d, SMA 50d, SMA 200d, 40W VWAP, AVWAP 6mos - all ON
+      return new Set(['sma21', 'sma50', 'sma200', 'vwap40Week', 'anchoredVwap'] as IndicatorKey[]);
     default:
-      // Default: Daily set
       return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
   }
 }
@@ -467,15 +461,15 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number; barCount: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   
-  // Indicator toggles - initialized based on signal type and timeframe
+  // Indicator toggles - initialized based on timeframe
   const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorKey>>(() => 
-    getDefaultIndicators(technicalSignal, selectedPattern, interval)
+    getDefaultIndicators(interval)
   );
   
-  // Update enabled indicators when signal/pattern/timeframe changes
+  // Update enabled indicators when timeframe changes
   useEffect(() => {
-    setEnabledIndicators(getDefaultIndicators(technicalSignal, selectedPattern, interval));
-  }, [technicalSignal, selectedPattern, interval]);
+    setEnabledIndicators(getDefaultIndicators(interval));
+  }, [interval]);
   
   const toggleIndicator = (key: IndicatorKey) => {
     setEnabledIndicators(prev => {
@@ -638,6 +632,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     const sma6 = calculateSMA(history, 6);
     const sma10 = calculateSMA(history, 10);
     const sma20 = calculateSMA(history, 20);
+    const sma21 = calculateSMA(history, 21);
     const sma50 = calculateSMA(history, 50);
     const sma200 = calculateSMA(history, 200);
     const ema21 = calculateEMA(history, 21);
@@ -699,6 +694,11 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       addIndicatorSeries(ema21, '#f472b6', 3); // Pink, thick
     }
     
+    // SMA 21 - Pink (for weekly/monthly)
+    if (enabledIndicators.has('sma21')) {
+      addIndicatorSeries(sma21, '#f472b6', 2); // Pink
+    }
+    
     // 3 Month SMA - Pink
     if (enabledIndicators.has('sma3Month')) {
       addIndicatorSeries(sma3Month, '#f472b6', 2); // Pink
@@ -743,6 +743,38 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
           }
         }
         addIndicatorSeries(vwap12Week, 'rgba(234, 179, 8, 0.9)', 3);
+      }
+    }
+    
+    // 40 Week VWAP (for weekly/monthly) - Yellow thick
+    if (enabledIndicators.has('vwap40Week')) {
+      // Calculate 40-week VWAP (approximately 40 weeks = ~10 months back)
+      const tenMonthsAgo = new Date();
+      tenMonthsAgo.setMonth(tenMonthsAgo.getMonth() - 10);
+      let lowestPrice = Infinity;
+      let anchorIdx = -1;
+      for (let i = 0; i < history.length; i++) {
+        const itemDate = new Date(history[i].date);
+        if (itemDate >= tenMonthsAgo && history[i].low < lowestPrice) {
+          lowestPrice = history[i].low;
+          anchorIdx = i;
+        }
+      }
+      if (anchorIdx !== -1) {
+        const vwap40Week: (number | null)[] = [];
+        let cumulativeTPV = 0;
+        let cumulativeVolume = 0;
+        for (let i = 0; i < history.length; i++) {
+          if (i < anchorIdx) {
+            vwap40Week.push(null);
+          } else {
+            const tp = (history[i].high + history[i].low + history[i].close) / 3;
+            cumulativeTPV += tp * history[i].volume;
+            cumulativeVolume += history[i].volume;
+            vwap40Week.push(cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null);
+          }
+        }
+        addIndicatorSeries(vwap40Week, 'rgba(234, 179, 8, 0.9)', 3);
       }
     }
 
@@ -1130,157 +1162,46 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         <div>
           <h3 className="font-semibold text-foreground mb-2">Indicator Toggles</h3>
           <div className="flex gap-1 items-center flex-wrap">
-            {/* Indicator toggle buttons - driven by enabledIndicators and signal/pattern context */}
-            
-            {/* 6/20 Cross specific: SMA 6 and SMA 20 */}
-            {technicalSignal === '6_20_cross' && (
-              <>
+            {/* Timeframe-based indicator toggles */}
+            {getAvailableIndicators(interval).map((key) => {
+              const indicatorStyles: Record<IndicatorKey, { color: string; label: string; isDotted?: boolean }> = {
+                sma5: { color: '#22c55e', label: 'SMA 5' },
+                sma6: { color: '#f472b6', label: 'SMA 6' },
+                sma10: { color: '#3b82f6', label: 'SMA 10' },
+                sma20: { color: '#f472b6', label: 'SMA 20' },
+                sma21: { color: '#f472b6', label: 'SMA 21' },
+                sma50: { color: '#dc2626', label: 'SMA 50' },
+                sma200: { color: '#000000', label: 'SMA 200' },
+                ema21: { color: '#f472b6', label: 'EMA 21' },
+                sma3Month: { color: '#f472b6', label: '3M SMA' },
+                autoVwap: { color: '#f97316', label: 'VWAP', isDotted: true },
+                anchoredVwap: { color: 'rgba(234, 179, 8, 0.7)', label: 'AVWAP 6MOS' },
+                vwap12Week: { color: 'rgba(234, 179, 8, 0.9)', label: '12W VWAP' },
+                vwap40Week: { color: 'rgba(234, 179, 8, 0.9)', label: '40W VWAP' },
+              };
+              const style = indicatorStyles[key];
+              const isSma200 = key === 'sma200';
+              
+              return (
                 <Button
-                  variant={enabledIndicators.has('sma6') ? 'default' : 'outline'}
+                  key={key}
+                  variant={enabledIndicators.has(key) ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => toggleIndicator('sma6')}
+                  onClick={() => toggleIndicator(key)}
                   className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma6"
+                  data-testid={`toggle-${key}`}
                 >
-                  <span className="w-3 h-0.5 inline-block rounded" style={{ backgroundColor: '#f472b6' }}></span>
-                  <span className="text-xs">SMA 6</span>
+                  {style.isDotted ? (
+                    <span className="w-4 h-0.5 inline-block" style={{ borderTop: `2px dotted ${style.color}` }}></span>
+                  ) : isSma200 ? (
+                    <span className="w-3 h-0.5 rounded bg-black dark:bg-white"></span>
+                  ) : (
+                    <span className="w-3 h-0.5 rounded" style={{ backgroundColor: style.color }}></span>
+                  )}
+                  <span className="text-xs">{style.label}</span>
                 </Button>
-                <Button
-                  variant={enabledIndicators.has('sma20') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('sma20')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma20"
-                >
-                  <span className="w-3 h-1 rounded" style={{ backgroundColor: '#3b82f6' }}></span>
-                  <span className="text-xs">SMA 20</span>
-                </Button>
-              </>
-            )}
-            
-            {/* EMA 21 for Ride 21 EMA and Pullback signals */}
-            {(technicalSignal === 'ride_21_ema' || technicalSignal?.startsWith('pullback_')) && (
-              <Button
-                variant={enabledIndicators.has('ema21') ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => toggleIndicator('ema21')}
-                className="gap-1 h-7 px-2"
-                data-testid="toggle-ema21"
-              >
-                <span className="w-3 h-1 rounded" style={{ backgroundColor: '#f472b6' }}></span>
-                <span className="text-xs">EMA 21</span>
-              </Button>
-            )}
-            
-            {/* Standard SMAs for non-6/20 Cross modes */}
-            {/* SMA 5 and 10 shown on all timeframes; SMA 50 and 200 only on daily/weekly/monthly */}
-            {technicalSignal !== '6_20_cross' && (
-              <>
-                <Button
-                  variant={enabledIndicators.has('sma5') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('sma5')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma5"
-                >
-                  <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#22c55e' }}></span>
-                  <span className="text-xs">SMA 5</span>
-                </Button>
-                <Button
-                  variant={enabledIndicators.has('sma10') ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => toggleIndicator('sma10')}
-                  className="gap-1 h-7 px-2"
-                  data-testid="toggle-sma10"
-                >
-                  <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#3b82f6' }}></span>
-                  <span className="text-xs">SMA 10</span>
-                </Button>
-                {/* SMA 50 and 200 only on daily/weekly/monthly - NOT on intraday (5m, 15m, 30m, 60m) */}
-                {['1d', '1wk', '1mo'].includes(interval) && (
-                  <>
-                    <Button
-                      variant={enabledIndicators.has('sma50') ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => toggleIndicator('sma50')}
-                      className="gap-1 h-7 px-2"
-                      data-testid="toggle-sma50"
-                    >
-                      <span className="w-3 h-1 rounded" style={{ backgroundColor: '#dc2626' }}></span>
-                      <span className="text-xs">SMA 50</span>
-                    </Button>
-                    <Button
-                      variant={enabledIndicators.has('sma200') ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => toggleIndicator('sma200')}
-                      className="gap-1 h-7 px-2"
-                      data-testid="toggle-sma200"
-                    >
-                      <span className="w-3 h-0.5 rounded bg-black dark:bg-white"></span>
-                      <span className="text-xs">SMA 200</span>
-                    </Button>
-                  </>
-                )}
-              </>
-            )}
-            
-            {/* Pattern-specific indicators: 3 Month SMA (only on weekly/monthly), 12 Week VWAP (only on weekly, not VCP) */}
-            {selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern) && (
-              <>
-                {/* 3M SMA only on weekly or monthly timeframes - NOT on daily or intraday */}
-                {['1wk', '1mo'].includes(interval) && (
-                  <Button
-                    variant={enabledIndicators.has('sma3Month') ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => toggleIndicator('sma3Month')}
-                    className="gap-1 h-7 px-2"
-                    data-testid="toggle-sma3month"
-                  >
-                    <span className="w-3 h-0.5 rounded" style={{ backgroundColor: '#f472b6' }}></span>
-                    <span className="text-xs">3M SMA</span>
-                  </Button>
-                )}
-                {/* 12W VWAP only shows on weekly timeframe and not for VCP */}
-                {interval === '1wk' && selectedPattern !== 'VCP' && (
-                  <Button
-                    variant={enabledIndicators.has('vwap12Week') ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => toggleIndicator('vwap12Week')}
-                    className="gap-1 h-7 px-2"
-                    data-testid="toggle-vwap12week"
-                  >
-                    <span className="w-3 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.9)' }}></span>
-                    <span className="text-xs">12W VWAP</span>
-                  </Button>
-                )}
-              </>
-            )}
-            
-            {/* VWAP (always shown) */}
-            <Button
-              variant={enabledIndicators.has('autoVwap') ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => toggleIndicator('autoVwap')}
-              className="gap-1 h-7 px-2"
-              data-testid="toggle-autovwap"
-            >
-              <span className="w-4 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
-              <span className="text-xs">VWAP</span>
-            </Button>
-            
-            {/* Anchored VWAP (not for 6/20 Cross) */}
-            {technicalSignal !== '6_20_cross' && (
-              <Button
-                variant={enabledIndicators.has('anchoredVwap') ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => toggleIndicator('anchoredVwap')}
-                className="gap-1 h-7 px-2"
-                data-testid="toggle-anchoredvwap"
-              >
-                <span className="w-4 h-1 rounded" style={{ backgroundColor: 'rgba(234, 179, 8, 0.7)' }}></span>
-                <span className="text-xs">AVWAP LOW 6MOS</span>
-              </Button>
-            )}
+              );
+            })}
             
             {/* Timeframe Selector - moved here after indicator toggles */}
             <span className="text-xs text-muted-foreground mx-2">|</span>
