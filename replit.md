@@ -17,6 +17,18 @@ AI Swing Scanner is a stock market scanner and analysis application that enables
   - Detail chart shows thicker pink EMA 21 line
 - Moved pullback patterns (5/10/20/50 DMA) from Chart Patterns into Technical Indicator Signals section
 - URL params now pass technicalSignal and crossDirection to symbol page for criteria display
+- Added criteria summary under "Scan Results" with [CLEAR] button to reset filters
+- Indicator toggle system: clickable Shadcn Button toggles to show/hide each indicator
+  - Indicator colors: SMA 5 Green (#22c55e), SMA 10 Blue (#3b82f6), SMA 50 Red (#dc2626), SMA 200 Black/White, EMA 21 Pink (#f472b6)
+  - VWAPs: Auto VWAP dotted Orange, Anchored VWAP thicker Yellow
+  - Pattern-specific: 3 Month SMA Pink, 12 Week VWAP (anchored to 8-month low) Yellow
+- Auto-timeframe selection based on signal/pattern:
+  - 6/20 Cross → 5 minute (117 bars visible = ~1.5 trading days)
+  - Ride 21 EMA / Pullback → Daily
+  - VCP/Weekly Tight/High Tight Flag/Cup Handle → Daily (130 bars = 6 months)
+  - Monthly Tight → Monthly (24 bars = 24 months)
+  - Default → Daily (200 bars = ~8-9 months)
+- userSelectedInterval resets when signal/pattern changes for auto-timeframe switching
 
 ## Changes (January 2026)
 - Renamed application from "TradeScan" to "AI Swing Scanner"
