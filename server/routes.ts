@@ -422,13 +422,14 @@ function detectPattern(candles: Candle[], patternType: string): boolean {
 function detectVCP(candles: Candle[]): boolean {
   if (candles.length < 30) return false;
   
-  // Get last 30 days of data
-  const recentCandles = candles.slice(-30);
+  // Get last 30-60 days of data
+  const recentCandles = candles.slice(-Math.min(60, candles.length));
   
   // Divide into 3 periods to check for contraction
-  const period1 = recentCandles.slice(0, 10);
-  const period2 = recentCandles.slice(10, 20);
-  const period3 = recentCandles.slice(20, 30);
+  const third = Math.floor(recentCandles.length / 3);
+  const period1 = recentCandles.slice(0, third);
+  const period2 = recentCandles.slice(third, third * 2);
+  const period3 = recentCandles.slice(third * 2);
   
   // Calculate price range (volatility) for each period
   const getRange = (c: Candle[]) => {
@@ -440,24 +441,13 @@ function detectVCP(candles: Candle[]): boolean {
     return (maxHigh - minLow) / avgPrice; // Normalized range as percentage
   };
   
-  // Calculate average volume for each period
-  const getAvgVolume = (c: Candle[]) => c.reduce((sum, x) => sum + x.volume, 0) / c.length;
-  
   const range1 = getRange(period1);
   const range2 = getRange(period2);
   const range3 = getRange(period3);
   
-  const vol1 = getAvgVolume(period1);
-  const vol2 = getAvgVolume(period2);
-  const vol3 = getAvgVolume(period3);
-  
-  // VCP characteristics:
-  // 1. Price range should be contracting (each period smaller than previous)
-  // 2. Volume should be decreasing or stable
-  // 3. Price should be near highs of the consolidation (not breaking down)
-  
-  const rangeContracting = range2 < range1 * 0.9 && range3 < range2 * 0.9;
-  const volumeDecreasing = vol2 <= vol1 * 1.1 && vol3 <= vol2 * 1.1;
+  // VCP: Overall contraction from first to last period
+  // Allow period 2 to vary, just require range3 < range1
+  const rangeContracting = range3 < range1 * 0.95;
   
   // Check if current price is in upper half of consolidation range
   const consolidationHigh = Math.max(...recentCandles.map(c => c.high));
@@ -465,47 +455,39 @@ function detectVCP(candles: Candle[]): boolean {
   const currentClose = recentCandles[recentCandles.length - 1].close;
   const inUpperHalf = currentClose > (consolidationHigh + consolidationLow) / 2;
   
-  return rangeContracting && volumeDecreasing && inUpperHalf;
+  return rangeContracting && inUpperHalf;
 }
 
 // Detect VCP with loose rules (more variance allowed)
 function detectVCPLoose(candles: Candle[]): boolean {
-  if (candles.length < 30) return false;
+  if (candles.length < 20) return false;
   
-  const recentCandles = candles.slice(-30);
-  const period1 = recentCandles.slice(0, 10);
-  const period2 = recentCandles.slice(10, 20);
-  const period3 = recentCandles.slice(20, 30);
+  // Use 20-60 day window for consolidation detection
+  const recentCandles = candles.slice(-Math.min(60, candles.length));
   
-  const getRange = (c: Candle[]) => {
-    const highs = c.map(x => x.high);
-    const lows = c.map(x => x.low);
-    const maxHigh = Math.max(...highs);
-    const minLow = Math.min(...lows);
-    const avgPrice = c.reduce((sum, x) => sum + x.close, 0) / c.length;
-    return (maxHigh - minLow) / avgPrice;
-  };
-  
-  const getAvgVolume = (c: Candle[]) => c.reduce((sum, x) => sum + x.volume, 0) / c.length;
-  
-  const range1 = getRange(period1);
-  const range2 = getRange(period2);
-  const range3 = getRange(period3);
-  
-  const vol1 = getAvgVolume(period1);
-  const vol2 = getAvgVolume(period2);
-  const vol3 = getAvgVolume(period3);
-  
-  // Loose: Allow more variance (1.0 instead of 0.9, 1.3 instead of 1.1)
-  const rangeContracting = range3 < range1 * 1.0; // Just need overall contraction
-  const volumeStable = vol3 <= vol1 * 1.3;
-  
+  // Get high-low range of the consolidation
   const consolidationHigh = Math.max(...recentCandles.map(c => c.high));
   const consolidationLow = Math.min(...recentCandles.map(c => c.low));
-  const currentClose = recentCandles[recentCandles.length - 1].close;
-  const inUpperThird = currentClose > consolidationLow + (consolidationHigh - consolidationLow) * 0.4;
+  const avgPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
+  const consolidationRange = (consolidationHigh - consolidationLow) / avgPrice * 100;
   
-  return rangeContracting && volumeStable && inUpperThird;
+  // VCP-like: Consolidation within 5-25% range
+  if (consolidationRange < 5 || consolidationRange > 25) return false;
+  
+  // Check if recent price action is tightening
+  const last10 = candles.slice(-10);
+  const last10High = Math.max(...last10.map(c => c.high));
+  const last10Low = Math.min(...last10.map(c => c.low));
+  const last10Range = (last10High - last10Low) / avgPrice * 100;
+  
+  // Recent 10 days should be tighter than full consolidation
+  const isTightening = last10Range < consolidationRange * 0.8;
+  
+  // Current price should be in upper half
+  const currentClose = candles[candles.length - 1].close;
+  const inUpperHalf = currentClose > (consolidationHigh + consolidationLow) / 2;
+  
+  return isTightening && inUpperHalf;
 }
 
 // Weekly Tight: 1-4 weeks of tight consolidation (current)
@@ -524,19 +506,20 @@ function detectWeeklyTight(candles: Candle[], loose: boolean = false): boolean {
   const avgPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
   const rangePercent = ((maxHigh - minLow) / avgPrice) * 100;
   
-  // Tight threshold: price range < 8% (tight) or < 12% (loose)
-  const threshold = loose ? 12 : 8;
+  // Tight threshold: price range < 10% (tight) or < 18% (loose)
+  const threshold = loose ? 18 : 10;
   
   // Must be current (last bar within range)
   const lastClose = recentCandles[recentCandles.length - 1].close;
   const isCurrent = lastClose >= minLow && lastClose <= maxHigh;
   
-  // Volume should be decreasing or stable
+  // Volume check - relaxed in loose mode
   const firstHalfVol = recentCandles.slice(0, Math.floor(recentCandles.length / 2))
     .reduce((sum, c) => sum + c.volume, 0);
   const secondHalfVol = recentCandles.slice(Math.floor(recentCandles.length / 2))
     .reduce((sum, c) => sum + c.volume, 0);
-  const volumeStable = secondHalfVol <= firstHalfVol * (loose ? 1.5 : 1.2);
+  // In loose mode, skip volume check entirely
+  const volumeStable = loose ? true : secondHalfVol <= firstHalfVol * 1.3;
   
   return rangePercent <= threshold && isCurrent && volumeStable;
 }
@@ -557,19 +540,20 @@ function detectMonthlyTight(candles: Candle[], loose: boolean = false): boolean 
   const avgPrice = recentCandles.reduce((sum, c) => sum + c.close, 0) / recentCandles.length;
   const rangePercent = ((maxHigh - minLow) / avgPrice) * 100;
   
-  // Monthly tight threshold: price range < 15% (tight) or < 22% (loose)
-  const threshold = loose ? 22 : 15;
+  // Monthly tight threshold: price range < 20% (tight) or < 30% (loose)
+  const threshold = loose ? 30 : 20;
   
   // Must be current (last bar within range)
   const lastClose = recentCandles[recentCandles.length - 1].close;
   const isCurrent = lastClose >= minLow && lastClose <= maxHigh;
   
-  // Volume should be lower in recent period
+  // Volume check - relaxed in loose mode
   const firstHalfVol = recentCandles.slice(0, Math.floor(recentCandles.length / 2))
     .reduce((sum, c) => sum + c.volume, 0);
   const secondHalfVol = recentCandles.slice(Math.floor(recentCandles.length / 2))
     .reduce((sum, c) => sum + c.volume, 0);
-  const volumeStable = secondHalfVol <= firstHalfVol * (loose ? 1.5 : 1.2);
+  // In loose mode, skip volume check entirely
+  const volumeStable = loose ? true : secondHalfVol <= firstHalfVol * 1.3;
   
   return rangePercent <= threshold && isCurrent && volumeStable;
 }
