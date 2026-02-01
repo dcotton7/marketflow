@@ -575,13 +575,11 @@ export default function ScannerPage() {
                         )}
                       </CardHeader>
                       <CardContent className="pt-0">
-                        <div className="h-32">
-                          <MiniChart 
-                            symbol={stock.symbol} 
-                            technicalSignal={filters.technicalSignal}
-                            crossDirection={filters.crossDirection}
-                          />
-                        </div>
+                        <MiniChart 
+                          symbol={stock.symbol} 
+                          technicalSignal={filters.technicalSignal}
+                          crossDirection={filters.crossDirection}
+                        />
                       </CardContent>
                     </Card>
                   );

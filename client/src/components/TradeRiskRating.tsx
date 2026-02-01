@@ -1,10 +1,19 @@
 import { useStockHistory } from "@/hooks/use-stocks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, X } from "lucide-react";
+import { Check, X, AlertTriangle } from "lucide-react";
 
 interface TradeRiskRatingProps {
   symbol: string;
   currentPrice: number;
+}
+
+// Calculate average daily range as percentage (high - low) / close
+// This gives the daily trading range relative to the closing price
+function calculateAvgRange(data: { high: number; low: number; close: number }[], days: number): number | null {
+  if (data.length < days) return null;
+  const slice = data.slice(-days);
+  const ranges = slice.map(d => ((d.high - d.low) / d.close) * 100);
+  return ranges.reduce((sum, r) => sum + r, 0) / ranges.length;
 }
 
 function calculateSMA(data: { close: number }[], period: number): number | null {
@@ -105,8 +114,16 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
   const sma20 = calculateSMA(history, 20);
   const sma50 = calculateSMA(history, 50);
   const sma200 = calculateSMA(history, 200);
+  
+  // Calculate price extension from 50 DSMA
+  const priceExtension50 = sma50 !== null ? ((currentPrice - sma50) / sma50) * 100 : null;
+  
+  // Calculate average trade ranges
+  const avgRange5 = calculateAvgRange(history, 5);
+  const avgRange20 = calculateAvgRange(history, 20);
 
   // 10 criteria for 10 bar sections
+  // Note: priceAbove6PctOf50 is a WARNING (not ideal), so it counts as NOT passed
   const checks = {
     aboveAutoVWAP: autoVwap !== null && currentPrice > autoVwap,
     aboveAnchoredVWAP: anchoredVwap !== null && currentPrice > anchoredVwap,
@@ -115,10 +132,13 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
     sma50Rising: isSMAFlatOrRising(history, 50),
     sma200Rising: isSMAFlatOrRising(history, 200),
     within4PctOf50: sma50 !== null && currentPrice <= sma50 * 1.04 && currentPrice >= sma50,
-    priceAbove6PctOf50: sma50 !== null && currentPrice > sma50 * 1.06,
+    priceBelow6PctOf50: sma50 !== null && currentPrice <= sma50 * 1.06, // Inverted: check passes if NOT above 6%
     spy5Rising: spyHistory ? isSMAFlatOrRising(spyHistory, 5) : false,
     vixBelow3: vixHistory && vixHistory.length > 0 ? vixHistory[vixHistory.length - 1].close < 3 : false,
   };
+  
+  // Check if price is extended more than 6% (warning condition)
+  const isExtendedWarning = sma50 !== null && currentPrice > sma50 * 1.06;
 
   const checkCount = Object.values(checks).filter(Boolean).length;
   const totalChecks = 10;
@@ -226,8 +246,14 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
             <span>Price Distance above 50-day ≤ 4%</span>
           </div>
           <div className="flex items-center gap-2">
-            <CheckIcon passed={checks.priceAbove6PctOf50} />
-            <span>Price Distance above 50-day &gt; 6%</span>
+            {isExtendedWarning ? (
+              <AlertTriangle className="w-4 h-4 text-yellow-500" />
+            ) : (
+              <CheckIcon passed={checks.priceBelow6PctOf50} />
+            )}
+            <span className={isExtendedWarning ? "text-yellow-500" : ""}>
+              {isExtendedWarning ? "Not ideal: Price Distance above 50-day > 6%" : "Price Distance above 50-day ≤ 6%"}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <CheckIcon passed={checks.spy5Rising} />
@@ -237,6 +263,26 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
             <CheckIcon passed={checks.vixBelow3} />
             <span>VIX below 3 for the day</span>
           </div>
+        </div>
+        
+        {/* Additional Metrics below risk box */}
+        <div className="pt-3 border-t border-border space-y-2 text-sm">
+          {priceExtension50 !== null && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Price Extended from 50 DSMA:</span>
+              <span className={`font-mono font-medium ${priceExtension50 >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {priceExtension50 >= 0 ? '+' : ''}{priceExtension50.toFixed(1)}%
+              </span>
+            </div>
+          )}
+          {avgRange5 !== null && avgRange20 !== null && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Avg Trade Range (5/20 Days):</span>
+              <span className="font-mono font-medium text-foreground">
+                {avgRange5.toFixed(1)}% / {avgRange20.toFixed(1)}%
+              </span>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

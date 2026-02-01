@@ -383,7 +383,10 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
-  const [interval, setInterval] = useState('1d');
+  // Track if user has manually changed the interval
+  const [userSelectedInterval, setUserSelectedInterval] = useState(false);
+  // Auto-select 5-minute timeframe for 6/20 Cross signal on initial load
+  const [interval, setIntervalState] = useState(technicalSignal === '6_20_cross' ? '5m' : '1d');
   const [showChannels, setShowChannels] = useState(initialShowChannels);
   const [showPatternViz, setShowPatternViz] = useState(!!selectedPattern);
   const [toolMode, setToolMode] = useState<ToolMode>('none');
@@ -391,6 +394,22 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const [measureStart, setMeasureStart] = useState<MeasurePoint | null>(null);
   const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  
+  // Wrapper to track user manual interval changes
+  const setInterval = (newInterval: string) => {
+    setUserSelectedInterval(true);
+    setIntervalState(newInterval);
+  };
+  
+  // Auto-switch to 5-minute when 6/20 Cross is detected (only if user hasn't manually changed it)
+  useEffect(() => {
+    if (technicalSignal === '6_20_cross' && !userSelectedInterval) {
+      setIntervalState('5m');
+    } else if (technicalSignal !== '6_20_cross' && !userSelectedInterval) {
+      // Reset to daily when not 6/20 Cross (only if user hasn't manually changed)
+      setIntervalState('1d');
+    }
+  }, [technicalSignal, userSelectedInterval]);
   
   // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
   const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
@@ -792,8 +811,16 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     });
 
     // For daily timeframe, zoom to ~8-9 months (about 180-200 candles) for better pattern visibility
+    // For 5-minute 6/20 Cross, show ~1.5 days (about 117 5-min bars: 78 bars/day * 1.5)
     // For other timeframes, fit all content
-    if (interval === '1d' && candleData.length > 200) {
+    if (interval === '5m' && technicalSignal === '6_20_cross' && candleData.length > 117) {
+      // Show last 1.5 days for 6/20 Cross 5-minute charts
+      const visibleBars = 117;
+      chart.timeScale().setVisibleLogicalRange({
+        from: candleData.length - visibleBars,
+        to: candleData.length
+      });
+    } else if (interval === '1d' && candleData.length > 200) {
       // Show last 200 candles for daily charts
       const visibleBars = 200;
       chart.timeScale().setVisibleLogicalRange({
@@ -912,22 +939,49 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
           <h3 className="font-semibold text-foreground mb-2">Price History</h3>
           <div className="flex gap-4 items-center flex-wrap">
             <div className="flex gap-3 text-xs bg-white/90 dark:bg-white/10 px-2 py-1 rounded">
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                <span className="text-gray-700 dark:text-gray-300">SMA 5</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: 'rgba(236, 72, 153, 0.7)' }}></span>
-                <span className="text-gray-700 dark:text-gray-300">SMA 20</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-1 bg-red-600 inline-block"></span>
-                <span className="text-gray-700 dark:text-gray-300">SMA 50</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-0.5 bg-black inline-block"></span>
-                <span className="text-gray-700 dark:text-gray-300">SMA 200</span>
-              </span>
+              {/* Dynamic legend based on what's shown */}
+              {technicalSignal === '6_20_cross' ? (
+                <>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: '#f472b6' }}></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 6</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-1 bg-blue-500 inline-block"></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 20</span>
+                  </span>
+                </>
+              ) : technicalSignal === 'ride_21_ema' ? (
+                <>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-1 inline-block" style={{ backgroundColor: '#f472b6' }}></span>
+                    <span className="text-gray-700 dark:text-gray-300">EMA 21</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-1 bg-red-600 inline-block"></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 50</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 5</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 inline-block" style={{ backgroundColor: 'rgba(236, 72, 153, 0.7)' }}></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 20</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-1 bg-red-600 inline-block"></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 50</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 bg-black dark:bg-white inline-block"></span>
+                    <span className="text-gray-700 dark:text-gray-300">SMA 200</span>
+                  </span>
+                </>
+              )}
               <span className="flex items-center gap-1">
                 <span className="w-6 h-0.5 inline-block" style={{ borderTop: '2px dotted #f97316' }}></span>
                 <span className="text-gray-700 dark:text-gray-300">Auto VWAP</span>
