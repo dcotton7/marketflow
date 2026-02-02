@@ -5,6 +5,11 @@
 @tailwind utilities;
 
 :root {
+  /* Font Families */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-serif: 'Georgia', serif;
+
   /* Dark Financial Theme Base */
   --background: 224 71% 4%;
   --foreground: 210 40% 98%;
