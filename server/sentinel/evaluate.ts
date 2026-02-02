@@ -13,7 +13,7 @@ export async function evaluateTrade(
   userId: number,
   tradeId?: number
 ): Promise<{ evaluation: EvaluationResult; tradeId: number }> {
-  const model = request.deepEval ? "gpt-5.2" : "gpt-5-mini";
+  const model = request.deepEval ? "gpt-5.2" : "gpt-5.1";
   
   const userPrompt = buildEvaluationPrompt(
     request.symbol,
@@ -32,7 +32,7 @@ export async function evaluateTrade(
       { role: "user", content: userPrompt }
     ],
     response_format: { type: "json_object" },
-    max_tokens: 1500,
+    max_completion_tokens: 1500,
   });
 
   const content = response.choices[0]?.message?.content || "{}";

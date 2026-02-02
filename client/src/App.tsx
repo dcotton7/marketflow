@@ -31,6 +31,11 @@ function SentinelRouter() {
   return (
     <Switch>
       <Route path="/sentinel/login" component={SentinelLoginPage} />
+      <Route path="/sentinel/dashboard">
+        <SentinelProtectedRoute>
+          <SentinelDashboardPage />
+        </SentinelProtectedRoute>
+      </Route>
       <Route path="/sentinel">
         <SentinelProtectedRoute>
           <SentinelDashboardPage />

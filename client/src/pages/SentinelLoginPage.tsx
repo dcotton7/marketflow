@@ -31,7 +31,7 @@ export default function SentinelLoginPage() {
         await login(username, password);
         toast({ title: "Welcome back", description: "Logged in successfully" });
       }
-      setLocation("/sentinel");
+      setLocation("/sentinel/dashboard");
     } catch (error: any) {
       toast({
         title: "Error",

@@ -12,26 +12,17 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, CheckCircle, TrendingUp, Loader2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, Loader2 } from "lucide-react";
 
 interface EvaluationResult {
-  trade: {
-    id: number;
-    symbol: string;
-    direction: string;
-    entryPrice: number;
-    stopPrice?: number;
-    targetPrice?: number;
-    status: string;
-  };
+  tradeId: number;
   evaluation: {
-    id: number;
     score: number;
     recommendation: string;
     reasoning: string;
     riskFlags: string[];
-    keyPoints: string[];
-    modelUsed: string;
+    model: string;
+    promptVersion: string;
   };
 }
 
@@ -78,7 +69,7 @@ export default function SentinelEvaluatePage() {
     onSuccess: () => {
       toast({ title: "Trade Committed", description: "Trade is now active" });
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
-      setLocation("/sentinel");
+      setLocation("/sentinel/dashboard");
     },
     onError: (error: any) => {
       toast({
@@ -109,8 +100,8 @@ export default function SentinelEvaluatePage() {
   };
 
   const handleCommit = () => {
-    if (result?.trade.id) {
-      commitMutation.mutate(result.trade.id);
+    if (result?.tradeId) {
+      commitMutation.mutate(result.tradeId);
     }
   };
 
@@ -124,7 +115,7 @@ export default function SentinelEvaluatePage() {
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
+          <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel/dashboard")} data-testid="button-back">
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div>
@@ -276,18 +267,18 @@ export default function SentinelEvaluatePage() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle>Evaluation Result</CardTitle>
-                      <Badge variant="outline" className="text-xs">
-                        {result.evaluation.modelUsed}
+                      <CardTitle data-testid="text-result-title">Evaluation Result</CardTitle>
+                      <Badge variant="outline" className="text-xs" data-testid="badge-model">
+                        {result.evaluation.model}
                       </Badge>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-lg font-medium">{result.trade.symbol}</span>
+                      <span className="text-lg font-medium" data-testid="text-symbol-result">{symbol.toUpperCase()}</span>
                       <div className="flex items-center gap-2">
-                        <Badge variant={result.trade.direction === "long" ? "default" : "destructive"}>
-                          {result.trade.direction.toUpperCase()}
+                        <Badge variant={direction === "long" ? "default" : "destructive"} data-testid="badge-direction">
+                          {direction.toUpperCase()}
                         </Badge>
                         <span className={`text-3xl font-bold ${getScoreColor(result.evaluation.score)}`} data-testid="text-score">
                           {result.evaluation.score}
@@ -298,19 +289,19 @@ export default function SentinelEvaluatePage() {
 
                     <div className="p-3 bg-muted rounded-md">
                       <p className="font-medium mb-1">Recommendation</p>
-                      <p className={getScoreColor(result.evaluation.score)} data-testid="text-recommendation">
+                      <p className={`text-lg font-semibold uppercase ${getScoreColor(result.evaluation.score)}`} data-testid="text-recommendation">
                         {result.evaluation.recommendation}
                       </p>
                     </div>
 
                     <div>
                       <p className="font-medium mb-2">Reasoning</p>
-                      <p className="text-sm text-muted-foreground" data-testid="text-reasoning">
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap" data-testid="text-reasoning">
                         {result.evaluation.reasoning}
                       </p>
                     </div>
 
-                    {result.evaluation.riskFlags.length > 0 && (
+                    {result.evaluation.riskFlags && result.evaluation.riskFlags.length > 0 && (
                       <div>
                         <p className="font-medium mb-2 flex items-center gap-1">
                           <AlertTriangle className="w-4 h-4 text-yellow-500" />
@@ -325,22 +316,6 @@ export default function SentinelEvaluatePage() {
                         </div>
                       </div>
                     )}
-
-                    {result.evaluation.keyPoints.length > 0 && (
-                      <div>
-                        <p className="font-medium mb-2 flex items-center gap-1">
-                          <CheckCircle className="w-4 h-4 text-green-500" />
-                          Key Points
-                        </p>
-                        <ul className="text-sm space-y-1">
-                          {result.evaluation.keyPoints.map((point, i) => (
-                            <li key={i} className="text-muted-foreground" data-testid={`text-keypoint-${i}`}>
-                              • {point}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
 
@@ -348,7 +323,7 @@ export default function SentinelEvaluatePage() {
                   <Button
                     variant="outline"
                     className="flex-1"
-                    onClick={() => setLocation("/sentinel")}
+                    onClick={() => setLocation("/sentinel/dashboard")}
                     data-testid="button-keep-considering"
                   >
                     Keep Considering

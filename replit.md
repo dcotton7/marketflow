@@ -1,10 +1,46 @@
-# AI Swing Scanner
+# AI Swing Scanner & Sentinel
 
 ## Overview
 
-AI Swing Scanner is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
+This project contains two applications:
 
-## Recent Changes (February 2026)
+**AI Swing Scanner** - A stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
+
+**Sentinel** - A multi-user trading decision evaluation web app. Sentinel evaluates user-submitted trade ideas using OpenAI (gpt-5.1 default, gpt-5.2 for deep eval) and flags decision risks. Does NOT generate trade signals - only provides judgment before risk. Features session-based authentication, trade tracking (considering/active/closed states), and comprehensive event logging.
+
+## Sentinel (Phase 1 - February 2026)
+
+### Routes
+- `/sentinel/login` - Login/register page with toggle between modes
+- `/sentinel/dashboard` (or `/sentinel`) - Main dashboard with tabs for trade status (Considering, Active, Closed, Events)
+- `/sentinel/evaluate` - Form to submit new trade for AI evaluation
+- `/sentinel/trade/:id` - Trade detail page with editable stops/targets
+
+### API Endpoints
+- `POST /api/auth/register` - Create new user account
+- `POST /api/auth/login` - Login with username/password
+- `POST /api/auth/logout` - End session
+- `GET /api/auth/me` - Get current user (requires auth)
+- `POST /api/sentinel/evaluate` - Submit trade for AI evaluation
+- `POST /api/sentinel/commit/:tradeId` - Activate a considering trade
+- `GET /api/sentinel/dashboard` - Get user's trades grouped by status
+- `GET /api/sentinel/trade/:id` - Get trade details with evaluations/events
+- `PATCH /api/sentinel/trade/:id` - Update trade stop/target/status
+
+### Key Implementation Details
+- Session-based auth using PostgreSQL-backed sessions (connect-pg-simple)
+- AI Models: gpt-5.1 for default evaluation, gpt-5.2 for "deep eval" option
+- Uses `max_completion_tokens` instead of deprecated `max_tokens` for newer OpenAI models
+- Evaluation returns: score (0-100), recommendation (proceed/caution/avoid), reasoning, riskFlags
+
+### Database Tables (Sentinel)
+- `sentinel_users` - User accounts with bcrypt password hashes
+- `sentinel_trades` - Trade records with status (considering/active/closed)
+- `sentinel_evaluations` - AI evaluation history for each trade
+- `sentinel_events` - Event log for status changes, updates
+- `session` - PostgreSQL session store table (auto-created)
+
+## AI Swing Scanner - Recent Changes (February 2026)
 - Dual-chart layout on symbol pages:
   - Top chart: Fixed Daily chart (cannot be changed)
     - Shows SMA 5 Green, SMA 21 Pink, SMA 50 Red, SMA 200 Black

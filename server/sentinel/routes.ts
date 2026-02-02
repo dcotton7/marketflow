@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { sentinelModels } from "./models";
@@ -51,8 +52,15 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 export function registerSentinelRoutes(app: Express): void {
+  const PgSession = connectPgSimple(session);
+  
   app.use(
     session({
+      store: new PgSession({
+        conString: process.env.DATABASE_URL,
+        tableName: "session",
+        createTableIfMissing: true,
+      }),
       secret: process.env.SESSION_SECRET || "sentinel-session-secret",
       resave: false,
       saveUninitialized: false,
@@ -87,10 +95,16 @@ export function registerSentinelRoutes(app: Express): void {
       req.session.userId = user.id;
       req.session.username = user.username;
 
-      res.status(201).json({ 
-        id: user.id, 
-        username: user.username, 
-        email: user.email 
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+          return res.status(500).json({ error: "Registration failed" });
+        }
+        res.status(201).json({ 
+          id: user.id, 
+          username: user.username, 
+          email: user.email 
+        });
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -117,11 +131,18 @@ export function registerSentinelRoutes(app: Express): void {
 
       req.session.userId = user.id;
       req.session.username = user.username;
-
-      res.json({ 
-        id: user.id, 
-        username: user.username, 
-        email: user.email 
+      
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+          return res.status(500).json({ error: "Login failed" });
+        }
+        console.log("[Sentinel Auth] Session saved:", { userId: req.session.userId, sessionID: req.sessionID });
+        res.json({ 
+          id: user.id, 
+          username: user.username, 
+          email: user.email 
+        });
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
