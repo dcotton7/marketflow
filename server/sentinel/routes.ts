@@ -11,7 +11,7 @@ import { evaluateTrade } from "./evaluate";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, insertSentinelTradeLabelSchema } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema } from "@shared/schema";
 
 declare module "express-session" {
   interface SessionData {
@@ -119,6 +119,27 @@ export function registerSentinelRoutes(app: Express): void {
       },
     })
   );
+
+  // TEMPORARY: One-time password reset for Mythical user - REMOVE AFTER USE
+  app.post("/api/auth/temp-reset-mythical", async (req: Request, res: Response) => {
+    try {
+      if (!db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+      const passwordHash = await bcrypt.hash("password", 10);
+      const result = await db.update(sentinelUsers)
+        .set({ passwordHash })
+        .where(eq(sentinelUsers.username, "Mythical"))
+        .returning({ id: sentinelUsers.id });
+      if (result.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true, message: "Password reset to 'password'" });
+    } catch (error) {
+      console.error("Temp reset error:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
