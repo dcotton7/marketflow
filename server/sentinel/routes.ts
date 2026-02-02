@@ -51,6 +51,10 @@ const evaluateSchema = z.object({
 const updateTradeSchema = z.object({
   stopPrice: z.number().positive().optional(),
   targetPrice: z.number().positive().optional(),
+  entryPrice: z.number().positive().optional(),
+  entryDate: z.string().optional(),
+  exitPrice: z.number().positive().optional(),
+  positionSize: z.number().positive().optional(),
   status: z.enum(["considering", "active", "closed"]).optional(),
 });
 
@@ -448,6 +452,55 @@ export function registerSentinelRoutes(app: Express): void {
         });
       }
 
+      if (data.entryPrice !== undefined && data.entryPrice !== trade.entryPrice) {
+        updates.entryPrice = data.entryPrice;
+        await sentinelModels.createEvent({
+          tradeId,
+          userId: req.session.userId!,
+          eventType: "entry_update",
+          oldValue: trade.entryPrice.toString(),
+          newValue: data.entryPrice.toString(),
+          description: `Entry updated: $${trade.entryPrice.toFixed(2)} → $${data.entryPrice.toFixed(2)}`,
+        });
+      }
+
+      if (data.positionSize !== undefined && data.positionSize !== trade.positionSize) {
+        updates.positionSize = data.positionSize;
+        await sentinelModels.createEvent({
+          tradeId,
+          userId: req.session.userId!,
+          eventType: "position_update",
+          oldValue: trade.positionSize?.toString() || "none",
+          newValue: data.positionSize.toString(),
+          description: `Position size updated: ${trade.positionSize || 'none'} → ${data.positionSize} shares`,
+        });
+      }
+
+      if (data.entryDate !== undefined) {
+        const newEntryDate = new Date(data.entryDate);
+        (updates as any).entryDate = newEntryDate;
+        await sentinelModels.createEvent({
+          tradeId,
+          userId: req.session.userId!,
+          eventType: "entry_date_update",
+          oldValue: trade.entryDate?.toISOString() || "none",
+          newValue: newEntryDate.toISOString(),
+          description: `Lot date updated`,
+        });
+      }
+
+      if (data.exitPrice !== undefined && data.exitPrice !== trade.exitPrice) {
+        (updates as any).exitPrice = data.exitPrice;
+        await sentinelModels.createEvent({
+          tradeId,
+          userId: req.session.userId!,
+          eventType: "exit_price_update",
+          oldValue: trade.exitPrice?.toString() || "none",
+          newValue: data.exitPrice.toString(),
+          description: `Close price updated: $${trade.exitPrice?.toFixed(2) || 'none'} → $${data.exitPrice.toFixed(2)}`,
+        });
+      }
+
       const updatedTrade = await sentinelModels.updateTrade(tradeId, updates);
       res.json(updatedTrade);
     } catch (error) {
@@ -456,6 +509,27 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Update trade error:", error);
       res.status(500).json({ error: "Failed to update trade" });
+    }
+  });
+
+  // Delete trade
+  app.delete("/api/sentinel/trade/:tradeId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.tradeId as string);
+
+      const trade = await sentinelModels.getTrade(tradeId);
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+      if (trade.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      await sentinelModels.deleteTrade(tradeId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete trade error:", error);
+      res.status(500).json({ error: "Failed to delete trade" });
     }
   });
 

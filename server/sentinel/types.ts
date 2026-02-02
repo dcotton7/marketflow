@@ -61,6 +61,10 @@ export interface EvaluationResult {
 export interface TradeUpdate {
   stopPrice?: number;
   targetPrice?: number;
+  entryPrice?: number;
+  entryDate?: string;
+  exitPrice?: number;
+  positionSize?: number;
   status?: 'considering' | 'active' | 'closed';
 }
 

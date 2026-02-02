@@ -11,7 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
@@ -28,8 +30,11 @@ interface TradeWithEvaluation {
   symbol: string;
   direction: string;
   entryPrice: number;
+  entryDate?: string;
   stopPrice?: number;
   targetPrice?: number;
+  exitPrice?: number;
+  positionSize?: number;
   status: string;
   createdAt: string;
   labels?: TradeLabel[];
@@ -110,80 +115,192 @@ function getScoreColor(score: number): string {
   return "text-red-500";
 }
 
+function getShortRiskFlag(flag: string): { short: string; full: string } {
+  const flagLower = flag.toLowerCase();
+  if (flagLower.includes("stop") && flagLower.includes("day")) return { short: "STOP_LOD", full: flag };
+  if (flagLower.includes("stop") && flagLower.includes("wide")) return { short: "WIDE_STOP", full: flag };
+  if (flagLower.includes("stop")) return { short: "STOP_RISK", full: flag };
+  if (flagLower.includes("concentration") || flagLower.includes("correlated")) return { short: "CORR_RISK", full: flag };
+  if (flagLower.includes("late entry") || flagLower.includes("extended")) return { short: "LATE_ENTRY", full: flag };
+  if (flagLower.includes("thesis") && (flagLower.includes("vague") || flagLower.includes("unclear"))) return { short: "WEAK_THESIS", full: flag };
+  if (flagLower.includes("risk") && flagLower.includes("reward")) return { short: "POOR_RR", full: flag };
+  if (flagLower.includes("volume")) return { short: "VOL_ISSUE", full: flag };
+  if (flagLower.includes("trend") && flagLower.includes("down")) return { short: "DOWNTREND", full: flag };
+  if (flagLower.includes("resistance")) return { short: "AT_RESIST", full: flag };
+  if (flagLower.includes("support")) return { short: "SUPPORT", full: flag };
+  if (flagLower.includes("chop") || flagLower.includes("choppy")) return { short: "CHOPPY_MKT", full: flag };
+  if (flagLower.includes("market") && flagLower.includes("weak")) return { short: "WEAK_MKT", full: flag };
+  if (flagLower.includes("size") || flagLower.includes("position")) return { short: "SIZE_ISSUE", full: flag };
+  if (flagLower.includes("no stop") || flagLower.includes("without stop")) return { short: "NO_STOP", full: flag };
+  if (flag.length <= 10) return { short: flag.toUpperCase(), full: flag };
+  return { short: flag.substring(0, 8).toUpperCase() + "..", full: flag };
+}
+
 function getScoreBadgeVariant(score: number): "default" | "secondary" | "destructive" | "outline" {
   if (score >= 70) return "default";
   if (score >= 50) return "secondary";
   return "destructive";
 }
 
-function TradeCard({ trade }: { trade: TradeWithEvaluation }) {
+interface TradeCardProps {
+  trade: TradeWithEvaluation;
+  isActive?: boolean;
+  onEdit?: (trade: TradeWithEvaluation) => void;
+  onClose?: (trade: TradeWithEvaluation) => void;
+  onCancel?: (trade: TradeWithEvaluation) => void;
+}
+
+function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: TradeCardProps) {
+  const [, setLocation] = useLocation();
+  
+  const handleOpenIvyAI = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
+  };
+
+  const handleMenuAction = (action: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    switch (action) {
+      case 'edit':
+        onEdit?.(trade);
+        break;
+      case 'close':
+        onClose?.(trade);
+        break;
+      case 'cancel':
+        onCancel?.(trade);
+        break;
+      case 'ivyai':
+        setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
+        break;
+    }
+  };
+
+  const handleCardClick = () => {
+    setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
+  };
+
   return (
-    <Link href={`/sentinel/evaluate?tradeId=${trade.id}`}>
-      <Card className="hover-elevate cursor-pointer" data-testid={`card-trade-${trade.id}`}>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-lg" data-testid={`text-symbol-${trade.id}`}>{trade.symbol}</span>
-              <Badge variant={trade.direction === "long" ? "default" : "destructive"} data-testid={`badge-direction-${trade.id}`}>
-                {trade.direction === "long" ? (
-                  <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
-                ) : (
-                  <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
-                )}
-              </Badge>
-            </div>
-            {trade.latestEvaluation && (
-              <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
-                {trade.latestEvaluation.score}/100
-              </Badge>
-            )}
+    <Card 
+      className="hover-elevate cursor-pointer relative" 
+      data-testid={`card-trade-${trade.id}`}
+      onClick={handleCardClick}
+    >
+      <CardContent className="p-4 pb-10">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-lg" data-testid={`text-symbol-${trade.id}`}>{trade.symbol}</span>
+            <Badge variant={trade.direction === "long" ? "default" : "destructive"} data-testid={`badge-direction-${trade.id}`}>
+              {trade.direction === "long" ? (
+                <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
+              ) : (
+                <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
+              )}
+            </Badge>
           </div>
-
-          {/* Display labels */}
-          {trade.labels && trade.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {trade.labels.map((label) => (
-                <span
-                  key={label.id}
-                  className="px-2 py-0.5 text-xs rounded-full text-white"
-                  style={{ backgroundColor: label.color }}
-                  data-testid={`label-${trade.id}-${label.id}`}
-                >
-                  {label.name}
-                </span>
-              ))}
-            </div>
-          )}
-
-          <div className="text-sm text-muted-foreground space-y-1">
-            <div>Entry: ${trade.entryPrice.toFixed(2)}</div>
-            <div className="flex gap-4">
-              {trade.stopPrice && <span>Stop: ${trade.stopPrice.toFixed(2)}</span>}
-              {trade.targetPrice && <span>Target: ${trade.targetPrice.toFixed(2)}</span>}
-            </div>
-          </div>
-
-          {trade.latestEvaluation && trade.latestEvaluation.riskFlags.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {trade.latestEvaluation.riskFlags.slice(0, 3).map((flag, i) => (
-                <Badge key={i} variant="outline" className="text-xs" data-testid={`badge-risk-${trade.id}-${i}`}>
-                  <AlertTriangle className="w-3 h-3 mr-1 text-yellow-500" />
-                  {flag}
-                </Badge>
-              ))}
-            </div>
-          )}
-
           {trade.latestEvaluation && (
-            <div className="mt-2 text-sm">
-              <span className={getScoreColor(trade.latestEvaluation.score)}>
-                {trade.latestEvaluation.recommendation}
-              </span>
-            </div>
+            <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
+              {trade.latestEvaluation.score}/100
+            </Badge>
           )}
-        </CardContent>
-      </Card>
-    </Link>
+        </div>
+
+        {/* Display labels with tooltips */}
+        {trade.labels && trade.labels.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-2">
+            {trade.labels.map((label) => {
+              const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
+              return (
+                <Tooltip key={label.id}>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
+                      style={{ backgroundColor: label.color }}
+                      data-testid={`label-${trade.id}-${label.id}`}
+                    >
+                      {displayName}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{label.name}</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="text-sm text-muted-foreground space-y-1">
+          <div>Entry: ${trade.entryPrice.toFixed(2)}</div>
+          <div className="flex gap-4 flex-wrap">
+            {trade.stopPrice && <span>Stop: ${trade.stopPrice.toFixed(2)}</span>}
+            {trade.targetPrice && <span>Target: ${trade.targetPrice.toFixed(2)}</span>}
+          </div>
+        </div>
+
+        {/* Risk flags with short names and tooltips */}
+        {trade.latestEvaluation && trade.latestEvaluation.riskFlags.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {trade.latestEvaluation.riskFlags.slice(0, 4).map((flag, i) => {
+              const { short, full } = getShortRiskFlag(flag);
+              return (
+                <Tooltip key={i}>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="text-xs cursor-help" data-testid={`badge-risk-${trade.id}-${i}`}>
+                      <AlertTriangle className="w-3 h-3 mr-1 text-yellow-500" />
+                      {short}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p className="text-sm">{full}</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Green arrow action menu at bottom right */}
+        <div className="absolute bottom-2 right-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="text-green-500"
+                data-testid={`button-trade-menu-${trade.id}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ChevronRight className="w-5 h-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem onClick={(e) => handleMenuAction('edit', e)} data-testid={`menu-edit-${trade.id}`}>
+                <Edit3 className="w-4 h-4 mr-2" />
+                Edit
+              </DropdownMenuItem>
+              {isActive && (
+                <DropdownMenuItem onClick={(e) => handleMenuAction('close', e)} data-testid={`menu-close-${trade.id}`}>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Close Trade
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={(e) => handleMenuAction('cancel', e)} className="text-destructive" data-testid={`menu-cancel-${trade.id}`}>
+                <XCircle className="w-4 h-4 mr-2" />
+                {isActive ? 'Cancel Trade' : 'Delete Item'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={(e) => handleMenuAction('ivyai', e)} data-testid={`menu-ivyai-${trade.id}`}>
+                <Brain className="w-4 h-4 mr-2 text-primary" />
+                Open Ivy AI
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -350,6 +467,25 @@ export default function SentinelDashboardPage() {
   const [ruleForm, setRuleForm] = useState({ name: "", description: "", category: "entry" });
   const [ruleFilter, setRuleFilter] = useState<string>("all");
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(null);
+  
+  // Trade action dialogs
+  const [showEditTrade, setShowEditTrade] = useState(false);
+  const [showCloseTrade, setShowCloseTrade] = useState(false);
+  const [showCancelTrade, setShowCancelTrade] = useState(false);
+  const [selectedTrade, setSelectedTrade] = useState<TradeWithEvaluation | null>(null);
+  const [editForm, setEditForm] = useState({
+    entryPrice: "",
+    stopPrice: "",
+    targetPrice: "",
+    positionSize: "",
+    entryDate: "",
+    exitPrice: ""
+  });
+  const [closeForm, setCloseForm] = useState({
+    exitPrice: "",
+    outcome: "win" as "win" | "loss" | "breakeven",
+    notes: ""
+  });
 
   const { data: dashboard, isLoading, error } = useQuery<DashboardData>({
     queryKey: ["/api/sentinel/dashboard"],
@@ -466,6 +602,115 @@ export default function SentinelDashboardPage() {
       toast({ title: data.message || "AI analysis complete" });
     },
   });
+
+  const deleteTradeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("DELETE", `/api/sentinel/trade/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      setShowCancelTrade(false);
+      setSelectedTrade(null);
+      toast({ title: "Trade removed" });
+    },
+  });
+
+  const closeTradeMutation = useMutation({
+    mutationFn: async (data: { tradeId: number; exitPrice: number; outcome: string; notes?: string }) => {
+      return apiRequest("POST", `/api/sentinel/trade/${data.tradeId}/close`, {
+        exitPrice: data.exitPrice,
+        outcome: data.outcome,
+        notes: data.notes
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      setShowCloseTrade(false);
+      setSelectedTrade(null);
+      setCloseForm({ exitPrice: "", outcome: "win", notes: "" });
+      toast({ title: "Trade closed successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to close trade", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateTradeMutation = useMutation({
+    mutationFn: async (data: { tradeId: number; entryPrice?: number; stopPrice?: number; targetPrice?: number; positionSize?: number; entryDate?: string; exitPrice?: number }) => {
+      const { tradeId, ...updateData } = data;
+      return apiRequest("PATCH", `/api/sentinel/trade/${tradeId}`, updateData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      setShowEditTrade(false);
+      setSelectedTrade(null);
+      setEditForm({ entryPrice: "", stopPrice: "", targetPrice: "", positionSize: "", entryDate: "", exitPrice: "" });
+      toast({ title: "Trade updated" });
+    },
+  });
+
+  // Trade action handlers
+  const handleEditTrade = (trade: TradeWithEvaluation) => {
+    setSelectedTrade(trade);
+    setEditForm({
+      entryPrice: trade.entryPrice.toFixed(2),
+      stopPrice: trade.stopPrice?.toFixed(2) || "",
+      targetPrice: trade.targetPrice?.toFixed(2) || "",
+      positionSize: trade.positionSize?.toString() || "",
+      entryDate: trade.entryDate ? new Date(trade.entryDate).toISOString().slice(0, 16) : "",
+      exitPrice: trade.exitPrice?.toFixed(2) || ""
+    });
+    setShowEditTrade(true);
+  };
+
+  const handleCloseTrade = (trade: TradeWithEvaluation) => {
+    setSelectedTrade(trade);
+    const defaultExit = trade.targetPrice && trade.stopPrice 
+      ? Math.max(trade.targetPrice, trade.stopPrice).toFixed(2)
+      : trade.stopPrice?.toFixed(2) || "";
+    setCloseForm({
+      exitPrice: defaultExit,
+      outcome: "win",
+      notes: ""
+    });
+    setShowCloseTrade(true);
+  };
+
+  const handleCancelTrade = (trade: TradeWithEvaluation) => {
+    setSelectedTrade(trade);
+    setShowCancelTrade(true);
+  };
+
+  const confirmDeleteTrade = () => {
+    if (selectedTrade) {
+      deleteTradeMutation.mutate(selectedTrade.id);
+    }
+  };
+
+  const confirmCloseTrade = () => {
+    if (selectedTrade && closeForm.exitPrice) {
+      closeTradeMutation.mutate({
+        tradeId: selectedTrade.id,
+        exitPrice: parseFloat(closeForm.exitPrice),
+        outcome: closeForm.outcome,
+        notes: closeForm.notes || undefined
+      });
+    }
+  };
+
+  const confirmEditTrade = () => {
+    if (selectedTrade) {
+      updateTradeMutation.mutate({
+        tradeId: selectedTrade.id,
+        entryPrice: editForm.entryPrice ? parseFloat(editForm.entryPrice) : undefined,
+        stopPrice: editForm.stopPrice ? parseFloat(editForm.stopPrice) : undefined,
+        targetPrice: editForm.targetPrice ? parseFloat(editForm.targetPrice) : undefined,
+        positionSize: editForm.positionSize ? parseInt(editForm.positionSize) : undefined,
+        entryDate: editForm.entryDate || undefined,
+        exitPrice: editForm.exitPrice ? parseFloat(editForm.exitPrice) : undefined
+      });
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -601,7 +846,13 @@ export default function SentinelDashboardPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredConsidering?.map((trade) => (
-                  <TradeCard key={trade.id} trade={trade} />
+                  <TradeCard 
+                    key={trade.id} 
+                    trade={trade} 
+                    isActive={false}
+                    onEdit={handleEditTrade}
+                    onCancel={handleCancelTrade}
+                  />
                 ))}
               </div>
             )}
@@ -648,7 +899,14 @@ export default function SentinelDashboardPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredActive?.map((trade) => (
-                  <TradeCard key={trade.id} trade={trade} />
+                  <TradeCard 
+                    key={trade.id} 
+                    trade={trade} 
+                    isActive={true}
+                    onEdit={handleEditTrade}
+                    onClose={handleCloseTrade}
+                    onCancel={handleCancelTrade}
+                  />
                 ))}
               </div>
             )}
@@ -1007,6 +1265,163 @@ export default function SentinelDashboardPage() {
             <Button variant="outline" onClick={() => setShowAddRule(false)}>Cancel</Button>
             <Button onClick={handleAddRule} disabled={!ruleForm.name || addRuleMutation.isPending} data-testid="button-confirm-add-rule">
               {addRuleMutation.isPending ? "Adding..." : "Add Rule"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Trade Dialog */}
+      <Dialog open={showEditTrade} onOpenChange={setShowEditTrade}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Trade: {selectedTrade?.symbol}</DialogTitle>
+            <DialogDescription>Update lot details and pricing</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="entry-date">Lot Date/Time</Label>
+              <Input
+                id="entry-date"
+                type="datetime-local"
+                value={editForm.entryDate}
+                onChange={(e) => setEditForm({ ...editForm, entryDate: e.target.value })}
+                data-testid="input-lot-datetime"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="position-size">QTY (Shares)</Label>
+                <Input
+                  id="position-size"
+                  type="number"
+                  placeholder="100"
+                  value={editForm.positionSize}
+                  onChange={(e) => setEditForm({ ...editForm, positionSize: e.target.value })}
+                  data-testid="input-qty"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="entry-price">Cost Basis ($)</Label>
+                <Input
+                  id="entry-price"
+                  type="number"
+                  step="0.01"
+                  value={editForm.entryPrice}
+                  onChange={(e) => setEditForm({ ...editForm, entryPrice: e.target.value })}
+                  data-testid="input-cost-basis"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="stop-price">Stop Price ($)</Label>
+                <Input
+                  id="stop-price"
+                  type="number"
+                  step="0.01"
+                  value={editForm.stopPrice}
+                  onChange={(e) => setEditForm({ ...editForm, stopPrice: e.target.value })}
+                  data-testid="input-stop-price"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="target-price">Target Price ($)</Label>
+                <Input
+                  id="target-price"
+                  type="number"
+                  step="0.01"
+                  value={editForm.targetPrice}
+                  onChange={(e) => setEditForm({ ...editForm, targetPrice: e.target.value })}
+                  data-testid="input-target-price"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="exit-price">Close Price ($)</Label>
+              <Input
+                id="exit-price"
+                type="number"
+                step="0.01"
+                value={editForm.exitPrice}
+                onChange={(e) => setEditForm({ ...editForm, exitPrice: e.target.value })}
+                data-testid="input-close-price"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditTrade(false)}>Cancel</Button>
+            <Button onClick={confirmEditTrade} disabled={updateTradeMutation.isPending} data-testid="button-confirm-edit">
+              {updateTradeMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Close Trade Dialog */}
+      <Dialog open={showCloseTrade} onOpenChange={setShowCloseTrade}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Close Trade: {selectedTrade?.symbol}</DialogTitle>
+            <DialogDescription>Record the exit price and outcome</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="exit-price">Exit Price ($)</Label>
+              <Input
+                id="exit-price"
+                type="number"
+                step="0.01"
+                value={closeForm.exitPrice}
+                onChange={(e) => setCloseForm({ ...closeForm, exitPrice: e.target.value })}
+                data-testid="input-exit-price"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Outcome</Label>
+              <Select value={closeForm.outcome} onValueChange={(v) => setCloseForm({ ...closeForm, outcome: v as typeof closeForm.outcome })}>
+                <SelectTrigger data-testid="select-outcome">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="win">Win</SelectItem>
+                  <SelectItem value="loss">Loss</SelectItem>
+                  <SelectItem value="breakeven">Breakeven</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="close-notes">Notes (optional)</Label>
+              <Textarea
+                id="close-notes"
+                placeholder="What did you learn from this trade?"
+                value={closeForm.notes}
+                onChange={(e) => setCloseForm({ ...closeForm, notes: e.target.value })}
+                data-testid="input-close-notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCloseTrade(false)}>Cancel</Button>
+            <Button onClick={confirmCloseTrade} disabled={!closeForm.exitPrice || closeTradeMutation.isPending} data-testid="button-confirm-close">
+              {closeTradeMutation.isPending ? "Closing..." : "Close Trade"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel/Delete Trade Confirmation */}
+      <Dialog open={showCancelTrade} onOpenChange={setShowCancelTrade}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Trade</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the {selectedTrade?.symbol} trade? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancelTrade(false)}>Keep Trade</Button>
+            <Button variant="destructive" onClick={confirmDeleteTrade} disabled={deleteTradeMutation.isPending} data-testid="button-confirm-delete">
+              {deleteTradeMutation.isPending ? "Deleting..." : "Delete Trade"}
             </Button>
           </DialogFooter>
         </DialogContent>

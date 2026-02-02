@@ -91,6 +91,7 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   symbol: text("symbol").notNull(),
   direction: text("direction").notNull(), // 'long' | 'short'
   entryPrice: doublePrecision("entry_price").notNull(),
+  entryDate: timestamp("entry_date"), // Lot Date/Time - when position was entered
   stopPrice: doublePrecision("stop_price"),
   targetPrice: doublePrecision("target_price"),
   positionSize: doublePrecision("position_size"),

@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X } from "lucide-react";
 import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface SectorTrend {
@@ -141,6 +141,9 @@ export default function SentinelEvaluatePage() {
   const [tradeDate, setTradeDate] = useState("");
   const [tradeTime, setTradeTime] = useState("");
   const [selectedLabelIds, setSelectedLabelIds] = useState<number[]>([]);
+  const [historicalTags, setHistoricalTags] = useState<string[]>(["Historical"]);
+  const [newTagInput, setNewTagInput] = useState("");
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [isPreloaded, setIsPreloaded] = useState(false);
@@ -313,9 +316,44 @@ export default function SentinelEvaluatePage() {
     evaluateMutation.mutate(data);
   };
 
-  const handleCommit = () => {
+  const handleCommit = async () => {
     if (result?.tradeId) {
-      commitMutation.mutate({ tradeId: result.tradeId, labelIds: selectedLabelIds });
+      try {
+        const allLabelIds = [...selectedLabelIds];
+        let createdNewLabels = false;
+        
+        for (const tag of historicalTags) {
+          const existingLabel = labelsQuery.data?.find(l => l.name.toLowerCase() === tag.toLowerCase());
+          if (existingLabel) {
+            if (!allLabelIds.includes(existingLabel.id)) {
+              allLabelIds.push(existingLabel.id);
+            }
+          } else {
+            const randomColor = `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`;
+            const newLabelRes = await apiRequest("POST", "/api/sentinel/labels", { 
+              name: tag, 
+              color: randomColor,
+              description: "Auto-created from historical tag"
+            });
+            const newLabel = await newLabelRes.json();
+            allLabelIds.push(newLabel.id);
+            createdNewLabels = true;
+          }
+        }
+        
+        if (createdNewLabels) {
+          queryClient.invalidateQueries({ queryKey: ["/api/sentinel/labels"] });
+        }
+        
+        commitMutation.mutate({ tradeId: result.tradeId, labelIds: allLabelIds });
+      } catch (error) {
+        toast({
+          title: "Error processing tags",
+          description: "Failed to create some tags. Trade committed without them.",
+          variant: "destructive"
+        });
+        commitMutation.mutate({ tradeId: result.tradeId, labelIds: selectedLabelIds });
+      }
     }
   };
 
@@ -351,6 +389,12 @@ export default function SentinelEvaluatePage() {
       </header>
 
       <main className="container mx-auto px-4 py-6">
+        {/* Ivy AI Branding */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-primary" data-testid="ivy-ai-title">Ivy AI</h1>
+          <p className="text-lg text-muted-foreground" data-testid="ivy-ai-subtitle">Advanced Trading Insights</p>
+        </div>
+
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
             <CardHeader>
@@ -686,6 +730,88 @@ export default function SentinelEvaluatePage() {
                             />
                           </div>
                         </div>
+                        
+                        {/* Historical Tags */}
+                        <div className="space-y-2">
+                          <Label className="text-xs">Tags</Label>
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {historicalTags.map((tag, idx) => (
+                              <Badge 
+                                key={idx} 
+                                variant="secondary" 
+                                className="text-xs cursor-pointer"
+                                onClick={() => setHistoricalTags(historicalTags.filter((_, i) => i !== idx))}
+                                data-testid={`badge-historical-tag-${idx}`}
+                              >
+                                {tag}
+                                <X className="w-3 h-3 ml-1" />
+                              </Badge>
+                            ))}
+                          </div>
+                          <div className="relative">
+                            <Input
+                              placeholder="Add tag (e.g., Earnings Play, Gap Up)..."
+                              value={newTagInput}
+                              onChange={(e) => {
+                                setNewTagInput(e.target.value);
+                                setShowTagSuggestions(e.target.value.length > 0);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && newTagInput.trim()) {
+                                  e.preventDefault();
+                                  if (!historicalTags.includes(newTagInput.trim())) {
+                                    setHistoricalTags([...historicalTags, newTagInput.trim()]);
+                                  }
+                                  setNewTagInput("");
+                                  setShowTagSuggestions(false);
+                                }
+                              }}
+                              onBlur={() => setTimeout(() => setShowTagSuggestions(false), 200)}
+                              onFocus={() => setShowTagSuggestions(newTagInput.length > 0)}
+                              data-testid="input-historical-tag"
+                              className="text-sm"
+                            />
+                            {showTagSuggestions && labelsQuery.data && (
+                              <div className="absolute z-10 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-32 overflow-auto">
+                                {labelsQuery.data
+                                  .filter(label => 
+                                    label.name.toLowerCase().includes(newTagInput.toLowerCase()) &&
+                                    !historicalTags.includes(label.name)
+                                  )
+                                  .slice(0, 5)
+                                  .map(label => (
+                                    <div
+                                      key={label.id}
+                                      className="px-3 py-1.5 text-sm cursor-pointer hover:bg-muted"
+                                      onClick={() => {
+                                        setHistoricalTags([...historicalTags, label.name]);
+                                        setNewTagInput("");
+                                        setShowTagSuggestions(false);
+                                      }}
+                                      data-testid={`suggestion-tag-${label.id}`}
+                                    >
+                                      <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ backgroundColor: label.color }} />
+                                      {label.name}
+                                    </div>
+                                  ))
+                                }
+                                {newTagInput.trim() && !labelsQuery.data.some(l => l.name.toLowerCase() === newTagInput.toLowerCase()) && (
+                                  <div
+                                    className="px-3 py-1.5 text-sm cursor-pointer hover:bg-muted text-muted-foreground"
+                                    onClick={() => {
+                                      setHistoricalTags([...historicalTags, newTagInput.trim()]);
+                                      setNewTagInput("");
+                                      setShowTagSuggestions(false);
+                                    }}
+                                  >
+                                    Create "{newTagInput.trim()}"
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
                         <p className="text-xs text-muted-foreground">
                           Market data and sentiment will be pulled from this date/time for accurate analysis.
                         </p>
@@ -708,7 +834,7 @@ export default function SentinelEvaluatePage() {
                   ) : (
                     <>
                       <TrendingUp className="w-4 h-4 mr-2" />
-                      Evaluate Trade
+                      Ask Ivy
                     </>
                   )}
                 </Button>

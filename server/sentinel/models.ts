@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
-  sentinelRuleSuggestions, sentinelRulePerformance,
+  sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels,
   type SentinelUser, type SentinelTrade, type SentinelEvaluation, type SentinelEvent, type SentinelWatchlistItem, type SentinelRule,
   type SentinelRuleSuggestion, type SentinelRulePerformance,
   type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule
@@ -58,6 +58,13 @@ export const sentinelModels = {
       .where(eq(sentinelTrades.id, id))
       .returning();
     return trade;
+  },
+
+  async deleteTrade(id: number): Promise<void> {
+    await db.delete(sentinelEvaluations).where(eq(sentinelEvaluations.tradeId, id));
+    await db.delete(sentinelEvents).where(eq(sentinelEvents.tradeId, id));
+    await db.delete(sentinelTradeToLabels).where(eq(sentinelTradeToLabels.tradeId, id));
+    await db.delete(sentinelTrades).where(eq(sentinelTrades.id, id));
   },
 
   async createEvaluation(data: InsertSentinelEvaluation): Promise<SentinelEvaluation> {
