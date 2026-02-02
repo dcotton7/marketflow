@@ -560,7 +560,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         borderColor: isDark ? '#3a3a4e' : '#e0e0e0',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 10, // Prevent bars from being cut off on right side
+        rightOffset: 15, // Prevent bars from being cut off on right side
       },
     });
     
@@ -936,31 +936,23 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         });
         cupArcLine.setData(arcPoints);
         
-        // Draw handle: SIMPLE descending line, not squiggly
-        // Only draw if we have handle data and it's not a "Cup Only" pattern
+        // Draw handle: STRAIGHT DESCENDING line that stops at handle low
+        // Acts as support line under the bar lows - NO upturn
         if (!cupData.cupOnly && cupData.handleLows.length > 0) {
           const sortedHandleLows = [...cupData.handleLows].sort((a, b) => a.time - b.time);
           
           // Find the lowest point in the handle (the handle low)
           const handleLow = sortedHandleLows.reduce((min, h) => h.price < min.price ? h : min, sortedHandleLows[0]);
           
-          // Draw a clean V-shape or descending line for handle:
-          // Right Rim → Handle Low → Last Bar (swing up)
+          // Draw a straight descending line from right rim to handle low and STOP
+          // No upturn - the handle ends at the lowest point
           const handlePoints: { time: Time; value: number }[] = [];
           
           // Start from right rim
           handlePoints.push({ time: cupData.rightRimTime as Time, value: cupData.rightRimPrice });
           
-          // Descend to handle low
+          // End at handle low - STOP here, no swing up
           handlePoints.push({ time: handleLow.time as Time, value: handleLow.price });
-          
-          // If handle low is not the last point, add a swing up to the last bar
-          const lastHandleBar = sortedHandleLows[sortedHandleLows.length - 1];
-          if (lastHandleBar.time > handleLow.time) {
-            // Use the close of the last bar if available (approximate with a slight uptick from the low)
-            const lastPrice = lastHandleBar.price * 1.01; // Small uptick to show swing up
-            handlePoints.push({ time: lastHandleBar.time as Time, value: lastPrice });
-          }
           
           const handleLine = chart.addSeries(LineSeries, {
             color: CUP_HANDLE_COLOR,
@@ -1006,8 +998,8 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     const isPatternMode = selectedPattern && ['VCP', 'Weekly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
     const isPullbackSignal = technicalSignal?.startsWith('pullback_');
     
-    // Add right padding to ensure last bar is fully visible (add 8 bars of padding)
-    const rightPadding = 8;
+    // Add right padding to ensure last bar is fully visible
+    const rightPadding = 15;
     
     // Determine visible bars based on timeframe
     const getVisibleBarsForInterval = (): number => {

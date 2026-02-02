@@ -12,7 +12,7 @@ import {
   ReferenceArea,
   ReferenceLine
 } from "recharts";
-import { detectCupAndHandle } from "@shared/patternDetection";
+// Cup and Handle detection removed - thumbnails just show candlesticks
 
 interface MiniChartProps {
   symbol: string;
@@ -212,81 +212,9 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
   // No channels for Cup and Handle - we draw the cup arc instead
   const channels = (is620Cross || isRide21EMA || isPullback || isCupAndHandle) ? [] : detectConsolidationChannels(slicedHistory, patternTimeframe);
   
-  // Detect cup and handle pattern for thumbnail visualization
-  let cupArcData: { date: string; cupArc: number | null }[] = [];
-  let handleLineData: { date: string; handleLine: number | null }[] = [];
-  
-  if (isCupAndHandle && slicedHistory.length > 30) {
-    const cupResult = detectCupAndHandle(slicedHistory, true);
-    if (cupResult.detected && 
-        cupResult.leftPeakIdx !== undefined && 
-        cupResult.cupBottomIdx !== undefined && 
-        cupResult.rightRimIdx !== undefined &&
-        cupResult.leftPeakPrice !== undefined &&
-        cupResult.cupBottomPrice !== undefined &&
-        cupResult.rightRimPrice !== undefined) {
-      
-      // Use indices directly from detection result
-      // Detection indices are relative to slicedHistory
-      const leftIdx = cupResult.leftPeakIdx;
-      const bottomIdx = cupResult.cupBottomIdx;
-      const rightIdx = cupResult.rightRimIdx;
-      
-      // Validate indices are within slicedHistory bounds
-      if (leftIdx >= 0 && bottomIdx > leftIdx && rightIdx > bottomIdx && rightIdx < slicedHistory.length) {
-        // Calculate arc values using PIECEWISE COSINE that passes through actual cup bottom
-        const cupDuration = rightIdx - leftIdx;
-        const bottomOffset = bottomIdx - leftIdx;
-        const bottomFraction = bottomOffset / cupDuration;
-        
-        cupArcData = slicedHistory.map((candle, idx) => {
-          if (idx < leftIdx || idx > rightIdx) {
-            return { date: candle.date, cupArc: null };
-          }
-          
-          const t = (idx - leftIdx) / cupDuration; // 0 to 1
-          let arcValue: number;
-          
-          if (t <= bottomFraction) {
-            // Left side: idx goes from leftIdx to bottomIdx
-            // Curve goes from left peak down to cup bottom using cos
-            const normalizedT = t / bottomFraction; // 0 to 1
-            const cosValue = Math.cos(normalizedT * Math.PI / 2); // 1 to 0
-            arcValue = cupResult.cupBottomPrice! + (cupResult.leftPeakPrice! - cupResult.cupBottomPrice!) * cosValue;
-          } else {
-            // Right side: idx goes from bottomIdx to rightIdx
-            // Curve goes from cup bottom up to right rim using sin
-            const normalizedT = (t - bottomFraction) / (1 - bottomFraction); // 0 to 1
-            const sinValue = Math.sin(normalizedT * Math.PI / 2); // 0 to 1
-            arcValue = cupResult.cupBottomPrice! + (cupResult.rightRimPrice! - cupResult.cupBottomPrice!) * sinValue;
-          }
-          
-          return { date: candle.date, cupArc: arcValue };
-        });
-        
-        // Generate SIMPLE handle line (just right rim to handle low, then swing up)
-        // Only draw handle if we have handle data and it's not a "Cup Only" pattern
-        if (!cupResult.cupOnly && cupResult.handleLows && cupResult.handleLows.length > 0) {
-          // Find the lowest handle point
-          const handleLow = cupResult.handleLows.reduce((min, h) => h.price < min.price ? h : min, cupResult.handleLows[0]);
-          const handleLowIdx = slicedHistory.findIndex(c => new Date(c.date).getTime() / 1000 === handleLow.time);
-          
-          handleLineData = slicedHistory.map((candle, idx) => {
-            // Only draw for right rim, handle low, and last bar
-            if (idx === rightIdx) {
-              return { date: candle.date, handleLine: cupResult.rightRimPrice! };
-            } else if (handleLowIdx >= 0 && idx === handleLowIdx) {
-              return { date: candle.date, handleLine: handleLow.price };
-            } else if (idx === slicedHistory.length - 1 && idx > handleLowIdx) {
-              // Last bar - slight uptick from low to show swing up
-              return { date: candle.date, handleLine: candle.low * 1.01 };
-            }
-            return { date: candle.date, handleLine: null };
-          });
-        }
-      }
-    }
-  }
+  // Cup and Handle: Skip detection and visualization for thumbnails
+  // The cup overlay doesn't render properly at small thumbnail size
+  // Full visualization is shown on the symbol detail chart instead
   
   // Calculate indicators based on signal type
   // Thumbnail indicators per spreadsheet:
@@ -337,13 +265,8 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
     } else if (isMonthlyTight) {
       baseData.sma3Month = sma3MonthValues[index];
     } else if (isCupAndHandle) {
-      // Add cup arc and handle line data
-      if (cupArcData[index]) {
-        baseData.cupArc = cupArcData[index].cupArc;
-      }
-      if (handleLineData[index]) {
-        baseData.handleLine = handleLineData[index].handleLine;
-      }
+      // No overlay data for cup and handle thumbnails - just show candlesticks
+      // Full visualization is shown on symbol detail chart only
     } else if (isPatternWithSMA21) {
       baseData.sma21 = sma21Values[index];
     }
@@ -463,29 +386,8 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
               />
             )}
             
-            {/* Cup and Handle: Draw cup arc and handle line in bright blue */}
-            {isCupAndHandle && (
-              <>
-                <Line
-                  type="monotone"
-                  dataKey="cupArc"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="handleLine"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              </>
-            )}
+            {/* Cup and Handle: No overlay on thumbnails - they don't render properly at small size */}
+            {/* The full chart visualization works correctly, thumbnails just show the candlesticks */}
             
             {/* Default: SMA 21 for pullbacks, patterns (VCP, Weekly Tight, High Tight Flag) */}
             {!is620Cross && !isRide21EMA && !isMonthlyTight && !isCupAndHandle && isPatternWithSMA21 && (
