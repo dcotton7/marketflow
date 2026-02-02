@@ -80,6 +80,7 @@ export const sentinelUsers = pgTable("sentinel_users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  accountSize: doublePrecision("account_size").default(1000000), // Default $1M
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -1,0 +1,330 @@
+import yahooFinance from "yahoo-finance2";
+
+export interface TechnicalData {
+  symbol: string;
+  currentPrice: number;
+  
+  // Today's data
+  todayOpen: number;
+  todayHigh: number;
+  todayLow: number;
+  
+  // Yesterday's data
+  yesterdayHigh: number;
+  yesterdayLow: number;
+  yesterdayClose: number;
+  
+  // Weekly low (low of the week so far)
+  weeklyLow: number;
+  weeklyHigh: number;
+  
+  // 5-day range
+  fiveDayHigh: number;
+  fiveDayLow: number;
+  
+  // Key moving averages
+  sma5: number;
+  sma10: number;
+  sma21: number;
+  sma50: number;
+  sma200: number;
+  
+  // Volatility
+  atr14: number;
+  avgVolume20: number;
+  
+  // Base structure
+  baseBottom: number | null; // Lowest low in the last 30 days (for base quality)
+  baseTop: number | null; // Highest high in consolidation area
+  
+  // Relative to MAs
+  distanceFromSma21: number; // % above/below
+  distanceFromSma50: number;
+  distanceFromSma200: number;
+  
+  fetchedAt: Date;
+}
+
+interface HistoricalQuote {
+  date: Date;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+async function fetchQuote(symbol: string): Promise<{ price: number; open: number; high: number; low: number } | null> {
+  try {
+    const quote = await yahooFinance.quote(symbol) as any;
+    return {
+      price: quote.regularMarketPrice || 0,
+      open: quote.regularMarketOpen || 0,
+      high: quote.regularMarketDayHigh || 0,
+      low: quote.regularMarketDayLow || 0,
+    };
+  } catch (error) {
+    console.error(`Failed to fetch quote for ${symbol}:`, error);
+    return null;
+  }
+}
+
+async function fetchHistorical(symbol: string, days: number): Promise<HistoricalQuote[]> {
+  try {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days - 10); // Extra buffer
+
+    const result = await yahooFinance.historical(symbol, {
+      period1: startDate,
+      period2: endDate,
+      interval: "1d",
+    }) as HistoricalQuote[];
+
+    // Sort by date descending (most recent first)
+    return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  } catch (error) {
+    console.error(`Failed to fetch historical for ${symbol}:`, error);
+    return [];
+  }
+}
+
+function calculateSMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices[0] || 0;
+  const slice = prices.slice(0, period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+function calculateATR(candles: HistoricalQuote[], period: number): number {
+  if (candles.length < period + 1) return 0;
+  
+  let atrSum = 0;
+  for (let i = 0; i < period; i++) {
+    const current = candles[i];
+    const previous = candles[i + 1];
+    if (!current || !previous) continue;
+    
+    const tr = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previous.close),
+      Math.abs(current.low - previous.close)
+    );
+    atrSum += tr;
+  }
+  
+  return atrSum / period;
+}
+
+function findBaseStructure(candles: HistoricalQuote[]): { bottom: number | null; top: number | null } {
+  if (candles.length < 20) return { bottom: null, top: null };
+  
+  // Look at last 30 days for a base
+  const last30 = candles.slice(0, 30);
+  const lows = last30.map(c => c.low);
+  const highs = last30.map(c => c.high);
+  
+  const bottom = Math.min(...lows);
+  const top = Math.max(...highs);
+  
+  return { bottom, top };
+}
+
+function getWeeklyRange(candles: HistoricalQuote[]): { low: number; high: number } {
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  
+  // Get candles from this week
+  const weekCandles = candles.slice(0, daysFromMonday + 1);
+  if (weekCandles.length === 0) {
+    return { low: 0, high: 0 };
+  }
+  
+  return {
+    low: Math.min(...weekCandles.map(c => c.low)),
+    high: Math.max(...weekCandles.map(c => c.high)),
+  };
+}
+
+export async function fetchTechnicalData(symbol: string): Promise<TechnicalData | null> {
+  try {
+    const [quote, historical] = await Promise.all([
+      fetchQuote(symbol),
+      fetchHistorical(symbol, 250), // ~1 year for 200 SMA
+    ]);
+
+    if (!quote || historical.length < 5) {
+      console.error(`Insufficient data for ${symbol}`);
+      return null;
+    }
+
+    const closes = historical.map(c => c.close);
+    
+    // Yesterday's data (index 0 is today if market is open, or last trading day)
+    const yesterday = historical[1] || historical[0];
+    
+    // 5-day high/low
+    const last5 = historical.slice(0, 5);
+    const fiveDayHigh = Math.max(...last5.map(c => c.high));
+    const fiveDayLow = Math.min(...last5.map(c => c.low));
+    
+    // Weekly range
+    const weeklyRange = getWeeklyRange(historical);
+    
+    // Moving averages
+    const sma5 = calculateSMA(closes, 5);
+    const sma10 = calculateSMA(closes, 10);
+    const sma21 = calculateSMA(closes, 21);
+    const sma50 = calculateSMA(closes, 50);
+    const sma200 = calculateSMA(closes, 200);
+    
+    // ATR
+    const atr14 = calculateATR(historical, 14);
+    
+    // Average volume
+    const volumes = historical.slice(0, 20).map(c => c.volume);
+    const avgVolume20 = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    
+    // Base structure
+    const base = findBaseStructure(historical);
+    
+    // Distance from MAs
+    const distanceFromSma21 = ((quote.price - sma21) / sma21) * 100;
+    const distanceFromSma50 = ((quote.price - sma50) / sma50) * 100;
+    const distanceFromSma200 = ((quote.price - sma200) / sma200) * 100;
+
+    return {
+      symbol: symbol.toUpperCase(),
+      currentPrice: quote.price,
+      
+      todayOpen: quote.open,
+      todayHigh: quote.high,
+      todayLow: quote.low,
+      
+      yesterdayHigh: yesterday.high,
+      yesterdayLow: yesterday.low,
+      yesterdayClose: yesterday.close,
+      
+      weeklyLow: weeklyRange.low,
+      weeklyHigh: weeklyRange.high,
+      
+      fiveDayHigh,
+      fiveDayLow,
+      
+      sma5,
+      sma10,
+      sma21,
+      sma50,
+      sma200,
+      
+      atr14,
+      avgVolume20,
+      
+      baseBottom: base.bottom,
+      baseTop: base.top,
+      
+      distanceFromSma21,
+      distanceFromSma50,
+      distanceFromSma200,
+      
+      fetchedAt: new Date(),
+    };
+  } catch (error) {
+    console.error(`Failed to fetch technical data for ${symbol}:`, error);
+    return null;
+  }
+}
+
+// Resolve level-based stop/target to actual price
+export function resolveLevelPrice(
+  level: string,
+  technicals: TechnicalData,
+  entryPrice: number,
+  direction: 'long' | 'short'
+): { price: number; description: string } | null {
+  switch (level) {
+    case "LOD_TODAY":
+      return { price: technicals.todayLow, description: `LOD Today ($${technicals.todayLow.toFixed(2)})` };
+    case "LOD_YESTERDAY":
+      return { price: technicals.yesterdayLow, description: `LOD Yesterday ($${technicals.yesterdayLow.toFixed(2)})` };
+    case "LOD_WEEKLY":
+      return { price: technicals.weeklyLow, description: `Weekly Low ($${technicals.weeklyLow.toFixed(2)})` };
+    case "5_DMA":
+      return { price: technicals.sma5, description: `5 DMA ($${technicals.sma5.toFixed(2)})` };
+    case "10_DMA":
+      return { price: technicals.sma10, description: `10 DMA ($${technicals.sma10.toFixed(2)})` };
+    case "21_DMA":
+      return { price: technicals.sma21, description: `21 DMA ($${technicals.sma21.toFixed(2)})` };
+    case "50_DMA":
+      return { price: technicals.sma50, description: `50 DMA ($${technicals.sma50.toFixed(2)})` };
+    case "PREV_DAY_HIGH":
+      return { price: technicals.yesterdayHigh, description: `Previous Day High ($${technicals.yesterdayHigh.toFixed(2)})` };
+    case "5_DAY_HIGH":
+      return { price: technicals.fiveDayHigh, description: `5 Day High ($${technicals.fiveDayHigh.toFixed(2)})` };
+    default:
+      // Check for RR multipliers
+      if (level.startsWith("RR_")) {
+        const match = level.match(/RR_(\d+)X/);
+        if (match) {
+          const multiplier = parseInt(match[1]);
+          // This needs stop price to calculate, return null to signal
+          return null;
+        }
+      }
+      return null;
+  }
+}
+
+// Calculate RR-based target given entry and stop
+export function calculateRRTarget(
+  entryPrice: number,
+  stopPrice: number,
+  rrMultiplier: number,
+  direction: 'long' | 'short'
+): number {
+  const riskAmount = Math.abs(entryPrice - stopPrice);
+  const rewardAmount = riskAmount * rrMultiplier;
+  
+  return direction === 'long' 
+    ? entryPrice + rewardAmount 
+    : entryPrice - rewardAmount;
+}
+
+// Get a summary of MA structure
+export function getMaStructureSummary(technicals: TechnicalData): string {
+  const { currentPrice, sma21, sma50, sma200, distanceFromSma21, distanceFromSma50, distanceFromSma200 } = technicals;
+  
+  const parts: string[] = [];
+  
+  // Price relative to MAs
+  if (currentPrice > sma21 && currentPrice > sma50 && currentPrice > sma200) {
+    parts.push("Price above all major MAs (bullish structure)");
+  } else if (currentPrice < sma21 && currentPrice < sma50 && currentPrice < sma200) {
+    parts.push("Price below all major MAs (bearish structure)");
+  } else {
+    const above: string[] = [];
+    const below: string[] = [];
+    if (currentPrice > sma21) above.push("21"); else below.push("21");
+    if (currentPrice > sma50) above.push("50"); else below.push("50");
+    if (currentPrice > sma200) above.push("200"); else below.push("200");
+    parts.push(`Price above ${above.join("/")} MA, below ${below.join("/")} MA`);
+  }
+  
+  // MA stacking
+  if (sma21 > sma50 && sma50 > sma200) {
+    parts.push("MAs stacked bullish (21>50>200)");
+  } else if (sma21 < sma50 && sma50 < sma200) {
+    parts.push("MAs stacked bearish (21<50<200)");
+  }
+  
+  // Distance from 21
+  if (Math.abs(distanceFromSma21) < 3) {
+    parts.push("Price near 21 MA (potential support/resistance)");
+  } else if (distanceFromSma21 > 10) {
+    parts.push(`Extended ${distanceFromSma21.toFixed(1)}% above 21 MA (potential pullback risk)`);
+  } else if (distanceFromSma21 < -10) {
+    parts.push(`Extended ${Math.abs(distanceFromSma21).toFixed(1)}% below 21 MA`);
+  }
+  
+  return parts.join(". ");
+}

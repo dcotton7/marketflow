@@ -41,6 +41,7 @@ const evaluateSchema = z.object({
   positionSizeUnit: z.enum(["shares", "dollars"]).optional(),
   thesis: z.string().optional(),
   deepEval: z.boolean().optional(),
+  historicalAnalysis: z.boolean().optional(),
 });
 
 const updateTradeSchema = z.object({
@@ -222,6 +223,8 @@ export function registerSentinelRoutes(app: Express): void {
   app.post("/api/sentinel/evaluate", requireAuth, async (req: Request, res: Response) => {
     try {
       const data = evaluateSchema.parse(req.body);
+      console.log("[Sentinel] Evaluate request:", data.symbol, data.direction);
+      
       const request: EvaluationRequest = {
         symbol: data.symbol,
         direction: data.direction,
@@ -234,9 +237,11 @@ export function registerSentinelRoutes(app: Express): void {
         positionSizeUnit: data.positionSizeUnit,
         thesis: data.thesis,
         deepEval: data.deepEval,
+        historicalAnalysis: data.historicalAnalysis,
       };
 
       const result = await evaluateTrade(request, req.session.userId!);
+      console.log("[Sentinel] Evaluate complete - score:", result.evaluation.score);
       res.json(result);
     } catch (error) {
       if (error instanceof z.ZodError) {

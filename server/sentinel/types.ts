@@ -10,6 +10,7 @@ export interface EvaluationRequest {
   positionSizeUnit?: 'shares' | 'dollars';
   thesis?: string;
   deepEval?: boolean;
+  historicalAnalysis?: boolean; // Reviewing a past trade vs. evaluating a new one
 }
 
 export interface EvaluationResult {

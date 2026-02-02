@@ -1,42 +1,121 @@
-export const PROMPT_VERSION = "v1.0";
+import type { TechnicalData } from "./technicals";
+
+export const PROMPT_VERSION = "v2.0";
 
 export const SYSTEM_PROMPT = `You are SENTINEL, a Decision Gate AI that evaluates trade ideas for risk and quality.
 
 Your role is JUDGMENT before risk. You do NOT generate trade signals or recommendations to trade. 
 You ONLY evaluate user-submitted trade ideas and flag potential risks.
 
-Evaluation criteria:
-1. Risk/Reward Ratio - Is the stop loss appropriately placed? Is the target realistic?
-2. Position Sizing - Is the position size appropriate for the account and stop distance?
-3. Thesis Quality - Does the thesis have a clear catalyst or technical setup?
-4. Market Context - Consider sector, volatility, and general market conditions
-5. Timing Considerations - Entry timing relative to key levels
+## CRITICAL: Use the TECHNICAL DATA provided
+You are given real-time price data, moving averages, and key levels. USE THESE SPECIFIC NUMBERS in your analysis.
+- When discussing stops, reference the actual price levels (LOD, MA levels, etc.)
+- Calculate and state the actual dollar risk and R:R ratio
+- Comment on the stock's position relative to its moving averages
+- Note if entry is extended from base or near support
 
-Risk Flags to check:
-- OVERSIZED: Position too large relative to account
-- WIDE_STOP: Stop loss too far from entry (high % at risk)
-- TIGHT_STOP: Stop likely to get hit by normal volatility
+## Evaluation Criteria (with technical context):
+
+1. **Risk/Reward Ratio** - Calculate using the ACTUAL stop and target levels provided
+   - State the exact R:R (e.g., "2.3:1 R:R based on $103.50 stop to $115 target")
+   - Flag if R:R < 2:1
+
+2. **Stop Placement Quality** - Analyze the stop relative to technical levels
+   - Is the stop below logical support (LOD, MA, base bottom)?
+   - How far is the stop from current price (% risk)?
+   - Does ATR suggest the stop could get hit by normal volatility?
+   - Suggest better stop levels if applicable
+
+3. **Position Sizing** - Calculate actual risk in dollars and % of account
+   - Risk per share × shares = total dollar risk
+   - Dollar risk ÷ account size = % of account at risk
+   - Flag if >2% of account or if sizing seems off
+
+4. **Technical Structure** - Analyze the setup quality
+   - Where is price relative to 21/50/200 MA?
+   - Is the MA structure bullish or bearish?
+   - Is the stock extended or pulling back?
+   - Is there a clear base pattern?
+
+5. **Entry Timing** - Is this a good entry point?
+   - Chasing if entry is far above recent breakout level
+   - Ideal if entering on pullback to support
+   - Consider distance from recent highs/lows
+
+## Rule Adherence
+If the trader has personal rules, evaluate EACH rule and state whether this trade follows or violates it.
+Be specific about which rules apply and why.
+
+## Risk Flags to check:
+- OVERSIZED: Position risk >2% of account
+- WIDE_STOP: Stop >8% from entry or >2x ATR
+- TIGHT_STOP: Stop <0.5x ATR, likely to get hit by noise
 - POOR_RR: Risk/reward ratio below 2:1
-- CHASING: Entry price above recent resistance or extended from base
-- EARNINGS_RISK: Upcoming earnings or major catalyst
+- CHASING: Entry is >5% above recent base/consolidation
+- EXTENDED: Price is >10% above 21 MA
+- BELOW_KEY_MA: Price below 50 or 200 MA (for longs)
+- MA_BREAKDOWN: Price breaking below rising MA
 - SECTOR_WEAKNESS: Sector showing relative weakness
-- OVERTRADING: Too many positions in same sector
 - EMOTIONAL: Signs of FOMO, revenge trading, or bias
-- ILLIQUID: Low volume or wide spreads
+- RULE_VIOLATION: Violates one of trader's personal rules
+- INSUFFICIENT_DATA: Missing key information for evaluation
 
+## Response Format
 Respond with a JSON object containing:
 {
   "score": <1-100 overall quality score>,
-  "reasoning": "<detailed explanation of your evaluation>",
+  "recommendation": "<proceed|caution|avoid>",
+  "reasoning": "<detailed evaluation with specific price levels and calculations>",
   "riskFlags": [<array of applicable risk flag codes>],
-  "recommendation": "<proceed|caution|avoid>"
+  "technicalSummary": {
+    "maStructure": "<bullish|bearish|mixed>",
+    "distanceFrom21MA": "<X.X%>",
+    "calculatedRR": "<X.X:1>",
+    "dollarRisk": "<$X,XXX>",
+    "percentRisk": "<X.X%>",
+    "stopQuality": "<strong|adequate|weak>",
+    "suggestedStop": "<$XXX.XX or null>"
+  },
+  "ruleChecklist": [
+    {"rule": "<rule name>", "status": "<followed|violated|not_applicable>", "note": "<brief explanation>"}
+  ]
 }
 
 Score guidelines:
-- 80-100: Strong setup, proceed with confidence
-- 60-79: Acceptable but has concerns, proceed with caution
-- 40-59: Significant issues, recommend avoiding or adjusting
-- 0-39: High risk, strong avoid recommendation`;
+- 80-100: Strong setup with good technicals and risk management, proceed with confidence
+- 60-79: Acceptable but has concerns, proceed with caution and monitor closely
+- 40-59: Significant issues with stop/target or technical structure, recommend adjusting
+- 0-39: High risk, poor R:R, or major rule violations, strong avoid`;
+
+export const HISTORICAL_SYSTEM_PROMPT = `You are SENTINEL, evaluating a COMPLETED trade for process quality.
+
+This is a POST-TRADE analysis. The trade has already happened. Your job is to:
+1. Evaluate whether the trader followed good PROCESS, regardless of outcome
+2. Check rule adherence - did they follow their own rules?
+3. Identify what they did well and what they can improve
+4. Reward disciplined execution even if the trade lost money
+5. Flag process violations even if the trade made money
+
+Key principle: A winning trade with poor process is WORSE than a losing trade with good process.
+
+Respond with a JSON object containing:
+{
+  "score": <1-100 process quality score>,
+  "recommendation": "<excellent_process|good_process|needs_improvement|poor_process>",
+  "reasoning": "<analysis of the process, not the outcome>",
+  "riskFlags": [<process issues identified>],
+  "processAnalysis": {
+    "entryExecution": "<how well did they execute the entry>",
+    "stopManagement": "<did they honor their stop>",
+    "targetManagement": "<did they take profits appropriately>",
+    "emotionalControl": "<any signs of emotional decisions>",
+    "rulesFollowed": <number of rules followed>,
+    "rulesViolated": <number of rules violated>
+  },
+  "ruleChecklist": [
+    {"rule": "<rule name>", "status": "<followed|violated|not_applicable>", "note": "<brief explanation>"}
+  ]
+}`;
 
 const STOP_LEVEL_LABELS: Record<string, string> = {
   "LOD_TODAY": "Low of Day (Today)",
@@ -64,7 +143,8 @@ const TARGET_LEVEL_LABELS: Record<string, string> = {
 interface TraderContext {
   activePositions?: { symbol: string; direction: string; entryPrice: number }[];
   watchlist?: { symbol: string; thesis?: string }[];
-  rules?: { name: string; category?: string }[];
+  rules?: { id: number; name: string; category?: string; description?: string; severity?: string }[];
+  accountSize?: number;
 }
 
 export interface MarketContext {
@@ -100,72 +180,238 @@ export function buildEvaluationPrompt(
   positionSizeUnit?: 'shares' | 'dollars',
   thesis?: string,
   traderContext?: TraderContext,
-  marketContext?: MarketContext
+  marketContext?: MarketContext,
+  technicalData?: TechnicalData | null
 ): string {
-  let prompt = `Evaluate this trade idea:
+  const accountSize = traderContext?.accountSize || 1000000;
+  
+  let prompt = `=== TRADE IDEA TO EVALUATE ===
 
 Symbol: ${symbol}
 Direction: ${direction.toUpperCase()}
-Entry Price: $${entryPrice.toFixed(2)}`;
+Entry Price: $${entryPrice.toFixed(2)}
+Account Size: $${accountSize.toLocaleString()}`;
 
-  if (stopPrice) {
-    const riskPercent = Math.abs((entryPrice - stopPrice) / entryPrice * 100);
-    prompt += `\nStop Price: $${stopPrice.toFixed(2)} (${riskPercent.toFixed(1)}% risk)`;
-  } else if (stopPriceLevel) {
-    const label = STOP_LEVEL_LABELS[stopPriceLevel] || stopPriceLevel;
-    prompt += `\nStop Level: ${label}`;
+  // Calculate actual stop price from level if needed
+  let actualStopPrice = stopPrice;
+  let stopDescription = "";
+  
+  if (technicalData && stopPriceLevel && !stopPrice) {
+    switch (stopPriceLevel) {
+      case "LOD_TODAY":
+        actualStopPrice = technicalData.todayLow;
+        stopDescription = `LOD Today @ $${technicalData.todayLow.toFixed(2)}`;
+        break;
+      case "LOD_YESTERDAY":
+        actualStopPrice = technicalData.yesterdayLow;
+        stopDescription = `LOD Yesterday @ $${technicalData.yesterdayLow.toFixed(2)}`;
+        break;
+      case "LOD_WEEKLY":
+        actualStopPrice = technicalData.weeklyLow;
+        stopDescription = `Weekly Low @ $${technicalData.weeklyLow.toFixed(2)}`;
+        break;
+      case "5_DMA":
+        actualStopPrice = technicalData.sma5;
+        stopDescription = `5 DMA @ $${technicalData.sma5.toFixed(2)}`;
+        break;
+      case "10_DMA":
+        actualStopPrice = technicalData.sma10;
+        stopDescription = `10 DMA @ $${technicalData.sma10.toFixed(2)}`;
+        break;
+      case "21_DMA":
+        actualStopPrice = technicalData.sma21;
+        stopDescription = `21 DMA @ $${technicalData.sma21.toFixed(2)}`;
+        break;
+      case "50_DMA":
+        actualStopPrice = technicalData.sma50;
+        stopDescription = `50 DMA @ $${technicalData.sma50.toFixed(2)}`;
+        break;
+      default:
+        stopDescription = STOP_LEVEL_LABELS[stopPriceLevel] || stopPriceLevel;
+    }
   }
 
-  if (targetPrice) {
-    const rewardPercent = Math.abs((targetPrice - entryPrice) / entryPrice * 100);
-    prompt += `\nTarget Price: $${targetPrice.toFixed(2)} (${rewardPercent.toFixed(1)}% reward)`;
+  if (actualStopPrice) {
+    const riskPerShare = Math.abs(entryPrice - actualStopPrice);
+    const riskPercent = (riskPerShare / entryPrice) * 100;
+    prompt += `\nStop Price: $${actualStopPrice.toFixed(2)} (${riskPercent.toFixed(2)}% risk per share)`;
+    if (stopDescription) {
+      prompt += ` - ${stopDescription}`;
+    }
+  } else if (stopPriceLevel) {
+    const label = STOP_LEVEL_LABELS[stopPriceLevel] || stopPriceLevel;
+    prompt += `\nStop Level: ${label} (exact price unknown - evaluate with caution)`;
+  }
+
+  // Calculate actual target price
+  let actualTargetPrice = targetPrice;
+  let targetDescription = "";
+  
+  if (technicalData && targetPriceLevel && !targetPrice) {
+    switch (targetPriceLevel) {
+      case "PREV_DAY_HIGH":
+        actualTargetPrice = technicalData.yesterdayHigh;
+        targetDescription = `Previous Day High @ $${technicalData.yesterdayHigh.toFixed(2)}`;
+        break;
+      case "5_DAY_HIGH":
+        actualTargetPrice = technicalData.fiveDayHigh;
+        targetDescription = `5 Day High @ $${technicalData.fiveDayHigh.toFixed(2)}`;
+        break;
+      default:
+        // Handle RR targets if we have a stop
+        if (targetPriceLevel.startsWith("RR_") && actualStopPrice) {
+          const match = targetPriceLevel.match(/RR_(\d+)X/);
+          if (match) {
+            const multiplier = parseInt(match[1]);
+            const riskAmount = Math.abs(entryPrice - actualStopPrice);
+            actualTargetPrice = direction === 'long' 
+              ? entryPrice + (riskAmount * multiplier)
+              : entryPrice - (riskAmount * multiplier);
+            targetDescription = `${multiplier}x R:R @ $${actualTargetPrice.toFixed(2)}`;
+          }
+        } else {
+          targetDescription = TARGET_LEVEL_LABELS[targetPriceLevel] || targetPriceLevel;
+        }
+    }
+  }
+
+  if (actualTargetPrice) {
+    const rewardPerShare = Math.abs(actualTargetPrice - entryPrice);
+    const rewardPercent = (rewardPerShare / entryPrice) * 100;
+    prompt += `\nTarget Price: $${actualTargetPrice.toFixed(2)} (${rewardPercent.toFixed(2)}% potential reward)`;
+    if (targetDescription) {
+      prompt += ` - ${targetDescription}`;
+    }
     
-    if (stopPrice) {
-      const riskAmount = Math.abs(entryPrice - stopPrice);
-      const rewardAmount = Math.abs(targetPrice - entryPrice);
+    if (actualStopPrice) {
+      const riskAmount = Math.abs(entryPrice - actualStopPrice);
+      const rewardAmount = Math.abs(actualTargetPrice - entryPrice);
       const rrRatio = rewardAmount / riskAmount;
-      prompt += `\nRisk/Reward Ratio: ${rrRatio.toFixed(2)}:1`;
+      prompt += `\n>>> CALCULATED R:R RATIO: ${rrRatio.toFixed(2)}:1 <<<`;
     }
   } else if (targetPriceLevel) {
     const label = TARGET_LEVEL_LABELS[targetPriceLevel] || targetPriceLevel;
     prompt += `\nTarget Level: ${label}`;
   }
 
+  // Position sizing with risk calculations
   if (positionSize) {
     const unit = positionSizeUnit || 'shares';
+    let shares: number;
+    let dollarPosition: number;
+    
     if (unit === 'shares') {
-      prompt += `\nPosition Size: ${positionSize} shares`;
-      const dollarValue = positionSize * entryPrice;
-      prompt += ` ($${dollarValue.toLocaleString()})`;
+      shares = positionSize;
+      dollarPosition = shares * entryPrice;
     } else {
-      prompt += `\nPosition Size: $${positionSize.toLocaleString()}`;
-      const shares = Math.floor(positionSize / entryPrice);
-      prompt += ` (~${shares} shares)`;
+      dollarPosition = positionSize;
+      shares = Math.floor(dollarPosition / entryPrice);
+    }
+    
+    prompt += `\n\nPosition Size: ${shares} shares ($${dollarPosition.toLocaleString()})`;
+    
+    if (actualStopPrice) {
+      const riskPerShare = Math.abs(entryPrice - actualStopPrice);
+      const totalDollarRisk = riskPerShare * shares;
+      const percentOfAccount = (totalDollarRisk / accountSize) * 100;
+      prompt += `\n>>> DOLLAR RISK: $${totalDollarRisk.toFixed(2)} (${percentOfAccount.toFixed(2)}% of account) <<<`;
+      
+      if (percentOfAccount > 2) {
+        prompt += `\n[WARNING: Risk exceeds 2% of account!]`;
+      }
     }
   }
 
-  if (thesis) {
-    prompt += `\n\nTrader's Thesis:\n${thesis}`;
+  // Technical data section
+  if (technicalData) {
+    prompt += `\n\n=== TECHNICAL DATA (REAL-TIME) ===`;
+    prompt += `\nCurrent Price: $${technicalData.currentPrice.toFixed(2)}`;
+    prompt += `\nToday's Range: $${technicalData.todayLow.toFixed(2)} - $${technicalData.todayHigh.toFixed(2)}`;
+    prompt += `\nYesterday's Range: $${technicalData.yesterdayLow.toFixed(2)} - $${technicalData.yesterdayHigh.toFixed(2)}`;
+    prompt += `\n5-Day Range: $${technicalData.fiveDayLow.toFixed(2)} - $${technicalData.fiveDayHigh.toFixed(2)}`;
+    
+    prompt += `\n\nMoving Averages:`;
+    prompt += `\n  21 DMA: $${technicalData.sma21.toFixed(2)} (${technicalData.distanceFromSma21 > 0 ? '+' : ''}${technicalData.distanceFromSma21.toFixed(1)}% from price)`;
+    prompt += `\n  50 DMA: $${technicalData.sma50.toFixed(2)} (${technicalData.distanceFromSma50 > 0 ? '+' : ''}${technicalData.distanceFromSma50.toFixed(1)}% from price)`;
+    prompt += `\n  200 DMA: $${technicalData.sma200.toFixed(2)} (${technicalData.distanceFromSma200 > 0 ? '+' : ''}${technicalData.distanceFromSma200.toFixed(1)}% from price)`;
+    
+    prompt += `\n\nVolatility:`;
+    prompt += `\n  ATR(14): $${technicalData.atr14.toFixed(2)} (${((technicalData.atr14 / technicalData.currentPrice) * 100).toFixed(1)}% of price)`;
+    
+    // MA structure analysis
+    const aboveAll = technicalData.currentPrice > technicalData.sma21 && 
+                     technicalData.currentPrice > technicalData.sma50 && 
+                     technicalData.currentPrice > technicalData.sma200;
+    const belowAll = technicalData.currentPrice < technicalData.sma21 && 
+                     technicalData.currentPrice < technicalData.sma50 && 
+                     technicalData.currentPrice < technicalData.sma200;
+    const maStackedBullish = technicalData.sma21 > technicalData.sma50 && technicalData.sma50 > technicalData.sma200;
+    const maStackedBearish = technicalData.sma21 < technicalData.sma50 && technicalData.sma50 < technicalData.sma200;
+    
+    prompt += `\n\nMA Structure Analysis:`;
+    if (aboveAll) {
+      prompt += `\n  Price ABOVE all major MAs (bullish structure)`;
+    } else if (belowAll) {
+      prompt += `\n  Price BELOW all major MAs (bearish structure)`;
+    } else {
+      prompt += `\n  Price mixed relative to MAs`;
+    }
+    
+    if (maStackedBullish) {
+      prompt += `\n  MAs stacked bullish (21 > 50 > 200)`;
+    } else if (maStackedBearish) {
+      prompt += `\n  MAs stacked bearish (21 < 50 < 200)`;
+    }
+    
+    if (Math.abs(technicalData.distanceFromSma21) < 3) {
+      prompt += `\n  [NEAR 21 MA - potential support/resistance zone]`;
+    }
+    if (technicalData.distanceFromSma21 > 10) {
+      prompt += `\n  [EXTENDED - ${technicalData.distanceFromSma21.toFixed(1)}% above 21 MA - pullback risk]`;
+    }
+    
+    // Base structure
+    if (technicalData.baseBottom && technicalData.baseTop) {
+      prompt += `\n\n30-Day Base:`;
+      prompt += `\n  Range: $${technicalData.baseBottom.toFixed(2)} - $${technicalData.baseTop.toFixed(2)}`;
+      const baseDepth = ((technicalData.baseTop - technicalData.baseBottom) / technicalData.baseTop) * 100;
+      prompt += `\n  Depth: ${baseDepth.toFixed(1)}%`;
+    }
+    
+    // Suggested alternative stops
+    prompt += `\n\nKey Support Levels for Stop Consideration:`;
+    prompt += `\n  LOD Today: $${technicalData.todayLow.toFixed(2)}`;
+    prompt += `\n  LOD Yesterday: $${technicalData.yesterdayLow.toFixed(2)}`;
+    prompt += `\n  Weekly Low: $${technicalData.weeklyLow.toFixed(2)}`;
+    prompt += `\n  21 DMA: $${technicalData.sma21.toFixed(2)}`;
+    if (technicalData.baseBottom) {
+      prompt += `\n  Base Bottom (30d): $${technicalData.baseBottom.toFixed(2)}`;
+    }
+  } else {
+    prompt += `\n\n[WARNING: Technical data unavailable - evaluation based on provided info only]`;
   }
 
-  // Add trader context if available
+  if (thesis) {
+    prompt += `\n\n=== TRADER'S THESIS ===\n${thesis}`;
+  }
+
+  // Trader context
   if (traderContext) {
     if (traderContext.activePositions && traderContext.activePositions.length > 0) {
-      prompt += `\n\nTrader's Current Positions:`;
+      prompt += `\n\n=== CURRENT POSITIONS ===`;
       traderContext.activePositions.forEach(pos => {
         prompt += `\n- ${pos.symbol} (${pos.direction.toUpperCase()}) @ $${pos.entryPrice.toFixed(2)}`;
       });
-      // Check for sector concentration or correlation
-      const sameSymbol = traderContext.activePositions.find(p => p.symbol === symbol);
+      const sameSymbol = traderContext.activePositions.find(p => p.symbol.toUpperCase() === symbol.toUpperCase());
       if (sameSymbol) {
-        prompt += `\n\n[ALERT: Trader already has a position in ${symbol}]`;
+        prompt += `\n[ALERT: Already has a position in ${symbol}!]`;
       }
     }
 
     if (traderContext.watchlist && traderContext.watchlist.length > 0) {
-      const onWatchlist = traderContext.watchlist.find(w => w.symbol === symbol);
+      const onWatchlist = traderContext.watchlist.find(w => w.symbol.toUpperCase() === symbol.toUpperCase());
       if (onWatchlist) {
-        prompt += `\n\n[Note: This stock was on trader's watchlist`;
+        prompt += `\n\n[This stock was on the watchlist`;
         if (onWatchlist.thesis) {
           prompt += ` with thesis: "${onWatchlist.thesis}"`;
         }
@@ -173,26 +419,45 @@ Entry Price: $${entryPrice.toFixed(2)}`;
       }
     }
 
+    // Enhanced rule section
     if (traderContext.rules && traderContext.rules.length > 0) {
-      prompt += `\n\nTrader's Personal Rules (evaluate adherence):`;
+      prompt += `\n\n=== TRADER'S PERSONAL RULES (EVALUATE EACH) ===`;
+      prompt += `\nFor EACH rule below, determine if this trade FOLLOWS or VIOLATES it:\n`;
+      
+      const rulesByCategory: Record<string, typeof traderContext.rules> = {};
       traderContext.rules.forEach(rule => {
-        prompt += `\n- ${rule.name}${rule.category ? ` [${rule.category}]` : ''}`;
+        const cat = rule.category || 'general';
+        if (!rulesByCategory[cat]) rulesByCategory[cat] = [];
+        rulesByCategory[cat].push(rule);
       });
+      
+      for (const [category, rules] of Object.entries(rulesByCategory)) {
+        prompt += `\n[${category.toUpperCase()}]`;
+        rules.forEach(rule => {
+          prompt += `\n• ${rule.name}`;
+          if (rule.description) {
+            prompt += ` - ${rule.description}`;
+          }
+          if (rule.severity === 'auto_reject') {
+            prompt += ` [AUTO-REJECT if violated]`;
+          }
+        });
+      }
     }
   }
 
-  // Add market context if available
+  // Market context
   if (marketContext) {
-    prompt += `\n\n--- MARKET ENVIRONMENT ---`;
+    prompt += `\n\n=== MARKET ENVIRONMENT ===`;
     
     if (marketContext.weekly) {
       const weeklyEmoji = marketContext.weekly.state === 1 ? "↑" : marketContext.weekly.state === -1 ? "↓" : "→";
-      prompt += `\nWeekly Trend: ${weeklyEmoji} ${marketContext.weekly.stateName} (${marketContext.weekly.confidence} confidence)`;
+      prompt += `\nWeekly Trend: ${weeklyEmoji} ${marketContext.weekly.stateName} (${marketContext.weekly.confidence})`;
     }
     
     if (marketContext.daily) {
       const dailyEmoji = marketContext.daily.state === "RISK-ON" ? "↑" : marketContext.daily.state === "RISK-OFF" ? "↓" : "→";
-      prompt += `\nDaily Risk Basket: ${dailyEmoji} ${marketContext.daily.state} (${marketContext.daily.confidence} confidence)`;
+      prompt += `\nDaily Risk: ${dailyEmoji} ${marketContext.daily.state} (${marketContext.daily.confidence})`;
       if (marketContext.daily.canaryTags && marketContext.daily.canaryTags.length > 0) {
         prompt += `\n  Warnings: ${marketContext.daily.canaryTags.join(", ")}`;
       }
@@ -200,14 +465,10 @@ Entry Price: $${entryPrice.toFixed(2)}`;
     
     if (marketContext.sector) {
       const sectorEmoji = marketContext.sector.state === 1 ? "↑" : marketContext.sector.state === -1 ? "↓" : "→";
-      prompt += `\nSector (${marketContext.sector.sector}): ${sectorEmoji} ${marketContext.sector.stateName} via ${marketContext.sector.etf} (${marketContext.sector.confidence} confidence)`;
+      prompt += `\nSector (${marketContext.sector.sector}): ${sectorEmoji} ${marketContext.sector.stateName} via ${marketContext.sector.etf}`;
     }
 
-    if (marketContext.summary) {
-      prompt += `\n\nMarket Summary: ${marketContext.summary}`;
-    }
-
-    // Add scoring guidance based on direction and market context
+    // Environment scoring guidance
     const isLong = direction === 'long';
     let environmentScore = 0;
     
@@ -219,15 +480,16 @@ Entry Price: $${entryPrice.toFixed(2)}`;
     if (marketContext.sector?.state === -1) environmentScore += isLong ? -5 : 5;
 
     if (environmentScore > 0) {
-      prompt += `\n\n[ENVIRONMENT FAVORABLE: Market conditions support this ${direction.toUpperCase()} trade (+${environmentScore} points)]`;
+      prompt += `\n\n[ENVIRONMENT SUPPORTS this ${direction.toUpperCase()} trade (+${environmentScore} pts)]`;
     } else if (environmentScore < 0) {
-      prompt += `\n\n[ENVIRONMENT HEADWIND: Market conditions work against this ${direction.toUpperCase()} trade (${environmentScore} points)]`;
-    } else {
-      prompt += `\n\n[ENVIRONMENT NEUTRAL: Mixed market conditions, be selective]`;
+      prompt += `\n\n[ENVIRONMENT HEADWIND for ${direction.toUpperCase()} trade (${environmentScore} pts)]`;
     }
   }
 
-  prompt += `\n\nProvide your evaluation as a JSON object.`;
+  prompt += `\n\n=== PROVIDE YOUR EVALUATION ===
+Use the technical data above to give SPECIFIC analysis with actual price levels.
+Calculate the exact R:R ratio, dollar risk, and evaluate each trading rule.
+Respond with the JSON object as specified.`;
 
   return prompt;
 }

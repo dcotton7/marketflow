@@ -99,6 +99,7 @@ export default function SentinelEvaluatePage() {
   
   const [thesis, setThesis] = useState("");
   const [deepEval, setDeepEval] = useState(false);
+  const [historicalAnalysis, setHistoricalAnalysis] = useState(false);
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
 
@@ -188,6 +189,7 @@ export default function SentinelEvaluatePage() {
       direction,
       entryPrice: parseFloat(entryPrice),
       deepEval,
+      historicalAnalysis,
     };
 
     // Stop price - either amount or choice
@@ -493,17 +495,32 @@ export default function SentinelEvaluatePage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-3 bg-muted rounded-md">
-                  <div>
-                    <Label htmlFor="deepEval" className="font-medium">Deep Evaluation</Label>
-                    <p className="text-xs text-muted-foreground">Use advanced AI model (gpt-5.2)</p>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between p-3 bg-muted rounded-md">
+                    <div>
+                      <Label htmlFor="deepEval" className="font-medium">Deep Evaluation</Label>
+                      <p className="text-xs text-muted-foreground">Use advanced AI model (gpt-5.2)</p>
+                    </div>
+                    <Switch
+                      id="deepEval"
+                      checked={deepEval}
+                      onCheckedChange={setDeepEval}
+                      data-testid="switch-deep-eval"
+                    />
                   </div>
-                  <Switch
-                    id="deepEval"
-                    checked={deepEval}
-                    onCheckedChange={setDeepEval}
-                    data-testid="switch-deep-eval"
-                  />
+                  
+                  <div className="flex items-center justify-between p-3 bg-muted rounded-md">
+                    <div>
+                      <Label htmlFor="historicalAnalysis" className="font-medium">Historical Analysis</Label>
+                      <p className="text-xs text-muted-foreground">Review a past trade for process quality</p>
+                    </div>
+                    <Switch
+                      id="historicalAnalysis"
+                      checked={historicalAnalysis}
+                      onCheckedChange={setHistoricalAnalysis}
+                      data-testid="switch-historical-analysis"
+                    />
+                  </div>
                 </div>
 
                 <Button
