@@ -44,8 +44,13 @@ function getPeriodStartDate(period: string): Date {
       return new Date(now.setFullYear(now.getFullYear() - 1));
     case '2y':
       return new Date(now.setFullYear(now.getFullYear() - 2));
+    case '3y':
+      return new Date(now.setFullYear(now.getFullYear() - 3));
+    case '5y':
+      return new Date(now.setFullYear(now.getFullYear() - 5));
     default:
-      return new Date(now.setFullYear(now.getFullYear() - 1));
+      // Default to 3 years for SMA 200 to have continuous line
+      return new Date(now.setFullYear(now.getFullYear() - 3));
   }
 }
 

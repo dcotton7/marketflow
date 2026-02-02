@@ -351,13 +351,12 @@ function detectCupAndHandleForChart(
   // Use shared detection algorithm
   const result = sharedDetectCupAndHandle(data, loose);
   
+  // Only require the 3 key points for the smooth parabolic curve
   if (!result.detected || 
       !result.leftPeakTime || result.leftPeakPrice === undefined ||
       !result.cupBottomTime || result.cupBottomPrice === undefined ||
       !result.rightRimTime || result.rightRimPrice === undefined ||
-      !result.handleStartTime || !result.handleEndTime || 
-      !result.handleLows || result.handleLows.length === 0 ||
-      !result.cupLows || result.cupLows.length === 0) {
+      !result.handleStartTime || !result.handleEndTime) {
     return null;
   }
   
@@ -370,8 +369,8 @@ function detectCupAndHandleForChart(
     rightRimPrice: result.rightRimPrice,
     handleStartTime: result.handleStartTime,
     handleEndTime: result.handleEndTime,
-    handleLows: result.handleLows,
-    cupLows: result.cupLows, // Bar lows for cup support line visualization
+    handleLows: result.handleLows || [],
+    cupLows: result.cupLows || [],
     cupOnly: result.cupOnly || false,
     completionPct: result.completionPct || 0,
     extensionPct: result.extensionPct || 0
@@ -901,63 +900,108 @@ export function StockChart({
       }
     }
     
-    // Draw Cup and Handle visualization - BRIGHT BLUE color for all elements
-    const CUP_HANDLE_COLOR = '#3b82f6'; // Bright blue to distinguish from VWAP lines
+    // Draw Cup and Handle visualization - MarketSurge style smooth parabolic curve
+    const CUP_HANDLE_COLOR = '#3b82f6'; // Bright blue
     
     if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
       const cupData = detectCupAndHandleForChart(history);
-      if (cupData && cupData.cupLows && cupData.cupLows.length > 0) {
-        // Draw the cup by tracing along the ACTUAL BAR LOWS as a support line
-        // This follows the user's vision: the line hugs the bottom of each candle
-        // as it descends into and ascends out of the cup formation
+      if (cupData) {
+        // MarketSurge style: Draw a SMOOTH PARABOLIC CURVE connecting:
+        // 1. Left peak (left rim of cup)
+        // 2. Cup bottom (lowest point)
+        // 3. Right rim (where handle starts)
         
-        const cupPoints: { time: Time; value: number }[] = cupData.cupLows.map(point => ({
-          time: point.time as Time,
-          value: point.price
-        }));
+        // Generate smooth U-shaped curve using quadratic interpolation
+        // The parabola passes through all 3 key points
+        const leftTime = cupData.leftPeakTime;
+        const bottomTime = cupData.cupBottomTime;
+        const rightTime = cupData.rightRimTime;
         
-        const cupSupportLine = chart.addSeries(LineSeries, {
+        const leftPrice = cupData.leftPeakPrice;
+        const bottomPrice = cupData.cupBottomPrice;
+        const rightPrice = cupData.rightRimPrice;
+        
+        // Generate 30 points along the smooth curve
+        const NUM_POINTS = 30;
+        const cupCurvePoints: { time: Time; value: number }[] = [];
+        
+        for (let i = 0; i <= NUM_POINTS; i++) {
+          const t = i / NUM_POINTS; // 0 to 1
+          
+          // Quadratic Bezier-style interpolation for smooth U-shape
+          // Control point is at the bottom of the cup
+          // P(t) = (1-t)^2 * P0 + 2*(1-t)*t * P1 + t^2 * P2
+          // where P0 = left peak, P1 = bottom (control), P2 = right rim
+          
+          const timeValue = (1 - t) * (1 - t) * leftTime + 2 * (1 - t) * t * bottomTime + t * t * rightTime;
+          const priceValue = (1 - t) * (1 - t) * leftPrice + 2 * (1 - t) * t * bottomPrice + t * t * rightPrice;
+          
+          cupCurvePoints.push({
+            time: timeValue as Time,
+            value: priceValue
+          });
+        }
+        
+        const cupCurveLine = chart.addSeries(LineSeries, {
           color: CUP_HANDLE_COLOR,
           lineWidth: 3,
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
         });
-        cupSupportLine.setData(cupPoints);
+        cupCurveLine.setData(cupCurvePoints);
         
-        // Draw handle: trace along the ACTUAL BAR LOWS as support
-        // Acts as support line under the handle candles, connects to cup at right rim low
+        // Draw horizontal lip line at the right rim level
+        const lipLine = chart.addSeries(LineSeries, {
+          color: CUP_HANDLE_COLOR,
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        lipLine.setData([
+          { time: leftTime as Time, value: Math.max(leftPrice, rightPrice) },
+          { time: rightTime as Time, value: Math.max(leftPrice, rightPrice) }
+        ]);
+        
+        // Draw handle as a small consolidation channel
         if (!cupData.cupOnly && cupData.handleLows && cupData.handleLows.length > 0) {
-          // Sort by time and find the handle low
+          // Sort handle lows by time
           const sortedHandleLows = [...cupData.handleLows].sort((a, b) => a.time - b.time);
-          const handleLow = sortedHandleLows.reduce((min, h) => h.price < min.price ? h : min, sortedHandleLows[0]);
           
-          // Find index of handle low - we stop here (no upturn)
-          const handleLowIdx = sortedHandleLows.findIndex(h => h.time === handleLow.time);
+          // Find handle high (approximately at right rim level) and handle low
+          const handleLow = Math.min(...sortedHandleLows.map(h => h.price));
+          const handleHigh = cupData.rightRimPrice; // Handle top is at the rim level
           
-          // Build handle points - starts from last cup point (right rim low) for continuity
-          const handlePoints: { time: Time; value: number }[] = [];
+          // Draw handle as two parallel lines (channel)
+          const handleStartTime = cupData.rightRimTime;
+          const handleEndTime = cupData.handleEndTime;
           
-          // Get right rim bar's low from cupLows (last point) for seamless connection
-          const rightRimLow = cupData.cupLows[cupData.cupLows.length - 1];
-          handlePoints.push({ time: rightRimLow.time as Time, value: rightRimLow.price });
-          
-          // Trace along handle bar lows up to and including handle low, then STOP
-          for (let i = 0; i <= handleLowIdx; i++) {
-            handlePoints.push({
-              time: sortedHandleLows[i].time as Time,
-              value: sortedHandleLows[i].price
-            });
-          }
-          
-          const handleLine = chart.addSeries(LineSeries, {
+          // Top of handle channel (horizontal at rim level, slight downslope allowed)
+          const handleTopLine = chart.addSeries(LineSeries, {
             color: CUP_HANDLE_COLOR,
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
             priceLineVisible: false,
             lastValueVisible: false,
           });
-          handleLine.setData(handlePoints);
+          handleTopLine.setData([
+            { time: handleStartTime as Time, value: handleHigh },
+            { time: handleEndTime as Time, value: handleHigh * 0.98 } // Slight downslope
+          ]);
+          
+          // Bottom of handle channel (support line)
+          const handleBottomLine = chart.addSeries(LineSeries, {
+            color: CUP_HANDLE_COLOR,
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+          });
+          handleBottomLine.setData([
+            { time: handleStartTime as Time, value: handleLow * 1.01 }, // Slight offset from rim
+            { time: handleEndTime as Time, value: handleLow }
+          ]);
         }
       }
     }
