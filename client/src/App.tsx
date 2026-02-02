@@ -16,27 +16,17 @@ import SentinelDashboardPage from "@/pages/SentinelDashboardPage";
 import SentinelEvaluatePage from "@/pages/SentinelEvaluatePage";
 import SentinelTradePage from "@/pages/SentinelTradePage";
 
-function ScannerRouter() {
+function Router() {
   return (
     <Switch>
+      {/* Scanner Routes */}
       <Route path="/" component={ScannerPage} />
       <Route path="/symbol/:symbol" component={SymbolPage} />
       <Route path="/watchlist" component={WatchlistPage} />
-      <Route component={NotFound} />
-    </Switch>
-  );
-}
-
-function SentinelRouter() {
-  return (
-    <Switch>
+      
+      {/* Sentinel Routes */}
       <Route path="/sentinel/login" component={SentinelLoginPage} />
       <Route path="/sentinel/dashboard">
-        <SentinelProtectedRoute>
-          <SentinelDashboardPage />
-        </SentinelProtectedRoute>
-      </Route>
-      <Route path="/sentinel">
         <SentinelProtectedRoute>
           <SentinelDashboardPage />
         </SentinelProtectedRoute>
@@ -47,12 +37,20 @@ function SentinelRouter() {
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/trade/:tradeId">
-        {(params) => (
+        {() => (
           <SentinelProtectedRoute>
             <SentinelTradePage />
           </SentinelProtectedRoute>
         )}
       </Route>
+      <Route path="/sentinel">
+        <SentinelProtectedRoute>
+          <SentinelDashboardPage />
+        </SentinelProtectedRoute>
+      </Route>
+      
+      {/* Catch-all 404 */}
+      <Route component={NotFound} />
     </Switch>
   );
 }
@@ -65,8 +63,7 @@ function App() {
           <TimeframeProvider>
             <ScannerProvider>
               <Toaster />
-              <ScannerRouter />
-              <SentinelRouter />
+              <Router />
             </ScannerProvider>
           </TimeframeProvider>
         </SentinelAuthProvider>
