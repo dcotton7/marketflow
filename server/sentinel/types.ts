@@ -3,8 +3,11 @@ export interface EvaluationRequest {
   direction: 'long' | 'short';
   entryPrice: number;
   stopPrice?: number;
+  stopPriceLevel?: string;
   targetPrice?: number;
+  targetPriceLevel?: string;
   positionSize?: number;
+  positionSizeUnit?: 'shares' | 'dollars';
   thesis?: string;
   deepEval?: boolean;
 }

@@ -38,13 +38,39 @@ Score guidelines:
 - 40-59: Significant issues, recommend avoiding or adjusting
 - 0-39: High risk, strong avoid recommendation`;
 
+const STOP_LEVEL_LABELS: Record<string, string> = {
+  "LOD_TODAY": "Low of Day (Today)",
+  "LOD_YESTERDAY": "Low of Day (Yesterday)",
+  "LOD_WEEKLY": "Low of Day (Weekly)",
+  "5_DMA": "5-Day Moving Average",
+  "10_DMA": "10-Day Moving Average",
+  "21_DMA": "21-Day Moving Average",
+  "50_DMA": "50-Day Moving Average",
+  "6_20_DOWN_CROSS": "6/20 SMA Down Cross (5 min)",
+  "MACD_DOWN_CROSS": "MACD Cross Down",
+};
+
+const TARGET_LEVEL_LABELS: Record<string, string> = {
+  "PREV_DAY_HIGH": "Previous Day High",
+  "5_DAY_HIGH": "Past 5 Day High",
+  "RR_2X": "2x Risk/Reward",
+  "RR_3X": "3x Risk/Reward",
+  "RR_4X": "4x Risk/Reward",
+  "RR_5X": "5x Risk/Reward",
+  "RR_8X": "8x Risk/Reward",
+  "RR_10X": "10x Risk/Reward",
+};
+
 export function buildEvaluationPrompt(
   symbol: string,
   direction: 'long' | 'short',
   entryPrice: number,
   stopPrice?: number,
+  stopPriceLevel?: string,
   targetPrice?: number,
+  targetPriceLevel?: string,
   positionSize?: number,
+  positionSizeUnit?: 'shares' | 'dollars',
   thesis?: string
 ): string {
   let prompt = `Evaluate this trade idea:
@@ -56,6 +82,9 @@ Entry Price: $${entryPrice.toFixed(2)}`;
   if (stopPrice) {
     const riskPercent = Math.abs((entryPrice - stopPrice) / entryPrice * 100);
     prompt += `\nStop Price: $${stopPrice.toFixed(2)} (${riskPercent.toFixed(1)}% risk)`;
+  } else if (stopPriceLevel) {
+    const label = STOP_LEVEL_LABELS[stopPriceLevel] || stopPriceLevel;
+    prompt += `\nStop Level: ${label}`;
   }
 
   if (targetPrice) {
@@ -68,12 +97,22 @@ Entry Price: $${entryPrice.toFixed(2)}`;
       const rrRatio = rewardAmount / riskAmount;
       prompt += `\nRisk/Reward Ratio: ${rrRatio.toFixed(2)}:1`;
     }
+  } else if (targetPriceLevel) {
+    const label = TARGET_LEVEL_LABELS[targetPriceLevel] || targetPriceLevel;
+    prompt += `\nTarget Level: ${label}`;
   }
 
   if (positionSize) {
-    prompt += `\nPosition Size: ${positionSize} shares`;
-    const dollarValue = positionSize * entryPrice;
-    prompt += ` ($${dollarValue.toLocaleString()})`;
+    const unit = positionSizeUnit || 'shares';
+    if (unit === 'shares') {
+      prompt += `\nPosition Size: ${positionSize} shares`;
+      const dollarValue = positionSize * entryPrice;
+      prompt += ` ($${dollarValue.toLocaleString()})`;
+    } else {
+      prompt += `\nPosition Size: $${positionSize.toLocaleString()}`;
+      const shares = Math.floor(positionSize / entryPrice);
+      prompt += ` (~${shares} shares)`;
+    }
   }
 
   if (thesis) {

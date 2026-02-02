@@ -32,8 +32,11 @@ const evaluateSchema = z.object({
   direction: z.enum(["long", "short"]),
   entryPrice: z.number().positive(),
   stopPrice: z.number().positive().optional(),
+  stopPriceLevel: z.string().optional(),
   targetPrice: z.number().positive().optional(),
+  targetPriceLevel: z.string().optional(),
   positionSize: z.number().positive().optional(),
+  positionSizeUnit: z.enum(["shares", "dollars"]).optional(),
   thesis: z.string().optional(),
   deepEval: z.boolean().optional(),
 });
@@ -185,8 +188,11 @@ export function registerSentinelRoutes(app: Express): void {
         direction: data.direction,
         entryPrice: data.entryPrice,
         stopPrice: data.stopPrice,
+        stopPriceLevel: data.stopPriceLevel,
         targetPrice: data.targetPrice,
+        targetPriceLevel: data.targetPriceLevel,
         positionSize: data.positionSize,
+        positionSizeUnit: data.positionSizeUnit,
         thesis: data.thesis,
         deepEval: data.deepEval,
       };
@@ -365,6 +371,65 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Update trade error:", error);
       res.status(500).json({ error: "Failed to update trade" });
+    }
+  });
+
+  // Ticker info endpoint for quick lookup
+  app.get("/api/sentinel/ticker/:symbol", async (req: Request, res: Response) => {
+    const symbolParam = req.params.symbol;
+    const symbol = typeof symbolParam === 'string' ? symbolParam.toUpperCase() : '';
+    if (!symbol) {
+      return res.status(400).json({ error: "Symbol required" });
+    }
+
+    try {
+      // Dynamic import Yahoo Finance
+      const YahooFinanceModule = await import('yahoo-finance2') as any;
+      const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
+      let yf: any;
+      if (typeof YahooFinance === 'function') {
+        yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+      } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
+        yf = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+      } else {
+        yf = YahooFinance;
+      }
+
+      const quote = await yf.quote(symbol);
+      
+      let sector = quote.sector || 'Unknown';
+      let industry = quote.industry || 'Unknown';
+      let description = '';
+      
+      // Try to get detailed info
+      try {
+        const summary = await yf.quoteSummary(symbol, { modules: ['assetProfile'] });
+        if (summary.assetProfile) {
+          sector = summary.assetProfile.sector || sector;
+          industry = summary.assetProfile.industry || industry;
+          description = summary.assetProfile.longBusinessSummary || '';
+          // Truncate description to first 2 sentences
+          if (description) {
+            const sentences = description.match(/[^.!?]+[.!?]+/g) || [];
+            description = sentences.slice(0, 2).join(' ').trim();
+          }
+        }
+      } catch (e) {
+        // Use basic quote data
+      }
+
+      res.json({
+        symbol,
+        name: quote.shortName || quote.longName || symbol,
+        currentPrice: quote.regularMarketPrice,
+        previousClose: quote.regularMarketPreviousClose,
+        sector,
+        industry,
+        description
+      });
+    } catch (error) {
+      console.error(`Ticker lookup failed for ${symbol}:`, error);
+      res.status(404).json({ error: `Symbol ${symbol} not found` });
     }
   });
 

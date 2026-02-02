@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, Loader2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, Loader2, DollarSign, Hash, Info } from "lucide-react";
 
 interface EvaluationResult {
   tradeId: number;
@@ -26,6 +27,39 @@ interface EvaluationResult {
   };
 }
 
+interface TickerInfo {
+  symbol: string;
+  name: string;
+  currentPrice: number;
+  previousClose: number;
+  sector: string;
+  industry: string;
+  description: string;
+}
+
+const STOP_PRICE_CHOICES = [
+  { value: "LOD_TODAY", label: "LOD Today" },
+  { value: "LOD_YESTERDAY", label: "LOD Yesterday" },
+  { value: "LOD_WEEKLY", label: "LOD Weekly" },
+  { value: "5_DMA", label: "5 DMA" },
+  { value: "10_DMA", label: "10 DMA" },
+  { value: "21_DMA", label: "21 DMA" },
+  { value: "50_DMA", label: "50 DMA" },
+  { value: "6_20_DOWN_CROSS", label: "6/20 (5 min) Down Cross" },
+  { value: "MACD_DOWN_CROSS", label: "MACD Cross Down" },
+];
+
+const TARGET_PRICE_CHOICES = [
+  { value: "PREV_DAY_HIGH", label: "Previous Day High" },
+  { value: "5_DAY_HIGH", label: "Past 5 Day High" },
+  { value: "RR_2X", label: "2x Risk/Reward" },
+  { value: "RR_3X", label: "3x Risk/Reward" },
+  { value: "RR_4X", label: "4x Risk/Reward" },
+  { value: "RR_5X", label: "5x Risk/Reward" },
+  { value: "RR_8X", label: "8x Risk/Reward" },
+  { value: "RR_10X", label: "10x Risk/Reward" },
+];
+
 export default function SentinelEvaluatePage() {
   const [, setLocation] = useLocation();
   const { user } = useSentinelAuth();
@@ -33,15 +67,60 @@ export default function SentinelEvaluatePage() {
   const queryClient = useQueryClient();
 
   const [symbol, setSymbol] = useState("");
+  const [debouncedSymbol, setDebouncedSymbol] = useState("");
   const [direction, setDirection] = useState<"long" | "short">("long");
   const [entryPrice, setEntryPrice] = useState("");
+  
+  // Stop price
+  const [stopPriceMode, setStopPriceMode] = useState<"amount" | "choice">("amount");
   const [stopPrice, setStopPrice] = useState("");
+  const [stopPriceChoice, setStopPriceChoice] = useState("");
+  
+  // Target price
+  const [targetPriceMode, setTargetPriceMode] = useState<"amount" | "choice">("amount");
   const [targetPrice, setTargetPrice] = useState("");
+  const [targetPriceChoice, setTargetPriceChoice] = useState("");
+  
+  // Position size
+  const [positionSizeUnit, setPositionSizeUnit] = useState<"shares" | "dollars">("shares");
   const [positionSize, setPositionSize] = useState("");
+  
   const [thesis, setThesis] = useState("");
   const [deepEval, setDeepEval] = useState(false);
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
+
+  // Debounce symbol for ticker lookup
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (symbol.length >= 1) {
+        setDebouncedSymbol(symbol.toUpperCase());
+      } else {
+        setDebouncedSymbol("");
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [symbol]);
+
+  // Async ticker lookup
+  const tickerQuery = useQuery<TickerInfo>({
+    queryKey: ["/api/sentinel/ticker", debouncedSymbol],
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/ticker/${debouncedSymbol}`);
+      if (!res.ok) throw new Error("Ticker not found");
+      return res.json();
+    },
+    enabled: debouncedSymbol.length >= 1,
+    staleTime: 60000,
+    retry: false,
+  });
+
+  // Auto-fill entry price when ticker loads
+  useEffect(() => {
+    if (tickerQuery.data?.currentPrice && !entryPrice) {
+      setEntryPrice(tickerQuery.data.currentPrice.toFixed(2));
+    }
+  }, [tickerQuery.data?.currentPrice]);
 
   const evaluateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -91,9 +170,25 @@ export default function SentinelEvaluatePage() {
       deepEval,
     };
 
-    if (stopPrice) data.stopPrice = parseFloat(stopPrice);
-    if (targetPrice) data.targetPrice = parseFloat(targetPrice);
-    if (positionSize) data.positionSize = parseFloat(positionSize);
+    // Stop price - either amount or choice
+    if (stopPriceMode === "amount" && stopPrice) {
+      data.stopPrice = parseFloat(stopPrice);
+    } else if (stopPriceMode === "choice" && stopPriceChoice) {
+      data.stopPriceLevel = stopPriceChoice;
+    }
+
+    // Target price - either amount or choice
+    if (targetPriceMode === "amount" && targetPrice) {
+      data.targetPrice = parseFloat(targetPrice);
+    } else if (targetPriceMode === "choice" && targetPriceChoice) {
+      data.targetPriceLevel = targetPriceChoice;
+    }
+
+    // Position size with unit
+    if (positionSize) {
+      data.positionSize = parseFloat(positionSize);
+      data.positionSizeUnit = positionSizeUnit;
+    }
     if (thesis) data.thesis = thesis;
 
     evaluateMutation.mutate(data);
@@ -160,6 +255,43 @@ export default function SentinelEvaluatePage() {
                   </div>
                 </div>
 
+                {/* Ticker Info Display */}
+                {debouncedSymbol && (
+                  <div className="p-3 bg-muted/50 rounded-md border">
+                    {tickerQuery.isLoading ? (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">Loading ticker info...</span>
+                      </div>
+                    ) : tickerQuery.isError ? (
+                      <div className="text-sm text-destructive">
+                        Symbol not found
+                      </div>
+                    ) : tickerQuery.data ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-lg" data-testid="text-ticker-name">{tickerQuery.data.name}</span>
+                            <Badge variant="outline" className="text-xs" data-testid="badge-ticker-symbol">{tickerQuery.data.symbol}</Badge>
+                          </div>
+                          <span className="text-xl font-bold text-primary" data-testid="text-current-price">
+                            ${tickerQuery.data.currentPrice?.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          <Badge variant="secondary" className="text-xs" data-testid="badge-sector">{tickerQuery.data.sector}</Badge>
+                          <Badge variant="secondary" className="text-xs" data-testid="badge-industry">{tickerQuery.data.industry}</Badge>
+                        </div>
+                        {tickerQuery.data.description && (
+                          <p className="text-xs text-muted-foreground leading-relaxed" data-testid="text-description">
+                            {tickerQuery.data.description}
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="entryPrice">Entry Price</Label>
                   <Input
@@ -174,11 +306,27 @@ export default function SentinelEvaluatePage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="stopPrice">Stop Price (optional)</Label>
+                {/* Stop Price with mode toggle */}
+                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-medium">Stop Price</Label>
+                    <RadioGroup
+                      value={stopPriceMode}
+                      onValueChange={(v) => setStopPriceMode(v as "amount" | "choice")}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-1">
+                        <RadioGroupItem value="amount" id="stop-amount" />
+                        <Label htmlFor="stop-amount" className="text-xs cursor-pointer">Amount</Label>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <RadioGroupItem value="choice" id="stop-choice" />
+                        <Label htmlFor="stop-choice" className="text-xs cursor-pointer">Level</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  {stopPriceMode === "amount" ? (
                     <Input
-                      id="stopPrice"
                       type="number"
                       step="0.01"
                       data-testid="input-stop-price"
@@ -186,11 +334,43 @@ export default function SentinelEvaluatePage() {
                       onChange={(e) => setStopPrice(e.target.value)}
                       placeholder="145.00"
                     />
+                  ) : (
+                    <Select value={stopPriceChoice} onValueChange={setStopPriceChoice}>
+                      <SelectTrigger data-testid="select-stop-level">
+                        <SelectValue placeholder="Select stop level..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STOP_PRICE_CHOICES.map((choice) => (
+                          <SelectItem key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {/* Target Price with mode toggle */}
+                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-medium">First Profit Trim</Label>
+                    <RadioGroup
+                      value={targetPriceMode}
+                      onValueChange={(v) => setTargetPriceMode(v as "amount" | "choice")}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-1">
+                        <RadioGroupItem value="amount" id="target-amount" />
+                        <Label htmlFor="target-amount" className="text-xs cursor-pointer">Amount</Label>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <RadioGroupItem value="choice" id="target-choice" />
+                        <Label htmlFor="target-choice" className="text-xs cursor-pointer">Level</Label>
+                      </div>
+                    </RadioGroup>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="targetPrice">Target Price (optional)</Label>
+                  {targetPriceMode === "amount" ? (
                     <Input
-                      id="targetPrice"
                       type="number"
                       step="0.01"
                       data-testid="input-target-price"
@@ -198,19 +378,58 @@ export default function SentinelEvaluatePage() {
                       onChange={(e) => setTargetPrice(e.target.value)}
                       placeholder="165.00"
                     />
-                  </div>
+                  ) : (
+                    <Select value={targetPriceChoice} onValueChange={setTargetPriceChoice}>
+                      <SelectTrigger data-testid="select-target-level">
+                        <SelectValue placeholder="Select target level..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TARGET_PRICE_CHOICES.map((choice) => (
+                          <SelectItem key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="positionSize">Position Size $ (optional)</Label>
+                {/* Position Size with unit toggle */}
+                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-medium">Position Size</Label>
+                    <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={positionSizeUnit === "shares" ? "default" : "ghost"}
+                        className="h-7 px-2 gap-1"
+                        onClick={() => setPositionSizeUnit("shares")}
+                        data-testid="button-unit-shares"
+                      >
+                        <Hash className="w-3 h-3" />
+                        <span className="text-xs">Shares</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={positionSizeUnit === "dollars" ? "default" : "ghost"}
+                        className="h-7 px-2 gap-1"
+                        onClick={() => setPositionSizeUnit("dollars")}
+                        data-testid="button-unit-dollars"
+                      >
+                        <DollarSign className="w-3 h-3" />
+                        <span className="text-xs">Dollars</span>
+                      </Button>
+                    </div>
+                  </div>
                   <Input
-                    id="positionSize"
                     type="number"
-                    step="1"
+                    step={positionSizeUnit === "shares" ? "1" : "0.01"}
                     data-testid="input-position-size"
                     value={positionSize}
                     onChange={(e) => setPositionSize(e.target.value)}
-                    placeholder="10000"
+                    placeholder={positionSizeUnit === "shares" ? "100" : "10000"}
                   />
                 </div>
 

@@ -20,8 +20,11 @@ export async function evaluateTrade(
     request.direction,
     request.entryPrice,
     request.stopPrice,
+    request.stopPriceLevel,
     request.targetPrice,
+    request.targetPriceLevel,
     request.positionSize,
+    request.positionSizeUnit,
     request.thesis
   );
 
