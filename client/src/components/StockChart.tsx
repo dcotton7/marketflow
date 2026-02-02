@@ -871,40 +871,55 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
       const cupData = detectCupAndHandleForChart(history);
       if (cupData) {
-        // Draw the cup arc using TRUE PARABOLA formula: y = a*(x-h)² + k
-        // where (h, k) is the cup bottom (vertex of the parabola)
-        // This creates a smooth, rounded U-shape
+        // Draw the cup arc using QUADRATIC BEZIER that EXACTLY passes through cup bottom
+        // Given: P0 (left peak), P2 (right rim), and B (cup bottom that curve must pass through)
+        // Solve for P1 (control point) such that B(t_bottom) = B
+        //
+        // Bezier formula: B(t) = (1-t)² * P0 + 2*(1-t)*t * P1 + t² * P2
+        // Solving for P1: P1 = (B - (1-t)² * P0 - t² * P2) / (2*(1-t)*t)
+        //
+        // where t_bottom = (cupBottomTime - leftPeakTime) / (rightRimTime - leftPeakTime)
+        
         const arcPoints: { time: Time; value: number }[] = [];
-        const arcSegments = 40; // More segments for smoother curve
+        const arcSegments = 50; // High segment count for smooth curve
         
-        // Parabola vertex is at cup bottom
-        const h = cupData.cupBottomTime; // x-coordinate of vertex
-        const k = cupData.cupBottomPrice; // y-coordinate of vertex (minimum)
+        // Endpoints
+        const P0_time = cupData.leftPeakTime;
+        const P0_price = cupData.leftPeakPrice;
+        const P2_time = cupData.rightRimTime;
+        const P2_price = cupData.rightRimPrice;
         
-        // Calculate 'a' coefficient for left side (passes through left peak)
-        // y = a*(x-h)² + k  =>  a = (y - k) / (x - h)²
-        const leftDx = cupData.leftPeakTime - h;
-        const leftDy = cupData.leftPeakPrice - k;
-        const aLeft = leftDx !== 0 ? leftDy / (leftDx * leftDx) : 0;
+        // Point the curve must pass through (cup bottom)
+        const B_time = cupData.cupBottomTime;
+        const B_price = cupData.cupBottomPrice;
         
-        // Calculate 'a' coefficient for right side (passes through right rim)
-        const rightDx = cupData.rightRimTime - h;
-        const rightDy = cupData.rightRimPrice - k;
-        const aRight = rightDx !== 0 ? rightDy / (rightDx * rightDx) : 0;
+        // Calculate t at which curve should pass through cup bottom
+        const totalDuration = P2_time - P0_time;
+        const t_bottom = totalDuration > 0 ? (B_time - P0_time) / totalDuration : 0.5;
         
-        // Generate parabola points from left peak to right rim
-        const totalDuration = cupData.rightRimTime - cupData.leftPeakTime;
+        // Clamp t_bottom to avoid division issues at edges
+        const t = Math.max(0.1, Math.min(0.9, t_bottom));
+        const oneMinusT = 1 - t;
         
+        // Solve for P1: P1 = (B - (1-t)² * P0 - t² * P2) / (2*(1-t)*t)
+        const denominator = 2 * oneMinusT * t;
+        
+        // Calculate control point that forces curve through cup bottom
+        const P1_time = (B_time - oneMinusT * oneMinusT * P0_time - t * t * P2_time) / denominator;
+        const P1_price = (B_price - oneMinusT * oneMinusT * P0_price - t * t * P2_price) / denominator;
+        
+        // Generate Bezier curve points
         for (let i = 0; i <= arcSegments; i++) {
-          const t = i / arcSegments; // 0 to 1
-          const timePoint = cupData.leftPeakTime + (totalDuration * t);
+          const param = i / arcSegments; // 0 to 1
+          const omt = 1 - param;
           
-          // Use left parabola for left side, right parabola for right side
-          const dx = timePoint - h;
-          const a = dx <= 0 ? aLeft : aRight;
-          
-          // Parabola formula: y = a*(x-h)² + k
-          const curveValue = a * dx * dx + k;
+          // Quadratic Bezier formula
+          const timePoint = omt * omt * P0_time + 
+                           2 * omt * param * P1_time + 
+                           param * param * P2_time;
+          const curveValue = omt * omt * P0_price + 
+                            2 * omt * param * P1_price + 
+                            param * param * P2_price;
           
           arcPoints.push({
             time: timePoint as Time,
