@@ -560,6 +560,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
         borderColor: isDark ? '#3a3a4e' : '#e0e0e0',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 10, // Prevent bars from being cut off on right side
       },
     });
     
@@ -870,38 +871,40 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
       const cupData = detectCupAndHandleForChart(history);
       if (cupData) {
-        // Draw the cup arc: Left Peak → Cup Bottom → Right Rim
-        // Use a SMOOTH ROUNDED U-shape that passes through the actual cup bottom at the correct time
+        // Draw the cup arc using TRUE PARABOLA formula: y = a*(x-h)² + k
+        // where (h, k) is the cup bottom (vertex of the parabola)
+        // This creates a smooth, rounded U-shape
         const arcPoints: { time: Time; value: number }[] = [];
-        const totalDuration = cupData.rightRimTime - cupData.leftPeakTime;
-        const arcSegments = 30; // Number of segments for smooth curve
+        const arcSegments = 40; // More segments for smoother curve
         
-        // Calculate where the bottom is as a fraction of the duration
-        const bottomTimeOffset = cupData.cupBottomTime - cupData.leftPeakTime;
-        const bottomFraction = bottomTimeOffset / totalDuration;
+        // Parabola vertex is at cup bottom
+        const h = cupData.cupBottomTime; // x-coordinate of vertex
+        const k = cupData.cupBottomPrice; // y-coordinate of vertex (minimum)
+        
+        // Calculate 'a' coefficient for left side (passes through left peak)
+        // y = a*(x-h)² + k  =>  a = (y - k) / (x - h)²
+        const leftDx = cupData.leftPeakTime - h;
+        const leftDy = cupData.leftPeakPrice - k;
+        const aLeft = leftDx !== 0 ? leftDy / (leftDx * leftDx) : 0;
+        
+        // Calculate 'a' coefficient for right side (passes through right rim)
+        const rightDx = cupData.rightRimTime - h;
+        const rightDy = cupData.rightRimPrice - k;
+        const aRight = rightDx !== 0 ? rightDy / (rightDx * rightDx) : 0;
+        
+        // Generate parabola points from left peak to right rim
+        const totalDuration = cupData.rightRimTime - cupData.leftPeakTime;
         
         for (let i = 0; i <= arcSegments; i++) {
           const t = i / arcSegments; // 0 to 1
           const timePoint = cupData.leftPeakTime + (totalDuration * t);
           
-          // Use PIECEWISE cosine to ensure bottom is at the correct time (bottomFraction)
-          // Left segment: t goes 0 to bottomFraction, curve goes left peak to bottom
-          // Right segment: t goes bottomFraction to 1, curve goes bottom to right rim
-          let curveValue: number;
+          // Use left parabola for left side, right parabola for right side
+          const dx = timePoint - h;
+          const a = dx <= 0 ? aLeft : aRight;
           
-          if (t <= bottomFraction) {
-            // Left side: t=0 is left peak, t=bottomFraction is cup bottom
-            // Map to cos(0) = 1 (top) to cos(PI/2) = 0 (bottom)
-            const normalizedT = t / bottomFraction; // 0 to 1
-            const cosValue = Math.cos(normalizedT * Math.PI / 2); // 1 to 0
-            curveValue = cupData.cupBottomPrice + (cupData.leftPeakPrice - cupData.cupBottomPrice) * cosValue;
-          } else {
-            // Right side: t=bottomFraction is cup bottom, t=1 is right rim
-            // Map to cos(PI/2) = 0 (bottom) to cos(0) = 1 (top)
-            const normalizedT = (t - bottomFraction) / (1 - bottomFraction); // 0 to 1
-            const cosValue = Math.sin(normalizedT * Math.PI / 2); // 0 to 1
-            curveValue = cupData.cupBottomPrice + (cupData.rightRimPrice - cupData.cupBottomPrice) * cosValue;
-          }
+          // Parabola formula: y = a*(x-h)² + k
+          const curveValue = a * dx * dx + k;
           
           arcPoints.push({
             time: timePoint as Time,
