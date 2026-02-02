@@ -153,10 +153,60 @@ export const sentinelRules = pgTable("sentinel_rules", {
   userId: integer("user_id").notNull(),
   name: text("name").notNull(), // e.g., "Wait for pullback to 21 EMA"
   description: text("description"),
-  category: text("category"), // 'entry' | 'exit' | 'sizing' | 'risk' | 'general'
+  category: text("category"), // 'entry' | 'exit' | 'sizing' | 'risk' | 'general' | 'auto_reject' | 'profit_taking' | 'stop_loss' | 'ma_structure' | 'base_quality' | 'breakout' | 'position_sizing' | 'market_regime'
   isActive: boolean("is_active").default(true),
   order: integer("order").default(0), // display order
+  // Enhanced fields for starter rules system
+  source: text("source").default("user"), // 'starter' | 'user' | 'ai_collective' | 'ai_agentic'
+  severity: text("severity").default("warning"), // 'auto_reject' | 'critical' | 'warning' | 'info'
+  isAutoReject: boolean("is_auto_reject").default(false), // If true, trade fails automatically
+  ruleCode: text("rule_code"), // Machine-readable code for programmatic evaluation
+  formula: text("formula"), // Optional formula e.g., "Target = 50 SMA × 1.08"
+  parentRuleId: integer("parent_rule_id"), // For rules derived from AI learning
+  confidenceScore: doublePrecision("confidence_score"), // AI confidence 0-1 for suggested rules
+  adoptionCount: integer("adoption_count").default(0), // How many users adopted this rule
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// AI-generated rule suggestions (collective learning)
+export const sentinelRuleSuggestions = pgTable("sentinel_rule_suggestions", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"),
+  severity: text("severity").default("warning"),
+  isAutoReject: boolean("is_auto_reject").default(false),
+  ruleCode: text("rule_code"),
+  formula: text("formula"),
+  source: text("source").notNull(), // 'ai_collective' | 'ai_agentic'
+  confidenceScore: doublePrecision("confidence_score").notNull(), // AI confidence 0-1
+  supportingData: jsonb("supporting_data").$type<{
+    totalTrades: number;
+    winRate: number;
+    avgPnL: number;
+    sampleSize: number;
+    patternDescription: string;
+  }>(),
+  status: text("status").default("pending"), // 'pending' | 'approved' | 'rejected' | 'expired'
+  adoptionCount: integer("adoption_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+});
+
+// Track rule performance across all users (anonymized aggregation)
+export const sentinelRulePerformance = pgTable("sentinel_rule_performance", {
+  id: serial("id").primaryKey(),
+  ruleCode: text("rule_code").notNull(), // Normalized rule identifier
+  ruleName: text("rule_name").notNull(),
+  category: text("category"),
+  totalTrades: integer("total_trades").default(0),
+  followedCount: integer("followed_count").default(0),
+  notFollowedCount: integer("not_followed_count").default(0),
+  winRateWhenFollowed: doublePrecision("win_rate_when_followed"),
+  winRateWhenNotFollowed: doublePrecision("win_rate_when_not_followed"),
+  avgPnLWhenFollowed: doublePrecision("avg_pnl_when_followed"),
+  avgPnLWhenNotFollowed: doublePrecision("avg_pnl_when_not_followed"),
+  lastUpdated: timestamp("last_updated").defaultNow(),
 });
 
 // Sentinel Schemas
@@ -166,6 +216,8 @@ export const insertSentinelEvaluationSchema = createInsertSchema(sentinelEvaluat
 export const insertSentinelEventSchema = createInsertSchema(sentinelEvents).omit({ id: true, createdAt: true });
 export const insertSentinelWatchlistSchema = createInsertSchema(sentinelWatchlist).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertSentinelRuleSchema = createInsertSchema(sentinelRules).omit({ id: true, createdAt: true });
+export const insertSentinelRuleSuggestionSchema = createInsertSchema(sentinelRuleSuggestions).omit({ id: true, createdAt: true });
+export const insertSentinelRulePerformanceSchema = createInsertSchema(sentinelRulePerformance).omit({ id: true });
 
 // Sentinel Types
 export type SentinelUser = typeof sentinelUsers.$inferSelect;
@@ -174,6 +226,8 @@ export type SentinelEvaluation = typeof sentinelEvaluations.$inferSelect;
 export type SentinelEvent = typeof sentinelEvents.$inferSelect;
 export type SentinelWatchlistItem = typeof sentinelWatchlist.$inferSelect;
 export type SentinelRule = typeof sentinelRules.$inferSelect;
+export type SentinelRuleSuggestion = typeof sentinelRuleSuggestions.$inferSelect;
+export type SentinelRulePerformance = typeof sentinelRulePerformance.$inferSelect;
 
 export type InsertSentinelUser = z.infer<typeof insertSentinelUserSchema>;
 export type InsertSentinelTrade = z.infer<typeof insertSentinelTradeSchema>;
@@ -181,6 +235,8 @@ export type InsertSentinelEvaluation = z.infer<typeof insertSentinelEvaluationSc
 export type InsertSentinelEvent = z.infer<typeof insertSentinelEventSchema>;
 export type InsertSentinelWatchlistItem = z.infer<typeof insertSentinelWatchlistSchema>;
 export type InsertSentinelRule = z.infer<typeof insertSentinelRuleSchema>;
+export type InsertSentinelRuleSuggestion = z.infer<typeof insertSentinelRuleSuggestionSchema>;
+export type InsertSentinelRulePerformance = z.infer<typeof insertSentinelRulePerformanceSchema>;
 
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {

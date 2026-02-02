@@ -60,6 +60,11 @@ interface TradingRule {
   category?: string;
   isActive: boolean;
   order: number;
+  source?: string;
+  severity?: string;
+  isAutoReject?: boolean;
+  ruleCode?: string;
+  formula?: string;
 }
 
 interface DashboardData {
@@ -206,16 +211,38 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
 }
 
 function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (id: number, active: boolean) => void; onDelete: (id: number) => void }) {
-  const categoryColors = {
+  const categoryColors: Record<string, string> = {
     entry: "bg-blue-500/10 text-blue-500",
     exit: "bg-green-500/10 text-green-500",
     sizing: "bg-purple-500/10 text-purple-500",
     risk: "bg-red-500/10 text-red-500",
     general: "bg-muted text-muted-foreground",
+    auto_reject: "bg-red-600/20 text-red-600",
+    profit_taking: "bg-emerald-500/10 text-emerald-500",
+    stop_loss: "bg-orange-500/10 text-orange-500",
+    ma_structure: "bg-cyan-500/10 text-cyan-500",
+    base_quality: "bg-indigo-500/10 text-indigo-500",
+    breakout: "bg-teal-500/10 text-teal-500",
+    position_sizing: "bg-violet-500/10 text-violet-500",
+    market_regime: "bg-amber-500/10 text-amber-500",
+  };
+
+  const severityColors: Record<string, string> = {
+    auto_reject: "bg-red-600 text-white",
+    critical: "bg-orange-500 text-white",
+    warning: "bg-yellow-500/20 text-yellow-600",
+    info: "bg-blue-500/20 text-blue-500",
+  };
+
+  const sourceLabels: Record<string, string> = {
+    starter: "Starter",
+    user: "Custom",
+    ai_collective: "AI Learned",
+    ai_agentic: "AI Agent",
   };
 
   return (
-    <div className={`flex items-center justify-between p-3 border rounded-md ${!rule.isActive ? 'opacity-50' : ''}`} data-testid={`rule-${rule.id}`}>
+    <div className={`flex items-center justify-between p-3 border rounded-md ${!rule.isActive ? 'opacity-50' : ''} ${rule.isAutoReject ? 'border-red-500/30' : ''}`} data-testid={`rule-${rule.id}`}>
       <div className="flex items-center gap-3 flex-1">
         <input
           type="checkbox"
@@ -225,16 +252,34 @@ function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (
           data-testid={`checkbox-rule-${rule.id}`}
         />
         <div className="flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {rule.isAutoReject && (
+              <Badge className="bg-red-600 text-white text-xs">AUTO-REJECT</Badge>
+            )}
             <span className="font-medium">{rule.name}</span>
             {rule.category && (
-              <Badge className={categoryColors[rule.category as keyof typeof categoryColors] || categoryColors.general}>
-                {rule.category}
+              <Badge className={`${categoryColors[rule.category] || categoryColors.general} text-xs`}>
+                {rule.category.replace('_', ' ')}
+              </Badge>
+            )}
+            {rule.source && rule.source !== 'user' && (
+              <Badge variant="outline" className="text-xs">
+                {sourceLabels[rule.source] || rule.source}
+              </Badge>
+            )}
+            {rule.severity && rule.severity !== 'warning' && !rule.isAutoReject && (
+              <Badge className={`${severityColors[rule.severity] || ''} text-xs`}>
+                {rule.severity}
               </Badge>
             )}
           </div>
           {rule.description && (
             <p className="text-sm text-muted-foreground mt-1">{rule.description}</p>
+          )}
+          {rule.formula && (
+            <p className="text-xs text-muted-foreground mt-1 font-mono bg-muted/50 px-2 py-1 rounded inline-block">
+              {rule.formula}
+            </p>
           )}
         </div>
       </div>
@@ -256,6 +301,7 @@ export default function SentinelDashboardPage() {
   const [showAddRule, setShowAddRule] = useState(false);
   const [watchlistForm, setWatchlistForm] = useState({ symbol: "", targetEntry: "", thesis: "", priority: "medium" });
   const [ruleForm, setRuleForm] = useState({ name: "", description: "", category: "entry" });
+  const [ruleFilter, setRuleFilter] = useState<string>("all");
 
   const { data: dashboard, isLoading, error } = useQuery<DashboardData>({
     queryKey: ["/api/sentinel/dashboard"],
@@ -469,7 +515,33 @@ export default function SentinelDashboardPage() {
           </TabsContent>
 
           <TabsContent value="rules" className="space-y-4">
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { value: "all", label: "All" },
+                  { value: "auto_reject", label: "Auto-Reject" },
+                  { value: "entry", label: "Entry" },
+                  { value: "exit", label: "Exit" },
+                  { value: "profit_taking", label: "Profit" },
+                  { value: "stop_loss", label: "Stop" },
+                  { value: "position_sizing", label: "Sizing" },
+                  { value: "ma_structure", label: "MA" },
+                  { value: "base_quality", label: "Base" },
+                  { value: "breakout", label: "Breakout" },
+                  { value: "market_regime", label: "Regime" },
+                ].map((cat) => (
+                  <Button
+                    key={cat.value}
+                    size="sm"
+                    variant={ruleFilter === cat.value ? "default" : "outline"}
+                    onClick={() => setRuleFilter(cat.value)}
+                    data-testid={`button-filter-${cat.value}`}
+                    className="text-xs"
+                  >
+                    {cat.label}
+                  </Button>
+                ))}
+              </div>
               <Button onClick={() => setShowAddRule(true)} data-testid="button-add-rule">
                 <Plus className="w-4 h-4 mr-2" />
                 Add Rule
@@ -477,7 +549,10 @@ export default function SentinelDashboardPage() {
             </div>
             <Card>
               <CardHeader>
-                <CardTitle>My Trading Rules</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  My Trading Rules
+                  <Badge variant="outline" className="text-xs">{rules.length} rules</Badge>
+                </CardTitle>
                 <CardDescription>Define your rules. Track adherence. Build discipline.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -486,14 +561,23 @@ export default function SentinelDashboardPage() {
                     No rules defined yet. Add your trading rules to track discipline.
                   </div>
                 ) : (
-                  rules.map((rule) => (
-                    <RuleItem
-                      key={rule.id}
-                      rule={rule}
-                      onToggle={(id, isActive) => toggleRuleMutation.mutate({ id, isActive })}
-                      onDelete={(id) => deleteRuleMutation.mutate(id)}
-                    />
-                  ))
+                  <>
+                    {rules
+                      .filter((r) => ruleFilter === "all" || r.category === ruleFilter)
+                      .map((rule) => (
+                        <RuleItem
+                          key={rule.id}
+                          rule={rule}
+                          onToggle={(id, isActive) => toggleRuleMutation.mutate({ id, isActive })}
+                          onDelete={(id) => deleteRuleMutation.mutate(id)}
+                        />
+                      ))}
+                    {rules.filter((r) => ruleFilter === "all" || r.category === ruleFilter).length === 0 && (
+                      <div className="text-center text-muted-foreground py-4">
+                        No rules in this category
+                      </div>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -621,10 +705,16 @@ export default function SentinelDashboardPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="entry">Entry</SelectItem>
-                  <SelectItem value="exit">Exit</SelectItem>
-                  <SelectItem value="sizing">Position Sizing</SelectItem>
+                  <SelectItem value="auto_reject">Auto-Reject (Trade Fails)</SelectItem>
+                  <SelectItem value="entry">Entry Timing</SelectItem>
+                  <SelectItem value="exit">Exit / Profit Taking</SelectItem>
+                  <SelectItem value="stop_loss">Stop Loss</SelectItem>
                   <SelectItem value="risk">Risk Management</SelectItem>
+                  <SelectItem value="position_sizing">Position Sizing</SelectItem>
+                  <SelectItem value="ma_structure">MA Structure</SelectItem>
+                  <SelectItem value="base_quality">Base / Pattern Quality</SelectItem>
+                  <SelectItem value="breakout">Breakout</SelectItem>
+                  <SelectItem value="market_regime">Market Regime</SelectItem>
                   <SelectItem value="general">General</SelectItem>
                 </SelectContent>
               </Select>

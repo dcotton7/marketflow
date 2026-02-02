@@ -126,6 +126,15 @@ export function registerSentinelRoutes(app: Express): void {
         passwordHash,
       });
 
+      // Seed starter rules for new user
+      try {
+        await sentinelModels.seedStarterRulesForUser(user.id);
+        console.log(`[Sentinel] Seeded ${61} starter rules for user ${user.username}`);
+      } catch (seedError) {
+        console.error("Failed to seed starter rules:", seedError);
+        // Don't fail registration if seeding fails
+      }
+
       req.session.userId = user.id;
       req.session.username = user.username;
 

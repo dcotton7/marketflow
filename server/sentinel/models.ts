@@ -1,10 +1,13 @@
 import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
+  sentinelRuleSuggestions, sentinelRulePerformance,
   type SentinelUser, type SentinelTrade, type SentinelEvaluation, type SentinelEvent, type SentinelWatchlistItem, type SentinelRule,
+  type SentinelRuleSuggestion, type SentinelRulePerformance,
   type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule
 } from "@shared/schema";
 import { eq, desc, and, asc } from "drizzle-orm";
+import { STARTER_RULES } from "./starterRules";
 
 export const sentinelModels = {
   async createUser(data: InsertSentinelUser): Promise<SentinelUser> {
@@ -164,5 +167,152 @@ export const sentinelModels = {
     return db.select().from(sentinelTrades)
       .where(and(eq(sentinelTrades.userId, userId), eq(sentinelTrades.status, 'closed')))
       .orderBy(desc(sentinelTrades.exitDate));
+  },
+
+  // Seed starter rules for a new user
+  async seedStarterRulesForUser(userId: number): Promise<SentinelRule[]> {
+    const rules = STARTER_RULES.map(rule => ({
+      userId,
+      name: rule.name,
+      description: rule.description,
+      category: rule.category,
+      isActive: true,
+      order: rule.order,
+      source: 'starter' as const,
+      severity: rule.severity,
+      isAutoReject: rule.isAutoReject,
+      ruleCode: rule.ruleCode,
+      formula: rule.formula,
+    }));
+
+    const insertedRules = await db.insert(sentinelRules).values(rules).returning();
+    return insertedRules;
+  },
+
+  // Get rules by category
+  async getRulesByCategory(userId: number, category: string): Promise<SentinelRule[]> {
+    return db.select().from(sentinelRules)
+      .where(and(eq(sentinelRules.userId, userId), eq(sentinelRules.category, category)))
+      .orderBy(asc(sentinelRules.order));
+  },
+
+  // Get auto-reject rules
+  async getAutoRejectRules(userId: number): Promise<SentinelRule[]> {
+    return db.select().from(sentinelRules)
+      .where(and(
+        eq(sentinelRules.userId, userId), 
+        eq(sentinelRules.isAutoReject, true),
+        eq(sentinelRules.isActive, true)
+      ))
+      .orderBy(asc(sentinelRules.order));
+  },
+
+  // Rule suggestions methods
+  async getPendingSuggestions(): Promise<SentinelRuleSuggestion[]> {
+    return db.select().from(sentinelRuleSuggestions)
+      .where(eq(sentinelRuleSuggestions.status, 'pending'))
+      .orderBy(desc(sentinelRuleSuggestions.confidenceScore));
+  },
+
+  async adoptSuggestion(suggestionId: number, userId: number): Promise<SentinelRule> {
+    const [suggestion] = await db.select().from(sentinelRuleSuggestions)
+      .where(eq(sentinelRuleSuggestions.id, suggestionId));
+    
+    if (!suggestion) {
+      throw new Error('Suggestion not found');
+    }
+
+    // Create rule from suggestion
+    const [rule] = await db.insert(sentinelRules).values({
+      userId,
+      name: suggestion.name,
+      description: suggestion.description,
+      category: suggestion.category,
+      isActive: true,
+      order: 100, // Add at end
+      source: suggestion.source,
+      severity: suggestion.severity,
+      isAutoReject: suggestion.isAutoReject,
+      ruleCode: suggestion.ruleCode,
+      formula: suggestion.formula,
+      confidenceScore: suggestion.confidenceScore,
+    }).returning();
+
+    // Increment adoption count
+    await db.update(sentinelRuleSuggestions)
+      .set({ adoptionCount: (suggestion.adoptionCount || 0) + 1 })
+      .where(eq(sentinelRuleSuggestions.id, suggestionId));
+
+    return rule;
+  },
+
+  // Rule performance tracking
+  async updateRulePerformance(
+    ruleCode: string, 
+    ruleName: string, 
+    category: string | null,
+    followed: boolean, 
+    won: boolean, 
+    pnl: number
+  ): Promise<void> {
+    const [existing] = await db.select().from(sentinelRulePerformance)
+      .where(eq(sentinelRulePerformance.ruleCode, ruleCode));
+
+    if (existing) {
+      const newFollowed = followed ? (existing.followedCount || 0) + 1 : existing.followedCount || 0;
+      const newNotFollowed = !followed ? (existing.notFollowedCount || 0) + 1 : existing.notFollowedCount || 0;
+      const newTotal = (existing.totalTrades || 0) + 1;
+
+      // Update win rates (simple running average for now)
+      let winRateFollowed = existing.winRateWhenFollowed;
+      let winRateNotFollowed = existing.winRateWhenNotFollowed;
+      let avgPnLFollowed = existing.avgPnLWhenFollowed;
+      let avgPnLNotFollowed = existing.avgPnLWhenNotFollowed;
+
+      if (followed) {
+        const prevWins = (existing.winRateWhenFollowed || 0) * (existing.followedCount || 0);
+        winRateFollowed = (prevWins + (won ? 1 : 0)) / newFollowed;
+        const prevPnL = (existing.avgPnLWhenFollowed || 0) * (existing.followedCount || 0);
+        avgPnLFollowed = (prevPnL + pnl) / newFollowed;
+      } else {
+        const prevWins = (existing.winRateWhenNotFollowed || 0) * (existing.notFollowedCount || 0);
+        winRateNotFollowed = (prevWins + (won ? 1 : 0)) / newNotFollowed;
+        const prevPnL = (existing.avgPnLWhenNotFollowed || 0) * (existing.notFollowedCount || 0);
+        avgPnLNotFollowed = (prevPnL + pnl) / newNotFollowed;
+      }
+
+      await db.update(sentinelRulePerformance)
+        .set({
+          totalTrades: newTotal,
+          followedCount: newFollowed,
+          notFollowedCount: newNotFollowed,
+          winRateWhenFollowed: winRateFollowed,
+          winRateWhenNotFollowed: winRateNotFollowed,
+          avgPnLWhenFollowed: avgPnLFollowed,
+          avgPnLWhenNotFollowed: avgPnLNotFollowed,
+          lastUpdated: new Date(),
+        })
+        .where(eq(sentinelRulePerformance.id, existing.id));
+    } else {
+      // Create new performance record
+      await db.insert(sentinelRulePerformance).values({
+        ruleCode,
+        ruleName,
+        category,
+        totalTrades: 1,
+        followedCount: followed ? 1 : 0,
+        notFollowedCount: followed ? 0 : 1,
+        winRateWhenFollowed: followed && won ? 1 : followed ? 0 : null,
+        winRateWhenNotFollowed: !followed && won ? 1 : !followed ? 0 : null,
+        avgPnLWhenFollowed: followed ? pnl : null,
+        avgPnLWhenNotFollowed: !followed ? pnl : null,
+      });
+    }
+  },
+
+  // Get rule performance stats
+  async getRulePerformanceStats(): Promise<SentinelRulePerformance[]> {
+    return db.select().from(sentinelRulePerformance)
+      .orderBy(desc(sentinelRulePerformance.totalTrades));
   }
 };
