@@ -1,4 +1,24 @@
-import yahooFinance from "yahoo-finance2";
+let yahooFinance: any = null;
+
+async function getYahooFinance() {
+  if (yahooFinance) return yahooFinance;
+  
+  try {
+    const YahooFinanceModule = await import('yahoo-finance2') as any;
+    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
+    if (typeof YahooFinance === 'function') {
+      yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+    } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
+      yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+    } else {
+      yahooFinance = YahooFinance;
+    }
+    return yahooFinance;
+  } catch (error) {
+    console.error("Failed to initialize YahooFinance:", error);
+    throw error;
+  }
+}
 
 export interface TechnicalData {
   symbol: string;
@@ -56,7 +76,8 @@ interface HistoricalQuote {
 
 async function fetchQuote(symbol: string): Promise<{ price: number; open: number; high: number; low: number } | null> {
   try {
-    const quote = await yahooFinance.quote(symbol) as any;
+    const yf = await getYahooFinance();
+    const quote = await yf.quote(symbol) as any;
     return {
       price: quote.regularMarketPrice || 0,
       open: quote.regularMarketOpen || 0,
@@ -71,11 +92,12 @@ async function fetchQuote(symbol: string): Promise<{ price: number; open: number
 
 async function fetchHistorical(symbol: string, days: number): Promise<HistoricalQuote[]> {
   try {
+    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10); // Extra buffer
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",
@@ -244,13 +266,14 @@ export async function fetchHistoricalTechnicalData(
   targetDate: Date
 ): Promise<TechnicalData | null> {
   try {
+    const yf = await getYahooFinance();
     // Fetch historical data going back far enough for 200 SMA calculation
     const endDate = new Date(targetDate);
     endDate.setDate(endDate.getDate() + 1); // Include the target date
     const startDate = new Date(targetDate);
     startDate.setDate(startDate.getDate() - 300); // Extra buffer for 200 SMA
     
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",

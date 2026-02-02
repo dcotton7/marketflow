@@ -1,4 +1,24 @@
-import yahooFinance from "yahoo-finance2";
+let yahooFinance: any = null;
+
+async function getYahooFinance() {
+  if (yahooFinance) return yahooFinance;
+  
+  try {
+    const YahooFinanceModule = await import('yahoo-finance2') as any;
+    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
+    if (typeof YahooFinance === 'function') {
+      yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+    } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
+      yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+    } else {
+      yahooFinance = YahooFinance;
+    }
+    return yahooFinance;
+  } catch (error) {
+    console.error("Failed to initialize YahooFinance:", error);
+    throw error;
+  }
+}
 
 export interface InstrumentTrend {
   symbol: string;
@@ -96,11 +116,12 @@ function calculateSlope(prices: number[], period: number): "rising" | "falling" 
 
 async function fetchHistoricalPrices(symbol: string, days: number): Promise<number[]> {
   try {
+    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10);
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",
@@ -115,11 +136,12 @@ async function fetchHistoricalPrices(symbol: string, days: number): Promise<numb
 
 async function fetchWeeklyPrices(symbol: string, weeks: number): Promise<number[]> {
   try {
+    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - weeks * 7 - 30);
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
       interval: "1wk",
@@ -140,11 +162,12 @@ interface OHLCCandle {
 
 async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[]> {
   try {
+    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10);
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
       interval: "1d",
@@ -159,11 +182,12 @@ async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[
 
 async function fetchWeeklyOHLC(symbol: string, weeks: number): Promise<OHLCCandle[]> {
   try {
+    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - weeks * 7 - 30);
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
       interval: "1wk",
@@ -450,7 +474,8 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
 
 export async function fetchSectorSentiment(symbol: string): Promise<SectorTrend | null> {
   try {
-    const quote = await yahooFinance.quoteSummary(symbol, { modules: ["assetProfile"] }) as { assetProfile?: { sector?: string } };
+    const yf = await getYahooFinance();
+    const quote = await yf.quoteSummary(symbol, { modules: ["assetProfile"] }) as { assetProfile?: { sector?: string } };
     const sector = quote.assetProfile?.sector;
 
     if (!sector || !SECTOR_ETF_MAP[sector]) {
@@ -524,12 +549,13 @@ export function getSentimentCacheAge(): number {
 // Fetch historical prices ending on a specific date
 async function fetchHistoricalPricesAsOf(symbol: string, endDate: Date, days: number): Promise<number[]> {
   try {
+    const yf = await getYahooFinance();
     const end = new Date(endDate);
     end.setDate(end.getDate() + 1); // Include the target date
     const start = new Date(endDate);
     start.setDate(start.getDate() - days - 10);
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: start,
       period2: end,
       interval: "1d",
@@ -547,12 +573,13 @@ async function fetchHistoricalPricesAsOf(symbol: string, endDate: Date, days: nu
 // Fetch weekly prices ending on a specific date
 async function fetchWeeklyPricesAsOf(symbol: string, endDate: Date, weeks: number): Promise<number[]> {
   try {
+    const yf = await getYahooFinance();
     const end = new Date(endDate);
     end.setDate(end.getDate() + 7); // Buffer to include the week
     const start = new Date(endDate);
     start.setDate(start.getDate() - weeks * 7 - 30);
 
-    const result = await yahooFinance.historical(symbol, {
+    const result = await yf.historical(symbol, {
       period1: start,
       period2: end,
       interval: "1wk",
@@ -663,7 +690,8 @@ export async function fetchHistoricalMarketSentiment(targetDate: Date): Promise<
 // Fetch sector sentiment as of a historical date
 export async function fetchHistoricalSectorSentiment(symbol: string, targetDate: Date): Promise<SectorTrend | null> {
   try {
-    const quote = await yahooFinance.quoteSummary(symbol, { modules: ["assetProfile"] }) as { assetProfile?: { sector?: string } };
+    const yf = await getYahooFinance();
+    const quote = await yf.quoteSummary(symbol, { modules: ["assetProfile"] }) as { assetProfile?: { sector?: string } };
     const sector = quote.assetProfile?.sector;
 
     if (!sector || !SECTOR_ETF_MAP[sector]) {
