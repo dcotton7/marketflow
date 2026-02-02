@@ -205,7 +205,8 @@ export function buildEvaluationPrompt(
   thesis?: string,
   traderContext?: TraderContext,
   marketContext?: MarketContext,
-  technicalData?: TechnicalData | null
+  technicalData?: TechnicalData | null,
+  historicalDate?: Date | null
 ): string {
   const accountSize = traderContext?.accountSize || 1000000;
   
@@ -215,6 +216,23 @@ Symbol: ${symbol}
 Direction: ${direction.toUpperCase()}
 Entry Price: $${entryPrice.toFixed(2)}
 Account Size: $${accountSize.toLocaleString()}`;
+
+  // Add historical context if analyzing a past trade
+  if (historicalDate) {
+    const dateStr = historicalDate.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const timeStr = historicalDate.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true
+    });
+    prompt += `\n\n>>> HISTORICAL ANALYSIS - Trade Date: ${dateStr} at ${timeStr} <<<
+All market data, sentiment, and technicals below are AS OF this date, not current.`
+  }
 
   // Calculate actual stop price from level if needed
   let actualStopPrice = stopPrice;

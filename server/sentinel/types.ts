@@ -11,6 +11,8 @@ export interface EvaluationRequest {
   thesis?: string;
   deepEval?: boolean;
   historicalAnalysis?: boolean; // Reviewing a past trade vs. evaluating a new one
+  tradeDate?: string; // ISO date string for historical trades (YYYY-MM-DD)
+  tradeTime?: string; // Time of trade for historical analysis (HH:MM)
 }
 
 export interface RiskFlagDetail {

@@ -1,8 +1,8 @@
 import OpenAI from "openai";
 import { SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPT, PROMPT_VERSION, buildEvaluationPrompt, type MarketContext } from "./prompts";
 import { sentinelModels } from "./models";
-import { fetchMarketSentiment, fetchSectorSentiment } from "./sentiment";
-import { fetchTechnicalData } from "./technicals";
+import { fetchMarketSentiment, fetchSectorSentiment, fetchHistoricalMarketSentiment, fetchHistoricalSectorSentiment } from "./sentiment";
+import { fetchTechnicalData, fetchHistoricalTechnicalData } from "./technicals";
 import type { EvaluationRequest, EvaluationResult } from "./types";
 
 const openai = new OpenAI({
@@ -18,7 +18,18 @@ export async function evaluateTrade(
   const model = request.deepEval ? "gpt-5.2" : "gpt-5.1";
   const isHistorical = request.historicalAnalysis || false;
   
+  // Parse historical date if provided
+  let historicalDate: Date | null = null;
+  if (isHistorical && request.tradeDate) {
+    historicalDate = new Date(request.tradeDate);
+    if (request.tradeTime) {
+      const [hours, minutes] = request.tradeTime.split(':').map(Number);
+      historicalDate.setHours(hours, minutes, 0, 0);
+    }
+  }
+  
   // Fetch all context data in parallel
+  // Use historical data fetchers if a historical date is provided
   const [
     user,
     activePositions,
@@ -32,9 +43,15 @@ export async function evaluateTrade(
     sentinelModels.getTradesByStatus(userId, "active"),
     sentinelModels.getWatchlistByUser(userId),
     sentinelModels.getActiveRulesByUser(userId),
-    fetchMarketSentiment().catch(() => null),
-    fetchSectorSentiment(request.symbol).catch(() => null),
-    fetchTechnicalData(request.symbol).catch(() => null),
+    historicalDate 
+      ? fetchHistoricalMarketSentiment(historicalDate).catch(() => null)
+      : fetchMarketSentiment().catch(() => null),
+    historicalDate
+      ? fetchHistoricalSectorSentiment(request.symbol, historicalDate).catch(() => null)
+      : fetchSectorSentiment(request.symbol).catch(() => null),
+    historicalDate
+      ? fetchHistoricalTechnicalData(request.symbol, historicalDate).catch(() => null)
+      : fetchTechnicalData(request.symbol).catch(() => null),
   ]);
 
   const accountSize = user?.accountSize || 1000000;
@@ -94,7 +111,8 @@ export async function evaluateTrade(
     request.thesis,
     traderContext,
     marketContext,
-    technicalData
+    technicalData,
+    historicalDate
   );
 
   const systemPrompt = isHistorical ? HISTORICAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
@@ -170,15 +188,16 @@ export async function evaluateTrade(
   }
   
   // Normalize riskFlags - support both old string[] and new object[] format
-  let normalizedRiskFlags: { flag: string; severity: string; detail: string }[] = [];
+  let normalizedRiskFlags: { flag: string; severity: 'high' | 'medium' | 'low'; detail: string }[] = [];
   if (Array.isArray(parsed.riskFlags)) {
     normalizedRiskFlags = parsed.riskFlags.map((rf: any) => {
       if (typeof rf === 'string') {
-        return { flag: rf, severity: 'medium', detail: rf };
+        return { flag: rf, severity: 'medium' as const, detail: rf };
       }
+      const severity = (['high', 'medium', 'low'].includes(rf.severity) ? rf.severity : 'medium') as 'high' | 'medium' | 'low';
       return {
         flag: rf.flag || 'UNKNOWN',
-        severity: rf.severity || 'medium',
+        severity,
         detail: rf.detail || rf.flag || '',
       };
     });

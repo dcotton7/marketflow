@@ -134,6 +134,8 @@ export default function SentinelEvaluatePage() {
   const [thesis, setThesis] = useState("");
   const [deepEval, setDeepEval] = useState(false);
   const [historicalAnalysis, setHistoricalAnalysis] = useState(false);
+  const [tradeDate, setTradeDate] = useState("");
+  const [tradeTime, setTradeTime] = useState("");
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
 
@@ -246,6 +248,12 @@ export default function SentinelEvaluatePage() {
       data.positionSizeUnit = positionSizeUnit;
     }
     if (thesis) data.thesis = thesis;
+
+    // Add historical date/time if in historical mode
+    if (historicalAnalysis) {
+      if (tradeDate) data.tradeDate = tradeDate;
+      if (tradeTime) data.tradeTime = tradeTime;
+    }
 
     evaluateMutation.mutate(data);
   };
@@ -543,17 +551,55 @@ export default function SentinelEvaluatePage() {
                     />
                   </div>
                   
-                  <div className="flex items-center justify-between p-3 bg-muted rounded-md">
-                    <div>
-                      <Label htmlFor="historicalAnalysis" className="font-medium">Historical Analysis</Label>
-                      <p className="text-xs text-muted-foreground">Review a past trade for process quality</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-muted rounded-md">
+                      <div>
+                        <Label htmlFor="historicalAnalysis" className="font-medium">Historical Analysis</Label>
+                        <p className="text-xs text-muted-foreground">Review a past trade for process quality</p>
+                      </div>
+                      <Switch
+                        id="historicalAnalysis"
+                        checked={historicalAnalysis}
+                        onCheckedChange={setHistoricalAnalysis}
+                        data-testid="switch-historical-analysis"
+                      />
                     </div>
-                    <Switch
-                      id="historicalAnalysis"
-                      checked={historicalAnalysis}
-                      onCheckedChange={setHistoricalAnalysis}
-                      data-testid="switch-historical-analysis"
-                    />
+                    
+                    {historicalAnalysis && (
+                      <div className="p-3 bg-muted/50 rounded-md border space-y-3">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Clock className="w-4 h-4" />
+                          <span>When did you take this trade?</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label htmlFor="tradeDate" className="text-xs">Date</Label>
+                            <Input
+                              id="tradeDate"
+                              type="date"
+                              value={tradeDate}
+                              onChange={(e) => setTradeDate(e.target.value)}
+                              max={new Date().toISOString().split('T')[0]}
+                              data-testid="input-trade-date"
+                              required={historicalAnalysis}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="tradeTime" className="text-xs">Time (Market Hours)</Label>
+                            <Input
+                              id="tradeTime"
+                              type="time"
+                              value={tradeTime}
+                              onChange={(e) => setTradeTime(e.target.value)}
+                              data-testid="input-trade-time"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Market data and sentiment will be pulled from this date/time for accurate analysis.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 

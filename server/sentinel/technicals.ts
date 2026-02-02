@@ -235,6 +235,125 @@ export async function fetchTechnicalData(symbol: string): Promise<TechnicalData 
   }
 }
 
+// Fetch historical technical data for a specific past date
+export async function fetchHistoricalTechnicalData(
+  symbol: string, 
+  targetDate: Date
+): Promise<TechnicalData | null> {
+  try {
+    // Fetch historical data going back far enough for 200 SMA calculation
+    const endDate = new Date(targetDate);
+    endDate.setDate(endDate.getDate() + 1); // Include the target date
+    const startDate = new Date(targetDate);
+    startDate.setDate(startDate.getDate() - 300); // Extra buffer for 200 SMA
+    
+    const result = await yahooFinance.historical(symbol, {
+      period1: startDate,
+      period2: endDate,
+      interval: "1d",
+    }) as HistoricalQuote[];
+    
+    // Sort by date descending
+    const allData = result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    
+    // Find the target date index (or closest prior trading day)
+    const targetTime = targetDate.getTime();
+    let targetIndex = allData.findIndex(d => {
+      const dTime = new Date(d.date).getTime();
+      return dTime <= targetTime;
+    });
+    
+    if (targetIndex === -1 || allData.length < 5) {
+      console.error(`Insufficient historical data for ${symbol} on ${targetDate.toISOString()}`);
+      return null;
+    }
+    
+    // Slice from target date onwards (historical perspective)
+    const historical = allData.slice(targetIndex);
+    const targetDay = historical[0];
+    const yesterday = historical[1] || historical[0];
+    const closes = historical.map(c => c.close);
+    
+    // 5-day high/low from that perspective
+    const last5 = historical.slice(0, 5);
+    const fiveDayHigh = Math.max(...last5.map(c => c.high));
+    const fiveDayLow = Math.min(...last5.map(c => c.low));
+    
+    // Weekly range - calculate from that date's week
+    const targetDayOfWeek = new Date(targetDay.date).getDay();
+    const daysFromMonday = targetDayOfWeek === 0 ? 6 : targetDayOfWeek - 1;
+    const weekCandles = historical.slice(0, daysFromMonday + 1);
+    const weeklyRange = weekCandles.length > 0 
+      ? { low: Math.min(...weekCandles.map(c => c.low)), high: Math.max(...weekCandles.map(c => c.high)) }
+      : { low: targetDay.low, high: targetDay.high };
+    
+    // Moving averages as of that date
+    const sma5 = calculateSMA(closes, 5);
+    const sma10 = calculateSMA(closes, 10);
+    const sma21 = calculateSMA(closes, 21);
+    const sma50 = calculateSMA(closes, 50);
+    const sma200 = calculateSMA(closes, 200);
+    
+    // ATR as of that date
+    const atr14 = calculateATR(historical, 14);
+    
+    // Average volume as of that date
+    const volumes = historical.slice(0, 20).map(c => c.volume);
+    const avgVolume20 = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    
+    // Base structure as of that date
+    const base = findBaseStructure(historical);
+    
+    // Use close price as the "current" price for that historical date
+    const priceOnDate = targetDay.close;
+    
+    // Distance from MAs
+    const distanceFromSma21 = ((priceOnDate - sma21) / sma21) * 100;
+    const distanceFromSma50 = ((priceOnDate - sma50) / sma50) * 100;
+    const distanceFromSma200 = ((priceOnDate - sma200) / sma200) * 100;
+    
+    return {
+      symbol: symbol.toUpperCase(),
+      currentPrice: priceOnDate,
+      
+      todayOpen: targetDay.open,
+      todayHigh: targetDay.high,
+      todayLow: targetDay.low,
+      
+      yesterdayHigh: yesterday.high,
+      yesterdayLow: yesterday.low,
+      yesterdayClose: yesterday.close,
+      
+      weeklyLow: weeklyRange.low,
+      weeklyHigh: weeklyRange.high,
+      
+      fiveDayHigh,
+      fiveDayLow,
+      
+      sma5,
+      sma10,
+      sma21,
+      sma50,
+      sma200,
+      
+      atr14,
+      avgVolume20,
+      
+      baseBottom: base.bottom,
+      baseTop: base.top,
+      
+      distanceFromSma21,
+      distanceFromSma50,
+      distanceFromSma200,
+      
+      fetchedAt: targetDate, // Mark as the historical date
+    };
+  } catch (error) {
+    console.error(`Failed to fetch historical technical data for ${symbol} on ${targetDate}:`, error);
+    return null;
+  }
+}
+
 // Resolve level-based stop/target to actual price
 export function resolveLevelPrice(
   level: string,
