@@ -870,89 +870,49 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
     
     if (showPatternViz && selectedPattern === 'Cup and Handle' && history.length > 30) {
       const cupData = detectCupAndHandleForChart(history);
-      if (cupData) {
-        // Draw the cup arc using QUADRATIC BEZIER that EXACTLY passes through cup bottom
-        // Given: P0 (left peak), P2 (right rim), and B (cup bottom that curve must pass through)
-        // Solve for P1 (control point) such that B(t_bottom) = B
-        //
-        // Bezier formula: B(t) = (1-t)² * P0 + 2*(1-t)*t * P1 + t² * P2
-        // Solving for P1: P1 = (B - (1-t)² * P0 - t² * P2) / (2*(1-t)*t)
-        //
-        // where t_bottom = (cupBottomTime - leftPeakTime) / (rightRimTime - leftPeakTime)
+      if (cupData && cupData.cupLows && cupData.cupLows.length > 0) {
+        // Draw the cup by tracing along the ACTUAL BAR LOWS as a support line
+        // This follows the user's vision: the line hugs the bottom of each candle
+        // as it descends into and ascends out of the cup formation
         
-        const arcPoints: { time: Time; value: number }[] = [];
-        const arcSegments = 50; // High segment count for smooth curve
+        const cupPoints: { time: Time; value: number }[] = cupData.cupLows.map(point => ({
+          time: point.time as Time,
+          value: point.price
+        }));
         
-        // Endpoints
-        const P0_time = cupData.leftPeakTime;
-        const P0_price = cupData.leftPeakPrice;
-        const P2_time = cupData.rightRimTime;
-        const P2_price = cupData.rightRimPrice;
-        
-        // Point the curve must pass through (cup bottom)
-        const B_time = cupData.cupBottomTime;
-        const B_price = cupData.cupBottomPrice;
-        
-        // Calculate t at which curve should pass through cup bottom
-        const totalDuration = P2_time - P0_time;
-        const t_bottom = totalDuration > 0 ? (B_time - P0_time) / totalDuration : 0.5;
-        
-        // Clamp t_bottom to avoid division issues at edges
-        const t = Math.max(0.1, Math.min(0.9, t_bottom));
-        const oneMinusT = 1 - t;
-        
-        // Solve for P1: P1 = (B - (1-t)² * P0 - t² * P2) / (2*(1-t)*t)
-        const denominator = 2 * oneMinusT * t;
-        
-        // Calculate control point that forces curve through cup bottom
-        const P1_time = (B_time - oneMinusT * oneMinusT * P0_time - t * t * P2_time) / denominator;
-        const P1_price = (B_price - oneMinusT * oneMinusT * P0_price - t * t * P2_price) / denominator;
-        
-        // Generate Bezier curve points
-        for (let i = 0; i <= arcSegments; i++) {
-          const param = i / arcSegments; // 0 to 1
-          const omt = 1 - param;
-          
-          // Quadratic Bezier formula
-          const timePoint = omt * omt * P0_time + 
-                           2 * omt * param * P1_time + 
-                           param * param * P2_time;
-          const curveValue = omt * omt * P0_price + 
-                            2 * omt * param * P1_price + 
-                            param * param * P2_price;
-          
-          arcPoints.push({
-            time: timePoint as Time,
-            value: curveValue
-          });
-        }
-        
-        const cupArcLine = chart.addSeries(LineSeries, {
+        const cupSupportLine = chart.addSeries(LineSeries, {
           color: CUP_HANDLE_COLOR,
           lineWidth: 3,
           lineStyle: LineStyle.Solid,
           priceLineVisible: false,
           lastValueVisible: false,
         });
-        cupArcLine.setData(arcPoints);
+        cupSupportLine.setData(cupPoints);
         
-        // Draw handle: STRAIGHT DESCENDING line that stops at handle low
-        // Acts as support line under the bar lows - NO upturn
-        if (!cupData.cupOnly && cupData.handleLows.length > 0) {
+        // Draw handle: trace along the ACTUAL BAR LOWS as support
+        // Acts as support line under the handle candles, connects to cup at right rim low
+        if (!cupData.cupOnly && cupData.handleLows && cupData.handleLows.length > 0) {
+          // Sort by time and find the handle low
           const sortedHandleLows = [...cupData.handleLows].sort((a, b) => a.time - b.time);
-          
-          // Find the lowest point in the handle (the handle low)
           const handleLow = sortedHandleLows.reduce((min, h) => h.price < min.price ? h : min, sortedHandleLows[0]);
           
-          // Draw a straight descending line from right rim to handle low and STOP
-          // No upturn - the handle ends at the lowest point
+          // Find index of handle low - we stop here (no upturn)
+          const handleLowIdx = sortedHandleLows.findIndex(h => h.time === handleLow.time);
+          
+          // Build handle points - starts from last cup point (right rim low) for continuity
           const handlePoints: { time: Time; value: number }[] = [];
           
-          // Start from right rim
-          handlePoints.push({ time: cupData.rightRimTime as Time, value: cupData.rightRimPrice });
+          // Get right rim bar's low from cupLows (last point) for seamless connection
+          const rightRimLow = cupData.cupLows[cupData.cupLows.length - 1];
+          handlePoints.push({ time: rightRimLow.time as Time, value: rightRimLow.price });
           
-          // End at handle low - STOP here, no swing up
-          handlePoints.push({ time: handleLow.time as Time, value: handleLow.price });
+          // Trace along handle bar lows up to and including handle low, then STOP
+          for (let i = 0; i <= handleLowIdx; i++) {
+            handlePoints.push({
+              time: sortedHandleLows[i].time as Time,
+              value: sortedHandleLows[i].price
+            });
+          }
           
           const handleLine = chart.addSeries(LineSeries, {
             color: CUP_HANDLE_COLOR,

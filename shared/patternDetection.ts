@@ -18,6 +18,7 @@ export interface CupAndHandleResult {
   handleEndIdx?: number;
   handleEndTime?: number;
   handleLows?: { time: number; price: number }[]; // Actual candle lows for handle
+  cupLows?: { time: number; price: number }[]; // Actual candle lows for cup portion (support line)
   completionPct?: number;
   extensionPct?: number; // How much right rim exceeds left peak (%)
 }
@@ -149,6 +150,14 @@ export function detectCupAndHandle(candles: Candle[], loose: boolean = false): C
       price: c.low
     }));
     
+    // Collect actual candle lows for the CUP portion (left peak to right rim)
+    // This allows visualization to trace along the bar lows as support
+    const cupCandles = recentCandles.slice(leftPeakIdx, rightRimIdx + 1);
+    const cupLows: { time: number; price: number }[] = cupCandles.map(c => ({
+      time: new Date(c.date).getTime() / 1000,
+      price: c.low
+    }));
+    
     // Handle should be a pullback - highest low shouldn't exceed right rim too much
     const handleHighestHigh = Math.max(...handleCandles.map(c => c.high));
     const handleLowestLow = Math.min(...handleCandles.map(c => c.low));
@@ -209,6 +218,7 @@ export function detectCupAndHandle(candles: Candle[], loose: boolean = false): C
       handleEndIdx: dataStartIdx + handleEndIdx,
       handleEndTime: new Date(recentCandles[handleEndIdx].date).getTime() / 1000,
       handleLows,
+      cupLows, // Bar lows for the cup portion to trace as support
       completionPct,
       extensionPct
     };
