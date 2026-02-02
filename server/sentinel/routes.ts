@@ -3,6 +3,7 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import OpenAI from "openai";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { startMonitoring } from "./monitor";
@@ -67,7 +68,11 @@ const watchlistSchema = z.object({
 const ruleSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
-  category: z.enum(["entry", "exit", "sizing", "risk", "general"]).optional(),
+  category: z.enum([
+    "entry", "exit", "sizing", "risk", "general", 
+    "auto_reject", "profit_taking", "stop_loss", "ma_structure", 
+    "base_quality", "breakout", "position_sizing", "market_regime"
+  ]).optional(),
   order: z.number().optional(),
 });
 
@@ -676,6 +681,167 @@ export function registerSentinelRoutes(app: Express): void {
     } catch (error) {
       console.error(`Ticker lookup failed for ${symbol}:`, error);
       res.status(404).json({ error: `Symbol ${symbol} not found` });
+    }
+  });
+
+  // AI Rule Suggestions Routes
+  
+  // Get pending suggestions
+  app.get("/api/sentinel/suggestions", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const suggestions = await sentinelModels.getPendingSuggestions();
+      res.json(suggestions);
+    } catch (error) {
+      console.error("Get suggestions error:", error);
+      res.status(500).json({ error: "Failed to load suggestions" });
+    }
+  });
+
+  // Adopt a suggestion (add to user's rules)
+  app.post("/api/sentinel/suggestions/:id/adopt", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const suggestionId = parseInt(req.params.id);
+      const rule = await sentinelModels.adoptSuggestion(suggestionId, req.session.userId!);
+      res.json(rule);
+    } catch (error) {
+      console.error("Adopt suggestion error:", error);
+      res.status(500).json({ error: "Failed to adopt suggestion" });
+    }
+  });
+
+  // Dismiss a suggestion
+  app.post("/api/sentinel/suggestions/:id/dismiss", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const suggestionId = parseInt(req.params.id);
+      await sentinelModels.updateSuggestionStatus(suggestionId, 'dismissed');
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Dismiss suggestion error:", error);
+      res.status(500).json({ error: "Failed to dismiss suggestion" });
+    }
+  });
+
+  // Get rule performance stats
+  app.get("/api/sentinel/rule-performance", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const stats = await sentinelModels.getRulePerformanceStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Rule performance error:", error);
+      res.status(500).json({ error: "Failed to load rule performance" });
+    }
+  });
+
+  // AI-powered rule analysis and suggestion generation
+  app.post("/api/sentinel/ai/analyze-rules", requireAuth, async (req: Request, res: Response) => {
+    try {
+      // Get rule performance data (only rules with enough trades for meaningful analysis)
+      const performanceData = await sentinelModels.getHighDataRules(5);
+      
+      // Need minimum data for analysis
+      if (performanceData.length < 3) {
+        return res.json({ 
+          message: "Not enough data yet. Keep trading to gather rule performance insights. You need at least 3 rules with 5+ trades each.",
+          suggestions: []
+        });
+      }
+
+      // Prepare analysis summary for AI
+      const analysisPrompt = `Analyze these trading rule performance statistics and suggest 1-3 new rules:
+
+RULE PERFORMANCE DATA:
+${performanceData.map(r => `- ${r.ruleName}: ${r.totalTrades} trades, Win rate when followed: ${((r.winRateWhenFollowed || 0) * 100).toFixed(1)}%, Win rate when not followed: ${((r.winRateWhenNotFollowed || 0) * 100).toFixed(1)}%, Avg P&L followed: $${(r.avgPnLWhenFollowed || 0).toFixed(2)}, Avg P&L not followed: $${(r.avgPnLWhenNotFollowed || 0).toFixed(2)}`).join('\n')}
+
+Based on patterns in this data:
+1. Identify rules with significant win rate differences when followed vs not followed
+2. Look for rules that show strong P&L improvement when followed
+3. Suggest modifications or new rules that could improve outcomes
+
+Return a JSON array of suggested rules with format:
+[{
+  "name": "Rule name (concise)",
+  "description": "Why this rule matters based on the data",
+  "category": "entry|exit|stop_loss|position_sizing|ma_structure|base_quality|breakout|market_regime|risk",
+  "severity": "warning|critical",
+  "isAutoReject": false,
+  "ruleCode": "unique_snake_case_code",
+  "formula": "Optional formula like 'stop_percent <= 3%'",
+  "confidenceScore": 0.7 to 0.95,
+  "patternDescription": "What data pattern supports this rule"
+}]
+
+Only suggest rules NOT already in the list. Focus on actionable, specific rules.`;
+
+      let openai: OpenAI;
+      try {
+        openai = new OpenAI();
+      } catch (configError) {
+        console.error("OpenAI configuration error:", configError);
+        return res.status(500).json({ error: "AI service not configured. Please ensure OpenAI API key is set." });
+      }
+
+      let completion;
+      try {
+        completion = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            { role: "system", content: "You are a trading analytics expert. Analyze rule performance data and suggest new rules based on patterns you observe. Return ONLY valid JSON array." },
+            { role: "user", content: analysisPrompt }
+          ],
+          temperature: 0.7,
+        });
+      } catch (aiError: any) {
+        console.error("OpenAI API error:", aiError);
+        return res.status(500).json({ error: "AI analysis failed. Please try again later." });
+      }
+
+      const responseText = completion.choices[0].message.content || '[]';
+      
+      // Parse AI response
+      let suggestedRules: any[] = [];
+      try {
+        // Extract JSON from response (handle markdown code blocks)
+        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          suggestedRules = JSON.parse(jsonMatch[0]);
+        }
+      } catch (parseError) {
+        console.error("Failed to parse AI response:", parseError);
+        return res.json({ message: "AI analysis complete but no valid suggestions generated", suggestions: [] });
+      }
+
+      // Store new suggestions (avoid duplicates)
+      const newSuggestions = [];
+      for (const rule of suggestedRules) {
+        if (!rule.ruleCode) continue;
+        
+        const existing = await sentinelModels.getSuggestionByRuleCode(rule.ruleCode);
+        if (!existing) {
+          const suggestion = await sentinelModels.createRuleSuggestion({
+            name: rule.name || 'Untitled Rule',
+            description: rule.description || null,
+            category: rule.category || 'general',
+            source: 'ai_collective',
+            severity: rule.severity || 'warning',
+            isAutoReject: rule.isAutoReject || false,
+            ruleCode: rule.ruleCode,
+            formula: rule.formula || null,
+            confidenceScore: rule.confidenceScore || 0.7,
+            supportingData: {
+              patternDescription: rule.patternDescription || rule.evidence || null,
+            },
+          });
+          newSuggestions.push(suggestion);
+        }
+      }
+
+      res.json({
+        message: `AI analysis complete. ${newSuggestions.length} new suggestion(s) generated.`,
+        suggestions: newSuggestions
+      });
+    } catch (error) {
+      console.error("AI rule analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze rules" });
     }
   });
 

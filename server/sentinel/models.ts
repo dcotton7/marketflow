@@ -314,5 +314,52 @@ export const sentinelModels = {
   async getRulePerformanceStats(): Promise<SentinelRulePerformance[]> {
     return db.select().from(sentinelRulePerformance)
       .orderBy(desc(sentinelRulePerformance.totalTrades));
+  },
+
+  // Create a new rule suggestion
+  async createRuleSuggestion(data: {
+    name: string;
+    description: string | null;
+    category: string | null;
+    source: string;
+    severity: string | null;
+    isAutoReject: boolean;
+    ruleCode: string | null;
+    formula: string | null;
+    confidenceScore: number;
+    supportingData: {
+      totalTrades?: number;
+      winRate?: number;
+      avgPnL?: number;
+      sampleSize?: number;
+      patternDescription?: string;
+    } | null;
+  }): Promise<SentinelRuleSuggestion> {
+    const [suggestion] = await db.insert(sentinelRuleSuggestions).values({
+      ...data,
+      status: 'pending',
+      adoptionCount: 0,
+    }).returning();
+    return suggestion;
+  },
+
+  // Get suggestion by rule code (to avoid duplicates)
+  async getSuggestionByRuleCode(ruleCode: string): Promise<SentinelRuleSuggestion | undefined> {
+    const [suggestion] = await db.select().from(sentinelRuleSuggestions)
+      .where(eq(sentinelRuleSuggestions.ruleCode, ruleCode));
+    return suggestion;
+  },
+
+  // Update suggestion status
+  async updateSuggestionStatus(id: number, status: string): Promise<void> {
+    await db.update(sentinelRuleSuggestions)
+      .set({ status })
+      .where(eq(sentinelRuleSuggestions.id, id));
+  },
+
+  // Get high-performing rules for AI analysis (rules with enough data)
+  async getHighDataRules(minTrades: number = 10): Promise<SentinelRulePerformance[]> {
+    const allRules = await db.select().from(sentinelRulePerformance);
+    return allRules.filter(r => (r.totalTrades || 0) >= minTrades);
   }
 };

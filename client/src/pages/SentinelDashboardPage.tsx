@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -71,6 +71,28 @@ interface DashboardData {
   considering: TradeWithEvaluation[];
   active: TradeWithEvaluation[];
   recentEvents: TradeEvent[];
+}
+
+interface RuleSuggestion {
+  id: number;
+  name: string;
+  description?: string;
+  category?: string;
+  source: string;
+  severity?: string;
+  isAutoReject?: boolean;
+  ruleCode?: string;
+  formula?: string;
+  confidenceScore?: number;
+  adoptionCount?: number;
+  supportingData?: {
+    totalTrades?: number;
+    winRate?: number;
+    avgPnL?: number;
+    sampleSize?: number;
+    patternDescription?: string;
+  };
+  status: string;
 }
 
 function getScoreColor(score: number): string {
@@ -315,6 +337,10 @@ export default function SentinelDashboardPage() {
     queryKey: ["/api/sentinel/rules"],
   });
 
+  const { data: suggestions = [] } = useQuery<RuleSuggestion[]>({
+    queryKey: ["/api/sentinel/suggestions"],
+  });
+
   // Mutations
   const addWatchlistMutation = useMutation({
     mutationFn: async (data: { symbol: string; targetEntry?: number; thesis?: string; priority: string }) => {
@@ -366,6 +392,37 @@ export default function SentinelDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
       toast({ title: "Rule deleted" });
+    },
+  });
+
+  const adoptSuggestionMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("POST", `/api/sentinel/suggestions/${id}/adopt`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/suggestions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
+      toast({ title: "Rule adopted to your rulebook" });
+    },
+  });
+
+  const dismissSuggestionMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("POST", `/api/sentinel/suggestions/${id}/dismiss`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/suggestions"] });
+      toast({ title: "Suggestion dismissed" });
+    },
+  });
+
+  const analyzeRulesMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/sentinel/ai/analyze-rules");
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/suggestions"] });
+      toast({ title: data.message || "AI analysis complete" });
     },
   });
 
@@ -454,6 +511,10 @@ export default function SentinelDashboardPage() {
             <TabsTrigger value="rules" data-testid="tab-rules">
               <BookOpen className="w-4 h-4 mr-1" />
               My Rules ({rules.length})
+            </TabsTrigger>
+            <TabsTrigger value="ai" data-testid="tab-ai">
+              <Brain className="w-4 h-4 mr-1" />
+              AI Insights
             </TabsTrigger>
             <TabsTrigger value="events" data-testid="tab-events">
               Events
@@ -601,6 +662,117 @@ export default function SentinelDashboardPage() {
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="ai" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-purple-500" />
+                  AI-Suggested Rules
+                </CardTitle>
+                <CardDescription>
+                  Rules learned from collective trading patterns across all users. Adopt rules that resonate with your style.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-end">
+                  <Button 
+                    onClick={() => analyzeRulesMutation.mutate()}
+                    disabled={analyzeRulesMutation.isPending}
+                    data-testid="button-analyze-rules"
+                  >
+                    <Brain className="w-4 h-4 mr-2" />
+                    {analyzeRulesMutation.isPending ? "Analyzing..." : "Analyze Rule Patterns"}
+                  </Button>
+                </div>
+
+                {suggestions.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Lightbulb className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p className="font-medium">No AI suggestions yet</p>
+                    <p className="text-sm mt-1">Keep trading and closing trades to generate rule performance data.</p>
+                    <p className="text-sm mt-1">Click "Analyze Rule Patterns" to generate suggestions based on your trading history.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {suggestions.map((suggestion) => (
+                      <div 
+                        key={suggestion.id} 
+                        className="border rounded-lg p-4 bg-purple-500/5 border-purple-500/20"
+                        data-testid={`suggestion-${suggestion.id}`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-2">
+                              <span className="font-medium">{suggestion.name}</span>
+                              {suggestion.category && (
+                                <Badge variant="outline" className="text-xs">{suggestion.category}</Badge>
+                              )}
+                              {suggestion.confidenceScore && (
+                                <Badge className="bg-purple-500/20 text-purple-600 text-xs">
+                                  {(suggestion.confidenceScore * 100).toFixed(0)}% confidence
+                                </Badge>
+                              )}
+                              {suggestion.adoptionCount !== undefined && suggestion.adoptionCount > 0 && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {suggestion.adoptionCount} adopted
+                                </Badge>
+                              )}
+                            </div>
+                            {suggestion.description && (
+                              <p className="text-sm text-muted-foreground">{suggestion.description}</p>
+                            )}
+                            {suggestion.formula && (
+                              <p className="text-xs font-mono bg-muted/50 px-2 py-1 rounded mt-2 inline-block">
+                                {suggestion.formula}
+                              </p>
+                            )}
+                            {suggestion.supportingData?.patternDescription && (
+                              <p className="text-xs text-muted-foreground mt-2 italic">
+                                Evidence: {suggestion.supportingData.patternDescription}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => adoptSuggestionMutation.mutate(suggestion.id)}
+                              disabled={adoptSuggestionMutation.isPending}
+                              data-testid={`button-adopt-${suggestion.id}`}
+                            >
+                              <Plus className="w-4 h-4 mr-1" />
+                              Adopt
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => dismissSuggestionMutation.mutate(suggestion.id)}
+                              disabled={dismissSuggestionMutation.isPending}
+                              data-testid={`button-dismiss-${suggestion.id}`}
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>How AI Learning Works</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-muted-foreground">
+                <p><strong>1. Trade & Track:</strong> As you close trades and record rule adherence, we track which rules correlate with wins.</p>
+                <p><strong>2. Collective Patterns:</strong> Anonymized data from all users reveals which rules most reliably predict success.</p>
+                <p><strong>3. AI Suggestions:</strong> Our AI analyzes patterns and suggests new rules with high win-rate correlation.</p>
+                <p><strong>4. You Decide:</strong> Review suggestions and adopt the ones that fit your trading style.</p>
               </CardContent>
             </Card>
           </TabsContent>
