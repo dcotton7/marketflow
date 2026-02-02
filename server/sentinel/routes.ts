@@ -47,6 +47,30 @@ const updateTradeSchema = z.object({
   status: z.enum(["considering", "active", "closed"]).optional(),
 });
 
+const closeTradeSchema = z.object({
+  exitPrice: z.number().positive(),
+  outcome: z.enum(["win", "loss", "breakeven"]),
+  rulesFollowed: z.record(z.boolean()).optional(),
+  notes: z.string().optional(),
+});
+
+const watchlistSchema = z.object({
+  symbol: z.string().min(1).max(10),
+  targetEntry: z.number().positive().optional(),
+  stopPlan: z.number().positive().optional(),
+  targetPlan: z.number().positive().optional(),
+  alertPrice: z.number().positive().optional(),
+  thesis: z.string().optional(),
+  priority: z.enum(["high", "medium", "low"]).optional(),
+});
+
+const ruleSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  category: z.enum(["entry", "exit", "sizing", "risk", "general"]).optional(),
+  order: z.number().optional(),
+});
+
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -371,6 +395,219 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Update trade error:", error);
       res.status(500).json({ error: "Failed to update trade" });
+    }
+  });
+
+  // Close trade with outcome and rule adherence
+  app.post("/api/sentinel/trade/:tradeId/close", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.tradeId);
+      const data = closeTradeSchema.parse(req.body);
+
+      const trade = await sentinelModels.getTrade(tradeId);
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+      if (trade.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Calculate P&L
+      const positionSize = trade.positionSize || 0;
+      let actualPnL = 0;
+      if (positionSize > 0) {
+        const priceDiff = trade.direction === 'long' 
+          ? data.exitPrice - trade.entryPrice 
+          : trade.entryPrice - data.exitPrice;
+        actualPnL = priceDiff * positionSize;
+      }
+
+      const updatedTrade = await sentinelModels.updateTrade(tradeId, {
+        status: "closed",
+        exitPrice: data.exitPrice,
+        exitDate: new Date(),
+        actualPnL,
+        outcome: data.outcome,
+        rulesFollowed: data.rulesFollowed || {},
+        notes: data.notes,
+      });
+
+      await sentinelModels.createEvent({
+        tradeId,
+        userId: req.session.userId!,
+        eventType: "status_change",
+        oldValue: trade.status,
+        newValue: "closed",
+        description: `Trade closed: ${trade.symbol} ${data.outcome.toUpperCase()} at $${data.exitPrice.toFixed(2)}`,
+      });
+
+      res.json(updatedTrade);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Close trade error:", error);
+      res.status(500).json({ error: "Failed to close trade" });
+    }
+  });
+
+  // Watchlist routes
+  app.get("/api/sentinel/watchlist", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const items = await sentinelModels.getWatchlistByUser(req.session.userId!);
+      res.json(items);
+    } catch (error) {
+      console.error("Watchlist error:", error);
+      res.status(500).json({ error: "Failed to load watchlist" });
+    }
+  });
+
+  app.post("/api/sentinel/watchlist", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const data = watchlistSchema.parse(req.body);
+      const item = await sentinelModels.createWatchlistItem({
+        userId: req.session.userId!,
+        symbol: data.symbol.toUpperCase(),
+        targetEntry: data.targetEntry,
+        stopPlan: data.stopPlan,
+        targetPlan: data.targetPlan,
+        alertPrice: data.alertPrice,
+        thesis: data.thesis,
+        priority: data.priority || "medium",
+      });
+      res.status(201).json(item);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Create watchlist error:", error);
+      res.status(500).json({ error: "Failed to create watchlist item" });
+    }
+  });
+
+  app.patch("/api/sentinel/watchlist/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const item = await sentinelModels.getWatchlistItem(id);
+      
+      if (!item) {
+        return res.status(404).json({ error: "Watchlist item not found" });
+      }
+      if (item.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const data = watchlistSchema.partial().parse(req.body);
+      const updated = await sentinelModels.updateWatchlistItem(id, data);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Update watchlist error:", error);
+      res.status(500).json({ error: "Failed to update watchlist item" });
+    }
+  });
+
+  app.delete("/api/sentinel/watchlist/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const item = await sentinelModels.getWatchlistItem(id);
+      
+      if (!item) {
+        return res.status(404).json({ error: "Watchlist item not found" });
+      }
+      if (item.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      await sentinelModels.deleteWatchlistItem(id);
+      res.json({ message: "Deleted" });
+    } catch (error) {
+      console.error("Delete watchlist error:", error);
+      res.status(500).json({ error: "Failed to delete watchlist item" });
+    }
+  });
+
+  // Rules routes
+  app.get("/api/sentinel/rules", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const rules = await sentinelModels.getRulesByUser(req.session.userId!);
+      res.json(rules);
+    } catch (error) {
+      console.error("Rules error:", error);
+      res.status(500).json({ error: "Failed to load rules" });
+    }
+  });
+
+  app.post("/api/sentinel/rules", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const data = ruleSchema.parse(req.body);
+      const rule = await sentinelModels.createRule({
+        userId: req.session.userId!,
+        name: data.name,
+        description: data.description,
+        category: data.category,
+        order: data.order || 0,
+      });
+      res.status(201).json(rule);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Create rule error:", error);
+      res.status(500).json({ error: "Failed to create rule" });
+    }
+  });
+
+  app.patch("/api/sentinel/rules/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existingRules = await sentinelModels.getRulesByUser(req.session.userId!);
+      const rule = existingRules.find(r => r.id === id);
+      
+      if (!rule) {
+        return res.status(404).json({ error: "Rule not found" });
+      }
+
+      const data = ruleSchema.partial().extend({ isActive: z.boolean().optional() }).parse(req.body);
+      const updated = await sentinelModels.updateRule(id, data);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Update rule error:", error);
+      res.status(500).json({ error: "Failed to update rule" });
+    }
+  });
+
+  app.delete("/api/sentinel/rules/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existingRules = await sentinelModels.getRulesByUser(req.session.userId!);
+      const rule = existingRules.find(r => r.id === id);
+      
+      if (!rule) {
+        return res.status(404).json({ error: "Rule not found" });
+      }
+
+      await sentinelModels.deleteRule(id);
+      res.json({ message: "Deleted" });
+    } catch (error) {
+      console.error("Delete rule error:", error);
+      res.status(500).json({ error: "Failed to delete rule" });
+    }
+  });
+
+  // Closed trades history
+  app.get("/api/sentinel/trades/closed", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const trades = await sentinelModels.getClosedTrades(req.session.userId!);
+      res.json(trades);
+    } catch (error) {
+      console.error("Closed trades error:", error);
+      res.status(500).json({ error: "Failed to load closed trades" });
     }
   });
 

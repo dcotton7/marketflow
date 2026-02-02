@@ -61,6 +61,12 @@ const TARGET_LEVEL_LABELS: Record<string, string> = {
   "RR_10X": "10x Risk/Reward",
 };
 
+interface TraderContext {
+  activePositions?: { symbol: string; direction: string; entryPrice: number }[];
+  watchlist?: { symbol: string; thesis?: string }[];
+  rules?: { name: string; category?: string }[];
+}
+
 export function buildEvaluationPrompt(
   symbol: string,
   direction: 'long' | 'short',
@@ -71,7 +77,8 @@ export function buildEvaluationPrompt(
   targetPriceLevel?: string,
   positionSize?: number,
   positionSizeUnit?: 'shares' | 'dollars',
-  thesis?: string
+  thesis?: string,
+  traderContext?: TraderContext
 ): string {
   let prompt = `Evaluate this trade idea:
 
@@ -117,6 +124,39 @@ Entry Price: $${entryPrice.toFixed(2)}`;
 
   if (thesis) {
     prompt += `\n\nTrader's Thesis:\n${thesis}`;
+  }
+
+  // Add trader context if available
+  if (traderContext) {
+    if (traderContext.activePositions && traderContext.activePositions.length > 0) {
+      prompt += `\n\nTrader's Current Positions:`;
+      traderContext.activePositions.forEach(pos => {
+        prompt += `\n- ${pos.symbol} (${pos.direction.toUpperCase()}) @ $${pos.entryPrice.toFixed(2)}`;
+      });
+      // Check for sector concentration or correlation
+      const sameSymbol = traderContext.activePositions.find(p => p.symbol === symbol);
+      if (sameSymbol) {
+        prompt += `\n\n[ALERT: Trader already has a position in ${symbol}]`;
+      }
+    }
+
+    if (traderContext.watchlist && traderContext.watchlist.length > 0) {
+      const onWatchlist = traderContext.watchlist.find(w => w.symbol === symbol);
+      if (onWatchlist) {
+        prompt += `\n\n[Note: This stock was on trader's watchlist`;
+        if (onWatchlist.thesis) {
+          prompt += ` with thesis: "${onWatchlist.thesis}"`;
+        }
+        prompt += `]`;
+      }
+    }
+
+    if (traderContext.rules && traderContext.rules.length > 0) {
+      prompt += `\n\nTrader's Personal Rules (evaluate adherence):`;
+      traderContext.rules.forEach(rule => {
+        prompt += `\n- ${rule.name}${rule.category ? ` [${rule.category}]` : ''}`;
+      });
+    }
   }
 
   prompt += `\n\nProvide your evaluation as a JSON object.`;

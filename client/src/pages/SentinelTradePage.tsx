@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useParams } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -8,8 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, CheckCircle, Clock, TrendingUp, TrendingDown, Edit2, X, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, AlertTriangle, CheckCircle, Clock, TrendingUp, TrendingDown, Edit2, X, Check, Loader2, DollarSign } from "lucide-react";
 
 interface Trade {
   id: number;
@@ -51,6 +55,14 @@ interface TradeDetail {
   events: TradeEvent[];
 }
 
+interface TradingRule {
+  id: number;
+  name: string;
+  description?: string;
+  category?: string;
+  isActive: boolean;
+}
+
 export default function SentinelTradePage() {
   const [, setLocation] = useLocation();
   const params = useParams<{ tradeId: string }>();
@@ -62,11 +74,33 @@ export default function SentinelTradePage() {
   const [editingTarget, setEditingTarget] = useState(false);
   const [newStop, setNewStop] = useState("");
   const [newTarget, setNewTarget] = useState("");
+  
+  // Close trade dialog state
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
+  const [exitPrice, setExitPrice] = useState("");
+  const [outcome, setOutcome] = useState<"win" | "loss" | "breakeven">("win");
+  const [closeNotes, setCloseNotes] = useState("");
+  const [rulesFollowed, setRulesFollowed] = useState<Record<string, boolean>>({});
 
   const { data, isLoading, error } = useQuery<TradeDetail>({
     queryKey: ["/api/sentinel/trade", tradeId],
     enabled: tradeId > 0,
   });
+
+  const { data: rules = [] } = useQuery<TradingRule[]>({
+    queryKey: ["/api/sentinel/rules"],
+  });
+
+  // Initialize rulesFollowed when rules load
+  useEffect(() => {
+    if (rules.length > 0 && Object.keys(rulesFollowed).length === 0) {
+      const initial: Record<string, boolean> = {};
+      rules.filter(r => r.isActive).forEach(r => {
+        initial[r.id.toString()] = true;
+      });
+      setRulesFollowed(initial);
+    }
+  }, [rules]);
 
   const updateMutation = useMutation({
     mutationFn: async (updates: any) => {
@@ -109,14 +143,15 @@ export default function SentinelTradePage() {
   });
 
   const closeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("PATCH", `/api/sentinel/trade/${tradeId}`, { status: "closed" });
+    mutationFn: async (closeData: { exitPrice: number; outcome: string; rulesFollowed?: Record<string, boolean>; notes?: string }) => {
+      const res = await apiRequest("POST", `/api/sentinel/trade/${tradeId}/close`, closeData);
       return await res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trade", tradeId] });
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
-      toast({ title: "Closed", description: "Trade marked as closed" });
+      setShowCloseDialog(false);
+      toast({ title: "Trade Closed", description: "Trade has been closed and recorded" });
     },
     onError: (error: any) => {
       toast({
@@ -126,6 +161,20 @@ export default function SentinelTradePage() {
       });
     },
   });
+
+  const handleCloseTrade = () => {
+    const price = parseFloat(exitPrice);
+    if (isNaN(price) || price <= 0) {
+      toast({ title: "Invalid exit price", variant: "destructive" });
+      return;
+    }
+    closeMutation.mutate({
+      exitPrice: price,
+      outcome,
+      rulesFollowed,
+      notes: closeNotes || undefined,
+    });
+  };
 
   const handleSaveStop = () => {
     const price = parseFloat(newStop);
@@ -205,8 +254,9 @@ export default function SentinelTradePage() {
             </Button>
           )}
           {trade.status === "active" && (
-            <Button variant="outline" onClick={() => closeMutation.mutate()} disabled={closeMutation.isPending} data-testid="button-close">
-              {closeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Close Trade"}
+            <Button variant="outline" onClick={() => setShowCloseDialog(true)} data-testid="button-close">
+              <DollarSign className="w-4 h-4 mr-2" />
+              Close Trade
             </Button>
           )}
         </div>
@@ -438,6 +488,99 @@ export default function SentinelTradePage() {
           </div>
         </div>
       </main>
+
+      {/* Close Trade Dialog */}
+      <Dialog open={showCloseDialog} onOpenChange={setShowCloseDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Close Trade: {data?.trade.symbol}</DialogTitle>
+            <DialogDescription>Record the outcome and review your rule adherence</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="exit-price">Exit Price</Label>
+                <Input
+                  id="exit-price"
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={exitPrice}
+                  onChange={(e) => setExitPrice(e.target.value)}
+                  data-testid="input-exit-price"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="outcome">Outcome</Label>
+                <Select value={outcome} onValueChange={(v) => setOutcome(v as typeof outcome)}>
+                  <SelectTrigger id="outcome" data-testid="select-outcome">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="win">Win</SelectItem>
+                    <SelectItem value="loss">Loss</SelectItem>
+                    <SelectItem value="breakeven">Breakeven</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {rules.filter(r => r.isActive).length > 0 && (
+              <div className="space-y-2">
+                <Label>Did you follow your rules?</Label>
+                <div className="space-y-2 max-h-40 overflow-y-auto border rounded-md p-2">
+                  {rules.filter(r => r.isActive).map((rule) => (
+                    <div key={rule.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`rule-${rule.id}`}
+                        checked={rulesFollowed[rule.id.toString()] ?? true}
+                        onCheckedChange={(checked) => {
+                          setRulesFollowed(prev => ({
+                            ...prev,
+                            [rule.id.toString()]: checked === true,
+                          }));
+                        }}
+                        data-testid={`checkbox-close-rule-${rule.id}`}
+                      />
+                      <label htmlFor={`rule-${rule.id}`} className="text-sm flex-1 cursor-pointer">
+                        {rule.name}
+                        {rule.category && (
+                          <Badge variant="outline" className="ml-2 text-xs">{rule.category}</Badge>
+                        )}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="close-notes">Notes (optional)</Label>
+              <Textarea
+                id="close-notes"
+                placeholder="What did you learn? What would you do differently?"
+                value={closeNotes}
+                onChange={(e) => setCloseNotes(e.target.value)}
+                data-testid="input-close-notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCloseDialog(false)}>Cancel</Button>
+            <Button 
+              onClick={handleCloseTrade} 
+              disabled={!exitPrice || closeMutation.isPending}
+              data-testid="button-confirm-close"
+            >
+              {closeMutation.isPending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Closing...</>
+              ) : (
+                "Close Trade"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

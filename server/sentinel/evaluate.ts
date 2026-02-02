@@ -15,6 +15,29 @@ export async function evaluateTrade(
 ): Promise<{ evaluation: EvaluationResult; tradeId: number }> {
   const model = request.deepEval ? "gpt-5.2" : "gpt-5.1";
   
+  // Fetch trader context for enhanced evaluation
+  const [activePositions, watchlist, rules] = await Promise.all([
+    sentinelModels.getTradesByStatus(userId, "active"),
+    sentinelModels.getWatchlistByUser(userId),
+    sentinelModels.getActiveRulesByUser(userId),
+  ]);
+
+  const traderContext = {
+    activePositions: activePositions.map(p => ({
+      symbol: p.symbol,
+      direction: p.direction,
+      entryPrice: p.entryPrice,
+    })),
+    watchlist: watchlist.map(w => ({
+      symbol: w.symbol,
+      thesis: w.thesis || undefined,
+    })),
+    rules: rules.map(r => ({
+      name: r.name,
+      category: r.category || undefined,
+    })),
+  };
+
   const userPrompt = buildEvaluationPrompt(
     request.symbol,
     request.direction,
@@ -25,7 +48,8 @@ export async function evaluateTrade(
     request.targetPriceLevel,
     request.positionSize,
     request.positionSizeUnit,
-    request.thesis
+    request.thesis,
+    traderContext
   );
 
   const response = await openai.chat.completions.create({

@@ -6,7 +6,16 @@ This project consists of two distinct applications:
 
 **AI Swing Scanner**: A stock market scanning and analysis tool designed for identifying technical patterns and criteria. It offers detailed stock charts, real-time quotes, and a personal watchlist, all powered by Yahoo Finance data within a dark-themed financial dashboard. The application provides advanced charting capabilities including various SMAs, VWAP, and visualizations for patterns like Cup and Handle, VCP, and High Tight Flag.
 
-**Sentinel**: A multi-user web application for evaluating trade ideas. It utilizes OpenAI's advanced models (gpt-5.1, gpt-5.2) to assess user-submitted trade ideas, highlight potential risks, and provide judgment before execution. It features secure session-based authentication, comprehensive trade tracking (Considering, Active, Closed states), and detailed event logging. Sentinel is strictly an evaluation tool and does not generate trade signals.
+**Sentinel**: A multi-user web application for evaluating trade ideas and building trading discipline. It utilizes OpenAI's advanced models (gpt-5.1, gpt-5.2) to assess user-submitted trade ideas, highlight potential risks, and provide judgment before execution. Key features include:
+- Session-based authentication with PostgreSQL-backed sessions
+- Trade lifecycle tracking (Considering → Active → Closed)
+- **Personal Trading Rules**: Define and track adherence to custom rules
+- **Watchlist Management**: Monitor setups with target entry prices and priority levels
+- **Trade Close Flow**: Record exit prices, outcomes (win/loss/breakeven), and rule adherence
+- **Contextual AI Evaluation**: AI considers current positions, watchlist, and personal rules when evaluating
+- Detailed event logging and evaluation history
+
+Sentinel is strictly an evaluation tool focused on rewarding good process and discipline - it does not generate trade signals.
 
 ## User Preferences
 
@@ -36,7 +45,13 @@ The project utilizes a monorepo structure, separating client (React frontend) an
 
 ### Data Storage
 - **AI Swing Scanner**: Stores stock data cache, saved scans, and watchlist items.
-- **Sentinel**: Manages `sentinel_users`, `sentinel_trades`, `sentinel_evaluations`, and `sentinel_events` tables for user data, trade records, AI evaluations, and event logging.
+- **Sentinel**: Manages multiple tables:
+  - `sentinel_users`: User accounts with secure password hashing
+  - `sentinel_trades`: Trade records with full lifecycle (entry, exit, P&L, outcome, rules followed)
+  - `sentinel_evaluations`: AI evaluation history per trade
+  - `sentinel_events`: Detailed event logging (status changes, stop/target updates)
+  - `sentinel_watchlist`: Setups being monitored with target entry, stop plan, priority
+  - `sentinel_rules`: User's custom trading rules/rubric for discipline tracking
 
 ## External Dependencies
 
