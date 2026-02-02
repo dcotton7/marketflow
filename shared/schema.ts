@@ -94,6 +94,13 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   positionSize: doublePrecision("position_size"),
   thesis: text("thesis"),
   status: text("status").notNull().default("considering"), // 'considering' | 'active' | 'closed'
+  // Trade closure fields
+  exitPrice: doublePrecision("exit_price"),
+  exitDate: timestamp("exit_date"),
+  actualPnL: doublePrecision("actual_pnl"),
+  outcome: text("outcome"), // 'win' | 'loss' | 'breakeven'
+  rulesFollowed: jsonb("rules_followed").$type<Record<string, boolean>>(), // { ruleId: true/false }
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -123,22 +130,57 @@ export const sentinelEvents = pgTable("sentinel_events", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Watchlist - setups user is monitoring for entry
+export const sentinelWatchlist = pgTable("sentinel_watchlist", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  symbol: text("symbol").notNull(),
+  targetEntry: doublePrecision("target_entry"), // desired entry price
+  stopPlan: doublePrecision("stop_plan"), // planned stop if entered
+  targetPlan: doublePrecision("target_plan"), // planned target if entered
+  alertPrice: doublePrecision("alert_price"), // price to alert user
+  thesis: text("thesis"),
+  priority: text("priority").default("medium"), // 'high' | 'medium' | 'low'
+  status: text("status").default("watching"), // 'watching' | 'triggered' | 'expired' | 'entered'
+  expiresAt: timestamp("expires_at"), // optional expiration
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// User's trading rules/rubric for process evaluation
+export const sentinelRules = pgTable("sentinel_rules", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(), // e.g., "Wait for pullback to 21 EMA"
+  description: text("description"),
+  category: text("category"), // 'entry' | 'exit' | 'sizing' | 'risk' | 'general'
+  isActive: boolean("is_active").default(true),
+  order: integer("order").default(0), // display order
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Sentinel Schemas
 export const insertSentinelUserSchema = createInsertSchema(sentinelUsers).omit({ id: true, createdAt: true });
 export const insertSentinelTradeSchema = createInsertSchema(sentinelTrades).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertSentinelEvaluationSchema = createInsertSchema(sentinelEvaluations).omit({ id: true, createdAt: true });
 export const insertSentinelEventSchema = createInsertSchema(sentinelEvents).omit({ id: true, createdAt: true });
+export const insertSentinelWatchlistSchema = createInsertSchema(sentinelWatchlist).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertSentinelRuleSchema = createInsertSchema(sentinelRules).omit({ id: true, createdAt: true });
 
 // Sentinel Types
 export type SentinelUser = typeof sentinelUsers.$inferSelect;
 export type SentinelTrade = typeof sentinelTrades.$inferSelect;
 export type SentinelEvaluation = typeof sentinelEvaluations.$inferSelect;
 export type SentinelEvent = typeof sentinelEvents.$inferSelect;
+export type SentinelWatchlistItem = typeof sentinelWatchlist.$inferSelect;
+export type SentinelRule = typeof sentinelRules.$inferSelect;
 
 export type InsertSentinelUser = z.infer<typeof insertSentinelUserSchema>;
 export type InsertSentinelTrade = z.infer<typeof insertSentinelTradeSchema>;
 export type InsertSentinelEvaluation = z.infer<typeof insertSentinelEvaluationSchema>;
 export type InsertSentinelEvent = z.infer<typeof insertSentinelEventSchema>;
+export type InsertSentinelWatchlistItem = z.infer<typeof insertSentinelWatchlistSchema>;
+export type InsertSentinelRule = z.infer<typeof insertSentinelRuleSchema>;
 
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {
