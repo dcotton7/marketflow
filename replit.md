@@ -51,7 +51,18 @@ The project utilizes a monorepo structure, separating client (React frontend) an
   - `sentinel_evaluations`: AI evaluation history per trade
   - `sentinel_events`: Detailed event logging (status changes, stop/target updates)
   - `sentinel_watchlist`: Setups being monitored with target entry, stop plan, priority
-  - `sentinel_rules`: User's custom trading rules/rubric for discipline tracking
+  - `sentinel_rules`: User's custom trading rules/rubric for discipline tracking (61 starter rules across 12 categories)
+  - `sentinel_rule_suggestions`: AI-generated rule suggestions with confidence scores and adoption tracking
+  - `sentinel_rule_performance`: Aggregated rule performance statistics for collective learning
+
+### Rule Categories (12 total)
+auto_reject, entry, exit, profit_taking, stop_loss, ma_structure, base_quality, breakout, position_sizing, market_regime, risk, general
+
+### AI Collective Learning
+- Rules have sources: 'starter' (61 pre-loaded), 'user' (custom), 'ai_collective' (learned from patterns), 'ai_agentic' (future agent-generated)
+- Rule performance is tracked across all users (anonymized) via `getHighDataRules(5)` which only analyzes rules with 5+ trades
+- AI endpoint uses gpt-4o to analyze patterns and suggest new rules with confidence scores
+- Users can adopt suggestions into their personal rulebook via the AI Insights dashboard tab
 
 ## External Dependencies
 
