@@ -241,8 +241,27 @@ export default function SymbolPage() {
           </div>
         )}
         <div className="flex gap-4 items-start">
-          <div className="flex-1 min-w-0">
-            <StockChart symbol={safeSymbol} selectedPattern={selectedPattern} technicalSignal={technicalSignal} initialInterval={initialInterval || undefined} pullbackUpPeriod={pbUpPeriodCandles} />
+          <div className="flex-1 min-w-0 space-y-4">
+            {/* Top Chart: Fixed Daily - cannot be changed */}
+            <StockChart 
+              symbol={safeSymbol} 
+              selectedPattern={selectedPattern} 
+              chartMode="daily-fixed"
+              showToolsArea={false}
+              chartHeight={350}
+            />
+            
+            {/* Bottom Chart: Variable timeframe - user can change */}
+            <StockChart 
+              symbol={safeSymbol} 
+              selectedPattern={selectedPattern} 
+              technicalSignal={technicalSignal} 
+              initialInterval={initialInterval || undefined} 
+              pullbackUpPeriod={pbUpPeriodCandles}
+              chartMode="variable"
+              showToolsArea={true}
+              chartHeight={400}
+            />
           </div>
           <div className="w-64 flex-shrink-0 hidden lg:block pt-8">
             <TradeRiskRating symbol={safeSymbol} currentPrice={quote.price} />

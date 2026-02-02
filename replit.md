@@ -5,6 +5,18 @@
 AI Swing Scanner is a stock market scanner and analysis application that enables users to screen stocks based on technical patterns and criteria, view detailed stock charts and quotes, and manage a personal watchlist. The application fetches real-time market data from Yahoo Finance and provides an intuitive dark-themed financial dashboard interface.
 
 ## Recent Changes (February 2026)
+- Dual-chart layout on symbol pages:
+  - Top chart: Fixed Daily chart (cannot be changed)
+    - Shows SMA 5 Green, SMA 21 Pink, SMA 50 Red, SMA 200 Black
+    - No timeframe selector, no tools area
+  - Bottom chart: Variable timeframe (user can change)
+    - 5min: SMA 6 Pink, SMA 20 Blue
+    - 15min: SMA 5 Green, SMA 21 Pink, Daily VWAP Orange Dotted
+    - 30min: SMA 5 Green, SMA 21 Pink, SMA 50 Red, Daily VWAP Orange Dotted
+    - Tools area (measure, line, channels) displayed here
+- Cup and Handle visualization now traces along actual bar lows as support line:
+  - Cup: Connects lows of each bar from left peak to right rim
+  - Handle: Connects from right rim low along handle bar lows, stops at handle low (no upturn)
 - Chart timeframe improvements:
   - Added TimeframeContext to preserve selected timeframe when navigating between symbols
   - Clicking ETF holdings, related stocks, watchlist, or Market items now keeps the current timeframe

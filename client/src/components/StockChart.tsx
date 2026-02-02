@@ -25,6 +25,10 @@ interface StockChartProps {
   technicalSignal?: string;
   initialInterval?: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo';
   pullbackUpPeriod?: number; // For pullback patterns: number of candles in the up period
+  // Dual-chart mode props
+  chartMode?: 'daily-fixed' | 'variable'; // daily-fixed = locked to daily, no timeframe selector
+  showToolsArea?: boolean; // Whether to show the tools (measure, line, channels) area
+  chartHeight?: number; // Override chart height in pixels
 }
 
 interface HorizontalLineDefinition {
@@ -334,6 +338,7 @@ interface CupAndHandleData {
   handleStartTime: number;
   handleEndTime: number;
   handleLows: { time: number; price: number }[];
+  cupLows: { time: number; price: number }[]; // Bar lows for cup portion (support line)
   cupOnly: boolean;
   completionPct: number;
   extensionPct: number;
@@ -351,7 +356,8 @@ function detectCupAndHandleForChart(
       !result.cupBottomTime || result.cupBottomPrice === undefined ||
       !result.rightRimTime || result.rightRimPrice === undefined ||
       !result.handleStartTime || !result.handleEndTime || 
-      !result.handleLows || result.handleLows.length === 0) {
+      !result.handleLows || result.handleLows.length === 0 ||
+      !result.cupLows || result.cupLows.length === 0) {
     return null;
   }
   
@@ -365,6 +371,7 @@ function detectCupAndHandleForChart(
     handleStartTime: result.handleStartTime,
     handleEndTime: result.handleEndTime,
     handleLows: result.handleLows,
+    cupLows: result.cupLows, // Bar lows for cup support line visualization
     cupOnly: result.cupOnly || false,
     completionPct: result.completionPct || 0,
     extensionPct: result.extensionPct || 0
@@ -384,22 +391,28 @@ interface IndicatorConfig {
 }
 
 // Get available indicators (visible toggles) per timeframe
-function getAvailableIndicators(timeframe: string): IndicatorKey[] {
+// isDailyFixed: true for the fixed daily chart (top chart in dual layout)
+function getAvailableIndicators(timeframe: string, isDailyFixed: boolean = false): IndicatorKey[] {
+  // Daily-fixed chart has specific fixed indicators: SMA 5, SMA 21, SMA 50, SMA 200
+  if (isDailyFixed) {
+    return ['sma5', 'sma21', 'sma50', 'sma200'];
+  }
+  
   switch (timeframe) {
     case '5m':
-      // 5min: SMA 6, SMA 20, VWAP
-      return ['sma6', 'sma20', 'autoVwap'];
+      // 5min: 6 SMA Pink, 20 SMA Blue
+      return ['sma6', 'sma20'];
     case '15m':
-      // 15min: SMA 5, SMA 20, SMA 50 (daily)
-      return ['sma5', 'sma20', 'sma50'];
+      // 15min: 5 DAY SMA Green, 21 DAY SMA Pink, Daily VWAP Orange Dotted
+      return ['sma5', 'sma21', 'autoVwap'];
     case '30m':
-      // 30min: SMA 5D, EMA 21, VWAP, SMA 50d
-      return ['sma5', 'ema21', 'autoVwap', 'sma50'];
+      // 30min: 5 DAY SMA Green, 21 DAY SMA Pink, 50 DAY SMA Red, Daily VWAP Orange Dotted
+      return ['sma5', 'sma21', 'sma50', 'autoVwap'];
     case '60m':
       // 60min: SMA 5d, EMA 21d, SMA 50d, SMA 200d, VWAP, AVWAP 6MOS
       return ['sma5', 'ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
     case '1d':
-      // Daily: SMA 5, SMA 10, SMA 20 (pink), SMA 50, SMA 200, VWAP, AVWAP 6MOS
+      // Daily variable: SMA 5, SMA 10, SMA 20 (pink), SMA 50, SMA 200, VWAP, AVWAP 6MOS
       return ['sma5', 'sma10', 'sma20', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
     case '1wk':
     case '1mo':
@@ -411,22 +424,28 @@ function getAvailableIndicators(timeframe: string): IndicatorKey[] {
 }
 
 // Get default enabled indicators (ON by default) per timeframe
-function getDefaultIndicators(timeframe?: string): Set<IndicatorKey> {
+// isDailyFixed: true for the fixed daily chart
+function getDefaultIndicators(timeframe?: string, isDailyFixed: boolean = false): Set<IndicatorKey> {
+  // Daily-fixed chart: SMA 5 Green, SMA 21 Pink, SMA 50 Red, SMA 200 Black - all ON
+  if (isDailyFixed) {
+    return new Set(['sma5', 'sma21', 'sma50', 'sma200'] as IndicatorKey[]);
+  }
+  
   switch (timeframe) {
     case '5m':
-      // 5min: SMA 6, SMA 20, VWAP - all ON
-      return new Set(['sma6', 'sma20', 'autoVwap'] as IndicatorKey[]);
+      // 5min: 6 SMA Pink, 20 SMA Blue - all ON
+      return new Set(['sma6', 'sma20'] as IndicatorKey[]);
     case '15m':
-      // 15min: SMA 5, SMA 20 ON; SMA 50 OFF
-      return new Set(['sma5', 'sma20'] as IndicatorKey[]);
+      // 15min: 5 DAY SMA Green, 21 DAY SMA Pink, Daily VWAP Orange Dotted - all ON
+      return new Set(['sma5', 'sma21', 'autoVwap'] as IndicatorKey[]);
     case '30m':
-      // 30min: SMA 5D, EMA 21, VWAP ON; SMA 50d OFF
-      return new Set(['sma5', 'ema21', 'autoVwap'] as IndicatorKey[]);
+      // 30min: 5 DAY SMA Green, 21 DAY SMA Pink, 50 DAY SMA Red, Daily VWAP Orange Dotted - all ON
+      return new Set(['sma5', 'sma21', 'sma50', 'autoVwap'] as IndicatorKey[]);
     case '60m':
       // 60min: EMA 21d, SMA 50d, SMA 200d, VWAP, AVWAP ON; SMA 5d OFF
       return new Set(['ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
     case '1d':
-      // Daily: SMA 5, SMA 50, SMA 200, VWAP, AVWAP ON; SMA 10, SMA 20 OFF
+      // Daily variable: SMA 5, SMA 50, SMA 200, VWAP, AVWAP ON; SMA 10, SMA 20 OFF
       return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
     case '1wk':
     case '1mo':
@@ -437,16 +456,30 @@ function getDefaultIndicators(timeframe?: string): Set<IndicatorKey> {
   }
 }
 
-export function StockChart({ symbol, showChannels: initialShowChannels = false, selectedPattern, technicalSignal, initialInterval, pullbackUpPeriod }: StockChartProps) {
+export function StockChart({ 
+  symbol, 
+  showChannels: initialShowChannels = false, 
+  selectedPattern, 
+  technicalSignal, 
+  initialInterval, 
+  pullbackUpPeriod,
+  chartMode = 'variable', // Default to variable mode (existing behavior)
+  showToolsArea = true, // Default to showing tools
+  chartHeight = 500 // Default height
+}: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
   const { globalTimeframe, setGlobalTimeframe } = useTimeframeContext();
   
+  // In daily-fixed mode, always use daily timeframe
+  const isDailyFixed = chartMode === 'daily-fixed';
+  
   // Track if user has manually changed the interval
   const [userSelectedInterval, setUserSelectedInterval] = useState(false);
   // Auto-select timeframe based on: URL param > globalTimeframe > technicalSignal > default
   const getDefaultInterval = () => {
+    if (isDailyFixed) return '1d'; // Always daily for fixed chart
     if (initialInterval) return initialInterval;
     if (technicalSignal === '6_20_cross') return '5m';
     // Use global timeframe if no special signal/pattern dictates otherwise
@@ -461,15 +494,17 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number; barCount: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   
-  // Indicator toggles - initialized based on timeframe
+  // Indicator toggles - initialized based on timeframe and chart mode
   const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorKey>>(() => 
-    getDefaultIndicators(interval)
+    getDefaultIndicators(interval, isDailyFixed)
   );
   
-  // Update enabled indicators when timeframe changes
+  // Update enabled indicators when timeframe changes (but not for daily-fixed mode)
   useEffect(() => {
-    setEnabledIndicators(getDefaultIndicators(interval));
-  }, [interval]);
+    if (!isDailyFixed) {
+      setEnabledIndicators(getDefaultIndicators(interval, isDailyFixed));
+    }
+  }, [interval, isDailyFixed]);
   
   const toggleIndicator = (key: IndicatorKey) => {
     setEnabledIndicators(prev => {
@@ -496,9 +531,10 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
   }, [technicalSignal, selectedPattern]);
   
   // Auto-switch timeframe based on signal/pattern (only if user hasn't manually changed it AND no initialInterval was provided)
+  // Also skip for daily-fixed mode which is always locked to '1d'
   useEffect(() => {
-    // Skip auto-switch if user manually changed interval or if an initialInterval was provided via URL
-    if (userSelectedInterval || initialInterval) return;
+    // Skip auto-switch for daily-fixed mode or if user manually changed interval or if an initialInterval was provided
+    if (isDailyFixed || userSelectedInterval || initialInterval) return;
     
     if (technicalSignal === '6_20_cross') {
       setIntervalState('5m');
@@ -508,7 +544,7 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       // Use global timeframe when no pattern/signal dictates otherwise
       setIntervalState(globalTimeframe);
     }
-  }, [technicalSignal, selectedPattern, userSelectedInterval, initialInterval, globalTimeframe]);
+  }, [technicalSignal, selectedPattern, userSelectedInterval, initialInterval, globalTimeframe, isDailyFixed]);
   
   // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
   const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
@@ -1130,15 +1166,17 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
       {/* Header with legend toggle buttons and tools */}
       <div className="mb-4 flex justify-between items-start flex-wrap gap-4">
         <div>
-          <h3 className="font-semibold text-foreground mb-2">Indicator Toggles</h3>
+          <h3 className="font-semibold text-foreground mb-2">
+            {isDailyFixed ? 'Daily Chart' : 'Indicator Toggles'}
+          </h3>
           <div className="flex gap-1 items-center flex-wrap">
             {/* Timeframe-based indicator toggles */}
-            {getAvailableIndicators(interval).map((key) => {
+            {getAvailableIndicators(interval, isDailyFixed).map((key) => {
               const indicatorStyles: Record<IndicatorKey, { color: string; label: string; isDotted?: boolean }> = {
                 sma5: { color: '#22c55e', label: 'SMA 5' },
                 sma6: { color: '#f472b6', label: 'SMA 6' },
                 sma10: { color: '#3b82f6', label: 'SMA 10' },
-                sma20: { color: '#f472b6', label: 'SMA 20' },
+                sma20: { color: '#3b82f6', label: 'SMA 20' }, // Blue for 5m timeframe
                 sma21: { color: '#f472b6', label: 'SMA 21' },
                 sma50: { color: '#dc2626', label: 'SMA 50' },
                 sma200: { color: '#000000', label: 'SMA 200' },
@@ -1173,24 +1211,29 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
               );
             })}
             
-            {/* Timeframe Selector - moved here after indicator toggles */}
-            <span className="text-xs text-muted-foreground mx-2">|</span>
-            {TIMEFRAMES.map((tf) => (
-              <Button
-                key={tf.value}
-                variant={interval === tf.value ? "default" : "outline"}
-                size="sm"
-                onClick={() => setInterval(tf.value)}
-                className="h-7 px-2"
-                data-testid={`button-timeframe-${tf.value}`}
-              >
-                <span className="text-xs">{tf.label}</span>
-              </Button>
-            ))}
+            {/* Timeframe Selector - only for variable mode, hidden in daily-fixed mode */}
+            {!isDailyFixed && (
+              <>
+                <span className="text-xs text-muted-foreground mx-2">|</span>
+                {TIMEFRAMES.map((tf) => (
+                  <Button
+                    key={tf.value}
+                    variant={interval === tf.value ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setInterval(tf.value)}
+                    className="h-7 px-2"
+                    data-testid={`button-timeframe-${tf.value}`}
+                  >
+                    <span className="text-xs">{tf.label}</span>
+                  </Button>
+                ))}
+              </>
+            )}
           </div>
         </div>
         
-        {/* Drawing Tools */}
+        {/* Drawing Tools - hidden in daily-fixed mode unless showToolsArea is true */}
+        {showToolsArea && (
         <div className="flex gap-2 items-center flex-wrap">
           <Button
             variant={showChannels ? "default" : "outline"}
@@ -1253,12 +1296,14 @@ export function StockChart({ symbol, showChannels: initialShowChannels = false, 
             </Button>
           )}
         </div>
+        )}
       </div>
       
-      {/* Chart container - fixed height to prevent layout shift */}
+      {/* Chart container - dynamic height based on prop */}
       <div 
         ref={chartContainerRef} 
-        className={`w-full h-[500px] ${toolMode !== 'none' ? 'cursor-crosshair' : ''}`}
+        className={`w-full ${toolMode !== 'none' ? 'cursor-crosshair' : ''}`}
+        style={{ height: `${chartHeight}px` }}
         onClick={handleChartClick}
         data-testid="chart-container" 
       />
