@@ -16,6 +16,13 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
 
+interface TradeLabel {
+  id: number;
+  name: string;
+  color: string;
+  isAdminOnly?: boolean;
+}
+
 interface TradeWithEvaluation {
   id: number;
   symbol: string;
@@ -25,6 +32,7 @@ interface TradeWithEvaluation {
   targetPrice?: number;
   status: string;
   createdAt: string;
+  labels?: TradeLabel[];
   latestEvaluation?: {
     score: number;
     recommendation: string;
@@ -110,7 +118,7 @@ function getScoreBadgeVariant(score: number): "default" | "secondary" | "destruc
 
 function TradeCard({ trade }: { trade: TradeWithEvaluation }) {
   return (
-    <Link href={`/sentinel/trade/${trade.id}`}>
+    <Link href={`/sentinel/evaluate?tradeId=${trade.id}`}>
       <Card className="hover-elevate cursor-pointer" data-testid={`card-trade-${trade.id}`}>
         <CardContent className="p-4">
           <div className="flex items-center justify-between mb-2">
@@ -130,6 +138,22 @@ function TradeCard({ trade }: { trade: TradeWithEvaluation }) {
               </Badge>
             )}
           </div>
+
+          {/* Display labels */}
+          {trade.labels && trade.labels.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-2">
+              {trade.labels.map((label) => (
+                <span
+                  key={label.id}
+                  className="px-2 py-0.5 text-xs rounded-full text-white"
+                  style={{ backgroundColor: label.color }}
+                  data-testid={`label-${trade.id}-${label.id}`}
+                >
+                  {label.name}
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="text-sm text-muted-foreground space-y-1">
             <div>Entry: ${trade.entryPrice.toFixed(2)}</div>
@@ -325,6 +349,7 @@ export default function SentinelDashboardPage() {
   const [watchlistForm, setWatchlistForm] = useState({ symbol: "", targetEntry: "", thesis: "", priority: "medium" });
   const [ruleForm, setRuleForm] = useState({ name: "", description: "", category: "entry" });
   const [ruleFilter, setRuleFilter] = useState<string>("all");
+  const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(null);
 
   const { data: dashboard, isLoading, error } = useQuery<DashboardData>({
     queryKey: ["/api/sentinel/dashboard"],
@@ -341,6 +366,21 @@ export default function SentinelDashboardPage() {
   const { data: suggestions = [] } = useQuery<RuleSuggestion[]>({
     queryKey: ["/api/sentinel/suggestions"],
   });
+
+  const { data: allLabels = [] } = useQuery<TradeLabel[]>({
+    queryKey: ["/api/sentinel/labels"],
+  });
+
+  // Filter trades by label
+  const filterTradesByLabel = (trades: TradeWithEvaluation[] | undefined) => {
+    if (!trades || selectedLabelFilter === null) return trades;
+    return trades.filter(trade => 
+      trade.labels?.some(label => label.id === selectedLabelFilter)
+    );
+  };
+
+  const filteredConsidering = filterTradesByLabel(dashboard?.considering);
+  const filteredActive = filterTradesByLabel(dashboard?.active);
 
   // Mutations
   const addWatchlistMutation = useMutation({
@@ -520,15 +560,47 @@ export default function SentinelDashboardPage() {
           </TabsList>
 
           <TabsContent value="considering" className="space-y-4">
-            {dashboard?.considering.length === 0 ? (
+            {/* Label filter grid */}
+            {allLabels.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4" data-testid="label-filter-grid">
+                <Button
+                  size="sm"
+                  variant={selectedLabelFilter === null ? "default" : "outline"}
+                  onClick={() => setSelectedLabelFilter(null)}
+                  data-testid="label-filter-all"
+                >
+                  All
+                </Button>
+                {allLabels.map((label) => (
+                  <Button
+                    key={label.id}
+                    size="sm"
+                    variant={selectedLabelFilter === label.id ? "default" : "outline"}
+                    onClick={() => setSelectedLabelFilter(label.id)}
+                    className="gap-1"
+                    data-testid={`label-filter-${label.id}`}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: label.color }}
+                    />
+                    {label.name}
+                    {label.isAdminOnly && <span className="text-xs opacity-70">(admin)</span>}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {filteredConsidering?.length === 0 ? (
               <Card>
                 <CardContent className="p-6 text-center text-muted-foreground">
-                  No trades under consideration. Click "New Evaluation" to get started.
+                  {selectedLabelFilter !== null
+                    ? "No trades with this label."
+                    : "No trades under consideration. Click \"New Evaluation\" to get started."}
                 </CardContent>
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {dashboard?.considering.map((trade) => (
+                {filteredConsidering?.map((trade) => (
                   <TradeCard key={trade.id} trade={trade} />
                 ))}
               </div>
@@ -536,15 +608,46 @@ export default function SentinelDashboardPage() {
           </TabsContent>
 
           <TabsContent value="active" className="space-y-4">
-            {dashboard?.active.length === 0 ? (
+            {/* Label filter grid for active trades */}
+            {allLabels.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4" data-testid="label-filter-grid-active">
+                <Button
+                  size="sm"
+                  variant={selectedLabelFilter === null ? "default" : "outline"}
+                  onClick={() => setSelectedLabelFilter(null)}
+                  data-testid="label-filter-all-active"
+                >
+                  All
+                </Button>
+                {allLabels.map((label) => (
+                  <Button
+                    key={label.id}
+                    size="sm"
+                    variant={selectedLabelFilter === label.id ? "default" : "outline"}
+                    onClick={() => setSelectedLabelFilter(label.id)}
+                    className="gap-1"
+                    data-testid={`label-filter-active-${label.id}`}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: label.color }}
+                    />
+                    {label.name}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {filteredActive?.length === 0 ? (
               <Card>
                 <CardContent className="p-6 text-center text-muted-foreground">
-                  No active trades. Commit a trade to start tracking it.
+                  {selectedLabelFilter !== null
+                    ? "No active trades with this label."
+                    : "No active trades. Commit a trade to start tracking it."}
                 </CardContent>
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {dashboard?.active.map((trade) => (
+                {filteredActive?.map((trade) => (
                   <TradeCard key={trade.id} trade={trade} />
                 ))}
               </div>

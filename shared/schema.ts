@@ -81,6 +81,7 @@ export const sentinelUsers = pgTable("sentinel_users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   accountSize: doublePrecision("account_size").default(1000000), // Default $1M
+  isAdmin: boolean("is_admin").default(false), // Admin users can create/view special labels
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -210,6 +211,24 @@ export const sentinelRulePerformance = pgTable("sentinel_rule_performance", {
   lastUpdated: timestamp("last_updated").defaultNow(),
 });
 
+// Trade labels for categorizing/tagging trades (admin-only labels for expert trade logging)
+export const sentinelTradeLabels = pgTable("sentinel_trade_labels", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  color: text("color").default("#6366f1"), // Hex color for display
+  description: text("description"),
+  isAdminOnly: boolean("is_admin_only").default(false), // If true, only admins can see/use
+  createdBy: integer("created_by").notNull(), // User who created the label
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Many-to-many association between trades and labels
+export const sentinelTradeToLabels = pgTable("sentinel_trade_to_labels", {
+  tradeId: integer("trade_id").notNull(),
+  labelId: integer("label_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Sentinel Schemas
 export const insertSentinelUserSchema = createInsertSchema(sentinelUsers).omit({ id: true, createdAt: true });
 export const insertSentinelTradeSchema = createInsertSchema(sentinelTrades).omit({ id: true, createdAt: true, updatedAt: true });
@@ -219,6 +238,8 @@ export const insertSentinelWatchlistSchema = createInsertSchema(sentinelWatchlis
 export const insertSentinelRuleSchema = createInsertSchema(sentinelRules).omit({ id: true, createdAt: true });
 export const insertSentinelRuleSuggestionSchema = createInsertSchema(sentinelRuleSuggestions).omit({ id: true, createdAt: true });
 export const insertSentinelRulePerformanceSchema = createInsertSchema(sentinelRulePerformance).omit({ id: true });
+export const insertSentinelTradeLabelSchema = createInsertSchema(sentinelTradeLabels).omit({ id: true, createdAt: true });
+export const insertSentinelTradeToLabelsSchema = createInsertSchema(sentinelTradeToLabels).omit({ createdAt: true });
 
 // Sentinel Types
 export type SentinelUser = typeof sentinelUsers.$inferSelect;
@@ -229,6 +250,8 @@ export type SentinelWatchlistItem = typeof sentinelWatchlist.$inferSelect;
 export type SentinelRule = typeof sentinelRules.$inferSelect;
 export type SentinelRuleSuggestion = typeof sentinelRuleSuggestions.$inferSelect;
 export type SentinelRulePerformance = typeof sentinelRulePerformance.$inferSelect;
+export type SentinelTradeLabel = typeof sentinelTradeLabels.$inferSelect;
+export type SentinelTradeToLabel = typeof sentinelTradeToLabels.$inferSelect;
 
 export type InsertSentinelUser = z.infer<typeof insertSentinelUserSchema>;
 export type InsertSentinelTrade = z.infer<typeof insertSentinelTradeSchema>;
@@ -238,6 +261,8 @@ export type InsertSentinelWatchlistItem = z.infer<typeof insertSentinelWatchlist
 export type InsertSentinelRule = z.infer<typeof insertSentinelRuleSchema>;
 export type InsertSentinelRuleSuggestion = z.infer<typeof insertSentinelRuleSuggestionSchema>;
 export type InsertSentinelRulePerformance = z.infer<typeof insertSentinelRulePerformanceSchema>;
+export type InsertSentinelTradeLabel = z.infer<typeof insertSentinelTradeLabelSchema>;
+export type InsertSentinelTradeToLabel = z.infer<typeof insertSentinelTradeToLabelsSchema>;
 
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {

@@ -35,9 +35,22 @@ export interface SectorTrend {
   ma200: number;
 }
 
+export interface ChoppinessRegime {
+  daily: {
+    value: number;
+    state: "CHOPPY" | "MIXED" | "TRENDING";
+  };
+  weekly: {
+    value: number;
+    state: "CHOPPY" | "MIXED" | "TRENDING";
+  };
+  recommendation: string;
+}
+
 export interface MarketSentiment {
   weekly: WeeklyTrend;
   daily: DailyBasket;
+  choppiness?: ChoppinessRegime;
   summary: string;
   updatedAt: Date;
 }
@@ -116,6 +129,133 @@ async function fetchWeeklyPrices(symbol: string, weeks: number): Promise<number[
   } catch (error) {
     console.error(`Failed to fetch weekly ${symbol}:`, error);
     return [];
+  }
+}
+
+interface OHLCCandle {
+  high: number;
+  low: number;
+  close: number;
+}
+
+async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[]> {
+  try {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days - 10);
+
+    const result = await yahooFinance.historical(symbol, {
+      period1: startDate,
+      period2: endDate,
+      interval: "1d",
+    }) as Array<{ high: number; low: number; close: number }>;
+
+    return result.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
+  } catch (error) {
+    console.error(`Failed to fetch OHLC for ${symbol}:`, error);
+    return [];
+  }
+}
+
+async function fetchWeeklyOHLC(symbol: string, weeks: number): Promise<OHLCCandle[]> {
+  try {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - weeks * 7 - 30);
+
+    const result = await yahooFinance.historical(symbol, {
+      period1: startDate,
+      period2: endDate,
+      interval: "1wk",
+    }) as Array<{ high: number; low: number; close: number }>;
+
+    return result.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
+  } catch (error) {
+    console.error(`Failed to fetch weekly OHLC for ${symbol}:`, error);
+    return [];
+  }
+}
+
+// Calculate Choppiness Index (CI)
+// CI = 100 * LOG10(SUM(ATR, n) / (Highest High - Lowest Low)) / LOG10(n)
+// CI > 61.8 = Choppy/ranging, CI < 38.2 = Trending
+function calculateChoppinessIndex(candles: OHLCCandle[], period: number): number {
+  if (candles.length < period + 1) return 50; // Default to mixed if insufficient data
+  
+  // Calculate ATR sum over period
+  let atrSum = 0;
+  for (let i = 0; i < period; i++) {
+    const current = candles[i];
+    const previous = candles[i + 1];
+    if (!current || !previous) continue;
+    
+    const tr = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previous.close),
+      Math.abs(current.low - previous.close)
+    );
+    atrSum += tr;
+  }
+  
+  // Get highest high and lowest low over the period
+  const periodCandles = candles.slice(0, period);
+  const highestHigh = Math.max(...periodCandles.map(c => c.high));
+  const lowestLow = Math.min(...periodCandles.map(c => c.low));
+  
+  const range = highestHigh - lowestLow;
+  if (range === 0) return 50; // Avoid division by zero
+  
+  // Choppiness Index formula
+  const ci = 100 * Math.log10(atrSum / range) / Math.log10(period);
+  
+  return Math.min(100, Math.max(0, ci)); // Clamp between 0-100
+}
+
+function classifyChoppiness(value: number): "CHOPPY" | "MIXED" | "TRENDING" {
+  if (value >= 61.8) return "CHOPPY";
+  if (value <= 38.2) return "TRENDING";
+  return "MIXED";
+}
+
+function getChoppinessRecommendation(dailyState: string, weeklyState: string): string {
+  if (dailyState === "CHOPPY" && weeklyState === "CHOPPY") {
+    return "Market is very choppy. Scale out profits quickly, avoid overnight holds, use smaller position sizes.";
+  }
+  if (dailyState === "CHOPPY" && weeklyState === "TRENDING") {
+    return "Daily chop within weekly trend. Use intraday pullbacks for entries aligned with weekly trend.";
+  }
+  if (dailyState === "TRENDING" && weeklyState === "CHOPPY") {
+    return "Short-term trend in choppy environment. Quick day trades work, avoid swing holds.";
+  }
+  if (dailyState === "TRENDING" && weeklyState === "TRENDING") {
+    return "Strong trending environment. Let winners run, add on pullbacks, overnight holds OK.";
+  }
+  return "Mixed conditions. Normal trade management applies.";
+}
+
+async function fetchChoppinessRegime(): Promise<ChoppinessRegime | null> {
+  try {
+    const [dailyCandles, weeklyCandles] = await Promise.all([
+      fetchDailyOHLC("SPY", 20), // Need 20 days for 14-period CI
+      fetchWeeklyOHLC("SPY", 15), // Need 15 weeks for 10-period CI
+    ]);
+
+    const dailyCI = calculateChoppinessIndex(dailyCandles, 14);
+    const weeklyCI = calculateChoppinessIndex(weeklyCandles, 10);
+    
+    const dailyState = classifyChoppiness(dailyCI);
+    const weeklyState = classifyChoppiness(weeklyCI);
+
+    console.log(`[Sentiment] Choppiness - Daily: ${dailyCI.toFixed(1)} (${dailyState}), Weekly: ${weeklyCI.toFixed(1)} (${weeklyState})`);
+
+    return {
+      daily: { value: Math.round(dailyCI * 10) / 10, state: dailyState },
+      weekly: { value: Math.round(weeklyCI * 10) / 10, state: weeklyState },
+      recommendation: getChoppinessRecommendation(dailyState, weeklyState),
+    };
+  } catch (error) {
+    console.error("Failed to calculate choppiness:", error);
+    return null;
   }
 }
 
@@ -253,8 +393,9 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
     return sentimentCache.data;
   }
 
-  const [weekly, ...basketPrices] = await Promise.all([
+  const [weekly, choppiness, ...basketPrices] = await Promise.all([
     fetchWeeklyTrend(),
+    fetchChoppinessRegime(),
     ...RISK_BASKET.map((s) => fetchHistoricalPrices(s, 30)),
   ]);
 
@@ -288,9 +429,17 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
     summary += ` Warning: ${daily.canaryTags.join(", ")}.`;
   }
 
+  // Add choppiness context to summary
+  if (choppiness) {
+    if (choppiness.daily.state === "CHOPPY" || choppiness.weekly.state === "CHOPPY") {
+      summary += " Choppiness detected - take profits faster, reduce overnight exposure.";
+    }
+  }
+
   const sentiment: MarketSentiment = {
     weekly,
     daily,
+    choppiness: choppiness || undefined,
     summary,
     updatedAt: new Date(),
   };

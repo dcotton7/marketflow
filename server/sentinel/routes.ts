@@ -4,12 +4,14 @@ import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import OpenAI from "openai";
+import { eq, and } from "drizzle-orm";
+import { db } from "../db";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, insertSentinelTradeLabelSchema } from "@shared/schema";
 
 declare module "express-session" {
   interface SessionData {
@@ -42,6 +44,8 @@ const evaluateSchema = z.object({
   thesis: z.string().optional(),
   deepEval: z.boolean().optional(),
   historicalAnalysis: z.boolean().optional(),
+  tradeDate: z.string().optional(),
+  tradeTime: z.string().optional(),
 });
 
 const updateTradeSchema = z.object({
@@ -238,6 +242,8 @@ export function registerSentinelRoutes(app: Express): void {
         thesis: data.thesis,
         deepEval: data.deepEval,
         historicalAnalysis: data.historicalAnalysis,
+        tradeDate: data.tradeDate,
+        tradeTime: data.tradeTime,
       };
 
       const result = await evaluateTrade(request, req.session.userId!);
@@ -254,7 +260,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.post("/api/sentinel/commit/:tradeId", requireAuth, async (req: Request, res: Response) => {
     try {
-      const tradeId = parseInt(req.params.tradeId);
+      const tradeId = parseInt(req.params.tradeId as string);
       const trade = await sentinelModels.getTrade(tradeId);
 
       if (!trade) {
@@ -285,6 +291,8 @@ export function registerSentinelRoutes(app: Express): void {
   app.get("/api/sentinel/dashboard", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      const isAdmin = user?.isAdmin ?? false;
 
       const [considering, active, recentEvents] = await Promise.all([
         sentinelModels.getTradesByStatus(userId, "considering"),
@@ -295,8 +303,41 @@ export function registerSentinelRoutes(app: Express): void {
       const enrichTrades = async (trades: typeof considering): Promise<TradeWithEvaluation[]> => {
         return Promise.all(trades.map(async (trade) => {
           const latestEval = await sentinelModels.getLatestEvaluation(trade.id);
+          
+          // Fetch labels with proper admin visibility filtering
+          let labels;
+          if (isAdmin) {
+            labels = await db
+              .select({
+                id: sentinelTradeLabels.id,
+                name: sentinelTradeLabels.name,
+                color: sentinelTradeLabels.color,
+                isAdminOnly: sentinelTradeLabels.isAdminOnly,
+              })
+              .from(sentinelTradeToLabels)
+              .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
+              .where(eq(sentinelTradeToLabels.tradeId, trade.id));
+          } else {
+            labels = await db
+              .select({
+                id: sentinelTradeLabels.id,
+                name: sentinelTradeLabels.name,
+                color: sentinelTradeLabels.color,
+                isAdminOnly: sentinelTradeLabels.isAdminOnly,
+              })
+              .from(sentinelTradeToLabels)
+              .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
+              .where(
+                and(
+                  eq(sentinelTradeToLabels.tradeId, trade.id),
+                  eq(sentinelTradeLabels.isAdminOnly, false)
+                )
+              );
+          }
+          
           return {
             ...trade,
+            labels,
             latestEvaluation: latestEval ? {
               score: latestEval.score,
               recommendation: latestEval.recommendation,
@@ -334,7 +375,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.get("/api/sentinel/trade/:tradeId", requireAuth, async (req: Request, res: Response) => {
     try {
-      const tradeId = parseInt(req.params.tradeId);
+      const tradeId = parseInt(req.params.tradeId as string);
       const trade = await sentinelModels.getTrade(tradeId);
 
       if (!trade) {
@@ -358,7 +399,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.patch("/api/sentinel/trade/:tradeId", requireAuth, async (req: Request, res: Response) => {
     try {
-      const tradeId = parseInt(req.params.tradeId);
+      const tradeId = parseInt(req.params.tradeId as string);
       const data = updateTradeSchema.parse(req.body);
 
       const trade = await sentinelModels.getTrade(tradeId);
@@ -421,7 +462,7 @@ export function registerSentinelRoutes(app: Express): void {
   // Close trade with outcome and rule adherence
   app.post("/api/sentinel/trade/:tradeId/close", requireAuth, async (req: Request, res: Response) => {
     try {
-      const tradeId = parseInt(req.params.tradeId);
+      const tradeId = parseInt(req.params.tradeId as string);
       const data = closeTradeSchema.parse(req.body);
 
       const trade = await sentinelModels.getTrade(tradeId);
@@ -507,7 +548,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.patch("/api/sentinel/watchlist/:id", requireAuth, async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const item = await sentinelModels.getWatchlistItem(id);
       
       if (!item) {
@@ -531,7 +572,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.delete("/api/sentinel/watchlist/:id", requireAuth, async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const item = await sentinelModels.getWatchlistItem(id);
       
       if (!item) {
@@ -582,7 +623,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.patch("/api/sentinel/rules/:id", requireAuth, async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const existingRules = await sentinelModels.getRulesByUser(req.session.userId!);
       const rule = existingRules.find(r => r.id === id);
       
@@ -604,7 +645,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.delete("/api/sentinel/rules/:id", requireAuth, async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const existingRules = await sentinelModels.getRulesByUser(req.session.userId!);
       const rule = existingRules.find(r => r.id === id);
       
@@ -706,7 +747,7 @@ export function registerSentinelRoutes(app: Express): void {
   // Adopt a suggestion (add to user's rules)
   app.post("/api/sentinel/suggestions/:id/adopt", requireAuth, async (req: Request, res: Response) => {
     try {
-      const suggestionId = parseInt(req.params.id);
+      const suggestionId = parseInt(req.params.id as string);
       const rule = await sentinelModels.adoptSuggestion(suggestionId, req.session.userId!);
       res.json(rule);
     } catch (error) {
@@ -718,7 +759,7 @@ export function registerSentinelRoutes(app: Express): void {
   // Dismiss a suggestion
   app.post("/api/sentinel/suggestions/:id/dismiss", requireAuth, async (req: Request, res: Response) => {
     try {
-      const suggestionId = parseInt(req.params.id);
+      const suggestionId = parseInt(req.params.id as string);
       await sentinelModels.updateSuggestionStatus(suggestionId, 'dismissed');
       res.json({ success: true });
     } catch (error) {
@@ -865,7 +906,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
   app.get("/api/sentinel/sentiment/sector/:symbol", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { symbol } = req.params;
+      const symbol = req.params.symbol as string;
       const sectorTrend = await fetchSectorSentiment(symbol.toUpperCase());
       if (!sectorTrend) {
         return res.status(404).json({ error: "Sector data not available for this symbol" });
@@ -874,6 +915,156 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Sector sentiment error:", error);
       res.status(500).json({ error: "Failed to fetch sector sentiment" });
+    }
+  });
+
+  // === TRADE LABELS ENDPOINTS ===
+
+  // Get all labels (filtered by admin status)
+  app.get("/api/sentinel/labels", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      const isAdmin = user?.isAdmin ?? false;
+
+      // Admin sees all labels, regular users only see non-admin labels
+      let labels;
+      if (isAdmin) {
+        labels = await db
+          .select()
+          .from(sentinelTradeLabels)
+          .orderBy(sentinelTradeLabels.name);
+      } else {
+        labels = await db
+          .select()
+          .from(sentinelTradeLabels)
+          .where(eq(sentinelTradeLabels.isAdminOnly, false))
+          .orderBy(sentinelTradeLabels.name);
+      }
+
+      res.json(labels);
+    } catch (error) {
+      console.error("Get labels error:", error);
+      res.status(500).json({ error: "Failed to fetch labels" });
+    }
+  });
+
+  // Create a new label
+  app.post("/api/sentinel/labels", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      const isAdmin = user?.isAdmin ?? false;
+
+      const validatedData = insertSentinelTradeLabelSchema.parse({
+        ...req.body,
+        createdBy: userId,
+        isAdminOnly: req.body.isAdminOnly && isAdmin ? true : false, // Only admins can create admin-only labels
+      });
+
+      const [label] = await db
+        .insert(sentinelTradeLabels)
+        .values(validatedData)
+        .returning();
+
+      res.status(201).json(label);
+    } catch (error) {
+      console.error("Create label error:", error);
+      res.status(500).json({ error: "Failed to create label" });
+    }
+  });
+
+  // Get labels for a specific trade
+  app.get("/api/sentinel/trades/:tradeId/labels", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.tradeId as string);
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      const isAdmin = user?.isAdmin ?? false;
+
+      let labels;
+      if (isAdmin) {
+        labels = await db
+          .select({
+            id: sentinelTradeLabels.id,
+            name: sentinelTradeLabels.name,
+            color: sentinelTradeLabels.color,
+            description: sentinelTradeLabels.description,
+            isAdminOnly: sentinelTradeLabels.isAdminOnly,
+          })
+          .from(sentinelTradeToLabels)
+          .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
+          .where(eq(sentinelTradeToLabels.tradeId, tradeId));
+      } else {
+        labels = await db
+          .select({
+            id: sentinelTradeLabels.id,
+            name: sentinelTradeLabels.name,
+            color: sentinelTradeLabels.color,
+            description: sentinelTradeLabels.description,
+            isAdminOnly: sentinelTradeLabels.isAdminOnly,
+          })
+          .from(sentinelTradeToLabels)
+          .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
+          .where(
+            and(
+              eq(sentinelTradeToLabels.tradeId, tradeId),
+              eq(sentinelTradeLabels.isAdminOnly, false)
+            )
+          );
+      }
+
+      res.json(labels);
+    } catch (error) {
+      console.error("Get trade labels error:", error);
+      res.status(500).json({ error: "Failed to fetch trade labels" });
+    }
+  });
+
+  // Add labels to a trade
+  app.post("/api/sentinel/trades/:tradeId/labels", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.tradeId as string);
+      const { labelIds } = req.body as { labelIds: number[] };
+
+      if (!labelIds || !Array.isArray(labelIds)) {
+        return res.status(400).json({ error: "labelIds must be an array" });
+      }
+
+      // Remove existing labels first, then add new ones
+      await db.delete(sentinelTradeToLabels).where(eq(sentinelTradeToLabels.tradeId, tradeId));
+
+      if (labelIds.length > 0) {
+        await db.insert(sentinelTradeToLabels).values(
+          labelIds.map((labelId) => ({ tradeId, labelId }))
+        );
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Update trade labels error:", error);
+      res.status(500).json({ error: "Failed to update trade labels" });
+    }
+  });
+
+  // Get current user's admin status
+  app.get("/api/sentinel/me", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        isAdmin: user.isAdmin ?? false,
+        accountSize: user.accountSize,
+      });
+    } catch (error) {
+      console.error("Get user info error:", error);
+      res.status(500).json({ error: "Failed to fetch user info" });
     }
   });
 

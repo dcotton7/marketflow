@@ -189,6 +189,11 @@ export interface MarketContext {
     stateName: string;
     confidence: string;
   };
+  choppiness?: {
+    daily: { value: number; state: "CHOPPY" | "MIXED" | "TRENDING" };
+    weekly: { value: number; state: "CHOPPY" | "MIXED" | "TRENDING" };
+    recommendation: string;
+  };
   summary?: string;
 }
 
@@ -509,6 +514,18 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
       const sectorEmoji = marketContext.sector.state === 1 ? "↑" : marketContext.sector.state === -1 ? "↓" : "→";
       prompt += `\nSector (${marketContext.sector.sector}): ${sectorEmoji} ${marketContext.sector.stateName} via ${marketContext.sector.etf}`;
     }
+    
+    // Choppiness regime
+    if (marketContext.choppiness) {
+      const dailyChop = marketContext.choppiness.daily;
+      const weeklyChop = marketContext.choppiness.weekly;
+      const chopEmoji = (state: string) => state === "CHOPPY" ? "⚡" : state === "TRENDING" ? "📈" : "↔";
+      
+      prompt += `\n\n=== CHOPPINESS REGIME ===`;
+      prompt += `\nDaily: ${chopEmoji(dailyChop.state)} ${dailyChop.state} (CI: ${dailyChop.value})`;
+      prompt += `\nWeekly: ${chopEmoji(weeklyChop.state)} ${weeklyChop.state} (CI: ${weeklyChop.value})`;
+      prompt += `\n>>> ${marketContext.choppiness.recommendation} <<<`;
+    }
 
     // Environment scoring guidance
     const isLong = direction === 'long';
@@ -520,6 +537,12 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
     if (marketContext.daily?.state === "RISK-OFF") environmentScore += isLong ? -10 : 10;
     if (marketContext.sector?.state === 1) environmentScore += isLong ? 5 : -5;
     if (marketContext.sector?.state === -1) environmentScore += isLong ? -5 : 5;
+    
+    // Penalize choppy conditions for swing trades
+    if (marketContext.choppiness) {
+      if (marketContext.choppiness.daily.state === "CHOPPY") environmentScore -= 5;
+      if (marketContext.choppiness.weekly.state === "CHOPPY") environmentScore -= 10;
+    }
 
     if (environmentScore > 0) {
       prompt += `\n\n[ENVIRONMENT SUPPORTS this ${direction.toUpperCase()} trade (+${environmentScore} pts)]`;

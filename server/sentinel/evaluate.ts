@@ -95,8 +95,24 @@ export async function evaluateTrade(
       stateName: sectorSentiment.stateName,
       confidence: sectorSentiment.confidence,
     } : undefined,
+    choppiness: marketSentiment.choppiness ? {
+      daily: marketSentiment.choppiness.daily,
+      weekly: marketSentiment.choppiness.weekly,
+      recommendation: marketSentiment.choppiness.recommendation,
+    } : undefined,
     summary: marketSentiment.summary,
   } : undefined;
+
+  // Log technical data availability for debugging stop/target resolution
+  if (technicalData) {
+    console.log(`[Sentinel] Technical data for ${request.symbol}: LOD=$${technicalData.todayLow?.toFixed(2)}, 21DMA=$${technicalData.sma21?.toFixed(2)}`);
+  } else {
+    console.log(`[Sentinel] No technical data available for ${request.symbol}`);
+  }
+  
+  // Log stop/target levels for debugging
+  console.log(`[Sentinel] Stop: price=${request.stopPrice}, level=${request.stopPriceLevel}`);
+  console.log(`[Sentinel] Target: price=${request.targetPrice}, level=${request.targetPriceLevel}`);
 
   const userPrompt = buildEvaluationPrompt(
     request.symbol,

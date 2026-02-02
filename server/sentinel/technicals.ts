@@ -147,6 +147,7 @@ function getWeeklyRange(candles: HistoricalQuote[]): { low: number; high: number
 }
 
 export async function fetchTechnicalData(symbol: string): Promise<TechnicalData | null> {
+  console.log(`[Technicals] Fetching data for ${symbol}...`);
   try {
     const [quote, historical] = await Promise.all([
       fetchQuote(symbol),
@@ -154,9 +155,11 @@ export async function fetchTechnicalData(symbol: string): Promise<TechnicalData 
     ]);
 
     if (!quote || historical.length < 5) {
-      console.error(`Insufficient data for ${symbol}`);
+      console.error(`[Technicals] Insufficient data for ${symbol}: quote=${!!quote}, historical=${historical.length}`);
       return null;
     }
+    
+    console.log(`[Technicals] ${symbol} quote: price=$${quote.price.toFixed(2)}, low=$${quote.low.toFixed(2)}, high=$${quote.high.toFixed(2)}`);
 
     const closes = historical.map(c => c.close);
     

@@ -112,6 +112,10 @@ export default function SentinelEvaluatePage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Get tradeId from URL query params for pre-loading trade data
+  const urlParams = new URLSearchParams(window.location.search);
+  const preloadTradeId = urlParams.get('tradeId');
+
   const [symbol, setSymbol] = useState("");
   const [debouncedSymbol, setDebouncedSymbol] = useState("");
   const [direction, setDirection] = useState<"long" | "short">("long");
@@ -136,8 +140,55 @@ export default function SentinelEvaluatePage() {
   const [historicalAnalysis, setHistoricalAnalysis] = useState(false);
   const [tradeDate, setTradeDate] = useState("");
   const [tradeTime, setTradeTime] = useState("");
+  const [selectedLabelIds, setSelectedLabelIds] = useState<number[]>([]);
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
+  const [isPreloaded, setIsPreloaded] = useState(false);
+
+  // Fetch available labels
+  const labelsQuery = useQuery<{id: number; name: string; color: string; isAdminOnly: boolean}[]>({
+    queryKey: ["/api/sentinel/labels"],
+  });
+
+  // Fetch user info for admin status
+  const userInfoQuery = useQuery<{id: number; username: string; isAdmin: boolean}>({
+    queryKey: ["/api/sentinel/me"],
+  });
+
+  // Fetch trade data if tradeId is in URL
+  const preloadTradeQuery = useQuery({
+    queryKey: ["/api/sentinel/trade", preloadTradeId],
+    enabled: !!preloadTradeId && !isPreloaded,
+  });
+
+  // Pre-fill form when trade data loads
+  useEffect(() => {
+    if (preloadTradeQuery.data && !isPreloaded) {
+      const trade = (preloadTradeQuery.data as any).trade;
+      if (trade) {
+        setSymbol(trade.symbol);
+        setDebouncedSymbol(trade.symbol);
+        setDirection(trade.direction);
+        setEntryPrice(trade.entryPrice.toString());
+        if (trade.stopPrice) {
+          setStopPriceMode("amount");
+          setStopPrice(trade.stopPrice.toString());
+        }
+        if (trade.targetPrice) {
+          setTargetPriceMode("amount");
+          setTargetPrice(trade.targetPrice.toString());
+        }
+        if (trade.positionSize) {
+          setPositionSize(trade.positionSize.toString());
+        }
+        if (trade.thesis) {
+          setThesis(trade.thesis);
+        }
+        setIsPreloaded(true);
+        toast({ title: "Trade Loaded", description: `Loaded ${trade.symbol} trade for review` });
+      }
+    }
+  }, [preloadTradeQuery.data, isPreloaded, toast]);
 
   // Debounce symbol for ticker lookup
   useEffect(() => {
@@ -198,8 +249,12 @@ export default function SentinelEvaluatePage() {
   });
 
   const commitMutation = useMutation({
-    mutationFn: async (tradeId: number) => {
+    mutationFn: async ({ tradeId, labelIds }: { tradeId: number; labelIds: number[] }) => {
       const res = await apiRequest("POST", `/api/sentinel/commit/${tradeId}`);
+      // Save labels if any are selected
+      if (labelIds.length > 0) {
+        await apiRequest("POST", `/api/sentinel/trades/${tradeId}/labels`, { labelIds });
+      }
       return await res.json();
     },
     onSuccess: () => {
@@ -260,7 +315,7 @@ export default function SentinelEvaluatePage() {
 
   const handleCommit = () => {
     if (result?.tradeId) {
-      commitMutation.mutate(result.tradeId);
+      commitMutation.mutate({ tradeId: result.tradeId, labelIds: selectedLabelIds });
     }
   };
 
@@ -536,6 +591,42 @@ export default function SentinelEvaluatePage() {
                     rows={3}
                   />
                 </div>
+
+                {/* Labels Selection */}
+                {labelsQuery.data && labelsQuery.data.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Labels (optional)</Label>
+                    <div className="flex flex-wrap gap-2" data-testid="label-selection">
+                      {labelsQuery.data.map((label) => (
+                        <button
+                          key={label.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedLabelIds(prev =>
+                              prev.includes(label.id)
+                                ? prev.filter(id => id !== label.id)
+                                : [...prev, label.id]
+                            );
+                          }}
+                          className={`px-3 py-1 text-sm rounded-full border transition-colors ${
+                            selectedLabelIds.includes(label.id)
+                              ? "border-transparent text-white"
+                              : "border-border hover-elevate"
+                          }`}
+                          style={{
+                            backgroundColor: selectedLabelIds.includes(label.id) ? label.color : "transparent",
+                          }}
+                          data-testid={`label-toggle-${label.id}`}
+                        >
+                          {label.name}
+                          {label.isAdminOnly && (
+                            <span className="ml-1 text-xs opacity-70">(admin)</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between p-3 bg-muted rounded-md">
@@ -853,7 +944,7 @@ export default function SentinelEvaluatePage() {
                         className="gap-2"
                         onClick={() => {
                           toast({ title: "Added to Watchlist", description: `${symbol.toUpperCase()} added for monitoring` });
-                          setLocation("/sentinel/watchlist");
+                          setLocation("/sentinel/dashboard?tab=watchlist");
                         }}
                         data-testid="button-watchlist"
                       >

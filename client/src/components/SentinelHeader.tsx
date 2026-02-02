@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import sentinelLogo from "@/assets/images/sentinel-logo.png";
@@ -16,9 +16,20 @@ interface MarketSentiment {
     confidence: "high" | "medium" | "low";
     canaryTags: string[];
   };
+  choppiness?: {
+    daily: { value: number; state: "CHOPPY" | "MIXED" | "TRENDING" };
+    weekly: { value: number; state: "CHOPPY" | "MIXED" | "TRENDING" };
+    recommendation: string;
+  };
   summary: string;
   updatedAt: string;
   cacheAgeMinutes: number;
+}
+
+function getChopColor(state: "CHOPPY" | "MIXED" | "TRENDING"): string {
+  if (state === "TRENDING") return "bg-green-500/20 text-green-400 border-green-500/30";
+  if (state === "CHOPPY") return "bg-orange-500/20 text-orange-400 border-orange-500/30";
+  return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
 }
 
 function TrendIcon({ state }: { state: 1 | 0 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF" }) {
@@ -120,6 +131,38 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                   )}
                 </TooltipContent>
               </Tooltip>
+
+              {sentiment.choppiness && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Chop:</span>
+                      <Badge 
+                        variant="outline" 
+                        className={`text-xs ${getChopColor(sentiment.choppiness.weekly.state)}`}
+                        data-testid="badge-choppiness"
+                      >
+                        {sentiment.choppiness.weekly.state === "CHOPPY" ? (
+                          <Zap className="h-3 w-3" />
+                        ) : sentiment.choppiness.weekly.state === "TRENDING" ? (
+                          <TrendingUp className="h-3 w-3" />
+                        ) : (
+                          <ArrowLeftRight className="h-3 w-3" />
+                        )}
+                        <span className="ml-1">{sentiment.choppiness.weekly.state}</span>
+                      </Badge>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p className="text-sm font-medium">Choppiness Index (SPY)</p>
+                    <div className="mt-1 space-y-1">
+                      <p className="text-xs">Daily: {sentiment.choppiness.daily.state} ({sentiment.choppiness.daily.value})</p>
+                      <p className="text-xs">Weekly: {sentiment.choppiness.weekly.state} ({sentiment.choppiness.weekly.value})</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">{sentiment.choppiness.recommendation}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               <span className="text-[10px] text-muted-foreground" data-testid="text-sentiment-age">
                 Updated {sentiment.cacheAgeMinutes < 1 ? "just now" : `${sentiment.cacheAgeMinutes}m ago`}
