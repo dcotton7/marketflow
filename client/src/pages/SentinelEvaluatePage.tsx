@@ -13,7 +13,19 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, Loader2, DollarSign, Hash, Info } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info } from "lucide-react";
+import { SentinelHeader } from "@/components/SentinelHeader";
+
+interface SectorTrend {
+  sector: string;
+  etf: string;
+  state: 1 | 0 | -1;
+  stateName: "Tailwind" | "Neutral" | "Headwind";
+  confidence: "strong" | "moderate" | "weak";
+  price: number;
+  ma50: number;
+  ma200: number;
+}
 
 interface EvaluationResult {
   tradeId: number;
@@ -115,6 +127,14 @@ export default function SentinelEvaluatePage() {
     retry: false,
   });
 
+  // Sector sentiment query - fetches live when ticker is entered
+  const sectorQuery = useQuery<SectorTrend>({
+    queryKey: ["/api/sentinel/sentiment/sector", debouncedSymbol],
+    enabled: debouncedSymbol.length >= 1 && !!tickerQuery.data,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
   // Auto-fill entry price when ticker loads
   useEffect(() => {
     if (tickerQuery.data?.currentPrice && !entryPrice) {
@@ -206,16 +226,27 @@ export default function SentinelEvaluatePage() {
     return "text-red-500";
   };
 
+  const getSectorTrendColor = (state: 1 | 0 | -1) => {
+    if (state === 1) return "bg-green-500/20 text-green-400 border-green-500/30";
+    if (state === -1) return "bg-red-500/20 text-red-400 border-red-500/30";
+    return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+  };
+
+  const SectorTrendIcon = ({ state }: { state: 1 | 0 | -1 }) => {
+    if (state === 1) return <TrendingUp className="h-3 w-3" />;
+    if (state === -1) return <TrendingDown className="h-3 w-3" />;
+    return <Minus className="h-3 w-3" />;
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel/dashboard")} data-testid="button-back">
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" data-testid="text-page-title">Evaluate Trade</h1>
-            <p className="text-sm text-muted-foreground">Get AI judgment on your trade idea</p>
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel/dashboard")} data-testid="button-back">
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <SentinelHeader showSentiment={true} />
           </div>
         </div>
       </header>
@@ -278,9 +309,26 @@ export default function SentinelEvaluatePage() {
                             ${tickerQuery.data.currentPrice?.toFixed(2)}
                           </span>
                         </div>
-                        <div className="flex gap-2 flex-wrap">
+                        <div className="flex gap-2 flex-wrap items-center">
                           <Badge variant="secondary" className="text-xs" data-testid="badge-sector">{tickerQuery.data.sector}</Badge>
                           <Badge variant="secondary" className="text-xs" data-testid="badge-industry">{tickerQuery.data.industry}</Badge>
+                          
+                          {sectorQuery.isLoading && (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Sector trend...
+                            </span>
+                          )}
+                          {sectorQuery.data && (
+                            <Badge 
+                              variant="outline" 
+                              className={`text-xs ${getSectorTrendColor(sectorQuery.data.state)}`}
+                              data-testid="badge-sector-trend"
+                            >
+                              <SectorTrendIcon state={sectorQuery.data.state} />
+                              <span className="ml-1">{sectorQuery.data.etf} {sectorQuery.data.stateName}</span>
+                            </Badge>
+                          )}
                         </div>
                         {tickerQuery.data.description && (
                           <p className="text-xs text-muted-foreground leading-relaxed" data-testid="text-description">

@@ -1,6 +1,7 @@
 import OpenAI from "openai";
-import { SYSTEM_PROMPT, PROMPT_VERSION, buildEvaluationPrompt } from "./prompts";
+import { SYSTEM_PROMPT, PROMPT_VERSION, buildEvaluationPrompt, type MarketContext } from "./prompts";
 import { sentinelModels } from "./models";
+import { fetchMarketSentiment, fetchSectorSentiment } from "./sentiment";
 import type { EvaluationRequest, EvaluationResult } from "./types";
 
 const openai = new OpenAI({
@@ -15,11 +16,13 @@ export async function evaluateTrade(
 ): Promise<{ evaluation: EvaluationResult; tradeId: number }> {
   const model = request.deepEval ? "gpt-5.2" : "gpt-5.1";
   
-  // Fetch trader context for enhanced evaluation
-  const [activePositions, watchlist, rules] = await Promise.all([
+  // Fetch trader context and market context in parallel
+  const [activePositions, watchlist, rules, marketSentiment, sectorSentiment] = await Promise.all([
     sentinelModels.getTradesByStatus(userId, "active"),
     sentinelModels.getWatchlistByUser(userId),
     sentinelModels.getActiveRulesByUser(userId),
+    fetchMarketSentiment().catch(() => null),
+    fetchSectorSentiment(request.symbol).catch(() => null),
   ]);
 
   const traderContext = {
@@ -38,6 +41,28 @@ export async function evaluateTrade(
     })),
   };
 
+  // Build market context for AI evaluation
+  const marketContext: MarketContext | undefined = marketSentiment ? {
+    weekly: {
+      state: marketSentiment.weekly.state,
+      stateName: marketSentiment.weekly.stateName,
+      confidence: marketSentiment.weekly.confidence,
+    },
+    daily: {
+      state: marketSentiment.daily.state,
+      confidence: marketSentiment.daily.confidence,
+      canaryTags: marketSentiment.daily.canaryTags,
+    },
+    sector: sectorSentiment ? {
+      sector: sectorSentiment.sector,
+      etf: sectorSentiment.etf,
+      state: sectorSentiment.state,
+      stateName: sectorSentiment.stateName,
+      confidence: sectorSentiment.confidence,
+    } : undefined,
+    summary: marketSentiment.summary,
+  } : undefined;
+
   const userPrompt = buildEvaluationPrompt(
     request.symbol,
     request.direction,
@@ -49,7 +74,8 @@ export async function evaluateTrade(
     request.positionSize,
     request.positionSizeUnit,
     request.thesis,
-    traderContext
+    traderContext,
+    marketContext
   );
 
   const response = await openai.chat.completions.create({

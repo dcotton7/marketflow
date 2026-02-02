@@ -7,6 +7,7 @@ import OpenAI from "openai";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { startMonitoring } from "./monitor";
+import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
 import { sentinelTrades } from "@shared/schema";
 
@@ -842,6 +843,32 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("AI rule analysis error:", error);
       res.status(500).json({ error: "Failed to analyze rules" });
+    }
+  });
+
+  // Market Sentiment endpoints
+  app.get("/api/sentinel/sentiment/market", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const sentiment = await fetchMarketSentiment();
+      const cacheAgeMinutes = getSentimentCacheAge();
+      res.json({ ...sentiment, cacheAgeMinutes });
+    } catch (error) {
+      console.error("Market sentiment error:", error);
+      res.status(500).json({ error: "Failed to fetch market sentiment" });
+    }
+  });
+
+  app.get("/api/sentinel/sentiment/sector/:symbol", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { symbol } = req.params;
+      const sectorTrend = await fetchSectorSentiment(symbol.toUpperCase());
+      if (!sectorTrend) {
+        return res.status(404).json({ error: "Sector data not available for this symbol" });
+      }
+      res.json(sectorTrend);
+    } catch (error) {
+      console.error("Sector sentiment error:", error);
+      res.status(500).json({ error: "Failed to fetch sector sentiment" });
     }
   });
 

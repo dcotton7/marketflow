@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import sentinelLogo from "@/assets/images/sentinel-logo.png";
 
 export default function SentinelLoginPage() {
   const [, setLocation] = useLocation();
@@ -47,12 +48,12 @@ export default function SentinelLoginPage() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold tracking-tight text-foreground mb-2" data-testid="text-sentinel-logo">
-            SENTINEL
-          </h1>
-          <p className="text-sm text-muted-foreground italic" data-testid="text-sentinel-tagline">
-            Judgment before risk.
-          </p>
+          <img 
+            src={sentinelLogo} 
+            alt="Sentinel - Judgment before risk" 
+            className="h-48 mx-auto mb-4"
+            data-testid="img-sentinel-logo"
+          />
         </div>
 
         <Card>

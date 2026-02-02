@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface TradeWithEvaluation {
   id: number;
@@ -469,11 +470,8 @@ export default function SentinelDashboardPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" data-testid="text-dashboard-title">SENTINEL</h1>
-            <p className="text-sm text-muted-foreground italic">Judgment before risk.</p>
-          </div>
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+          <SentinelHeader showSentiment={true} />
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground" data-testid="text-username">
               {user?.username}

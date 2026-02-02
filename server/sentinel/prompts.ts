@@ -67,6 +67,27 @@ interface TraderContext {
   rules?: { name: string; category?: string }[];
 }
 
+export interface MarketContext {
+  weekly?: {
+    state: 1 | 0 | -1;
+    stateName: string;
+    confidence: string;
+  };
+  daily?: {
+    state: string;
+    confidence: string;
+    canaryTags: string[];
+  };
+  sector?: {
+    sector: string;
+    etf: string;
+    state: 1 | 0 | -1;
+    stateName: string;
+    confidence: string;
+  };
+  summary?: string;
+}
+
 export function buildEvaluationPrompt(
   symbol: string,
   direction: 'long' | 'short',
@@ -78,7 +99,8 @@ export function buildEvaluationPrompt(
   positionSize?: number,
   positionSizeUnit?: 'shares' | 'dollars',
   thesis?: string,
-  traderContext?: TraderContext
+  traderContext?: TraderContext,
+  marketContext?: MarketContext
 ): string {
   let prompt = `Evaluate this trade idea:
 
@@ -156,6 +178,52 @@ Entry Price: $${entryPrice.toFixed(2)}`;
       traderContext.rules.forEach(rule => {
         prompt += `\n- ${rule.name}${rule.category ? ` [${rule.category}]` : ''}`;
       });
+    }
+  }
+
+  // Add market context if available
+  if (marketContext) {
+    prompt += `\n\n--- MARKET ENVIRONMENT ---`;
+    
+    if (marketContext.weekly) {
+      const weeklyEmoji = marketContext.weekly.state === 1 ? "↑" : marketContext.weekly.state === -1 ? "↓" : "→";
+      prompt += `\nWeekly Trend: ${weeklyEmoji} ${marketContext.weekly.stateName} (${marketContext.weekly.confidence} confidence)`;
+    }
+    
+    if (marketContext.daily) {
+      const dailyEmoji = marketContext.daily.state === "RISK-ON" ? "↑" : marketContext.daily.state === "RISK-OFF" ? "↓" : "→";
+      prompt += `\nDaily Risk Basket: ${dailyEmoji} ${marketContext.daily.state} (${marketContext.daily.confidence} confidence)`;
+      if (marketContext.daily.canaryTags && marketContext.daily.canaryTags.length > 0) {
+        prompt += `\n  Warnings: ${marketContext.daily.canaryTags.join(", ")}`;
+      }
+    }
+    
+    if (marketContext.sector) {
+      const sectorEmoji = marketContext.sector.state === 1 ? "↑" : marketContext.sector.state === -1 ? "↓" : "→";
+      prompt += `\nSector (${marketContext.sector.sector}): ${sectorEmoji} ${marketContext.sector.stateName} via ${marketContext.sector.etf} (${marketContext.sector.confidence} confidence)`;
+    }
+
+    if (marketContext.summary) {
+      prompt += `\n\nMarket Summary: ${marketContext.summary}`;
+    }
+
+    // Add scoring guidance based on direction and market context
+    const isLong = direction === 'long';
+    let environmentScore = 0;
+    
+    if (marketContext.weekly?.state === 1) environmentScore += isLong ? 10 : -10;
+    if (marketContext.weekly?.state === -1) environmentScore += isLong ? -10 : 10;
+    if (marketContext.daily?.state === "RISK-ON") environmentScore += isLong ? 10 : -10;
+    if (marketContext.daily?.state === "RISK-OFF") environmentScore += isLong ? -10 : 10;
+    if (marketContext.sector?.state === 1) environmentScore += isLong ? 5 : -5;
+    if (marketContext.sector?.state === -1) environmentScore += isLong ? -5 : 5;
+
+    if (environmentScore > 0) {
+      prompt += `\n\n[ENVIRONMENT FAVORABLE: Market conditions support this ${direction.toUpperCase()} trade (+${environmentScore} points)]`;
+    } else if (environmentScore < 0) {
+      prompt += `\n\n[ENVIRONMENT HEADWIND: Market conditions work against this ${direction.toUpperCase()} trade (${environmentScore} points)]`;
+    } else {
+      prompt += `\n\n[ENVIRONMENT NEUTRAL: Mixed market conditions, be selective]`;
     }
   }
 

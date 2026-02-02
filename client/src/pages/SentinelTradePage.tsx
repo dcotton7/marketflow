@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, AlertTriangle, CheckCircle, Clock, TrendingUp, TrendingDown, Edit2, X, Check, Loader2, DollarSign } from "lucide-react";
+import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface Trade {
   id: number;
@@ -228,37 +229,35 @@ export default function SentinelTradePage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold tracking-tight" data-testid="text-symbol">{trade.symbol}</h1>
-              <Badge variant={trade.direction === "long" ? "default" : "destructive"}>
-                {trade.direction === "long" ? (
-                  <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
-                ) : (
-                  <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
-                )}
-              </Badge>
-              <Badge variant="outline" data-testid="badge-status">{trade.status}</Badge>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Created {new Date(trade.createdAt).toLocaleDateString()}
-            </p>
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <SentinelHeader showSentiment={true} />
           </div>
-          {trade.status === "considering" && (
-            <Button onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending} data-testid="button-commit">
-              {commitMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Commit Trade"}
-            </Button>
-          )}
-          {trade.status === "active" && (
-            <Button variant="outline" onClick={() => setShowCloseDialog(true)} data-testid="button-close">
-              <DollarSign className="w-4 h-4 mr-2" />
-              Close Trade
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight" data-testid="text-symbol">{trade.symbol}</h1>
+            <Badge variant={trade.direction === "long" ? "default" : "destructive"}>
+              {trade.direction === "long" ? (
+                <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
+              ) : (
+                <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
+              )}
+            </Badge>
+            <Badge variant="outline" data-testid="badge-status">{trade.status}</Badge>
+            {trade.status === "considering" && (
+              <Button size="sm" onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending} data-testid="button-commit">
+                {commitMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Commit Trade"}
+              </Button>
+            )}
+            {trade.status === "active" && (
+              <Button size="sm" variant="outline" onClick={() => setShowCloseDialog(true)} data-testid="button-close">
+                <DollarSign className="w-4 h-4 mr-2" />
+                Close Trade
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 

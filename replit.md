@@ -64,6 +64,15 @@ auto_reject, entry, exit, profit_taking, stop_loss, ma_structure, base_quality, 
 - AI endpoint uses gpt-4o to analyze patterns and suggest new rules with confidence scores
 - Users can adopt suggestions into their personal rulebook via the AI Insights dashboard tab
 
+### Market Sentiment Engine
+- **Weekly Trend**: SPY vs 40-week MA with slope analysis → Tailwind/Neutral/Headwind
+- **Daily Risk Basket**: QQQ, IWO, SLY, ARKK, VIX with 20-day MA → RISK-ON/MIXED/RISK-OFF
+- **Sector Trend**: SPDR sector ETFs (XLK, XLF, XLE, etc.) with 50/200-day MA analysis
+- Canary/Early-Warning Tags: Narrow Leadership, Speculative Rebound Attempt, Volatility Stress
+- 30-minute cache with timestamp display ("Updated Xm ago")
+- Sentiment feeds into AI trade evaluation: adjusts scoring for LONG vs SHORT based on environment
+- Sentiment displayed in page header (weekly + daily) and ticker box (sector trend)
+
 ## External Dependencies
 
 ### Database
