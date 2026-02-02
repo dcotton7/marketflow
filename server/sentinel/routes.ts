@@ -54,6 +54,11 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 export function registerSentinelRoutes(app: Express): void {
   const PgSession = connectPgSimple(session);
   
+  // Trust proxy for production (Replit uses reverse proxy)
+  if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+  
   app.use(
     session({
       store: new PgSession({
@@ -66,6 +71,8 @@ export function registerSentinelRoutes(app: Express): void {
       saveUninitialized: false,
       cookie: {
         secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       },
     })
