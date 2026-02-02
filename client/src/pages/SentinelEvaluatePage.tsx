@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon } from "lucide-react";
 import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface SectorTrend {
@@ -27,13 +27,47 @@ interface SectorTrend {
   ma200: number;
 }
 
+interface RiskFlagDetail {
+  flag: string;
+  severity: 'high' | 'medium' | 'low';
+  detail: string;
+}
+
+interface RuleCheckItem {
+  rule: string;
+  status: 'followed' | 'violated' | 'na';
+  note?: string;
+}
+
+interface PlanSummary {
+  entry: string;
+  stop: string;
+  riskPerShare: string;
+  target: string | null;
+  rrRatio: string | null;
+}
+
 interface EvaluationResult {
   tradeId: number;
   evaluation: {
+    // Core decision gate
     score: number;
+    status: 'GREEN' | 'YELLOW' | 'RED';
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    modelTag: 'BREAKOUT' | 'RECLAIM' | 'CUP_AND_HANDLE' | 'PULLBACK' | 'EPISODIC_PIVOT' | 'UNKNOWN';
+    
+    // User's plan summary
+    planSummary?: PlanSummary;
+    
+    // Structured feedback
+    whyBullets?: string[];
+    riskFlags: RiskFlagDetail[] | string[];
+    improvements?: string[];
+    ruleChecklist?: RuleCheckItem[];
+    
+    // Legacy fields
     recommendation: string;
     reasoning: string;
-    riskFlags: string[];
     model: string;
     promptVersion: string;
   };
@@ -548,86 +582,253 @@ export default function SentinelEvaluatePage() {
           <div className="space-y-4">
             {result ? (
               <>
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle data-testid="text-result-title">Evaluation Result</CardTitle>
+                {/* Header Section */}
+                <Card className={`border-l-4 ${
+                  result.evaluation.status === 'GREEN' ? 'border-l-green-500' :
+                  result.evaluation.status === 'RED' ? 'border-l-red-500' : 'border-l-yellow-500'
+                }`}>
+                  <CardContent className="pt-4">
+                    {/* Ticker / Direction / Model Tag Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-bold" data-testid="text-symbol-result">{symbol.toUpperCase()}</span>
+                        <Badge variant={direction === "long" ? "default" : "destructive"} data-testid="badge-direction">
+                          {direction.toUpperCase()}
+                        </Badge>
+                        {result.evaluation.modelTag && result.evaluation.modelTag !== 'UNKNOWN' && (
+                          <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30" data-testid="badge-model-tag">
+                            {result.evaluation.modelTag.replace('_', ' ')}
+                          </Badge>
+                        )}
+                      </div>
                       <Badge variant="outline" className="text-xs" data-testid="badge-model">
                         {result.evaluation.model}
                       </Badge>
                     </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-lg font-medium" data-testid="text-symbol-result">{symbol.toUpperCase()}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={direction === "long" ? "default" : "destructive"} data-testid="badge-direction">
-                          {direction.toUpperCase()}
-                        </Badge>
-                        <span className={`text-3xl font-bold ${getScoreColor(result.evaluation.score)}`} data-testid="text-score">
-                          {result.evaluation.score}
-                        </span>
-                        <span className="text-muted-foreground">/100</span>
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-muted rounded-md">
-                      <p className="font-medium mb-1">Recommendation</p>
-                      <p className={`text-lg font-semibold uppercase ${getScoreColor(result.evaluation.score)}`} data-testid="text-recommendation">
-                        {result.evaluation.recommendation}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="font-medium mb-2">Reasoning</p>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap" data-testid="text-reasoning">
-                        {result.evaluation.reasoning}
-                      </p>
-                    </div>
-
-                    {result.evaluation.riskFlags && result.evaluation.riskFlags.length > 0 && (
-                      <div>
-                        <p className="font-medium mb-2 flex items-center gap-1">
-                          <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                          Risk Flags
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {result.evaluation.riskFlags.map((flag, i) => (
-                            <Badge key={i} variant="outline" className="text-xs" data-testid={`badge-risk-${i}`}>
-                              {flag}
-                            </Badge>
-                          ))}
-                        </div>
+                    
+                    {/* Plan Summary */}
+                    {result.evaluation.planSummary && (
+                      <div className="text-sm text-muted-foreground mb-3 p-2 bg-muted/30 rounded" data-testid="plan-summary">
+                        <span className="font-medium">Your Plan:</span>{' '}
+                        Entry {result.evaluation.planSummary.entry} | Stop {result.evaluation.planSummary.stop} | Risk/share {result.evaluation.planSummary.riskPerShare}
+                        {result.evaluation.planSummary.rrRatio && ` | R:R ${result.evaluation.planSummary.rrRatio}`}
                       </div>
                     )}
+
+                    {/* Decision Gate */}
+                    <div className={`p-4 rounded-md ${
+                      result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
+                      result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
+                    }`} data-testid="decision-gate">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {result.evaluation.status === 'GREEN' ? (
+                            <CheckCircle2 className="w-8 h-8 text-green-500" />
+                          ) : result.evaluation.status === 'RED' ? (
+                            <XCircle className="w-8 h-8 text-red-500" />
+                          ) : (
+                            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+                          )}
+                          <div>
+                            <p className={`text-lg font-bold ${
+                              result.evaluation.status === 'GREEN' ? 'text-green-500' :
+                              result.evaluation.status === 'RED' ? 'text-red-500' : 'text-yellow-500'
+                            }`} data-testid="text-status">
+                              {result.evaluation.status}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Decision Gate</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-3xl font-bold ${getScoreColor(result.evaluation.score)}`} data-testid="text-score">
+                            {result.evaluation.score}<span className="text-lg text-muted-foreground">/100</span>
+                          </p>
+                          <Badge variant="outline" className="text-xs mt-1" data-testid="badge-confidence">
+                            {result.evaluation.confidence || 'MEDIUM'} Confidence
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
 
-                <div className="flex gap-4">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => setLocation("/sentinel/dashboard")}
-                    data-testid="button-keep-considering"
-                  >
-                    Keep Considering
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    onClick={handleCommit}
-                    disabled={commitMutation.isPending}
-                    data-testid="button-commit"
-                  >
-                    {commitMutation.isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Committing...
-                      </>
-                    ) : (
-                      "Commit Trade"
-                    )}
-                  </Button>
-                </div>
+                {/* Why Section */}
+                {result.evaluation.whyBullets && result.evaluation.whyBullets.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Target className="w-4 h-4 text-green-500" />
+                        Why This Could Work
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-1.5" data-testid="why-bullets">
+                        {result.evaluation.whyBullets.map((bullet, i) => (
+                          <li key={i} className="text-sm flex items-start gap-2">
+                            <ArrowUpCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                            <span>{bullet}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Risk Flags Section */}
+                {result.evaluation.riskFlags && result.evaluation.riskFlags.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-yellow-500" />
+                        Risk Flags (Read Before Committing)
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2" data-testid="risk-flags">
+                        {result.evaluation.riskFlags.map((flag, i) => {
+                          const isDetailedFlag = typeof flag === 'object';
+                          const severity = isDetailedFlag ? (flag as RiskFlagDetail).severity : 'medium';
+                          const flagName = isDetailedFlag ? (flag as RiskFlagDetail).flag : flag;
+                          const detail = isDetailedFlag ? (flag as RiskFlagDetail).detail : flag;
+                          
+                          return (
+                            <div 
+                              key={i} 
+                              className={`p-2 rounded border ${
+                                severity === 'high' ? 'bg-red-500/10 border-red-500/30' :
+                                severity === 'medium' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                                'bg-muted/50 border-muted'
+                              }`}
+                              data-testid={`risk-flag-${i}`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <AlertOctagon className={`w-4 h-4 shrink-0 mt-0.5 ${
+                                  severity === 'high' ? 'text-red-500' :
+                                  severity === 'medium' ? 'text-yellow-500' : 'text-muted-foreground'
+                                }`} />
+                                <div>
+                                  <span className="font-medium text-sm">{String(flagName).replace(/_/g, ' ')}</span>
+                                  {isDetailedFlag && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Improvements Section */}
+                {result.evaluation.improvements && result.evaluation.improvements.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Lightbulb className="w-4 h-4 text-blue-500" />
+                        What Would Make This Better
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-1.5" data-testid="improvements">
+                        {result.evaluation.improvements.map((improvement, i) => (
+                          <li key={i} className="text-sm flex items-start gap-2">
+                            <Zap className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                            <span>{improvement}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Rule Checklist Section */}
+                {result.evaluation.ruleChecklist && result.evaluation.ruleChecklist.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Info className="w-4 h-4" />
+                        Rule Checklist
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-1" data-testid="rule-checklist">
+                        {result.evaluation.ruleChecklist.map((item, i) => (
+                          <div key={i} className="flex items-center gap-2 text-sm py-1">
+                            {item.status === 'followed' ? (
+                              <CheckCircle2 className="w-4 h-4 text-green-500" />
+                            ) : item.status === 'violated' ? (
+                              <XCircle className="w-4 h-4 text-red-500" />
+                            ) : (
+                              <Minus className="w-4 h-4 text-muted-foreground" />
+                            )}
+                            <span className={item.status === 'violated' ? 'text-red-400' : ''}>{item.rule}</span>
+                            {item.note && <span className="text-xs text-muted-foreground">- {item.note}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Commitment Prompt - Action Buttons */}
+                <Card className="bg-muted/30">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Commitment</CardTitle>
+                    <CardDescription>Log your decision for analysis</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-2" data-testid="commitment-buttons">
+                      <Button
+                        className="gap-2"
+                        onClick={handleCommit}
+                        disabled={commitMutation.isPending}
+                        data-testid="button-commit"
+                      >
+                        {commitMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4" />
+                        )}
+                        Commit Trade
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => setLocation("/sentinel/dashboard")}
+                        data-testid="button-modify"
+                      >
+                        <Clock className="w-4 h-4" />
+                        Modify / Wait
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => {
+                          toast({ title: "Added to Watchlist", description: `${symbol.toUpperCase()} added for monitoring` });
+                          setLocation("/sentinel/watchlist");
+                        }}
+                        data-testid="button-watchlist"
+                      >
+                        <ListPlus className="w-4 h-4" />
+                        Add to Watchlist
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2 text-red-400 hover:text-red-300"
+                        onClick={() => {
+                          toast({ title: "Trade Rejected", description: "Decision logged" });
+                          setLocation("/sentinel/dashboard");
+                        }}
+                        data-testid="button-reject"
+                      >
+                        <ThumbsDown className="w-4 h-4" />
+                        Reject / Pass
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               </>
             ) : (
               <Card>

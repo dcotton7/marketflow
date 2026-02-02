@@ -121,82 +121,116 @@ export async function evaluateTrade(
     console.error("[Sentinel Eval] JSON parse error:", err);
     parsed = {
       score: 50,
-      reasoning: "Failed to parse AI response. Please try again.",
-      riskFlags: ["PARSE_ERROR"],
-      recommendation: "caution"
+      status: "YELLOW",
+      confidence: "LOW",
+      modelTag: "UNKNOWN",
+      whyBullets: [],
+      riskFlags: [{ flag: "PARSE_ERROR", severity: "high", detail: "Failed to parse AI response" }],
+      improvements: ["Please try again"],
+      ruleChecklist: [],
     };
   }
   
-  // Ensure required fields exist
-  if (!parsed.reasoning || !parsed.score) {
-    console.error("[Sentinel Eval] Missing required fields in response:", parsed);
-    // If we have technical summary or rule checklist but no reasoning, build from those
-    let fallbackReasoning = "";
-    if (parsed.technicalSummary) {
-      fallbackReasoning += "Technical Analysis:\n";
-      if (parsed.technicalSummary.maStructure) fallbackReasoning += `• MA Structure: ${parsed.technicalSummary.maStructure}\n`;
-      if (parsed.technicalSummary.calculatedRR) fallbackReasoning += `• R:R Ratio: ${parsed.technicalSummary.calculatedRR}\n`;
-      if (parsed.technicalSummary.dollarRisk) fallbackReasoning += `• Dollar Risk: ${parsed.technicalSummary.dollarRisk}\n`;
-    }
-    if (parsed.ruleChecklist && parsed.ruleChecklist.length > 0) {
-      fallbackReasoning += "\nRule Checklist:\n";
-      for (const item of parsed.ruleChecklist) {
-        fallbackReasoning += `• ${item.rule}: ${item.status}\n`;
-      }
-    }
-    
-    parsed = {
-      score: parsed.score || 50,
-      reasoning: parsed.reasoning || fallbackReasoning || "AI response was incomplete. Please try again.",
-      riskFlags: parsed.riskFlags || [],
-      recommendation: parsed.recommendation || "caution",
-      technicalSummary: parsed.technicalSummary,
-      ruleChecklist: parsed.ruleChecklist,
-    };
-  }
+  // Map status to recommendation for backwards compatibility
+  const statusToRecommendation: Record<string, 'proceed' | 'caution' | 'avoid'> = {
+    "GREEN": "proceed",
+    "YELLOW": "caution",
+    "RED": "avoid",
+  };
   
-  // Map historical recommendation values to standard ones
-  const historicalRecommendationMap: Record<string, string> = {
+  // Map historical recommendation values
+  const historicalRecommendationMap: Record<string, 'proceed' | 'caution' | 'avoid'> = {
     "excellent_process": "proceed",
     "good_process": "proceed",
     "needs_improvement": "caution",
     "poor_process": "avoid",
   };
-  if (parsed.recommendation && historicalRecommendationMap[parsed.recommendation]) {
-    parsed.recommendation = historicalRecommendationMap[parsed.recommendation];
-  }
-
-  // Build reasoning with technical summary if available
-  let reasoning = parsed.reasoning || "No reasoning provided";
   
-  // Append technical summary if provided
-  if (parsed.technicalSummary) {
-    const ts = parsed.technicalSummary;
-    reasoning += `\n\n📊 Technical Summary:`;
-    if (ts.maStructure) reasoning += `\n• MA Structure: ${ts.maStructure}`;
-    if (ts.calculatedRR) reasoning += `\n• R:R Ratio: ${ts.calculatedRR}`;
-    if (ts.dollarRisk) reasoning += `\n• Dollar Risk: ${ts.dollarRisk}`;
-    if (ts.percentRisk) reasoning += `\n• Account Risk: ${ts.percentRisk}`;
-    if (ts.stopQuality) reasoning += `\n• Stop Quality: ${ts.stopQuality}`;
-    if (ts.suggestedStop) reasoning += `\n• Suggested Stop: ${ts.suggestedStop}`;
+  // Determine recommendation from status or explicit field
+  let recommendation: 'proceed' | 'caution' | 'avoid' = "caution";
+  if (parsed.status && statusToRecommendation[parsed.status]) {
+    recommendation = statusToRecommendation[parsed.status];
+  } else if (parsed.recommendation && historicalRecommendationMap[parsed.recommendation]) {
+    recommendation = historicalRecommendationMap[parsed.recommendation];
+  } else if (["proceed", "caution", "avoid"].includes(parsed.recommendation)) {
+    recommendation = parsed.recommendation;
   }
-
-  // Append rule checklist if provided
-  if (parsed.ruleChecklist && Array.isArray(parsed.ruleChecklist) && parsed.ruleChecklist.length > 0) {
-    reasoning += `\n\n📋 Rule Checklist:`;
-    for (const item of parsed.ruleChecklist) {
-      const icon = item.status === 'followed' ? '✅' : item.status === 'violated' ? '❌' : '➖';
-      reasoning += `\n${icon} ${item.rule}${item.note ? ` - ${item.note}` : ''}`;
-    }
+  
+  // Build reasoning - prefer parsed.reasoning if available (especially for historical analysis)
+  let reasoning = "";
+  if (parsed.reasoning && typeof parsed.reasoning === 'string' && parsed.reasoning.trim().length > 0) {
+    reasoning = parsed.reasoning;
+  } else if (parsed.whyBullets && Array.isArray(parsed.whyBullets) && parsed.whyBullets.length > 0) {
+    reasoning = "• " + parsed.whyBullets.join("\n• ");
   }
+  
+  // Add improvements section to reasoning if using synthesized reasoning
+  if (!parsed.reasoning && parsed.improvements && Array.isArray(parsed.improvements) && parsed.improvements.length > 0) {
+    reasoning += "\n\nWhat would make this better:\n• " + parsed.improvements.join("\n• ");
+  }
+  
+  // Normalize riskFlags - support both old string[] and new object[] format
+  let normalizedRiskFlags: { flag: string; severity: string; detail: string }[] = [];
+  if (Array.isArray(parsed.riskFlags)) {
+    normalizedRiskFlags = parsed.riskFlags.map((rf: any) => {
+      if (typeof rf === 'string') {
+        return { flag: rf, severity: 'medium', detail: rf };
+      }
+      return {
+        flag: rf.flag || 'UNKNOWN',
+        severity: rf.severity || 'medium',
+        detail: rf.detail || rf.flag || '',
+      };
+    });
+  }
+  
+  // Ensure rule checklist is properly formatted
+  const ruleChecklist = Array.isArray(parsed.ruleChecklist) 
+    ? parsed.ruleChecklist.map((item: any) => ({
+        rule: item.rule || 'Unknown rule',
+        status: ['followed', 'violated', 'na'].includes(item.status) ? item.status : 'na',
+        note: item.note || undefined,
+      }))
+    : [];
 
   const evaluation: EvaluationResult = {
+    // Core decision gate
     score: Math.min(100, Math.max(0, parsed.score || 50)),
-    reasoning,
-    riskFlags: Array.isArray(parsed.riskFlags) ? parsed.riskFlags : [],
-    recommendation: ["proceed", "caution", "avoid"].includes(parsed.recommendation) 
-      ? parsed.recommendation 
-      : "caution",
+    status: ['GREEN', 'YELLOW', 'RED'].includes(parsed.status) ? parsed.status : 'YELLOW',
+    confidence: ['HIGH', 'MEDIUM', 'LOW'].includes(parsed.confidence) ? parsed.confidence : 'MEDIUM',
+    modelTag: ['BREAKOUT', 'RECLAIM', 'CUP_AND_HANDLE', 'PULLBACK', 'EPISODIC_PIVOT', 'UNKNOWN'].includes(parsed.modelTag) 
+      ? parsed.modelTag : 'UNKNOWN',
+    
+    // User's plan summary
+    planSummary: parsed.planSummary || {
+      entry: `$${request.entryPrice.toFixed(2)}`,
+      stop: request.stopPrice 
+        ? `$${request.stopPrice.toFixed(2)}` 
+        : request.stopPriceLevel 
+          ? request.stopPriceLevel.replace(/_/g, ' ') 
+          : 'Not set',
+      riskPerShare: request.stopPrice 
+        ? `$${Math.abs(request.entryPrice - request.stopPrice).toFixed(2)} (${(Math.abs(request.entryPrice - request.stopPrice) / request.entryPrice * 100).toFixed(1)}%)`
+        : 'N/A',
+      target: request.targetPrice 
+        ? `$${request.targetPrice.toFixed(2)}` 
+        : request.targetPriceLevel 
+          ? request.targetPriceLevel.replace(/_/g, ' ')
+          : null,
+      rrRatio: request.stopPrice && request.targetPrice
+        ? `${(Math.abs(request.targetPrice - request.entryPrice) / Math.abs(request.entryPrice - request.stopPrice)).toFixed(1)}:1`
+        : null,
+    },
+    
+    // Structured feedback
+    whyBullets: Array.isArray(parsed.whyBullets) ? parsed.whyBullets : [],
+    riskFlags: normalizedRiskFlags,
+    improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],
+    ruleChecklist,
+    
+    // Legacy fields
+    recommendation,
+    reasoning: reasoning || "Evaluation complete. See structured feedback above.",
     model,
     promptVersion: PROMPT_VERSION,
   };
@@ -218,6 +252,11 @@ export async function evaluateTrade(
     finalTradeId = trade.id;
   }
 
+  // Convert riskFlags to string[] for database storage (dashboard compatibility)
+  const riskFlagsForDb = evaluation.riskFlags.map(rf => 
+    typeof rf === 'string' ? rf : rf.flag
+  );
+
   await sentinelModels.createEvaluation({
     tradeId: finalTradeId,
     userId,
@@ -225,7 +264,7 @@ export async function evaluateTrade(
     promptVersion: evaluation.promptVersion,
     score: evaluation.score,
     reasoning: evaluation.reasoning,
-    riskFlags: evaluation.riskFlags,
+    riskFlags: riskFlagsForDb,
     recommendation: evaluation.recommendation,
     isDeepEval: request.deepEval || false,
   });

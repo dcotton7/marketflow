@@ -13,11 +13,45 @@ export interface EvaluationRequest {
   historicalAnalysis?: boolean; // Reviewing a past trade vs. evaluating a new one
 }
 
+export interface RiskFlagDetail {
+  flag: string;
+  severity: 'high' | 'medium' | 'low';
+  detail: string;
+}
+
+export interface RuleCheckItem {
+  rule: string;
+  status: 'followed' | 'violated' | 'na';
+  note?: string;
+}
+
+export interface PlanSummary {
+  entry: string;
+  stop: string;
+  riskPerShare: string;
+  target: string | null;
+  rrRatio: string | null;
+}
+
 export interface EvaluationResult {
+  // Core decision gate
   score: number;
-  reasoning: string;
-  riskFlags: string[];
+  status: 'GREEN' | 'YELLOW' | 'RED';
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  modelTag: 'BREAKOUT' | 'RECLAIM' | 'CUP_AND_HANDLE' | 'PULLBACK' | 'EPISODIC_PIVOT' | 'UNKNOWN';
+  
+  // User's plan summary
+  planSummary: PlanSummary;
+  
+  // Structured feedback
+  whyBullets: string[];
+  riskFlags: RiskFlagDetail[];
+  improvements: string[];
+  ruleChecklist: RuleCheckItem[];
+  
+  // Legacy fields for backwards compatibility
   recommendation: 'proceed' | 'caution' | 'avoid';
+  reasoning: string;
   model: string;
   promptVersion: string;
 }

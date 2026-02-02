@@ -36,9 +36,19 @@ The application features a dark-themed financial dashboard. The AI Swing Scanner
 
 **Sentinel**:
 - Implements session-based authentication using PostgreSQL-backed sessions (`connect-pg-simple`).
-- Leverages OpenAI's `gpt-5.1` for default trade evaluation and `gpt-5.2` for "deep eval," providing scores, recommendations, reasoning, and risk flags.
+- Leverages OpenAI's `gpt-5.1` for default trade evaluation and `gpt-5.2` for "deep eval."
+- **Enhanced Response Shape (v3.0)** with structured evaluation output:
+  - Decision Gate: Status (GREEN/YELLOW/RED), Score (0-100), Confidence (HIGH/MEDIUM/LOW)
+  - Model Tag Detection: BREAKOUT, RECLAIM, CUP_AND_HANDLE, PULLBACK, EPISODIC_PIVOT, UNKNOWN
+  - Plan Summary: Entry, stop, risk per share, target, R:R ratio
+  - "Why This Could Work" bullets (3-7 reasons tied to rules)
+  - Risk Flags with severity (high/medium/low) and detailed descriptions
+  - "What Would Make This Better" improvements (2-3 concrete changes)
+  - Rule Checklist showing which rules are followed/violated
 - Trade submission forms include dynamic ticker lookup, flexible stop price and target definitions (e.g., LOD, DMA, RR multipliers), and position sizing in shares or dollars.
+- Commitment Prompt with 4 action buttons: Commit Trade, Modify/Wait, Add to Watchlist, Reject/Pass
 - API endpoints support user authentication, trade submission, status updates, and retrieval of trade details and evaluations.
+- Technical data fetcher provides real-time LOD, 5-day range, key MAs (5/10/21/50/200), and ATR for AI evaluation context.
 
 ### System Design Choices
 The project utilizes a monorepo structure, separating client (React frontend) and server (Express backend) code while sharing common definitions (Zod schemas for API contracts, Drizzle schemas for database). React Query manages server state and caching for efficient data fetching on the frontend. Drizzle ORM provides type-safe database interactions with PostgreSQL, ensuring robust data management and migrations.
