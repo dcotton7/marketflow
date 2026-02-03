@@ -567,6 +567,7 @@ export function registerSentinelRoutes(app: Express): void {
 
       // Save lot entries array for order grid persistence
       if (data.lotEntries !== undefined) {
+        console.log("[DEBUG] Saving lot entries:", JSON.stringify(data.lotEntries));
         (updates as any).lotEntries = data.lotEntries;
       }
 

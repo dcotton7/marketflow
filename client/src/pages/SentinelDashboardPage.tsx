@@ -1368,7 +1368,7 @@ export default function SentinelDashboardPage() {
         positionSize: totalBuyQty || undefined,
         entryDate: latestDateTime || editForm.entryDate || undefined,
         exitPrice: avgSellPrice,
-        lotEntries: lotEntries.filter(lot => lot.qty && lot.dateTime) // Only save valid entries
+        lotEntries: lotEntries.filter(lot => lot.qty && lot.qty !== "0" && lot.dateTime && lot.price) // Only save valid entries with qty, dateTime, and price
       });
     }
   };
