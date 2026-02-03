@@ -1,6 +1,7 @@
 import type { TechnicalData } from "./technicals";
+import type { TnnWeightContext } from "./tnn";
 
-export const PROMPT_VERSION = "v3.0";
+export const PROMPT_VERSION = "v3.1";
 
 export const SYSTEM_PROMPT = `You are SENTINEL, a Decision Gate AI that evaluates trade ideas for risk and quality.
 
@@ -298,7 +299,8 @@ export function buildEvaluationPrompt(
   traderContext?: TraderContext,
   marketContext?: MarketContext,
   technicalData?: TechnicalData | null,
-  historicalDate?: Date | null
+  historicalDate?: Date | null,
+  tnnContext?: TnnWeightContext
 ): string {
   const accountSize = traderContext?.accountSize || 1000000;
   
@@ -636,6 +638,48 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
     } else if (environmentScore < 0) {
       prompt += `\n\n[ENVIRONMENT HEADWIND for ${direction.toUpperCase()} trade (${environmentScore} pts)]`;
     }
+  }
+
+  // Add TNN (Trader Neural Network) factor weights if available
+  if (tnnContext && Object.keys(tnnContext.factors).length > 0) {
+    prompt += `\n\n=== TNN FACTOR WEIGHTS (Admin-Tuned) ===
+These weights represent learned importance from historical trade outcomes.
+Higher weights (80-100) = more critical, Lower weights (40-60) = less critical.
+
+Key Discipline Weights:
+- Structural: ${tnnContext.factors.structural || 'N/A'}
+- Entry Timing: ${tnnContext.factors.entry || 'N/A'}
+- Stop Loss Discipline: ${tnnContext.factors.stop_loss || 'N/A'}
+- Position Sizing: ${tnnContext.factors.position_sizing || 'N/A'}
+- Risk Management: ${tnnContext.factors.risk || 'N/A'}
+- Market Regime: ${tnnContext.factors.market_regime || 'N/A'}
+
+Setup Type Weights (adjusted for current conditions):`;
+
+    // Show relevant setup weights
+    const setupWeights = Object.entries(tnnContext.factors)
+      .filter(([key]) => key.endsWith('_setup') || key === 'cup_and_handle' || key === 'vcp' || key === 'high_tight_flag' || key === 'episodic_pivot')
+      .map(([key, weight]) => `- ${key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}: ${weight}`)
+      .join('\n');
+    
+    if (setupWeights) {
+      prompt += `\n${setupWeights}`;
+    }
+
+    // Show active modifiers that have been applied
+    if (tnnContext.modifiers.length > 0) {
+      prompt += `\n\nActive Condition Modifiers Applied:`;
+      for (const mod of tnnContext.modifiers) {
+        const sign = mod.modifier > 0 ? '+' : '';
+        prompt += `\n- ${mod.factorKey.replace(/_/g, ' ')} when ${mod.condition.replace(/_/g, ' ')}: ${sign}${mod.modifier} pts`;
+      }
+    }
+
+    if (tnnContext.activeConditions.length > 0) {
+      prompt += `\n\nCurrent Market Conditions Detected: ${tnnContext.activeConditions.map(c => c.replace(/_/g, ' ')).join(', ')}`;
+    }
+
+    prompt += `\n\n[Use these weights to inform your scoring - higher weighted factors should have more impact on the final score]`;
   }
 
   prompt += `\n\n=== PROVIDE YOUR EVALUATION ===

@@ -3,12 +3,26 @@ import { SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPT, PROMPT_VERSION, buildEvaluatio
 import { sentinelModels } from "./models";
 import { fetchMarketSentiment, fetchSectorSentiment, fetchHistoricalMarketSentiment, fetchHistoricalSectorSentiment } from "./sentiment";
 import { fetchTechnicalData, fetchHistoricalTechnicalData } from "./technicals";
+import { getWeightsForEvaluation, type TnnWeightContext } from "./tnn";
 import type { EvaluationRequest, EvaluationResult } from "./types";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
+
+// Infer setup type from thesis keywords
+function inferSetupType(thesis: string): string {
+  const lower = thesis.toLowerCase();
+  if (lower.includes("pullback") || lower.includes("pull back") || lower.includes("retest")) return "pullback_setup";
+  if (lower.includes("breakout") || lower.includes("break out") || lower.includes("new high")) return "breakout_setup";
+  if (lower.includes("reclaim") || lower.includes("recover")) return "reclaim_setup";
+  if (lower.includes("cup") || lower.includes("handle")) return "cup_and_handle";
+  if (lower.includes("gap") || lower.includes("earnings") || lower.includes("catalyst") || lower.includes("pivot")) return "episodic_pivot";
+  if (lower.includes("htf") || lower.includes("high tight") || lower.includes("tight flag")) return "high_tight_flag";
+  if (lower.includes("vcp") || lower.includes("volatility contraction")) return "vcp";
+  return "breakout_setup"; // Default to breakout
+}
 
 export async function evaluateTrade(
   request: EvaluationRequest,
@@ -114,6 +128,30 @@ export async function evaluateTrade(
   console.log(`[Sentinel] Stop: price=${request.stopPrice}, level=${request.stopPriceLevel}`);
   console.log(`[Sentinel] Target: price=${request.targetPrice}, level=${request.targetPriceLevel}`);
 
+  // Derive active market conditions from sentiment for TNN
+  const activeConditions: string[] = [];
+  if (marketContext?.choppiness?.daily?.state === "CHOPPY") activeConditions.push("choppy_daily");
+  if (marketContext?.choppiness?.weekly?.state === "CHOPPY") activeConditions.push("choppy_weekly");
+  if (marketContext?.choppiness?.daily?.state === "TRENDING") activeConditions.push("trending_daily");
+  if (marketContext?.choppiness?.weekly?.state === "TRENDING") activeConditions.push("trending_weekly");
+  if (marketContext?.daily?.state === "RISK-ON") activeConditions.push("risk_on");
+  if (marketContext?.daily?.state === "RISK-OFF") activeConditions.push("risk_off");
+  if (marketContext?.daily?.canaryTags?.includes("Volatility Stress")) activeConditions.push("volatility_stress");
+  if (marketContext?.daily?.canaryTags?.includes("Narrow Leadership")) activeConditions.push("narrow_leadership");
+  
+  // Infer setup type from thesis (will be refined by AI)
+  const inferredSetupType = inferSetupType(request.thesis || "");
+  
+  // Fetch TNN weights for evaluation
+  let tnnContext: TnnWeightContext | undefined;
+  try {
+    tnnContext = await getWeightsForEvaluation(inferredSetupType, activeConditions);
+    console.log(`[Sentinel TNN] Active conditions: ${activeConditions.join(", ") || "none"}`);
+    console.log(`[Sentinel TNN] Inferred setup: ${inferredSetupType}, Applied modifiers: ${tnnContext.modifiers.length}`);
+  } catch (e) {
+    console.log("[Sentinel TNN] Could not fetch TNN weights, proceeding without");
+  }
+
   const userPrompt = buildEvaluationPrompt(
     request.symbol,
     request.direction,
@@ -128,7 +166,8 @@ export async function evaluateTrade(
     traderContext,
     marketContext,
     technicalData,
-    historicalDate
+    historicalDate,
+    tnnContext
   );
 
   const systemPrompt = isHistorical ? HISTORICAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
