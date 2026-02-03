@@ -110,8 +110,11 @@ export default function SentinelRulesPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showAIChatDialog, setShowAIChatDialog] = useState(false);
+  const [showSimilarityDialog, setShowSimilarityDialog] = useState(false);
   const [showDeletedRules, setShowDeletedRules] = useState(false);
   const [selectedRule, setSelectedRule] = useState<TradingRule | null>(null);
+  const [similarRules, setSimilarRules] = useState<(TradingRule & { similarityScore: number; reason: string })[]>([]);
+  const [checkingSimilarity, setCheckingSimilarity] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["auto_reject"]));
   const [expandedMyRulesCategories, setExpandedMyRulesCategories] = useState<Set<string>>(new Set(["general"]));
   
@@ -386,6 +389,81 @@ export default function SentinelRulesPage() {
 
   const removeStrategyTag = (tag: string) => {
     setNewRule({ ...newRule, strategyTags: newRule.strategyTags.filter(t => t !== tag) });
+  };
+
+  // Check for similar rules before creating
+  const checkSimilarityAndCreate = async () => {
+    if (!newRule.name.trim() || !newRule.description.trim()) {
+      toast({ title: "Name and description are required", variant: "destructive" });
+      return;
+    }
+
+    setCheckingSimilarity(true);
+    try {
+      const response = await fetch("/api/sentinel/rules/check-similarity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          name: newRule.name,
+          description: newRule.description,
+          category: newRule.category
+        }),
+      });
+
+      if (!response.ok) {
+        // If similarity check fails, just create the rule
+        createRuleMutation.mutate(newRule);
+        return;
+      }
+
+      const data = await response.json();
+      
+      if (data.hasSimilar && data.similarRules.length > 0) {
+        setSimilarRules(data.similarRules);
+        setShowCreateDialog(false); // Close create dialog first
+        setShowSimilarityDialog(true);
+      } else {
+        // No similar rules, create directly
+        createRuleMutation.mutate(newRule);
+      }
+    } catch {
+      // If error, create directly
+      createRuleMutation.mutate(newRule);
+    } finally {
+      setCheckingSimilarity(false);
+    }
+  };
+
+  // Force create without checking similarity
+  const forceCreateRule = () => {
+    setShowSimilarityDialog(false);
+    createRuleMutation.mutate(newRule);
+  };
+
+  // Replace existing rule with new one
+  const replaceWithNewRule = (existingRuleId: number) => {
+    const ruleToReplace = similarRules.find(r => r.id === existingRuleId);
+    if (!ruleToReplace) return;
+    
+    // Confirm before replacing
+    if (!window.confirm(`Are you sure you want to archive "${ruleToReplace.name}" and create the new rule?`)) {
+      return;
+    }
+    
+    setShowSimilarityDialog(false);
+    // First archive the existing rule, then create new one
+    softDeleteRuleMutation.mutate(existingRuleId, {
+      onSuccess: () => {
+        createRuleMutation.mutate(newRule);
+        toast({ title: `Replaced "${ruleToReplace.name}" with new rule` });
+      },
+      onError: () => {
+        toast({ title: "Failed to archive existing rule", variant: "destructive" });
+        // Re-open similarity dialog on error
+        setShowSimilarityDialog(true);
+      }
+    });
   };
 
   const openEditOverride = (rule: TradingRule) => {
@@ -1010,11 +1088,65 @@ export default function SentinelRulesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
             <Button 
-              onClick={() => createRuleMutation.mutate(newRule)}
-              disabled={!newRule.name.trim() || newRule.directionTags.length === 0 || createRuleMutation.isPending}
+              onClick={checkSimilarityAndCreate}
+              disabled={!newRule.name.trim() || newRule.directionTags.length === 0 || createRuleMutation.isPending || checkingSimilarity}
               data-testid="button-save-rule"
             >
-              Create Rule
+              {checkingSimilarity ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Checking...
+                </>
+              ) : (
+                "Create Rule"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Similar Rules Dialog */}
+      <Dialog open={showSimilarityDialog} onOpenChange={setShowSimilarityDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-yellow-500" />
+              Similar Rules Found
+            </DialogTitle>
+            <DialogDescription>
+              We found existing rules that are similar to the one you're creating. Would you like to:
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-3 max-h-60 overflow-y-auto">
+            {similarRules.map((rule) => (
+              <div key={rule.id} className="p-3 border rounded-lg space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{rule.name}</span>
+                  <Badge variant="outline" className="text-xs">
+                    {Math.round(rule.similarityScore * 100)}% similar
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">{rule.description?.slice(0, 100)}...</p>
+                <p className="text-xs text-yellow-600">{rule.reason}</p>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => replaceWithNewRule(rule.id)}
+                  data-testid={`button-replace-rule-${rule.id}`}
+                >
+                  Replace with new rule
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setShowSimilarityDialog(false)}>
+              Cancel
+            </Button>
+            <Button variant="secondary" onClick={forceCreateRule} data-testid="button-keep-both">
+              Keep Both (Create Anyway)
             </Button>
           </DialogFooter>
         </DialogContent>

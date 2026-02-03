@@ -1316,6 +1316,138 @@ For strategy tags: Ensure they are concise (1-2 words), relevant to trading, and
     }
   });
 
+  // AI Rule Similarity Check - checks if a proposed rule is similar to existing rules
+  app.post("/api/sentinel/rules/check-similarity", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { name, description, category } = req.body;
+      
+      // Validate and sanitize inputs
+      const trimmedName = (name || '').trim();
+      const trimmedDescription = (description || '').trim();
+      
+      if (!trimmedName || trimmedName.length < 3) {
+        return res.status(400).json({ error: "Name must be at least 3 characters" });
+      }
+      if (!trimmedDescription || trimmedDescription.length < 10) {
+        return res.status(400).json({ error: "Description must be at least 10 characters" });
+      }
+
+      // Get all existing rules for the user
+      const existingRules = await sentinelModels.getRulesByUser(req.session.userId!);
+      const activeRules = existingRules.filter(r => !r.isDeleted);
+      
+      if (activeRules.length === 0) {
+        return res.json({ similarRules: [], hasSimilar: false });
+      }
+
+      // Check for OpenAI configuration
+      const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+      if (!apiKey) {
+        // If no AI, fall back to simple name matching
+        const similar = activeRules.filter(r => {
+          const nameSimilar = r.name.toLowerCase().includes(name.toLowerCase()) || 
+                              name.toLowerCase().includes(r.name.toLowerCase());
+          return nameSimilar;
+        }).slice(0, 3);
+        return res.json({ 
+          similarRules: similar.map(r => ({ ...r, similarityScore: 0.7, reason: "Similar name" })),
+          hasSimilar: similar.length > 0
+        });
+      }
+
+      const openai = new OpenAI({ apiKey, baseURL });
+
+      // Build a compact list of existing rules for the AI
+      const rulesList = activeRules.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description || '',
+        category: r.category
+      }));
+
+      const prompt = `You are analyzing trading rules for semantic similarity.
+
+PROPOSED NEW RULE:
+Name: ${trimmedName}
+Description: ${trimmedDescription}
+Category: ${category || 'general'}
+
+EXISTING RULES:
+${JSON.stringify(rulesList, null, 2)}
+
+Identify any existing rules that are semantically similar to the proposed rule. Consider:
+- Rules about the same trading concept (even if worded differently)
+- Rules that could conflict or overlap
+- Rules that could be merged together
+
+Return a JSON object with this structure:
+{
+  "similarRules": [
+    {
+      "id": <existing rule id>,
+      "similarityScore": <0.0 to 1.0>,
+      "reason": "<brief explanation of similarity>"
+    }
+  ]
+}
+
+Only include rules with similarityScore >= 0.5. If no similar rules, return {"similarRules": []}.
+Return ONLY the JSON object, no other text.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: 500,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || '{"similarRules": []}';
+      
+      let result;
+      try {
+        // Try to parse as JSON directly
+        result = JSON.parse(responseText.trim());
+      } catch {
+        // Try to extract JSON from response
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          result = JSON.parse(jsonMatch[0]);
+        } else {
+          result = { similarRules: [] };
+        }
+      }
+
+      // Enrich similar rules with safe rule data (filter out sensitive fields)
+      const enrichedSimilar = (result.similarRules || [])
+        .filter((s: { id: number; similarityScore: number; reason: string }) => 
+          s.similarityScore >= 0.5 // Enforce minimum threshold server-side
+        )
+        .map((s: { id: number; similarityScore: number; reason: string }) => {
+          const rule = activeRules.find(r => r.id === s.id);
+          if (!rule) return null;
+          // Return only safe fields
+          return {
+            id: rule.id,
+            name: rule.name,
+            description: rule.description,
+            category: rule.category,
+            severity: rule.severity,
+            similarityScore: s.similarityScore,
+            reason: s.reason
+          };
+        }).filter(Boolean);
+
+      res.json({ 
+        similarRules: enrichedSimilar,
+        hasSimilar: enrichedSimilar.length > 0
+      });
+    } catch (error) {
+      console.error("Similarity check error:", error);
+      res.status(500).json({ error: "Failed to check similarity" });
+    }
+  });
+
   // Closed trades history
   app.get("/api/sentinel/trades/closed", requireAuth, async (req: Request, res: Response) => {
     try {
