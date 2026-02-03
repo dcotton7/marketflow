@@ -214,6 +214,24 @@ export default function SentinelAdminPage() {
     },
   });
 
+  const runAnalysisMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/sentinel/ai/analyze-rules");
+      return res.json();
+    },
+    onSuccess: (data: { message: string; suggestions: unknown[] }) => {
+      toast({ 
+        title: "AI Analysis Complete", 
+        description: data.message || `Generated ${data.suggestions?.length || 0} suggestions` 
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/tnn/suggestions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/ai/insights"] });
+    },
+    onError: () => {
+      toast({ title: "Analysis Failed", description: "AI analysis could not be completed. Need more trade data.", variant: "destructive" });
+    },
+  });
+
   if (userLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center" data-testid="container-loading">
@@ -838,9 +856,19 @@ export default function SentinelAdminPage() {
                           ))
                         )}
 
-                        <Button variant="outline" className="w-full gap-2" data-testid="button-analyze">
-                          <Brain className="w-4 h-4" />
-                          Run AI Analysis
+                        <Button 
+                          variant="outline" 
+                          className="w-full gap-2" 
+                          onClick={() => runAnalysisMutation.mutate()}
+                          disabled={runAnalysisMutation.isPending}
+                          data-testid="button-analyze"
+                        >
+                          {runAnalysisMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Brain className="w-4 h-4" />
+                          )}
+                          {runAnalysisMutation.isPending ? "Analyzing..." : "Run AI Analysis"}
                         </Button>
                       </CardContent>
                     </Card>
