@@ -425,6 +425,93 @@ export type InsertTnnSuggestion = z.infer<typeof insertTnnSuggestionSchema>;
 export type InsertTnnHistory = z.infer<typeof insertTnnHistorySchema>;
 export type InsertTnnSetting = z.infer<typeof insertTnnSettingsSchema>;
 
+// === TRADE IMPORT TABLES ===
+
+// Asset types for imported trades
+export type ImportAssetType = "STOCK" | "ETF" | "MUTUAL_FUND" | "OPTIONS" | "CRYPTO";
+export type ImportTradeDirection = "BUY" | "SELL";
+export type ImportTimestampSource = "BROKER_PROVIDED" | "ESTIMATED_OPEN" | "ESTIMATED_CLOSE" | "PDF_CONFIRMATION" | "UNKNOWN";
+export type ImportTradeStatus = "CONFIRMED" | "PENDING" | "CANCELLED" | "REJECTED";
+export type ImportAccountType = "CASH" | "MARGIN" | "IRA" | "ROTH_IRA" | "TAXABLE";
+export type ImportBatchStatus = "PROCESSING" | "COMPLETE" | "FAILED";
+
+// Import batches - tracks each file upload
+export const sentinelImportBatches = pgTable("sentinel_import_batches", {
+  id: serial("id").primaryKey(),
+  batchId: text("batch_id").notNull().unique(), // UUID for batch
+  userId: integer("user_id").notNull(),
+  brokerId: text("broker_id").notNull(), // 'FIDELITY' | 'SCHWAB' | 'ROBINHOOD' etc.
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull().default("CSV"), // 'CSV' | 'PDF' | 'XLSX'
+  totalTradesFound: integer("total_trades_found").default(0),
+  totalTradesImported: integer("total_trades_imported").default(0),
+  skippedRows: jsonb("skipped_rows").$type<Array<{
+    rowIndex: number;
+    rawData: string;
+    reason: string;
+  }>>().default([]),
+  status: text("status").notNull().default("PROCESSING"), // 'PROCESSING' | 'COMPLETE' | 'FAILED'
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Imported trades - normalized trade records from any broker
+export const sentinelImportedTrades = pgTable("sentinel_imported_trades", {
+  id: serial("id").primaryKey(),
+  tradeId: text("trade_id").notNull().unique(), // UUID for this trade
+  userId: integer("user_id").notNull(),
+  batchId: text("batch_id").notNull(), // Links to import batch
+  brokerId: text("broker_id").notNull(),
+  brokerOrderId: text("broker_order_id"), // Extracted order ID if present
+  
+  // What was traded
+  ticker: text("ticker").notNull(),
+  assetType: text("asset_type").notNull().default("STOCK"),
+  direction: text("direction").notNull(), // 'BUY' | 'SELL'
+  
+  // Execution details
+  quantity: doublePrecision("quantity").notNull(),
+  price: doublePrecision("price").notNull(),
+  totalAmount: doublePrecision("total_amount").notNull(),
+  commission: doublePrecision("commission").default(0),
+  fees: doublePrecision("fees").default(0),
+  netAmount: doublePrecision("net_amount").notNull(),
+  
+  // Timestamps
+  tradeDate: text("trade_date").notNull(), // ISO date YYYY-MM-DD
+  settlementDate: text("settlement_date"),
+  executionTime: text("execution_time"), // Full ISO timestamp
+  timestampSource: text("timestamp_source").default("UNKNOWN"),
+  isTimeEstimated: boolean("is_time_estimated").default(true),
+  
+  // Account info
+  accountId: text("account_id"),
+  accountName: text("account_name"),
+  accountType: text("account_type").default("TAXABLE"),
+  
+  // Status
+  status: text("status").notNull().default("CONFIRMED"),
+  
+  // Fill tracking for partial fills
+  isFill: boolean("is_fill").default(false),
+  fillGroupKey: text("fill_group_key"), // Groups fills: "{date}_{ticker}_{direction}"
+  
+  // Audit trail
+  rawSource: text("raw_source"), // Original CSV row
+  importedAt: timestamp("imported_at").defaultNow(),
+});
+
+// Import Schemas
+export const insertSentinelImportBatchSchema = createInsertSchema(sentinelImportBatches).omit({ id: true, createdAt: true });
+export const insertSentinelImportedTradeSchema = createInsertSchema(sentinelImportedTrades).omit({ id: true, importedAt: true });
+
+// Import Types
+export type SentinelImportBatch = typeof sentinelImportBatches.$inferSelect;
+export type SentinelImportedTrade = typeof sentinelImportedTrades.$inferSelect;
+
+export type InsertSentinelImportBatch = z.infer<typeof insertSentinelImportBatchSchema>;
+export type InsertSentinelImportedTrade = z.infer<typeof insertSentinelImportedTradeSchema>;
+
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),

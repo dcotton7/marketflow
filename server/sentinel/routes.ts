@@ -12,8 +12,9 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades } from "@shared/schema";
 import * as tnn from "./tnn";
+import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 
 declare module "express-session" {
   interface SessionData {
@@ -110,6 +111,18 @@ const ruleSchema = z.object({
     "base_quality", "breakout", "position_sizing", "market_regime"
   ]).optional(),
   order: z.number().optional(),
+});
+
+const importPreviewSchema = z.object({
+  csvContent: z.string().min(1, "CSV content is required"),
+  fileName: z.string().optional(),
+  brokerId: z.enum(["FIDELITY", "SCHWAB", "ROBINHOOD", "fidelity", "schwab", "robinhood", "unknown"]).optional(),
+});
+
+const importConfirmSchema = z.object({
+  csvContent: z.string().min(1, "CSV content is required"),
+  fileName: z.string().optional(),
+  brokerId: z.enum(["FIDELITY", "SCHWAB", "ROBINHOOD", "fidelity", "schwab", "robinhood", "unknown"]).optional(),
 });
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -1768,6 +1781,208 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Update setting error:", error);
       res.status(500).json({ error: "Failed to update setting" });
+    }
+  });
+
+  // === TRADE IMPORT ROUTES ===
+
+  // Preview CSV import (parse without saving)
+  app.post("/api/sentinel/import/preview", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const validationResult = importPreviewSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ error: validationResult.error.errors[0]?.message || "Invalid request" });
+      }
+      
+      const { csvContent, fileName, brokerId } = validationResult.data;
+      
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      
+      const result = parseCSV(csvContent, fileName || "upload.csv", user?.username || "unknown", brokerId as BrokerId);
+      
+      res.json({
+        batch: result.batch,
+        trades: result.trades,
+        detectedBroker: detectBroker(csvContent),
+      });
+    } catch (error) {
+      console.error("Preview import error:", error);
+      res.status(500).json({ error: "Failed to preview import" });
+    }
+  });
+
+  // Import trades (save to database) - uses transaction for atomicity
+  app.post("/api/sentinel/import/confirm", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const validationResult = importConfirmSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({ error: validationResult.error.errors[0]?.message || "Invalid request" });
+      }
+      
+      const { csvContent, fileName, brokerId } = validationResult.data;
+      
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      
+      const result = parseCSV(csvContent, fileName || "upload.csv", user?.username || "unknown", brokerId as BrokerId);
+      
+      if (result.batch.status === "FAILED") {
+        return res.status(400).json({ error: "Failed to parse CSV", batch: result.batch });
+      }
+      
+      // Use a transaction to ensure atomicity - either all trades are saved or none
+      await db.transaction(async (tx) => {
+        // Save batch first
+        await tx.insert(sentinelImportBatches).values({
+          batchId: result.batch.batchId,
+          userId,
+          brokerId: result.batch.brokerId,
+          fileName: result.batch.fileName,
+          fileType: result.batch.fileType,
+          totalTradesFound: result.batch.totalTradesFound,
+          totalTradesImported: result.batch.totalTradesImported,
+          skippedRows: result.batch.skippedRows,
+          status: result.batch.status,
+        });
+        
+        // Batch insert all trades at once for better performance
+        if (result.trades.length > 0) {
+          const tradeValues = result.trades.map((trade) => ({
+            tradeId: trade.tradeId,
+            userId,
+            batchId: trade.importBatchId,
+            brokerId: trade.brokerId,
+            brokerOrderId: trade.brokerOrderId,
+            ticker: trade.ticker,
+            assetType: trade.assetType,
+            direction: trade.direction,
+            quantity: trade.quantity,
+            price: trade.price,
+            totalAmount: trade.totalAmount,
+            commission: trade.commission,
+            fees: trade.fees,
+            netAmount: trade.netAmount,
+            tradeDate: trade.tradeDate,
+            settlementDate: trade.settlementDate,
+            executionTime: trade.executionTime,
+            timestampSource: trade.timestampSource,
+            isTimeEstimated: trade.isTimeEstimated,
+            accountId: trade.accountId,
+            accountName: trade.accountName,
+            accountType: trade.accountType,
+            status: trade.status,
+            isFill: trade.isFill,
+            fillGroupKey: trade.fillGroupKey,
+            rawSource: trade.rawSource,
+          }));
+          
+          await tx.insert(sentinelImportedTrades).values(tradeValues);
+        }
+      });
+      
+      res.json({
+        success: true,
+        batch: result.batch,
+        tradesImported: result.trades.length,
+      });
+    } catch (error) {
+      console.error("Import confirm error:", error);
+      res.status(500).json({ error: "Failed to import trades" });
+    }
+  });
+
+  // Get import batches (history)
+  app.get("/api/sentinel/import/batches", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batches = await db.select()
+        .from(sentinelImportBatches)
+        .where(eq(sentinelImportBatches.userId, userId))
+        .orderBy(sentinelImportBatches.createdAt);
+      
+      res.json(batches.reverse());
+    } catch (error) {
+      console.error("Get batches error:", error);
+      res.status(500).json({ error: "Failed to fetch import history" });
+    }
+  });
+
+  // Get trades from a batch
+  app.get("/api/sentinel/import/batches/:batchId/trades", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId as string;
+      
+      const trades = await db!.select()
+        .from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId)
+        ))
+        .orderBy(sentinelImportedTrades.tradeDate);
+      
+      res.json(trades);
+    } catch (error) {
+      console.error("Get batch trades error:", error);
+      res.status(500).json({ error: "Failed to fetch batch trades" });
+    }
+  });
+
+  // Get all imported trades for user
+  app.get("/api/sentinel/import/trades", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { ticker, startDate, endDate } = req.query;
+      
+      let query = db.select()
+        .from(sentinelImportedTrades)
+        .where(eq(sentinelImportedTrades.userId, userId));
+      
+      const trades = await query.orderBy(sentinelImportedTrades.tradeDate);
+      
+      let filteredTrades = trades;
+      if (ticker) {
+        filteredTrades = filteredTrades.filter(t => t.ticker.toUpperCase().includes((ticker as string).toUpperCase()));
+      }
+      if (startDate) {
+        filteredTrades = filteredTrades.filter(t => t.tradeDate >= (startDate as string));
+      }
+      if (endDate) {
+        filteredTrades = filteredTrades.filter(t => t.tradeDate <= (endDate as string));
+      }
+      
+      res.json(filteredTrades.reverse());
+    } catch (error) {
+      console.error("Get imported trades error:", error);
+      res.status(500).json({ error: "Failed to fetch imported trades" });
+    }
+  });
+
+  // Delete an import batch (and its trades)
+  app.delete("/api/sentinel/import/batches/:batchId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId as string;
+      
+      // Delete trades first
+      await db!.delete(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId)
+        ));
+      
+      // Delete batch
+      await db!.delete(sentinelImportBatches)
+        .where(and(
+          eq(sentinelImportBatches.userId, userId),
+          eq(sentinelImportBatches.batchId, batchId)
+        ));
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete batch error:", error);
+      res.status(500).json({ error: "Failed to delete import batch" });
     }
   });
 

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -72,6 +72,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
 
   const isRulesPage = location === "/sentinel/rules";
   const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
+  const isImportPage = location === "/sentinel/import";
   const isAdminPage = location.startsWith("/sentinel/admin");
 
   return (
@@ -109,6 +110,17 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
             >
               <BookOpen className="w-4 h-4" />
               <span className="hidden sm:inline">Rules</span>
+            </Button>
+          </Link>
+          <Link href="/sentinel/import">
+            <Button 
+              variant={isImportPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-import"
+            >
+              <Upload className="w-4 h-4" />
+              <span className="hidden sm:inline">Import</span>
             </Button>
           </Link>
           {userInfo?.isAdmin && (
