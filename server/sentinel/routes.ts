@@ -918,29 +918,42 @@ export function registerSentinelRoutes(app: Express): void {
         return res.status(400).json({ error: "Message is required" });
       }
 
-      let openai: OpenAI;
-      try {
-        openai = new OpenAI();
-      } catch (configError) {
-        console.error("OpenAI configuration error:", configError);
-        return res.status(500).json({ error: "AI service not configured" });
+      // Suggested rule validation schema
+      const suggestedRuleSchema = z.object({
+        name: z.string().min(1).max(200),
+        description: z.string().min(1).max(2000),
+        category: z.enum(['auto_reject', 'entry', 'exit', 'profit_taking', 'stop_loss', 'ma_structure', 'base_quality', 'breakout', 'position_sizing', 'market_regime', 'risk', 'general']),
+        severity: z.enum(['auto_reject', 'critical', 'warning', 'info']),
+        ruleType: z.enum(['swing', 'intraday', 'long_term', 'all']).optional().default('swing'),
+        directionTags: z.array(z.enum(['long', 'short'])).min(1).optional().default(['long', 'short']),
+        strategyTags: z.array(z.string().max(20)).optional().default([]),
+        formula: z.string().nullable().optional()
+      });
+
+      // Check for OpenAI configuration
+      const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+      if (!apiKey) {
+        return res.status(500).json({ error: "AI service not configured. Please ensure OpenAI API key is set." });
       }
+
+      const openai = new OpenAI({ apiKey, baseURL });
 
       const systemPrompt = `You are an expert trading rules assistant. Your sole purpose is to help traders formalize their trading rules.
 
 IMPORTANT CONSTRAINTS:
 1. ONLY discuss topics related to trading, investing, market analysis, risk management, and trading rules
-2. If asked about non-trading topics, politely decline and redirect to trading rules
+2. If asked about non-trading topics (weather, cooking, politics, general chat, etc.), respond EXACTLY with: "I'm focused exclusively on helping you create trading rules. Let's discuss your trading approach - what criteria do you use when entering or exiting trades?"
 3. Keep responses concise and actionable
 
 When helping create a rule, extract these details:
-- name: A clear, concise rule name
-- description: What the rule means and when to apply it
+- name: A clear, concise rule name (required)
+- description: What the rule means and when to apply it (required)
 - category: One of: auto_reject, entry, exit, profit_taking, stop_loss, ma_structure, base_quality, breakout, position_sizing, market_regime, risk, general
 - severity: One of: auto_reject, critical, warning, info
 - ruleType: One of: swing, intraday, long_term, all
-- directionTags: Array of "long" and/or "short"
-- strategyTags: Short tags (max 20 chars) to categorize the strategy, e.g., ["breakout", "momentum"]
+- directionTags: Array containing "long" and/or "short" (at least one required)
+- strategyTags: Short tags (max 20 chars each) to categorize the strategy, e.g., ["breakout", "momentum"]
 - formula: Optional mathematical formula
 
 When you have enough information to create a rule, include a JSON block like this:
@@ -979,25 +992,29 @@ For strategy tags: Ensure they are concise (1-2 words), relevant to trading, and
 
       const responseText = completion.choices[0]?.message?.content || "I couldn't generate a response.";
       
-      // Extract suggested rule if present
+      // Extract and validate suggested rule - try all JSON blocks
       let suggestedRule = null;
-      const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
+      const jsonMatches = responseText.matchAll(/```json\s*([\s\S]*?)\s*```/g);
+      for (const match of jsonMatches) {
         try {
-          const parsed = JSON.parse(jsonMatch[1]);
+          const parsed = JSON.parse(match[1]);
           if (parsed.suggestedRule) {
-            suggestedRule = parsed.suggestedRule;
+            const validated = suggestedRuleSchema.safeParse(parsed.suggestedRule);
+            if (validated.success) {
+              suggestedRule = validated.data;
+              break;
+            }
           }
         } catch (parseError) {
-          // Ignore JSON parse errors
+          // Try next JSON block
         }
       }
 
-      // Clean response text by removing JSON blocks
+      // Clean response text by removing all JSON blocks
       const cleanResponse = responseText.replace(/```json\s*[\s\S]*?\s*```/g, '').trim();
 
       res.json({ 
-        response: cleanResponse || "I've prepared a rule for you. Click to review and customize it.",
+        response: cleanResponse || (suggestedRule ? "I've prepared a rule for you. Click to review and customize it." : "How can I help you create a trading rule?"),
         suggestedRule 
       });
     } catch (error) {
