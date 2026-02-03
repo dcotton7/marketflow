@@ -792,6 +792,39 @@ export default function SentinelEvaluatePage() {
                     </Select>
                   )}
                   
+                  {/* Per-share gain calculation for First Profit Trim */}
+                  {targetPriceMode === "amount" && targetPrice && entryPrice && (
+                    <div className="mt-2 p-2 bg-green-500/10 border border-green-500/30 rounded text-sm" data-testid="first-trim-calculation">
+                      {(() => {
+                        const entry = parseFloat(entryPrice);
+                        const target = parseFloat(targetPrice);
+                        const shares = positionSize 
+                          ? (positionSizeUnit === "shares" 
+                            ? parseFloat(positionSize) 
+                            : Math.round(parseFloat(positionSize) / entry)) 
+                          : 0;
+                        const gainPerShare = direction === "long" ? target - entry : entry - target;
+                        const trimShares = Math.round(shares * 0.3);
+                        const totalGain = trimShares > 0 ? gainPerShare * trimShares : 0;
+                        
+                        if (isNaN(entry) || isNaN(target)) return null;
+                        
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-green-400 font-medium">
+                              Gain: ${gainPerShare.toFixed(2)} / share
+                            </span>
+                            {shares > 0 && (
+                              <span className="text-green-400 font-medium">
+                                First Trim (30%): ${totalGain.toFixed(2)} ({trimShares} shares)
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  
                   {/* AI Target Suggestions */}
                   {targetPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
                     <div className="space-y-2">
@@ -864,6 +897,39 @@ export default function SentinelEvaluatePage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  )}
+                  
+                  {/* Per-share gain calculation for Target Profit */}
+                  {targetProfitMode === "amount" && targetProfitPrice && entryPrice && (
+                    <div className="mt-2 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-sm" data-testid="target-profit-calculation">
+                      {(() => {
+                        const entry = parseFloat(entryPrice);
+                        const target = parseFloat(targetProfitPrice);
+                        const shares = positionSize 
+                          ? (positionSizeUnit === "shares" 
+                            ? parseFloat(positionSize) 
+                            : Math.round(parseFloat(positionSize) / entry)) 
+                          : 0;
+                        const gainPerShare = direction === "long" ? target - entry : entry - target;
+                        const remainingShares = Math.round(shares * 0.7);
+                        const totalGain = remainingShares > 0 ? gainPerShare * remainingShares : 0;
+                        
+                        if (isNaN(entry) || isNaN(target)) return null;
+                        
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-emerald-400 font-medium">
+                              Gain: ${gainPerShare.toFixed(2)} / share
+                            </span>
+                            {shares > 0 && (
+                              <span className="text-emerald-400 font-medium">
+                                Target (70%): ${totalGain.toFixed(2)} ({remainingShares} shares)
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   )}
                   
                   {/* AI Target Profit Suggestions */}

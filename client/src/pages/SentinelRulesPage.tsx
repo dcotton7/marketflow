@@ -169,19 +169,16 @@ export default function SentinelRulesPage() {
 
   const createRuleMutation = useMutation({
     mutationFn: async (data: typeof newRule) => {
-      return apiRequest("/api/sentinel/rules", {
-        method: "POST",
-        body: JSON.stringify({
-          name: data.name,
-          description: data.description,
-          category: data.category,
-          severity: data.severity,
-          ruleType: data.ruleType,
-          directionTags: data.directionTags,
-          strategyTags: data.strategyTags,
-          formula: data.formula || null,
-          source: "user",
-        }),
+      return apiRequest("POST", "/api/sentinel/rules", {
+        name: data.name,
+        description: data.description,
+        category: data.category,
+        severity: data.severity,
+        ruleType: data.ruleType,
+        directionTags: data.directionTags,
+        strategyTags: data.strategyTags,
+        formula: data.formula || null,
+        source: "user",
       });
     },
     onSuccess: () => {
@@ -197,10 +194,7 @@ export default function SentinelRulesPage() {
 
   const updateRuleMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<TradingRule> }) => {
-      return apiRequest(`/api/sentinel/rules/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      });
+      return apiRequest("PATCH", `/api/sentinel/rules/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
@@ -213,10 +207,7 @@ export default function SentinelRulesPage() {
 
   const saveOverrideMutation = useMutation({
     mutationFn: async (data: { ruleCode: string } & typeof editOverride) => {
-      return apiRequest("/api/sentinel/rules/overrides", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      return apiRequest("POST", "/api/sentinel/rules/overrides", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules/overrides"] });
@@ -230,9 +221,7 @@ export default function SentinelRulesPage() {
 
   const restoreOverrideMutation = useMutation({
     mutationFn: async (ruleCode: string) => {
-      return apiRequest(`/api/sentinel/rules/overrides/${ruleCode}`, {
-        method: "DELETE",
-      });
+      return apiRequest("DELETE", `/api/sentinel/rules/overrides/${ruleCode}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules/overrides"] });
@@ -245,10 +234,7 @@ export default function SentinelRulesPage() {
 
   const softDeleteRuleMutation = useMutation({
     mutationFn: async (id: number) => {
-      return apiRequest(`/api/sentinel/rules/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ isDeleted: true }),
-      });
+      return apiRequest("PATCH", `/api/sentinel/rules/${id}`, { isDeleted: true });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
@@ -261,10 +247,7 @@ export default function SentinelRulesPage() {
 
   const restoreRuleMutation = useMutation({
     mutationFn: async (id: number) => {
-      return apiRequest(`/api/sentinel/rules/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ isDeleted: false }),
-      });
+      return apiRequest("PATCH", `/api/sentinel/rules/${id}`, { isDeleted: false });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
@@ -277,9 +260,7 @@ export default function SentinelRulesPage() {
 
   const adoptSuggestionMutation = useMutation({
     mutationFn: async (suggestionId: number) => {
-      return apiRequest(`/api/sentinel/suggestions/${suggestionId}/adopt`, {
-        method: "POST",
-      });
+      return apiRequest("POST", `/api/sentinel/suggestions/${suggestionId}/adopt`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
@@ -840,15 +821,13 @@ export default function SentinelRulesPage() {
                     </p>
                   </div>
                   <Switch 
-                    checked={user?.communityOptIn || false}
+                    checked={(user as { communityOptIn?: boolean })?.communityOptIn || false}
                     onCheckedChange={(checked) => {
-                      apiRequest("/api/sentinel/user/community-opt-in", {
-                        method: "PATCH",
-                        body: JSON.stringify({ optIn: checked }),
-                      }).then(() => {
-                        queryClient.invalidateQueries({ queryKey: ["/api/sentinel/user"] });
-                        toast({ title: checked ? "Opted in to community sharing" : "Opted out of community sharing" });
-                      });
+                      apiRequest("PATCH", "/api/sentinel/user/community-opt-in", { optIn: checked })
+                        .then(() => {
+                          queryClient.invalidateQueries({ queryKey: ["/api/sentinel/user"] });
+                          toast({ title: checked ? "Opted in to community sharing" : "Opted out of community sharing" });
+                        });
                     }}
                     data-testid="switch-community-opt-in"
                   />
