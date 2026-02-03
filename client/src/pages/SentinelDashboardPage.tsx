@@ -156,6 +156,7 @@ interface FifoResult {
   totalRemaining: number;
   avgCostBasis: number;
   direction: 'LONG' | 'SHORT' | 'FLAT';
+  realizedProfit: number; // Total profit/loss from closed lots
 }
 
 function calculateFifoTracking(entries: LotEntry[]): FifoResult {
@@ -181,14 +182,17 @@ function calculateFifoTracking(entries: LotEntry[]): FifoResult {
     }
   });
   
-  // Second pass: apply sells using FIFO
+  // Second pass: apply sells using FIFO and track realized profit
+  let realizedProfit = 0;
+  
   sortedEntries.forEach(entry => {
     if (entry.buySell === 'sell') {
       let remainingToSell = parseInt(entry.qty) || 0;
+      const sellPrice = parseFloat(entry.price) || 0;
       const sellInfo: FifoSellInfo = {
         sellId: entry.id,
         qty: remainingToSell,
-        price: parseFloat(entry.price) || 0,
+        price: sellPrice,
         dateTime: entry.dateTime,
         depletedFrom: [],
       };
@@ -201,6 +205,10 @@ function calculateFifoTracking(entries: LotEntry[]): FifoResult {
           lot.remainingQty -= qtyTaken;
           remainingToSell -= qtyTaken;
           sellInfo.depletedFrom.push({ lotId: lot.lotId, qtyTaken });
+          
+          // Calculate realized profit for this portion: (sell price - buy cost) * qty
+          realizedProfit += (sellPrice - lot.price) * qtyTaken;
+          
           if (lot.remainingQty === 0) {
             lot.depleted = true;
           }
@@ -227,6 +235,7 @@ function calculateFifoTracking(entries: LotEntry[]): FifoResult {
     totalRemaining,
     avgCostBasis,
     direction: totalRemaining > 0 ? 'LONG' : totalRemaining < 0 ? 'SHORT' : 'FLAT',
+    realizedProfit,
   };
 }
 
@@ -521,19 +530,36 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
     ? ((currentPrice - trade.entryPrice) / trade.entryPrice * 100) 
     : 0;
   
-  // Calculate Open PnL (unrealized) - for active trades based on position and current vs entry
-  // For closed trades, use actualPnL; for active, calculate (currentPrice - entryPrice) * positionSize
-  const isLongDirection = trade.direction === "long";
-  const openPnL = trade.status === "closed" 
-    ? undefined // Don't show open PnL for closed trades
-    : trade.positionSize 
-      ? (isLongDirection 
-          ? (currentPrice - trade.entryPrice) * trade.positionSize 
-          : (trade.entryPrice - currentPrice) * trade.positionSize)
-      : undefined;
+  // Calculate P&L from lot entries using FIFO method
+  const fifoData = trade.lotEntries && Array.isArray(trade.lotEntries) && trade.lotEntries.length > 0
+    ? calculateFifoTracking(trade.lotEntries as LotEntry[])
+    : null;
   
-  // Profit Closed - for closed trades, show actualPnL
-  const profitClosed = trade.status === "closed" ? trade.actualPnL : undefined;
+  const isLongDirection = trade.direction === "long";
+  
+  // Open PnL (unrealized) - uses FIFO avg cost basis and current position
+  // Formula: (Current Price - Avg Cost Basis) × Remaining Shares (for long)
+  let openPnL: number | undefined = undefined;
+  if (trade.status !== "closed" && fifoData && fifoData.totalRemaining > 0) {
+    openPnL = isLongDirection
+      ? (currentPrice - fifoData.avgCostBasis) * fifoData.totalRemaining
+      : (fifoData.avgCostBasis - currentPrice) * fifoData.totalRemaining;
+  } else if (trade.status !== "closed" && trade.positionSize && !fifoData) {
+    // Fallback if no lot entries: use entry price
+    openPnL = isLongDirection
+      ? (currentPrice - trade.entryPrice) * trade.positionSize
+      : (trade.entryPrice - currentPrice) * trade.positionSize;
+  }
+  
+  // Profit Closed (realized) - from FIFO matched closed lots
+  // For active trades with sells, show realized profit from partial closes
+  // For fully closed trades, show actualPnL or FIFO realized profit
+  let profitClosed: number | undefined = undefined;
+  if (trade.status === "closed") {
+    profitClosed = trade.actualPnL ?? (fifoData?.realizedProfit || undefined);
+  } else if (fifoData && fifoData.realizedProfit !== 0) {
+    profitClosed = fifoData.realizedProfit;
+  }
   const isLong = trade.direction === "long";
   
   // Calculate % distance to each price level
@@ -576,11 +602,11 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
 
   return (
     <Card 
-      className={`cursor-pointer relative overflow-hidden ${nearStop ? "ring-2 ring-red-500" : nearTarget ? "ring-2 ring-green-500" : ""}`}
+      className={`cursor-pointer relative ${nearStop ? "ring-2 ring-red-500 ring-inset" : nearTarget ? "ring-2 ring-green-500 ring-inset" : ""}`}
       data-testid={`card-trade-${trade.id}`}
       onClick={handleCardClick}
     >
-      <CardContent className="p-4 pb-10 relative">
+      <CardContent className="p-4 pb-10 relative overflow-hidden">
         {/* Alert banners */}
         {nearTarget && (
           <div className="absolute top-0 left-0 right-0 bg-green-500/20 text-green-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-target-${trade.id}`}>
