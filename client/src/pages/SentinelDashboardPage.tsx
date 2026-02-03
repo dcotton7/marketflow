@@ -270,7 +270,7 @@ interface EditablePriceRowProps {
   value: number | null | undefined;
   distance: number | null;
   isAlert?: boolean;
-  alertColor?: "red" | "green" | "yellow";
+  alertColor?: "red" | "orange" | "green" | "yellow";
   onSave: (value: number) => void;
   testId: string;
 }
@@ -314,8 +314,10 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
     setIsEditing(false);
   };
   
-  const alertBg = alertColor === "red" ? "bg-red-500/10" : alertColor === "green" ? "bg-green-500/10" : "bg-yellow-500/10";
-  const alertText = alertColor === "red" ? "text-red-500" : alertColor === "green" ? "text-green-500" : "text-yellow-500";
+  const alertBgMap = { red: "bg-red-500/10", orange: "bg-orange-500/10", green: "bg-green-500/10", yellow: "bg-yellow-500/10" };
+  const alertTextMap = { red: "text-red-500", orange: "text-orange-500", green: "text-green-500", yellow: "text-yellow-500" };
+  const alertBg = alertBgMap[alertColor] || "bg-red-500/10";
+  const alertText = alertTextMap[alertColor] || "text-red-500";
   
   return (
     <div 
@@ -604,26 +606,43 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
     ? ((trade.targetPrice - currentPrice) / currentPrice * 100)
     : null;
 
-  // Alert conditions - within 0.5% of goal, mutually exclusive (show only the closer one)
-  const ALERT_THRESHOLD = 0.5;
-  const stopClose = stopDistance !== null && Math.abs(stopDistance) <= ALERT_THRESHOLD;
-  const targetClose = targetDistance !== null && Math.abs(targetDistance) <= ALERT_THRESHOLD;
+  // Alert thresholds: 0.5% = critical, 1% = warning
+  const CRITICAL_THRESHOLD = 0.5;
+  const WARNING_THRESHOLD = 1.0;
   
-  // Mutual exclusivity: if both are close, show only the closer one
-  let nearStop = false;
-  let nearTarget = false;
-  
-  if (stopClose && targetClose) {
-    // Show the closer one
-    if (Math.abs(stopDistance!) <= Math.abs(targetDistance!)) {
-      nearStop = true;
-    } else {
-      nearTarget = true;
-    }
-  } else {
-    nearStop = stopClose;
-    nearTarget = targetClose;
+  // STOP: red if within 0.5%, orange if within 1%
+  let stopAlertColor: "red" | "orange" | null = null;
+  if (stopDistance !== null) {
+    const absDistance = Math.abs(stopDistance);
+    if (absDistance <= CRITICAL_THRESHOLD) stopAlertColor = "red";
+    else if (absDistance <= WARNING_THRESHOLD) stopAlertColor = "orange";
   }
+  
+  // Calculate partial distance if we have a partial price
+  const actualPartialPrice = trade.partialPrice || partialProfitPrice;
+  const actualPartialDistance = actualPartialPrice
+    ? ((actualPartialPrice - currentPrice) / currentPrice * 100)
+    : null;
+  
+  // PARTIAL: green if within 0.5%, yellow if within 1%
+  let partialAlertColor: "green" | "yellow" | null = null;
+  if (actualPartialDistance !== null) {
+    const absDistance = Math.abs(actualPartialDistance);
+    if (absDistance <= CRITICAL_THRESHOLD) partialAlertColor = "green";
+    else if (absDistance <= WARNING_THRESHOLD) partialAlertColor = "yellow";
+  }
+  
+  // TARGET: green if within 0.5%, yellow if within 1%
+  let targetAlertColor: "green" | "yellow" | null = null;
+  if (targetDistance !== null) {
+    const absDistance = Math.abs(targetDistance);
+    if (absDistance <= CRITICAL_THRESHOLD) targetAlertColor = "green";
+    else if (absDistance <= WARNING_THRESHOLD) targetAlertColor = "yellow";
+  }
+  
+  // Banner alerts for card outline - use 0.5% threshold
+  const nearStop = stopAlertColor === "red";
+  const nearTarget = targetAlertColor === "green";
 
   return (
     <Card 
@@ -696,8 +715,8 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
             icon={XCircle}
             value={trade.stopPrice}
             distance={stopDistance}
-            isAlert={nearStop}
-            alertColor="red"
+            isAlert={stopAlertColor !== null}
+            alertColor={stopAlertColor || "red"}
             onSave={(value) => onPriceUpdate?.(trade.id, "stopPrice", value)}
             testId={`monitor-stop-${trade.id}`}
           />
@@ -707,11 +726,9 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
             label="PARTIAL"
             icon={CircleDot}
             value={trade.partialPrice || partialProfitPrice}
-            distance={trade.partialPrice 
-              ? ((trade.partialPrice - currentPrice) / currentPrice * 100) 
-              : partialDistance}
-            isAlert={false}
-            alertColor="yellow"
+            distance={actualPartialDistance}
+            isAlert={partialAlertColor !== null}
+            alertColor={partialAlertColor || "yellow"}
             onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
             testId={`monitor-partial-${trade.id}`}
           />
@@ -722,8 +739,8 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
             icon={Target}
             value={trade.targetPrice}
             distance={targetDistance}
-            isAlert={nearTarget}
-            alertColor="green"
+            isAlert={targetAlertColor !== null}
+            alertColor={targetAlertColor || "green"}
             onSave={(value) => onPriceUpdate?.(trade.id, "targetPrice", value)}
             testId={`monitor-target-${trade.id}`}
           />
