@@ -38,6 +38,7 @@ interface TradeWithEvaluation {
   status: string;
   createdAt: string;
   labels?: TradeLabel[];
+  lotEntries?: LotEntry[]; // Order grid lot entries for FIFO tracking
   latestEvaluation?: {
     score: number;
     recommendation: string;
@@ -857,7 +858,7 @@ export default function SentinelDashboardPage() {
   });
 
   const updateTradeMutation = useMutation({
-    mutationFn: async (data: { tradeId: number; entryPrice?: number; stopPrice?: number; targetPrice?: number; positionSize?: number; entryDate?: string; exitPrice?: number }) => {
+    mutationFn: async (data: { tradeId: number; entryPrice?: number; stopPrice?: number; targetPrice?: number; positionSize?: number; entryDate?: string; exitPrice?: number; lotEntries?: LotEntry[] }) => {
       const { tradeId, ...updateData } = data;
       return apiRequest("PATCH", `/api/sentinel/trade/${tradeId}`, updateData);
     },
@@ -899,27 +900,34 @@ export default function SentinelDashboardPage() {
   // Trade action handlers
   const handleEditTrade = (trade: TradeWithEvaluation) => {
     setSelectedTrade(trade);
-    // Initialize with existing BUY from Ivy Evaluator
-    const buyLot: LotEntry = {
-      id: "initial-buy",
-      dateTime: trade.entryDate ? new Date(trade.entryDate).toISOString().slice(0, 16) : "",
-      qty: trade.positionSize?.toString() || "",
-      buySell: "buy",
-      price: trade.entryPrice.toFixed(2)
-    };
-    // If trade has exit price, add a sell lot too
-    const lots: LotEntry[] = [buyLot];
-    if (trade.exitPrice && trade.positionSize) {
-      const sellLot: LotEntry = {
-        id: "initial-sell",
-        dateTime: "",
-        qty: trade.positionSize.toString(),
-        buySell: "sell",
-        price: trade.exitPrice.toFixed(2)
+    
+    // Check if trade has saved lotEntries from database
+    if (trade.lotEntries && Array.isArray(trade.lotEntries) && trade.lotEntries.length > 0) {
+      // Load saved lot entries
+      setLotEntries(trade.lotEntries as LotEntry[]);
+    } else {
+      // Initialize with existing BUY from Ivy Evaluator (fallback for old trades)
+      const buyLot: LotEntry = {
+        id: "initial-buy",
+        dateTime: trade.entryDate ? new Date(trade.entryDate).toISOString().slice(0, 16) : "",
+        qty: trade.positionSize?.toString() || "",
+        buySell: "buy",
+        price: trade.entryPrice.toFixed(2)
       };
-      lots.push(sellLot);
+      // If trade has exit price, add a sell lot too
+      const lots: LotEntry[] = [buyLot];
+      if (trade.exitPrice && trade.positionSize) {
+        const sellLot: LotEntry = {
+          id: "initial-sell",
+          dateTime: "",
+          qty: trade.positionSize.toString(),
+          buySell: "sell",
+          price: trade.exitPrice.toFixed(2)
+        };
+        lots.push(sellLot);
+      }
+      setLotEntries(lots);
     }
-    setLotEntries(lots);
     setEditForm({
       entryPrice: trade.entryPrice.toFixed(2),
       stopPrice: trade.stopPrice?.toFixed(2) || "",
@@ -1013,6 +1021,7 @@ export default function SentinelDashboardPage() {
       });
       const avgSellPrice = totalSellQty > 0 ? totalSellValue / totalSellQty : undefined;
       
+      // Save the full lot entries array for persistence
       updateTradeMutation.mutate({
         tradeId: selectedTrade.id,
         entryPrice: avgCostBasis || undefined,
@@ -1020,7 +1029,8 @@ export default function SentinelDashboardPage() {
         targetPrice: editForm.targetPrice ? parseFloat(editForm.targetPrice) : undefined,
         positionSize: totalBuyQty || undefined,
         entryDate: latestDateTime || editForm.entryDate || undefined,
-        exitPrice: avgSellPrice
+        exitPrice: avgSellPrice,
+        lotEntries: lotEntries.filter(lot => lot.qty && lot.dateTime) // Only save valid entries
       });
     }
   };

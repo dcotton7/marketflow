@@ -114,6 +114,13 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   outcome: text("outcome"), // 'win' | 'loss' | 'breakeven'
   rulesFollowed: jsonb("rules_followed").$type<Record<string, boolean>>(), // { ruleId: true/false }
   notes: text("notes"),
+  lotEntries: jsonb("lot_entries").$type<Array<{
+    id: string;
+    dateTime: string;
+    qty: string;
+    buySell: "buy" | "sell";
+    price: string;
+  }>>(), // Order grid lot entries for FIFO tracking
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -48,6 +48,14 @@ const evaluateSchema = z.object({
   tradeTime: z.string().optional(),
 });
 
+const lotEntrySchema = z.object({
+  id: z.string(),
+  dateTime: z.string(),
+  qty: z.string(),
+  buySell: z.enum(["buy", "sell"]),
+  price: z.string(),
+});
+
 const updateTradeSchema = z.object({
   stopPrice: z.number().positive().optional(),
   targetPrice: z.number().positive().optional(),
@@ -56,6 +64,7 @@ const updateTradeSchema = z.object({
   exitPrice: z.number().positive().optional(),
   positionSize: z.number().positive().optional(),
   status: z.enum(["considering", "active", "closed"]).optional(),
+  lotEntries: z.array(lotEntrySchema).optional(),
 });
 
 const closeTradeSchema = z.object({
@@ -541,6 +550,11 @@ export function registerSentinelRoutes(app: Express): void {
           newValue: data.exitPrice.toString(),
           description: `Close price updated: $${trade.exitPrice?.toFixed(2) || 'none'} → $${data.exitPrice.toFixed(2)}`,
         });
+      }
+
+      // Save lot entries array for order grid persistence
+      if (data.lotEntries !== undefined) {
+        (updates as any).lotEntries = data.lotEntries;
       }
 
       const updatedTrade = await sentinelModels.updateTrade(tradeId, updates);
