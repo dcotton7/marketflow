@@ -38,6 +38,7 @@ interface TradeWithEvaluation {
   positionSize?: number;
   status: string;
   actualPnL?: number;
+  notes?: string;
   createdAt: string;
   labels?: TradeLabel[];
   lotEntries?: LotEntry[]; // Order grid lot entries for FIFO tracking
@@ -1104,6 +1105,23 @@ export default function SentinelDashboardPage() {
     outcome: "win" as "win" | "loss" | "breakeven",
     notes: ""
   });
+  
+  // Trade tagging dialog
+  const [showTaggingDialog, setShowTaggingDialog] = useState(false);
+  const [taggingTrade, setTaggingTrade] = useState<TradeWithEvaluation | null>(null);
+  const [taggingForm, setTaggingForm] = useState({
+    setupType: "",
+    outcome: "" as "" | "win" | "loss" | "breakeven",
+    notes: ""
+  });
+  const [taggingAnalysis, setTaggingAnalysis] = useState<{
+    holdDays: number | null;
+    calculatedPnL: number;
+    outcome: string;
+    avgCostBasis: number;
+    avgSellPrice: number;
+  } | null>(null);
+  const [suggestingSetup, setSuggestingSetup] = useState(false);
 
   const { data: dashboard, isLoading, error } = useQuery<DashboardData>({
     queryKey: ["/api/sentinel/dashboard"],
@@ -1127,6 +1145,22 @@ export default function SentinelDashboardPage() {
 
   const { data: tradeSources = [] } = useQuery<TradeSource[]>({
     queryKey: ["/api/sentinel/trades/sources"],
+  });
+  
+  // Tagging stats for AI Learning
+  const { data: taggingStats } = useQuery<{
+    totalClosed: number;
+    tagged: number;
+    untagged: number;
+    imported: number;
+    taggedPercent: number;
+  }>({
+    queryKey: ["/api/sentinel/trades/tagging-stats"],
+  });
+  
+  // Untagged trades for review
+  const { data: untaggedTrades = [] } = useQuery<TradeWithEvaluation[]>({
+    queryKey: ["/api/sentinel/trades/untagged"],
   });
 
   // Filter trades by label and source
@@ -1231,6 +1265,98 @@ export default function SentinelDashboardPage() {
       });
     },
   });
+  
+  // Tag trade mutation for AI learning
+  const tagTradeMutation = useMutation({
+    mutationFn: async ({ tradeId, setupType, outcome, notes }: { 
+      tradeId: number; 
+      setupType: string; 
+      outcome?: string; 
+      notes?: string 
+    }) => {
+      const response = await apiRequest("POST", `/api/sentinel/trades/${tradeId}/tag`, { 
+        setupType, 
+        outcome, 
+        notes 
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to tag trade");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades/untagged"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades/tagging-stats"] });
+      setShowTaggingDialog(false);
+      setTaggingTrade(null);
+      setTaggingForm({ setupType: "", outcome: "", notes: "" });
+      setTaggingAnalysis(null);
+      toast({ title: "Trade tagged for AI learning" });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Tagging Failed", 
+        description: error?.message || "Could not tag trade.",
+        variant: "destructive" 
+      });
+    },
+  });
+  
+  // Open tagging dialog and analyze trade
+  const openTaggingDialog = async (trade: TradeWithEvaluation) => {
+    setTaggingTrade(trade);
+    setTaggingForm({
+      setupType: (trade as any).setupType || "",
+      outcome: (trade as any).outcome || "",
+      notes: trade.notes || ""
+    });
+    setShowTaggingDialog(true);
+    
+    // Analyze the trade
+    try {
+      const response = await fetch(`/api/sentinel/trades/${trade.id}/analyze`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        const analysis = await response.json();
+        setTaggingAnalysis(analysis);
+        // Pre-fill outcome from analysis if not already set on trade
+        const existingOutcome = (trade as any).outcome;
+        if (!existingOutcome && analysis.outcome) {
+          setTaggingForm(prev => ({ ...prev, outcome: analysis.outcome }));
+        }
+      }
+    } catch (error) {
+      console.error("Trade analysis failed:", error);
+    }
+  };
+  
+  // Get AI setup suggestion
+  const getAISetupSuggestion = async () => {
+    if (!taggingTrade) return;
+    setSuggestingSetup(true);
+    try {
+      const response = await fetch(`/api/sentinel/trades/${taggingTrade.id}/suggest-setup`, {
+        method: "POST",
+        credentials: "include"
+      });
+      if (response.ok) {
+        const suggestion = await response.json();
+        setTaggingForm(prev => ({ ...prev, setupType: suggestion.suggestedSetup }));
+        toast({ 
+          title: "AI Suggestion",
+          description: `${suggestion.suggestedSetup} (${Math.round(suggestion.confidence * 100)}% confidence): ${suggestion.reasoning}`
+        });
+      }
+    } catch (error) {
+      toast({ title: "Could not get AI suggestion", variant: "destructive" });
+    } finally {
+      setSuggestingSetup(false);
+    }
+  };
 
   const addRuleMutation = useMutation({
     mutationFn: async (data: { name: string; description?: string; category?: string }) => {
@@ -2012,6 +2138,85 @@ export default function SentinelDashboardPage() {
           </TabsContent>
 
           <TabsContent value="ai" className="space-y-4">
+            {/* Trade Tagging for AI Learning */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="w-5 h-5 text-blue-500" />
+                  Trade Tagging for AI Learning
+                </CardTitle>
+                <CardDescription>
+                  Tag your closed trades with setup types to help Sentinel learn your trading patterns and improve its scoring.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Progress bar */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span>Tagging Progress</span>
+                    <span className="text-muted-foreground">
+                      {taggingStats?.tagged || 0} / {taggingStats?.totalClosed || 0} trades tagged 
+                      ({taggingStats?.taggedPercent || 0}%)
+                    </span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-500 transition-all"
+                      style={{ width: `${taggingStats?.taggedPercent || 0}%` }}
+                    />
+                  </div>
+                </div>
+                
+                {/* Untagged trades queue */}
+                {untaggedTrades.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Trades needing review ({untaggedTrades.length})</span>
+                    </div>
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {untaggedTrades.slice(0, 10).map((trade) => (
+                        <div 
+                          key={trade.id} 
+                          className="flex items-center justify-between p-2 border rounded-lg hover-elevate cursor-pointer"
+                          onClick={() => openTaggingDialog(trade)}
+                          data-testid={`untagged-trade-${trade.id}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Badge variant={trade.direction === "long" ? "default" : "destructive"}>
+                              {trade.symbol}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">
+                              {trade.entryDate ? new Date(trade.entryDate).toLocaleDateString() : "N/A"}
+                            </span>
+                            <span className={`text-sm font-medium ${
+                              trade.actualPnL && trade.actualPnL > 0 ? "text-green-500" : 
+                              trade.actualPnL && trade.actualPnL < 0 ? "text-red-500" : ""
+                            }`}>
+                              {trade.actualPnL ? `$${trade.actualPnL.toFixed(2)}` : ""}
+                            </span>
+                          </div>
+                          <Button size="sm" variant="outline" data-testid={`button-tag-trade-${trade.id}`}>
+                            Tag Trade
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    {untaggedTrades.length > 10 && (
+                      <p className="text-xs text-muted-foreground text-center">
+                        And {untaggedTrades.length - 10} more...
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <CheckCircle className="w-10 h-10 mx-auto mb-2 text-green-500/50" />
+                    <p className="font-medium">All trades tagged!</p>
+                    <p className="text-sm">Your AI learning data is up to date.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -2875,6 +3080,155 @@ export default function SentinelDashboardPage() {
               data-testid="button-confirm-delete-source"
             >
               {deleteBySourceMutation.isPending ? "Deleting..." : "Delete Trades"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Trade Tagging Dialog */}
+      <Dialog open={showTaggingDialog} onOpenChange={setShowTaggingDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-blue-500" />
+              Tag Trade for AI Learning
+            </DialogTitle>
+            <DialogDescription>
+              Help Sentinel learn from this trade by tagging it with the setup type and outcome.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {taggingTrade && (
+            <div className="space-y-4">
+              {/* Trade Summary */}
+              <div className="p-3 bg-muted/50 rounded-lg space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant={taggingTrade.direction === "long" ? "default" : "destructive"}>
+                    {taggingTrade.direction.toUpperCase()}
+                  </Badge>
+                  <span className="font-semibold">{taggingTrade.symbol}</span>
+                  <span className="text-muted-foreground text-sm">@ ${taggingTrade.entryPrice}</span>
+                </div>
+                
+                {taggingAnalysis && (
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Hold Time:</span>
+                      <span className="ml-1 font-medium">
+                        {taggingAnalysis.holdDays !== null ? `${taggingAnalysis.holdDays} days` : "N/A"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">P&L:</span>
+                      <span className={`ml-1 font-medium ${
+                        taggingAnalysis.calculatedPnL > 0 ? "text-green-500" : 
+                        taggingAnalysis.calculatedPnL < 0 ? "text-red-500" : ""
+                      }`}>
+                        ${taggingAnalysis.calculatedPnL.toFixed(2)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Detected:</span>
+                      <span className={`ml-1 font-medium ${
+                        taggingAnalysis.outcome === "win" ? "text-green-500" : 
+                        taggingAnalysis.outcome === "loss" ? "text-red-500" : ""
+                      }`}>
+                        {taggingAnalysis.outcome}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Setup Type */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Setup Type</Label>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    onClick={getAISetupSuggestion}
+                    disabled={suggestingSetup}
+                    data-testid="button-ai-suggest-setup"
+                  >
+                    <Brain className="w-4 h-4 mr-1" />
+                    {suggestingSetup ? "Suggesting..." : "AI Suggest"}
+                  </Button>
+                </div>
+                <Select
+                  value={taggingForm.setupType}
+                  onValueChange={(v) => setTaggingForm({ ...taggingForm, setupType: v })}
+                >
+                  <SelectTrigger data-testid="select-setup-type">
+                    <SelectValue placeholder="Select setup type..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="breakout">Breakout</SelectItem>
+                    <SelectItem value="pullback">Pullback</SelectItem>
+                    <SelectItem value="cup_and_handle">Cup and Handle</SelectItem>
+                    <SelectItem value="vcp">VCP (Volatility Contraction Pattern)</SelectItem>
+                    <SelectItem value="high_tight_flag">High Tight Flag</SelectItem>
+                    <SelectItem value="double_bottom">Double Bottom</SelectItem>
+                    <SelectItem value="ascending_base">Ascending Base</SelectItem>
+                    <SelectItem value="bounce">Bounce / Support</SelectItem>
+                    <SelectItem value="momentum">Momentum / Day Trade</SelectItem>
+                    <SelectItem value="gap_and_go">Gap and Go</SelectItem>
+                    <SelectItem value="earnings_play">Earnings Play</SelectItem>
+                    <SelectItem value="sector_rotation">Sector Rotation</SelectItem>
+                    <SelectItem value="swing_trade">Swing Trade (General)</SelectItem>
+                    <SelectItem value="position_trade">Position Trade (Long Hold)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Outcome Override */}
+              <div className="space-y-2">
+                <Label>Outcome</Label>
+                <Select
+                  value={taggingForm.outcome}
+                  onValueChange={(v) => setTaggingForm({ ...taggingForm, outcome: v as any })}
+                >
+                  <SelectTrigger data-testid="select-outcome">
+                    <SelectValue placeholder="Confirm or override outcome..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="win">Win</SelectItem>
+                    <SelectItem value="loss">Loss</SelectItem>
+                    <SelectItem value="breakeven">Breakeven</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Notes */}
+              <div className="space-y-2">
+                <Label>Notes (optional)</Label>
+                <Textarea
+                  value={taggingForm.notes}
+                  onChange={(e) => setTaggingForm({ ...taggingForm, notes: e.target.value })}
+                  placeholder="What did you learn from this trade?"
+                  className="resize-none"
+                  rows={3}
+                  data-testid="input-tagging-notes"
+                />
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTaggingDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => taggingTrade && tagTradeMutation.mutate({
+                tradeId: taggingTrade.id,
+                setupType: taggingForm.setupType,
+                outcome: taggingForm.outcome || undefined,
+                notes: taggingForm.notes || undefined
+              })}
+              disabled={!taggingForm.setupType || tagTradeMutation.isPending}
+              data-testid="button-save-tag"
+            >
+              {tagTradeMutation.isPending ? "Saving..." : "Save Tag"}
             </Button>
           </DialogFooter>
         </DialogContent>

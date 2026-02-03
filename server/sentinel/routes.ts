@@ -4,7 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import OpenAI from "openai";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { eq, and, or, inArray, sql, isNull, desc } from "drizzle-orm";
 import { db } from "../db";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
@@ -1445,6 +1445,333 @@ Return ONLY the JSON object, no other text.`;
     } catch (error) {
       console.error("Similarity check error:", error);
       res.status(500).json({ error: "Failed to check similarity" });
+    }
+  });
+
+  // === TRADE TAGGING FOR AI LEARNING ===
+  
+  // Get untagged closed trades (for review queue)
+  app.get("/api/sentinel/trades/untagged", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const trades = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, req.session.userId!),
+          eq(sentinelTrades.status, "closed"),
+          or(
+            eq(sentinelTrades.isTagged, false),
+            isNull(sentinelTrades.isTagged)
+          )
+        ))
+        .orderBy(desc(sentinelTrades.exitDate));
+      res.json(trades);
+    } catch (error) {
+      console.error("Get untagged trades error:", error);
+      res.status(500).json({ error: "Failed to load untagged trades" });
+    }
+  });
+  
+  // Analyze a trade - calculate outcome, hold days, P&L from lot entries
+  app.post("/api/sentinel/trades/:id/analyze", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.id as string);
+      const trade = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.id, tradeId),
+          eq(sentinelTrades.userId, req.session.userId!)
+        ))
+        .then(rows => rows[0]);
+      
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+      
+      const lotEntries = trade.lotEntries as Array<{
+        id: string;
+        dateTime: string;
+        qty: string;
+        buySell: "buy" | "sell";
+        price: string;
+      }> || [];
+      
+      // Calculate from lot entries
+      const buys = lotEntries.filter(e => e.buySell === "buy");
+      const sells = lotEntries.filter(e => e.buySell === "sell");
+      
+      let holdDays: number | null = null;
+      let calculatedPnL = 0;
+      let outcome: "win" | "loss" | "breakeven" = "breakeven";
+      let avgCostBasis = 0;
+      let avgSellPrice = 0;
+      let totalBuyQty = 0;
+      let totalSellQty = 0;
+      
+      if (buys.length > 0 && sells.length > 0) {
+        // Sort chronologically
+        const sortedBuys = [...buys].sort((a, b) => 
+          new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()
+        );
+        const sortedSells = [...sells].sort((a, b) => 
+          new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()
+        );
+        
+        // Hold days: first buy to last sell
+        const firstBuyDate = new Date(sortedBuys[0].dateTime);
+        const lastSellDate = new Date(sortedSells[sortedSells.length - 1].dateTime);
+        holdDays = Math.ceil((lastSellDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Calculate weighted average cost basis
+        buys.forEach(buy => {
+          const qty = parseFloat(buy.qty) || 0;
+          const price = parseFloat(buy.price) || 0;
+          totalBuyQty += qty;
+          avgCostBasis += qty * price;
+        });
+        avgCostBasis = totalBuyQty > 0 ? avgCostBasis / totalBuyQty : 0;
+        
+        // Calculate weighted average sell price
+        sells.forEach(sell => {
+          const qty = parseFloat(sell.qty) || 0;
+          const price = parseFloat(sell.price) || 0;
+          totalSellQty += qty;
+          avgSellPrice += qty * price;
+        });
+        avgSellPrice = totalSellQty > 0 ? avgSellPrice / totalSellQty : 0;
+        
+        // Realized P&L (simplified: using min of buy/sell qty)
+        const closedQty = Math.min(totalBuyQty, totalSellQty);
+        const isLong = trade.direction === "long";
+        if (isLong) {
+          calculatedPnL = (avgSellPrice - avgCostBasis) * closedQty;
+        } else {
+          calculatedPnL = (avgCostBasis - avgSellPrice) * closedQty;
+        }
+        
+        // Determine outcome
+        if (calculatedPnL > 5) outcome = "win"; // $5 buffer for fees
+        else if (calculatedPnL < -5) outcome = "loss";
+        else outcome = "breakeven";
+      }
+      
+      res.json({
+        tradeId,
+        holdDays,
+        calculatedPnL,
+        outcome,
+        avgCostBasis,
+        avgSellPrice,
+        totalBuyQty,
+        totalSellQty,
+        existingSetupType: trade.setupType,
+        existingOutcome: trade.outcome,
+        isTagged: trade.isTagged
+      });
+    } catch (error) {
+      console.error("Trade analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze trade" });
+    }
+  });
+  
+  // Get AI setup type suggestion for a trade
+  app.post("/api/sentinel/trades/:id/suggest-setup", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.id as string);
+      const trade = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.id, tradeId),
+          eq(sentinelTrades.userId, req.session.userId!)
+        ))
+        .then(rows => rows[0]);
+      
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+      
+      // Get trade context for AI analysis
+      const lotEntries = trade.lotEntries as Array<any> || [];
+      const holdDays = trade.holdDays || 0;
+      
+      const setupTypes = [
+        "breakout", "pullback", "cup_and_handle", "vcp", "high_tight_flag",
+        "double_bottom", "ascending_base", "bounce", "momentum", "gap_and_go",
+        "earnings_play", "sector_rotation", "swing_trade", "position_trade"
+      ];
+      
+      const prompt = `Analyze this historical trade and suggest the most likely setup type:
+
+TRADE DETAILS:
+- Symbol: ${trade.symbol}
+- Direction: ${trade.direction}
+- Entry Price: $${trade.entryPrice}
+- Exit Price: $${trade.exitPrice || "N/A"}
+- Hold Time: ${holdDays} days
+- P&L: $${trade.actualPnL?.toFixed(2) || "N/A"}
+- Outcome: ${trade.outcome || "unknown"}
+- Thesis: ${trade.thesis || "none provided"}
+- Notes: ${trade.notes || "none"}
+
+AVAILABLE SETUP TYPES:
+${setupTypes.map(s => `- ${s}`).join("\n")}
+
+Based on hold time and characteristics:
+- 0-1 days: likely "momentum" or "gap_and_go"
+- 2-5 days: likely "swing_trade", "breakout", or "bounce"
+- 5-20 days: likely "pullback", "vcp", or "cup_and_handle"
+- 20+ days: likely "position_trade" or "ascending_base"
+
+Respond in JSON format:
+{
+  "suggestedSetup": "<setup_type>",
+  "confidence": <0-1>,
+  "reasoning": "<brief explanation>"
+}`;
+
+      const openai = await getOpenAIClient();
+      if (!openai) {
+        // Fallback: use hold time heuristics
+        let suggestedSetup = "swing_trade";
+        if (holdDays <= 1) suggestedSetup = "momentum";
+        else if (holdDays <= 5) suggestedSetup = "breakout";
+        else if (holdDays > 20) suggestedSetup = "position_trade";
+        
+        return res.json({
+          suggestedSetup,
+          confidence: 0.5,
+          reasoning: "Suggestion based on hold time heuristics (AI unavailable)"
+        });
+      }
+      
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: 200
+      });
+      
+      const content = response.choices[0].message.content || "";
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error("Invalid AI response format");
+      }
+      
+      const result = JSON.parse(jsonMatch[0]);
+      
+      // Validate suggested setup is in our list
+      if (!setupTypes.includes(result.suggestedSetup)) {
+        result.suggestedSetup = "swing_trade";
+        result.confidence = 0.5;
+      }
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Setup suggestion error:", error);
+      res.status(500).json({ error: "Failed to get setup suggestion" });
+    }
+  });
+  
+  // Tag a trade (set setupType, outcome, calculate holdDays)
+  app.post("/api/sentinel/trades/:id/tag", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.id as string);
+      const { setupType, outcome, notes } = req.body;
+      
+      // Verify ownership
+      const trade = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.id, tradeId),
+          eq(sentinelTrades.userId, req.session.userId!)
+        ))
+        .then(rows => rows[0]);
+      
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+      
+      // Calculate hold days from lot entries
+      const lotEntries = trade.lotEntries as Array<{
+        id: string;
+        dateTime: string;
+        qty: string;
+        buySell: "buy" | "sell";
+        price: string;
+      }> || [];
+      
+      const buys = lotEntries.filter(e => e.buySell === "buy");
+      const sells = lotEntries.filter(e => e.buySell === "sell");
+      
+      let holdDays: number | null = null;
+      if (buys.length > 0 && sells.length > 0) {
+        const sortedBuys = [...buys].sort((a, b) => 
+          new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()
+        );
+        const sortedSells = [...sells].sort((a, b) => 
+          new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()
+        );
+        const firstBuyDate = new Date(sortedBuys[0].dateTime);
+        const lastSellDate = new Date(sortedSells[sortedSells.length - 1].dateTime);
+        holdDays = Math.ceil((lastSellDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24));
+      }
+      
+      // Update trade with tags
+      const [updated] = await db.update(sentinelTrades)
+        .set({
+          setupType: setupType || trade.setupType,
+          outcome: outcome || trade.outcome,
+          notes: notes !== undefined ? notes : trade.notes,
+          holdDays,
+          isTagged: true,
+          taggedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(sentinelTrades.id, tradeId))
+        .returning();
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Tag trade error:", error);
+      res.status(500).json({ error: "Failed to tag trade" });
+    }
+  });
+  
+  // Batch analyze trades for tagging stats
+  app.get("/api/sentinel/trades/tagging-stats", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Get counts
+      const [totalClosed] = await db.select({ count: sql<number>`count(*)` })
+        .from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.status, "closed")
+        ));
+      
+      const [tagged] = await db.select({ count: sql<number>`count(*)` })
+        .from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.status, "closed"),
+          eq(sentinelTrades.isTagged, true)
+        ));
+      
+      const [imported] = await db.select({ count: sql<number>`count(*)` })
+        .from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.status, "closed"),
+          eq(sentinelTrades.source, "import")
+        ));
+      
+      res.json({
+        totalClosed: Number(totalClosed.count),
+        tagged: Number(tagged.count),
+        untagged: Number(totalClosed.count) - Number(tagged.count),
+        imported: Number(imported.count),
+        taggedPercent: totalClosed.count > 0 ? 
+          Math.round((Number(tagged.count) / Number(totalClosed.count)) * 100) : 0
+      });
+    } catch (error) {
+      console.error("Tagging stats error:", error);
+      res.status(500).json({ error: "Failed to get tagging stats" });
     }
   });
 

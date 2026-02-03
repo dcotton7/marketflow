@@ -125,6 +125,12 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   }>>(), // Order grid lot entries for FIFO tracking
   source: text("source").default("hand"), // 'hand' for manual entry, 'import' for CSV imports
   importBatchId: text("import_batch_id"), // UUID of the import batch if source is 'import'
+  // AI Learning Tags
+  holdDays: integer("hold_days"), // Calculated from lot entries: days between first buy and last sell
+  isTagged: boolean("is_tagged").default(false), // Whether user has reviewed and tagged this trade
+  taggedAt: timestamp("tagged_at"), // When the trade was tagged
+  aiSuggestedSetup: text("ai_suggested_setup"), // AI's suggested setup type
+  aiSetupConfidence: doublePrecision("ai_setup_confidence"), // 0-1 confidence score
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
