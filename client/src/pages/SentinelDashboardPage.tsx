@@ -306,6 +306,13 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
               onKeyDown={handleKeyDown}
+              onBlur={() => {
+                const numValue = parseFloat(editValue);
+                if (!isNaN(numValue) && numValue > 0) {
+                  onSave(numValue);
+                }
+                setIsEditing(false);
+              }}
               className="w-20 h-5 px-1 text-xs bg-background border rounded focus:outline-none focus:ring-1 focus:ring-primary"
               data-testid={`${testId}-input`}
             />
@@ -511,9 +518,26 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
     ? ((trade.targetPrice - currentPrice) / currentPrice * 100)
     : null;
 
-  // Alert conditions - within 5% of goal
-  const nearStop = stopDistance !== null && Math.abs(stopDistance) <= 5;
-  const nearTarget = targetDistance !== null && Math.abs(targetDistance) <= 5;
+  // Alert conditions - within 0.5% of goal, mutually exclusive (show only the closer one)
+  const ALERT_THRESHOLD = 0.5;
+  const stopClose = stopDistance !== null && Math.abs(stopDistance) <= ALERT_THRESHOLD;
+  const targetClose = targetDistance !== null && Math.abs(targetDistance) <= ALERT_THRESHOLD;
+  
+  // Mutual exclusivity: if both are close, show only the closer one
+  let nearStop = false;
+  let nearTarget = false;
+  
+  if (stopClose && targetClose) {
+    // Show the closer one
+    if (Math.abs(stopDistance!) <= Math.abs(targetDistance!)) {
+      nearStop = true;
+    } else {
+      nearTarget = true;
+    }
+  } else {
+    nearStop = stopClose;
+    nearTarget = targetClose;
+  }
 
   return (
     <Card 
