@@ -908,32 +908,44 @@ export default function SentinelDashboardPage() {
 
   const confirmEditTrade = () => {
     if (selectedTrade) {
-      // Aggregate lot data - calculate weighted average cost basis and total qty
-      const filledLots = lotEntries.filter(lot => lot.qty && lot.costBasis);
-      let totalQty = 0;
-      let totalCost = 0;
-      let latestClosePrice = "";
+      // Aggregate lot data from buys and sells
+      const buyLots = lotEntries.filter(lot => lot.buySell === "buy" && lot.qty && lot.price);
+      const sellLots = lotEntries.filter(lot => lot.buySell === "sell" && lot.qty && lot.price);
+      
+      let totalBuyQty = 0;
+      let totalBuyCost = 0;
       let latestDateTime = "";
       
-      filledLots.forEach(lot => {
+      buyLots.forEach(lot => {
         const qty = parseInt(lot.qty) || 0;
-        const cost = parseFloat(lot.costBasis) || 0;
-        totalQty += qty;
-        totalCost += qty * cost;
-        if (lot.closePrice) latestClosePrice = lot.closePrice;
+        const price = parseFloat(lot.price) || 0;
+        totalBuyQty += qty;
+        totalBuyCost += qty * price;
         if (lot.dateTime) latestDateTime = lot.dateTime;
       });
       
-      const avgCostBasis = totalQty > 0 ? totalCost / totalQty : parseFloat(editForm.entryPrice) || 0;
+      // Calculate weighted average cost basis from buys
+      const avgCostBasis = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : parseFloat(editForm.entryPrice) || 0;
+      
+      // Get exit price from sells (weighted average)
+      let totalSellQty = 0;
+      let totalSellValue = 0;
+      sellLots.forEach(lot => {
+        const qty = parseInt(lot.qty) || 0;
+        const price = parseFloat(lot.price) || 0;
+        totalSellQty += qty;
+        totalSellValue += qty * price;
+      });
+      const avgSellPrice = totalSellQty > 0 ? totalSellValue / totalSellQty : undefined;
       
       updateTradeMutation.mutate({
         tradeId: selectedTrade.id,
         entryPrice: avgCostBasis || undefined,
         stopPrice: editForm.stopPrice ? parseFloat(editForm.stopPrice) : undefined,
         targetPrice: editForm.targetPrice ? parseFloat(editForm.targetPrice) : undefined,
-        positionSize: totalQty || undefined,
+        positionSize: totalBuyQty || undefined,
         entryDate: latestDateTime || editForm.entryDate || undefined,
-        exitPrice: latestClosePrice ? parseFloat(latestClosePrice) : undefined
+        exitPrice: avgSellPrice
       });
     }
   };
