@@ -477,6 +477,13 @@ interface TradeCardProps {
 function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPriceUpdate }: TradeCardProps) {
   const [, setLocation] = useLocation();
   
+  // Fetch current market price for accurate P&L
+  const tickerQuery = useQuery<{ symbol: string; price: number; name?: string }>({
+    queryKey: ["/api/sentinel/ticker", trade.symbol],
+    enabled: trade.status !== "closed", // Only fetch for active trades
+    refetchInterval: 60000, // Refresh every minute
+  });
+  
   const handleOpenIvyAI = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -506,13 +513,13 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
     setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
   };
 
-  // Calculate a pseudo % change based on entry vs target
-  const pctChange = trade.targetPrice && trade.entryPrice 
-    ? ((trade.targetPrice - trade.entryPrice) / trade.entryPrice * 100) 
-    : (trade.direction === "long" ? 2.5 : -2.5);
-
-  // Price monitoring calculations - use current price (entry for now, could be live)
-  const currentPrice = trade.entryPrice; // In production, this would be live price
+  // Use live market price if available, otherwise fall back to entry price
+  const currentPrice = tickerQuery.data?.price ?? trade.entryPrice;
+  
+  // Calculate actual % change from entry price using live market data
+  const pctChange = currentPrice && trade.entryPrice 
+    ? ((currentPrice - trade.entryPrice) / trade.entryPrice * 100) 
+    : 0;
   
   // Calculate Open PnL (unrealized) - for active trades based on position and current vs entry
   // For closed trades, use actualPnL; for active, calculate (currentPrice - entryPrice) * positionSize
