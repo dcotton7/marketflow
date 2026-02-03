@@ -113,8 +113,20 @@ interface LotEntry {
   id: string;
   dateTime: string;
   qty: string;
-  costBasis: string;
-  closePrice: string;
+  buySell: "buy" | "sell";
+  price: string; // Cost Basis for buys, Sell Price for sells
+}
+
+// Calculate running total for lot entries (buys positive, sells negative)
+function calculateRunningTotal(entries: LotEntry[]): number {
+  return entries.reduce((total, entry) => {
+    const qty = parseInt(entry.qty) || 0;
+    if (entry.buySell === "buy") {
+      return total + qty;
+    } else {
+      return total - qty;
+    }
+  }, 0);
 }
 
 function getScoreColor(score: number): string {
@@ -789,8 +801,8 @@ export default function SentinelDashboardPage() {
       id: Date.now().toString(),
       dateTime: "",
       qty: "",
-      costBasis: "",
-      closePrice: ""
+      buySell: "buy",
+      price: ""
     };
     setLotEntries([...lotEntries, newLot]);
   };
@@ -805,25 +817,34 @@ export default function SentinelDashboardPage() {
     setLotEntries(lotEntries.filter(lot => lot.id !== id));
   };
 
+  // Get running total for display (positive = long, negative = short, 0 = balanced)
+  const runningTotal = calculateRunningTotal(lotEntries);
+  const canCloseTrade = runningTotal === 0;
+
   // Trade action handlers
   const handleEditTrade = (trade: TradeWithEvaluation) => {
     setSelectedTrade(trade);
-    // Initialize with existing data as first lot, plus empty row for adding
-    const existingLot: LotEntry = {
-      id: "initial",
+    // Initialize with existing BUY from Ivy Evaluator
+    const buyLot: LotEntry = {
+      id: "initial-buy",
       dateTime: trade.entryDate ? new Date(trade.entryDate).toISOString().slice(0, 16) : "",
       qty: trade.positionSize?.toString() || "",
-      costBasis: trade.entryPrice.toFixed(2),
-      closePrice: trade.exitPrice?.toFixed(2) || ""
+      buySell: "buy",
+      price: trade.entryPrice.toFixed(2)
     };
-    const emptyLot: LotEntry = {
-      id: Date.now().toString(),
-      dateTime: "",
-      qty: "",
-      costBasis: "",
-      closePrice: ""
-    };
-    setLotEntries([existingLot, emptyLot]);
+    // If trade has exit price, add a sell lot too
+    const lots: LotEntry[] = [buyLot];
+    if (trade.exitPrice && trade.positionSize) {
+      const sellLot: LotEntry = {
+        id: "initial-sell",
+        dateTime: "",
+        qty: trade.positionSize.toString(),
+        buySell: "sell",
+        price: trade.exitPrice.toFixed(2)
+      };
+      lots.push(sellLot);
+    }
+    setLotEntries(lots);
     setEditForm({
       entryPrice: trade.entryPrice.toFixed(2),
       stopPrice: trade.stopPrice?.toFixed(2) || "",
