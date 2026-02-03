@@ -11,17 +11,22 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-// Infer setup type from thesis keywords
+// Infer setup type from thesis keywords (fallback if no explicit setupType provided)
 function inferSetupType(thesis: string): string {
   const lower = thesis.toLowerCase();
-  if (lower.includes("pullback") || lower.includes("pull back") || lower.includes("retest")) return "pullback_setup";
-  if (lower.includes("breakout") || lower.includes("break out") || lower.includes("new high")) return "breakout_setup";
-  if (lower.includes("reclaim") || lower.includes("recover")) return "reclaim_setup";
+  if (lower.includes("pullback") || lower.includes("pull back") || lower.includes("retest")) return "pullback";
+  if (lower.includes("breakout") || lower.includes("break out") || lower.includes("new high")) return "breakout";
+  if (lower.includes("reclaim") || lower.includes("recover")) return "reclaim";
   if (lower.includes("cup") || lower.includes("handle")) return "cup_and_handle";
   if (lower.includes("gap") || lower.includes("earnings") || lower.includes("catalyst") || lower.includes("pivot")) return "episodic_pivot";
   if (lower.includes("htf") || lower.includes("high tight") || lower.includes("tight flag")) return "high_tight_flag";
   if (lower.includes("vcp") || lower.includes("volatility contraction")) return "vcp";
-  return "breakout_setup"; // Default to breakout
+  if (lower.includes("low cheat")) return "low_cheat";
+  if (lower.includes("undercut") || lower.includes("rally")) return "undercut_rally";
+  if (lower.includes("orb") || lower.includes("opening range")) return "orb";
+  if (lower.includes("lost 50") || lower.includes("lost 50sma")) return "short_lost_50";
+  if (lower.includes("lost 200") || lower.includes("lost 200sma")) return "short_lost_200";
+  return "breakout"; // Default to breakout
 }
 
 export async function evaluateTrade(
@@ -139,15 +144,16 @@ export async function evaluateTrade(
   if (marketContext?.daily?.canaryTags?.includes("Volatility Stress")) activeConditions.push("volatility_stress");
   if (marketContext?.daily?.canaryTags?.includes("Narrow Leadership")) activeConditions.push("narrow_leadership");
   
-  // Infer setup type from thesis (will be refined by AI)
-  const inferredSetupType = inferSetupType(request.thesis || "");
+  // Use explicit setupType if provided, otherwise infer from thesis
+  const setupType = request.setupType || inferSetupType(request.thesis || "");
+  console.log(`[Sentinel] Setup type: ${setupType}${request.setupType ? " (explicit)" : " (inferred from thesis)"}`);
   
   // Fetch TNN weights for evaluation
   let tnnContext: TnnWeightContext | undefined;
   try {
-    tnnContext = await getWeightsForEvaluation(inferredSetupType, activeConditions);
+    tnnContext = await getWeightsForEvaluation(setupType, activeConditions);
     console.log(`[Sentinel TNN] Active conditions: ${activeConditions.join(", ") || "none"}`);
-    console.log(`[Sentinel TNN] Inferred setup: ${inferredSetupType}, Applied modifiers: ${tnnContext.modifiers.length}`);
+    console.log(`[Sentinel TNN] Setup: ${setupType}, Applied modifiers: ${tnnContext.modifiers.length}`);
   } catch (e) {
     console.log("[Sentinel TNN] Could not fetch TNN weights, proceeding without");
   }
@@ -506,6 +512,7 @@ export async function evaluateTrade(
       targetProfitLevel: request.targetProfitLevel,
       positionSize: request.positionSize,
       thesis: request.thesis,
+      setupType: setupType, // Store the setup type (explicit or inferred)
       status: "considering",
       lotEntries,
     });

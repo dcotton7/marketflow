@@ -181,6 +181,7 @@ export default function SentinelEvaluatePage() {
   const [positionSize, setPositionSize] = useState("");
   
   const [thesis, setThesis] = useState("");
+  const [setupType, setSetupType] = useState<string>("");
   const [deepEval, setDeepEval] = useState(false);
   const [historicalAnalysis, setHistoricalAnalysis] = useState(false);
   const [tradeDate, setTradeDate] = useState("");
@@ -232,6 +233,9 @@ export default function SentinelEvaluatePage() {
         }
         if (trade.thesis) {
           setThesis(trade.thesis);
+        }
+        if (trade.setupType) {
+          setSetupType(trade.setupType);
         }
         setIsPreloaded(true);
         toast({ title: "Trade Loaded", description: `Loaded ${trade.symbol} trade for review` });
@@ -360,6 +364,7 @@ export default function SentinelEvaluatePage() {
       data.positionSizeUnit = positionSizeUnit;
     }
     if (thesis) data.thesis = thesis;
+    if (setupType) data.setupType = setupType;
 
     // Add historical date/time if in historical mode
     if (historicalAnalysis) {
@@ -481,6 +486,30 @@ export default function SentinelEvaluatePage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="setupType">Setup Type</Label>
+                  <Select value={setupType} onValueChange={setSetupType}>
+                    <SelectTrigger data-testid="select-setup-type">
+                      <SelectValue placeholder="Select setup pattern..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="breakout">Breakout</SelectItem>
+                      <SelectItem value="pullback">Pullback</SelectItem>
+                      <SelectItem value="cup_and_handle">Cup and Handle</SelectItem>
+                      <SelectItem value="vcp">VCP (Volatility Contraction Pattern)</SelectItem>
+                      <SelectItem value="episodic_pivot">Episodic Pivot</SelectItem>
+                      <SelectItem value="reclaim">Reclaim</SelectItem>
+                      <SelectItem value="high_tight_flag">High Tight Flag</SelectItem>
+                      <SelectItem value="low_cheat">Low Cheat Setup</SelectItem>
+                      <SelectItem value="undercut_rally">Undercut and Rally</SelectItem>
+                      <SelectItem value="orb">Opening Range Breakout (ORB)</SelectItem>
+                      <SelectItem value="short_lost_50">SHORT: Lost 50 SMA</SelectItem>
+                      <SelectItem value="short_lost_200">SHORT: Lost 200 SMA</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Ticker Info Display */}

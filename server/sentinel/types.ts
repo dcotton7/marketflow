@@ -1,3 +1,18 @@
+export type SetupType = 
+  | 'breakout' 
+  | 'pullback' 
+  | 'cup_and_handle' 
+  | 'vcp' 
+  | 'episodic_pivot' 
+  | 'reclaim' 
+  | 'high_tight_flag'
+  | 'low_cheat'
+  | 'undercut_rally'
+  | 'orb'
+  | 'short_lost_50'
+  | 'short_lost_200'
+  | 'other';
+
 export interface EvaluationRequest {
   symbol: string;
   direction: 'long' | 'short';
@@ -11,6 +26,7 @@ export interface EvaluationRequest {
   positionSize?: number;
   positionSizeUnit?: 'shares' | 'dollars';
   thesis?: string;
+  setupType?: SetupType; // Explicit setup pattern selection
   deepEval?: boolean;
   historicalAnalysis?: boolean; // Reviewing a past trade vs. evaluating a new one
   tradeDate?: string; // ISO date string for historical trades (YYYY-MM-DD)
@@ -119,6 +135,7 @@ export interface TradeWithEvaluation {
   targetPrice: number | null;
   positionSize: number | null;
   thesis: string | null;
+  setupType: string | null;
   status: string;
   actualPnL: number | null;
   createdAt: Date | null;

@@ -45,6 +45,11 @@ const evaluateSchema = z.object({
   positionSize: z.number().positive().optional(),
   positionSizeUnit: z.enum(["shares", "dollars"]).optional(),
   thesis: z.string().optional(),
+  setupType: z.enum([
+    "breakout", "pullback", "cup_and_handle", "vcp", "episodic_pivot", 
+    "reclaim", "high_tight_flag", "low_cheat", "undercut_rally", "orb",
+    "short_lost_50", "short_lost_200", "other"
+  ]).optional(),
   deepEval: z.boolean().optional(),
   historicalAnalysis: z.boolean().optional(),
   tradeDate: z.string().optional(),
@@ -301,6 +306,7 @@ export function registerSentinelRoutes(app: Express): void {
         positionSize: data.positionSize,
         positionSizeUnit: data.positionSizeUnit,
         thesis: data.thesis,
+        setupType: data.setupType,
         deepEval: data.deepEval,
         historicalAnalysis: data.historicalAnalysis,
         tradeDate: data.tradeDate,
@@ -359,6 +365,11 @@ export function registerSentinelRoutes(app: Express): void {
     targetPrice: z.number().positive().optional(),
     partialPrice: z.number().positive().optional(),
     thesis: z.string().optional(),
+    setupType: z.enum([
+      "breakout", "pullback", "cup_and_handle", "vcp", "episodic_pivot", 
+      "reclaim", "high_tight_flag", "low_cheat", "undercut_rally", "orb",
+      "short_lost_50", "short_lost_200", "other"
+    ]).optional(),
     tradeDate: z.string().optional(), // ISO date string
     tradeTime: z.string().optional(), // HH:MM format
     status: z.enum(["considering", "active"]).default("active"),
@@ -397,6 +408,7 @@ export function registerSentinelRoutes(app: Express): void {
         partialPrice: data.partialPrice,
         positionSize: data.positionSize,
         thesis: data.thesis,
+        setupType: data.setupType,
         status: data.status,
         lotEntries,
       });

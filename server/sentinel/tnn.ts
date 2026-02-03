@@ -20,33 +20,39 @@ const DISCIPLINE_FACTORS = [
   { factorKey: "general", factorName: "General Discipline", description: "General trading discipline factors", baseWeight: 60, order: 12 },
 ];
 
-// Setup Type Factors (from AI model tags)
+// Setup Type Factors (from AI model tags and user selection)
 const SETUP_TYPE_FACTORS = [
-  { factorKey: "breakout_setup", factorName: "Breakout Setup", description: "Traditional breakout from consolidation or base", baseWeight: 75, order: 1 },
-  { factorKey: "pullback_setup", factorName: "Pullback Setup", description: "Pullback to moving average support (21/50 EMA)", baseWeight: 70, order: 2 },
-  { factorKey: "reclaim_setup", factorName: "Reclaim Setup", description: "Reclaim of key level after breakdown", baseWeight: 65, order: 3 },
+  { factorKey: "breakout", factorName: "Breakout Setup", description: "Traditional breakout from consolidation or base", baseWeight: 75, order: 1 },
+  { factorKey: "pullback", factorName: "Pullback Setup", description: "Pullback to moving average support (21/50 EMA)", baseWeight: 70, order: 2 },
+  { factorKey: "reclaim", factorName: "Reclaim Setup", description: "Reclaim of key level after breakdown", baseWeight: 65, order: 3 },
   { factorKey: "cup_and_handle", factorName: "Cup & Handle", description: "Classic cup and handle pattern", baseWeight: 80, order: 4 },
   { factorKey: "episodic_pivot", factorName: "Episodic Pivot", description: "Gap up on earnings or news catalyst", baseWeight: 70, order: 5 },
   { factorKey: "high_tight_flag", factorName: "High Tight Flag", description: "Tight consolidation after strong move", baseWeight: 75, order: 6 },
   { factorKey: "vcp", factorName: "VCP (Volatility Contraction)", description: "Volatility contraction pattern", baseWeight: 75, order: 7 },
+  { factorKey: "low_cheat", factorName: "Low Cheat Setup", description: "Buy before official breakout/pivot point", baseWeight: 70, order: 8 },
+  { factorKey: "undercut_rally", factorName: "Undercut & Rally", description: "Break below support then reclaim with strength", baseWeight: 65, order: 9 },
+  { factorKey: "orb", factorName: "Opening Range Breakout", description: "Breakout of first 15-30min range", baseWeight: 60, order: 10 },
+  { factorKey: "short_lost_50", factorName: "SHORT: Lost 50 SMA", description: "Short position after stock loses 50-day moving average", baseWeight: 70, order: 11 },
+  { factorKey: "short_lost_200", factorName: "SHORT: Lost 200 SMA", description: "Short position after stock loses 200-day moving average", baseWeight: 75, order: 12 },
+  { factorKey: "other", factorName: "Other Setup", description: "Custom or unclassified setup type", baseWeight: 50, order: 13 },
 ];
 
 // Baseline Modifiers (setup × market condition) - manual admin defaults
 const BASELINE_MODIFIERS = [
   // Pullback modifiers
-  { factorKey: "pullback_setup", factorName: "Pullback Setup", whenCondition: "choppy_daily", whenConditionName: "Choppy Daily Market", weightModifier: 15, notes: "Pullbacks to MAs tend to work better in choppy conditions" },
-  { factorKey: "pullback_setup", factorName: "Pullback Setup", whenCondition: "trending_weekly", whenConditionName: "Trending Weekly Market", weightModifier: 10, notes: "Pullbacks in uptrending markets are higher probability" },
-  { factorKey: "pullback_setup", factorName: "Pullback Setup", whenCondition: "risk_off", whenConditionName: "Risk-Off Environment", weightModifier: -10, notes: "Pullbacks less reliable in risk-off" },
+  { factorKey: "pullback", factorName: "Pullback Setup", whenCondition: "choppy_daily", whenConditionName: "Choppy Daily Market", weightModifier: 15, notes: "Pullbacks to MAs tend to work better in choppy conditions" },
+  { factorKey: "pullback", factorName: "Pullback Setup", whenCondition: "trending_weekly", whenConditionName: "Trending Weekly Market", weightModifier: 10, notes: "Pullbacks in uptrending markets are higher probability" },
+  { factorKey: "pullback", factorName: "Pullback Setup", whenCondition: "risk_off", whenConditionName: "Risk-Off Environment", weightModifier: -10, notes: "Pullbacks less reliable in risk-off" },
   
   // Breakout modifiers
-  { factorKey: "breakout_setup", factorName: "Breakout Setup", whenCondition: "choppy_daily", whenConditionName: "Choppy Daily Market", weightModifier: -20, notes: "Breakouts fail more often in choppy conditions" },
-  { factorKey: "breakout_setup", factorName: "Breakout Setup", whenCondition: "choppy_weekly", whenConditionName: "Choppy Weekly Market", weightModifier: -25, notes: "Weekly chop kills breakouts" },
-  { factorKey: "breakout_setup", factorName: "Breakout Setup", whenCondition: "trending_weekly", whenConditionName: "Trending Weekly Market", weightModifier: 15, notes: "Breakouts thrive in trending markets" },
-  { factorKey: "breakout_setup", factorName: "Breakout Setup", whenCondition: "risk_on", whenConditionName: "Risk-On Environment", weightModifier: 10, notes: "Risk-on favors breakouts" },
+  { factorKey: "breakout", factorName: "Breakout Setup", whenCondition: "choppy_daily", whenConditionName: "Choppy Daily Market", weightModifier: -20, notes: "Breakouts fail more often in choppy conditions" },
+  { factorKey: "breakout", factorName: "Breakout Setup", whenCondition: "choppy_weekly", whenConditionName: "Choppy Weekly Market", weightModifier: -25, notes: "Weekly chop kills breakouts" },
+  { factorKey: "breakout", factorName: "Breakout Setup", whenCondition: "trending_weekly", whenConditionName: "Trending Weekly Market", weightModifier: 15, notes: "Breakouts thrive in trending markets" },
+  { factorKey: "breakout", factorName: "Breakout Setup", whenCondition: "risk_on", whenConditionName: "Risk-On Environment", weightModifier: 10, notes: "Risk-on favors breakouts" },
   
   // Reclaim modifiers
-  { factorKey: "reclaim_setup", factorName: "Reclaim Setup", whenCondition: "oversold_market", whenConditionName: "Oversold Market Conditions", weightModifier: 15, notes: "Reclaims work better in oversold bounces" },
-  { factorKey: "reclaim_setup", factorName: "Reclaim Setup", whenCondition: "risk_off", whenConditionName: "Risk-Off Environment", weightModifier: -15, notes: "Reclaims struggle in risk-off" },
+  { factorKey: "reclaim", factorName: "Reclaim Setup", whenCondition: "oversold_market", whenConditionName: "Oversold Market Conditions", weightModifier: 15, notes: "Reclaims work better in oversold bounces" },
+  { factorKey: "reclaim", factorName: "Reclaim Setup", whenCondition: "risk_off", whenConditionName: "Risk-Off Environment", weightModifier: -15, notes: "Reclaims struggle in risk-off" },
   
   // Cup & Handle modifiers
   { factorKey: "cup_and_handle", factorName: "Cup & Handle", whenCondition: "trending_weekly", whenConditionName: "Trending Weekly Market", weightModifier: 15, notes: "C&H is a trend continuation pattern" },
@@ -55,6 +61,14 @@ const BASELINE_MODIFIERS = [
   // Episodic Pivot modifiers
   { factorKey: "episodic_pivot", factorName: "Episodic Pivot", whenCondition: "risk_on", whenConditionName: "Risk-On Environment", weightModifier: 10, notes: "EPs work better with market support" },
   { factorKey: "episodic_pivot", factorName: "Episodic Pivot", whenCondition: "volatility_stress", whenConditionName: "High Volatility/VIX Stress", weightModifier: -10, notes: "EPs get chopped up in volatile markets" },
+  
+  // ORB modifiers
+  { factorKey: "orb", factorName: "Opening Range Breakout", whenCondition: "trending_daily", whenConditionName: "Trending Daily Market", weightModifier: 10, notes: "ORB works better on trend days" },
+  { factorKey: "orb", factorName: "Opening Range Breakout", whenCondition: "choppy_daily", whenConditionName: "Choppy Daily Market", weightModifier: -15, notes: "ORB chops in range-bound markets" },
+  
+  // Short setup modifiers
+  { factorKey: "short_lost_50", factorName: "SHORT: Lost 50 SMA", whenCondition: "risk_off", whenConditionName: "Risk-Off Environment", weightModifier: 15, notes: "Shorts work better in risk-off" },
+  { factorKey: "short_lost_200", factorName: "SHORT: Lost 200 SMA", whenCondition: "risk_off", whenConditionName: "Risk-Off Environment", weightModifier: 20, notes: "Major breakdown shorts thrive in bear markets" },
 ];
 
 // Default TNN Settings

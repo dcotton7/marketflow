@@ -107,6 +107,7 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   targetProfitLevel: text("target_profit_level"), // Level type: EXTENDED_8X_50DMA, PREV_HIGH, RR_5X, etc.
   positionSize: doublePrecision("position_size"),
   thesis: text("thesis"),
+  setupType: text("setup_type"), // Setup pattern: breakout, pullback, cup_and_handle, vcp, etc.
   status: text("status").notNull().default("considering"), // 'considering' | 'active' | 'closed'
   // Trade closure fields
   exitPrice: doublePrecision("exit_price"),
