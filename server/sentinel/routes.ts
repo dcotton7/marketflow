@@ -12,7 +12,7 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings } from "@shared/schema";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 
@@ -1988,6 +1988,41 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         return res.status(400).json({ error: "Failed to parse CSV", batch: result.batch });
       }
       
+      // Detect orphan sells - sells with no prior buy for the same ticker in the dataset
+      // Group trades by ticker and sort by date to detect orphans
+      const tradesByTicker: Record<string, typeof result.trades> = {};
+      for (const trade of result.trades) {
+        if (!tradesByTicker[trade.ticker]) {
+          tradesByTicker[trade.ticker] = [];
+        }
+        tradesByTicker[trade.ticker].push(trade);
+      }
+      
+      // Track which trades are orphan sells
+      const orphanSellTradeIds = new Set<string>();
+      
+      for (const ticker of Object.keys(tradesByTicker)) {
+        const tickerTrades = tradesByTicker[ticker].sort((a, b) => 
+          new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime()
+        );
+        
+        let runningPosition = 0; // Tracks cumulative shares
+        
+        for (const trade of tickerTrades) {
+          if (trade.direction === 'BUY') {
+            runningPosition += trade.quantity;
+          } else if (trade.direction === 'SELL') {
+            // If we're selling more than we've bought, this is an orphan sell
+            if (runningPosition < trade.quantity) {
+              orphanSellTradeIds.add(trade.tradeId);
+            }
+            runningPosition -= trade.quantity;
+          }
+        }
+      }
+      
+      const orphanSellsCount = orphanSellTradeIds.size;
+      
       // Use a transaction to ensure atomicity - either all trades are saved or none
       await db.transaction(async (tx) => {
         // Save batch first
@@ -1999,8 +2034,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           fileType: result.batch.fileType,
           totalTradesFound: result.batch.totalTradesFound,
           totalTradesImported: result.batch.totalTradesImported,
+          orphanSellsCount,
           skippedRows: result.batch.skippedRows,
-          status: result.batch.status,
+          status: orphanSellsCount > 0 ? "NEEDS_REVIEW" : result.batch.status,
         });
         
         // Batch insert all trades at once for better performance
@@ -2032,6 +2068,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             status: trade.status,
             isFill: trade.isFill,
             fillGroupKey: trade.fillGroupKey,
+            // Mark orphan sells
+            isOrphanSell: orphanSellTradeIds.has(trade.tradeId),
+            orphanStatus: orphanSellTradeIds.has(trade.tradeId) ? 'pending' : null,
             rawSource: trade.rawSource,
           }));
           
@@ -2043,6 +2082,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         success: true,
         batch: result.batch,
         tradesImported: result.trades.length,
+        orphanSellsCount,
+        needsReview: orphanSellsCount > 0,
       });
     } catch (error) {
       console.error("Import confirm error:", error);
@@ -2195,6 +2236,154 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Delete all imports error:", error);
       res.status(500).json({ error: "Failed to delete all imported trades" });
+    }
+  });
+
+  // === Account Settings Endpoints ===
+  
+  // Get all account settings for the user
+  app.get("/api/sentinel/account-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const settings = await db!.select().from(sentinelAccountSettings)
+        .where(eq(sentinelAccountSettings.userId, userId))
+        .orderBy(sentinelAccountSettings.brokerId, sentinelAccountSettings.accountName);
+      res.json(settings);
+    } catch (error) {
+      console.error("Get account settings error:", error);
+      res.status(500).json({ error: "Failed to fetch account settings" });
+    }
+  });
+
+  // Create new account settings
+  app.post("/api/sentinel/account-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { brokerId, accountName, accountNumber, allowsShortSales, notes } = req.body;
+      
+      const [setting] = await db!.insert(sentinelAccountSettings).values({
+        userId,
+        brokerId,
+        accountName,
+        accountNumber,
+        allowsShortSales: allowsShortSales ?? false,
+        notes,
+      }).returning();
+      
+      res.status(201).json(setting);
+    } catch (error) {
+      console.error("Create account settings error:", error);
+      res.status(500).json({ error: "Failed to create account settings" });
+    }
+  });
+
+  // Update account settings
+  app.patch("/api/sentinel/account-settings/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const settingsId = parseInt(req.params.id);
+      const updates = req.body;
+      
+      const [updated] = await db!.update(sentinelAccountSettings)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(and(
+          eq(sentinelAccountSettings.id, settingsId),
+          eq(sentinelAccountSettings.userId, userId)
+        ))
+        .returning();
+      
+      if (!updated) {
+        return res.status(404).json({ error: "Account settings not found" });
+      }
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Update account settings error:", error);
+      res.status(500).json({ error: "Failed to update account settings" });
+    }
+  });
+
+  // Delete account settings
+  app.delete("/api/sentinel/account-settings/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const settingsId = parseInt(req.params.id);
+      
+      const [deleted] = await db!.delete(sentinelAccountSettings)
+        .where(and(
+          eq(sentinelAccountSettings.id, settingsId),
+          eq(sentinelAccountSettings.userId, userId)
+        ))
+        .returning();
+      
+      if (!deleted) {
+        return res.status(404).json({ error: "Account settings not found" });
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete account settings error:", error);
+      res.status(500).json({ error: "Failed to delete account settings" });
+    }
+  });
+
+  // Get orphan sells for a batch (sells with no matching buy)
+  app.get("/api/sentinel/import/batches/:batchId/orphans", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { batchId } = req.params;
+      
+      const orphans = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId),
+          eq(sentinelImportedTrades.isOrphanSell, true)
+        ))
+        .orderBy(sentinelImportedTrades.tradeDate);
+      
+      res.json(orphans);
+    } catch (error) {
+      console.error("Get orphan sells error:", error);
+      res.status(500).json({ error: "Failed to fetch orphan sells" });
+    }
+  });
+
+  // Resolve an orphan sell (add cost basis or delete)
+  app.patch("/api/sentinel/import/trades/:tradeId/resolve-orphan", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { tradeId } = req.params;
+      const { action, costBasis, openDate } = req.body;
+      
+      if (action === 'delete') {
+        await db!.delete(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.tradeId, tradeId),
+            eq(sentinelImportedTrades.userId, userId)
+          ));
+        return res.json({ success: true, action: 'deleted' });
+      }
+      
+      if (action === 'resolve') {
+        const [updated] = await db!.update(sentinelImportedTrades)
+          .set({
+            orphanStatus: 'resolved',
+            manualCostBasis: costBasis,
+            manualOpenDate: openDate,
+          })
+          .where(and(
+            eq(sentinelImportedTrades.tradeId, tradeId),
+            eq(sentinelImportedTrades.userId, userId)
+          ))
+          .returning();
+        
+        return res.json({ success: true, action: 'resolved', trade: updated });
+      }
+      
+      res.status(400).json({ error: "Invalid action. Use 'delete' or 'resolve'" });
+    } catch (error) {
+      console.error("Resolve orphan error:", error);
+      res.status(500).json({ error: "Failed to resolve orphan sell" });
     }
   });
 

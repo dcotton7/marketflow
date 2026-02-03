@@ -443,16 +443,18 @@ export const sentinelImportBatches = pgTable("sentinel_import_batches", {
   batchId: text("batch_id").notNull().unique(), // UUID for batch
   userId: integer("user_id").notNull(),
   brokerId: text("broker_id").notNull(), // 'FIDELITY' | 'SCHWAB' | 'ROBINHOOD' etc.
+  accountSettingsId: integer("account_settings_id"), // Links to account settings for this import
   fileName: text("file_name").notNull(),
   fileType: text("file_type").notNull().default("CSV"), // 'CSV' | 'PDF' | 'XLSX'
   totalTradesFound: integer("total_trades_found").default(0),
   totalTradesImported: integer("total_trades_imported").default(0),
+  orphanSellsCount: integer("orphan_sells_count").default(0), // Sells with no matching buy
   skippedRows: jsonb("skipped_rows").$type<Array<{
     rowIndex: number;
     rawData: string;
     reason: string;
   }>>().default([]),
-  status: text("status").notNull().default("PROCESSING"), // 'PROCESSING' | 'COMPLETE' | 'FAILED'
+  status: text("status").notNull().default("PROCESSING"), // 'PROCESSING' | 'COMPLETE' | 'FAILED' | 'NEEDS_REVIEW'
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -498,6 +500,12 @@ export const sentinelImportedTrades = pgTable("sentinel_imported_trades", {
   isFill: boolean("is_fill").default(false),
   fillGroupKey: text("fill_group_key"), // Groups fills: "{date}_{ticker}_{direction}"
   
+  // Orphan sell tracking (sells with no matching buy in dataset)
+  isOrphanSell: boolean("is_orphan_sell").default(false),
+  orphanStatus: text("orphan_status"), // 'pending' | 'resolved' | 'deleted'
+  manualCostBasis: doublePrecision("manual_cost_basis"), // User-entered cost basis for orphan sells
+  manualOpenDate: text("manual_open_date"), // User-entered open date for orphan sells
+  
   // Audit trail
   rawSource: text("raw_source"), // Original CSV row
   importedAt: timestamp("imported_at").defaultNow(),
@@ -513,6 +521,24 @@ export type SentinelImportedTrade = typeof sentinelImportedTrades.$inferSelect;
 
 export type InsertSentinelImportBatch = z.infer<typeof insertSentinelImportBatchSchema>;
 export type InsertSentinelImportedTrade = z.infer<typeof insertSentinelImportedTradeSchema>;
+
+// Broker Account Settings - persisted settings per broker/account combination
+export const sentinelAccountSettings = pgTable("sentinel_account_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  brokerId: text("broker_id").notNull(), // 'FIDELITY' | 'SCHWAB' | 'ROBINHOOD' etc.
+  accountName: text("account_name").notNull(), // User-defined name like "Fidelity IRA", "401k Brokerage"
+  accountNumber: text("account_number"), // Optional masked account number for identification
+  allowsShortSales: boolean("allows_short_sales").notNull().default(false), // Default: no shorts (IRA/401k)
+  defaultDirection: text("default_direction").default("LONG"), // Default assumption for orphan sells
+  notes: text("notes"), // User notes about this account
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSentinelAccountSettingsSchema = createInsertSchema(sentinelAccountSettings).omit({ id: true, createdAt: true, updatedAt: true });
+export type SentinelAccountSettings = typeof sentinelAccountSettings.$inferSelect;
+export type InsertSentinelAccountSettings = z.infer<typeof insertSentinelAccountSettingsSchema>;
 
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {
