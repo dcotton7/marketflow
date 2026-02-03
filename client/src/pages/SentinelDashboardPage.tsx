@@ -989,8 +989,35 @@ function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (
 export default function SentinelDashboardPage() {
   const [, setLocation] = useLocation();
   const { user, logout } = useSentinelAuth();
-  const [activeTab, setActiveTab] = useState("active");
   const { toast } = useToast();
+  
+  // State preservation keys
+  const STORAGE_KEY_TAB = "sentinel_dashboard_active_tab";
+  const STORAGE_KEY_LABEL = "sentinel_dashboard_label_filter";
+  
+  // Initialize activeTab from localStorage
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_TAB);
+    return saved || "active";
+  });
+  
+  // Initialize selectedLabelFilter from localStorage
+  const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_LABEL);
+    if (saved === null || saved === "null") return null;
+    const parsed = parseInt(saved, 10);
+    return isNaN(parsed) ? null : parsed;
+  });
+  
+  // Persist activeTab to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_TAB, activeTab);
+  }, [activeTab]);
+  
+  // Persist selectedLabelFilter to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_LABEL, selectedLabelFilter === null ? "null" : String(selectedLabelFilter));
+  }, [selectedLabelFilter]);
 
   // Dialogs
   const [showAddWatchlist, setShowAddWatchlist] = useState(false);
@@ -1007,7 +1034,6 @@ export default function SentinelDashboardPage() {
   });
   const [strategyTagInput, setStrategyTagInput] = useState("");
   const [ruleFilter, setRuleFilter] = useState<string>("all");
-  const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(null);
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<number>>(new Set()); // For toggle mode - all ON by default
   
   // Trade action dialogs
