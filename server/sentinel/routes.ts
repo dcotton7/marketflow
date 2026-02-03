@@ -909,6 +909,103 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // AI Chat for rule creation assistance
+  app.post("/api/sentinel/rules/ai-chat", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { message, conversationHistory = [] } = req.body;
+      
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      let openai: OpenAI;
+      try {
+        openai = new OpenAI();
+      } catch (configError) {
+        console.error("OpenAI configuration error:", configError);
+        return res.status(500).json({ error: "AI service not configured" });
+      }
+
+      const systemPrompt = `You are an expert trading rules assistant. Your sole purpose is to help traders formalize their trading rules.
+
+IMPORTANT CONSTRAINTS:
+1. ONLY discuss topics related to trading, investing, market analysis, risk management, and trading rules
+2. If asked about non-trading topics, politely decline and redirect to trading rules
+3. Keep responses concise and actionable
+
+When helping create a rule, extract these details:
+- name: A clear, concise rule name
+- description: What the rule means and when to apply it
+- category: One of: auto_reject, entry, exit, profit_taking, stop_loss, ma_structure, base_quality, breakout, position_sizing, market_regime, risk, general
+- severity: One of: auto_reject, critical, warning, info
+- ruleType: One of: swing, intraday, long_term, all
+- directionTags: Array of "long" and/or "short"
+- strategyTags: Short tags (max 20 chars) to categorize the strategy, e.g., ["breakout", "momentum"]
+- formula: Optional mathematical formula
+
+When you have enough information to create a rule, include a JSON block like this:
+\`\`\`json
+{
+  "suggestedRule": {
+    "name": "Rule name",
+    "description": "Description",
+    "category": "entry",
+    "severity": "warning",
+    "ruleType": "swing",
+    "directionTags": ["long"],
+    "strategyTags": ["breakout"],
+    "formula": null
+  }
+}
+\`\`\`
+
+For strategy tags: Ensure they are concise (1-2 words), relevant to trading, and descriptive of the strategy type. Examples: breakout, momentum, mean-reversion, trend-following, gap-play.`;
+
+      const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+        ...conversationHistory.map((msg: { role: string; content: string }) => ({
+          role: msg.role as "user" | "assistant",
+          content: msg.content
+        })),
+        { role: "user", content: message }
+      ];
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-5.1",
+        messages,
+        temperature: 0.7,
+        max_tokens: 1000,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || "I couldn't generate a response.";
+      
+      // Extract suggested rule if present
+      let suggestedRule = null;
+      const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          if (parsed.suggestedRule) {
+            suggestedRule = parsed.suggestedRule;
+          }
+        } catch (parseError) {
+          // Ignore JSON parse errors
+        }
+      }
+
+      // Clean response text by removing JSON blocks
+      const cleanResponse = responseText.replace(/```json\s*[\s\S]*?\s*```/g, '').trim();
+
+      res.json({ 
+        response: cleanResponse || "I've prepared a rule for you. Click to review and customize it.",
+        suggestedRule 
+      });
+    } catch (error) {
+      console.error("AI chat error:", error);
+      res.status(500).json({ error: "Failed to get AI response" });
+    }
+  });
+
   // Closed trades history
   app.get("/api/sentinel/trades/closed", requireAuth, async (req: Request, res: Response) => {
     try {

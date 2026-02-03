@@ -16,7 +16,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { 
   BookOpen, Shield, Brain, Users, Plus, Edit3, RotateCcw, Check, X, 
   AlertTriangle, Info, AlertCircle, Ban, ChevronDown, ChevronUp,
-  Sparkles, TrendingUp, TrendingDown, ArrowUpDown, Loader2
+  Sparkles, TrendingUp, TrendingDown, ArrowUpDown, Loader2,
+  MessageSquare, Send, Trash2, Tag
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -36,7 +37,9 @@ interface TradingRule {
   formula?: string;
   ruleType?: string;
   directionTags?: string[];
+  strategyTags?: string[];
   isGlobal?: boolean;
+  isDeleted?: boolean;
 }
 
 interface RuleOverride {
@@ -95,14 +98,27 @@ const RULE_TYPES = [
   { value: "long_term", label: "Long Term" },
 ];
 
+interface AIChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export default function SentinelRulesPage() {
   const { user, logout } = useSentinelAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("system");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showAIChatDialog, setShowAIChatDialog] = useState(false);
+  const [showDeletedRules, setShowDeletedRules] = useState(false);
   const [selectedRule, setSelectedRule] = useState<TradingRule | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["auto_reject"]));
+  const [expandedMyRulesCategories, setExpandedMyRulesCategories] = useState<Set<string>>(new Set(["general"]));
+  
+  const [aiChatMessages, setAIChatMessages] = useState<AIChatMessage[]>([]);
+  const [aiChatInput, setAIChatInput] = useState("");
+  const [aiChatLoading, setAIChatLoading] = useState(false);
+  const [newStrategyTag, setNewStrategyTag] = useState("");
   
   const [newRule, setNewRule] = useState({
     name: "",
@@ -110,7 +126,8 @@ export default function SentinelRulesPage() {
     category: "general",
     severity: "warning",
     ruleType: "swing",
-    directionTags: ["long"],
+    directionTags: ["long"] as string[],
+    strategyTags: [] as string[],
     formula: "",
   });
 
@@ -144,8 +161,11 @@ export default function SentinelRulesPage() {
   const isCommunityTabLoading = globalRulesLoading;
 
   const starterRules = rules.filter(r => r.source === "starter");
-  const userRules = rules.filter(r => r.source === "user");
-  const aiRules = rules.filter(r => r.source === "ai_collective" || r.source === "ai_agentic");
+  const userRulesAll = rules.filter(r => r.source === "user");
+  const userRulesActive = userRulesAll.filter(r => !r.isDeleted);
+  const userRulesDeleted = userRulesAll.filter(r => r.isDeleted);
+  const userRules = showDeletedRules ? userRulesAll : userRulesActive;
+  const aiRules = rules.filter(r => (r.source === "ai_collective" || r.source === "ai_agentic") && !r.isDeleted);
 
   const createRuleMutation = useMutation({
     mutationFn: async (data: typeof newRule) => {
@@ -158,6 +178,7 @@ export default function SentinelRulesPage() {
           severity: data.severity,
           ruleType: data.ruleType,
           directionTags: data.directionTags,
+          strategyTags: data.strategyTags,
           formula: data.formula || null,
           source: "user",
         }),
@@ -166,7 +187,7 @@ export default function SentinelRulesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
       setShowCreateDialog(false);
-      setNewRule({ name: "", description: "", category: "general", severity: "warning", ruleType: "swing", directionTags: ["long"], formula: "" });
+      setNewRule({ name: "", description: "", category: "general", severity: "warning", ruleType: "swing", directionTags: ["long"], strategyTags: [], formula: "" });
       toast({ title: "Rule created successfully" });
     },
     onError: () => {
@@ -222,18 +243,35 @@ export default function SentinelRulesPage() {
     },
   });
 
-  const deleteRuleMutation = useMutation({
+  const softDeleteRuleMutation = useMutation({
     mutationFn: async (id: number) => {
       return apiRequest(`/api/sentinel/rules/${id}`, {
-        method: "DELETE",
+        method: "PATCH",
+        body: JSON.stringify({ isDeleted: true }),
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
-      toast({ title: "Rule deleted" });
+      toast({ title: "Rule archived" });
     },
     onError: () => {
-      toast({ title: "Failed to delete rule", variant: "destructive" });
+      toast({ title: "Failed to archive rule", variant: "destructive" });
+    },
+  });
+
+  const restoreRuleMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest(`/api/sentinel/rules/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isDeleted: false }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
+      toast({ title: "Rule restored" });
+    },
+    onError: () => {
+      toast({ title: "Failed to restore rule", variant: "destructive" });
     },
   });
 
@@ -301,6 +339,74 @@ export default function SentinelRulesPage() {
     setExpandedCategories(newExpanded);
   };
 
+  const toggleMyRulesCategory = (category: string) => {
+    const newExpanded = new Set(expandedMyRulesCategories);
+    if (newExpanded.has(category)) {
+      newExpanded.delete(category);
+    } else {
+      newExpanded.add(category);
+    }
+    setExpandedMyRulesCategories(newExpanded);
+  };
+
+  const handleAIChatSubmit = async () => {
+    if (!aiChatInput.trim() || aiChatLoading) return;
+    
+    const userMessage = aiChatInput.trim();
+    setAIChatMessages(prev => [...prev, { role: "user", content: userMessage }]);
+    setAIChatInput("");
+    setAIChatLoading(true);
+    
+    try {
+      const response = await fetch("/api/sentinel/rules/ai-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMessage, conversationHistory: aiChatMessages }),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to get AI response");
+      }
+      
+      const data = await response.json();
+      setAIChatMessages(prev => [...prev, { role: "assistant", content: data.response }]);
+      
+      if (data.suggestedRule) {
+        setNewRule({
+          name: data.suggestedRule.name || "",
+          description: data.suggestedRule.description || "",
+          category: data.suggestedRule.category || "general",
+          severity: data.suggestedRule.severity || "warning",
+          ruleType: data.suggestedRule.ruleType || "swing",
+          directionTags: data.suggestedRule.directionTags || ["long"],
+          strategyTags: data.suggestedRule.strategyTags || [],
+          formula: data.suggestedRule.formula || "",
+        });
+        setShowAIChatDialog(false);
+        setShowCreateDialog(true);
+        toast({ title: "AI has drafted a rule for you to review" });
+      }
+    } catch (error) {
+      toast({ title: "Failed to get AI response", variant: "destructive" });
+    } finally {
+      setAIChatLoading(false);
+    }
+  };
+
+  const addStrategyTag = () => {
+    const tag = newStrategyTag.trim().toLowerCase().replace(/\s+/g, "-");
+    if (tag && tag.length <= 20 && !newRule.strategyTags.includes(tag)) {
+      setNewRule({ ...newRule, strategyTags: [...newRule.strategyTags, tag] });
+      setNewStrategyTag("");
+    } else if (tag.length > 20) {
+      toast({ title: "Strategy tag must be 20 characters or less", variant: "destructive" });
+    }
+  };
+
+  const removeStrategyTag = (tag: string) => {
+    setNewRule({ ...newRule, strategyTags: newRule.strategyTags.filter(t => t !== tag) });
+  };
+
   const openEditOverride = (rule: TradingRule) => {
     setSelectedRule(rule);
     const override = getOverrideForRule(rule.ruleCode);
@@ -329,11 +435,12 @@ export default function SentinelRulesPage() {
     const override = getOverrideForRule(rule.ruleCode);
     const hasOverride = !!override;
     const displayRule = getRuleWithOverride(rule);
+    const isDeleted = rule.isDeleted;
     
     return (
       <div 
         key={rule.id}
-        className={`p-3 rounded-md border ${displayRule.isActive ? "bg-card" : "bg-muted/30 opacity-60"} ${hasOverride ? "border-primary/30" : "border-border"}`}
+        className={`p-3 rounded-md border ${isDeleted ? "bg-muted/20 opacity-50" : displayRule.isActive ? "bg-card" : "bg-muted/30 opacity-60"} ${hasOverride ? "border-primary/30" : "border-border"}`}
         data-testid={`rule-card-${rule.id}`}
       >
         <div className="flex items-start gap-3">
@@ -342,13 +449,16 @@ export default function SentinelRulesPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className={`font-medium ${!displayRule.isActive ? "line-through text-muted-foreground" : ""}`}>
+              <span className={`font-medium ${isDeleted || !displayRule.isActive ? "line-through text-muted-foreground" : ""}`}>
                 {displayRule.name}
               </span>
-              {hasOverride && (
+              {isDeleted && (
+                <Badge variant="secondary" className="text-xs bg-red-500/10 text-red-500">Archived</Badge>
+              )}
+              {hasOverride && !isDeleted && (
                 <Badge variant="outline" className="text-xs">Customized</Badge>
               )}
-              {!displayRule.isActive && (
+              {!displayRule.isActive && !isDeleted && (
                 <Badge variant="secondary" className="text-xs">Disabled</Badge>
               )}
             </div>
@@ -372,11 +482,32 @@ export default function SentinelRulesPage() {
                   {tag}
                 </Badge>
               ))}
+              {rule.strategyTags?.map(tag => (
+                <Badge key={tag} variant="secondary" className="text-xs">
+                  <Tag className="w-3 h-3 mr-1" />
+                  {tag}
+                </Badge>
+              ))}
             </div>
           </div>
           {showEdit && (
             <div className="flex items-center gap-1">
-              {isStarter && (
+              {isDeleted ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-7 w-7"
+                      onClick={() => restoreRuleMutation.mutate(rule.id)}
+                      data-testid={`button-restore-deleted-${rule.id}`}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Restore this rule</TooltipContent>
+                </Tooltip>
+              ) : isStarter ? (
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -409,23 +540,27 @@ export default function SentinelRulesPage() {
                     </Tooltip>
                   )}
                 </>
-              )}
-              {!isStarter && (
+              ) : (
                 <>
                   <Switch
                     checked={displayRule.isActive}
                     onCheckedChange={(checked) => updateRuleMutation.mutate({ id: rule.id, data: { isActive: checked } })}
                     data-testid={`switch-rule-active-${rule.id}`}
                   />
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => deleteRuleMutation.mutate(rule.id)}
-                    data-testid={`button-delete-rule-${rule.id}`}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => softDeleteRuleMutation.mutate(rule.id)}
+                        data-testid={`button-archive-rule-${rule.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Archive rule</TooltipContent>
+                  </Tooltip>
                 </>
               )}
             </div>
@@ -526,29 +661,81 @@ export default function SentinelRulesPage() {
 
           <TabsContent value="personal" className="space-y-4">
             <Card>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg">My Custom Rules</CardTitle>
-                  <CardDescription>
-                    {userRules.length} personal rules you've created
-                  </CardDescription>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <CardTitle className="text-lg">My Custom Rules</CardTitle>
+                    <CardDescription>
+                      {userRulesActive.length} active rules{userRulesDeleted.length > 0 && `, ${userRulesDeleted.length} archived`}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setAIChatMessages([{ role: "assistant", content: "I can help you create trading rules. Describe your trading strategy, patterns you trade, or rules you want to follow. I'll help you formalize them into clear, actionable rules.\n\nFor example:\n- \"I want a rule about waiting for volume confirmation on breakouts\"\n- \"Help me create rules for taking profits\"\n- \"I need a rule about not trading in the first 30 minutes\"" }]);
+                        setShowAIChatDialog(true);
+                      }} 
+                      data-testid="button-ai-chat"
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      Ask AI
+                    </Button>
+                    <Button onClick={() => setShowCreateDialog(true)} data-testid="button-create-rule">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Rule
+                    </Button>
+                  </div>
                 </div>
-                <Button onClick={() => setShowCreateDialog(true)} data-testid="button-create-rule">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Rule
-                </Button>
+                {userRulesDeleted.length > 0 && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Switch
+                      id="show-deleted"
+                      checked={showDeletedRules}
+                      onCheckedChange={setShowDeletedRules}
+                    />
+                    <Label htmlFor="show-deleted" className="text-sm text-muted-foreground cursor-pointer">
+                      Show archived rules ({userRulesDeleted.length})
+                    </Label>
+                  </div>
+                )}
               </CardHeader>
               <CardContent>
-                {userRules.length === 0 ? (
+                {userRulesActive.length === 0 && !showDeletedRules ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p className="font-medium">No custom rules yet</p>
-                    <p className="text-sm">Create rules based on your trading experience</p>
+                    <p className="text-sm">Create rules based on your trading experience or ask AI for help</p>
                   </div>
                 ) : (
-                  <ScrollArea className="h-[calc(100vh-380px)]">
-                    <div className="space-y-2">
-                      {userRules.map(rule => renderRuleCard(rule, true, false))}
+                  <ScrollArea className="h-[calc(100vh-420px)]">
+                    <div className="space-y-4">
+                      {RULE_CATEGORIES.map(cat => {
+                        const categoryRules = userRules.filter(r => r.category === cat.value);
+                        if (categoryRules.length === 0) return null;
+                        const isExpanded = expandedMyRulesCategories.has(cat.value);
+                        
+                        return (
+                          <div key={cat.value} className="border rounded-lg">
+                            <button
+                              className="w-full flex items-center justify-between p-3 hover-elevate"
+                              onClick={() => toggleMyRulesCategory(cat.value)}
+                              data-testid={`my-rules-category-toggle-${cat.value}`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{cat.label}</span>
+                                <Badge variant="secondary" className="text-xs">{categoryRules.length}</Badge>
+                              </div>
+                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </button>
+                            {isExpanded && (
+                              <div className="px-3 pb-3 space-y-2">
+                                {categoryRules.map(rule => renderRuleCard(rule, true, false))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </ScrollArea>
                 )}
@@ -801,12 +988,51 @@ export default function SentinelRulesPage() {
                 data-testid="input-rule-formula"
               />
             </div>
+            <div>
+              <Label>Strategy Tags</Label>
+              <p className="text-xs text-muted-foreground mb-2">Add tags to organize rules by strategy (max 20 characters each)</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newStrategyTag}
+                  onChange={(e) => setNewStrategyTag(e.target.value)}
+                  placeholder="e.g., breakout, momentum"
+                  className="flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addStrategyTag();
+                    }
+                  }}
+                  data-testid="input-strategy-tag"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addStrategyTag} data-testid="button-add-tag">
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
+              {newRule.strategyTags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {newRule.strategyTags.map(tag => (
+                    <Badge key={tag} variant="secondary" className="text-xs">
+                      <Tag className="w-3 h-3 mr-1" />
+                      {tag}
+                      <button
+                        type="button"
+                        className="ml-1 hover:text-destructive"
+                        onClick={() => removeStrategyTag(tag)}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
             <Button 
               onClick={() => createRuleMutation.mutate(newRule)}
-              disabled={!newRule.name.trim() || createRuleMutation.isPending}
+              disabled={!newRule.name.trim() || newRule.directionTags.length === 0 || createRuleMutation.isPending}
               data-testid="button-save-rule"
             >
               Create Rule
@@ -907,6 +1133,73 @@ export default function SentinelRulesPage() {
               Save Customization
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showAIChatDialog} onOpenChange={setShowAIChatDialog}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-primary" />
+              AI Rule Assistant
+            </DialogTitle>
+            <DialogDescription>
+              Describe your trading rules and I'll help formalize them
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="flex-1 min-h-[300px] max-h-[400px] p-4 border rounded-lg">
+            <div className="space-y-4">
+              {aiChatMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[85%] p-3 rounded-lg ${
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted"
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  </div>
+                </div>
+              ))}
+              {aiChatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-muted p-3 rounded-lg">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+          <div className="flex items-center gap-2 mt-4">
+            <Input
+              value={aiChatInput}
+              onChange={(e) => setAIChatInput(e.target.value)}
+              placeholder="Describe your trading rule..."
+              className="flex-1"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAIChatSubmit();
+                }
+              }}
+              disabled={aiChatLoading}
+              data-testid="input-ai-chat"
+            />
+            <Button 
+              onClick={handleAIChatSubmit} 
+              disabled={!aiChatInput.trim() || aiChatLoading}
+              data-testid="button-send-ai-chat"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            This assistant only discusses trading rules and strategies. Off-topic questions will be politely declined.
+          </p>
         </DialogContent>
       </Dialog>
     </div>

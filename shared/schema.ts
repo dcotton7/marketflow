@@ -189,7 +189,9 @@ export const sentinelRules = pgTable("sentinel_rules", {
   // New fields for Rules Management system
   ruleType: text("rule_type").default("swing"), // 'swing' | 'intraday' | 'long_term' | 'all'
   directionTags: text("direction_tags").array(), // ['long'] | ['short'] | ['long', 'short']
+  strategyTags: text("strategy_tags").array(), // User-defined strategy tags e.g., ['breakout', 'momentum']
   isGlobal: boolean("is_global").default(false), // If true, visible to all users (admin-committed)
+  isDeleted: boolean("is_deleted").default(false), // Soft delete - grayed out but restorable
   createdAt: timestamp("created_at").defaultNow(),
 });
 
