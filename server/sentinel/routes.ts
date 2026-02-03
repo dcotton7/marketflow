@@ -1081,7 +1081,7 @@ For strategy tags: Ensure they are concise (1-2 words), relevant to trading, and
       res.json({
         symbol,
         name: quote.shortName || quote.longName || symbol,
-        currentPrice: quote.regularMarketPrice,
+        price: quote.regularMarketPrice,
         previousClose: quote.regularMarketPreviousClose,
         sector,
         industry,
