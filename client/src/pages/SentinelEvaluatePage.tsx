@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp } from "lucide-react";
 import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface SectorTrend {
@@ -192,6 +192,7 @@ export default function SentinelEvaluatePage() {
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [isPreloaded, setIsPreloaded] = useState(false);
+  const [ruleChecklistExpanded, setRuleChecklistExpanded] = useState(false);
 
   // Fetch available labels
   const labelsQuery = useQuery<{id: number; name: string; color: string; isAdminOnly: boolean}[]>({
@@ -285,6 +286,7 @@ export default function SentinelEvaluatePage() {
     },
     onSuccess: (data) => {
       setResult(data);
+      setRuleChecklistExpanded(false);
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
     },
     onError: (error: any) => {
@@ -1327,34 +1329,93 @@ export default function SentinelEvaluatePage() {
                   </Card>
                 )}
 
-                {/* Rule Checklist Section */}
-                {result.evaluation.ruleChecklist && result.evaluation.ruleChecklist.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Info className="w-4 h-4" />
-                        Rule Checklist
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-1" data-testid="rule-checklist">
-                        {result.evaluation.ruleChecklist.map((item, i) => (
-                          <div key={i} className="flex items-center gap-2 text-sm py-1">
-                            {item.status === 'followed' ? (
-                              <CheckCircle2 className="w-4 h-4 text-green-500" />
-                            ) : item.status === 'violated' ? (
-                              <XCircle className="w-4 h-4 text-red-500" />
+                {/* Rule Checklist Section - Collapsible */}
+                {result.evaluation.ruleChecklist && result.evaluation.ruleChecklist.length > 0 && (() => {
+                  const checklist = result.evaluation.ruleChecklist;
+                  const followed = checklist.filter(r => r.status === 'followed').length;
+                  const violated = checklist.filter(r => r.status === 'violated').length;
+                  const applicable = followed + violated;
+                  const naCount = checklist.filter(r => r.status === 'na').length;
+                  const percentage = applicable > 0 ? Math.round((followed / applicable) * 100) : 100;
+                  
+                  // Quality label based on percentage
+                  let qualityLabel: string;
+                  let qualityColor: string;
+                  if (percentage >= 95) {
+                    qualityLabel = "Excellent";
+                    qualityColor = "text-green-400";
+                  } else if (percentage >= 85) {
+                    qualityLabel = "Solid";
+                    qualityColor = "text-green-500";
+                  } else if (percentage >= 70) {
+                    qualityLabel = "Acceptable";
+                    qualityColor = "text-yellow-500";
+                  } else {
+                    qualityLabel = "Needs Work";
+                    qualityColor = "text-red-400";
+                  }
+                  
+                  return (
+                    <Card>
+                      <CardHeader 
+                        className="pb-2 cursor-pointer hover-elevate" 
+                        onClick={() => setRuleChecklistExpanded(!ruleChecklistExpanded)}
+                        data-testid="rule-checklist-header"
+                      >
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Info className="w-4 h-4" />
+                            Rule Checklist
+                          </CardTitle>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-medium ${qualityColor}`} data-testid="text-quality-label">{qualityLabel}</span>
+                            {ruleChecklistExpanded ? (
+                              <ChevronUp className="w-4 h-4 text-muted-foreground" />
                             ) : (
-                              <Minus className="w-4 h-4 text-muted-foreground" />
+                              <ChevronDown className="w-4 h-4 text-muted-foreground" />
                             )}
-                            <span className={item.status === 'violated' ? 'text-red-400' : ''}>{item.rule}</span>
-                            {item.note && <span className="text-xs text-muted-foreground">- {item.note}</span>}
                           </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+                        </div>
+                        <CardDescription className="flex items-center gap-3 mt-1">
+                          <span className="flex items-center gap-1" data-testid="text-rules-summary">
+                            <CheckCircle2 className="w-3 h-3 text-green-500" />
+                            {followed} of {applicable} rules satisfied ({percentage}%)
+                          </span>
+                          {violated > 0 && (
+                            <span className="flex items-center gap-1 text-red-400" data-testid="text-rules-violated">
+                              <XCircle className="w-3 h-3" />
+                              {violated} violated
+                            </span>
+                          )}
+                          {naCount > 0 && (
+                            <span className="flex items-center gap-1 text-muted-foreground text-xs" data-testid="text-rules-na">
+                              ({naCount} N/A)
+                            </span>
+                          )}
+                        </CardDescription>
+                      </CardHeader>
+                      {ruleChecklistExpanded && (
+                        <CardContent>
+                          <div className="space-y-1" data-testid="rule-checklist">
+                            {checklist.map((item, i) => (
+                              <div key={i} className="flex items-center gap-2 text-sm py-1">
+                                {item.status === 'followed' ? (
+                                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                ) : item.status === 'violated' ? (
+                                  <XCircle className="w-4 h-4 text-red-500" />
+                                ) : (
+                                  <Minus className="w-4 h-4 text-muted-foreground" />
+                                )}
+                                <span className={item.status === 'violated' ? 'text-red-400' : ''}>{item.rule}</span>
+                                {item.note && <span className="text-xs text-muted-foreground">- {item.note}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      )}
+                    </Card>
+                  );
+                })()}
 
                 {/* Commitment Prompt - Action Buttons */}
                 <Card className="bg-muted/30">
