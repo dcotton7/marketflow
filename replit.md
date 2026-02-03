@@ -106,6 +106,15 @@ structural (formerly auto_reject), entry, exit, profit_taking, stop_loss, ma_str
 - **Label Filtering**: Clickable label filter grid on dashboard to filter trades by label
 - Labels are displayed on trade cards in the dashboard
 
+### Interactive AI Suggestions
+- **Auto-Suggest Endpoint**: POST /api/sentinel/suggest returns stop/target suggestions based on technical data
+- **Stop Suggestions**: LOD, previous day low, key SMAs (5/10/21/50/200), ATR-based levels, ranked by confidence
+- **Target Suggestions**: R:R ratios (1:1 to 3:1), key resistance levels, round numbers, ranked by relevance
+- **Position Size**: Suggests shares based on 1% account risk calculation
+- **Technical Context**: Displays price relative to MAs, ATR volatility, and current technical levels
+- **UI Integration**: Clickable suggestion badges auto-populate form fields when selected
+- **Auto-Trigger**: Suggestions fetch automatically when symbol + direction + entry price are filled
+
 ### Trader Neural Network (TNN)
 An admin-only three-layer adaptive factor weighting system where AI learns from trade outcomes to propose weight adjustments with admin approval controls.
 
