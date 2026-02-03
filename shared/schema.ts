@@ -33,6 +33,13 @@ export const watchlistItems = pgTable("watchlist_items", {
   addedAt: timestamp("added_at").defaultNow(),
 });
 
+// Session table for connect-pg-simple (express-session)
+export const session = pgTable("session", {
+  sid: text("sid").primaryKey(),
+  sess: jsonb("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+});
+
 // === SCHEMAS ===
 
 export const insertScanSchema = createInsertSchema(savedScans).omit({ id: true, createdAt: true });
