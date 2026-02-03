@@ -117,6 +117,8 @@ export default function SentinelAdminPage() {
     weightModifier: 0,
     notes: "",
   });
+  // Local state for slider dragging - tracks value while dragging before committing
+  const [draggingSliders, setDraggingSliders] = useState<Record<string, number>>({});
 
   const { data: userInfo, isLoading: userLoading } = useQuery<{ id: number; username: string; isAdmin: boolean }>({
     queryKey: ["/api/sentinel/me"],
@@ -458,16 +460,24 @@ export default function SentinelAdminPage() {
                                       <Label>Base Weight (0-100)</Label>
                                       <div className="flex items-center gap-3">
                                         <Slider 
-                                          value={[factor.baseWeight]} 
+                                          value={[draggingSliders[factor.factorKey] ?? factor.baseWeight]} 
                                           max={100} 
                                           step={5}
                                           className="flex-1"
+                                          onValueChange={(value) => {
+                                            setDraggingSliders(prev => ({ ...prev, [factor.factorKey]: value[0] }));
+                                          }}
                                           onValueCommit={(value) => {
                                             updateFactorMutation.mutate({ factorKey: factor.factorKey, updates: { baseWeight: value[0] } });
+                                            setDraggingSliders(prev => {
+                                              const next = { ...prev };
+                                              delete next[factor.factorKey];
+                                              return next;
+                                            });
                                           }}
                                           data-testid={`slider-base-weight-${factor.factorKey}`}
                                         />
-                                        <span className="w-10 text-center font-bold">{factor.baseWeight}</span>
+                                        <span className="w-10 text-center font-bold">{draggingSliders[factor.factorKey] ?? factor.baseWeight}</span>
                                       </div>
                                     </div>
                                     
@@ -615,15 +625,23 @@ export default function SentinelAdminPage() {
                                     <Label>Base Weight (0-100)</Label>
                                     <div className="flex items-center gap-3">
                                       <Slider 
-                                        value={[factor.baseWeight]} 
+                                        value={[draggingSliders[factor.factorKey] ?? factor.baseWeight]} 
                                         max={100} 
                                         step={5}
                                         className="flex-1"
+                                        onValueChange={(value) => {
+                                          setDraggingSliders(prev => ({ ...prev, [factor.factorKey]: value[0] }));
+                                        }}
                                         onValueCommit={(value) => {
                                           updateFactorMutation.mutate({ factorKey: factor.factorKey, updates: { baseWeight: value[0] } });
+                                          setDraggingSliders(prev => {
+                                            const next = { ...prev };
+                                            delete next[factor.factorKey];
+                                            return next;
+                                          });
                                         }}
                                       />
-                                      <span className="w-10 text-center font-bold">{factor.baseWeight}</span>
+                                      <span className="w-10 text-center font-bold">{draggingSliders[factor.factorKey] ?? factor.baseWeight}</span>
                                     </div>
                                   </div>
                                   

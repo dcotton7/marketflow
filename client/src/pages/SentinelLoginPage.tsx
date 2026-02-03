@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,15 @@ import sentinelLogo from "@/assets/images/sentinel-logo.png";
 
 export default function SentinelLoginPage() {
   const [, setLocation] = useLocation();
-  const { login, register } = useSentinelAuth();
+  const { login, register, user, isLoading: authLoading } = useSentinelAuth();
   const { toast } = useToast();
+  
+  // Redirect if already logged in - handles the case where login succeeds but navigation didn't work
+  useEffect(() => {
+    if (!authLoading && user) {
+      setLocation("/sentinel");
+    }
+  }, [user, authLoading, setLocation]);
 
   const [isRegistering, setIsRegistering] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
