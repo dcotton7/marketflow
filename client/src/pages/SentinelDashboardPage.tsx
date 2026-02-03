@@ -1162,6 +1162,47 @@ export default function SentinelDashboardPage() {
   const { data: untaggedTrades = [] } = useQuery<TradeWithEvaluation[]>({
     queryKey: ["/api/sentinel/trades/untagged"],
   });
+  
+  // TNN performance data
+  const tnnPerformance = useQuery<{
+    totalTagged: number;
+    performance: Array<{
+      setupType: string;
+      totalTrades: number;
+      wins: number;
+      losses: number;
+      winRate: number;
+      avgHoldDays: number;
+      avgProfitPercent: number;
+      recentTrend: "improving" | "declining" | "stable";
+    }>;
+    bestSetup: string | null;
+    worstSetup: string | null;
+  }>({
+    queryKey: ["/api/sentinel/tnn/learning/performance"],
+  });
+  
+  // Generate TNN suggestions mutation (admin only)
+  const generateTnnSuggestionsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/sentinel/tnn/learning/generate-suggestions");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "TNN Suggestions Generated",
+        description: data.message || `Generated ${data.count} new suggestions`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/tnn/suggestions"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to generate TNN suggestions",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Filter trades by label and source
   const filterTrades = (trades: TradeWithEvaluation[] | undefined) => {
@@ -2310,6 +2351,116 @@ export default function SentinelDashboardPage() {
                       </div>
                     ))}
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* TNN Learning Insights */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="w-5 h-5 text-amber-500" />
+                  Trader Neural Network (TNN) Insights
+                </CardTitle>
+                <CardDescription>
+                  Performance metrics by setup type based on your tagged trades. The TNN learns from your trading history to personalize scoring.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {tnnPerformance.isLoading ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full mx-auto mb-2" />
+                    Loading performance data...
+                  </div>
+                ) : tnnPerformance.data?.totalTagged === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <TrendingUp className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                    <p className="font-medium">No tagged trades yet</p>
+                    <p className="text-sm">Tag your closed trades above to see performance insights.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Total tagged trades analyzed:</span>
+                      <span className="font-medium">{tnnPerformance.data?.totalTagged || 0}</span>
+                    </div>
+                    
+                    {tnnPerformance.data?.bestSetup && (
+                      <div className="flex items-center justify-between p-3 border rounded-lg bg-green-500/5 border-green-500/20">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          <span className="text-sm">Best performing setup:</span>
+                        </div>
+                        <Badge variant="outline" className="border-green-500/50 text-green-500">
+                          {tnnPerformance.data.bestSetup.replace(/_/g, ' ')}
+                        </Badge>
+                      </div>
+                    )}
+                    
+                    {tnnPerformance.data?.worstSetup && (
+                      <div className="flex items-center justify-between p-3 border rounded-lg bg-red-500/5 border-red-500/20">
+                        <div className="flex items-center gap-2">
+                          <TrendingDown className="w-4 h-4 text-red-500" />
+                          <span className="text-sm">Needs improvement:</span>
+                        </div>
+                        <Badge variant="outline" className="border-red-500/50 text-red-500">
+                          {tnnPerformance.data.worstSetup.replace(/_/g, ' ')}
+                        </Badge>
+                      </div>
+                    )}
+                    
+                    {/* Performance breakdown by setup type */}
+                    {tnnPerformance.data?.performance && tnnPerformance.data.performance.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Performance by Setup Type</p>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {tnnPerformance.data.performance.map((perf) => (
+                            <div key={perf.setupType} className="flex items-center justify-between p-2 border rounded text-sm">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{perf.setupType.replace(/_/g, ' ')}</span>
+                                <span className="text-muted-foreground">({perf.totalTrades} trades)</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className={perf.winRate >= 0.5 ? "text-green-500" : "text-red-500"}>
+                                  {(perf.winRate * 100).toFixed(0)}% win
+                                </span>
+                                <Badge 
+                                  variant="outline" 
+                                  className={
+                                    perf.recentTrend === "improving" ? "border-green-500/50 text-green-500" :
+                                    perf.recentTrend === "declining" ? "border-red-500/50 text-red-500" :
+                                    "border-muted-foreground/50"
+                                  }
+                                >
+                                  {perf.recentTrend === "improving" ? "Improving" : 
+                                   perf.recentTrend === "declining" ? "Declining" : "Stable"}
+                                </Badge>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Admin: Generate TNN suggestions */}
+                    {currentUser?.isAdmin && (
+                      <div className="pt-4 border-t">
+                        <Button 
+                          onClick={() => generateTnnSuggestionsMutation.mutate()}
+                          disabled={generateTnnSuggestionsMutation.isPending}
+                          variant="outline"
+                          className="w-full"
+                          data-testid="button-generate-tnn-suggestions"
+                        >
+                          <Brain className="w-4 h-4 mr-2" />
+                          {generateTnnSuggestionsMutation.isPending ? "Generating..." : "Generate TNN Weight Suggestions"}
+                        </Button>
+                        <p className="text-xs text-muted-foreground mt-2 text-center">
+                          Admin only: Analyzes all tagged trades to suggest TNN weight adjustments
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>

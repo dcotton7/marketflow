@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { tnnFactors, tnnModifiers, tnnSuggestions, tnnHistory, tnnSettings } from "@shared/schema";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { tnnFactors, tnnModifiers, tnnSuggestions, tnnHistory, tnnSettings, sentinelTrades } from "@shared/schema";
+import { eq, and, desc, asc, sql } from "drizzle-orm";
 
 // === SEED DATA ===
 
@@ -429,5 +429,274 @@ export async function getWeightsForEvaluation(setupType: string, activeCondition
       modifier: m.weightModifier,
     })),
     activeConditions,
+  };
+}
+
+// === TNN LEARNING FROM TAGGED TRADES ===
+
+interface SetupPerformance {
+  setupType: string;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  avgHoldDays: number;
+  avgProfitPercent: number;
+  recentTrend: "improving" | "declining" | "stable";
+}
+
+interface TnnLearningResult {
+  analyzed: number;
+  suggestions: Array<{
+    factorKey: string;
+    factorName: string;
+    currentWeight: number;
+    proposedWeight: number;
+    reason: string;
+    confidence: number;
+    sampleSize: number;
+  }>;
+  performance: SetupPerformance[];
+}
+
+export async function analyzeTaggedTrades(userId?: number): Promise<TnnLearningResult> {
+  // Get tagged trades with outcomes
+  let query = db.select().from(sentinelTrades)
+    .where(and(
+      eq(sentinelTrades.isTagged, true),
+      sql`${sentinelTrades.outcome} IS NOT NULL`,
+      sql`${sentinelTrades.setupType} IS NOT NULL`
+    ));
+  
+  if (userId) {
+    query = db.select().from(sentinelTrades)
+      .where(and(
+        eq(sentinelTrades.isTagged, true),
+        eq(sentinelTrades.userId, userId),
+        sql`${sentinelTrades.outcome} IS NOT NULL`,
+        sql`${sentinelTrades.setupType} IS NOT NULL`
+      )) as any;
+  }
+  
+  const taggedTrades = await query;
+  
+  // Group by setup type
+  const setupStats: Map<string, {
+    wins: number;
+    losses: number;
+    totalPnl: number;
+    holdDaysSum: number;
+    recentWins: number;
+    recentLosses: number;
+  }> = new Map();
+  
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  
+  for (const trade of taggedTrades) {
+    const setupType = trade.setupType || "other";
+    if (!setupStats.has(setupType)) {
+      setupStats.set(setupType, { 
+        wins: 0, losses: 0, totalPnl: 0, holdDaysSum: 0, 
+        recentWins: 0, recentLosses: 0 
+      });
+    }
+    
+    const stats = setupStats.get(setupType)!;
+    const isWin = trade.outcome === "win" || trade.outcome === "target_hit";
+    const isLoss = trade.outcome === "loss" || trade.outcome === "stopped_out";
+    
+    if (isWin) stats.wins++;
+    if (isLoss) stats.losses++;
+    
+    // Calculate P&L percent from lot entries
+    const lotEntries = trade.lotEntries as Array<{
+      dateTime: string;
+      qty: string;
+      buySell: "buy" | "sell";
+      price: string;
+    }> || [];
+    
+    let totalCost = 0, totalRevenue = 0;
+    for (const entry of lotEntries) {
+      const qty = parseFloat(entry.qty) || 0;
+      const price = parseFloat(entry.price) || 0;
+      if (entry.buySell === "buy") totalCost += qty * price;
+      else totalRevenue += qty * price;
+    }
+    if (totalCost > 0) {
+      stats.totalPnl += ((totalRevenue - totalCost) / totalCost) * 100;
+    }
+    
+    if (trade.holdDays) stats.holdDaysSum += trade.holdDays;
+    
+    // Track recent trend
+    const tradeDate = trade.taggedAt || trade.updatedAt || trade.createdAt;
+    if (tradeDate && new Date(tradeDate) >= thirtyDaysAgo) {
+      if (isWin) stats.recentWins++;
+      if (isLoss) stats.recentLosses++;
+    }
+  }
+  
+  // Calculate performance metrics per setup type
+  const performance: SetupPerformance[] = [];
+  const suggestions: TnnLearningResult["suggestions"] = [];
+  
+  // Get current TNN factors for comparison
+  const allFactors = await getFactors("setup_type");
+  const factorMap = new Map(allFactors.map(f => [f.factorKey, f]));
+  
+  // Get min sample size from settings
+  const minSampleSizeSetting = await getSetting("min_sample_size");
+  const minSampleSize = parseInt(minSampleSizeSetting || "10");
+  
+  for (const [setupType, stats] of Array.from(setupStats.entries())) {
+    const totalTrades = stats.wins + stats.losses;
+    if (totalTrades === 0) continue;
+    
+    const winRate = stats.wins / totalTrades;
+    const avgHoldDays = stats.holdDaysSum / totalTrades;
+    const avgProfitPercent = stats.totalPnl / totalTrades;
+    
+    // Determine recent trend
+    const recentTotal = stats.recentWins + stats.recentLosses;
+    let recentTrend: "improving" | "declining" | "stable" = "stable";
+    if (recentTotal >= 3) {
+      const recentWinRate = stats.recentWins / recentTotal;
+      if (recentWinRate > winRate + 0.1) recentTrend = "improving";
+      else if (recentWinRate < winRate - 0.1) recentTrend = "declining";
+    }
+    
+    performance.push({
+      setupType,
+      totalTrades,
+      wins: stats.wins,
+      losses: stats.losses,
+      winRate,
+      avgHoldDays,
+      avgProfitPercent,
+      recentTrend
+    });
+    
+    // Generate suggestions if enough sample size
+    if (totalTrades >= minSampleSize) {
+      const factor = factorMap.get(setupType);
+      if (factor) {
+        const currentWeight = factor.aiAdjustedWeight ?? factor.baseWeight;
+        
+        // Calculate suggested weight based on win rate
+        // Win rate of 50% = baseline weight, adjust +/- based on performance
+        const winRateDeviation = (winRate - 0.5) * 100;
+        let proposedWeight = currentWeight + Math.round(winRateDeviation / 2);
+        
+        // Clamp to reasonable bounds
+        proposedWeight = Math.max(30, Math.min(95, proposedWeight));
+        
+        // Only suggest if meaningful change
+        const weightDiff = Math.abs(proposedWeight - currentWeight);
+        if (weightDiff >= 5) {
+          const confidence = Math.min(95, 50 + totalTrades * 2 + (winRateDeviation > 0 ? 10 : 0));
+          
+          suggestions.push({
+            factorKey: setupType,
+            factorName: factor.factorName,
+            currentWeight,
+            proposedWeight,
+            reason: `Based on ${totalTrades} tagged trades: ${(winRate * 100).toFixed(1)}% win rate, avg ${avgProfitPercent.toFixed(1)}% P&L. Trend: ${recentTrend}.`,
+            confidence,
+            sampleSize: totalTrades
+          });
+        }
+      }
+    }
+  }
+  
+  return {
+    analyzed: taggedTrades.length,
+    suggestions,
+    performance
+  };
+}
+
+// Create TNN suggestions from learning analysis
+export async function createLearningBasedSuggestions(userId: number, isAdmin: boolean = false): Promise<number> {
+  const analysis = await analyzeTaggedTrades(isAdmin ? undefined : userId);
+  let created = 0;
+  
+  // Get confidence threshold from settings
+  const confidenceThresholdSetting = await getSetting("confidence_threshold");
+  const confidenceThreshold = parseInt(confidenceThresholdSetting || "75");
+  
+  for (const suggestion of analysis.suggestions) {
+    if (suggestion.confidence < confidenceThreshold) continue;
+    
+    // Check for existing pending suggestion for this factor
+    const existing = await db.select().from(tnnSuggestions)
+      .where(and(
+        eq(tnnSuggestions.factorKey, suggestion.factorKey),
+        eq(tnnSuggestions.status, "pending")
+      )).limit(1);
+    
+    if (existing.length > 0) continue;
+    
+    await db.insert(tnnSuggestions).values({
+      suggestionType: "factor_weight",
+      factorKey: suggestion.factorKey,
+      factorName: suggestion.factorName,
+      currentValue: suggestion.currentWeight,
+      proposedValue: suggestion.proposedWeight,
+      reasoning: suggestion.reason,
+      confidenceScore: suggestion.confidence,
+      supportingData: {
+        sampleSize: suggestion.sampleSize,
+        winRateWithChange: 0,
+        winRateWithout: 0,
+        avgPnLImpact: 0,
+        tradeIds: []
+      },
+      status: "pending"
+    });
+    
+    created++;
+  }
+  
+  // Update last analysis timestamp
+  await updateSetting("last_ai_analysis", new Date().toISOString(), "system");
+  
+  return created;
+}
+
+// Get user-specific performance summary
+export async function getUserTradePerformance(userId: number): Promise<{
+  totalTagged: number;
+  performance: SetupPerformance[];
+  bestSetup: string | null;
+  worstSetup: string | null;
+}> {
+  const analysis = await analyzeTaggedTrades(userId);
+  
+  let bestSetup: string | null = null;
+  let worstSetup: string | null = null;
+  let bestWinRate = 0;
+  let worstWinRate = 1;
+  
+  for (const perf of analysis.performance) {
+    if (perf.totalTrades >= 5) {
+      if (perf.winRate > bestWinRate) {
+        bestWinRate = perf.winRate;
+        bestSetup = perf.setupType;
+      }
+      if (perf.winRate < worstWinRate) {
+        worstWinRate = perf.winRate;
+        worstSetup = perf.setupType;
+      }
+    }
+  }
+  
+  return {
+    totalTagged: analysis.analyzed,
+    performance: analysis.performance,
+    bestSetup,
+    worstSetup
   };
 }

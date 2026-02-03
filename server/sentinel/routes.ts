@@ -2400,6 +2400,53 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  // === TNN LEARNING ROUTES ===
+
+  // Analyze tagged trades and get performance metrics
+  app.get("/api/sentinel/tnn/learning/analyze", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      
+      // Admin can analyze all trades, regular users only see their own
+      const analysis = await tnn.analyzeTaggedTrades(user?.isAdmin ? undefined : userId);
+      res.json(analysis);
+    } catch (error) {
+      console.error("TNN learning analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze trades for TNN learning" });
+    }
+  });
+
+  // Get user-specific performance summary
+  app.get("/api/sentinel/tnn/learning/performance", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const performance = await tnn.getUserTradePerformance(userId);
+      res.json(performance);
+    } catch (error) {
+      console.error("TNN performance error:", error);
+      res.status(500).json({ error: "Failed to get trade performance" });
+    }
+  });
+
+  // Generate TNN suggestions from tagged trades (admin only for system-wide)
+  app.post("/api/sentinel/tnn/learning/generate-suggestions", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required to generate TNN suggestions" });
+      }
+      
+      const count = await tnn.createLearningBasedSuggestions(userId, true);
+      res.json({ message: `Generated ${count} new TNN suggestions based on tagged trades`, count });
+    } catch (error) {
+      console.error("TNN suggestion generation error:", error);
+      res.status(500).json({ error: "Failed to generate TNN suggestions" });
+    }
+  });
+
   // === TRADE IMPORT ROUTES ===
 
   // Preview CSV import (parse without saving)
