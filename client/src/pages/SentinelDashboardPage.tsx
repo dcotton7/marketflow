@@ -480,16 +480,20 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitC
       <Badge className={`${statusColor} text-xs`} data-testid={`badge-status-${symbol}`}>
         {statusLabel}
       </Badge>
-      {/* P&L Metrics */}
-      {profitClosed !== undefined && (
-        <span className={`text-xs ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
-          Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
-        </span>
-      )}
-      {openPnL !== undefined && (
-        <span className={`text-xs ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
-          Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
-        </span>
+      {/* P&L Metrics - stacked vertically, left justified */}
+      {(profitClosed !== undefined || openPnL !== undefined) && (
+        <div className="flex flex-col items-start">
+          {profitClosed !== undefined && (
+            <span className={`text-xs ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
+              Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
+            </span>
+          )}
+          {openPnL !== undefined && (
+            <span className={`text-xs ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
+              Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
+            </span>
+          )}
+        </div>
       )}
       {breakEven && breakEven.shares > 0 && (
         <span 
@@ -1011,7 +1015,22 @@ export default function SentinelDashboardPage() {
   const [showCloseTrade, setShowCloseTrade] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showCancelTrade, setShowCancelTrade] = useState(false);
+  const [showAddTrade, setShowAddTrade] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState<TradeWithEvaluation | null>(null);
+  
+  // Add Trade form
+  const [addTradeForm, setAddTradeForm] = useState({
+    symbol: "",
+    direction: "long" as "long" | "short",
+    entryPrice: "",
+    positionSize: "",
+    stopPrice: "",
+    targetPrice: "",
+    thesis: "",
+    tradeDate: new Date().toISOString().split("T")[0],
+    tradeTime: "09:30",
+    status: "active" as "considering" | "active",
+  });
   
   // Lot tracking table - each row is a lot entry
   const [lotEntries, setLotEntries] = useState<LotEntry[]>([]);
@@ -1227,6 +1246,62 @@ export default function SentinelDashboardPage() {
       toast({ title: "Trade updated" });
     },
   });
+
+  const createTradeMutation = useMutation({
+    mutationFn: async (data: {
+      symbol: string;
+      direction: "long" | "short";
+      entryPrice: number;
+      positionSize?: number;
+      stopPrice?: number;
+      targetPrice?: number;
+      thesis?: string;
+      tradeDate?: string;
+      tradeTime?: string;
+      status: "considering" | "active";
+    }) => {
+      return apiRequest("POST", "/api/sentinel/trades", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      setShowAddTrade(false);
+      setAddTradeForm({
+        symbol: "",
+        direction: "long",
+        entryPrice: "",
+        positionSize: "",
+        stopPrice: "",
+        targetPrice: "",
+        thesis: "",
+        tradeDate: new Date().toISOString().split("T")[0],
+        tradeTime: "09:30",
+        status: "active",
+      });
+      toast({ title: "Trade added successfully" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to add trade", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleAddTrade = () => {
+    if (!addTradeForm.symbol || !addTradeForm.entryPrice) {
+      toast({ title: "Symbol and entry price are required", variant: "destructive" });
+      return;
+    }
+    createTradeMutation.mutate({
+      symbol: addTradeForm.symbol.toUpperCase(),
+      direction: addTradeForm.direction,
+      entryPrice: parseFloat(addTradeForm.entryPrice),
+      positionSize: addTradeForm.positionSize ? parseFloat(addTradeForm.positionSize) : undefined,
+      stopPrice: addTradeForm.stopPrice ? parseFloat(addTradeForm.stopPrice) : undefined,
+      targetPrice: addTradeForm.targetPrice ? parseFloat(addTradeForm.targetPrice) : undefined,
+      thesis: addTradeForm.thesis || undefined,
+      tradeDate: addTradeForm.tradeDate,
+      tradeTime: addTradeForm.tradeTime,
+      status: addTradeForm.status,
+    });
+  };
 
   // Lot entry helpers
   const addLotEntry = () => {
@@ -1491,10 +1566,24 @@ export default function SentinelDashboardPage() {
       <main className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-semibold">Trading Cards</h2>
-          <Button onClick={() => setLocation("/sentinel/evaluate")} data-testid="button-new-evaluation">
-            <Plus className="w-4 h-4 mr-2" />
-            New Evaluation
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button data-testid="button-add-trade-menu">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Trade
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setLocation("/sentinel/evaluate")} data-testid="menu-new-evaluation">
+                <Brain className="w-4 h-4 mr-2" />
+                Ask Ivy (Evaluation)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowAddTrade(true)} data-testid="menu-add-trade-direct">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Trade Directly
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
@@ -1927,6 +2016,155 @@ export default function SentinelDashboardPage() {
             <Button variant="outline" onClick={() => setShowAddWatchlist(false)}>Cancel</Button>
             <Button onClick={handleAddWatchlist} disabled={!watchlistForm.symbol || addWatchlistMutation.isPending} data-testid="button-confirm-add-watchlist">
               {addWatchlistMutation.isPending ? "Adding..." : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Trade Directly Dialog */}
+      <Dialog open={showAddTrade} onOpenChange={setShowAddTrade}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Trade</DialogTitle>
+            <DialogDescription>Add a trade directly without IVY evaluation</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-symbol">Symbol <span className="text-red-500">*</span></Label>
+                <Input
+                  id="add-trade-symbol"
+                  placeholder="AAPL"
+                  value={addTradeForm.symbol}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, symbol: e.target.value.toUpperCase() })}
+                  data-testid="input-add-trade-symbol"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Direction</Label>
+                <Select value={addTradeForm.direction} onValueChange={(v: "long" | "short") => setAddTradeForm({ ...addTradeForm, direction: v })}>
+                  <SelectTrigger data-testid="select-add-trade-direction">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="long">
+                      <span className="flex items-center gap-1">
+                        <TrendingUp className="w-4 h-4 text-green-500" /> Long
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="short">
+                      <span className="flex items-center gap-1">
+                        <TrendingDown className="w-4 h-4 text-red-500" /> Short
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-entry">Entry Price <span className="text-red-500">*</span></Label>
+                <Input
+                  id="add-trade-entry"
+                  type="number"
+                  step="0.01"
+                  placeholder="150.00"
+                  value={addTradeForm.entryPrice}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, entryPrice: e.target.value })}
+                  data-testid="input-add-trade-entry"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-size">Position Size (shares)</Label>
+                <Input
+                  id="add-trade-size"
+                  type="number"
+                  placeholder="100"
+                  value={addTradeForm.positionSize}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, positionSize: e.target.value })}
+                  data-testid="input-add-trade-size"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-stop">Stop Price</Label>
+                <Input
+                  id="add-trade-stop"
+                  type="number"
+                  step="0.01"
+                  placeholder="145.00"
+                  value={addTradeForm.stopPrice}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, stopPrice: e.target.value })}
+                  data-testid="input-add-trade-stop"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-target">Target Price</Label>
+                <Input
+                  id="add-trade-target"
+                  type="number"
+                  step="0.01"
+                  placeholder="165.00"
+                  value={addTradeForm.targetPrice}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, targetPrice: e.target.value })}
+                  data-testid="input-add-trade-target"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-date">Trade Date</Label>
+                <Input
+                  id="add-trade-date"
+                  type="date"
+                  value={addTradeForm.tradeDate}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, tradeDate: e.target.value })}
+                  data-testid="input-add-trade-date"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-trade-time">Trade Time</Label>
+                <Input
+                  id="add-trade-time"
+                  type="time"
+                  value={addTradeForm.tradeTime}
+                  onChange={(e) => setAddTradeForm({ ...addTradeForm, tradeTime: e.target.value })}
+                  data-testid="input-add-trade-time"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={addTradeForm.status} onValueChange={(v: "considering" | "active") => setAddTradeForm({ ...addTradeForm, status: v })}>
+                <SelectTrigger data-testid="select-add-trade-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active (Trade Committed)</SelectItem>
+                  <SelectItem value="considering">Considering (Planning)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-trade-thesis">Thesis / Notes</Label>
+              <Textarea
+                id="add-trade-thesis"
+                placeholder="Why are you taking this trade?"
+                value={addTradeForm.thesis}
+                onChange={(e) => setAddTradeForm({ ...addTradeForm, thesis: e.target.value })}
+                data-testid="input-add-trade-thesis"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddTrade(false)}>Cancel</Button>
+            <Button 
+              onClick={handleAddTrade} 
+              disabled={!addTradeForm.symbol || !addTradeForm.entryPrice || createTradeMutation.isPending} 
+              data-testid="button-confirm-add-trade"
+            >
+              {createTradeMutation.isPending ? "Adding..." : "Add Trade"}
             </Button>
           </DialogFooter>
         </DialogContent>

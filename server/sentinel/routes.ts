@@ -348,6 +348,77 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // Create trade directly (without IVY evaluation)
+  const createTradeSchema = z.object({
+    symbol: z.string().min(1),
+    direction: z.enum(["long", "short"]),
+    entryPrice: z.number().positive(),
+    positionSize: z.number().positive().optional(),
+    stopPrice: z.number().positive().optional(),
+    targetPrice: z.number().positive().optional(),
+    partialPrice: z.number().positive().optional(),
+    thesis: z.string().optional(),
+    tradeDate: z.string().optional(), // ISO date string
+    tradeTime: z.string().optional(), // HH:MM format
+    status: z.enum(["considering", "active"]).default("active"),
+  });
+
+  app.post("/api/sentinel/trades", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const data = createTradeSchema.parse(req.body);
+      const userId = req.session.userId!;
+
+      // Build entry date from tradeDate + tradeTime
+      let entryDate: Date | undefined = undefined;
+      if (data.tradeDate) {
+        const dateStr = data.tradeDate;
+        const timeStr = data.tradeTime || "09:30";
+        entryDate = new Date(`${dateStr}T${timeStr}:00`);
+      }
+
+      // Build initial lot entries if position size and entry price provided
+      const lotEntries = data.positionSize ? [{
+        id: `lot_${Date.now()}`,
+        dateTime: entryDate?.toISOString() || new Date().toISOString(),
+        qty: String(data.positionSize),
+        buySell: data.direction === "long" ? "buy" as const : "sell" as const,
+        price: String(data.entryPrice),
+      }] : undefined;
+
+      const trade = await sentinelModels.createTrade({
+        userId,
+        symbol: data.symbol.toUpperCase(),
+        direction: data.direction,
+        entryPrice: data.entryPrice,
+        entryDate,
+        stopPrice: data.stopPrice,
+        targetPrice: data.targetPrice,
+        partialPrice: data.partialPrice,
+        positionSize: data.positionSize,
+        thesis: data.thesis,
+        status: data.status,
+        lotEntries,
+      });
+
+      await sentinelModels.createEvent({
+        tradeId: trade.id,
+        userId,
+        eventType: "status_change",
+        oldValue: null,
+        newValue: data.status,
+        description: `Trade created directly: ${trade.symbol} ${trade.direction.toUpperCase()} @ $${data.entryPrice}`,
+      });
+
+      res.json(trade);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid request data", details: error.errors });
+      }
+      console.error("Create trade error:", error);
+      res.status(500).json({ error: "Failed to create trade" });
+    }
+  });
+
   app.get("/api/sentinel/dashboard", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
