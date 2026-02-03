@@ -106,6 +106,41 @@ structural (formerly auto_reject), entry, exit, profit_taking, stop_loss, ma_str
 - **Label Filtering**: Clickable label filter grid on dashboard to filter trades by label
 - Labels are displayed on trade cards in the dashboard
 
+### Trader Neural Network (TNN)
+An admin-only three-layer adaptive factor weighting system where AI learns from trade outcomes to propose weight adjustments with admin approval controls.
+
+**Architecture (Three Layers)**:
+1. **Discipline Factors (Layer 1)**: 12 rule category weights (structural, entry, stop_loss, position_sizing, risk, market_regime, etc.) - base weights 50-70
+2. **Setup Type Factors (Layer 2)**: 7 pattern type weights (breakout, pullback, cup_and_handle, vcp, episodic_pivot, reclaim, high_tight_flag) - base weights 50-60
+3. **Contextual Modifiers (Layer 3)**: Setup × market condition combinations (e.g., pullback + choppy_daily = -10, breakout + trending_weekly = +15)
+
+**Database Tables (5)**:
+- `tnn_factors`: Factor weights with autonomy controls (autoAdjust toggle, maxMagnitude, maxDrift)
+- `tnn_modifiers`: Condition-based adjustments linking factors to market conditions
+- `tnn_suggestions`: AI-proposed weight changes with confidence scores, pending admin approval
+- `tnn_history`: Audit log of all weight changes with source tracking
+- `tnn_settings`: Global system settings (analysis period, learning rate, confidence threshold)
+
+**Market Conditions Detected**:
+- choppy_daily, choppy_weekly, trending_daily, trending_weekly
+- risk_on, risk_off
+- volatility_stress, narrow_leadership
+
+**AI Integration (Prompt v3.1)**:
+- TNN weights are fetched during trade evaluation
+- Setup type is inferred from thesis keywords
+- Active market conditions are derived from sentiment data
+- Factor weights and active modifiers are included in AI prompt
+- Higher weighted factors have more impact on final score
+
+**Admin Controls**:
+- Initialize TNN: Seeds 19 factors + 14 baseline modifiers
+- Manual modifier creation/editing via dialog
+- Per-factor autonomy: auto-adjust toggle, max magnitude limits (0-100), max drift limits (0-50)
+- Approval workflow for AI suggestions (Phase 1: all changes require approval)
+
+**Sources Tracked**: manual, ai_suggested, ai_confirmed, seed
+
 ## External Dependencies
 
 ### Database
