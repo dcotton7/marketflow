@@ -32,10 +32,12 @@ interface TradeWithEvaluation {
   entryPrice: number;
   entryDate?: string;
   stopPrice?: number;
+  partialPrice?: number;
   targetPrice?: number;
   exitPrice?: number;
   positionSize?: number;
   status: string;
+  actualPnL?: number;
   createdAt: string;
   labels?: TradeLabel[];
   lotEntries?: LotEntry[]; // Order grid lot entries for FIFO tracking
@@ -414,9 +416,11 @@ interface TickerWidgetProps {
   pctChange?: number;
   direction: string;
   status?: string; // "active", "considering", "watch"
+  profitClosed?: number; // MTD realized P&L (for closed trades)
+  openPnL?: number; // Unrealized P&L (for active trades)
 }
 
-function TickerWidget({ symbol, price, pctChange = 0, direction, status }: TickerWidgetProps) {
+function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitClosed, openPnL }: TickerWidgetProps) {
   const isPositive = pctChange >= 0;
   
   // Determine label based on status
@@ -433,11 +437,10 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status }: Ticke
   }
   
   return (
-    <div className="flex items-center gap-2" data-testid={`ticker-widget-${symbol}`}>
-      {/* Ticker Box with sparkline */}
-      <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5 border" data-testid={`ticker-box-${symbol}`}>
+    <div className="flex items-center gap-1.5 flex-wrap" data-testid={`ticker-widget-${symbol}`}>
+      {/* Ticker Box - compact without sparkline */}
+      <div className="flex items-center gap-1.5 bg-muted/50 rounded-md px-2 py-1 border" data-testid={`ticker-box-${symbol}`}>
         <span className="font-bold text-sm" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
-        <MiniSparkline positive={isPositive} />
         <span className="text-sm font-medium" data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
         <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-pct-${symbol}`}>
           {isPositive ? "+" : ""}{pctChange.toFixed(1)}%
@@ -447,6 +450,17 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status }: Ticke
       <Badge className={`${statusColor} text-xs`} data-testid={`badge-status-${symbol}`}>
         {statusLabel}
       </Badge>
+      {/* P&L Metrics */}
+      {profitClosed !== undefined && (
+        <span className={`text-xs ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
+          Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
+        </span>
+      )}
+      {openPnL !== undefined && (
+        <span className={`text-xs ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
+          Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
+        </span>
+      )}
     </div>
   );
 }
@@ -457,7 +471,7 @@ interface TradeCardProps {
   onEdit?: (trade: TradeWithEvaluation) => void;
   onClose?: (trade: TradeWithEvaluation) => void;
   onCancel?: (trade: TradeWithEvaluation) => void;
-  onPriceUpdate?: (tradeId: number, field: "stopPrice" | "targetPrice", value: number) => void;
+  onPriceUpdate?: (tradeId: number, field: "stopPrice" | "partialPrice" | "targetPrice", value: number) => void;
 }
 
 function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPriceUpdate }: TradeCardProps) {
@@ -492,13 +506,27 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
     setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
   };
 
-  // Calculate a pseudo % change based on entry vs target (for sparkline direction)
+  // Calculate a pseudo % change based on entry vs target
   const pctChange = trade.targetPrice && trade.entryPrice 
     ? ((trade.targetPrice - trade.entryPrice) / trade.entryPrice * 100) 
     : (trade.direction === "long" ? 2.5 : -2.5);
 
   // Price monitoring calculations - use current price (entry for now, could be live)
   const currentPrice = trade.entryPrice; // In production, this would be live price
+  
+  // Calculate Open PnL (unrealized) - for active trades based on position and current vs entry
+  // For closed trades, use actualPnL; for active, calculate (currentPrice - entryPrice) * positionSize
+  const isLongDirection = trade.direction === "long";
+  const openPnL = trade.status === "closed" 
+    ? undefined // Don't show open PnL for closed trades
+    : trade.positionSize 
+      ? (isLongDirection 
+          ? (currentPrice - trade.entryPrice) * trade.positionSize 
+          : (trade.entryPrice - currentPrice) * trade.positionSize)
+      : undefined;
+  
+  // Profit Closed - for closed trades, show actualPnL
+  const profitClosed = trade.status === "closed" ? trade.actualPnL : undefined;
   const isLong = trade.direction === "long";
   
   // Calculate % distance to each price level
@@ -566,6 +594,8 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
             pctChange={pctChange}
             direction={trade.direction}
             status={isActive ? "active" : "considering"}
+            openPnL={openPnL}
+            profitClosed={profitClosed ?? undefined}
           />
           {trade.latestEvaluation && (
             <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
@@ -613,19 +643,19 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
             testId={`monitor-stop-${trade.id}`}
           />
           
-          {/* Partial Profit (calculated from stop and target) - Display only, not editable */}
-          {partialProfitPrice && partialDistance !== null && (
-            <div className="flex items-center justify-between px-2 py-1 rounded bg-muted/30" data-testid={`monitor-partial-${trade.id}`}>
-              <div className="flex items-center gap-1.5">
-                <CircleDot className="w-3 h-3 text-yellow-500" />
-                <span className="text-muted-foreground">PARTIAL</span>
-                <span className="text-muted-foreground">${partialProfitPrice.toFixed(2)}</span>
-              </div>
-              <span className="font-mono text-muted-foreground">
-                {partialDistance > 0 ? "+" : ""}{partialDistance.toFixed(1)}%
-              </span>
-            </div>
-          )}
+          {/* Partial Profit - Always shown, editable (uses saved value or calculated default) */}
+          <EditablePriceRow
+            label="PARTIAL"
+            icon={CircleDot}
+            value={trade.partialPrice || partialProfitPrice}
+            distance={trade.partialPrice 
+              ? ((trade.partialPrice - currentPrice) / currentPrice * 100) 
+              : partialDistance}
+            isAlert={false}
+            alertColor="yellow"
+            onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
+            testId={`monitor-partial-${trade.id}`}
+          />
           
           {/* Profit Target - Always shown */}
           <EditablePriceRow
@@ -1091,7 +1121,7 @@ export default function SentinelDashboardPage() {
   });
 
   const updateTradeMutation = useMutation({
-    mutationFn: async (data: { tradeId: number; entryPrice?: number; stopPrice?: number; targetPrice?: number; positionSize?: number; entryDate?: string; exitPrice?: number; lotEntries?: LotEntry[] }) => {
+    mutationFn: async (data: { tradeId: number; entryPrice?: number; stopPrice?: number; partialPrice?: number; targetPrice?: number; positionSize?: number; entryDate?: string; exitPrice?: number; lotEntries?: LotEntry[] }) => {
       const { tradeId, ...updateData } = data;
       return apiRequest("PATCH", `/api/sentinel/trade/${tradeId}`, updateData);
     },
@@ -1131,7 +1161,7 @@ export default function SentinelDashboardPage() {
   const canCloseTrade = runningTotal === 0;
 
   // Handler for inline price updates from trading cards
-  const handlePriceUpdate = (tradeId: number, field: "stopPrice" | "targetPrice", value: number) => {
+  const handlePriceUpdate = (tradeId: number, field: "stopPrice" | "partialPrice" | "targetPrice", value: number) => {
     updateTradeMutation.mutate({
       tradeId,
       [field]: value,

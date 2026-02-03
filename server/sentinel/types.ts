@@ -94,6 +94,7 @@ export interface EvaluationResult {
 
 export interface TradeUpdate {
   stopPrice?: number;
+  partialPrice?: number;
   targetPrice?: number;
   entryPrice?: number;
   entryDate?: string;
@@ -114,10 +115,12 @@ export interface TradeWithEvaluation {
   direction: string;
   entryPrice: number;
   stopPrice: number | null;
+  partialPrice: number | null;
   targetPrice: number | null;
   positionSize: number | null;
   thesis: string | null;
   status: string;
+  actualPnL: number | null;
   createdAt: Date | null;
   latestEvaluation?: {
     score: number;

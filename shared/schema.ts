@@ -101,6 +101,7 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   entryPrice: doublePrecision("entry_price").notNull(),
   entryDate: timestamp("entry_date"), // Lot Date/Time - when position was entered
   stopPrice: doublePrecision("stop_price"),
+  partialPrice: doublePrecision("partial_price"), // Partial profit price (customizable, defaults to 50% to target)
   targetPrice: doublePrecision("target_price"), // First profit trim price
   targetProfitPrice: doublePrecision("target_profit_price"), // Full position exit target
   targetProfitLevel: text("target_profit_level"), // Level type: EXTENDED_8X_50DMA, PREV_HIGH, RR_5X, etc.

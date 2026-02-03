@@ -58,6 +58,7 @@ const lotEntrySchema = z.object({
 
 const updateTradeSchema = z.object({
   stopPrice: z.number().positive().optional(),
+  partialPrice: z.number().positive().optional(),
   targetPrice: z.number().positive().optional(),
   entryPrice: z.number().positive().optional(),
   entryDate: z.string().optional(),
@@ -476,6 +477,18 @@ export function registerSentinelRoutes(app: Express): void {
           oldValue: trade.stopPrice?.toString() || "none",
           newValue: data.stopPrice.toString(),
           description: `Stop updated: $${trade.stopPrice?.toFixed(2) || 'none'} → $${data.stopPrice.toFixed(2)}`,
+        });
+      }
+
+      if (data.partialPrice !== undefined && data.partialPrice !== trade.partialPrice) {
+        updates.partialPrice = data.partialPrice;
+        await sentinelModels.createEvent({
+          tradeId,
+          userId: req.session.userId!,
+          eventType: "partial_update",
+          oldValue: trade.partialPrice?.toString() || "none",
+          newValue: data.partialPrice.toString(),
+          description: `Partial updated: $${trade.partialPrice?.toFixed(2) || 'none'} → $${data.partialPrice.toFixed(2)}`,
         });
       }
 
