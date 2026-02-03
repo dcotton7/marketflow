@@ -580,17 +580,16 @@ export default function SentinelImportPage() {
                   <CardTitle>Import History</CardTitle>
                   <CardDescription>Previous CSV imports and their status</CardDescription>
                 </div>
-                {batches && batches.length > 0 && (
-                  <Button 
-                    variant="destructive" 
-                    size="sm"
-                    onClick={() => setShowDeleteAllDialog(true)}
-                    data-testid="button-delete-all"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete All
-                  </Button>
-                )}
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  onClick={() => setShowDeleteAllDialog(true)}
+                  disabled={!batches || batches.length === 0}
+                  data-testid="button-delete-all"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete All
+                </Button>
               </CardHeader>
               <CardContent>
                 {batchesLoading ? (
