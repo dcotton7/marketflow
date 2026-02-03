@@ -150,6 +150,27 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // TEMPORARY: Password reset for test user Foreboding - REMOVE AFTER USE
+  app.post("/api/auth/temp-reset-test", async (req: Request, res: Response) => {
+    try {
+      if (!db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+      const passwordHash = await bcrypt.hash("SEN_dec7DEC!", 10);
+      const result = await db.update(sentinelUsers)
+        .set({ passwordHash })
+        .where(eq(sentinelUsers.username, "Foreboding"))
+        .returning({ id: sentinelUsers.id });
+      if (result.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true, message: "Test user password reset" });
+    } catch (error) {
+      console.error("Temp reset error:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
   // TEMPORARY: Create session table if missing - REMOVE AFTER USE
   app.post("/api/admin/create-session-table", async (req: Request, res: Response) => {
     try {
