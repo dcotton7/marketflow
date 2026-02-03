@@ -21,6 +21,13 @@ Sentinel is strictly an evaluation tool focused on rewarding good process and di
 
 Preferred communication style: Simple, everyday language.
 
+## Test Accounts
+
+**Foreboding (Admin)**
+- Email: msft_dcotton@hotmail.com
+- Password: SEN_dec7DEC!
+- Note: Needs `is_admin = true` set in production database
+
 ## System Architecture
 
 ### UI/UX Decisions
