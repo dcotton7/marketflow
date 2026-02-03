@@ -109,6 +109,14 @@ interface RuleSuggestion {
   status: string;
 }
 
+interface LotEntry {
+  id: string;
+  dateTime: string;
+  qty: string;
+  costBasis: string;
+  closePrice: string;
+}
+
 function getScoreColor(score: number): string {
   if (score >= 70) return "text-green-500";
   if (score >= 50) return "text-yellow-500";
@@ -140,6 +148,75 @@ function getScoreBadgeVariant(score: number): "default" | "secondary" | "destruc
   if (score >= 70) return "default";
   if (score >= 50) return "secondary";
   return "destructive";
+}
+
+// Simple sparkline component based on % change direction
+function MiniSparkline({ positive, className = "" }: { positive: boolean; className?: string }) {
+  // Generate a simple upward or downward trend line
+  const points = positive 
+    ? "0,14 8,12 16,10 24,8 32,6 40,4 48,6 56,3 64,2"  // Upward trend
+    : "0,2 8,4 16,6 24,8 32,10 40,12 48,10 56,13 64,14"; // Downward trend
+  
+  return (
+    <svg 
+      viewBox="0 0 64 16" 
+      className={`h-4 w-16 ${className}`}
+      preserveAspectRatio="none"
+    >
+      <polyline
+        points={points}
+        fill="none"
+        stroke={positive ? "#22c55e" : "#ef4444"}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Compact Ticker Widget component
+interface TickerWidgetProps {
+  symbol: string;
+  price: number;
+  pctChange?: number;
+  direction: string;
+  status?: string; // "active", "considering", "watch"
+}
+
+function TickerWidget({ symbol, price, pctChange = 0, direction, status }: TickerWidgetProps) {
+  const isPositive = pctChange >= 0;
+  
+  // Determine label based on status
+  let statusLabel: string;
+  let statusColor: string;
+  
+  if (status === "watch") {
+    statusLabel = "WATCH";
+    statusColor = "bg-yellow-600 text-white";
+  } else {
+    // Active or considering - show direction
+    statusLabel = direction === "long" ? "LONG" : "SHORT";
+    statusColor = direction === "long" ? "bg-green-600 text-white" : "bg-red-600 text-white";
+  }
+  
+  return (
+    <div className="flex items-center gap-2" data-testid={`ticker-widget-${symbol}`}>
+      {/* Ticker Box with sparkline */}
+      <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5 border" data-testid={`ticker-box-${symbol}`}>
+        <span className="font-bold text-sm" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
+        <MiniSparkline positive={isPositive} />
+        <span className="text-sm font-medium" data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
+        <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-pct-${symbol}`}>
+          {isPositive ? "+" : ""}{pctChange.toFixed(1)}%
+        </span>
+      </div>
+      {/* Direction/Status Badge */}
+      <Badge className={`${statusColor} text-xs`} data-testid={`badge-status-${symbol}`}>
+        {statusLabel}
+      </Badge>
+    </div>
+  );
 }
 
 interface TradeCardProps {
@@ -182,6 +259,11 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
     setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
   };
 
+  // Calculate a pseudo % change based on entry vs target (for sparkline direction)
+  const pctChange = trade.targetPrice && trade.entryPrice 
+    ? ((trade.targetPrice - trade.entryPrice) / trade.entryPrice * 100) 
+    : (trade.direction === "long" ? 2.5 : -2.5);
+
   return (
     <Card 
       className="hover-elevate cursor-pointer relative" 
@@ -189,17 +271,15 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
       onClick={handleCardClick}
     >
       <CardContent className="p-4 pb-10">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-lg" data-testid={`text-symbol-${trade.id}`}>{trade.symbol}</span>
-            <Badge variant={trade.direction === "long" ? "default" : "destructive"} data-testid={`badge-direction-${trade.id}`}>
-              {trade.direction === "long" ? (
-                <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
-              ) : (
-                <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
-              )}
-            </Badge>
-          </div>
+        {/* Compact Ticker Widget with Sparkline */}
+        <div className="flex items-center justify-between mb-3">
+          <TickerWidget 
+            symbol={trade.symbol}
+            price={trade.entryPrice}
+            pctChange={pctChange}
+            direction={trade.direction}
+            status={isActive ? "active" : "considering"}
+          />
           {trade.latestEvaluation && (
             <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
               {trade.latestEvaluation.score}/100
@@ -233,7 +313,6 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
         )}
 
         <div className="text-sm text-muted-foreground space-y-1">
-          <div>Entry: ${trade.entryPrice.toFixed(2)}</div>
           <div className="flex gap-4 flex-wrap">
             {trade.stopPrice && <span>Stop: ${trade.stopPrice.toFixed(2)}</span>}
             {trade.targetPrice && <span>Target: ${trade.targetPrice.toFixed(2)}</span>}
@@ -494,8 +573,13 @@ export default function SentinelDashboardPage() {
   // Trade action dialogs
   const [showEditTrade, setShowEditTrade] = useState(false);
   const [showCloseTrade, setShowCloseTrade] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showCancelTrade, setShowCancelTrade] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState<TradeWithEvaluation | null>(null);
+  
+  // Lot tracking table - each row is a lot entry
+  const [lotEntries, setLotEntries] = useState<LotEntry[]>([]);
+  
   const [editForm, setEditForm] = useState({
     entryPrice: "",
     stopPrice: "",
@@ -699,9 +783,47 @@ export default function SentinelDashboardPage() {
     },
   });
 
+  // Lot entry helpers
+  const addLotEntry = () => {
+    const newLot: LotEntry = {
+      id: Date.now().toString(),
+      dateTime: "",
+      qty: "",
+      costBasis: "",
+      closePrice: ""
+    };
+    setLotEntries([...lotEntries, newLot]);
+  };
+
+  const updateLotEntry = (id: string, field: keyof LotEntry, value: string) => {
+    setLotEntries(lotEntries.map(lot => 
+      lot.id === id ? { ...lot, [field]: value } : lot
+    ));
+  };
+
+  const removeLotEntry = (id: string) => {
+    setLotEntries(lotEntries.filter(lot => lot.id !== id));
+  };
+
   // Trade action handlers
   const handleEditTrade = (trade: TradeWithEvaluation) => {
     setSelectedTrade(trade);
+    // Initialize with existing data as first lot, plus empty row for adding
+    const existingLot: LotEntry = {
+      id: "initial",
+      dateTime: trade.entryDate ? new Date(trade.entryDate).toISOString().slice(0, 16) : "",
+      qty: trade.positionSize?.toString() || "",
+      costBasis: trade.entryPrice.toFixed(2),
+      closePrice: trade.exitPrice?.toFixed(2) || ""
+    };
+    const emptyLot: LotEntry = {
+      id: Date.now().toString(),
+      dateTime: "",
+      qty: "",
+      costBasis: "",
+      closePrice: ""
+    };
+    setLotEntries([existingLot, emptyLot]);
     setEditForm({
       entryPrice: trade.entryPrice.toFixed(2),
       stopPrice: trade.stopPrice?.toFixed(2) || "",
@@ -715,15 +837,30 @@ export default function SentinelDashboardPage() {
 
   const handleCloseTrade = (trade: TradeWithEvaluation) => {
     setSelectedTrade(trade);
-    const defaultExit = trade.targetPrice && trade.stopPrice 
-      ? Math.max(trade.targetPrice, trade.stopPrice).toFixed(2)
-      : trade.stopPrice?.toFixed(2) || "";
-    setCloseForm({
-      exitPrice: defaultExit,
-      outcome: "win",
-      notes: ""
-    });
-    setShowCloseTrade(true);
+    // Show confirmation dialog first per spec
+    setShowCloseConfirm(true);
+  };
+
+  const handleCloseConfirmYes = () => {
+    // User wants to edit details first
+    setShowCloseConfirm(false);
+    if (selectedTrade) {
+      handleEditTrade(selectedTrade);
+    }
+  };
+
+  const handleCloseConfirmNo = () => {
+    // User doesn't want to edit - close trade as canceled per spec
+    setShowCloseConfirm(false);
+    if (selectedTrade) {
+      // Close trade with outcome as "canceled" by using the close mutation
+      closeTradeMutation.mutate({
+        tradeId: selectedTrade.id,
+        exitPrice: selectedTrade.entryPrice, // Use entry as exit for canceled
+        outcome: "loss", // Mark as loss since it was canceled
+        notes: "Trade canceled without editing final details"
+      });
+    }
   };
 
   const handleCancelTrade = (trade: TradeWithEvaluation) => {
@@ -750,14 +887,32 @@ export default function SentinelDashboardPage() {
 
   const confirmEditTrade = () => {
     if (selectedTrade) {
+      // Aggregate lot data - calculate weighted average cost basis and total qty
+      const filledLots = lotEntries.filter(lot => lot.qty && lot.costBasis);
+      let totalQty = 0;
+      let totalCost = 0;
+      let latestClosePrice = "";
+      let latestDateTime = "";
+      
+      filledLots.forEach(lot => {
+        const qty = parseInt(lot.qty) || 0;
+        const cost = parseFloat(lot.costBasis) || 0;
+        totalQty += qty;
+        totalCost += qty * cost;
+        if (lot.closePrice) latestClosePrice = lot.closePrice;
+        if (lot.dateTime) latestDateTime = lot.dateTime;
+      });
+      
+      const avgCostBasis = totalQty > 0 ? totalCost / totalQty : parseFloat(editForm.entryPrice) || 0;
+      
       updateTradeMutation.mutate({
         tradeId: selectedTrade.id,
-        entryPrice: editForm.entryPrice ? parseFloat(editForm.entryPrice) : undefined,
+        entryPrice: avgCostBasis || undefined,
         stopPrice: editForm.stopPrice ? parseFloat(editForm.stopPrice) : undefined,
         targetPrice: editForm.targetPrice ? parseFloat(editForm.targetPrice) : undefined,
-        positionSize: editForm.positionSize ? parseInt(editForm.positionSize) : undefined,
-        entryDate: editForm.entryDate || undefined,
-        exitPrice: editForm.exitPrice ? parseFloat(editForm.exitPrice) : undefined
+        positionSize: totalQty || undefined,
+        entryDate: latestDateTime || editForm.entryDate || undefined,
+        exitPrice: latestClosePrice ? parseFloat(latestClosePrice) : undefined
       });
     }
   };
@@ -821,7 +976,7 @@ export default function SentinelDashboardPage() {
 
       <main className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold">Dashboard</h2>
+          <h2 className="text-xl font-semibold">Trading Cards</h2>
           <Button onClick={() => setLocation("/sentinel/evaluate")} data-testid="button-new-evaluation">
             <Plus className="w-4 h-4 mr-2" />
             New Evaluation
@@ -1320,88 +1475,126 @@ export default function SentinelDashboardPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Trade Dialog */}
+      {/* Edit Trade Dialog - Table-based Lot Tracker */}
       <Dialog open={showEditTrade} onOpenChange={setShowEditTrade}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Trade: {selectedTrade?.symbol}</DialogTitle>
             <DialogDescription>Update lot details and pricing</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="entry-date">Lot Date/Time</Label>
-              <Input
-                id="entry-date"
-                type="datetime-local"
-                value={editForm.entryDate}
-                onChange={(e) => setEditForm({ ...editForm, entryDate: e.target.value })}
-                data-testid="input-lot-datetime"
-              />
+            {/* Lot Tracking Table */}
+            <div className="border rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Lots Date/Time</th>
+                    <th className="px-3 py-2 text-left font-medium">QTY</th>
+                    <th className="px-3 py-2 text-left font-medium">Cost Basis $</th>
+                    <th className="px-3 py-2 text-left font-medium">Close Price $</th>
+                    <th className="px-2 py-2 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lotEntries.map((lot, index) => (
+                    <tr key={lot.id} className="border-t">
+                      <td className="px-2 py-1">
+                        <Input
+                          type="datetime-local"
+                          value={lot.dateTime}
+                          onChange={(e) => updateLotEntry(lot.id, "dateTime", e.target.value)}
+                          className="h-8 text-xs"
+                          data-testid={`input-lot-datetime-${index}`}
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Input
+                          type="number"
+                          placeholder="100"
+                          value={lot.qty}
+                          onChange={(e) => updateLotEntry(lot.id, "qty", e.target.value)}
+                          className="h-8 w-20 text-xs"
+                          data-testid={`input-lot-qty-${index}`}
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={lot.costBasis}
+                          onChange={(e) => updateLotEntry(lot.id, "costBasis", e.target.value)}
+                          className="h-8 w-24 text-xs"
+                          data-testid={`input-lot-costbasis-${index}`}
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={lot.closePrice}
+                          onChange={(e) => updateLotEntry(lot.id, "closePrice", e.target.value)}
+                          className="h-8 w-24 text-xs"
+                          data-testid={`input-lot-closeprice-${index}`}
+                        />
+                      </td>
+                      <td className="px-1 py-1">
+                        {lotEntries.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-500 hover:text-red-600"
+                            onClick={() => removeLotEntry(lot.id)}
+                            data-testid={`button-remove-lot-${index}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="position-size">QTY (Shares)</Label>
-                <Input
-                  id="position-size"
-                  type="number"
-                  placeholder="100"
-                  value={editForm.positionSize}
-                  onChange={(e) => setEditForm({ ...editForm, positionSize: e.target.value })}
-                  data-testid="input-qty"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="entry-price">Cost Basis ($)</Label>
-                <Input
-                  id="entry-price"
-                  type="number"
-                  step="0.01"
-                  value={editForm.entryPrice}
-                  onChange={(e) => setEditForm({ ...editForm, entryPrice: e.target.value })}
-                  data-testid="input-cost-basis"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="stop-price">Stop Price ($)</Label>
-                <Input
-                  id="stop-price"
-                  type="number"
-                  step="0.01"
-                  value={editForm.stopPrice}
-                  onChange={(e) => setEditForm({ ...editForm, stopPrice: e.target.value })}
-                  data-testid="input-stop-price"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="target-price">Target Price ($)</Label>
-                <Input
-                  id="target-price"
-                  type="number"
-                  step="0.01"
-                  value={editForm.targetPrice}
-                  onChange={(e) => setEditForm({ ...editForm, targetPrice: e.target.value })}
-                  data-testid="input-target-price"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="exit-price">Close Price ($)</Label>
-              <Input
-                id="exit-price"
-                type="number"
-                step="0.01"
-                value={editForm.exitPrice}
-                onChange={(e) => setEditForm({ ...editForm, exitPrice: e.target.value })}
-                data-testid="input-close-price"
-              />
+            
+            {/* Add Row Button */}
+            <div className="flex justify-start">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={addLotEntry}
+                className="text-xs"
+                data-testid="button-add-lot"
+              >
+                <Plus className="w-3 h-3 mr-1" /> Add Lot
+              </Button>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditTrade(false)}>Cancel</Button>
-            <Button onClick={confirmEditTrade} disabled={updateTradeMutation.isPending} data-testid="button-confirm-edit">
-              {updateTradeMutation.isPending ? "Saving..." : "Save Changes"}
+          <DialogFooter className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowEditTrade(false)}>Cancel</Button>
+            <Button size="sm" onClick={confirmEditTrade} disabled={updateTradeMutation.isPending} data-testid="button-confirm-edit">
+              {updateTradeMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Close Trade Confirmation Dialog */}
+      <Dialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Close Trade: {selectedTrade?.symbol}</DialogTitle>
+            <DialogDescription>
+              Would you like to edit final details before closing?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={handleCloseConfirmNo} data-testid="button-close-no-edit">
+              No, Close Now
+            </Button>
+            <Button onClick={handleCloseConfirmYes} data-testid="button-close-edit-first">
+              Yes, Edit First
             </Button>
           </DialogFooter>
         </DialogContent>

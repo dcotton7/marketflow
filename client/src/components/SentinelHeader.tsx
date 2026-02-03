@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import sentinelLogo from "@/assets/images/sentinel-logo.png";
@@ -78,21 +78,28 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
       </Link>
 
       {showSentiment && (
-        <div className="flex items-center gap-3" data-testid="container-market-sentiment">
+        <div className="flex items-center gap-4" data-testid="container-market-sentiment">
           {isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <RefreshCw className="h-3 w-3 animate-spin" />
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+              <RefreshCw className="h-4 w-4 animate-spin" />
               <span>Loading sentiment...</span>
             </div>
           ) : sentiment ? (
             <>
+              {/* Market Sentiment Header with Fire/Ice icons */}
+              <div className="flex items-center gap-2">
+                <Flame className="h-5 w-5 text-orange-500" />
+                <span className="text-lg font-semibold">Market Sentiment</span>
+                <Snowflake className="h-5 w-5 text-blue-400" />
+              </div>
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Weekly:</span>
+                    <span className="text-sm font-medium text-muted-foreground">Weekly:</span>
                     <Badge 
                       variant="outline" 
-                      className={`text-xs ${getTrendColor(sentiment.weekly.state)}`}
+                      className={`text-sm px-3 py-1 ${getTrendColor(sentiment.weekly.state)}`}
                       data-testid="badge-weekly-trend"
                     >
                       <TrendIcon state={sentiment.weekly.state} />
@@ -109,10 +116,10 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Daily:</span>
+                    <span className="text-sm font-medium text-muted-foreground">Daily:</span>
                     <Badge 
                       variant="outline" 
-                      className={`text-xs ${getTrendColor(sentiment.daily.state)}`}
+                      className={`text-sm px-3 py-1 ${getTrendColor(sentiment.daily.state)}`}
                       data-testid="badge-daily-basket"
                     >
                       <TrendIcon state={sentiment.daily.state} />
@@ -136,18 +143,18 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Chop:</span>
+                      <span className="text-sm font-medium text-muted-foreground">Chop:</span>
                       <Badge 
                         variant="outline" 
-                        className={`text-xs ${getChopColor(sentiment.choppiness.weekly.state)}`}
+                        className={`text-sm px-3 py-1 ${getChopColor(sentiment.choppiness.weekly.state)}`}
                         data-testid="badge-choppiness"
                       >
                         {sentiment.choppiness.weekly.state === "CHOPPY" ? (
-                          <Zap className="h-3 w-3" />
+                          <Zap className="h-4 w-4" />
                         ) : sentiment.choppiness.weekly.state === "TRENDING" ? (
-                          <TrendingUp className="h-3 w-3" />
+                          <TrendingUp className="h-4 w-4" />
                         ) : (
-                          <ArrowLeftRight className="h-3 w-3" />
+                          <ArrowLeftRight className="h-4 w-4" />
                         )}
                         <span className="ml-1">{sentiment.choppiness.weekly.state}</span>
                       </Badge>
@@ -164,7 +171,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                 </Tooltip>
               )}
 
-              <span className="text-[10px] text-muted-foreground" data-testid="text-sentiment-age">
+              <span className="text-xs text-muted-foreground" data-testid="text-sentiment-age">
                 Updated {sentiment.cacheAgeMinutes < 1 ? "just now" : `${sentiment.cacheAgeMinutes}m ago`}
               </span>
             </>
