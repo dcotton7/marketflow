@@ -2022,19 +2022,26 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       
       if (tickersInImport.size > 0) {
         // Fetch existing imported trades for these tickers (from previous imports)
+        // Include accountName for per-account filtering
         const existingImportedTrades = await db!.select({
           ticker: sentinelImportedTrades.ticker,
           direction: sentinelImportedTrades.direction,
           quantity: sentinelImportedTrades.quantity,
           tradeDate: sentinelImportedTrades.tradeDate,
+          accountName: sentinelImportedTrades.accountName,
+          id: sentinelImportedTrades.id, // For stable ordering
         }).from(sentinelImportedTrades)
           .where(and(
             eq(sentinelImportedTrades.userId, userId),
             inArray(sentinelImportedTrades.ticker, Array.from(tickersInImport))
-          ));
+          ))
+          .orderBy(sentinelImportedTrades.tradeDate, sentinelImportedTrades.id);
         
         // Fetch hand-entered trades for these tickers
+        // Note: Hand-entered trades don't have accountName - they're used as a general position baseline
+        // This is a known limitation - if user has multi-account positions, hand trades are shared
         const existingHandTrades = await db!.select({
+          id: sentinelTrades.id,
           ticker: sentinelTrades.ticker,
           direction: sentinelTrades.direction,
           shares: sentinelTrades.shares,
@@ -2045,9 +2052,28 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           .where(and(
             eq(sentinelTrades.userId, userId),
             inArray(sentinelTrades.ticker, Array.from(tickersInImport))
-          ));
+          ))
+          .orderBy(sentinelTrades.entryDate, sentinelTrades.id);
         
+        // Process each ticker
         for (const ticker of Object.keys(tradesByTicker)) {
+          // Process current import trades grouped by account+ticker
+          // Each account's position is tracked separately to avoid cross-account matching
+          const currentTrades = tradesByTicker[ticker];
+        const currentBrokerId = result.batch.brokerId;
+        
+        // Group current import trades by account
+        const tradesByAccount = new Map<string, typeof currentTrades>();
+        for (const t of currentTrades) {
+          const accountKey = t.accountName || '__default__';
+          if (!tradesByAccount.has(accountKey)) {
+            tradesByAccount.set(accountKey, []);
+          }
+          tradesByAccount.get(accountKey)!.push(t);
+        }
+        
+        // Process each account separately
+        for (const [accountKey, accountTrades] of tradesByAccount) {
           // Build unified transaction list with stable IDs
           type UnifiedTrade = { 
             id: string; 
@@ -2059,10 +2085,15 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           };
           const allTrades: UnifiedTrade[] = [];
           
-          // Add existing imported trades (priority 1 - settled first)
-          for (const t of existingImportedTrades.filter(t => t.ticker === ticker)) {
+          // Add existing imported trades for this ticker AND account (priority 1)
+          // Filter by both ticker AND accountName to keep positions separate per account
+          const accountNameFilter = accountKey === '__default__' ? null : accountKey;
+          for (const t of existingImportedTrades.filter(t => 
+            t.ticker === ticker && 
+            (t.accountName || null) === accountNameFilter
+          )) {
             allTrades.push({
-              id: `existing_${t.tradeDate}_${t.direction}_${t.quantity}`,
+              id: `existing_${t.id}`, // Use DB id for stable ordering
               direction: t.direction,
               quantity: t.quantity,
               tradeDate: new Date(t.tradeDate),
@@ -2072,13 +2103,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           }
           
           // Add hand-entered trades (priority 2)
-          let handIdx = 0;
+          // Note: Hand-entered trades use aggregate shares, not lot-level FIFO
+          // They're included as a general position baseline (not filtered by account)
+          // This is a known limitation - hand trades don't have account tracking
           for (const t of existingHandTrades.filter(t => t.ticker === ticker)) {
-            // Entry transaction
             const entryDirection = t.direction === 'LONG' ? 'BUY' : 'SELL';
             if (t.entryDate && t.shares) {
               allTrades.push({
-                id: `hand_entry_${handIdx}`,
+                id: `hand_entry_${t.id}`, // Use DB id for stable ordering
                 direction: entryDirection,
                 quantity: t.shares,
                 tradeDate: new Date(t.entryDate),
@@ -2086,11 +2118,10 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 isCurrentImport: false,
               });
             }
-            // Exit transaction (if closed)
             if (t.exitDate && t.exitShares) {
               const exitDirection = t.direction === 'LONG' ? 'SELL' : 'BUY';
               allTrades.push({
-                id: `hand_exit_${handIdx}`,
+                id: `hand_exit_${t.id}`, // Use DB id for stable ordering
                 direction: exitDirection,
                 quantity: t.exitShares,
                 tradeDate: new Date(t.exitDate),
@@ -2098,14 +2129,12 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 isCurrentImport: false,
               });
             }
-            handIdx++;
           }
           
-          // Add current import trades with their actual tradeIds (priority 3)
-          const currentTrades = tradesByTicker[ticker];
-          for (const t of currentTrades) {
+          // Add current import trades for THIS ACCOUNT only (priority 3)
+          for (const t of accountTrades) {
             allTrades.push({
-              id: t.tradeId, // Use actual tradeId for stable identification
+              id: t.tradeId,
               direction: t.direction,
               quantity: t.quantity,
               tradeDate: new Date(t.tradeDate),
@@ -2114,35 +2143,33 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             });
           }
           
-          // Sort by date, then by source priority (existing first, then hand, then current)
+          // Sort by date, then by source priority, then by id (stable tie-breaker)
           allTrades.sort((a, b) => {
             const dateDiff = a.tradeDate.getTime() - b.tradeDate.getTime();
             if (dateDiff !== 0) return dateDiff;
-            return a.sourcePriority - b.sourcePriority;
+            const priorityDiff = a.sourcePriority - b.sourcePriority;
+            if (priorityDiff !== 0) return priorityDiff;
+            return a.id.localeCompare(b.id);
           });
           
-          // Calculate running position and identify orphans
-          let runningPosition = 0;
+          // Check short sale settings for this account
+          const tradeAccountKey = `${currentBrokerId}:${accountKey === '__default__' ? '' : accountKey}`;
+          const shortSalesAllowed = accountShortAllowed.get(tradeAccountKey) ?? false;
           
-          // Check if any current import trade's account allows shorts
-          const currentBrokerId = result.batch.brokerId;
-          const sampleTrade = currentTrades[0];
-          const accountKey = `${currentBrokerId}:${sampleTrade?.accountName || ''}`;
-          const shortSalesAllowed = accountShortAllowed.get(accountKey) ?? false;
+          // Calculate running position and identify orphans for this account
+          let runningPosition = 0;
           
           for (const trade of allTrades) {
             if (trade.direction === 'BUY') {
               runningPosition += trade.quantity;
             } else if (trade.direction === 'SELL') {
-              // Only flag as orphan if:
-              // 1. It's from current import
-              // 2. Selling more than we've bought (runningPosition < quantity)
-              // 3. Short sales are NOT allowed for this account
+              // For current import sells, check if position is sufficient
               if (trade.isCurrentImport && runningPosition < trade.quantity && !shortSalesAllowed) {
                 orphanSellTradeIds.add(trade.id);
               }
               runningPosition -= trade.quantity;
             }
+          }
           }
         }
         
