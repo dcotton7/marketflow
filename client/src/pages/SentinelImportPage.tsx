@@ -13,8 +13,9 @@ import { Input } from "@/components/ui/input";
 import { 
   Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
-  ChevronDown, ChevronUp, Building2, Calendar, DollarSign
+  ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle
 } from "lucide-react";
+import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
@@ -27,6 +28,7 @@ interface ImportBatch {
   fileType: string;
   totalTradesFound: number;
   totalTradesImported: number;
+  orphanSellsCount?: number;
   skippedRows: Array<{ rowIndex: number; rawData: string; reason: string }>;
   status: string;
   errorMessage?: string;
@@ -59,6 +61,10 @@ interface ImportedTrade {
   status: string;
   isFill: boolean;
   fillGroupKey?: string;
+  isOrphanSell?: boolean;
+  orphanStatus?: string;
+  manualCostBasis?: number;
+  manualOpenDate?: string;
   rawSource?: string;
   importedAt: string;
 }
@@ -98,6 +104,9 @@ export default function SentinelImportPage() {
   const [tickerFilter, setTickerFilter] = useState("");
   const [timestampOverride, setTimestampOverride] = useState<string>("");
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [showOrphanDialog, setShowOrphanDialog] = useState(false);
+  const [selectedOrphanBatchId, setSelectedOrphanBatchId] = useState<string | null>(null);
+  const [orphanResolutions, setOrphanResolutions] = useState<Record<string, { costBasis: string; openDate: string }>>({});
   
   const { data: batches, isLoading: batchesLoading } = useQuery<ImportBatch[]>({
     queryKey: ['/api/sentinel/import/batches'],
@@ -105,6 +114,16 @@ export default function SentinelImportPage() {
 
   const { data: allTrades, isLoading: tradesLoading } = useQuery<ImportedTrade[]>({
     queryKey: ['/api/sentinel/import/trades'],
+  });
+  
+  const { data: orphanSells, isLoading: orphansLoading, refetch: refetchOrphans } = useQuery<ImportedTrade[]>({
+    queryKey: ['/api/sentinel/import/batches', selectedOrphanBatchId, 'orphans'],
+    enabled: !!selectedOrphanBatchId,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/import/batches/${selectedOrphanBatchId}/orphans`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch orphan sells');
+      return res.json();
+    }
   });
 
   const previewMutation = useMutation({
@@ -221,6 +240,61 @@ export default function SentinelImportPage() {
       });
     },
   });
+
+  const resolveOrphanMutation = useMutation({
+    mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve'; costBasis?: number; openDate?: string }) => {
+      const response = await apiRequest('PATCH', `/api/sentinel/import/trades/${data.tradeId}/resolve-orphan`, {
+        action: data.action,
+        costBasis: data.costBasis,
+        openDate: data.openDate,
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to resolve orphan');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchOrphans();
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to resolve orphan",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleReviewOrphans = (batchId: string) => {
+    setSelectedOrphanBatchId(batchId);
+    setOrphanResolutions({});
+    setShowOrphanDialog(true);
+  };
+
+  const handleResolveOrphan = (tradeId: string, action: 'delete' | 'resolve') => {
+    const resolution = orphanResolutions[tradeId];
+    if (action === 'resolve') {
+      if (!resolution?.costBasis || !resolution?.openDate) {
+        toast({
+          title: "Missing Information",
+          description: "Please enter cost basis and open date",
+          variant: "destructive",
+        });
+        return;
+      }
+      resolveOrphanMutation.mutate({
+        tradeId,
+        action: 'resolve',
+        costBasis: parseFloat(resolution.costBasis),
+        openDate: resolution.openDate,
+      });
+    } else {
+      resolveOrphanMutation.mutate({ tradeId, action: 'delete' });
+    }
+  };
 
   const handleFileDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -617,9 +691,27 @@ export default function SentinelImportPage() {
                                 <div className="text-lg font-bold text-green-500">{batch.totalTradesImported}</div>
                                 <div className="text-xs text-muted-foreground">trades imported</div>
                               </div>
-                              <Badge variant={batch.status === "COMPLETE" ? "default" : "destructive"}>
-                                {batch.status}
-                              </Badge>
+                              {batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 ? (
+                                <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {batch.orphanSellsCount} Orphans
+                                </Badge>
+                              ) : (
+                                <Badge variant={batch.status === "COMPLETE" ? "default" : "destructive"}>
+                                  {batch.status}
+                                </Badge>
+                              )}
+                              {batch.status === "NEEDS_REVIEW" && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => handleReviewOrphans(batch.batchId)}
+                                  className="text-yellow-500 border-yellow-500/50"
+                                  data-testid={`button-review-orphans-${batch.batchId}`}
+                                >
+                                  Review
+                                </Button>
+                              )}
                               <Button 
                                 variant="ghost" 
                                 size="icon"
@@ -847,6 +939,130 @@ export default function SentinelImportPage() {
               ) : (
                 <>Delete All Trades</>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showOrphanDialog} onOpenChange={(open) => {
+        setShowOrphanDialog(open);
+        if (!open) {
+          setSelectedOrphanBatchId(null);
+          setOrphanResolutions({});
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-yellow-500">
+              <AlertTriangle className="h-5 w-5" />
+              Missing Cost Basis - Orphan Sells
+            </DialogTitle>
+            <DialogDescription>
+              These sell transactions have no matching buy order in the imported data. 
+              This can happen when the buy was placed before the export period or in a different account.
+              You can either add the original purchase info or delete the orphan sell.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="flex-1 max-h-[50vh] pr-4">
+            {orphansLoading ? (
+              <div className="flex justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </div>
+            ) : orphanSells && orphanSells.length > 0 ? (
+              <div className="space-y-4">
+                {orphanSells.filter(o => o.orphanStatus === 'pending').map((orphan) => (
+                  <Card key={orphan.tradeId} className="border-yellow-500/30">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="font-mono font-bold text-lg">{orphan.ticker}</div>
+                          <Badge variant="secondary" className="gap-1">
+                            <ArrowDownRight className="h-3 w-3" />
+                            SELL
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {orphan.quantity.toFixed(3)} shares @ ${orphan.price.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Sold on {formatDate(orphan.tradeDate)}
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="space-y-2">
+                          <Label>Original Purchase Date</Label>
+                          <Input
+                            type="date"
+                            value={orphanResolutions[orphan.tradeId]?.openDate || ''}
+                            onChange={(e) => setOrphanResolutions(prev => ({
+                              ...prev,
+                              [orphan.tradeId]: { ...prev[orphan.tradeId], openDate: e.target.value }
+                            }))}
+                            data-testid={`input-open-date-${orphan.tradeId}`}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Cost Basis per Share</Label>
+                          <div className="relative">
+                            <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              className="pl-9"
+                              value={orphanResolutions[orphan.tradeId]?.costBasis || ''}
+                              onChange={(e) => setOrphanResolutions(prev => ({
+                                ...prev,
+                                [orphan.tradeId]: { ...prev[orphan.tradeId], costBasis: e.target.value }
+                              }))}
+                              data-testid={`input-cost-basis-${orphan.tradeId}`}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => handleResolveOrphan(orphan.tradeId, 'delete')}
+                          disabled={resolveOrphanMutation.isPending}
+                          data-testid={`button-delete-orphan-${orphan.tradeId}`}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Delete
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleResolveOrphan(orphan.tradeId, 'resolve')}
+                          disabled={resolveOrphanMutation.isPending}
+                          data-testid={`button-resolve-orphan-${orphan.tradeId}`}
+                        >
+                          {resolveOrphanMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <><Check className="h-4 w-4 mr-1" /> Save Cost Basis</>
+                          )}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Check className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <p>All orphan sells have been resolved!</p>
+              </div>
+            )}
+          </ScrollArea>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOrphanDialog(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
