@@ -8,6 +8,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
+import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
@@ -81,6 +82,13 @@ const closeTradeSchema = z.object({
   outcome: z.enum(["win", "loss", "breakeven"]),
   rulesFollowed: z.record(z.boolean()).optional(),
   notes: z.string().optional(),
+});
+
+const suggestSchema = z.object({
+  symbol: z.string().min(1).max(10),
+  direction: z.enum(["long", "short"]),
+  entryPrice: z.number().positive(),
+  setupType: z.string().optional(),
 });
 
 const watchlistSchema = z.object({
@@ -286,6 +294,33 @@ export function registerSentinelRoutes(app: Express): void {
       return res.status(401).json({ error: "User not found" });
     }
     res.json({ id: user.id, username: user.username, email: user.email });
+  });
+
+  app.post("/api/sentinel/suggest", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const data = suggestSchema.parse(req.body);
+      console.log("[Sentinel] Suggest request:", data.symbol, data.direction, "entry:", data.entryPrice);
+      
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      const accountSize = user?.accountSize || 100000;
+      
+      const request: SuggestRequest = {
+        symbol: data.symbol.toUpperCase(),
+        direction: data.direction,
+        entryPrice: data.entryPrice,
+        setupType: data.setupType,
+      };
+
+      const suggestions = await generateSuggestions(request, accountSize);
+      console.log("[Sentinel] Suggestions generated:", suggestions.stopSuggestions.length, "stops,", suggestions.targetSuggestions.length, "targets");
+      res.json(suggestions);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("[Sentinel] Suggest error:", error);
+      res.status(500).json({ error: "Failed to generate suggestions" });
+    }
   });
 
   app.post("/api/sentinel/evaluate", requireAuth, async (req: Request, res: Response) => {

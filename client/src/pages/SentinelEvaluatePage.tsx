@@ -117,6 +117,38 @@ interface TickerInfo {
   description: string;
 }
 
+interface StopSuggestion {
+  price: number;
+  label: string;
+  description: string;
+  riskPercent: number;
+  rank: number;
+}
+
+interface TargetSuggestion {
+  price: number;
+  label: string;
+  description: string;
+  rrRatio: number;
+  rank: number;
+}
+
+interface SuggestResponse {
+  symbol: string;
+  currentPrice: number;
+  direction: "long" | "short";
+  entryPrice: number;
+  stopSuggestions: StopSuggestion[];
+  targetSuggestions: TargetSuggestion[];
+  positionSizeSuggestion?: {
+    shares: number;
+    dollarRisk: number;
+    percentOfAccount: number;
+  };
+  technicalContext: string;
+  fetchedAt: Date;
+}
+
 const STOP_PRICE_CHOICES = [
   { value: "LOD_TODAY", label: "LOD Today" },
   { value: "LOD_YESTERDAY", label: "LOD Yesterday" },
@@ -194,6 +226,35 @@ export default function SentinelEvaluatePage() {
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [isPreloaded, setIsPreloaded] = useState(false);
   const [ruleChecklistExpanded, setRuleChecklistExpanded] = useState(false);
+  const [suggestions, setSuggestions] = useState<SuggestResponse | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+
+  // Fetch suggestions when symbol, direction, and entry are filled
+  useEffect(() => {
+    const entry = parseFloat(entryPrice);
+    if (debouncedSymbol && debouncedSymbol.length >= 1 && direction && entry > 0) {
+      setSuggestionsLoading(true);
+      apiRequest("POST", "/api/sentinel/suggest", {
+        symbol: debouncedSymbol.toUpperCase(),
+        direction,
+        entryPrice: entry,
+        setupType: setupType || undefined,
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          setSuggestions(data as SuggestResponse);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch suggestions:", err);
+          setSuggestions(null);
+        })
+        .finally(() => {
+          setSuggestionsLoading(false);
+        });
+    } else {
+      setSuggestions(null);
+    }
+  }, [debouncedSymbol, direction, entryPrice, setupType]);
 
   // Fetch available labels
   const labelsQuery = useQuery<{id: number; name: string; color: string; isAdminOnly: boolean}[]>({
@@ -622,6 +683,36 @@ export default function SentinelEvaluatePage() {
                       </SelectContent>
                     </Select>
                   )}
+                  
+                  {/* AI Stop Suggestions */}
+                  {stopPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.stopSuggestions.length > 0)) && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-3 h-3 text-amber-500" />
+                        <span className="text-xs text-muted-foreground">AI Suggestions</span>
+                        {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5" data-testid="stop-suggestions">
+                        {suggestions?.stopSuggestions.slice(0, 5).map((s, i) => (
+                          <Badge
+                            key={i}
+                            variant="outline"
+                            className="cursor-pointer text-xs hover:bg-red-500/20 border-red-500/30"
+                            onClick={() => {
+                              setStopPrice(s.price.toString());
+                              setStopPriceMode("amount");
+                            }}
+                            data-testid={`badge-stop-suggestion-${i}`}
+                          >
+                            <span className="font-medium">{s.label}</span>
+                            <span className="text-muted-foreground ml-1">${s.price}</span>
+                            <span className="text-red-400 ml-1">({s.riskPercent.toFixed(1)}%)</span>
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* Real-time risk calculation */}
                   {stopPriceMode === "amount" && stopPrice && entryPrice && (
                     <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-sm" data-testid="risk-calculation">
@@ -696,6 +787,35 @@ export default function SentinelEvaluatePage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  )}
+                  
+                  {/* AI Target Suggestions */}
+                  {targetPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Target className="w-3 h-3 text-green-500" />
+                        <span className="text-xs text-muted-foreground">AI Suggestions</span>
+                        {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5" data-testid="target-suggestions">
+                        {suggestions?.targetSuggestions.slice(0, 5).map((t, i) => (
+                          <Badge
+                            key={i}
+                            variant="outline"
+                            className="cursor-pointer text-xs hover:bg-green-500/20 border-green-500/30"
+                            onClick={() => {
+                              setTargetPrice(t.price.toString());
+                              setTargetPriceMode("amount");
+                            }}
+                            data-testid={`badge-target-suggestion-${i}`}
+                          >
+                            <span className="font-medium">{t.label}</span>
+                            <span className="text-muted-foreground ml-1">${t.price}</span>
+                            <span className="text-green-400 ml-1">({t.rrRatio}:1)</span>
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -781,7 +901,38 @@ export default function SentinelEvaluatePage() {
                     onChange={(e) => setPositionSize(e.target.value)}
                     placeholder={positionSizeUnit === "shares" ? "100" : "10000"}
                   />
+                  
+                  {/* AI Position Size Suggestion */}
+                  {suggestions?.positionSizeSuggestion && stopPrice && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <Zap className="w-3 h-3 text-amber-500" />
+                      <Badge
+                        variant="outline"
+                        className="cursor-pointer text-xs hover:bg-amber-500/20 border-amber-500/30"
+                        onClick={() => {
+                          setPositionSize(suggestions.positionSizeSuggestion!.shares.toString());
+                          setPositionSizeUnit("shares");
+                        }}
+                        data-testid="badge-position-suggestion"
+                      >
+                        <span className="font-medium">1% Risk:</span>
+                        <span className="ml-1">{suggestions.positionSizeSuggestion.shares} shares</span>
+                        <span className="text-muted-foreground ml-1">(${suggestions.positionSizeSuggestion.dollarRisk})</span>
+                      </Badge>
+                    </div>
+                  )}
                 </div>
+                
+                {/* Technical Context from AI */}
+                {suggestions?.technicalContext && (
+                  <div className="p-2 bg-blue-500/10 border border-blue-500/30 rounded text-xs text-muted-foreground" data-testid="technical-context">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Info className="w-3 h-3 text-blue-400" />
+                      <span className="text-blue-400 font-medium">Technical Context</span>
+                    </div>
+                    {suggestions.technicalContext}
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="thesis">Trade Thesis (optional)</Label>
