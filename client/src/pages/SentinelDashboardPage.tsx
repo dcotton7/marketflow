@@ -41,11 +41,19 @@ interface TradeWithEvaluation {
   createdAt: string;
   labels?: TradeLabel[];
   lotEntries?: LotEntry[]; // Order grid lot entries for FIFO tracking
+  source?: string; // 'hand' for manual entry, 'import' for CSV imports
+  importBatchId?: string; // UUID of the import batch if source is 'import'
   latestEvaluation?: {
     score: number;
     recommendation: string;
     riskFlags: string[];
   };
+}
+
+interface TradeSource {
+  id: string; // 'hand' or batchId UUID
+  name: string; // 'Hand Entered' or batch file name with date
+  count: number;
 }
 
 interface TradeEvent {
@@ -994,6 +1002,7 @@ export default function SentinelDashboardPage() {
   // State preservation keys
   const STORAGE_KEY_TAB = "sentinel_dashboard_active_tab";
   const STORAGE_KEY_LABEL = "sentinel_dashboard_label_filter";
+  const STORAGE_KEY_SOURCE = "sentinel_dashboard_source_filter";
   
   // Initialize activeTab from localStorage
   const [activeTab, setActiveTab] = useState(() => {
@@ -1008,6 +1017,13 @@ export default function SentinelDashboardPage() {
     const parsed = parseInt(saved, 10);
     return isNaN(parsed) ? null : parsed;
   });
+
+  // Initialize selectedSourceFilter from localStorage
+  const [selectedSourceFilter, setSelectedSourceFilter] = useState<string | null>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_SOURCE);
+    if (saved === null || saved === "null") return null;
+    return saved;
+  });
   
   // Persist activeTab to localStorage
   useEffect(() => {
@@ -1018,6 +1034,11 @@ export default function SentinelDashboardPage() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_LABEL, selectedLabelFilter === null ? "null" : String(selectedLabelFilter));
   }, [selectedLabelFilter]);
+
+  // Persist selectedSourceFilter to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_SOURCE, selectedSourceFilter === null ? "null" : selectedSourceFilter);
+  }, [selectedSourceFilter]);
 
   // Dialogs
   const [showAddWatchlist, setShowAddWatchlist] = useState(false);
@@ -1043,6 +1064,15 @@ export default function SentinelDashboardPage() {
   const [showCancelTrade, setShowCancelTrade] = useState(false);
   const [showAddTrade, setShowAddTrade] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState<TradeWithEvaluation | null>(null);
+  
+  // Delete by Source dialog
+  const [showDeleteBySource, setShowDeleteBySource] = useState(false);
+  const [deleteSourceForm, setDeleteSourceForm] = useState({
+    sourceId: "", // 'hand' or batchId
+    dateFrom: "",
+    dateTo: "",
+    confirmText: "",
+  });
   
   // Add Trade form
   const [addTradeForm, setAddTradeForm] = useState({
@@ -1095,25 +1125,43 @@ export default function SentinelDashboardPage() {
     queryKey: ["/api/sentinel/labels"],
   });
 
-  // Filter trades by label - toggle mode (hidden labels are excluded)
-  const filterTradesByLabel = (trades: TradeWithEvaluation[] | undefined) => {
+  const { data: tradeSources = [] } = useQuery<TradeSource[]>({
+    queryKey: ["/api/sentinel/trades/sources"],
+  });
+
+  // Filter trades by label and source
+  const filterTrades = (trades: TradeWithEvaluation[] | undefined) => {
     if (!trades) return trades;
-    // If using single selection mode
+    
+    let filtered = trades;
+    
+    // Filter by source
+    if (selectedSourceFilter !== null) {
+      filtered = filtered.filter(trade => {
+        if (selectedSourceFilter === 'hand') {
+          return !trade.source || trade.source === 'hand';
+        }
+        return trade.importBatchId === selectedSourceFilter;
+      });
+    }
+    
+    // Filter by label - single selection mode
     if (selectedLabelFilter !== null) {
-      return trades.filter(trade => 
+      filtered = filtered.filter(trade => 
         trade.labels?.some(label => label.id === selectedLabelFilter)
       );
     }
     // Toggle mode - hide trades that have ONLY hidden labels
-    if (hiddenLabelIds.size > 0) {
-      return trades.filter(trade => {
+    else if (hiddenLabelIds.size > 0) {
+      filtered = filtered.filter(trade => {
         // If trade has no labels, show it
         if (!trade.labels || trade.labels.length === 0) return true;
         // If ANY label is visible (not hidden), show the trade
         return trade.labels.some(label => !hiddenLabelIds.has(label.id));
       });
     }
-    return trades;
+    
+    return filtered;
   };
   
   // Toggle a label on/off
@@ -1130,8 +1178,8 @@ export default function SentinelDashboardPage() {
     setSelectedLabelFilter(null); // Switch to toggle mode
   };
 
-  const filteredConsidering = filterTradesByLabel(dashboard?.considering);
-  const filteredActive = filterTradesByLabel(dashboard?.active);
+  const filteredConsidering = filterTrades(dashboard?.considering);
+  const filteredActive = filterTrades(dashboard?.active);
 
   // Mutations
   const addWatchlistMutation = useMutation({
@@ -1153,6 +1201,34 @@ export default function SentinelDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
       toast({ title: "Removed from watchlist" });
+    },
+  });
+
+  const deleteBySourceMutation = useMutation({
+    mutationFn: async (data: { sourceId: string; dateFrom?: string; dateTo?: string; confirmDelete: string }) => {
+      const response = await apiRequest("DELETE", "/api/sentinel/trades/by-source", data);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Delete failed with status ${response.status}`);
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades/sources"] });
+      setShowDeleteBySource(false);
+      setDeleteSourceForm({ sourceId: "", dateFrom: "", dateTo: "", confirmText: "" });
+      toast({ 
+        title: "Trades Deleted", 
+        description: `Successfully deleted ${data.deleted} trades.`
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Delete Failed", 
+        description: error?.message || "Could not delete trades. Please try again.",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -1639,41 +1715,78 @@ export default function SentinelDashboardPage() {
           </TabsList>
 
           <TabsContent value="considering" className="space-y-4">
-            {/* Label filter grid */}
-            {allLabels.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4" data-testid="label-filter-grid">
-                <Button
-                  size="sm"
-                  variant={selectedLabelFilter === null ? "default" : "outline"}
-                  onClick={() => setSelectedLabelFilter(null)}
-                  data-testid="label-filter-all"
-                >
-                  All
-                </Button>
-                {allLabels.map((label) => (
-                  <Button
-                    key={label.id}
-                    size="sm"
-                    variant={selectedLabelFilter === label.id ? "default" : "outline"}
-                    onClick={() => setSelectedLabelFilter(label.id)}
-                    className="gap-1"
-                    data-testid={`label-filter-${label.id}`}
+            {/* Filter bar - Source and Labels */}
+            <div className="flex flex-col gap-3">
+              {/* Source filter dropdown */}
+              {tradeSources.length > 0 && (
+                <div className="flex items-center gap-2" data-testid="source-filter">
+                  <Label className="text-sm font-medium">Source:</Label>
+                  <Select
+                    value={selectedSourceFilter || "all"}
+                    onValueChange={(value) => setSelectedSourceFilter(value === "all" ? null : value)}
                   >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: label.color }}
-                    />
-                    {label.name}
-                    {label.isAdminOnly && <span className="text-xs opacity-70">(admin)</span>}
+                    <SelectTrigger className="w-[220px]" data-testid="source-filter-trigger">
+                      <SelectValue placeholder="All Sources" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all" data-testid="source-filter-all">
+                        All Sources ({tradeSources.reduce((sum, s) => sum + s.count, 0)})
+                      </SelectItem>
+                      {tradeSources.map((source) => (
+                        <SelectItem key={source.id} value={source.id} data-testid={`source-filter-${source.id}`}>
+                          {source.name} ({source.count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setShowDeleteBySource(true)}
+                    data-testid="button-delete-by-source"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete
                   </Button>
-                ))}
-              </div>
-            )}
+                </div>
+              )}
+              
+              {/* Label filter grid */}
+              {allLabels.length > 0 && (
+                <div className="flex flex-wrap gap-2" data-testid="label-filter-grid">
+                  <Button
+                    size="sm"
+                    variant={selectedLabelFilter === null ? "default" : "outline"}
+                    onClick={() => setSelectedLabelFilter(null)}
+                    data-testid="label-filter-all"
+                  >
+                    All Labels
+                  </Button>
+                  {allLabels.map((label) => (
+                    <Button
+                      key={label.id}
+                      size="sm"
+                      variant={selectedLabelFilter === label.id ? "default" : "outline"}
+                      onClick={() => setSelectedLabelFilter(label.id)}
+                      className="gap-1"
+                      data-testid={`label-filter-${label.id}`}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: label.color }}
+                      />
+                      {label.name}
+                      {label.isAdminOnly && <span className="text-xs opacity-70">(admin)</span>}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
             {filteredConsidering?.length === 0 ? (
               <Card>
                 <CardContent className="p-6 text-center text-muted-foreground">
-                  {selectedLabelFilter !== null
-                    ? "No trades with this label."
+                  {selectedLabelFilter !== null || selectedSourceFilter !== null
+                    ? "No trades matching the selected filters."
                     : "No trades under consideration. Click \"New Evaluation\" to get started."}
                 </CardContent>
               </Card>
@@ -1694,40 +1807,77 @@ export default function SentinelDashboardPage() {
           </TabsContent>
 
           <TabsContent value="active" className="space-y-4">
-            {/* Label filter grid for active trades */}
-            {allLabels.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4" data-testid="label-filter-grid-active">
-                <Button
-                  size="sm"
-                  variant={selectedLabelFilter === null ? "default" : "outline"}
-                  onClick={() => setSelectedLabelFilter(null)}
-                  data-testid="label-filter-all-active"
-                >
-                  All
-                </Button>
-                {allLabels.map((label) => (
-                  <Button
-                    key={label.id}
-                    size="sm"
-                    variant={selectedLabelFilter === label.id ? "default" : "outline"}
-                    onClick={() => setSelectedLabelFilter(label.id)}
-                    className="gap-1"
-                    data-testid={`label-filter-active-${label.id}`}
+            {/* Filter bar - Source and Labels */}
+            <div className="flex flex-col gap-3">
+              {/* Source filter dropdown */}
+              {tradeSources.length > 0 && (
+                <div className="flex items-center gap-2" data-testid="source-filter-active">
+                  <Label className="text-sm font-medium">Source:</Label>
+                  <Select
+                    value={selectedSourceFilter || "all"}
+                    onValueChange={(value) => setSelectedSourceFilter(value === "all" ? null : value)}
                   >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: label.color }}
-                    />
-                    {label.name}
+                    <SelectTrigger className="w-[220px]" data-testid="source-filter-trigger-active">
+                      <SelectValue placeholder="All Sources" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all" data-testid="source-filter-all-active">
+                        All Sources ({tradeSources.reduce((sum, s) => sum + s.count, 0)})
+                      </SelectItem>
+                      {tradeSources.map((source) => (
+                        <SelectItem key={source.id} value={source.id} data-testid={`source-filter-active-${source.id}`}>
+                          {source.name} ({source.count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setShowDeleteBySource(true)}
+                    data-testid="button-delete-by-source-active"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Delete
                   </Button>
-                ))}
-              </div>
-            )}
+                </div>
+              )}
+              
+              {/* Label filter grid for active trades */}
+              {allLabels.length > 0 && (
+                <div className="flex flex-wrap gap-2" data-testid="label-filter-grid-active">
+                  <Button
+                    size="sm"
+                    variant={selectedLabelFilter === null ? "default" : "outline"}
+                    onClick={() => setSelectedLabelFilter(null)}
+                    data-testid="label-filter-all-active"
+                  >
+                    All Labels
+                  </Button>
+                  {allLabels.map((label) => (
+                    <Button
+                      key={label.id}
+                      size="sm"
+                      variant={selectedLabelFilter === label.id ? "default" : "outline"}
+                      onClick={() => setSelectedLabelFilter(label.id)}
+                      className="gap-1"
+                      data-testid={`label-filter-active-${label.id}`}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: label.color }}
+                      />
+                      {label.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
             {filteredActive?.length === 0 ? (
               <Card>
                 <CardContent className="p-6 text-center text-muted-foreground">
-                  {selectedLabelFilter !== null
-                    ? "No active trades with this label."
+                  {selectedLabelFilter !== null || selectedSourceFilter !== null
+                    ? "No active trades matching the selected filters."
                     : "No active trades. Commit a trade to start tracking it."}
                 </CardContent>
               </Card>
@@ -2638,6 +2788,93 @@ export default function SentinelDashboardPage() {
             <Button variant="outline" onClick={() => setShowCancelTrade(false)}>Keep Trade</Button>
             <Button variant="destructive" onClick={confirmDeleteTrade} disabled={deleteTradeMutation.isPending} data-testid="button-confirm-delete">
               {deleteTradeMutation.isPending ? "Deleting..." : "Delete Trade"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete by Source Dialog */}
+      <Dialog open={showDeleteBySource} onOpenChange={setShowDeleteBySource}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Trades by Source
+            </DialogTitle>
+            <DialogDescription>
+              Delete trades from a specific source. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Source</Label>
+              <Select
+                value={deleteSourceForm.sourceId}
+                onValueChange={(v) => setDeleteSourceForm({ ...deleteSourceForm, sourceId: v })}
+              >
+                <SelectTrigger data-testid="delete-source-select">
+                  <SelectValue placeholder="Select a source..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {tradeSources.map((source) => (
+                    <SelectItem key={source.id} value={source.id}>
+                      {source.name} ({source.count} trades)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="delete-date-from">From Date (optional)</Label>
+                <Input
+                  id="delete-date-from"
+                  type="date"
+                  value={deleteSourceForm.dateFrom}
+                  onChange={(e) => setDeleteSourceForm({ ...deleteSourceForm, dateFrom: e.target.value })}
+                  data-testid="delete-date-from"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="delete-date-to">To Date (optional)</Label>
+                <Input
+                  id="delete-date-to"
+                  type="date"
+                  value={deleteSourceForm.dateTo}
+                  onChange={(e) => setDeleteSourceForm({ ...deleteSourceForm, dateTo: e.target.value })}
+                  data-testid="delete-date-to"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirm">Type "DELETE" to confirm</Label>
+              <Input
+                id="delete-confirm"
+                placeholder="DELETE"
+                value={deleteSourceForm.confirmText}
+                onChange={(e) => setDeleteSourceForm({ ...deleteSourceForm, confirmText: e.target.value })}
+                data-testid="delete-confirm-input"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteBySource(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteBySourceMutation.mutate({
+                sourceId: deleteSourceForm.sourceId,
+                dateFrom: deleteSourceForm.dateFrom || undefined,
+                dateTo: deleteSourceForm.dateTo || undefined,
+                confirmDelete: deleteSourceForm.confirmText,
+              })}
+              disabled={
+                !deleteSourceForm.sourceId ||
+                deleteSourceForm.confirmText !== "DELETE" ||
+                deleteBySourceMutation.isPending
+              }
+              data-testid="button-confirm-delete-source"
+            >
+              {deleteBySourceMutation.isPending ? "Deleting..." : "Delete Trades"}
             </Button>
           </DialogFooter>
         </DialogContent>

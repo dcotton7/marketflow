@@ -123,6 +123,8 @@ export const sentinelTrades = pgTable("sentinel_trades", {
     buySell: "buy" | "sell";
     price: string;
   }>>(), // Order grid lot entries for FIFO tracking
+  source: text("source").default("hand"), // 'hand' for manual entry, 'import' for CSV imports
+  importBatchId: text("import_batch_id"), // UUID of the import batch if source is 'import'
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

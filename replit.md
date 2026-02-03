@@ -106,6 +106,16 @@ structural (formerly auto_reject), entry, exit, profit_taking, stop_loss, ma_str
 - **Label Filtering**: Clickable label filter grid on dashboard to filter trades by label
 - Labels are displayed on trade cards in the dashboard
 
+### Trade Source Filtering
+- **Source Tracking**: Each trade has `source` ('hand' for manual, 'import' for CSV) and optional `importBatchId`
+- **Source Filter**: Dropdown on Considering and Active tabs showing "Hand Entered" and import batch names with dates
+- **Delete by Source**: Dialog allows deleting trades by source with optional date range filter
+  - Requires typing "DELETE" to confirm
+  - Cascades deletions to labels, evaluations, and events in a transaction
+- **API Endpoints**:
+  - GET /api/sentinel/trades/sources - Returns trade sources with counts
+  - DELETE /api/sentinel/trades/by-source - Deletes trades by source with Zod validation
+
 ### Interactive AI Suggestions
 - **Auto-Suggest Endpoint**: POST /api/sentinel/suggest returns stop/target suggestions based on technical data
 - **Stop Suggestions**: LOD, previous day low, key SMAs (5/10/21/50/200), ATR-based levels, ranked by confidence

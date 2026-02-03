@@ -4,7 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import OpenAI from "openai";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
@@ -564,6 +564,161 @@ export function registerSentinelRoutes(app: Express): void {
     } catch (error) {
       console.error("Dashboard error:", error);
       res.status(500).json({ error: "Failed to load dashboard" });
+    }
+  });
+
+  // Get trade sources for filtering (hand entered + import batches)
+  app.get("/api/sentinel/trades/sources", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Get all trades to count by source
+      const trades = await db!.select({
+        source: sentinelTrades.source,
+        importBatchId: sentinelTrades.importBatchId,
+      }).from(sentinelTrades).where(eq(sentinelTrades.userId, userId));
+      
+      // Count hand-entered trades
+      const handCount = trades.filter(t => !t.source || t.source === 'hand').length;
+      
+      // Get unique import batch IDs
+      const importBatchIds = [...new Set(trades.filter(t => t.source === 'import' && t.importBatchId).map(t => t.importBatchId))];
+      
+      // Get batch details from sentinel_import_batches
+      const sources: Array<{ id: string; name: string; count: number }> = [];
+      
+      // Always include "Hand" source
+      sources.push({ id: 'hand', name: 'Hand Entered', count: handCount });
+      
+      // Add import batch sources
+      if (importBatchIds.length > 0) {
+        const batches = await db!.select({
+          batchId: sentinelImportBatches.batchId,
+          fileName: sentinelImportBatches.fileName,
+          createdAt: sentinelImportBatches.createdAt,
+        }).from(sentinelImportBatches).where(
+          and(
+            eq(sentinelImportBatches.userId, userId),
+            inArray(sentinelImportBatches.batchId, importBatchIds.filter((id): id is string => id !== null))
+          )
+        );
+        
+        for (const batch of batches) {
+          const count = trades.filter(t => t.importBatchId === batch.batchId).length;
+          const dateStr = batch.createdAt ? new Date(batch.createdAt).toLocaleDateString() : '';
+          sources.push({
+            id: batch.batchId,
+            name: `${batch.fileName}${dateStr ? ` (${dateStr})` : ''}`,
+            count,
+          });
+        }
+      }
+      
+      res.json(sources);
+    } catch (error) {
+      console.error("Get trade sources error:", error);
+      res.status(500).json({ error: "Failed to get trade sources" });
+    }
+  });
+
+  // Delete trades by source (with optional date range)
+  const dateStringSchema = z.string().refine((val) => {
+    if (!val) return true;
+    const date = new Date(val);
+    return !isNaN(date.getTime());
+  }, { message: "Invalid date format" });
+  
+  const deleteBySourceSchema = z.object({
+    sourceId: z.string().min(1, "sourceId is required"),
+    dateFrom: dateStringSchema.optional(),
+    dateTo: dateStringSchema.optional(),
+    confirmDelete: z.literal("DELETE"),
+  });
+
+  app.delete("/api/sentinel/trades/by-source", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Validate input
+      const parseResult = deleteBySourceSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Validation failed",
+          details: parseResult.error.errors
+        });
+      }
+      
+      const { sourceId, dateFrom, dateTo } = parseResult.data;
+
+      // Use transaction for cascading deletions
+      const result = await db!.transaction(async (tx) => {
+        // Build query conditions
+        const conditions = [eq(sentinelTrades.userId, userId)];
+        
+        if (sourceId === 'hand') {
+          // Delete hand-entered trades (source is null or 'hand')
+          conditions.push(
+            sql`(${sentinelTrades.source} IS NULL OR ${sentinelTrades.source} = 'hand')`
+          );
+        } else {
+          // Delete trades from a specific import batch
+          conditions.push(eq(sentinelTrades.importBatchId, sourceId));
+        }
+
+        // Add date range filters if provided
+        if (dateFrom) {
+          const fromDate = new Date(dateFrom);
+          if (!isNaN(fromDate.getTime())) {
+            conditions.push(sql`${sentinelTrades.createdAt} >= ${fromDate}`);
+          }
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          if (!isNaN(toDate.getTime())) {
+            toDate.setHours(23, 59, 59, 999); // End of day
+            conditions.push(sql`${sentinelTrades.createdAt} <= ${toDate}`);
+          }
+        }
+
+        // Get trade IDs that will be deleted
+        const tradesToDelete = await tx.select({ id: sentinelTrades.id })
+          .from(sentinelTrades)
+          .where(and(...conditions));
+        
+        const tradeIds = tradesToDelete.map(t => t.id);
+        
+        if (tradeIds.length === 0) {
+          return { deleted: 0 };
+        }
+
+        // Delete related records first (cascade)
+        // Delete trade-to-label associations
+        await tx.delete(sentinelTradeToLabels)
+          .where(inArray(sentinelTradeToLabels.tradeId, tradeIds));
+        
+        // Delete evaluations
+        await tx.delete(sentinelEvaluations)
+          .where(inArray(sentinelEvaluations.tradeId, tradeIds));
+        
+        // Delete events
+        await tx.delete(sentinelEvents)
+          .where(inArray(sentinelEvents.tradeId, tradeIds));
+        
+        // Finally delete the trades
+        const deletedTrades = await tx.delete(sentinelTrades)
+          .where(and(...conditions))
+          .returning({ id: sentinelTrades.id });
+
+        return { deleted: deletedTrades.length };
+      });
+
+      res.json({ 
+        success: true,
+        deleted: result.deleted
+      });
+    } catch (error) {
+      console.error("Delete trades by source error:", error);
+      res.status(500).json({ error: "Failed to delete trades" });
     }
   });
 
