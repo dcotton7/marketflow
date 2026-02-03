@@ -156,7 +156,9 @@ interface FifoResult {
   totalRemaining: number;
   avgCostBasis: number;
   direction: 'LONG' | 'SHORT' | 'FLAT';
-  realizedProfit: number; // Total profit/loss from closed lots
+  realizedProfit: number; // Total profit/loss from closed lots (sum of each sell's P&L)
+  // Per-lot open P&L calculation function - takes current price, returns sum of (currentPrice - lotCost) × lotRemaining
+  calculateOpenPnL: (currentPrice: number, isLong: boolean) => number;
 }
 
 function calculateFifoTracking(entries: LotEntry[]): FifoResult {
@@ -229,6 +231,21 @@ function calculateFifoTracking(entries: LotEntry[]): FifoResult {
   });
   const avgCostBasis = totalRemaining > 0 ? totalCost / totalRemaining : 0;
   
+  // Per-lot Open PnL calculation: sum of (currentPrice - lotCost) × lotRemaining for each lot
+  const calculateOpenPnL = (currentPrice: number, isLong: boolean): number => {
+    let openPnL = 0;
+    for (const lot of buyLots) {
+      if (lot.remainingQty > 0) {
+        // For each lot still open: (Current Price - Lot Cost) × Remaining Qty
+        const lotPnL = isLong
+          ? (currentPrice - lot.price) * lot.remainingQty
+          : (lot.price - currentPrice) * lot.remainingQty;
+        openPnL += lotPnL;
+      }
+    }
+    return openPnL;
+  };
+
   return {
     buyLots,
     sells,
@@ -236,6 +253,7 @@ function calculateFifoTracking(entries: LotEntry[]): FifoResult {
     avgCostBasis,
     direction: totalRemaining > 0 ? 'LONG' : totalRemaining < 0 ? 'SHORT' : 'FLAT',
     realizedProfit,
+    calculateOpenPnL,
   };
 }
 
@@ -537,13 +555,11 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
   
   const isLongDirection = trade.direction === "long";
   
-  // Open PnL (unrealized) - uses FIFO avg cost basis and current position
-  // Formula: (Current Price - Avg Cost Basis) × Remaining Shares (for long)
+  // Open PnL (unrealized) - per-lot calculation: sum of (Current Price - Lot Cost) × Lot Remaining for each lot
   let openPnL: number | undefined = undefined;
   if (trade.status !== "closed" && fifoData && fifoData.totalRemaining > 0) {
-    openPnL = isLongDirection
-      ? (currentPrice - fifoData.avgCostBasis) * fifoData.totalRemaining
-      : (fifoData.avgCostBasis - currentPrice) * fifoData.totalRemaining;
+    // Use per-lot calculation instead of avg cost basis
+    openPnL = fifoData.calculateOpenPnL(currentPrice, isLongDirection);
   } else if (trade.status !== "closed" && trade.positionSize && !fifoData) {
     // Fallback if no lot entries: use entry price
     openPnL = isLongDirection
@@ -551,7 +567,7 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
       : (trade.entryPrice - currentPrice) * trade.positionSize;
   }
   
-  // Profit Closed (realized) - from FIFO matched closed lots
+  // Profit Closed (realized) - sum of each sell's P&L: (Sell Price - Buy Lot Cost) × Qty
   // For active trades with sells, show realized profit from partial closes
   // For fully closed trades, show actualPnL or FIFO realized profit
   let profitClosed: number | undefined = undefined;
