@@ -1112,11 +1112,17 @@ export default function SentinelEvaluatePage() {
                             <p className="text-xs text-white/60 mb-1">Debug Info - Input Values:</p>
                             <div className="text-xs text-white/50 font-mono space-y-0.5">
                               <p>Entry: ${parseFloat(entryPrice).toFixed(2) || "—"} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
-                              <p>Stop: {stopPriceMode === "amount" ? `$${parseFloat(stopPrice).toFixed(2)}` : `[${stopPriceChoice || "none"}] - resolved by AI`}</p>
+                              <p>Stop: {stopPriceMode === "amount" 
+                                ? `$${parseFloat(stopPrice).toFixed(2)}` 
+                                : `[${stopPriceChoice || "none"}] → ${result.evaluation.planSummary?.stop || "pending"}`}</p>
                               <p>Shares: {positionSize || "—"} {positionSizeUnit}</p>
-                              <p>First Trim: {targetPriceMode === "amount" ? `$${parseFloat(targetPrice).toFixed(2) || "—"}` : `[${targetPriceChoice || "none"}] - resolved by AI`}</p>
-                              <p>Target: {targetProfitMode === "amount" ? `$${parseFloat(targetProfitPrice).toFixed(2) || "—"}` : `[${targetProfitChoice || "none"}] - resolved by AI`}</p>
-                              <p className="text-white/40 italic">Technical levels resolved by AI - see server values above</p>
+                              <p>First Trim: {targetPriceMode === "amount" 
+                                ? `$${parseFloat(targetPrice).toFixed(2) || "—"}` 
+                                : `[${targetPriceChoice || "none"}] → ${result.evaluation.planSummary?.firstTrim || "pending"}`}</p>
+                              <p>Target: {targetProfitMode === "amount" 
+                                ? `$${parseFloat(targetProfitPrice).toFixed(2) || "—"}` 
+                                : `[${targetProfitChoice || "none"}] → ${result.evaluation.planSummary?.target || "pending"}`}</p>
+                              <p className="text-white/40 italic">Technical levels resolved by AI from your selections</p>
                             </div>
                           </div>
                         )}
