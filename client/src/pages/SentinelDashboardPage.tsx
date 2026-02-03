@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -130,10 +130,222 @@ function calculateRunningTotal(entries: LotEntry[]): number {
   }, 0);
 }
 
+// FIFO lot tracking - track remaining shares per buy lot and which sells depleted them
+interface FifoLotInfo {
+  lotId: string;
+  originalQty: number;
+  remainingQty: number;
+  price: number;
+  dateTime: string;
+  depleted: boolean;
+}
+
+interface FifoSellInfo {
+  sellId: string;
+  qty: number;
+  price: number;
+  dateTime: string;
+  depletedFrom: { lotId: string; qtyTaken: number }[];
+}
+
+interface FifoResult {
+  buyLots: FifoLotInfo[];
+  sells: FifoSellInfo[];
+  totalRemaining: number;
+  avgCostBasis: number;
+  direction: 'LONG' | 'SHORT' | 'FLAT';
+}
+
+function calculateFifoTracking(entries: LotEntry[]): FifoResult {
+  // Sort entries by dateTime chronologically
+  const sortedEntries = [...entries]
+    .filter(e => e.dateTime && e.qty)
+    .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+  
+  const buyLots: FifoLotInfo[] = [];
+  const sells: FifoSellInfo[] = [];
+  
+  // First pass: identify all buy lots
+  sortedEntries.forEach(entry => {
+    if (entry.buySell === 'buy') {
+      buyLots.push({
+        lotId: entry.id,
+        originalQty: parseInt(entry.qty) || 0,
+        remainingQty: parseInt(entry.qty) || 0,
+        price: parseFloat(entry.price) || 0,
+        dateTime: entry.dateTime,
+        depleted: false,
+      });
+    }
+  });
+  
+  // Second pass: apply sells using FIFO
+  sortedEntries.forEach(entry => {
+    if (entry.buySell === 'sell') {
+      let remainingToSell = parseInt(entry.qty) || 0;
+      const sellInfo: FifoSellInfo = {
+        sellId: entry.id,
+        qty: remainingToSell,
+        price: parseFloat(entry.price) || 0,
+        dateTime: entry.dateTime,
+        depletedFrom: [],
+      };
+      
+      // Apply FIFO - decrement from oldest lots first
+      for (const lot of buyLots) {
+        if (remainingToSell <= 0) break;
+        if (lot.remainingQty > 0) {
+          const qtyTaken = Math.min(lot.remainingQty, remainingToSell);
+          lot.remainingQty -= qtyTaken;
+          remainingToSell -= qtyTaken;
+          sellInfo.depletedFrom.push({ lotId: lot.lotId, qtyTaken });
+          if (lot.remainingQty === 0) {
+            lot.depleted = true;
+          }
+        }
+      }
+      
+      sells.push(sellInfo);
+    }
+  });
+  
+  // Calculate final position
+  const totalRemaining = buyLots.reduce((sum, lot) => sum + lot.remainingQty, 0);
+  
+  // Calculate weighted average cost basis of remaining shares
+  let totalCost = 0;
+  buyLots.forEach(lot => {
+    totalCost += lot.remainingQty * lot.price;
+  });
+  const avgCostBasis = totalRemaining > 0 ? totalCost / totalRemaining : 0;
+  
+  return {
+    buyLots,
+    sells,
+    totalRemaining,
+    avgCostBasis,
+    direction: totalRemaining > 0 ? 'LONG' : totalRemaining < 0 ? 'SHORT' : 'FLAT',
+  };
+}
+
 function getScoreColor(score: number): string {
   if (score >= 70) return "text-green-500";
   if (score >= 50) return "text-yellow-500";
   return "text-red-500";
+}
+
+// Inline editable price row component for click-to-edit
+interface EditablePriceRowProps {
+  label: string;
+  icon: typeof XCircle;
+  value: number | null | undefined;
+  distance: number | null;
+  isAlert?: boolean;
+  alertColor?: "red" | "green" | "yellow";
+  onSave: (value: number) => void;
+  testId: string;
+}
+
+function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false, alertColor = "red", onSave, testId }: EditablePriceRowProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value?.toFixed(2) || "");
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      const numValue = parseFloat(editValue);
+      if (!isNaN(numValue) && numValue > 0) {
+        onSave(numValue);
+      }
+      setIsEditing(false);
+    } else if (e.key === "Escape") {
+      setEditValue(value?.toFixed(2) || "");
+      setIsEditing(false);
+    }
+  };
+  
+  const handleSave = () => {
+    const numValue = parseFloat(editValue);
+    if (!isNaN(numValue) && numValue > 0) {
+      onSave(numValue);
+    }
+    setIsEditing(false);
+  };
+  
+  const handleCancel = () => {
+    setEditValue(value?.toFixed(2) || "");
+    setIsEditing(false);
+  };
+  
+  const alertBg = alertColor === "red" ? "bg-red-500/10" : alertColor === "green" ? "bg-green-500/10" : "bg-yellow-500/10";
+  const alertText = alertColor === "red" ? "text-red-500" : alertColor === "green" ? "text-green-500" : "text-yellow-500";
+  
+  return (
+    <div 
+      className={`flex items-center justify-between px-2 py-1 rounded ${isAlert ? alertBg : "bg-muted/30"}`} 
+      data-testid={testId}
+    >
+      <div className="flex items-center gap-1.5 flex-1">
+        <Icon className={`w-3 h-3 ${isAlert ? alertText : "text-muted-foreground"}`} />
+        <span className={isAlert ? `${alertText} font-medium` : "text-muted-foreground"}>{label}</span>
+        
+        {isEditing ? (
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={inputRef}
+              type="number"
+              step="0.01"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-20 h-5 px-1 text-xs bg-background border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+              data-testid={`${testId}-input`}
+            />
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleSave(); }}
+              className="p-0.5 text-green-500 hover:text-green-600"
+              data-testid={`${testId}-save`}
+            >
+              <Check className="w-3 h-3" />
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); handleCancel(); }}
+              className="p-0.5 text-red-500 hover:text-red-600"
+              data-testid={`${testId}-cancel`}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        ) : (
+          <span 
+            className="text-muted-foreground cursor-pointer hover:text-foreground hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditValue(value?.toFixed(2) || "");
+              setIsEditing(true);
+            }}
+            data-testid={`${testId}-value`}
+          >
+            {value ? `$${value.toFixed(2)}` : "Set"}
+          </span>
+        )}
+      </div>
+      
+      {distance !== null && !isEditing && (
+        <span className={`font-mono ${isAlert ? `${alertText} font-bold` : "text-muted-foreground"}`}>
+          {distance > 0 ? "+" : ""}{distance.toFixed(1)}%
+        </span>
+      )}
+    </div>
+  );
 }
 
 function getShortRiskFlag(flag: string): { short: string; full: string } {
@@ -238,9 +450,10 @@ interface TradeCardProps {
   onEdit?: (trade: TradeWithEvaluation) => void;
   onClose?: (trade: TradeWithEvaluation) => void;
   onCancel?: (trade: TradeWithEvaluation) => void;
+  onPriceUpdate?: (tradeId: number, field: "stopPrice" | "targetPrice", value: number) => void;
 }
 
-function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: TradeCardProps) {
+function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPriceUpdate }: TradeCardProps) {
   const [, setLocation] = useLocation();
   
   const handleOpenIvyAI = (e: React.MouseEvent) => {
@@ -304,11 +517,11 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
 
   return (
     <Card 
-      className={`hover-elevate cursor-pointer relative ${nearStop ? "ring-2 ring-red-500" : nearTarget ? "ring-2 ring-green-500" : ""}`}
+      className={`cursor-pointer relative overflow-hidden ${nearStop ? "ring-2 ring-red-500" : nearTarget ? "ring-2 ring-green-500" : ""}`}
       data-testid={`card-trade-${trade.id}`}
       onClick={handleCardClick}
     >
-      <CardContent className="p-4 pb-10">
+      <CardContent className="p-4 pb-10 relative">
         {/* Alert banners */}
         {nearTarget && (
           <div className="absolute top-0 left-0 right-0 bg-green-500/20 text-green-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-target-${trade.id}`}>
@@ -362,23 +575,21 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
           </div>
         )}
 
-        {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance */}
+        {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
         <div className="text-xs space-y-1.5 mb-2">
-          {/* Stop Loss */}
-          {trade.stopPrice && stopDistance !== null && (
-            <div className={`flex items-center justify-between px-2 py-1 rounded ${nearStop ? "bg-red-500/10" : "bg-muted/30"}`} data-testid={`monitor-stop-${trade.id}`}>
-              <div className="flex items-center gap-1.5">
-                <XCircle className={`w-3 h-3 ${nearStop ? "text-red-500" : "text-muted-foreground"}`} />
-                <span className={nearStop ? "text-red-500 font-medium" : "text-muted-foreground"}>STOP</span>
-                <span className="text-muted-foreground">${trade.stopPrice.toFixed(2)}</span>
-              </div>
-              <span className={`font-mono ${nearStop ? "text-red-500 font-bold" : "text-muted-foreground"}`}>
-                {stopDistance > 0 ? "+" : ""}{stopDistance.toFixed(1)}%
-              </span>
-            </div>
-          )}
+          {/* Stop Loss - Always shown */}
+          <EditablePriceRow
+            label="STOP"
+            icon={XCircle}
+            value={trade.stopPrice}
+            distance={stopDistance}
+            isAlert={nearStop}
+            alertColor="red"
+            onSave={(value) => onPriceUpdate?.(trade.id, "stopPrice", value)}
+            testId={`monitor-stop-${trade.id}`}
+          />
           
-          {/* Partial Profit (50% to target) */}
+          {/* Partial Profit (calculated from stop and target) - Display only, not editable */}
           {partialProfitPrice && partialDistance !== null && (
             <div className="flex items-center justify-between px-2 py-1 rounded bg-muted/30" data-testid={`monitor-partial-${trade.id}`}>
               <div className="flex items-center gap-1.5">
@@ -392,19 +603,17 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
             </div>
           )}
           
-          {/* Profit Target */}
-          {trade.targetPrice && targetDistance !== null && (
-            <div className={`flex items-center justify-between px-2 py-1 rounded ${nearTarget ? "bg-green-500/10" : "bg-muted/30"}`} data-testid={`monitor-target-${trade.id}`}>
-              <div className="flex items-center gap-1.5">
-                <Target className={`w-3 h-3 ${nearTarget ? "text-green-500" : "text-muted-foreground"}`} />
-                <span className={nearTarget ? "text-green-500 font-medium" : "text-muted-foreground"}>TARGET</span>
-                <span className="text-muted-foreground">${trade.targetPrice.toFixed(2)}</span>
-              </div>
-              <span className={`font-mono ${nearTarget ? "text-green-500 font-bold" : "text-muted-foreground"}`}>
-                {targetDistance > 0 ? "+" : ""}{targetDistance.toFixed(1)}%
-              </span>
-            </div>
-          )}
+          {/* Profit Target - Always shown */}
+          <EditablePriceRow
+            label="TARGET"
+            icon={Target}
+            value={trade.targetPrice}
+            distance={targetDistance}
+            isAlert={nearTarget}
+            alertColor="green"
+            onSave={(value) => onPriceUpdate?.(trade.id, "targetPrice", value)}
+            testId={`monitor-target-${trade.id}`}
+          />
         </div>
 
         {/* Risk flags with short names and tooltips */}
@@ -897,6 +1106,14 @@ export default function SentinelDashboardPage() {
   const runningTotal = calculateRunningTotal(lotEntries);
   const canCloseTrade = runningTotal === 0;
 
+  // Handler for inline price updates from trading cards
+  const handlePriceUpdate = (tradeId: number, field: "stopPrice" | "targetPrice", value: number) => {
+    updateTradeMutation.mutate({
+      tradeId,
+      [field]: value,
+    });
+  };
+
   // Trade action handlers
   const handleEditTrade = (trade: TradeWithEvaluation) => {
     setSelectedTrade(trade);
@@ -1175,6 +1392,7 @@ export default function SentinelDashboardPage() {
                     isActive={false}
                     onEdit={handleEditTrade}
                     onCancel={handleCancelTrade}
+                    onPriceUpdate={handlePriceUpdate}
                   />
                 ))}
               </div>
@@ -1228,6 +1446,7 @@ export default function SentinelDashboardPage() {
                     isActive={true}
                     onEdit={handleEditTrade}
                     onClose={handleCloseTrade}
+                    onPriceUpdate={handlePriceUpdate}
                     onCancel={handleCancelTrade}
                   />
                 ))}
@@ -1601,126 +1820,160 @@ export default function SentinelDashboardPage() {
             <DialogDescription>Update order entries - Running total must be zero to close trade</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* V2 Order Grid Table */}
-            <div className="border rounded-md overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">Transaction Date/Time</th>
-                    <th className="px-3 py-2 text-left font-medium">QTY</th>
-                    <th className="px-3 py-2 text-left font-medium">BUY/SELL</th>
-                    <th className="px-3 py-2 text-left font-medium">Cost Basis / Sell Price</th>
-                    <th className="px-3 py-2 text-left font-medium">Running Total</th>
-                    <th className="px-2 py-2 w-16"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lotEntries.map((lot, index) => {
-                    // Calculate running total up to this row
-                    const runningTotalAtRow = lotEntries.slice(0, index + 1).reduce((total, entry) => {
-                      const qty = parseInt(entry.qty) || 0;
-                      return entry.buySell === "buy" ? total + qty : total - qty;
-                    }, 0);
-                    
-                    return (
-                      <tr key={lot.id} className="border-t">
-                        <td className="px-2 py-1">
-                          <Input
-                            type="datetime-local"
-                            value={lot.dateTime}
-                            onChange={(e) => updateLotEntry(lot.id, "dateTime", e.target.value)}
-                            className="h-8 text-xs"
-                            data-testid={`input-lot-datetime-${index}`}
-                          />
-                        </td>
-                        <td className="px-2 py-1">
-                          <Input
-                            type="number"
-                            placeholder="100"
-                            value={lot.qty}
-                            onChange={(e) => updateLotEntry(lot.id, "qty", e.target.value)}
-                            className="h-8 w-20 text-xs"
-                            data-testid={`input-lot-qty-${index}`}
-                          />
-                        </td>
-                        <td className="px-2 py-1">
-                          <Select
-                            value={lot.buySell}
-                            onValueChange={(value) => updateLotEntry(lot.id, "buySell", value)}
-                          >
-                            <SelectTrigger className="h-8 w-20 text-xs" data-testid={`select-lot-buysell-${index}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="buy">BUY</SelectItem>
-                              <SelectItem value="sell">SELL</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-2 py-1">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            placeholder="0.00"
-                            value={lot.price}
-                            onChange={(e) => updateLotEntry(lot.id, "price", e.target.value)}
-                            className="h-8 w-24 text-xs"
-                            data-testid={`input-lot-price-${index}`}
-                          />
-                        </td>
-                        <td className="px-2 py-1">
-                          <span className={`font-mono text-xs font-medium ${
-                            runningTotalAtRow === 0 ? "text-green-500" : 
-                            runningTotalAtRow > 0 ? "text-blue-500" : "text-orange-500"
-                          }`}>
-                            {runningTotalAtRow > 0 ? `+${runningTotalAtRow} LONG` : 
-                             runningTotalAtRow < 0 ? `${runningTotalAtRow} SHORT` : "0 FLAT"}
+            {/* V2 Order Grid Table with FIFO Tracking */}
+            {(() => {
+              const fifoResult = calculateFifoTracking(lotEntries);
+              return (
+                <>
+                  <div className="border rounded-md overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Transaction Date/Time</th>
+                          <th className="px-3 py-2 text-left font-medium">QTY</th>
+                          <th className="px-3 py-2 text-left font-medium">BUY/SELL</th>
+                          <th className="px-3 py-2 text-left font-medium">Cost Basis / Sell Price</th>
+                          <th className="px-3 py-2 text-left font-medium">Lot Remaining</th>
+                          <th className="px-3 py-2 text-left font-medium">Running Total</th>
+                          <th className="px-2 py-2 w-16"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lotEntries.map((lot, index) => {
+                          // Calculate running total up to this row
+                          const runningTotalAtRow = lotEntries.slice(0, index + 1).reduce((total, entry) => {
+                            const qty = parseInt(entry.qty) || 0;
+                            return entry.buySell === "buy" ? total + qty : total - qty;
+                          }, 0);
+                          
+                          // Get FIFO lot info for buy lots
+                          const fifoLot = fifoResult.buyLots.find(l => l.lotId === lot.id);
+                          const fifoSell = fifoResult.sells.find(s => s.sellId === lot.id);
+                          
+                          return (
+                            <tr key={lot.id} className={`border-t ${fifoLot?.depleted ? 'opacity-50' : ''}`}>
+                              <td className="px-2 py-1">
+                                <Input
+                                  type="datetime-local"
+                                  value={lot.dateTime}
+                                  onChange={(e) => updateLotEntry(lot.id, "dateTime", e.target.value)}
+                                  className="h-8 text-xs"
+                                  data-testid={`input-lot-datetime-${index}`}
+                                />
+                              </td>
+                              <td className="px-2 py-1">
+                                <Input
+                                  type="number"
+                                  placeholder="100"
+                                  value={lot.qty}
+                                  onChange={(e) => updateLotEntry(lot.id, "qty", e.target.value)}
+                                  className="h-8 w-20 text-xs"
+                                  data-testid={`input-lot-qty-${index}`}
+                                />
+                              </td>
+                              <td className="px-2 py-1">
+                                <Select
+                                  value={lot.buySell}
+                                  onValueChange={(value) => updateLotEntry(lot.id, "buySell", value)}
+                                >
+                                  <SelectTrigger className="h-8 w-20 text-xs" data-testid={`select-lot-buysell-${index}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="buy">BUY</SelectItem>
+                                    <SelectItem value="sell">SELL</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                              <td className="px-2 py-1">
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  placeholder="0.00"
+                                  value={lot.price}
+                                  onChange={(e) => updateLotEntry(lot.id, "price", e.target.value)}
+                                  className="h-8 w-24 text-xs"
+                                  data-testid={`input-lot-price-${index}`}
+                                />
+                              </td>
+                              <td className="px-2 py-1">
+                                {lot.buySell === 'buy' && fifoLot ? (
+                                  <span className={`font-mono text-xs font-medium ${
+                                    fifoLot.depleted ? 'text-gray-400 line-through' : 
+                                    fifoLot.remainingQty < fifoLot.originalQty ? 'text-orange-400' : 'text-blue-400'
+                                  }`}>
+                                    {fifoLot.depleted ? 'CLOSED' : `${fifoLot.remainingQty}/${fifoLot.originalQty}`}
+                                  </span>
+                                ) : lot.buySell === 'sell' && fifoSell ? (
+                                  <span className="font-mono text-xs text-red-400">
+                                    -{fifoSell.qty}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="px-2 py-1">
+                                <span className={`font-mono text-xs font-medium ${
+                                  runningTotalAtRow === 0 ? "text-green-500" : 
+                                  runningTotalAtRow > 0 ? "text-blue-500" : "text-orange-500"
+                                }`}>
+                                  {runningTotalAtRow > 0 ? `+${runningTotalAtRow}` : 
+                                   runningTotalAtRow < 0 ? `${runningTotalAtRow}` : "0"}
+                                </span>
+                              </td>
+                              <td className="px-1 py-1 flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-red-500 hover:text-red-600"
+                                  onClick={() => removeLotEntry(lot.id)}
+                                  data-testid={`button-remove-lot-${index}`}
+                                >
+                                  <X className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-green-500 hover:text-green-600"
+                                  onClick={addLotEntry}
+                                  data-testid={`button-add-row-${index}`}
+                                >
+                                  <Check className="w-3 h-3" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  {/* Enhanced Final Position Display with FIFO */}
+                  <div className="border rounded-md bg-yellow-500/10 border-yellow-500/30 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="text-sm font-medium text-yellow-500">Final Position</div>
+                        <div className="flex flex-col gap-1">
+                          <span className="font-mono text-lg font-bold text-foreground">
+                            Total Shares: {fifoResult.totalRemaining} {fifoResult.direction}
                           </span>
-                        </td>
-                        <td className="px-1 py-1 flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-red-500 hover:text-red-600"
-                            onClick={() => removeLotEntry(lot.id)}
-                            data-testid={`button-remove-lot-${index}`}
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-green-500 hover:text-green-600"
-                            onClick={addLotEntry}
-                            data-testid={`button-add-row-${index}`}
-                          >
-                            <Check className="w-3 h-3" />
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Running Total Checksum Display */}
-            <div className="flex items-center justify-between px-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Final Position:</span>
-                <span className={`font-mono font-bold ${
-                  runningTotal === 0 ? "text-green-500" : "text-yellow-500"
-                }`}>
-                  {runningTotal === 0 ? "FLAT (0)" : 
-                   runningTotal > 0 ? `LONG ${runningTotal}` : `SHORT ${Math.abs(runningTotal)}`}
-                </span>
-              </div>
-              {runningTotal !== 0 && (
-                <span className="text-xs text-yellow-500">
-                  ⚠️ Buys and sells must balance to close trade
-                </span>
-              )}
-            </div>
+                          {fifoResult.totalRemaining > 0 && fifoResult.avgCostBasis > 0 && (
+                            <span className="font-mono text-sm text-muted-foreground">
+                              Avg Cost Basis: ${fifoResult.avgCostBasis.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {fifoResult.totalRemaining !== 0 && (
+                        <span className="text-xs text-yellow-500">
+                          ⚠️ Buys and sells must balance to close trade
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
           <DialogFooter className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowEditTrade(false)}>Cancel</Button>
