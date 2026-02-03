@@ -89,6 +89,7 @@ export const sentinelUsers = pgTable("sentinel_users", {
   passwordHash: text("password_hash").notNull(),
   accountSize: doublePrecision("account_size").default(1000000), // Default $1M
   isAdmin: boolean("is_admin").default(false), // Admin users can create/view special labels
+  communityOptIn: boolean("community_opt_in").default(false), // Allow anonymous rule performance sharing
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -177,7 +178,26 @@ export const sentinelRules = pgTable("sentinel_rules", {
   parentRuleId: integer("parent_rule_id"), // For rules derived from AI learning
   confidenceScore: doublePrecision("confidence_score"), // AI confidence 0-1 for suggested rules
   adoptionCount: integer("adoption_count").default(0), // How many users adopted this rule
+  // New fields for Rules Management system
+  ruleType: text("rule_type").default("swing"), // 'swing' | 'intraday' | 'long_term' | 'all'
+  directionTags: text("direction_tags").array(), // ['long'] | ['short'] | ['long', 'short']
+  isGlobal: boolean("is_global").default(false), // If true, visible to all users (admin-committed)
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// User overrides for starter/system rules (allows customization without modifying originals)
+export const sentinelRuleOverrides = pgTable("sentinel_rule_overrides", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ruleCode: text("rule_code").notNull(), // References the starter rule by code
+  customName: text("custom_name"), // User's custom name (null = use original)
+  customDescription: text("custom_description"), // User's custom description
+  customSeverity: text("custom_severity"), // User's preferred severity
+  isDisabled: boolean("is_disabled").default(false), // User has disabled this rule
+  customFormula: text("custom_formula"), // User's modified formula
+  notes: text("notes"), // Personal notes about this rule
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // AI-generated rule suggestions (collective learning)
@@ -246,6 +266,7 @@ export const insertSentinelEvaluationSchema = createInsertSchema(sentinelEvaluat
 export const insertSentinelEventSchema = createInsertSchema(sentinelEvents).omit({ id: true, createdAt: true });
 export const insertSentinelWatchlistSchema = createInsertSchema(sentinelWatchlist).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertSentinelRuleSchema = createInsertSchema(sentinelRules).omit({ id: true, createdAt: true });
+export const insertSentinelRuleOverrideSchema = createInsertSchema(sentinelRuleOverrides).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertSentinelRuleSuggestionSchema = createInsertSchema(sentinelRuleSuggestions).omit({ id: true, createdAt: true });
 export const insertSentinelRulePerformanceSchema = createInsertSchema(sentinelRulePerformance).omit({ id: true });
 export const insertSentinelTradeLabelSchema = createInsertSchema(sentinelTradeLabels).omit({ id: true, createdAt: true });
@@ -258,6 +279,7 @@ export type SentinelEvaluation = typeof sentinelEvaluations.$inferSelect;
 export type SentinelEvent = typeof sentinelEvents.$inferSelect;
 export type SentinelWatchlistItem = typeof sentinelWatchlist.$inferSelect;
 export type SentinelRule = typeof sentinelRules.$inferSelect;
+export type SentinelRuleOverride = typeof sentinelRuleOverrides.$inferSelect;
 export type SentinelRuleSuggestion = typeof sentinelRuleSuggestions.$inferSelect;
 export type SentinelRulePerformance = typeof sentinelRulePerformance.$inferSelect;
 export type SentinelTradeLabel = typeof sentinelTradeLabels.$inferSelect;
@@ -269,6 +291,7 @@ export type InsertSentinelEvaluation = z.infer<typeof insertSentinelEvaluationSc
 export type InsertSentinelEvent = z.infer<typeof insertSentinelEventSchema>;
 export type InsertSentinelWatchlistItem = z.infer<typeof insertSentinelWatchlistSchema>;
 export type InsertSentinelRule = z.infer<typeof insertSentinelRuleSchema>;
+export type InsertSentinelRuleOverride = z.infer<typeof insertSentinelRuleOverrideSchema>;
 export type InsertSentinelRuleSuggestion = z.infer<typeof insertSentinelRuleSuggestionSchema>;
 export type InsertSentinelRulePerformance = z.infer<typeof insertSentinelRulePerformanceSchema>;
 export type InsertSentinelTradeLabel = z.infer<typeof insertSentinelTradeLabelSchema>;

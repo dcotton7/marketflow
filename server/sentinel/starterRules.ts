@@ -7,6 +7,8 @@ export interface StarterRule {
   ruleCode: string;
   formula?: string;
   order: number;
+  ruleType: 'swing' | 'intraday' | 'long_term' | 'all';
+  directionTags: ('long' | 'short')[];
 }
 
 export const STARTER_RULES: StarterRule[] = [
@@ -19,6 +21,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: true,
     ruleCode: "PRICE_BELOW_50SMA",
     order: 1,
+    ruleType: "all",
+    directionTags: ["long"],
   },
   {
     name: "50 SMA falling (counter-trend)",
@@ -28,6 +32,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: true,
     ruleCode: "50SMA_FALLING",
     order: 2,
+    ruleType: "all",
+    directionTags: ["long"],
   },
   {
     name: "Stop loss >5% from entry",
@@ -38,6 +44,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "STOP_TOO_WIDE",
     formula: "Stop % = (Entry - Stop) / Entry × 100 > 5%",
     order: 3,
+    ruleType: "swing",
+    directionTags: ["long", "short"],
   },
   {
     name: "Extension ≥8% from 50 SMA",
@@ -48,6 +56,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "EXTENSION_8PCT",
     formula: "Extension = (Price - 50SMA) / 50SMA × 100 ≥ 8%",
     order: 4,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Risk/Reward ratio <2:1",
@@ -58,6 +68,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "RR_BELOW_2",
     formula: "R:R = (Target - Entry) / (Entry - Stop) < 2",
     order: 5,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "No invalidation/stop defined",
@@ -67,6 +79,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: true,
     ruleCode: "NO_STOP_DEFINED",
     order: 6,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Extreme chase >2.0 ATR above AVWAP (swing)",
@@ -77,6 +91,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "EXTREME_CHASE_SWING",
     formula: "Entry > AVWAP + (2.0 × ATR)",
     order: 7,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Extreme chase >1.5 ATR above AVWAP (intraday)",
@@ -87,6 +103,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "EXTREME_CHASE_INTRADAY",
     formula: "Entry > AVWAP + (1.5 × ATR)",
     order: 8,
+    ruleType: "intraday",
+    directionTags: ["long"],
   },
   {
     name: "Trade conflicts with market regime (Headwind)",
@@ -96,6 +114,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: true,
     ruleCode: "REGIME_CONFLICT",
     order: 9,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
 
   // === 8% PROFIT-TAKING RULE ===
@@ -108,6 +128,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "PROFIT_8PCT_50SMA",
     formula: "Target = 50 SMA × 1.08",
     order: 10,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Never buy at 7.5%+ extension from 50 SMA",
@@ -117,6 +139,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "NO_BUY_75PCT_EXT",
     order: 11,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === RISK/REWARD REQUIREMENTS ===
@@ -129,6 +153,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "MIN_RR_4",
     formula: "R:R = (Target - Entry) / (Entry - Stop) ≥ 4",
     order: 12,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Target R:R ratio 6:1 to 8:1",
@@ -138,6 +164,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "TARGET_RR_6_8",
     order: 13,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
 
   // === STOP LOSS RULES ===
@@ -149,6 +177,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CHOPPY_LOD_STOP",
     order: 14,
+    ruleType: "intraday",
+    directionTags: ["long"],
   },
   {
     name: "Lock in profits: Move stop to breakeven at 2-3% gain",
@@ -158,6 +188,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "LOCK_BREAKEVEN",
     order: 15,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "NEVER move stop away from entry",
@@ -167,6 +199,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "NEVER_WIDEN_STOP",
     order: 16,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Choppy market: Sell 1/4 to 1/3 same day to lock gains",
@@ -176,6 +210,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CHOPPY_PARTIAL_EXIT",
     order: 17,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === MA STRUCTURE REQUIREMENTS ===
@@ -187,6 +223,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "PRICE_ABOVE_50SMA_BASE",
     order: 18,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "50 SMA must be rising (not flat or falling)",
@@ -196,6 +234,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "50SMA_RISING",
     order: 19,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Price must be above 200 SMA at entry",
@@ -205,6 +245,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "ABOVE_200SMA",
     order: 20,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "50 SMA should be above 200 SMA (Stage 2 uptrend)",
@@ -214,6 +256,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "50_ABOVE_200",
     order: 21,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Extension 0-3% from 50 SMA: Ideal",
@@ -223,6 +267,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXT_0_3PCT_IDEAL",
     order: 22,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Extension 3-6% from 50 SMA: Acceptable",
@@ -232,6 +278,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXT_3_6PCT_OK",
     order: 23,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Extension 6-7.5% from 50 SMA: Caution",
@@ -241,6 +289,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXT_6_75PCT_CAUTION",
     order: 24,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Extension from 200 SMA >40%: Very risky",
@@ -250,6 +300,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXT_200SMA_40PCT",
     order: 25,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === BASE/PATTERN QUALITY ===
@@ -261,6 +313,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "VOLUME_CONTRACTION_30",
     order: 26,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Base duration: 5-12 weeks ideal",
@@ -270,6 +324,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "BASE_5_12_WEEKS",
     order: 27,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "First base off lows: Best odds",
@@ -279,6 +335,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "FIRST_BASE_BEST",
     order: 28,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Third+ base: Higher failure risk",
@@ -288,6 +346,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "THIRD_BASE_WARNING",
     order: 29,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Cup depth: 15-35% (25% ideal)",
@@ -297,6 +357,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CUP_DEPTH_15_35",
     order: 30,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Cup shape: U-shaped (NOT V-shaped)",
@@ -306,6 +368,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CUP_U_SHAPE",
     order: 31,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Handle depth: <15% of cup depth, <20% absolute",
@@ -315,6 +379,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "HANDLE_SHALLOW",
     order: 32,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "High Tight Flag: Prior gain 40-120%+ in 4-8 weeks",
@@ -324,6 +390,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "HTF_PRIOR_GAIN",
     order: 33,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "VCP: 3+ contraction stages with each pullback shallower",
@@ -333,6 +401,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "VCP_3_CONTRACTIONS",
     order: 34,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === BREAKOUT QUALITY ===
@@ -344,6 +414,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "VOLUME_150PCT_EXCELLENT",
     order: 35,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Breakout volume 100-150% above average: Strong",
@@ -353,6 +425,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "VOLUME_100_150_STRONG",
     order: 36,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Breakout volume <50% above average: Weak",
@@ -362,6 +436,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "VOLUME_BELOW_50_WEAK",
     order: 37,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Decisive move above resistance required",
@@ -371,6 +447,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "DECISIVE_BREAK",
     order: 38,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === POSITION SIZING ===
@@ -382,6 +460,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SIZE_90_100_FULL",
     order: 39,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Score 75-89: Full or slightly reduced (75-100%)",
@@ -391,6 +471,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SIZE_75_89_REDUCE",
     order: 40,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Score 60-74: Reduced position (50-75%)",
@@ -400,6 +482,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SIZE_60_74_SMALL",
     order: 41,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Score <60: No position (0%)",
@@ -409,6 +493,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SIZE_BELOW_60_NONE",
     order: 42,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Adjust size to keep dollar risk constant",
@@ -419,6 +505,8 @@ export const STARTER_RULES: StarterRule[] = [
     ruleCode: "CONSTANT_DOLLAR_RISK",
     formula: "Position = Risk$ / (Entry - Stop)",
     order: 43,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
 
   // === ENTRY TIMING ===
@@ -430,6 +518,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "ENTRY_AT_PIVOT",
     order: 44,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Entry within 5% of pivot acceptable",
@@ -439,6 +529,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "ENTRY_WITHIN_5PCT",
     order: 45,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Chasing >5% past pivot: Poor entry",
@@ -448,6 +540,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CHASE_5PCT_BAD",
     order: 46,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Confirm volume on breakout before entering",
@@ -457,6 +551,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CONFIRM_VOLUME",
     order: 47,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === PROFIT-TAKING ===
@@ -468,6 +564,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SCALE_8PCT_FIRST",
     order: 48,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Scale out: Take 1/3 at measured move target",
@@ -477,6 +575,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SCALE_MEASURED_MOVE",
     order: 49,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Exit immediately if stop hit (no exceptions)",
@@ -486,6 +586,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXIT_STOP_HIT",
     order: 50,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Exit if pattern fails (breaks back into base)",
@@ -495,6 +597,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXIT_PATTERN_FAIL",
     order: 51,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Exit if 50 SMA turns down",
@@ -504,6 +608,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "EXIT_50SMA_DOWN",
     order: 52,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
 
   // === MARKET REGIME ADJUSTMENTS ===
@@ -515,6 +621,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "BULL_EXT_TOLERANCE",
     order: 53,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Choppy market: Demand <20% extension from 200 SMA",
@@ -524,6 +632,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CHOPPY_EXT_TIGHT",
     order: 54,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Choppy market: Take quick profits (3-5%)",
@@ -533,6 +643,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "CHOPPY_QUICK_PROFIT",
     order: 55,
+    ruleType: "swing",
+    directionTags: ["long"],
   },
   {
     name: "Bear market: Only trade strongest relative strength",
@@ -542,6 +654,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "BEAR_RS_ONLY",
     order: 56,
+    ruleType: "all",
+    directionTags: ["long"],
   },
   {
     name: "Bear market: Avoid trades scoring <85",
@@ -551,6 +665,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "BEAR_MIN_85",
     order: 57,
+    ruleType: "all",
+    directionTags: ["long"],
   },
 
   // === MINIMUM STANDARDS ===
@@ -562,6 +678,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "MIN_SCORE_50",
     order: 58,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Score 50-59: Watch only (no entry)",
@@ -571,6 +689,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "SCORE_50_59_WATCH",
     order: 59,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "Never hope a losing trade comes back",
@@ -580,6 +700,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "NO_HOPE_TRADING",
     order: 60,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
   {
     name: "A rejected trade is better than a losing one",
@@ -589,6 +711,8 @@ export const STARTER_RULES: StarterRule[] = [
     isAutoReject: false,
     ruleCode: "REJECT_OVER_LOSE",
     order: 61,
+    ruleType: "all",
+    directionTags: ["long", "short"],
   },
 ];
 
@@ -612,4 +736,16 @@ export const SEVERITY_LEVELS = [
   { value: "critical", label: "Critical", color: "orange", description: "Major rule that should rarely be broken" },
   { value: "warning", label: "Warning", color: "yellow", description: "Important rule to consider" },
   { value: "info", label: "Info", color: "blue", description: "Good practice / nice to have" },
+];
+
+export const RULE_TYPES = [
+  { value: "all", label: "All Trades", description: "Applies to all trade types" },
+  { value: "swing", label: "Swing Trade", description: "Multi-day to multi-week holds" },
+  { value: "intraday", label: "Intraday", description: "Day trades only" },
+  { value: "long_term", label: "Long Term", description: "Position trades (months+)" },
+];
+
+export const DIRECTION_TAGS = [
+  { value: "long", label: "Long", description: "Buy-side trades" },
+  { value: "short", label: "Short", description: "Short-sale trades" },
 ];

@@ -777,6 +777,111 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // Get rules by source (system/user/ai/community tabs)
+  app.get("/api/sentinel/rules/source/:source", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const source = req.params.source as string;
+      const rules = await sentinelModels.getRulesBySource(req.session.userId!, source);
+      res.json(rules);
+    } catch (error) {
+      console.error("Get rules by source error:", error);
+      res.status(500).json({ error: "Failed to load rules" });
+    }
+  });
+
+  // Get all rule overrides for user
+  app.get("/api/sentinel/rules/overrides", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const overrides = await sentinelModels.getRuleOverridesByUser(req.session.userId!);
+      res.json(overrides);
+    } catch (error) {
+      console.error("Get rule overrides error:", error);
+      res.status(500).json({ error: "Failed to load rule overrides" });
+    }
+  });
+
+  // Create or update rule override
+  app.post("/api/sentinel/rules/overrides", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { ruleCode, customName, customDescription, customSeverity, isDisabled, customFormula, notes } = req.body;
+      if (!ruleCode) {
+        return res.status(400).json({ error: "Rule code is required" });
+      }
+      const override = await sentinelModels.upsertRuleOverride({
+        userId: req.session.userId!,
+        ruleCode,
+        customName: customName || null,
+        customDescription: customDescription || null,
+        customSeverity: customSeverity || null,
+        isDisabled: isDisabled || false,
+        customFormula: customFormula || null,
+        notes: notes || null,
+      });
+      res.json(override);
+    } catch (error) {
+      console.error("Create/update rule override error:", error);
+      res.status(500).json({ error: "Failed to save rule override" });
+    }
+  });
+
+  // Delete rule override (restore to default)
+  app.delete("/api/sentinel/rules/overrides/:ruleCode", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const ruleCode = req.params.ruleCode as string;
+      await sentinelModels.deleteRuleOverride(req.session.userId!, ruleCode);
+      res.json({ message: "Override deleted, rule restored to default" });
+    } catch (error) {
+      console.error("Delete rule override error:", error);
+      res.status(500).json({ error: "Failed to delete rule override" });
+    }
+  });
+
+  // Get global (community) rules
+  app.get("/api/sentinel/rules/global", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const rules = await sentinelModels.getGlobalRules();
+      res.json(rules);
+    } catch (error) {
+      console.error("Get global rules error:", error);
+      res.status(500).json({ error: "Failed to load global rules" });
+    }
+  });
+
+  // Toggle community opt-in status
+  app.patch("/api/sentinel/user/community-opt-in", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { optIn } = req.body;
+      if (typeof optIn !== 'boolean') {
+        return res.status(400).json({ error: "optIn must be a boolean" });
+      }
+      const user = await sentinelModels.updateCommunityOptIn(req.session.userId!, optIn);
+      res.json({ communityOptIn: user?.communityOptIn });
+    } catch (error) {
+      console.error("Update community opt-in error:", error);
+      res.status(500).json({ error: "Failed to update community opt-in status" });
+    }
+  });
+
+  // Admin: Set rule as global
+  app.patch("/api/sentinel/rules/:id/global", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const id = parseInt(req.params.id as string);
+      const { isGlobal } = req.body;
+      if (typeof isGlobal !== 'boolean') {
+        return res.status(400).json({ error: "isGlobal must be a boolean" });
+      }
+      const rule = await sentinelModels.setRuleGlobal(id, isGlobal);
+      res.json(rule);
+    } catch (error) {
+      console.error("Set rule global error:", error);
+      res.status(500).json({ error: "Failed to update rule global status" });
+    }
+  });
+
   // Closed trades history
   app.get("/api/sentinel/trades/closed", requireAuth, async (req: Request, res: Response) => {
     try {

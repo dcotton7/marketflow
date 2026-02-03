@@ -1,12 +1,12 @@
 import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
-  sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels,
+  sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides,
   type SentinelUser, type SentinelTrade, type SentinelEvaluation, type SentinelEvent, type SentinelWatchlistItem, type SentinelRule,
-  type SentinelRuleSuggestion, type SentinelRulePerformance,
-  type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule
+  type SentinelRuleSuggestion, type SentinelRulePerformance, type SentinelRuleOverride,
+  type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule, type InsertSentinelRuleOverride
 } from "@shared/schema";
-import { eq, desc, and, asc } from "drizzle-orm";
+import { eq, desc, and, asc, or, isNull } from "drizzle-orm";
 import { STARTER_RULES } from "./starterRules";
 
 export const sentinelModels = {
@@ -190,6 +190,8 @@ export const sentinelModels = {
       isAutoReject: rule.isAutoReject,
       ruleCode: rule.ruleCode,
       formula: rule.formula,
+      ruleType: rule.ruleType,
+      directionTags: rule.directionTags,
     }));
 
     const insertedRules = await db.insert(sentinelRules).values(rules).returning();
@@ -368,5 +370,78 @@ export const sentinelModels = {
   async getHighDataRules(minTrades: number = 10): Promise<SentinelRulePerformance[]> {
     const allRules = await db.select().from(sentinelRulePerformance);
     return allRules.filter(r => (r.totalTrades || 0) >= minTrades);
+  },
+
+  // === RULE OVERRIDES ===
+  
+  // Get all overrides for a user
+  async getRuleOverridesByUser(userId: number): Promise<SentinelRuleOverride[]> {
+    return db.select().from(sentinelRuleOverrides)
+      .where(eq(sentinelRuleOverrides.userId, userId));
+  },
+
+  // Get override for specific rule code
+  async getRuleOverride(userId: number, ruleCode: string): Promise<SentinelRuleOverride | undefined> {
+    const [override] = await db.select().from(sentinelRuleOverrides)
+      .where(and(
+        eq(sentinelRuleOverrides.userId, userId),
+        eq(sentinelRuleOverrides.ruleCode, ruleCode)
+      ));
+    return override;
+  },
+
+  // Create or update rule override
+  async upsertRuleOverride(data: InsertSentinelRuleOverride): Promise<SentinelRuleOverride> {
+    const existing = await this.getRuleOverride(data.userId, data.ruleCode);
+    if (existing) {
+      const [updated] = await db.update(sentinelRuleOverrides)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(sentinelRuleOverrides.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(sentinelRuleOverrides).values(data).returning();
+    return created;
+  },
+
+  // Delete rule override (restore to default)
+  async deleteRuleOverride(userId: number, ruleCode: string): Promise<void> {
+    await db.delete(sentinelRuleOverrides)
+      .where(and(
+        eq(sentinelRuleOverrides.userId, userId),
+        eq(sentinelRuleOverrides.ruleCode, ruleCode)
+      ));
+  },
+
+  // Get rules by source type
+  async getRulesBySource(userId: number, source: string): Promise<SentinelRule[]> {
+    return db.select().from(sentinelRules)
+      .where(and(eq(sentinelRules.userId, userId), eq(sentinelRules.source, source)))
+      .orderBy(asc(sentinelRules.order));
+  },
+
+  // Get global rules (visible to all users) - for community rules tab
+  async getGlobalRules(): Promise<SentinelRule[]> {
+    return db.select().from(sentinelRules)
+      .where(eq(sentinelRules.isGlobal, true))
+      .orderBy(asc(sentinelRules.order));
+  },
+
+  // Update user community opt-in status
+  async updateCommunityOptIn(userId: number, optIn: boolean): Promise<SentinelUser | undefined> {
+    const [user] = await db.update(sentinelUsers)
+      .set({ communityOptIn: optIn })
+      .where(eq(sentinelUsers.id, userId))
+      .returning();
+    return user;
+  },
+
+  // Admin: Make a rule global (visible to all users)
+  async setRuleGlobal(ruleId: number, isGlobal: boolean): Promise<SentinelRule | undefined> {
+    const [rule] = await db.update(sentinelRules)
+      .set({ isGlobal })
+      .where(eq(sentinelRules.id, ruleId))
+      .returning();
+    return rule;
   }
 };

@@ -15,6 +15,7 @@ import SentinelLoginPage from "@/pages/SentinelLoginPage";
 import SentinelDashboardPage from "@/pages/SentinelDashboardPage";
 import SentinelEvaluatePage from "@/pages/SentinelEvaluatePage";
 import SentinelTradePage from "@/pages/SentinelTradePage";
+import SentinelRulesPage from "@/pages/SentinelRulesPage";
 
 function Router() {
   return (
@@ -42,6 +43,11 @@ function Router() {
             <SentinelTradePage />
           </SentinelProtectedRoute>
         )}
+      </Route>
+      <Route path="/sentinel/rules">
+        <SentinelProtectedRoute>
+          <SentinelRulesPage />
+        </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel">
         <SentinelProtectedRoute>

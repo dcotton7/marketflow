@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import sentinelLogo from "@/assets/images/sentinel-logo.png";
 
@@ -57,6 +58,7 @@ interface SentinelHeaderProps {
 }
 
 export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
+  const [location] = useLocation();
   const { data: sentiment, isLoading } = useQuery<MarketSentiment>({
     queryKey: ["/api/sentinel/sentiment/market"],
     enabled: showSentiment,
@@ -64,18 +66,48 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
     staleTime: 30 * 60 * 1000,
   });
 
+  const isRulesPage = location === "/sentinel/rules";
+  const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
+
   return (
-    <div className="flex items-center justify-between gap-4 flex-wrap">
-      <Link href="/sentinel">
-        <div className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md p-1" data-testid="link-sentinel-home">
-          <img 
-            src={sentinelLogo} 
-            alt="Sentinel" 
-            className="h-8"
-            data-testid="img-sentinel-header-logo"
-          />
-        </div>
-      </Link>
+    <div className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3 bg-card">
+      <div className="flex items-center gap-4">
+        <Link href="/sentinel">
+          <div className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md p-1" data-testid="link-sentinel-home">
+            <img 
+              src={sentinelLogo} 
+              alt="Sentinel" 
+              className="h-8"
+              data-testid="img-sentinel-header-logo"
+            />
+          </div>
+        </Link>
+        
+        <nav className="flex items-center gap-1">
+          <Link href="/sentinel/dashboard">
+            <Button 
+              variant={isDashboardPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-dashboard"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span className="hidden sm:inline">Dashboard</span>
+            </Button>
+          </Link>
+          <Link href="/sentinel/rules">
+            <Button 
+              variant={isRulesPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-rules"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span className="hidden sm:inline">Rules</span>
+            </Button>
+          </Link>
+        </nav>
+      </div>
 
       {showSentiment && (
         <div className="flex items-center gap-4" data-testid="container-market-sentiment">
