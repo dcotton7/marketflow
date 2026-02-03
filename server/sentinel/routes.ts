@@ -37,8 +37,10 @@ const evaluateSchema = z.object({
   entryPrice: z.number().positive(),
   stopPrice: z.number().positive().optional(),
   stopPriceLevel: z.string().optional(),
-  targetPrice: z.number().positive().optional(),
+  targetPrice: z.number().positive().optional(), // First profit trim
   targetPriceLevel: z.string().optional(),
+  targetProfitPrice: z.number().positive().optional(), // Full position exit target
+  targetProfitLevel: z.string().optional(),
   positionSize: z.number().positive().optional(),
   positionSizeUnit: z.enum(["shares", "dollars"]).optional(),
   thesis: z.string().optional(),
@@ -291,8 +293,10 @@ export function registerSentinelRoutes(app: Express): void {
         entryPrice: data.entryPrice,
         stopPrice: data.stopPrice,
         stopPriceLevel: data.stopPriceLevel,
-        targetPrice: data.targetPrice,
+        targetPrice: data.targetPrice, // First profit trim
         targetPriceLevel: data.targetPriceLevel,
+        targetProfitPrice: data.targetProfitPrice, // Full position exit
+        targetProfitLevel: data.targetProfitLevel,
         positionSize: data.positionSize,
         positionSizeUnit: data.positionSizeUnit,
         thesis: data.thesis,

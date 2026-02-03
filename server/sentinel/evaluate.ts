@@ -425,16 +425,50 @@ export async function evaluateTrade(
   let finalTradeId = tradeId;
   
   if (!finalTradeId) {
+    // Build entry date from tradeDate and tradeTime if provided
+    let entryDate: Date | undefined;
+    if (request.tradeDate) {
+      entryDate = new Date(request.tradeDate);
+      if (request.tradeTime) {
+        const [hours, minutes] = request.tradeTime.split(':').map(Number);
+        entryDate.setHours(hours, minutes, 0, 0);
+      }
+    }
+    
+    // Create initial lot entry if we have date, position size, and entry price
+    let lotEntries: Array<{
+      id: string;
+      dateTime: string;
+      qty: string;
+      buySell: "buy" | "sell";
+      price: string;
+    }> | undefined;
+    
+    if (entryDate && request.positionSize && request.entryPrice) {
+      const lotId = `lot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      lotEntries = [{
+        id: lotId,
+        dateTime: entryDate.toISOString(),
+        qty: request.positionSize.toString(),
+        buySell: request.direction === 'long' ? 'buy' : 'sell',
+        price: request.entryPrice.toString(),
+      }];
+    }
+    
     const trade = await sentinelModels.createTrade({
       userId,
       symbol: request.symbol.toUpperCase(),
       direction: request.direction,
       entryPrice: request.entryPrice,
+      entryDate,
       stopPrice: request.stopPrice,
-      targetPrice: request.targetPrice,
+      partialPrice: request.targetPrice, // First profit trim → partialPrice
+      targetPrice: request.targetProfitPrice, // Full position exit → targetPrice
+      targetProfitLevel: request.targetProfitLevel,
       positionSize: request.positionSize,
       thesis: request.thesis,
       status: "considering",
+      lotEntries,
     });
     finalTradeId = trade.id;
   }

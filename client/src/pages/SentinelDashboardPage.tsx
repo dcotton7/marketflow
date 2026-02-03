@@ -1268,8 +1268,12 @@ export default function SentinelDashboardPage() {
     
     // Check if trade has saved lotEntries from database
     if (trade.lotEntries && Array.isArray(trade.lotEntries) && trade.lotEntries.length > 0) {
-      // Load saved lot entries
-      setLotEntries(trade.lotEntries as LotEntry[]);
+      // Load saved lot entries, converting dateTime from ISO to datetime-local format
+      const convertedEntries = (trade.lotEntries as LotEntry[]).map(lot => ({
+        ...lot,
+        dateTime: lot.dateTime ? new Date(lot.dateTime).toISOString().slice(0, 16) : ""
+      }));
+      setLotEntries(convertedEntries);
     } else {
       // Initialize with existing BUY from Ivy Evaluator (fallback for old trades)
       const buyLot: LotEntry = {

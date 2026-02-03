@@ -172,7 +172,7 @@ export default function SentinelEvaluatePage() {
   const [targetPriceChoice, setTargetPriceChoice] = useState("");
   
   // Target profit (full exit target)
-  const [targetProfitMode, setTargetProfitMode] = useState<"amount" | "choice">("choice");
+  const [targetProfitMode, setTargetProfitMode] = useState<"amount" | "choice">("amount");
   const [targetProfitPrice, setTargetProfitPrice] = useState("");
   const [targetProfitChoice, setTargetProfitChoice] = useState("");
   
