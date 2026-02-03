@@ -250,10 +250,15 @@ export async function evaluateTrade(
       const riskPerShare = Math.abs(request.entryPrice - resolvedStop);
       const totalRisk = riskPerShare * request.positionSize;
       const profitPerShare = resolvedTarget - request.entryPrice;
+      const firstTrimProfitPerShare = profitPerShare * 0.3;
+      const targetProfitPerShare = profitPerShare * 0.7;
       parsed.moneyBreakdown = {
         totalRisk: `$${totalRisk.toFixed(2)}`,
-        firstTrimProfit: profitPerShare > 0 ? `$${(profitPerShare * 0.3 * request.positionSize).toFixed(2)}` : null,
-        targetProfit: profitPerShare > 0 ? `$${(profitPerShare * 0.7 * request.positionSize).toFixed(2)}` : null,
+        riskPerShare: `$${riskPerShare.toFixed(2)}`,
+        firstTrimProfit: profitPerShare > 0 ? `$${(firstTrimProfitPerShare * request.positionSize).toFixed(2)}` : null,
+        firstTrimProfitPerShare: profitPerShare > 0 ? `$${firstTrimProfitPerShare.toFixed(2)}` : null,
+        targetProfit: profitPerShare > 0 ? `$${(targetProfitPerShare * request.positionSize).toFixed(2)}` : null,
+        targetProfitPerShare: profitPerShare > 0 ? `$${targetProfitPerShare.toFixed(2)}` : null,
         totalPotentialProfit: profitPerShare > 0 ? `$${(profitPerShare * request.positionSize).toFixed(2)}` : null,
       };
     }
@@ -414,8 +419,11 @@ export async function evaluateTrade(
     // Money breakdown - real dollars
     moneyBreakdown: parsed.moneyBreakdown ? {
       totalRisk: parsed.moneyBreakdown.totalRisk || '$0',
+      riskPerShare: parsed.moneyBreakdown.riskPerShare || '$0',
       firstTrimProfit: parsed.moneyBreakdown.firstTrimProfit || null,
+      firstTrimProfitPerShare: parsed.moneyBreakdown.firstTrimProfitPerShare || null,
       targetProfit: parsed.moneyBreakdown.targetProfit || null,
+      targetProfitPerShare: parsed.moneyBreakdown.targetProfitPerShare || null,
       totalPotentialProfit: parsed.moneyBreakdown.totalPotentialProfit || '$0',
     } : undefined,
     

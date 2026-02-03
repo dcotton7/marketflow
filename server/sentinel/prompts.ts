@@ -97,8 +97,11 @@ Respond with a JSON object:
   },
   "moneyBreakdown": {
     "totalRisk": "$XXX",
+    "riskPerShare": "$X.XX",
     "firstTrimProfit": "$XXX at 30% trim",
+    "firstTrimProfitPerShare": "$X.XX per share profit at 30% trim",
     "targetProfit": "$XXX remaining 70%",
+    "targetProfitPerShare": "$X.XX per share profit for 70% position",
     "totalPotentialProfit": "$XXX if all targets hit"
   },
   "planSummary": {
@@ -178,8 +181,11 @@ Respond with a JSON object:
   },
   "moneyBreakdown": {
     "totalRisk": "<$XXX - total dollars at risk>",
+    "riskPerShare": "<$X.XX - risk per share>",
     "firstTrimProfit": "<$XXX at 30% trim or null>",
+    "firstTrimProfitPerShare": "<$X.XX per share profit at 30% trim or null>",
     "targetProfit": "<$XXX remaining 70% or null>",
+    "targetProfitPerShare": "<$X.XX per share profit for 70% position or null>",
     "totalPotentialProfit": "<$XXX if all targets hit>"
   },
   "planSummary": {

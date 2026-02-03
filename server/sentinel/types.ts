@@ -62,8 +62,11 @@ export interface VerdictSummary {
 
 export interface MoneyBreakdown {
   totalRisk: string;
+  riskPerShare: string;
   firstTrimProfit: string | null;
+  firstTrimProfitPerShare: string | null;
   targetProfit: string | null;
+  targetProfitPerShare: string | null;
   totalPotentialProfit: string;
 }
 

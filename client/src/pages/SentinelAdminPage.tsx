@@ -149,7 +149,8 @@ export default function SentinelAdminPage() {
 
   const seedMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("/api/sentinel/tnn/seed", { method: "POST" });
+      const res = await apiRequest("POST", "/api/sentinel/tnn/seed");
+      return res.json();
     },
     onSuccess: (data: { seeded: boolean; message: string }) => {
       toast({ title: "TNN Initialized", description: data.message });
@@ -166,7 +167,8 @@ export default function SentinelAdminPage() {
 
   const updateFactorMutation = useMutation({
     mutationFn: async ({ factorKey, updates }: { factorKey: string; updates: Record<string, unknown> }) => {
-      return apiRequest(`/api/sentinel/tnn/factors/${factorKey}`, { method: "PATCH", body: JSON.stringify(updates) });
+      const res = await apiRequest("PATCH", `/api/sentinel/tnn/factors/${factorKey}`, updates);
+      return res.json();
     },
     onSuccess: () => {
       toast({ title: "Factor Updated" });
@@ -180,7 +182,8 @@ export default function SentinelAdminPage() {
 
   const createModifierMutation = useMutation({
     mutationFn: async (data: { factorKey: string; factorName: string; whenCondition: string; whenConditionName: string; weightModifier: number; notes?: string }) => {
-      return apiRequest("/api/sentinel/tnn/modifiers", { method: "POST", body: JSON.stringify(data) });
+      const res = await apiRequest("POST", "/api/sentinel/tnn/modifiers", data);
+      return res.json();
     },
     onSuccess: () => {
       toast({ title: "Modifier Created" });
@@ -196,7 +199,8 @@ export default function SentinelAdminPage() {
 
   const reviewSuggestionMutation = useMutation({
     mutationFn: async ({ id, approved, notes }: { id: number; approved: boolean; notes?: string }) => {
-      return apiRequest(`/api/sentinel/tnn/suggestions/${id}/review`, { method: "POST", body: JSON.stringify({ approved, notes }) });
+      const res = await apiRequest("POST", `/api/sentinel/tnn/suggestions/${id}/review`, { approved, notes });
+      return res.json();
     },
     onSuccess: () => {
       toast({ title: "Suggestion Reviewed" });

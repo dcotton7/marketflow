@@ -56,8 +56,11 @@ interface VerdictSummary {
 
 interface MoneyBreakdown {
   totalRisk: string;
+  riskPerShare: string;
   firstTrimProfit: string | null;
+  firstTrimProfitPerShare: string | null;
   targetProfit: string | null;
+  targetProfitPerShare: string | null;
   totalPotentialProfit: string;
 }
 
@@ -1249,18 +1252,18 @@ export default function SentinelEvaluatePage() {
                             </span>
                           </div>
                           
-                          {/* Profit Lines */}
+                          {/* Profit Lines - Per Share */}
                           <div className="flex flex-wrap gap-x-6 gap-y-1">
-                            {result.evaluation.moneyBreakdown.firstTrimProfit && (
+                            {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
                               <span>
                                 <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
-                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.firstTrimProfit}</span>
+                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.firstTrimProfitPerShare}/share</span>
                               </span>
                             )}
-                            {result.evaluation.moneyBreakdown.targetProfit && (
+                            {result.evaluation.moneyBreakdown.targetProfitPerShare && (
                               <span>
                                 <span className="text-muted-foreground">Target @ 70%: </span>
-                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.targetProfit}</span>
+                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.targetProfitPerShare}/share</span>
                               </span>
                             )}
                           </div>
