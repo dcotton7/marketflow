@@ -923,7 +923,16 @@ export default function SentinelDashboardPage() {
   const [showAddWatchlist, setShowAddWatchlist] = useState(false);
   const [showAddRule, setShowAddRule] = useState(false);
   const [watchlistForm, setWatchlistForm] = useState({ symbol: "", targetEntry: "", thesis: "", priority: "medium" });
-  const [ruleForm, setRuleForm] = useState({ name: "", description: "", category: "entry" });
+  const [ruleForm, setRuleForm] = useState({ 
+    name: "", 
+    description: "", 
+    category: "entry",
+    ruleType: "swing" as "swing" | "intraday" | "long_term" | "other",
+    directionTags: [] as ("long" | "short")[],
+    strategyTags: [] as string[],
+    isGlobal: false, // Admin only - save globally vs personal
+  });
+  const [strategyTagInput, setStrategyTagInput] = useState("");
   const [ruleFilter, setRuleFilter] = useState<string>("all");
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(null);
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<number>>(new Set()); // For toggle mode - all ON by default
@@ -1040,7 +1049,16 @@ export default function SentinelDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
       setShowAddRule(false);
-      setRuleForm({ name: "", description: "", category: "entry" });
+      setRuleForm({ 
+        name: "", 
+        description: "", 
+        category: "entry", 
+        ruleType: "swing", 
+        directionTags: [], 
+        strategyTags: [],
+        isGlobal: false,
+      });
+      setStrategyTagInput("");
       toast({ title: "Rule added" });
     },
   });
@@ -1329,12 +1347,39 @@ export default function SentinelDashboardPage() {
   };
 
   const handleAddRule = () => {
-    if (!ruleForm.name) return;
+    if (!ruleForm.name || ruleForm.directionTags.length === 0) return;
     addRuleMutation.mutate({
       name: ruleForm.name,
       description: ruleForm.description || undefined,
       category: ruleForm.category,
+      ruleType: ruleForm.ruleType,
+      directionTags: ruleForm.directionTags,
+      strategyTags: ruleForm.strategyTags.length > 0 ? ruleForm.strategyTags : undefined,
+      isGlobal: ruleForm.isGlobal,
     });
+  };
+
+  const handleDirectionToggle = (direction: "long" | "short") => {
+    setRuleForm(prev => {
+      const current = prev.directionTags;
+      if (current.includes(direction)) {
+        return { ...prev, directionTags: current.filter(d => d !== direction) };
+      } else {
+        return { ...prev, directionTags: [...current, direction] };
+      }
+    });
+  };
+
+  const handleAddStrategyTag = () => {
+    const tag = strategyTagInput.trim().toLowerCase();
+    if (tag && tag.length <= 20 && !ruleForm.strategyTags.includes(tag)) {
+      setRuleForm(prev => ({ ...prev, strategyTags: [...prev.strategyTags, tag] }));
+      setStrategyTagInput("");
+    }
+  };
+
+  const handleRemoveStrategyTag = (tag: string) => {
+    setRuleForm(prev => ({ ...prev, strategyTags: prev.strategyTags.filter(t => t !== tag) }));
   };
 
   if (isLoading) {
@@ -1816,14 +1861,15 @@ export default function SentinelDashboardPage() {
 
       {/* Add Rule Dialog */}
       <Dialog open={showAddRule} onOpenChange={setShowAddRule}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Add Trading Rule</DialogTitle>
-            <DialogDescription>Define a rule to track your discipline</DialogDescription>
+            <DialogDescription>Define a rule to track your discipline. Rules must have at least one direction (Long/Short).</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            {/* Rule Name */}
             <div className="space-y-2">
-              <Label htmlFor="rule-name">Rule</Label>
+              <Label htmlFor="rule-name">Rule <span className="text-red-500">*</span></Label>
               <Input
                 id="rule-name"
                 placeholder="e.g., Wait for pullback to 21 EMA"
@@ -1832,8 +1878,62 @@ export default function SentinelDashboardPage() {
                 data-testid="input-rule-name"
               />
             </div>
+
+            {/* Rule Type */}
             <div className="space-y-2">
-              <Label htmlFor="rule-category">Category</Label>
+              <Label>Rule Type <span className="text-red-500">*</span></Label>
+              <Select value={ruleForm.ruleType} onValueChange={(v: "swing" | "intraday" | "long_term" | "other") => setRuleForm({ ...ruleForm, ruleType: v })}>
+                <SelectTrigger data-testid="select-rule-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="swing">Swing Trade</SelectItem>
+                  <SelectItem value="intraday">Intraday</SelectItem>
+                  <SelectItem value="long_term">Long Term</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Direction Tags - Required */}
+            <div className="space-y-2">
+              <Label>Direction <span className="text-red-500">*</span> <span className="text-xs text-muted-foreground">(at least one required)</span></Label>
+              <div className="flex gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ruleForm.directionTags.includes("long")}
+                    onChange={() => handleDirectionToggle("long")}
+                    className="w-4 h-4 rounded border-gray-300"
+                    data-testid="checkbox-direction-long"
+                  />
+                  <span className="flex items-center gap-1">
+                    <TrendingUp className="w-4 h-4 text-green-500" />
+                    Long
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ruleForm.directionTags.includes("short")}
+                    onChange={() => handleDirectionToggle("short")}
+                    className="w-4 h-4 rounded border-gray-300"
+                    data-testid="checkbox-direction-short"
+                  />
+                  <span className="flex items-center gap-1">
+                    <TrendingDown className="w-4 h-4 text-red-500" />
+                    Short
+                  </span>
+                </label>
+              </div>
+              {ruleForm.directionTags.length === 0 && (
+                <p className="text-xs text-red-500">Select at least one direction</p>
+              )}
+            </div>
+
+            {/* Category */}
+            <div className="space-y-2">
+              <Label htmlFor="rule-category">Category <span className="text-red-500">*</span></Label>
               <Select value={ruleForm.category} onValueChange={(v) => setRuleForm({ ...ruleForm, category: v })}>
                 <SelectTrigger data-testid="select-rule-category">
                   <SelectValue />
@@ -1843,6 +1943,7 @@ export default function SentinelDashboardPage() {
                   <SelectItem value="entry">Entry Timing</SelectItem>
                   <SelectItem value="exit">Exit / Profit Taking</SelectItem>
                   <SelectItem value="stop_loss">Stop Loss</SelectItem>
+                  <SelectItem value="profit_taking">Profit Taking</SelectItem>
                   <SelectItem value="risk">Risk Management</SelectItem>
                   <SelectItem value="position_sizing">Position Sizing</SelectItem>
                   <SelectItem value="ma_structure">MA Structure</SelectItem>
@@ -1853,21 +1954,75 @@ export default function SentinelDashboardPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Description */}
             <div className="space-y-2">
-              <Label htmlFor="rule-description">Description (optional)</Label>
+              <Label htmlFor="rule-description">Brief Description <span className="text-red-500">*</span></Label>
               <Textarea
                 id="rule-description"
-                placeholder="More details about this rule..."
+                placeholder="Why do you use this rule? What problem does it solve?"
                 value={ruleForm.description}
                 onChange={(e) => setRuleForm({ ...ruleForm, description: e.target.value })}
+                className="min-h-[80px]"
                 data-testid="input-rule-description"
               />
             </div>
+
+            {/* Strategy Tags */}
+            <div className="space-y-2">
+              <Label>Strategy Tags <span className="text-xs text-muted-foreground">(optional, max 20 chars each)</span></Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="e.g., breakout, momentum"
+                  value={strategyTagInput}
+                  onChange={(e) => setStrategyTagInput(e.target.value.slice(0, 20))}
+                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddStrategyTag())}
+                  className="flex-1"
+                  data-testid="input-strategy-tag"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={handleAddStrategyTag} disabled={!strategyTagInput.trim()}>
+                  Add
+                </Button>
+              </div>
+              {ruleForm.strategyTags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {ruleForm.strategyTags.map(tag => (
+                    <Badge key={tag} variant="secondary" className="flex items-center gap-1">
+                      {tag}
+                      <button onClick={() => handleRemoveStrategyTag(tag)} className="hover:text-red-500">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Admin: Global option */}
+            {user?.isAdmin && (
+              <div className="space-y-2 border-t pt-4">
+                <Label className="text-amber-500">Admin Options</Label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ruleForm.isGlobal}
+                    onChange={(e) => setRuleForm({ ...ruleForm, isGlobal: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300"
+                    data-testid="checkbox-global-rule"
+                  />
+                  <span className="text-sm">Make this rule Global (visible to all users)</span>
+                </label>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddRule(false)}>Cancel</Button>
-            <Button onClick={handleAddRule} disabled={!ruleForm.name || addRuleMutation.isPending} data-testid="button-confirm-add-rule">
-              {addRuleMutation.isPending ? "Adding..." : "Add Rule"}
+            <Button 
+              onClick={handleAddRule} 
+              disabled={!ruleForm.name || !ruleForm.description || ruleForm.directionTags.length === 0 || addRuleMutation.isPending} 
+              data-testid="button-confirm-add-rule"
+            >
+              {addRuleMutation.isPending ? "Adding..." : (ruleForm.isGlobal ? "Add Global Rule" : "Add Rule")}
             </Button>
           </DialogFooter>
         </DialogContent>
