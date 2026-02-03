@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -66,8 +66,13 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
     staleTime: 30 * 60 * 1000,
   });
 
+  const { data: userInfo } = useQuery<{ id: number; username: string; isAdmin: boolean }>({
+    queryKey: ["/api/sentinel/me"],
+  });
+
   const isRulesPage = location === "/sentinel/rules";
   const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
+  const isAdminPage = location.startsWith("/sentinel/admin");
 
   return (
     <div className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3 bg-card">
@@ -106,6 +111,19 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               <span className="hidden sm:inline">Rules</span>
             </Button>
           </Link>
+          {userInfo?.isAdmin && (
+            <Link href="/sentinel/admin">
+              <Button 
+                variant={isAdminPage ? "secondary" : "ghost"} 
+                size="sm"
+                className="gap-2"
+                data-testid="nav-admin"
+              >
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">Admin</span>
+              </Button>
+            </Link>
+          )}
         </nav>
       </div>
 
