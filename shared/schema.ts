@@ -307,6 +307,123 @@ export type InsertSentinelRulePerformance = z.infer<typeof insertSentinelRulePer
 export type InsertSentinelTradeLabel = z.infer<typeof insertSentinelTradeLabelSchema>;
 export type InsertSentinelTradeToLabel = z.infer<typeof insertSentinelTradeToLabelsSchema>;
 
+// === TNN (Trader Neural Network) TABLES ===
+
+// Factor types for the three-layer system
+export type TnnFactorType = 'discipline' | 'setup_type';
+export type TnnModifierSource = 'manual' | 'ai_suggested' | 'ai_confirmed';
+export type TnnSuggestionStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+
+// TNN Factors - Discipline categories and Setup types with weights
+export const tnnFactors = pgTable("tnn_factors", {
+  id: serial("id").primaryKey(),
+  factorType: text("factor_type").notNull(), // 'discipline' | 'setup_type'
+  factorKey: text("factor_key").notNull().unique(), // e.g., 'entry', 'pullback', 'breakout'
+  factorName: text("factor_name").notNull(), // Display name e.g., "Entry Timing", "Pullback Setup"
+  description: text("description"),
+  category: text("category"), // For discipline: the rule category; for setup_type: null
+  baseWeight: integer("base_weight").notNull().default(50), // Admin-set baseline (0-100)
+  aiAdjustedWeight: integer("ai_adjusted_weight").default(50), // Current AI-tuned weight
+  autoAdjust: boolean("auto_adjust").default(false), // Allow AI to auto-adjust
+  maxMagnitude: integer("max_magnitude"), // Max change per adjustment (null = unlimited)
+  maxDrift: integer("max_drift"), // Max deviation from base (null = unlimited)
+  sampleSize: integer("sample_size").default(0), // Number of trades used for AI learning
+  lastAiUpdate: timestamp("last_ai_update"),
+  order: integer("order").default(0), // Display order
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// TNN Modifiers - Contextual weight adjustments (setup × condition)
+export const tnnModifiers = pgTable("tnn_modifiers", {
+  id: serial("id").primaryKey(),
+  factorKey: text("factor_key").notNull(), // The factor being modified
+  factorName: text("factor_name").notNull(), // Display name for readability
+  whenCondition: text("when_condition").notNull(), // Condition key e.g., 'choppy_market', 'risk_off'
+  whenConditionName: text("when_condition_name").notNull(), // Display name
+  weightModifier: integer("weight_modifier").notNull(), // +/- adjustment to factor weight
+  source: text("source").notNull().default("manual"), // 'manual' | 'ai_suggested' | 'ai_confirmed'
+  confidence: doublePrecision("confidence"), // AI confidence score (0-100)
+  sampleSize: integer("sample_size").default(0), // Trades supporting this modifier
+  winRateImpact: doublePrecision("win_rate_impact"), // Observed win rate change when active
+  isActive: boolean("is_active").default(true),
+  createdBy: text("created_by"), // 'admin' | 'ai'
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// TNN Suggestions - AI-proposed weight changes awaiting approval
+export const tnnSuggestions = pgTable("tnn_suggestions", {
+  id: serial("id").primaryKey(),
+  suggestionType: text("suggestion_type").notNull(), // 'factor_weight' | 'modifier'
+  factorKey: text("factor_key").notNull(), // Target factor
+  factorName: text("factor_name").notNull(),
+  whenCondition: text("when_condition"), // For modifier suggestions
+  whenConditionName: text("when_condition_name"), // For modifier suggestions
+  currentValue: integer("current_value").notNull(),
+  proposedValue: integer("proposed_value").notNull(),
+  confidenceScore: doublePrecision("confidence_score").notNull(), // AI confidence (0-100)
+  reasoning: text("reasoning").notNull(), // AI explanation
+  supportingData: jsonb("supporting_data").$type<{
+    sampleSize: number;
+    winRateWithChange: number;
+    winRateWithout: number;
+    avgPnLImpact: number;
+    tradeIds: number[];
+  }>(),
+  status: text("status").notNull().default("pending"), // 'pending' | 'approved' | 'rejected' | 'expired'
+  reviewedBy: integer("reviewed_by"), // Admin who reviewed
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+});
+
+// TNN History - Audit log of all weight changes
+export const tnnHistory = pgTable("tnn_history", {
+  id: serial("id").primaryKey(),
+  changeType: text("change_type").notNull(), // 'factor_weight' | 'modifier_add' | 'modifier_update' | 'settings'
+  factorKey: text("factor_key"),
+  factorName: text("factor_name"),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  changedBy: text("changed_by").notNull(), // 'admin' | 'ai' | username
+  reason: text("reason"),
+  suggestionId: integer("suggestion_id"), // Link to suggestion if AI-driven
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// TNN Settings - Global autonomy and configuration
+export const tnnSettings = pgTable("tnn_settings", {
+  id: serial("id").primaryKey(),
+  settingKey: text("setting_key").notNull().unique(),
+  settingValue: text("setting_value").notNull(),
+  description: text("description"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// TNN Schemas
+export const insertTnnFactorSchema = createInsertSchema(tnnFactors).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertTnnModifierSchema = createInsertSchema(tnnModifiers).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertTnnSuggestionSchema = createInsertSchema(tnnSuggestions).omit({ id: true, createdAt: true });
+export const insertTnnHistorySchema = createInsertSchema(tnnHistory).omit({ id: true, createdAt: true });
+export const insertTnnSettingsSchema = createInsertSchema(tnnSettings).omit({ id: true, updatedAt: true });
+
+// TNN Types
+export type TnnFactor = typeof tnnFactors.$inferSelect;
+export type TnnModifier = typeof tnnModifiers.$inferSelect;
+export type TnnSuggestion = typeof tnnSuggestions.$inferSelect;
+export type TnnHistory = typeof tnnHistory.$inferSelect;
+export type TnnSetting = typeof tnnSettings.$inferSelect;
+
+export type InsertTnnFactor = z.infer<typeof insertTnnFactorSchema>;
+export type InsertTnnModifier = z.infer<typeof insertTnnModifierSchema>;
+export type InsertTnnSuggestion = z.infer<typeof insertTnnSuggestionSchema>;
+export type InsertTnnHistory = z.infer<typeof insertTnnHistorySchema>;
+export type InsertTnnSetting = z.infer<typeof insertTnnSettingsSchema>;
+
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),

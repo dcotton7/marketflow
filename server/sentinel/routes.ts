@@ -12,6 +12,7 @@ import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
 import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema } from "@shared/schema";
+import * as tnn from "./tnn";
 
 declare module "express-session" {
   interface SessionData {
@@ -1502,6 +1503,224 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Get user info error:", error);
       res.status(500).json({ error: "Failed to fetch user info" });
+    }
+  });
+
+  // === TNN (Trader Neural Network) ROUTES ===
+
+  // Seed TNN data (admin only, one-time setup)
+  app.post("/api/sentinel/tnn/seed", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const result = await tnn.seedTnnData();
+      res.json(result);
+    } catch (error) {
+      console.error("TNN seed error:", error);
+      res.status(500).json({ error: "Failed to seed TNN data" });
+    }
+  });
+
+  // Get all factors
+  app.get("/api/sentinel/tnn/factors", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const factorType = req.query.type as string | undefined;
+      const factors = await tnn.getFactors(factorType);
+      res.json(factors);
+    } catch (error) {
+      console.error("Get factors error:", error);
+      res.status(500).json({ error: "Failed to fetch factors" });
+    }
+  });
+
+  // Update factor
+  app.patch("/api/sentinel/tnn/factors/:factorKey", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { factorKey } = req.params;
+      const updates = req.body;
+      const factor = await tnn.updateFactor(factorKey, updates, user.username, updates.reason);
+      res.json(factor);
+    } catch (error) {
+      console.error("Update factor error:", error);
+      res.status(500).json({ error: "Failed to update factor" });
+    }
+  });
+
+  // Get all modifiers
+  app.get("/api/sentinel/tnn/modifiers", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const factorKey = req.query.factorKey as string | undefined;
+      const modifiers = await tnn.getModifiers(factorKey);
+      res.json(modifiers);
+    } catch (error) {
+      console.error("Get modifiers error:", error);
+      res.status(500).json({ error: "Failed to fetch modifiers" });
+    }
+  });
+
+  // Create modifier
+  app.post("/api/sentinel/tnn/modifiers", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const modifier = await tnn.createModifier(req.body, user.username);
+      res.json(modifier);
+    } catch (error) {
+      console.error("Create modifier error:", error);
+      res.status(500).json({ error: "Failed to create modifier" });
+    }
+  });
+
+  // Update modifier
+  app.patch("/api/sentinel/tnn/modifiers/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const modifier = await tnn.updateModifier(id, req.body, user.username);
+      res.json(modifier);
+    } catch (error) {
+      console.error("Update modifier error:", error);
+      res.status(500).json({ error: "Failed to update modifier" });
+    }
+  });
+
+  // Delete modifier
+  app.delete("/api/sentinel/tnn/modifiers/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const result = await tnn.deleteModifier(id, user.username);
+      res.json(result);
+    } catch (error) {
+      console.error("Delete modifier error:", error);
+      res.status(500).json({ error: "Failed to delete modifier" });
+    }
+  });
+
+  // Get suggestions
+  app.get("/api/sentinel/tnn/suggestions", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const status = req.query.status as string | undefined;
+      const suggestions = await tnn.getSuggestions(status);
+      res.json(suggestions);
+    } catch (error) {
+      console.error("Get suggestions error:", error);
+      res.status(500).json({ error: "Failed to fetch suggestions" });
+    }
+  });
+
+  // Review suggestion (approve/reject)
+  app.post("/api/sentinel/tnn/suggestions/:id/review", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const { approved, notes } = req.body;
+      const suggestion = await tnn.reviewSuggestion(id, approved, userId, notes);
+      res.json(suggestion);
+    } catch (error) {
+      console.error("Review suggestion error:", error);
+      res.status(500).json({ error: "Failed to review suggestion" });
+    }
+  });
+
+  // Get history
+  app.get("/api/sentinel/tnn/history", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const limit = parseInt(req.query.limit as string) || 50;
+      const history = await tnn.getHistory(limit);
+      res.json(history);
+    } catch (error) {
+      console.error("Get history error:", error);
+      res.status(500).json({ error: "Failed to fetch history" });
+    }
+  });
+
+  // Get settings
+  app.get("/api/sentinel/tnn/settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const settings = await tnn.getSettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Get settings error:", error);
+      res.status(500).json({ error: "Failed to fetch settings" });
+    }
+  });
+
+  // Update setting
+  app.patch("/api/sentinel/tnn/settings/:key", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { key } = req.params;
+      const { value } = req.body;
+      const setting = await tnn.updateSetting(key, value, user.username);
+      res.json(setting);
+    } catch (error) {
+      console.error("Update setting error:", error);
+      res.status(500).json({ error: "Failed to update setting" });
     }
   });
 
