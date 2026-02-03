@@ -117,12 +117,14 @@ const importPreviewSchema = z.object({
   csvContent: z.string().min(1, "CSV content is required"),
   fileName: z.string().optional(),
   brokerId: z.enum(["FIDELITY", "SCHWAB", "ROBINHOOD", "fidelity", "schwab", "robinhood", "unknown"]).optional(),
+  timestampOverride: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Invalid time format (HH:MM)").optional(),
 });
 
 const importConfirmSchema = z.object({
   csvContent: z.string().min(1, "CSV content is required"),
   fileName: z.string().optional(),
   brokerId: z.enum(["FIDELITY", "SCHWAB", "ROBINHOOD", "fidelity", "schwab", "robinhood", "unknown"]).optional(),
+  timestampOverride: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Invalid time format (HH:MM)").optional(),
 });
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -1820,7 +1822,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         return res.status(400).json({ error: validationResult.error.errors[0]?.message || "Invalid request" });
       }
       
-      const { csvContent, fileName, brokerId } = validationResult.data;
+      const { csvContent, fileName, brokerId, timestampOverride } = validationResult.data;
       
       const userId = req.session.userId!;
       const user = await sentinelModels.getUserById(userId);
@@ -1865,9 +1867,10 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             netAmount: trade.netAmount,
             tradeDate: trade.tradeDate,
             settlementDate: trade.settlementDate,
-            executionTime: trade.executionTime,
-            timestampSource: trade.timestampSource,
-            isTimeEstimated: trade.isTimeEstimated,
+            // Apply timestamp override if provided, otherwise use parsed value
+            executionTime: timestampOverride || trade.executionTime,
+            timestampSource: timestampOverride ? "user_override" : trade.timestampSource,
+            isTimeEstimated: timestampOverride ? false : trade.isTimeEstimated,
             accountId: trade.accountId,
             accountName: trade.accountName,
             accountType: trade.accountType,
@@ -1983,6 +1986,60 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Delete batch error:", error);
       res.status(500).json({ error: "Failed to delete import batch" });
+    }
+  });
+
+  // Delete ALL imported trades and batches for the current user (with confirmation check)
+  app.delete("/api/sentinel/import/all", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { confirmDelete } = req.body;
+      
+      // Require explicit confirmation to prevent accidental deletion
+      if (confirmDelete !== "DELETE_ALL_TRADES") {
+        return res.status(400).json({ 
+          error: "Confirmation required",
+          message: "Send confirmDelete: 'DELETE_ALL_TRADES' to confirm deletion"
+        });
+      }
+      
+      // Use transaction to ensure atomicity and consistent counts
+      const result = await db.transaction(async (tx) => {
+        // Count records using efficient aggregate before deletion
+        const [tradesCountResult] = await tx
+          .select({ count: sentinelImportedTrades.id })
+          .from(sentinelImportedTrades)
+          .where(eq(sentinelImportedTrades.userId, userId))
+          .limit(1);
+        const [batchesCountResult] = await tx
+          .select({ count: sentinelImportBatches.id })
+          .from(sentinelImportBatches)
+          .where(eq(sentinelImportBatches.userId, userId))
+          .limit(1);
+        
+        // Get actual counts by counting deleted rows
+        const deletedTrades = await tx.delete(sentinelImportedTrades)
+          .where(eq(sentinelImportedTrades.userId, userId))
+          .returning({ id: sentinelImportedTrades.id });
+        
+        const deletedBatches = await tx.delete(sentinelImportBatches)
+          .where(eq(sentinelImportBatches.userId, userId))
+          .returning({ id: sentinelImportBatches.id });
+        
+        return {
+          trades: deletedTrades.length,
+          batches: deletedBatches.length
+        };
+      });
+      
+      // Return response after transaction completes successfully
+      res.json({ 
+        success: true,
+        deleted: result
+      });
+    } catch (error) {
+      console.error("Delete all imports error:", error);
+      res.status(500).json({ error: "Failed to delete all imported trades" });
     }
   });
 

@@ -93,8 +93,11 @@ export default function SentinelImportPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
   const [showSkippedDialog, setShowSkippedDialog] = useState(false);
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const [tickerFilter, setTickerFilter] = useState("");
+  const [timestampOverride, setTimestampOverride] = useState<string>("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   
   const { data: batches, isLoading: batchesLoading } = useQuery<ImportBatch[]>({
     queryKey: ['/api/sentinel/import/batches'],
@@ -107,6 +110,10 @@ export default function SentinelImportPage() {
   const previewMutation = useMutation({
     mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string }) => {
       const response = await apiRequest('POST', '/api/sentinel/import/preview', data);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Preview failed with status ${response.status}`);
+      }
       return response.json();
     },
     onSuccess: (data: PreviewResult) => {
@@ -129,8 +136,12 @@ export default function SentinelImportPage() {
   });
 
   const confirmMutation = useMutation({
-    mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string }) => {
+    mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string; timestampOverride?: string }) => {
       const response = await apiRequest('POST', '/api/sentinel/import/confirm', data);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Import failed with status ${response.status}`);
+      }
       return response.json();
     },
     onSuccess: (data) => {
@@ -141,14 +152,18 @@ export default function SentinelImportPage() {
       setPreviewData(null);
       setCsvContent(null);
       setFileName(null);
+      setTimestampOverride("");
       setActiveTab("history");
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
     },
     onError: (error: any) => {
+      const errorMsg = error?.message || "Failed to import trades";
       toast({
         title: "Import Failed",
-        description: error.message || "Failed to import trades",
+        description: errorMsg.includes("duplicate") 
+          ? "Some trades may already exist. Try deleting the batch first."
+          : errorMsg,
         variant: "destructive",
       });
     },
@@ -157,6 +172,10 @@ export default function SentinelImportPage() {
   const deleteMutation = useMutation({
     mutationFn: async (batchId: string) => {
       const response = await apiRequest('DELETE', `/api/sentinel/import/batches/${batchId}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Delete failed with status ${response.status}`);
+      }
       return response.json();
     },
     onSuccess: () => {
@@ -164,8 +183,42 @@ export default function SentinelImportPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
     },
-    onError: () => {
-      toast({ title: "Delete Failed", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ 
+        title: "Delete Failed", 
+        description: error?.message || "Could not delete batch. Please try again.",
+        variant: "destructive" 
+      });
+    },
+  });
+
+  const deleteAllMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('DELETE', '/api/sentinel/import/all', {
+        confirmDelete: "DELETE_ALL_TRADES"
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Delete failed with status ${response.status}`);
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({ 
+        title: "All Trades Deleted", 
+        description: `Removed ${data.deleted?.trades || 0} trades and ${data.deleted?.batches || 0} batches`
+      });
+      setShowDeleteAllDialog(false);
+      setDeleteConfirmText("");
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Delete All Failed", 
+        description: error?.message || "Could not delete trades. Please try again.",
+        variant: "destructive" 
+      });
     },
   });
 
@@ -208,7 +261,18 @@ export default function SentinelImportPage() {
 
   const handleConfirm = () => {
     if (csvContent && fileName) {
-      confirmMutation.mutate({ csvContent, fileName, brokerId: selectedBrokerId });
+      confirmMutation.mutate({ 
+        csvContent, 
+        fileName, 
+        brokerId: selectedBrokerId,
+        timestampOverride: timestampOverride || undefined 
+      });
+    }
+  };
+
+  const handleDeleteAll = () => {
+    if (deleteConfirmText === "DELETE") {
+      deleteAllMutation.mutate();
     }
   };
 
@@ -284,6 +348,50 @@ export default function SentinelImportPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5" />
+                  Timestamp Override (Optional)
+                </CardTitle>
+                <CardDescription>
+                  Override execution time for all trades (useful when CSV lacks timestamps)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4">
+                  <Input
+                    type="time"
+                    value={timestampOverride}
+                    onChange={(e) => setTimestampOverride(e.target.value)}
+                    className="w-40"
+                    placeholder="HH:MM"
+                    data-testid="input-timestamp-override"
+                  />
+                  {timestampOverride && (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="gap-1">
+                        <Clock className="h-3 w-3" />
+                        {timestampOverride}
+                      </Badge>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => setTimestampOverride("")}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  {!timestampOverride && (
+                    <span className="text-sm text-muted-foreground">
+                      Leave empty to use timestamps from CSV (if available)
+                    </span>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -467,9 +575,22 @@ export default function SentinelImportPage() {
 
           <TabsContent value="history" className="mt-6">
             <Card>
-              <CardHeader>
-                <CardTitle>Import History</CardTitle>
-                <CardDescription>Previous CSV imports and their status</CardDescription>
+              <CardHeader className="flex flex-row items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Import History</CardTitle>
+                  <CardDescription>Previous CSV imports and their status</CardDescription>
+                </div>
+                {batches && batches.length > 0 && (
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    onClick={() => setShowDeleteAllDialog(true)}
+                    data-testid="button-delete-all"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete All
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 {batchesLoading ? (
@@ -676,6 +797,58 @@ export default function SentinelImportPage() {
           </ScrollArea>
           <DialogFooter>
             <Button onClick={() => setShowSkippedDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteAllDialog} onOpenChange={(open) => {
+        setShowDeleteAllDialog(open);
+        if (!open) setDeleteConfirmText("");
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <AlertCircle className="h-5 w-5" />
+              Delete All Imported Trades
+            </DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. This will permanently delete all {allTrades?.length || 0} imported trades and {batches?.length || 0} import batches.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-2">
+              Type <span className="font-mono font-bold text-foreground">DELETE</span> to confirm:
+            </p>
+            <Input 
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="Type DELETE to confirm"
+              className="font-mono"
+              data-testid="input-delete-confirm"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowDeleteAllDialog(false);
+                setDeleteConfirmText("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteAll}
+              disabled={deleteConfirmText !== "DELETE" || deleteAllMutation.isPending}
+              data-testid="button-confirm-delete-all"
+            >
+              {deleteAllMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting...</>
+              ) : (
+                <>Delete All Trades</>
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
