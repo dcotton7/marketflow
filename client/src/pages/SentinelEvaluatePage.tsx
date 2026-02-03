@@ -591,6 +591,37 @@ export default function SentinelEvaluatePage() {
                       </SelectContent>
                     </Select>
                   )}
+                  {/* Real-time risk calculation */}
+                  {stopPriceMode === "amount" && stopPrice && entryPrice && (
+                    <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-sm" data-testid="risk-calculation">
+                      {(() => {
+                        const entry = parseFloat(entryPrice);
+                        const stop = parseFloat(stopPrice);
+                        const shares = positionSize 
+                          ? (positionSizeUnit === "shares" 
+                            ? parseFloat(positionSize) 
+                            : Math.round(parseFloat(positionSize) / entry)) 
+                          : 0;
+                        const riskPerShare = direction === "long" ? entry - stop : stop - entry;
+                        const totalRisk = shares > 0 ? riskPerShare * shares : 0;
+                        
+                        if (isNaN(entry) || isNaN(stop)) return null;
+                        
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-red-400 font-medium">
+                              Risk: ${Math.abs(riskPerShare).toFixed(2)} / share
+                            </span>
+                            {shares > 0 && (
+                              <span className="text-red-400 font-medium">
+                                Total Risk: ${Math.abs(totalRisk).toFixed(2)} ({shares} shares)
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
 
                 {/* Target Price with mode toggle */}
@@ -994,28 +1025,101 @@ export default function SentinelEvaluatePage() {
                           <DollarSign className="w-4 h-4 text-blue-400" />
                           Your Risk/Reward Breakdown
                         </p>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Risking:</span>
-                            <span className="font-bold text-red-400 ml-2">{result.evaluation.moneyBreakdown.totalRisk}</span>
+                        <div className="space-y-2 text-sm">
+                          {/* Risk Line */}
+                          <div className="flex flex-wrap gap-x-6 gap-y-1">
+                            <span>
+                              <span className="text-muted-foreground">Risking: </span>
+                              <span className="font-bold text-red-400">{result.evaluation.planSummary?.riskPerShare || "—"} / Share</span>
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Total Risk: </span>
+                              <span className="font-bold text-red-400">{result.evaluation.moneyBreakdown.totalRisk}</span>
+                            </span>
                           </div>
-                          {result.evaluation.moneyBreakdown.firstTrimProfit && (
-                            <div>
-                              <span className="text-muted-foreground">First Profit (30% trim):</span>
-                              <span className="font-bold text-green-400 ml-2">+{result.evaluation.moneyBreakdown.firstTrimProfit}</span>
-                            </div>
-                          )}
-                          {result.evaluation.moneyBreakdown.targetProfit && (
-                            <div>
-                              <span className="text-muted-foreground">Target (70%):</span>
-                              <span className="font-bold text-green-400 ml-2">+{result.evaluation.moneyBreakdown.targetProfit}</span>
-                            </div>
-                          )}
-                          <div className="col-span-2 pt-1 border-t border-blue-500/30">
-                            <span className="text-muted-foreground">TOTAL if all hits:</span>
-                            <span className="font-bold text-green-500 ml-2">+{result.evaluation.moneyBreakdown.totalPotentialProfit}</span>
+                          
+                          {/* Profit Lines */}
+                          <div className="flex flex-wrap gap-x-6 gap-y-1">
+                            {result.evaluation.moneyBreakdown.firstTrimProfit && (
+                              <span>
+                                <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
+                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.firstTrimProfit}</span>
+                              </span>
+                            )}
+                            {result.evaluation.moneyBreakdown.targetProfit && (
+                              <span>
+                                <span className="text-muted-foreground">Target @ 70%: </span>
+                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.targetProfit}</span>
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Total Gain Line */}
+                          <div className="pt-1 border-t border-blue-500/30">
+                            <span className="text-muted-foreground">Total Gain: </span>
+                            <span className="font-bold text-green-500">+{result.evaluation.moneyBreakdown.totalPotentialProfit}</span>
                           </div>
                         </div>
+                        
+                        {/* Debug Info Section - Only show when all values are amounts (not technical levels) */}
+                        {stopPriceMode === "amount" && targetPriceMode === "amount" && targetProfitMode === "amount" && (
+                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
+                            <p className="text-xs text-white/60 mb-1">Debug Info - Input Values & Math:</p>
+                            <div className="text-xs text-white/50 font-mono space-y-0.5">
+                              {(() => {
+                                const entry = parseFloat(entryPrice) || 0;
+                                const stop = parseFloat(stopPrice) || 0;
+                                const target1 = parseFloat(targetPrice) || 0;
+                                const target2 = parseFloat(targetProfitPrice) || 0;
+                                const shares = positionSize 
+                                  ? (positionSizeUnit === "shares" 
+                                    ? parseFloat(positionSize) 
+                                    : Math.round(parseFloat(positionSize) / entry)) 
+                                  : 0;
+                                const riskPerShare = direction === "long" ? entry - stop : stop - entry;
+                                const totalRisk = riskPerShare * shares;
+                                const firstTrimGain = target1 > 0 
+                                  ? (direction === "long" ? (target1 - entry) * (shares * 0.3) : (entry - target1) * (shares * 0.3))
+                                  : 0;
+                                const targetGain = target2 > 0 
+                                  ? (direction === "long" ? (target2 - entry) * (shares * 0.7) : (entry - target2) * (shares * 0.7))
+                                  : 0;
+                                const totalGain = firstTrimGain + targetGain;
+                                
+                                return (
+                                  <>
+                                    <p>Entry: ${entry.toFixed(2)} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
+                                    <p>Stop: ${stop.toFixed(2)} (user entered amount)</p>
+                                    <p>Shares: {shares} {positionSizeUnit === "dollars" ? `(rounded from $${positionSize} / $${entry.toFixed(2)})` : "(user entered)"}</p>
+                                    <p>Risk/Share: ${Math.abs(riskPerShare).toFixed(2)} = |${entry.toFixed(2)} - ${stop.toFixed(2)}|</p>
+                                    <p>Total Risk: ${Math.abs(totalRisk).toFixed(2)} = ${Math.abs(riskPerShare).toFixed(2)} × {shares} shares</p>
+                                    {target1 > 0 && (
+                                      <p>First Trim (30%): ${target1.toFixed(2)} → Gain = (${target1.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.3)} shares = ${firstTrimGain.toFixed(2)}</p>
+                                    )}
+                                    {target2 > 0 && (
+                                      <p>Target (70%): ${target2.toFixed(2)} → Gain = (${target2.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.7)} shares = ${targetGain.toFixed(2)}</p>
+                                    )}
+                                    <p>Total Gain (calculated): ${totalGain.toFixed(2)} = ${firstTrimGain.toFixed(2)} + ${targetGain.toFixed(2)}</p>
+                                    <p className="text-white/40 italic">Note: Server values above may differ if AI resolves prices differently</p>
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                        {(stopPriceMode === "choice" || targetPriceMode === "choice" || targetProfitMode === "choice") && (
+                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
+                            <p className="text-xs text-white/60 mb-1">Debug Info - Input Values:</p>
+                            <div className="text-xs text-white/50 font-mono space-y-0.5">
+                              <p>Entry: ${parseFloat(entryPrice).toFixed(2) || "—"} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
+                              <p>Stop: {stopPriceMode === "amount" ? `$${parseFloat(stopPrice).toFixed(2)}` : `[${stopPriceChoice || "none"}] - resolved by AI`}</p>
+                              <p>Shares: {positionSize || "—"} {positionSizeUnit}</p>
+                              <p>First Trim: {targetPriceMode === "amount" ? `$${parseFloat(targetPrice).toFixed(2) || "—"}` : `[${targetPriceChoice || "none"}] - resolved by AI`}</p>
+                              <p>Target: {targetProfitMode === "amount" ? `$${parseFloat(targetProfitPrice).toFixed(2) || "—"}` : `[${targetProfitChoice || "none"}] - resolved by AI`}</p>
+                              <p className="text-white/40 italic">Technical levels resolved by AI - see server values above</p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
