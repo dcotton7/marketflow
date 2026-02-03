@@ -445,9 +445,10 @@ interface TickerWidgetProps {
   status?: string; // "active", "considering", "watch"
   profitClosed?: number; // MTD realized P&L (for closed trades)
   openPnL?: number; // Unrealized P&L (for active trades)
+  breakEven?: { shares: number; price: number }; // Break-even position info
 }
 
-function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitClosed, openPnL }: TickerWidgetProps) {
+function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitClosed, openPnL, breakEven }: TickerWidgetProps) {
   const isPositive = pctChange >= 0;
   
   // Determine label based on status
@@ -486,6 +487,14 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitC
       {openPnL !== undefined && (
         <span className={`text-xs ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
           Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
+        </span>
+      )}
+      {breakEven && breakEven.shares > 0 && (
+        <span 
+          className={`text-xs ${price >= breakEven.price ? "text-green-500" : "text-red-500"}`} 
+          data-testid={`text-breakeven-${symbol}`}
+        >
+          BreakEven: {breakEven.shares} shares @ ${breakEven.price.toFixed(2)}
         </span>
       )}
     </div>
@@ -639,12 +648,13 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
         <div className={`flex items-center justify-between mb-3 ${nearTarget || nearStop ? "mt-4" : ""}`}>
           <TickerWidget 
             symbol={trade.symbol}
-            price={trade.entryPrice}
+            price={currentPrice}
             pctChange={pctChange}
             direction={trade.direction}
             status={isActive ? "active" : "considering"}
             openPnL={openPnL}
             profitClosed={profitClosed ?? undefined}
+            breakEven={fifoData && fifoData.totalRemaining > 0 ? { shares: fifoData.totalRemaining, price: fifoData.avgCostBasis } : undefined}
           />
           {trade.latestEvaluation && (
             <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
