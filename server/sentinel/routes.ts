@@ -1992,6 +1992,18 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       // 1. Current import file
       // 2. Previously imported trades
       // 3. Hand-entered sentinel_trades
+      // Only flag as orphan if account doesn't allow short sales
+      
+      // Get account settings to check if short sales are allowed
+      const accountSettings = await db!.select().from(sentinelAccountSettings)
+        .where(eq(sentinelAccountSettings.userId, userId));
+      
+      // Build a lookup for account short sale settings
+      const accountShortAllowed = new Map<string, boolean>();
+      for (const setting of accountSettings) {
+        const key = `${setting.brokerId}:${setting.accountName || ''}`;
+        accountShortAllowed.set(key, setting.allowsShortSales);
+      }
       
       // Group trades by ticker from current import
       const tradesByTicker: Record<string, typeof result.trades> = {};
@@ -2004,132 +2016,138 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         tickersInImport.add(trade.ticker);
       }
       
-      // Fetch existing imported trades for these tickers (from previous imports)
-      const existingImportedTrades = await db!.select({
-        ticker: sentinelImportedTrades.ticker,
-        direction: sentinelImportedTrades.direction,
-        quantity: sentinelImportedTrades.quantity,
-        tradeDate: sentinelImportedTrades.tradeDate,
-      }).from(sentinelImportedTrades)
-        .where(and(
-          eq(sentinelImportedTrades.userId, userId),
-          inArray(sentinelImportedTrades.ticker, Array.from(tickersInImport))
-        ));
-      
-      // Fetch hand-entered trades for these tickers (closed trades have entry info)
-      const existingHandTrades = await db!.select({
-        ticker: sentinelTrades.ticker,
-        direction: sentinelTrades.direction,
-        shares: sentinelTrades.shares,
-        entryDate: sentinelTrades.entryDate,
-        exitDate: sentinelTrades.exitDate,
-        exitShares: sentinelTrades.exitShares,
-      }).from(sentinelTrades)
-        .where(and(
-          eq(sentinelTrades.userId, userId),
-          inArray(sentinelTrades.ticker, Array.from(tickersInImport))
-        ));
-      
-      // Track which trades are orphan sells
+      // Skip orphan detection if no tickers
+      let orphanSellsCount = 0;
       const orphanSellTradeIds = new Set<string>();
       
-      for (const ticker of Object.keys(tradesByTicker)) {
-        // Build unified transaction list from all sources
-        type UnifiedTrade = { direction: string; quantity: number; tradeDate: Date; source: string };
-        const allTrades: UnifiedTrade[] = [];
+      if (tickersInImport.size > 0) {
+        // Fetch existing imported trades for these tickers (from previous imports)
+        const existingImportedTrades = await db!.select({
+          ticker: sentinelImportedTrades.ticker,
+          direction: sentinelImportedTrades.direction,
+          quantity: sentinelImportedTrades.quantity,
+          tradeDate: sentinelImportedTrades.tradeDate,
+        }).from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            inArray(sentinelImportedTrades.ticker, Array.from(tickersInImport))
+          ));
         
-        // Add existing imported trades for this ticker
-        for (const t of existingImportedTrades.filter(t => t.ticker === ticker)) {
-          allTrades.push({
-            direction: t.direction,
-            quantity: t.quantity,
-            tradeDate: new Date(t.tradeDate),
-            source: 'existing_import',
-          });
-        }
+        // Fetch hand-entered trades for these tickers
+        const existingHandTrades = await db!.select({
+          ticker: sentinelTrades.ticker,
+          direction: sentinelTrades.direction,
+          shares: sentinelTrades.shares,
+          entryDate: sentinelTrades.entryDate,
+          exitDate: sentinelTrades.exitDate,
+          exitShares: sentinelTrades.exitShares,
+        }).from(sentinelTrades)
+          .where(and(
+            eq(sentinelTrades.userId, userId),
+            inArray(sentinelTrades.ticker, Array.from(tickersInImport))
+          ));
         
-        // Add hand-entered trades - entry (buy for LONG, sell for SHORT) and exit (opposite)
-        for (const t of existingHandTrades.filter(t => t.ticker === ticker)) {
-          // Entry transaction
-          const entryDirection = t.direction === 'LONG' ? 'BUY' : 'SELL';
-          if (t.entryDate && t.shares) {
-            allTrades.push({
-              direction: entryDirection,
-              quantity: t.shares,
-              tradeDate: new Date(t.entryDate),
-              source: 'hand_entry',
-            });
-          }
-          // Exit transaction (if closed)
-          if (t.exitDate && t.exitShares) {
-            const exitDirection = t.direction === 'LONG' ? 'SELL' : 'BUY';
-            allTrades.push({
-              direction: exitDirection,
-              quantity: t.exitShares,
-              tradeDate: new Date(t.exitDate),
-              source: 'hand_exit',
-            });
-          }
-        }
-        
-        // Add current import trades for this ticker (with marker for orphan check)
-        const currentTrades = tradesByTicker[ticker];
-        for (const t of currentTrades) {
-          allTrades.push({
-            direction: t.direction,
-            quantity: t.quantity,
-            tradeDate: new Date(t.tradeDate),
-            source: 'current_import',
-          });
-        }
-        
-        // Sort all trades chronologically (FIFO)
-        allTrades.sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime());
-        
-        // Calculate running position and identify orphans from current import
-        let runningPosition = 0;
-        const currentTradeIndex = new Map<number, string>(); // map allTrades index to tradeId
-        
-        // Map current import trades to their position in sorted list
-        let currentIdx = 0;
-        for (let i = 0; i < allTrades.length; i++) {
-          if (allTrades[i].source === 'current_import') {
-            const matchingTrade = currentTrades[currentIdx];
-            if (matchingTrade && 
-                allTrades[i].quantity === matchingTrade.quantity && 
-                allTrades[i].direction === matchingTrade.direction) {
-              currentTradeIndex.set(i, matchingTrade.tradeId);
-              currentIdx++;
-            }
-          }
-        }
-        
-        // Recalculate with proper mapping
-        currentIdx = 0;
-        for (let i = 0; i < allTrades.length; i++) {
-          const trade = allTrades[i];
+        for (const ticker of Object.keys(tradesByTicker)) {
+          // Build unified transaction list with stable IDs
+          type UnifiedTrade = { 
+            id: string; 
+            direction: string; 
+            quantity: number; 
+            tradeDate: Date; 
+            sourcePriority: number; // 1=existing, 2=hand, 3=current (for deterministic sorting)
+            isCurrentImport: boolean;
+          };
+          const allTrades: UnifiedTrade[] = [];
           
-          if (trade.direction === 'BUY') {
-            runningPosition += trade.quantity;
-          } else if (trade.direction === 'SELL') {
-            // Check if this is from current import and is an orphan
-            if (trade.source === 'current_import') {
-              const tradeId = currentTrades.find(t => 
-                t.direction === trade.direction && 
-                t.quantity === trade.quantity &&
-                new Date(t.tradeDate).getTime() === trade.tradeDate.getTime()
-              )?.tradeId;
-              
-              if (tradeId && runningPosition < trade.quantity) {
-                orphanSellTradeIds.add(tradeId);
-              }
+          // Add existing imported trades (priority 1 - settled first)
+          for (const t of existingImportedTrades.filter(t => t.ticker === ticker)) {
+            allTrades.push({
+              id: `existing_${t.tradeDate}_${t.direction}_${t.quantity}`,
+              direction: t.direction,
+              quantity: t.quantity,
+              tradeDate: new Date(t.tradeDate),
+              sourcePriority: 1,
+              isCurrentImport: false,
+            });
+          }
+          
+          // Add hand-entered trades (priority 2)
+          let handIdx = 0;
+          for (const t of existingHandTrades.filter(t => t.ticker === ticker)) {
+            // Entry transaction
+            const entryDirection = t.direction === 'LONG' ? 'BUY' : 'SELL';
+            if (t.entryDate && t.shares) {
+              allTrades.push({
+                id: `hand_entry_${handIdx}`,
+                direction: entryDirection,
+                quantity: t.shares,
+                tradeDate: new Date(t.entryDate),
+                sourcePriority: 2,
+                isCurrentImport: false,
+              });
             }
-            runningPosition -= trade.quantity;
+            // Exit transaction (if closed)
+            if (t.exitDate && t.exitShares) {
+              const exitDirection = t.direction === 'LONG' ? 'SELL' : 'BUY';
+              allTrades.push({
+                id: `hand_exit_${handIdx}`,
+                direction: exitDirection,
+                quantity: t.exitShares,
+                tradeDate: new Date(t.exitDate),
+                sourcePriority: 2,
+                isCurrentImport: false,
+              });
+            }
+            handIdx++;
+          }
+          
+          // Add current import trades with their actual tradeIds (priority 3)
+          const currentTrades = tradesByTicker[ticker];
+          for (const t of currentTrades) {
+            allTrades.push({
+              id: t.tradeId, // Use actual tradeId for stable identification
+              direction: t.direction,
+              quantity: t.quantity,
+              tradeDate: new Date(t.tradeDate),
+              sourcePriority: 3,
+              isCurrentImport: true,
+            });
+          }
+          
+          // Sort by date, then by source priority (existing first, then hand, then current)
+          allTrades.sort((a, b) => {
+            const dateDiff = a.tradeDate.getTime() - b.tradeDate.getTime();
+            if (dateDiff !== 0) return dateDiff;
+            return a.sourcePriority - b.sourcePriority;
+          });
+          
+          // Calculate running position and identify orphans
+          let runningPosition = 0;
+          
+          // Check if any current import trade's account allows shorts
+          const currentBrokerId = result.batch.brokerId;
+          const sampleTrade = currentTrades[0];
+          const accountKey = `${currentBrokerId}:${sampleTrade?.accountName || ''}`;
+          const shortSalesAllowed = accountShortAllowed.get(accountKey) ?? false;
+          
+          for (const trade of allTrades) {
+            if (trade.direction === 'BUY') {
+              runningPosition += trade.quantity;
+            } else if (trade.direction === 'SELL') {
+              // Only flag as orphan if:
+              // 1. It's from current import
+              // 2. Selling more than we've bought (runningPosition < quantity)
+              // 3. Short sales are NOT allowed for this account
+              if (trade.isCurrentImport && runningPosition < trade.quantity && !shortSalesAllowed) {
+                orphanSellTradeIds.add(trade.id);
+              }
+              runningPosition -= trade.quantity;
+            }
           }
         }
+        
+        orphanSellsCount = orphanSellTradeIds.size;
       }
-      
-      const orphanSellsCount = orphanSellTradeIds.size;
       
       // Use a transaction to ensure atomicity - either all trades are saved or none
       await db.transaction(async (tx) => {
