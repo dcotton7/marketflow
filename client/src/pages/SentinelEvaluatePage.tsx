@@ -862,6 +862,35 @@ export default function SentinelEvaluatePage() {
                       </SelectContent>
                     </Select>
                   )}
+                  
+                  {/* AI Target Profit Suggestions */}
+                  {targetProfitMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Target className="w-3 h-3 text-emerald-500" />
+                        <span className="text-xs text-muted-foreground">AI Suggestions (Full Exit)</span>
+                        {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5" data-testid="target-profit-suggestions">
+                        {suggestions?.targetSuggestions.slice(0, 5).map((t, i) => (
+                          <Badge
+                            key={i}
+                            variant="outline"
+                            className="cursor-pointer text-xs hover:bg-emerald-500/20 border-emerald-500/30"
+                            onClick={() => {
+                              setTargetProfitPrice(t.price.toString());
+                              setTargetProfitMode("amount");
+                            }}
+                            data-testid={`badge-target-profit-suggestion-${i}`}
+                          >
+                            <span className="font-medium">{t.label}</span>
+                            <span className="text-muted-foreground ml-1">${t.price}</span>
+                            <span className="text-emerald-400 ml-1">({t.rrRatio}:1)</span>
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Position Size with unit toggle */}
