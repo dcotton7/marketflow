@@ -115,6 +115,41 @@ structural (formerly auto_reject), entry, exit, profit_taking, stop_loss, ma_str
 - **UI Integration**: Clickable suggestion badges auto-populate form fields when selected
 - **Auto-Trigger**: Suggestions fetch automatically when symbol + direction + entry price are filled
 
+### Trade Import System
+Multi-broker CSV import system for bringing historical trades into Sentinel.
+
+**Supported Brokers**:
+- Fidelity (fully implemented)
+- Charles Schwab (mapper ready)
+- Robinhood (mapper ready)
+
+**Database Tables**:
+- `sentinel_import_batches`: Tracks each CSV upload with metadata, trade counts, skipped rows
+- `sentinel_imported_trades`: Normalized trade records with full transaction details
+
+**Features**:
+- Preview-before-confirm workflow for safe imports
+- Auto-broker detection from CSV headers
+- Partial fill detection via fillGroupKey
+- Transaction-wrapped batch inserts for atomicity
+- Import history with batch management
+- All-trades view with ticker filtering
+
+**API Endpoints**:
+- POST /api/sentinel/import/preview - Parse CSV without saving
+- POST /api/sentinel/import/confirm - Save parsed trades (uses transaction)
+- GET /api/sentinel/import/batches - List import history
+- GET /api/sentinel/import/batches/:batchId/trades - Get batch trades
+- GET /api/sentinel/import/trades - Get all imported trades
+- DELETE /api/sentinel/import/batches/:batchId - Delete batch and trades
+
+**Trade Schema**:
+- Normalized fields: ticker, assetType, direction, quantity, price, totalAmount
+- Fees tracked: commission, fees, netAmount
+- Timestamps: tradeDate, settlementDate, executionTime, timestampSource
+- Account info: accountId, accountName, accountType
+- Fill tracking: isFill, fillGroupKey for partial fill aggregation
+
 ### Trader Neural Network (TNN)
 An admin-only three-layer adaptive factor weighting system where AI learns from trade outcomes to propose weight adjustments with admin approval controls.
 
