@@ -203,17 +203,19 @@ export async function evaluateTrade(
     reasoning += "\n\nWhat would make this better:\n• " + parsed.improvements.join("\n• ");
   }
   
-  // Normalize riskFlags - support both old string[] and new object[] format
-  let normalizedRiskFlags: { flag: string; severity: 'high' | 'medium' | 'low'; detail: string }[] = [];
+  // Normalize riskFlags - support both old string[] and new object[] format with tier
+  let normalizedRiskFlags: { flag: string; severity: 'high' | 'medium' | 'low'; tier?: 'fatal' | 'contextual' | 'missing_input'; detail: string }[] = [];
   if (Array.isArray(parsed.riskFlags)) {
     normalizedRiskFlags = parsed.riskFlags.map((rf: any) => {
       if (typeof rf === 'string') {
         return { flag: rf, severity: 'medium' as const, detail: rf };
       }
       const severity = (['high', 'medium', 'low'].includes(rf.severity) ? rf.severity : 'medium') as 'high' | 'medium' | 'low';
+      const tier = (['fatal', 'contextual', 'missing_input'].includes(rf.tier) ? rf.tier : undefined) as 'fatal' | 'contextual' | 'missing_input' | undefined;
       return {
         flag: rf.flag || 'UNKNOWN',
         severity,
+        tier,
         detail: rf.detail || rf.flag || '',
       };
     });
@@ -235,6 +237,21 @@ export async function evaluateTrade(
     confidence: ['HIGH', 'MEDIUM', 'LOW'].includes(parsed.confidence) ? parsed.confidence : 'MEDIUM',
     modelTag: ['BREAKOUT', 'RECLAIM', 'CUP_AND_HANDLE', 'PULLBACK', 'EPISODIC_PIVOT', 'UNKNOWN'].includes(parsed.modelTag) 
       ? parsed.modelTag : 'UNKNOWN',
+    instrumentType: ['ETF', 'STOCK', 'INDEX'].includes(parsed.instrumentType) ? parsed.instrumentType : undefined,
+    
+    // Verdict summary - primary blockers at top
+    verdictSummary: parsed.verdictSummary ? {
+      verdict: parsed.verdictSummary.verdict || '',
+      primaryBlockers: Array.isArray(parsed.verdictSummary.primaryBlockers) ? parsed.verdictSummary.primaryBlockers : [],
+    } : undefined,
+    
+    // Money breakdown - real dollars
+    moneyBreakdown: parsed.moneyBreakdown ? {
+      totalRisk: parsed.moneyBreakdown.totalRisk || '$0',
+      firstTrimProfit: parsed.moneyBreakdown.firstTrimProfit || null,
+      targetProfit: parsed.moneyBreakdown.targetProfit || null,
+      totalPotentialProfit: parsed.moneyBreakdown.totalPotentialProfit || '$0',
+    } : undefined,
     
     // User's plan summary
     planSummary: parsed.planSummary || {
@@ -247,13 +264,16 @@ export async function evaluateTrade(
       riskPerShare: request.stopPrice 
         ? `$${Math.abs(request.entryPrice - request.stopPrice).toFixed(2)} (${(Math.abs(request.entryPrice - request.stopPrice) / request.entryPrice * 100).toFixed(1)}%)`
         : 'N/A',
-      target: request.targetPrice 
+      firstTrim: request.targetPrice 
         ? `$${request.targetPrice.toFixed(2)}` 
-        : request.targetPriceLevel 
-          ? request.targetPriceLevel.replace(/_/g, ' ')
+        : null,
+      target: request.targetProfitPrice 
+        ? `$${request.targetProfitPrice.toFixed(2)}` 
+        : request.targetProfitLevel 
+          ? request.targetProfitLevel.replace(/_/g, ' ')
           : null,
-      rrRatio: request.stopPrice && request.targetPrice
-        ? `${(Math.abs(request.targetPrice - request.entryPrice) / Math.abs(request.entryPrice - request.stopPrice)).toFixed(1)}:1`
+      rrRatio: request.stopPrice && request.targetProfitPrice
+        ? `${(Math.abs(request.targetProfitPrice - request.entryPrice) / Math.abs(request.entryPrice - request.stopPrice)).toFixed(1)}:1`
         : null,
     },
     
@@ -261,7 +281,18 @@ export async function evaluateTrade(
     whyBullets: Array.isArray(parsed.whyBullets) ? parsed.whyBullets : [],
     riskFlags: normalizedRiskFlags,
     improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],
+    fixesToPass: Array.isArray(parsed.fixesToPass) ? parsed.fixesToPass : [],
     ruleChecklist,
+    
+    // Process analysis for historical trades
+    processAnalysis: parsed.processAnalysis ? {
+      entryExecution: parsed.processAnalysis.entryExecution || '',
+      stopManagement: parsed.processAnalysis.stopManagement || '',
+      targetManagement: parsed.processAnalysis.targetManagement || '',
+      emotionalControl: parsed.processAnalysis.emotionalControl || '',
+      rulesFollowed: typeof parsed.processAnalysis.rulesFollowed === 'number' ? parsed.processAnalysis.rulesFollowed : 0,
+      rulesViolated: typeof parsed.processAnalysis.rulesViolated === 'number' ? parsed.processAnalysis.rulesViolated : 0,
+    } : undefined,
     
     // Legacy fields
     recommendation,

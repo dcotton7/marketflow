@@ -55,18 +55,32 @@ Based on the thesis and technicals, identify the trade model:
    - Check distance from recent highs/lows
 
 ## RISK FLAGS TO CHECK
+Classify flags into tiers:
+- FATAL (must fix): R:R < 1, no stop, thesis contradiction - these block the trade
+- CONTEXTUAL: Regime mismatch, stop sensitivity, overhead resistance - situation-dependent
+- MISSING_INPUT: Volume not provided, pivot unspecified - info not given, not necessarily wrong
+
+Flag codes:
 - CHASE_RISK: Entry is extended, not at defined trigger
 - OVERHEAD_RESISTANCE: Nearby resistance limits room to run
 - WIDE_STOP: Stop >8% from entry or >2x ATR
 - TIGHT_STOP: Stop <0.5x ATR, likely to get hit
 - POOR_RR: R:R ratio below 2:1
+- FATAL_RR: R:R ratio below 1:1 (FATAL tier)
 - HEADWIND_REGIME: Market environment against trade direction
 - THESIS_VAGUE: Thesis lacks specific trigger/edge
 - OVERSIZED: Position risk >2% of account
 - EXTENDED: Price >10% above 21 MA
 - BELOW_KEY_MA: Price below 50 or 200 MA (for longs)
 - RULE_VIOLATION: Violates trader's personal rules
-- NO_STOP: Stop not defined
+- NO_STOP: Stop not defined (FATAL tier)
+- STRUCTURAL_ISSUE: Fundamental plan structure problem
+
+## INSTRUMENT CONTEXT
+Consider the instrument type when evaluating:
+- ETF: Relax breakout volume requirements, pivot precision, intraday stop sensitivity
+- Single stock: Apply full rigor to all rules
+- Index-linked: Consider correlation to broader market
 
 ## RESPONSE FORMAT
 Respond with a JSON object:
@@ -75,25 +89,41 @@ Respond with a JSON object:
   "status": "<GREEN|YELLOW|RED>",
   "confidence": "<HIGH|MEDIUM|LOW>",
   "modelTag": "<BREAKOUT|RECLAIM|CUP_AND_HANDLE|PULLBACK|EPISODIC_PIVOT|UNKNOWN>",
+  "instrumentType": "<ETF|STOCK|INDEX>",
+  "verdictSummary": {
+    "verdict": "<One sentence: This plan [passes/needs work/fails] because [primary reason]>",
+    "primaryBlockers": ["<1-3 FATAL issues only, empty array if none>"]
+  },
+  "moneyBreakdown": {
+    "totalRisk": "$XXX",
+    "firstTrimProfit": "$XXX at 30% trim",
+    "targetProfit": "$XXX remaining 70%",
+    "totalPotentialProfit": "$XXX if all targets hit"
+  },
   "planSummary": {
     "entry": "$XXX.XX",
     "stop": "$XXX.XX",
     "riskPerShare": "$X.XX (X.X%)",
+    "firstTrim": "$XXX.XX or null",
     "target": "$XXX.XX or null",
     "rrRatio": "X.X:1 or null"
   },
   "whyBullets": [
-    "<3-7 short bullets tied to rules, not vibe - why this could work>"
+    "<3-7 short bullets tied to rules - why this could work>"
   ],
   "riskFlags": [
     {
       "flag": "<FLAG_CODE>",
       "severity": "<high|medium|low>",
-      "detail": "<specific, actionable warning>"
+      "tier": "<fatal|contextual|missing_input>",
+      "detail": "<specific, actionable - guidance not scolding>"
     }
   ],
   "improvements": [
     "<2-3 concrete changes that would raise the score>"
+  ],
+  "fixesToPass": [
+    "<If not GREEN: specific minimum changes needed to pass. Empty if already GREEN>"
   ],
   "ruleChecklist": [
     {"rule": "<rule name>", "status": "<followed|violated|na>", "note": "<brief>"}
@@ -122,12 +152,59 @@ This is a POST-TRADE analysis. The trade has already happened. Your job is to:
 
 Key principle: A winning trade with poor process is WORSE than a losing trade with good process.
 
-Respond with a JSON object containing:
+## YOUR TONE
+- Calm coach, guiding improvement
+- Never scolding, never harsh
+- Focus on what they can learn and apply next time
+- Perfect line: "The process here was solid even though the outcome wasn't. Keep executing like this."
+
+## FLAG CLASSIFICATION
+Classify flags into tiers for clarity:
+- FATAL: Must-fix structural issues (no stop, R:R < 1, thesis contradiction)
+- CONTEXTUAL: Situation-dependent concerns (regime mismatch, stop sensitivity)
+- MISSING_INPUT: Info not provided, not necessarily violated
+
+## RESPONSE FORMAT
+Respond with a JSON object:
 {
   "score": <1-100 process quality score>,
-  "recommendation": "<excellent_process|good_process|needs_improvement|poor_process>",
-  "reasoning": "<analysis of the process, not the outcome>",
-  "riskFlags": [<process issues identified>],
+  "status": "<GREEN|YELLOW|RED>",
+  "confidence": "<HIGH|MEDIUM|LOW>",
+  "modelTag": "<BREAKOUT|RECLAIM|CUP_AND_HANDLE|PULLBACK|EPISODIC_PIVOT|UNKNOWN>",
+  "verdictSummary": {
+    "verdict": "<One sentence: Plan passes/fails due to X>",
+    "primaryBlockers": ["<1-3 fatal issues, empty if none>"]
+  },
+  "moneyBreakdown": {
+    "totalRisk": "<$XXX - total dollars at risk>",
+    "firstTrimProfit": "<$XXX at 30% trim or null>",
+    "targetProfit": "<$XXX remaining 70% or null>",
+    "totalPotentialProfit": "<$XXX if all targets hit>"
+  },
+  "planSummary": {
+    "entry": "$XXX.XX",
+    "stop": "$XXX.XX",
+    "riskPerShare": "$X.XX (X.X%)",
+    "target": "$XXX.XX or null",
+    "rrRatio": "X.X:1 or null"
+  },
+  "whyBullets": [
+    "<3-7 short bullets - what the trader did RIGHT in their process>"
+  ],
+  "riskFlags": [
+    {
+      "flag": "<FLAG_CODE>",
+      "severity": "<high|medium|low>",
+      "tier": "<fatal|contextual|missing_input>",
+      "detail": "<specific, actionable observation - not scolding>"
+    }
+  ],
+  "improvements": [
+    "<2-3 concrete changes for next time - guidance, not criticism>"
+  ],
+  "fixesToPass": [
+    "<If RED/YELLOW: specific changes that would have raised the score>"
+  ],
   "processAnalysis": {
     "entryExecution": "<how well did they execute the entry>",
     "stopManagement": "<did they honor their stop>",
@@ -137,9 +214,19 @@ Respond with a JSON object containing:
     "rulesViolated": <number of rules violated>
   },
   "ruleChecklist": [
-    {"rule": "<rule name>", "status": "<followed|violated|not_applicable>", "note": "<brief explanation>"}
+    {"rule": "<rule name>", "status": "<followed|violated|na>", "note": "<brief>"}
   ]
-}`;
+}
+
+## STATUS SCORING FOR HISTORICAL
+- GREEN (80-100): Excellent process, followed rules, managed risk well
+- YELLOW (50-79): Decent process but room for improvement
+- RED (0-49): Significant process issues to address
+
+## CONFIDENCE LEVELS
+- HIGH: Clear process evaluation, sufficient data
+- MEDIUM: Some ambiguity in the trade record
+- LOW: Missing key information to evaluate properly`;
 
 const STOP_LEVEL_LABELS: Record<string, string> = {
   "LOD_TODAY": "Low of Day (Today)",
@@ -486,7 +573,7 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
             prompt += ` - ${rule.description}`;
           }
           if (rule.severity === 'auto_reject') {
-            prompt += ` [AUTO-REJECT if violated]`;
+            prompt += ` [STRUCTURAL - Plan must address this]`;
           }
         });
       }

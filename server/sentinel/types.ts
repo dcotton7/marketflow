@@ -4,8 +4,10 @@ export interface EvaluationRequest {
   entryPrice: number;
   stopPrice?: number;
   stopPriceLevel?: string;
-  targetPrice?: number;
-  targetPriceLevel?: string;
+  targetPrice?: number; // First profit trim
+  targetPriceLevel?: string; // First profit trim level
+  targetProfitPrice?: number; // Full position exit target
+  targetProfitLevel?: string; // Full target level: EXTENDED_8X_50DMA, PREV_HIGH, RR_5X, etc.
   positionSize?: number;
   positionSizeUnit?: 'shares' | 'dollars';
   thesis?: string;
@@ -18,6 +20,7 @@ export interface EvaluationRequest {
 export interface RiskFlagDetail {
   flag: string;
   severity: 'high' | 'medium' | 'low';
+  tier?: 'fatal' | 'contextual' | 'missing_input';
   detail: string;
 }
 
@@ -31,8 +34,21 @@ export interface PlanSummary {
   entry: string;
   stop: string;
   riskPerShare: string;
+  firstTrim?: string | null;
   target: string | null;
   rrRatio: string | null;
+}
+
+export interface VerdictSummary {
+  verdict: string;
+  primaryBlockers: string[];
+}
+
+export interface MoneyBreakdown {
+  totalRisk: string;
+  firstTrimProfit: string | null;
+  targetProfit: string | null;
+  totalPotentialProfit: string;
 }
 
 export interface EvaluationResult {
@@ -41,6 +57,13 @@ export interface EvaluationResult {
   status: 'GREEN' | 'YELLOW' | 'RED';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   modelTag: 'BREAKOUT' | 'RECLAIM' | 'CUP_AND_HANDLE' | 'PULLBACK' | 'EPISODIC_PIVOT' | 'UNKNOWN';
+  instrumentType?: 'ETF' | 'STOCK' | 'INDEX';
+  
+  // Verdict summary - primary blockers at top
+  verdictSummary?: VerdictSummary;
+  
+  // Money breakdown - real dollars
+  moneyBreakdown?: MoneyBreakdown;
   
   // User's plan summary
   planSummary: PlanSummary;
@@ -49,7 +72,18 @@ export interface EvaluationResult {
   whyBullets: string[];
   riskFlags: RiskFlagDetail[];
   improvements: string[];
+  fixesToPass?: string[]; // Minimum changes needed to reach GREEN
   ruleChecklist: RuleCheckItem[];
+  
+  // Process analysis for historical trades
+  processAnalysis?: {
+    entryExecution: string;
+    stopManagement: string;
+    targetManagement: string;
+    emotionalControl: string;
+    rulesFollowed: number;
+    rulesViolated: number;
+  };
   
   // Legacy fields for backwards compatibility
   recommendation: 'proceed' | 'caution' | 'avoid';

@@ -30,6 +30,7 @@ interface SectorTrend {
 interface RiskFlagDetail {
   flag: string;
   severity: 'high' | 'medium' | 'low';
+  tier?: 'fatal' | 'contextual' | 'missing_input';
   detail: string;
 }
 
@@ -43,8 +44,30 @@ interface PlanSummary {
   entry: string;
   stop: string;
   riskPerShare: string;
+  firstTrim?: string | null;
   target: string | null;
   rrRatio: string | null;
+}
+
+interface VerdictSummary {
+  verdict: string;
+  primaryBlockers: string[];
+}
+
+interface MoneyBreakdown {
+  totalRisk: string;
+  firstTrimProfit: string | null;
+  targetProfit: string | null;
+  totalPotentialProfit: string;
+}
+
+interface ProcessAnalysis {
+  entryExecution: string;
+  stopManagement: string;
+  targetManagement: string;
+  emotionalControl: string;
+  rulesFollowed: number;
+  rulesViolated: number;
 }
 
 interface EvaluationResult {
@@ -55,6 +78,13 @@ interface EvaluationResult {
     status: 'GREEN' | 'YELLOW' | 'RED';
     confidence: 'HIGH' | 'MEDIUM' | 'LOW';
     modelTag: 'BREAKOUT' | 'RECLAIM' | 'CUP_AND_HANDLE' | 'PULLBACK' | 'EPISODIC_PIVOT' | 'UNKNOWN';
+    instrumentType?: 'ETF' | 'STOCK' | 'INDEX';
+    
+    // Verdict summary - primary blockers at top
+    verdictSummary?: VerdictSummary;
+    
+    // Money breakdown - real dollars
+    moneyBreakdown?: MoneyBreakdown;
     
     // User's plan summary
     planSummary?: PlanSummary;
@@ -63,7 +93,11 @@ interface EvaluationResult {
     whyBullets?: string[];
     riskFlags: RiskFlagDetail[] | string[];
     improvements?: string[];
+    fixesToPass?: string[];
     ruleChecklist?: RuleCheckItem[];
+    
+    // Process analysis for historical trades
+    processAnalysis?: ProcessAnalysis;
     
     // Legacy fields
     recommendation: string;
@@ -98,9 +132,15 @@ const STOP_PRICE_CHOICES = [
 const TARGET_PRICE_CHOICES = [
   { value: "PREV_DAY_HIGH", label: "Previous Day High" },
   { value: "5_DAY_HIGH", label: "Past 5 Day High" },
+  { value: "RR_1_5X", label: "1.5x Risk/Reward" },
   { value: "RR_2X", label: "2x Risk/Reward" },
   { value: "RR_3X", label: "3x Risk/Reward" },
-  { value: "RR_4X", label: "4x Risk/Reward" },
+];
+
+const TARGET_PROFIT_CHOICES = [
+  { value: "EXTENDED_8X_50DMA", label: "Extended 8% over 50 DMA" },
+  { value: "PREV_DAY_HIGH", label: "Previous Day High" },
+  { value: "5_DAY_HIGH", label: "Past 5 Day High" },
   { value: "RR_5X", label: "5x Risk/Reward" },
   { value: "RR_8X", label: "8x Risk/Reward" },
   { value: "RR_10X", label: "10x Risk/Reward" },
@@ -130,6 +170,11 @@ export default function SentinelEvaluatePage() {
   const [targetPriceMode, setTargetPriceMode] = useState<"amount" | "choice">("amount");
   const [targetPrice, setTargetPrice] = useState("");
   const [targetPriceChoice, setTargetPriceChoice] = useState("");
+  
+  // Target profit (full exit target)
+  const [targetProfitMode, setTargetProfitMode] = useState<"amount" | "choice">("choice");
+  const [targetProfitPrice, setTargetProfitPrice] = useState("");
+  const [targetProfitChoice, setTargetProfitChoice] = useState("");
   
   // Position size
   const [positionSizeUnit, setPositionSizeUnit] = useState<"shares" | "dollars">("shares");
@@ -293,11 +338,18 @@ export default function SentinelEvaluatePage() {
       data.stopPriceLevel = stopPriceChoice;
     }
 
-    // Target price - either amount or choice
+    // First profit trim - either amount or choice
     if (targetPriceMode === "amount" && targetPrice) {
       data.targetPrice = parseFloat(targetPrice);
     } else if (targetPriceMode === "choice" && targetPriceChoice) {
       data.targetPriceLevel = targetPriceChoice;
+    }
+    
+    // Target profit (full exit) - either amount or choice
+    if (targetProfitMode === "amount" && targetProfitPrice) {
+      data.targetProfitPrice = parseFloat(targetProfitPrice);
+    } else if (targetProfitMode === "choice" && targetProfitChoice) {
+      data.targetProfitLevel = targetProfitChoice;
     }
 
     // Position size with unit
@@ -576,6 +628,51 @@ export default function SentinelEvaluatePage() {
                       </SelectTrigger>
                       <SelectContent>
                         {TARGET_PRICE_CHOICES.map((choice) => (
+                          <SelectItem key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                {/* Target Profit - Full position exit target */}
+                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-medium">Target Profit</Label>
+                    <RadioGroup
+                      value={targetProfitMode}
+                      onValueChange={(v) => setTargetProfitMode(v as "amount" | "choice")}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-1">
+                        <RadioGroupItem value="amount" id="profit-amount" />
+                        <Label htmlFor="profit-amount" className="text-xs cursor-pointer">Amount</Label>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <RadioGroupItem value="choice" id="profit-choice" />
+                        <Label htmlFor="profit-choice" className="text-xs cursor-pointer">Level</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Full exit target (5x-8x R:R ideal)</p>
+                  {targetProfitMode === "amount" ? (
+                    <Input
+                      type="number"
+                      step="0.01"
+                      data-testid="input-target-profit"
+                      value={targetProfitPrice}
+                      onChange={(e) => setTargetProfitPrice(e.target.value)}
+                      placeholder="180.00"
+                    />
+                  ) : (
+                    <Select value={targetProfitChoice} onValueChange={setTargetProfitChoice}>
+                      <SelectTrigger data-testid="select-target-profit-level">
+                        <SelectValue placeholder="Select target profit level..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TARGET_PROFIT_CHOICES.map((choice) => (
                           <SelectItem key={choice.value} value={choice.value}>
                             {choice.label}
                           </SelectItem>
@@ -869,11 +966,66 @@ export default function SentinelEvaluatePage() {
                       </Badge>
                     </div>
                     
+                    {/* Verdict Summary - Primary blockers at top */}
+                    {result.evaluation.verdictSummary && (
+                      <div className={`p-3 rounded-md mb-3 ${
+                        result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
+                        result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
+                      }`} data-testid="verdict-summary">
+                        <p className="text-sm font-medium mb-1">Verdict:</p>
+                        <p className="text-sm">{result.evaluation.verdictSummary.verdict}</p>
+                        {result.evaluation.verdictSummary.primaryBlockers && result.evaluation.verdictSummary.primaryBlockers.length > 0 && (
+                          <div className="mt-2">
+                            <p className="text-xs font-medium text-red-400">Primary Blockers ({result.evaluation.verdictSummary.primaryBlockers.length}):</p>
+                            <ul className="text-xs text-red-300 mt-1">
+                              {result.evaluation.verdictSummary.primaryBlockers.map((blocker, i) => (
+                                <li key={i}>• {blocker}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Money Breakdown - Real Dollars */}
+                    {result.evaluation.moneyBreakdown && (
+                      <div className="p-3 rounded-md mb-3 bg-blue-500/10 border border-blue-500/30" data-testid="money-breakdown">
+                        <p className="text-sm font-medium mb-2 flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-blue-400" />
+                          Your Risk/Reward Breakdown
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Risking:</span>
+                            <span className="font-bold text-red-400 ml-2">{result.evaluation.moneyBreakdown.totalRisk}</span>
+                          </div>
+                          {result.evaluation.moneyBreakdown.firstTrimProfit && (
+                            <div>
+                              <span className="text-muted-foreground">First Profit (30% trim):</span>
+                              <span className="font-bold text-green-400 ml-2">+{result.evaluation.moneyBreakdown.firstTrimProfit}</span>
+                            </div>
+                          )}
+                          {result.evaluation.moneyBreakdown.targetProfit && (
+                            <div>
+                              <span className="text-muted-foreground">Target (70%):</span>
+                              <span className="font-bold text-green-400 ml-2">+{result.evaluation.moneyBreakdown.targetProfit}</span>
+                            </div>
+                          )}
+                          <div className="col-span-2 pt-1 border-t border-blue-500/30">
+                            <span className="text-muted-foreground">TOTAL if all hits:</span>
+                            <span className="font-bold text-green-500 ml-2">+{result.evaluation.moneyBreakdown.totalPotentialProfit}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Plan Summary */}
                     {result.evaluation.planSummary && (
                       <div className="text-sm text-muted-foreground mb-3 p-2 bg-muted/30 rounded" data-testid="plan-summary">
                         <span className="font-medium">Your Plan:</span>{' '}
                         Entry {result.evaluation.planSummary.entry} | Stop {result.evaluation.planSummary.stop} | Risk/share {result.evaluation.planSummary.riskPerShare}
+                        {result.evaluation.planSummary.firstTrim && ` | First Trim ${result.evaluation.planSummary.firstTrim}`}
+                        {result.evaluation.planSummary.target && ` | Target ${result.evaluation.planSummary.target}`}
                         {result.evaluation.planSummary.rrRatio && ` | R:R ${result.evaluation.planSummary.rrRatio}`}
                       </div>
                     )}
@@ -937,49 +1089,108 @@ export default function SentinelEvaluatePage() {
                   </Card>
                 )}
 
-                {/* Risk Flags Section */}
-                {result.evaluation.riskFlags && result.evaluation.riskFlags.length > 0 && (
-                  <Card>
+                {/* Risk Flags Section - Tiered Display */}
+                {result.evaluation.riskFlags && result.evaluation.riskFlags.length > 0 && (() => {
+                  const flags = result.evaluation.riskFlags.map((flag) => {
+                    const isDetailedFlag = typeof flag === 'object';
+                    return {
+                      severity: isDetailedFlag ? (flag as RiskFlagDetail).severity : 'medium',
+                      tier: isDetailedFlag ? (flag as RiskFlagDetail).tier : undefined,
+                      flagName: isDetailedFlag ? (flag as RiskFlagDetail).flag : flag,
+                      detail: isDetailedFlag ? (flag as RiskFlagDetail).detail : flag,
+                    };
+                  });
+                  const fatalFlags = flags.filter(f => f.tier === 'fatal' || f.severity === 'high');
+                  const contextualFlags = flags.filter(f => f.tier === 'contextual' || (!f.tier && f.severity === 'medium'));
+                  const missingFlags = flags.filter(f => f.tier === 'missing_input' || (!f.tier && f.severity === 'low'));
+                  
+                  return (
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Shield className="w-4 h-4 text-yellow-500" />
+                          Risk Assessment
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {fatalFlags.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-red-400 mb-1.5">Structural Issues (Must Fix)</p>
+                            <div className="space-y-1.5" data-testid="risk-flags-fatal">
+                              {fatalFlags.map((f, i) => (
+                                <div key={i} className="p-2 rounded border bg-red-500/10 border-red-500/30">
+                                  <div className="flex items-start gap-2">
+                                    <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+                                    <div>
+                                      <span className="font-medium text-sm">{String(f.flagName).replace(/_/g, ' ')}</span>
+                                      <p className="text-xs text-muted-foreground mt-0.5">{f.detail}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {contextualFlags.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-yellow-400 mb-1.5">Contextual Concerns</p>
+                            <div className="space-y-1.5" data-testid="risk-flags-contextual">
+                              {contextualFlags.map((f, i) => (
+                                <div key={i} className="p-2 rounded border bg-yellow-500/10 border-yellow-500/30">
+                                  <div className="flex items-start gap-2">
+                                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-yellow-500" />
+                                    <div>
+                                      <span className="font-medium text-sm">{String(f.flagName).replace(/_/g, ' ')}</span>
+                                      <p className="text-xs text-muted-foreground mt-0.5">{f.detail}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {missingFlags.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-muted-foreground mb-1.5">Missing Information</p>
+                            <div className="space-y-1.5" data-testid="risk-flags-missing">
+                              {missingFlags.map((f, i) => (
+                                <div key={i} className="p-2 rounded border bg-muted/50 border-muted">
+                                  <div className="flex items-start gap-2">
+                                    <Info className="w-4 h-4 shrink-0 mt-0.5 text-muted-foreground" />
+                                    <div>
+                                      <span className="font-medium text-sm">{String(f.flagName).replace(/_/g, ' ')}</span>
+                                      <p className="text-xs text-muted-foreground mt-0.5">{f.detail}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
+
+                {/* Fixes to Pass Section - Minimum changes to reach GREEN */}
+                {result.evaluation.fixesToPass && result.evaluation.fixesToPass.length > 0 && (
+                  <Card className="border-green-500/30">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Shield className="w-4 h-4 text-yellow-500" />
-                        Risk Flags (Read Before Committing)
+                        <Target className="w-4 h-4 text-green-500" />
+                        Minimum Fixes to Pass
                       </CardTitle>
+                      <p className="text-xs text-muted-foreground">Make these changes to reach GREEN</p>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-2" data-testid="risk-flags">
-                        {result.evaluation.riskFlags.map((flag, i) => {
-                          const isDetailedFlag = typeof flag === 'object';
-                          const severity = isDetailedFlag ? (flag as RiskFlagDetail).severity : 'medium';
-                          const flagName = isDetailedFlag ? (flag as RiskFlagDetail).flag : flag;
-                          const detail = isDetailedFlag ? (flag as RiskFlagDetail).detail : flag;
-                          
-                          return (
-                            <div 
-                              key={i} 
-                              className={`p-2 rounded border ${
-                                severity === 'high' ? 'bg-red-500/10 border-red-500/30' :
-                                severity === 'medium' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                                'bg-muted/50 border-muted'
-                              }`}
-                              data-testid={`risk-flag-${i}`}
-                            >
-                              <div className="flex items-start gap-2">
-                                <AlertOctagon className={`w-4 h-4 shrink-0 mt-0.5 ${
-                                  severity === 'high' ? 'text-red-500' :
-                                  severity === 'medium' ? 'text-yellow-500' : 'text-muted-foreground'
-                                }`} />
-                                <div>
-                                  <span className="font-medium text-sm">{String(flagName).replace(/_/g, ' ')}</span>
-                                  {isDetailedFlag && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <ul className="space-y-1.5" data-testid="fixes-to-pass">
+                        {result.evaluation.fixesToPass.map((fix, i) => (
+                          <li key={i} className="text-sm flex items-start gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                            <span>{fix}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </CardContent>
                   </Card>
                 )}
@@ -1059,11 +1270,26 @@ export default function SentinelEvaluatePage() {
                       <Button
                         variant="outline"
                         className="gap-2"
-                        onClick={() => setLocation("/sentinel/dashboard")}
-                        data-testid="button-modify"
+                        onClick={() => {
+                          setResult(null);
+                          toast({ title: "Revise your plan", description: "Make adjustments and re-evaluate" });
+                        }}
+                        data-testid="button-revise"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Revise Plan
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => {
+                          toast({ title: "Waiting for confirmation", description: "Monitor for better entry" });
+                          setLocation("/sentinel/dashboard?tab=watchlist");
+                        }}
+                        data-testid="button-wait"
                       >
                         <Clock className="w-4 h-4" />
-                        Modify / Wait
+                        Wait for Confirmation
                       </Button>
                       <Button
                         variant="outline"
@@ -1079,15 +1305,15 @@ export default function SentinelEvaluatePage() {
                       </Button>
                       <Button
                         variant="outline"
-                        className="gap-2 text-red-400 hover:text-red-300"
+                        className="gap-2 text-red-400 hover:text-red-300 col-span-2"
                         onClick={() => {
-                          toast({ title: "Trade Rejected", description: "Decision logged" });
+                          toast({ title: "Trade Passed", description: "Decision logged" });
                           setLocation("/sentinel/dashboard");
                         }}
-                        data-testid="button-reject"
+                        data-testid="button-pass"
                       >
                         <ThumbsDown className="w-4 h-4" />
-                        Reject / Pass
+                        Pass on This Trade
                       </Button>
                     </div>
                   </CardContent>

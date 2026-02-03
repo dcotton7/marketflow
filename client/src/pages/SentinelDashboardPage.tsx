@@ -405,6 +405,28 @@ function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (
     ai_agentic: "AI Agent",
   };
 
+  const categoryLabels: Record<string, string> = {
+    auto_reject: "Structural",
+    profit_taking: "Profit Taking",
+    stop_loss: "Stop Loss",
+    ma_structure: "MA Structure",
+    base_quality: "Base Quality",
+    breakout: "Breakout",
+    position_sizing: "Position Sizing",
+    entry: "Entry",
+    exit: "Exit",
+    risk: "Risk",
+    market_regime: "Market Regime",
+    general: "General",
+  };
+
+  const severityLabels: Record<string, string> = {
+    auto_reject: "Structural Issue",
+    critical: "Critical",
+    warning: "Warning",
+    info: "Info",
+  };
+
   return (
     <div className={`flex items-center justify-between p-3 border rounded-md ${!rule.isActive ? 'opacity-50' : ''} ${rule.isAutoReject ? 'border-red-500/30' : ''}`} data-testid={`rule-${rule.id}`}>
       <div className="flex items-center gap-3 flex-1">
@@ -418,12 +440,12 @@ function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             {rule.isAutoReject && (
-              <Badge className="bg-red-600 text-white text-xs">AUTO-REJECT</Badge>
+              <Badge className="bg-red-600 text-white text-xs">STRUCTURAL</Badge>
             )}
             <span className="font-medium">{rule.name}</span>
             {rule.category && (
               <Badge className={`${categoryColors[rule.category] || categoryColors.general} text-xs`}>
-                {rule.category.replace('_', ' ')}
+                {categoryLabels[rule.category] || rule.category.replace('_', ' ')}
               </Badge>
             )}
             {rule.source && rule.source !== 'user' && (
@@ -433,7 +455,7 @@ function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (
             )}
             {rule.severity && rule.severity !== 'warning' && !rule.isAutoReject && (
               <Badge className={`${severityColors[rule.severity] || ''} text-xs`}>
-                {rule.severity}
+                {severityLabels[rule.severity] || rule.severity}
               </Badge>
             )}
           </div>
@@ -467,6 +489,7 @@ export default function SentinelDashboardPage() {
   const [ruleForm, setRuleForm] = useState({ name: "", description: "", category: "entry" });
   const [ruleFilter, setRuleFilter] = useState<string>("all");
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(null);
+  const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<number>>(new Set()); // For toggle mode - all ON by default
   
   // Trade action dialogs
   const [showEditTrade, setShowEditTrade] = useState(false);
@@ -507,12 +530,39 @@ export default function SentinelDashboardPage() {
     queryKey: ["/api/sentinel/labels"],
   });
 
-  // Filter trades by label
+  // Filter trades by label - toggle mode (hidden labels are excluded)
   const filterTradesByLabel = (trades: TradeWithEvaluation[] | undefined) => {
-    if (!trades || selectedLabelFilter === null) return trades;
-    return trades.filter(trade => 
-      trade.labels?.some(label => label.id === selectedLabelFilter)
-    );
+    if (!trades) return trades;
+    // If using single selection mode
+    if (selectedLabelFilter !== null) {
+      return trades.filter(trade => 
+        trade.labels?.some(label => label.id === selectedLabelFilter)
+      );
+    }
+    // Toggle mode - hide trades that have ONLY hidden labels
+    if (hiddenLabelIds.size > 0) {
+      return trades.filter(trade => {
+        // If trade has no labels, show it
+        if (!trade.labels || trade.labels.length === 0) return true;
+        // If ANY label is visible (not hidden), show the trade
+        return trade.labels.some(label => !hiddenLabelIds.has(label.id));
+      });
+    }
+    return trades;
+  };
+  
+  // Toggle a label on/off
+  const toggleLabelVisibility = (labelId: number) => {
+    setHiddenLabelIds(prev => {
+      const next = new Set(prev);
+      if (next.has(labelId)) {
+        next.delete(labelId);
+      } else {
+        next.add(labelId);
+      }
+      return next;
+    });
+    setSelectedLabelFilter(null); // Switch to toggle mode
   };
 
   const filteredConsidering = filterTradesByLabel(dashboard?.considering);
@@ -939,7 +989,7 @@ export default function SentinelDashboardPage() {
               <div className="flex flex-wrap gap-1">
                 {[
                   { value: "all", label: "All" },
-                  { value: "auto_reject", label: "Auto-Reject" },
+                  { value: "auto_reject", label: "Structural" },
                   { value: "entry", label: "Entry" },
                   { value: "exit", label: "Exit" },
                   { value: "profit_taking", label: "Profit" },
@@ -1236,7 +1286,7 @@ export default function SentinelDashboardPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto_reject">Auto-Reject (Trade Fails)</SelectItem>
+                  <SelectItem value="auto_reject">Structural (Plan Requirement)</SelectItem>
                   <SelectItem value="entry">Entry Timing</SelectItem>
                   <SelectItem value="exit">Exit / Profit Taking</SelectItem>
                   <SelectItem value="stop_loss">Stop Loss</SelectItem>

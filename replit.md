@@ -66,7 +66,9 @@ The project utilizes a monorepo structure, separating client (React frontend) an
   - `sentinel_rule_performance`: Aggregated rule performance statistics for collective learning
 
 ### Rule Categories (12 total)
-auto_reject, entry, exit, profit_taking, stop_loss, ma_structure, base_quality, breakout, position_sizing, market_regime, risk, general
+structural (formerly auto_reject), entry, exit, profit_taking, stop_loss, ma_structure, base_quality, breakout, position_sizing, market_regime, risk, general
+
+**Note**: "auto_reject" is internally retained as the database value but displayed as "Structural" or "Structural Requirements" in the UI. Similarly, severity level "auto_reject" displays as "Structural Issue" to use guidance-oriented language.
 
 ### AI Collective Learning
 - Rules have sources: 'starter' (61 pre-loaded), 'user' (custom), 'ai_collective' (learned from patterns), 'ai_agentic' (future agent-generated)

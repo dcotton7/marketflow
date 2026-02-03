@@ -10,7 +10,7 @@ export interface StarterRule {
 }
 
 export const STARTER_RULES: StarterRule[] = [
-  // === AUTO-REJECT RULES (Instant 0 Score) ===
+  // === STRUCTURAL REQUIREMENTS (Core Plan Requirements) ===
   {
     name: "Price below 50 SMA during base formation",
     description: "Never trade stocks with price below 50 SMA during base formation - indicates weakness",
@@ -593,7 +593,7 @@ export const STARTER_RULES: StarterRule[] = [
 ];
 
 export const RULE_CATEGORIES = [
-  { value: "auto_reject", label: "Auto-Reject", description: "Instant trade rejection" },
+  { value: "auto_reject", label: "Structural Requirements", description: "Core plan structure" },
   { value: "profit_taking", label: "Profit Taking", description: "When to take profits" },
   { value: "stop_loss", label: "Stop Loss", description: "Stop placement and management" },
   { value: "ma_structure", label: "MA Structure", description: "Moving average requirements" },
@@ -608,7 +608,7 @@ export const RULE_CATEGORIES = [
 ];
 
 export const SEVERITY_LEVELS = [
-  { value: "auto_reject", label: "Auto-Reject", color: "red", description: "Trade will be instantly rejected" },
+  { value: "auto_reject", label: "Structural Issue", color: "red", description: "Plan needs structural changes" },
   { value: "critical", label: "Critical", color: "orange", description: "Major rule that should rarely be broken" },
   { value: "warning", label: "Warning", color: "yellow", description: "Important rule to consider" },
   { value: "info", label: "Info", color: "blue", description: "Good practice / nice to have" },
