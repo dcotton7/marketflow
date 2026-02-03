@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -276,15 +276,52 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
     ? ((trade.targetPrice - trade.entryPrice) / trade.entryPrice * 100) 
     : (trade.direction === "long" ? 2.5 : -2.5);
 
+  // Price monitoring calculations - use current price (entry for now, could be live)
+  const currentPrice = trade.entryPrice; // In production, this would be live price
+  const isLong = trade.direction === "long";
+  
+  // Calculate % distance to each price level
+  const stopDistance = trade.stopPrice 
+    ? ((currentPrice - trade.stopPrice) / trade.stopPrice * 100) 
+    : null;
+  
+  // Partial profit at 50% of the way to target (R:R midpoint)
+  const partialProfitPrice = trade.stopPrice && trade.targetPrice
+    ? trade.entryPrice + ((trade.targetPrice - trade.entryPrice) * 0.5)
+    : null;
+  const partialDistance = partialProfitPrice
+    ? ((partialProfitPrice - currentPrice) / currentPrice * 100)
+    : null;
+  
+  const targetDistance = trade.targetPrice
+    ? ((trade.targetPrice - currentPrice) / currentPrice * 100)
+    : null;
+
+  // Alert conditions - within 5% of goal
+  const nearStop = stopDistance !== null && Math.abs(stopDistance) <= 5;
+  const nearTarget = targetDistance !== null && Math.abs(targetDistance) <= 5;
+
   return (
     <Card 
-      className="hover-elevate cursor-pointer relative" 
+      className={`hover-elevate cursor-pointer relative ${nearStop ? "ring-2 ring-red-500" : nearTarget ? "ring-2 ring-green-500" : ""}`}
       data-testid={`card-trade-${trade.id}`}
       onClick={handleCardClick}
     >
       <CardContent className="p-4 pb-10">
+        {/* Alert banners */}
+        {nearTarget && (
+          <div className="absolute top-0 left-0 right-0 bg-green-500/20 text-green-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-target-${trade.id}`}>
+            <Target className="w-3 h-3" /> NEAR PROFIT TARGET!
+          </div>
+        )}
+        {nearStop && (
+          <div className="absolute top-0 left-0 right-0 bg-red-500/20 text-red-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-stop-${trade.id}`}>
+            <AlertTriangle className="w-3 h-3" /> NEAR STOP LOSS!
+          </div>
+        )}
+
         {/* Compact Ticker Widget with Sparkline */}
-        <div className="flex items-center justify-between mb-3">
+        <div className={`flex items-center justify-between mb-3 ${nearTarget || nearStop ? "mt-4" : ""}`}>
           <TickerWidget 
             symbol={trade.symbol}
             price={trade.entryPrice}
@@ -324,11 +361,49 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel }: Trade
           </div>
         )}
 
-        <div className="text-sm text-muted-foreground space-y-1">
-          <div className="flex gap-4 flex-wrap">
-            {trade.stopPrice && <span>Stop: ${trade.stopPrice.toFixed(2)}</span>}
-            {trade.targetPrice && <span>Target: ${trade.targetPrice.toFixed(2)}</span>}
-          </div>
+        {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance */}
+        <div className="text-xs space-y-1.5 mb-2">
+          {/* Stop Loss */}
+          {trade.stopPrice && stopDistance !== null && (
+            <div className={`flex items-center justify-between px-2 py-1 rounded ${nearStop ? "bg-red-500/10" : "bg-muted/30"}`} data-testid={`monitor-stop-${trade.id}`}>
+              <div className="flex items-center gap-1.5">
+                <XCircle className={`w-3 h-3 ${nearStop ? "text-red-500" : "text-muted-foreground"}`} />
+                <span className={nearStop ? "text-red-500 font-medium" : "text-muted-foreground"}>STOP</span>
+                <span className="text-muted-foreground">${trade.stopPrice.toFixed(2)}</span>
+              </div>
+              <span className={`font-mono ${nearStop ? "text-red-500 font-bold" : "text-muted-foreground"}`}>
+                {stopDistance > 0 ? "+" : ""}{stopDistance.toFixed(1)}%
+              </span>
+            </div>
+          )}
+          
+          {/* Partial Profit (50% to target) */}
+          {partialProfitPrice && partialDistance !== null && (
+            <div className="flex items-center justify-between px-2 py-1 rounded bg-muted/30" data-testid={`monitor-partial-${trade.id}`}>
+              <div className="flex items-center gap-1.5">
+                <CircleDot className="w-3 h-3 text-yellow-500" />
+                <span className="text-muted-foreground">PARTIAL</span>
+                <span className="text-muted-foreground">${partialProfitPrice.toFixed(2)}</span>
+              </div>
+              <span className="font-mono text-muted-foreground">
+                {partialDistance > 0 ? "+" : ""}{partialDistance.toFixed(1)}%
+              </span>
+            </div>
+          )}
+          
+          {/* Profit Target */}
+          {trade.targetPrice && targetDistance !== null && (
+            <div className={`flex items-center justify-between px-2 py-1 rounded ${nearTarget ? "bg-green-500/10" : "bg-muted/30"}`} data-testid={`monitor-target-${trade.id}`}>
+              <div className="flex items-center gap-1.5">
+                <Target className={`w-3 h-3 ${nearTarget ? "text-green-500" : "text-muted-foreground"}`} />
+                <span className={nearTarget ? "text-green-500 font-medium" : "text-muted-foreground"}>TARGET</span>
+                <span className="text-muted-foreground">${trade.targetPrice.toFixed(2)}</span>
+              </div>
+              <span className={`font-mono ${nearTarget ? "text-green-500 font-bold" : "text-muted-foreground"}`}>
+                {targetDistance > 0 ? "+" : ""}{targetDistance.toFixed(1)}%
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Risk flags with short names and tooltips */}
@@ -1508,72 +1583,91 @@ export default function SentinelDashboardPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Trade Dialog - Table-based Lot Tracker */}
+      {/* Edit Trade Dialog - V2 Order Grid with BUY/SELL */}
       <Dialog open={showEditTrade} onOpenChange={setShowEditTrade}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Trade: {selectedTrade?.symbol}</DialogTitle>
-            <DialogDescription>Update lot details and pricing</DialogDescription>
+            <DialogDescription>Update order entries - Running total must be zero to close trade</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Lot Tracking Table */}
+            {/* V2 Order Grid Table */}
             <div className="border rounded-md overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">Lots Date/Time</th>
+                    <th className="px-3 py-2 text-left font-medium">Transaction Date/Time</th>
                     <th className="px-3 py-2 text-left font-medium">QTY</th>
-                    <th className="px-3 py-2 text-left font-medium">Cost Basis $</th>
-                    <th className="px-3 py-2 text-left font-medium">Close Price $</th>
-                    <th className="px-2 py-2 w-8"></th>
+                    <th className="px-3 py-2 text-left font-medium">BUY/SELL</th>
+                    <th className="px-3 py-2 text-left font-medium">Cost Basis / Sell Price</th>
+                    <th className="px-3 py-2 text-left font-medium">Running Total</th>
+                    <th className="px-2 py-2 w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {lotEntries.map((lot, index) => (
-                    <tr key={lot.id} className="border-t">
-                      <td className="px-2 py-1">
-                        <Input
-                          type="datetime-local"
-                          value={lot.dateTime}
-                          onChange={(e) => updateLotEntry(lot.id, "dateTime", e.target.value)}
-                          className="h-8 text-xs"
-                          data-testid={`input-lot-datetime-${index}`}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Input
-                          type="number"
-                          placeholder="100"
-                          value={lot.qty}
-                          onChange={(e) => updateLotEntry(lot.id, "qty", e.target.value)}
-                          className="h-8 w-20 text-xs"
-                          data-testid={`input-lot-qty-${index}`}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          placeholder="0.00"
-                          value={lot.costBasis}
-                          onChange={(e) => updateLotEntry(lot.id, "costBasis", e.target.value)}
-                          className="h-8 w-24 text-xs"
-                          data-testid={`input-lot-costbasis-${index}`}
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          placeholder="0.00"
-                          value={lot.closePrice}
-                          onChange={(e) => updateLotEntry(lot.id, "closePrice", e.target.value)}
-                          className="h-8 w-24 text-xs"
-                          data-testid={`input-lot-closeprice-${index}`}
-                        />
-                      </td>
-                      <td className="px-1 py-1">
-                        {lotEntries.length > 1 && (
+                  {lotEntries.map((lot, index) => {
+                    // Calculate running total up to this row
+                    const runningTotalAtRow = lotEntries.slice(0, index + 1).reduce((total, entry) => {
+                      const qty = parseInt(entry.qty) || 0;
+                      return entry.buySell === "buy" ? total + qty : total - qty;
+                    }, 0);
+                    
+                    return (
+                      <tr key={lot.id} className="border-t">
+                        <td className="px-2 py-1">
+                          <Input
+                            type="datetime-local"
+                            value={lot.dateTime}
+                            onChange={(e) => updateLotEntry(lot.id, "dateTime", e.target.value)}
+                            className="h-8 text-xs"
+                            data-testid={`input-lot-datetime-${index}`}
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <Input
+                            type="number"
+                            placeholder="100"
+                            value={lot.qty}
+                            onChange={(e) => updateLotEntry(lot.id, "qty", e.target.value)}
+                            className="h-8 w-20 text-xs"
+                            data-testid={`input-lot-qty-${index}`}
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <Select
+                            value={lot.buySell}
+                            onValueChange={(value) => updateLotEntry(lot.id, "buySell", value)}
+                          >
+                            <SelectTrigger className="h-8 w-20 text-xs" data-testid={`select-lot-buysell-${index}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="buy">BUY</SelectItem>
+                              <SelectItem value="sell">SELL</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-2 py-1">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={lot.price}
+                            onChange={(e) => updateLotEntry(lot.id, "price", e.target.value)}
+                            className="h-8 w-24 text-xs"
+                            data-testid={`input-lot-price-${index}`}
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <span className={`font-mono text-xs font-medium ${
+                            runningTotalAtRow === 0 ? "text-green-500" : 
+                            runningTotalAtRow > 0 ? "text-blue-500" : "text-orange-500"
+                          }`}>
+                            {runningTotalAtRow > 0 ? `+${runningTotalAtRow} LONG` : 
+                             runningTotalAtRow < 0 ? `${runningTotalAtRow} SHORT` : "0 FLAT"}
+                          </span>
+                        </td>
+                        <td className="px-1 py-1 flex gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -1583,32 +1677,62 @@ export default function SentinelDashboardPage() {
                           >
                             <X className="w-3 h-3" />
                           </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-green-500 hover:text-green-600"
+                            onClick={addLotEntry}
+                            data-testid={`button-add-row-${index}`}
+                          >
+                            <Check className="w-3 h-3" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
             
-            {/* Add Row Button */}
-            <div className="flex justify-start">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={addLotEntry}
-                className="text-xs"
-                data-testid="button-add-lot"
-              >
-                <Plus className="w-3 h-3 mr-1" /> Add Lot
-              </Button>
+            {/* Running Total Checksum Display */}
+            <div className="flex items-center justify-between px-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Final Position:</span>
+                <span className={`font-mono font-bold ${
+                  runningTotal === 0 ? "text-green-500" : "text-yellow-500"
+                }`}>
+                  {runningTotal === 0 ? "FLAT (0)" : 
+                   runningTotal > 0 ? `LONG ${runningTotal}` : `SHORT ${Math.abs(runningTotal)}`}
+                </span>
+              </div>
+              {runningTotal !== 0 && (
+                <span className="text-xs text-yellow-500">
+                  ⚠️ Buys and sells must balance to close trade
+                </span>
+              )}
             </div>
           </div>
           <DialogFooter className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowEditTrade(false)}>Cancel</Button>
-            <Button size="sm" onClick={confirmEditTrade} disabled={updateTradeMutation.isPending} data-testid="button-confirm-edit">
-              {updateTradeMutation.isPending ? "Saving..." : "Save"}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button 
+                    size="sm" 
+                    onClick={confirmEditTrade} 
+                    disabled={updateTradeMutation.isPending || (selectedTrade?.status === "closed" && !canCloseTrade)} 
+                    data-testid="button-confirm-edit"
+                  >
+                    {updateTradeMutation.isPending ? "Saving..." : "Save"}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {selectedTrade?.status === "closed" && !canCloseTrade && (
+                <TooltipContent>
+                  <p>Running total must be zero to close trade</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
           </DialogFooter>
         </DialogContent>
       </Dialog>
