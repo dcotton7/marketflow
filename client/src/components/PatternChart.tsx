@@ -147,10 +147,14 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
         
         try {
           const res = await fetch(`/api/stocks/${symbol}/history?period=${period}&interval=${interval}`);
+          
+          // Parse JSON even on error responses to get better messages
+          const data = await res.json().catch(() => ({}));
+          
           if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
+            const errorMsg = data.message || data.error || `HTTP ${res.status}`;
+            throw new Error(res.status === 429 ? 'Rate limited - try again' : errorMsg);
           }
-          const data = await res.json();
           
           if (cancelled) return;
           
@@ -167,12 +171,14 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
           } else {
             throw new Error('No chart data available');
           }
-        } catch (err) {
-          if (attempt < retries - 1) {
+        } catch (err: any) {
+          const isLastAttempt = attempt >= retries - 1;
+          if (!isLastAttempt) {
             await new Promise(r => setTimeout(r, delay * (attempt + 1)));
           } else {
             if (!cancelled) {
-              setError('Failed to fetch data');
+              const message = err?.message || 'Failed to fetch data';
+              setError(message.includes('Rate limit') ? 'Rate limited - try again' : message);
               setLoading(false);
             }
           }

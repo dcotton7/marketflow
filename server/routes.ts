@@ -11,6 +11,60 @@ import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 // Dynamic import to handle ESM/CJS compatibility
 let yahooFinance: any = null;
 
+// In-memory cache for stock history data (5 min TTL)
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+}
+const stockHistoryCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCachedHistory(key: string): any | null {
+  const entry = stockHistoryCache.get(key);
+  if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+    return entry.data;
+  }
+  stockHistoryCache.delete(key);
+  return null;
+}
+
+function setCachedHistory(key: string, data: any): void {
+  stockHistoryCache.set(key, { data, timestamp: Date.now() });
+}
+
+// Retry helper for Yahoo Finance calls
+async function fetchWithRetry<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  delay = 1000
+): Promise<T> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const msg = error.message?.toLowerCase() || '';
+      const code = error.code || error.status || 0;
+      const isRetryable = 
+        msg.includes('too many requests') ||
+        msg.includes('429') ||
+        msg.includes('timeout') ||
+        msg.includes('econnreset') ||
+        msg.includes('socket hang up') ||
+        msg.includes('fetch failed') ||
+        code === 429 ||
+        code >= 500;
+      
+      if (attempt < retries - 1 && isRetryable) {
+        console.log(`[YahooFinance] Retry ${attempt + 1}/${retries} after ${delay * (attempt + 1)}ms`);
+        await new Promise(r => setTimeout(r, delay * (attempt + 1)));
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
 async function getYahooFinance() {
   if (!yahooFinance) {
     try {
@@ -1207,7 +1261,7 @@ export async function registerRoutes(
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
-    const symbol = String(req.params.symbol);
+    const symbol = String(req.params.symbol).toUpperCase();
     const interval = String(req.query.interval || '1d');
     let period = String(req.query.period || '3y'); // Default to 3 years for scrollback history
     
@@ -1220,19 +1274,43 @@ export async function registerRoutes(
       period = '5y'; // Weekly/monthly can have longer history
     }
     
+    // Check cache first
+    const cacheKey = `${symbol}:${period}:${interval}`;
+    const cached = getCachedHistory(cacheKey);
+    if (cached) {
+      res.json(cached);
+      return;
+    }
+    
     try {
       const yf = await getYahooFinance();
-      const history = await getChartData(yf, symbol, period, interval);
+      
+      // Use retry logic for Yahoo Finance calls
+      const history = await fetchWithRetry(
+        () => getChartData(yf, symbol, period, interval),
+        3,
+        1500
+      );
       
       if (history.length === 0) {
         res.status(404).json({ message: `No data available for ${symbol}` });
         return;
       }
       
+      // Cache successful response
+      setCachedHistory(cacheKey, history);
       res.json(history);
-    } catch (error) {
-      console.error(`Error fetching history for ${symbol}:`, error);
-      res.status(404).json({ message: `Symbol ${symbol} not found or data unavailable` });
+    } catch (error: any) {
+      const isRateLimit = error.message?.includes('Too Many Requests') || 
+                          error.message?.includes('429') ||
+                          error.code === 429;
+      console.error(`Error fetching history for ${symbol}:`, error.message || error);
+      
+      if (isRateLimit) {
+        res.status(429).json({ message: `Rate limited - please try again in a few seconds` });
+      } else {
+        res.status(404).json({ message: `Symbol ${symbol} not found or data unavailable` });
+      }
     }
   });
 
