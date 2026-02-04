@@ -261,7 +261,7 @@ const TARGET_LEVEL_LABELS: Record<string, string> = {
 interface TraderContext {
   activePositions?: { symbol: string; direction: string; entryPrice: number }[];
   watchlist?: { symbol: string; thesis?: string }[];
-  rules?: { id: number; name: string; category?: string; description?: string; severity?: string }[];
+  rules?: { id: number; name: string; category?: string; description?: string; severity?: string; strategyTags?: string[] }[];
   accountSize?: number;
 }
 
@@ -306,7 +306,8 @@ export function buildEvaluationPrompt(
   marketContext?: MarketContext,
   technicalData?: TechnicalData | null,
   historicalDate?: Date | null,
-  tnnContext?: TnnWeightContext
+  tnnContext?: TnnWeightContext,
+  setupType?: string
 ): string {
   const accountSize = traderContext?.accountSize || 1000000;
   
@@ -561,10 +562,33 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
       }
     }
 
-    // Enhanced rule section
+    // Enhanced rule section with strategy matching
     if (traderContext.rules && traderContext.rules.length > 0) {
       prompt += `\n\n=== TRADER'S PERSONAL RULES (EVALUATE EACH) ===`;
-      prompt += `\nFor EACH rule below, determine if this trade FOLLOWS or VIOLATES it:\n`;
+      prompt += `\nFor EACH rule below, determine if this trade FOLLOWS or VIOLATES it.`;
+      
+      // Identify rules that match the current setup type for priority weighting
+      if (setupType) {
+        const matchingRules = traderContext.rules.filter(r => 
+          r.strategyTags?.includes(setupType)
+        );
+        if (matchingRules.length > 0) {
+          prompt += `\n\n>>> PRIORITY RULES FOR ${setupType.replace(/_/g, ' ').toUpperCase()} SETUP <<<`;
+          prompt += `\nThese rules are specifically tagged for this setup type and should carry EXTRA WEIGHT in your evaluation:`;
+          matchingRules.forEach(rule => {
+            prompt += `\n★ ${rule.name}`;
+            if (rule.description) {
+              prompt += ` - ${rule.description}`;
+            }
+            if (rule.severity === 'auto_reject') {
+              prompt += ` [CRITICAL - Must be followed]`;
+            }
+          });
+          prompt += `\n`;
+        }
+      }
+      
+      prompt += `\n`;
       
       const rulesByCategory: Record<string, typeof traderContext.rules> = {};
       traderContext.rules.forEach(rule => {
@@ -576,12 +600,16 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
       for (const [category, rules] of Object.entries(rulesByCategory)) {
         prompt += `\n[${category.toUpperCase()}]`;
         rules.forEach(rule => {
-          prompt += `\n• ${rule.name}`;
+          const matchesSetup = setupType && rule.strategyTags?.includes(setupType);
+          prompt += `\n${matchesSetup ? '★' : '•'} ${rule.name}`;
           if (rule.description) {
             prompt += ` - ${rule.description}`;
           }
           if (rule.severity === 'auto_reject') {
             prompt += ` [STRUCTURAL - Plan must address this]`;
+          }
+          if (matchesSetup) {
+            prompt += ` [SETUP-MATCHED]`;
           }
         });
       }

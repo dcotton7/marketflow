@@ -91,6 +91,7 @@ export async function evaluateTrade(
       category: r.category || undefined,
       description: r.description || undefined,
       severity: r.severity || undefined,
+      strategyTags: r.strategyTags || [],
     })),
     accountSize,
   };
@@ -173,7 +174,8 @@ export async function evaluateTrade(
     marketContext,
     technicalData,
     historicalDate,
-    tnnContext
+    tnnContext,
+    setupType
   );
 
   const systemPrompt = isHistorical ? HISTORICAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
