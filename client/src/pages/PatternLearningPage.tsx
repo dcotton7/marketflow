@@ -69,11 +69,6 @@ const RATING_ICONS = {
   4: Star,
 };
 
-const AVAILABLE_INDICATORS = [
-  "VWAP", "21 EMA", "50 SMA", "200 SMA", "9 EMA", "8 EMA", "20 SMA",
-  "Volume", "RSI", "MACD", "Bollinger Bands", "Keltner Channels"
-];
-
 export default function PatternLearningPage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
@@ -88,8 +83,10 @@ export default function PatternLearningPage() {
     formula: "",
     patternType: "custom",
     timeframe: "daily",
-    requiredTechnicals: { indicators: ["21 EMA", "VWAP"], volumeRequired: true }
   });
+  
+  const [currentFormula, setCurrentFormula] = useState<Record<string, any> | null>(null);
+  const [extractedTechnicals, setExtractedTechnicals] = useState<string[]>([]);
   
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "I'm ready to help you refine your trading setup. Select a setup or create a new one, then run a test to find matches. Rate the matches and provide feedback - I'll learn from your input to improve the detection formula." }
@@ -128,7 +125,6 @@ export default function PatternLearningPage() {
         formula: "",
         patternType: "custom",
         timeframe: "daily",
-        requiredTechnicals: { indicators: ["21 EMA", "VWAP"], volumeRequired: true }
       });
       queryClient.invalidateQueries({ queryKey: ['/api/pattern-learning/rules'] });
     },
@@ -191,6 +187,23 @@ export default function PatternLearningPage() {
     },
   });
 
+  useEffect(() => {
+    if (selectedSetup?.description && chatMessages.length <= 1) {
+      setChatInput(selectedSetup.description);
+    }
+    if (selectedSetup?.formulaParams) {
+      setCurrentFormula(selectedSetup.formulaParams as Record<string, any>);
+    } else {
+      setCurrentFormula(null);
+    }
+    if (selectedSetup?.requiredTechnicals) {
+      const techs = (selectedSetup.requiredTechnicals as any)?.indicators || [];
+      setExtractedTechnicals(techs);
+    } else {
+      setExtractedTechnicals([]);
+    }
+  }, [selectedSetup]);
+
   const handleSendChat = useCallback(async () => {
     if (!chatInput.trim() || isAiThinking) return;
     
@@ -221,6 +234,14 @@ export default function PatternLearningPage() {
           description: "AI has improved the detection formula based on your feedback" 
         });
         queryClient.invalidateQueries({ queryKey: ['/api/pattern-learning/rules'] });
+      }
+      
+      if (data.extractedTechnicals && data.extractedTechnicals.length > 0) {
+        setExtractedTechnicals(data.extractedTechnicals);
+      }
+      
+      if (data.proposedFormula) {
+        setCurrentFormula(data.proposedFormula);
       }
     } catch (error) {
       setChatMessages(prev => [...prev, { 
@@ -257,7 +278,9 @@ export default function PatternLearningPage() {
   const currentRating = ratings[currentMatchKey];
 
   const getTradingViewUrl = (ticker: string, date: string) => {
-    const technicals = selectedSetup?.requiredTechnicals?.indicators || [];
+    const technicals = extractedTechnicals.length > 0 
+      ? extractedTechnicals 
+      : (selectedSetup?.requiredTechnicals?.indicators || []);
     const studies = technicals.map(t => {
       if (t.includes('EMA')) return 'EMA@tv-basicstudies';
       if (t.includes('SMA')) return 'MA@tv-basicstudies';
@@ -385,35 +408,10 @@ export default function PatternLearningPage() {
                     />
                   </div>
                   
-                  <div>
-                    <Label>Required Technical Indicators</Label>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {AVAILABLE_INDICATORS.map(indicator => {
-                        const isSelected = newSetup.requiredTechnicals.indicators.includes(indicator);
-                        return (
-                          <Badge
-                            key={indicator}
-                            variant={isSelected ? "default" : "outline"}
-                            className="cursor-pointer"
-                            onClick={() => {
-                              setNewSetup(prev => ({
-                                ...prev,
-                                requiredTechnicals: {
-                                  ...prev.requiredTechnicals,
-                                  indicators: isSelected
-                                    ? prev.requiredTechnicals.indicators.filter(i => i !== indicator)
-                                    : [...prev.requiredTechnicals.indicators, indicator]
-                                }
-                              }));
-                            }}
-                            data-testid={`badge-indicator-${indicator.replace(/\s/g, '-')}`}
-                          >
-                            {indicator}
-                          </Badge>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    The AI will automatically discover which technical indicators are relevant 
+                    based on your description and conversation.
+                  </p>
                 </div>
                 
                 <DialogFooter>
@@ -485,12 +483,36 @@ export default function PatternLearningPage() {
                 </div>
               </div>
               
-              {selectedSetup.requiredTechnicals?.indicators && selectedSetup.requiredTechnicals.indicators.length > 0 && (
+              {extractedTechnicals.length > 0 && (
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="text-xs text-muted-foreground">Technicals:</span>
-                  {selectedSetup.requiredTechnicals.indicators.map(ind => (
+                  <span className="text-xs text-muted-foreground">AI-detected Technicals:</span>
+                  {extractedTechnicals.map(ind => (
                     <Badge key={ind} variant="secondary" className="text-xs">{ind}</Badge>
                   ))}
+                </div>
+              )}
+              
+              {currentFormula && Object.keys(currentFormula).length > 0 && (
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                      <Target className="h-3 w-3" />
+                      Formula Parameters
+                    </span>
+                    <Badge variant="outline" className="text-xs">AI-generated</Badge>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    {Object.entries(currentFormula).map(([key, value]) => (
+                      <div key={key} className="flex flex-col p-2 bg-background rounded border">
+                        <span className="text-muted-foreground capitalize">
+                          {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim()}
+                        </span>
+                        <span className="font-mono font-medium">
+                          {typeof value === 'number' ? value.toFixed(3) : String(value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </CardContent>

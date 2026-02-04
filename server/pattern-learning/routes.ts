@@ -10,7 +10,10 @@ let openaiClient: OpenAI | null = null;
 
 function getOpenAI(): OpenAI {
   if (!openaiClient) {
-    openaiClient = new OpenAI();
+    openaiClient = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || undefined,
+    });
   }
   return openaiClient;
 }
@@ -316,27 +319,41 @@ router.post("/chat", async (req, res) => {
       }
     }
     
-    const systemPrompt = `You are an expert trading pattern analyst helping a trader refine their setup detection formulas.
+    const systemPrompt = `You are an expert trading pattern analyst helping a trader build and refine setup detection formulas.
 
 Current Setup: ${currentSetup?.name || 'Not selected'}
 Setup Description: ${currentSetup?.description || 'None'}
 Pattern Type: ${currentSetup?.patternType || 'custom'}
 Timeframe: ${currentSetup?.timeframe || 'daily'}
-Required Technicals: ${JSON.stringify(currentSetup?.requiredTechnicals?.indicators || [], null, 2)}
 ${ratingsSummary}
 
 Your job is to:
-1. Help the user understand why certain chart patterns matched or didn't match
-2. Learn from their ratings and English feedback to improve the detection formula
-3. Suggest formula improvements in plain English (the system will convert to parameters)
-4. Explain what you're adjusting and why based on their feedback
+1. Analyze the user's pattern description and extract relevant technical indicators
+2. Build a detection formula based on their description
+3. Help them understand why certain chart patterns matched or didn't match
+4. Learn from their ratings and English feedback to improve the formula
+5. Suggest formula improvements in plain English
 
-When suggesting formula updates that should be applied, include this JSON at the END of your response:
-{"formulaUpdate": true, "changes": "Description of what changed"}
+IMPORTANT: Always include this JSON block at the END of your response (after your explanation):
+{
+  "technicals": ["list", "of", "indicators", "mentioned"],
+  "formula": {
+    "entryCondition": "description of entry",
+    "volumeRatio": 1.5,
+    "pullbackDepth": 0.3,
+    "maType": "21 EMA",
+    "confirmationCandles": 2
+  },
+  "formulaUpdate": false
+}
 
-Be conversational and helpful. Focus on learning from the user's feedback to improve pattern detection.
-For example, if they say "entry was too early", you might suggest tightening the entry confirmation threshold.
-If they say "volume wasn't convincing", suggest increasing the volume ratio requirement.`;
+Set formulaUpdate to true ONLY when you are making changes based on user feedback.
+technicals should list indicators like: "VWAP", "21 EMA", "50 SMA", "9 EMA", "RSI", "Volume", etc.
+formula should contain key parameters for pattern detection.
+
+Be conversational and helpful. When they describe a pattern, extract the technicals and propose initial formula parameters.
+For example, if they say "reclaim VWAP after dip below 21 MA", extract ["VWAP", "21 EMA"] and propose relevant parameters.
+If they say "entry was too early", adjust confirmationCandles. If "volume wasn't convincing", increase volumeRatio.`;
 
     const openai = getOpenAI();
     const response = await openai.chat.completions.create({
@@ -351,16 +368,34 @@ If they say "volume wasn't convincing", suggest increasing the volume ratio requ
     const aiResponse = response.choices[0]?.message?.content || "I couldn't generate a response.";
     
     let formulaUpdate = false;
-    const jsonMatch = aiResponse.match(/\{"formulaUpdate":\s*true[^}]*\}/);
+    let extractedTechnicals: string[] = [];
+    let proposedFormula: Record<string, any> | null = null;
+    
+    const jsonMatch = aiResponse.match(/\{[\s\S]*"technicals"[\s\S]*\}/);
     if (jsonMatch) {
-      formulaUpdate = true;
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.technicals && Array.isArray(parsed.technicals)) {
+          extractedTechnicals = parsed.technicals;
+        }
+        if (parsed.formula && typeof parsed.formula === 'object') {
+          proposedFormula = parsed.formula;
+        }
+        if (parsed.formulaUpdate === true) {
+          formulaUpdate = true;
+        }
+      } catch (e) {
+        console.log("Failed to parse AI JSON response:", e);
+      }
     }
     
-    const cleanResponse = aiResponse.replace(/\{"formulaUpdate":\s*true[^}]*\}/, '').trim();
+    const cleanResponse = aiResponse.replace(/\{[\s\S]*"technicals"[\s\S]*\}/, '').trim();
     
     res.json({ 
       response: cleanResponse,
-      formulaUpdate 
+      formulaUpdate,
+      extractedTechnicals,
+      proposedFormula
     });
   } catch (error) {
     console.error("Error in chat:", error);
