@@ -136,20 +136,37 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     setLoading(true);
     setError(null);
     
-    const range = timeframe === 'D' || timeframe === 'W' ? '1y' : '5d';
+    const period = timeframe === 'D' || timeframe === 'W' ? '1y' : '5d';
     const interval = timeframe === 'W' ? '1wk' : timeframe === 'D' ? '1d' : '1h';
     
-    fetch(`/api/stock/${symbol}/history?range=${range}&interval=${interval}`)
-      .then(res => res.json())
+    console.log(`[PatternChart] Fetching ${symbol} with period=${period}, interval=${interval}`);
+    fetch(`/api/stock/${symbol}/history?period=${period}&interval=${interval}`)
+      .then(res => {
+        console.log(`[PatternChart] Response status: ${res.status}, ok: ${res.ok}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        return res.json();
+      })
       .then(data => {
-        if (data.error) {
-          setError(data.error);
-        } else if (data.data) {
+        console.log(`[PatternChart] Data received:`, typeof data, Array.isArray(data) ? `array len=${data.length}` : data);
+        if (data.error || data.message) {
+          console.log(`[PatternChart] Error in response:`, data.error || data.message);
+          setError(data.error || data.message);
+        } else if (Array.isArray(data) && data.length > 0) {
+          console.log(`[PatternChart] Setting ${data.length} bars, first:`, data[0]);
+          setStockData(data);
+        } else if (data.data && Array.isArray(data.data)) {
+          console.log(`[PatternChart] Setting ${data.data.length} bars from data.data`);
           setStockData(data.data);
+        } else {
+          console.log(`[PatternChart] No valid data structure found`);
+          setError('No chart data available');
         }
         setLoading(false);
       })
       .catch(err => {
+        console.error(`[PatternChart] Fetch error:`, err);
         setError('Failed to fetch data');
         setLoading(false);
       });
@@ -158,12 +175,28 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
   useEffect(() => {
     if (!containerRef.current || stockData.length === 0) return;
 
+    // Wait for container to have dimensions
+    const containerWidth = containerRef.current.clientWidth;
+    if (containerWidth <= 0) {
+      // Retry after a small delay
+      const timer = setTimeout(() => {
+        if (containerRef.current) {
+          const newWidth = containerRef.current.clientWidth;
+          if (newWidth > 0 && chartRef.current === null) {
+            // Trigger re-render
+            setStockData([...stockData]);
+          }
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+
     if (chartRef.current) {
       chartRef.current.remove();
     }
 
     const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
+      width: containerWidth || 400,
       height: height,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
@@ -285,8 +318,8 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
   }
 
   return (
-    <div className="w-full">
-      <div ref={containerRef} style={{ height }} />
+    <div className="w-full min-w-0">
+      <div ref={containerRef} className="w-full" style={{ height, minWidth: '100%' }} />
       {indicators.length > 0 && (
         <div className="flex gap-3 mt-2 flex-wrap">
           {indicators.map((ind, idx) => (

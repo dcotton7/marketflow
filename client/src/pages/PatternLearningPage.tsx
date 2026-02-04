@@ -640,7 +640,7 @@ export default function PatternLearningPage() {
                       <PatternChart 
                         symbol={currentMatch.ticker}
                         indicators={extractedTechnicals.length > 0 ? extractedTechnicals : (selectedSetup?.requiredTechnicals?.indicators || [])}
-                        height={280}
+                        height={350}
                         timeframe={chartTimeframe}
                       />
                     </div>
