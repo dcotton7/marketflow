@@ -12,7 +12,7 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules } from "@shared/schema";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 
@@ -1445,6 +1445,285 @@ Return ONLY the JSON object, no other text.`;
     } catch (error) {
       console.error("Similarity check error:", error);
       res.status(500).json({ error: "Failed to check similarity" });
+    }
+  });
+
+  // === PERFORMANCE-BASED RULE CONSOLIDATION ===
+  
+  // Analyze rules for consolidation suggestions based on similarity and performance
+  app.post("/api/sentinel/rules/consolidation-suggestions", requireAuth, async (req: Request, res: Response) => {
+    try {
+      // Get all active rules for the user
+      const existingRules = await sentinelModels.getRulesByUser(req.session.userId!);
+      const activeRules = existingRules.filter(r => !r.isDeleted && r.isActive);
+      
+      if (activeRules.length < 2) {
+        return res.json({ suggestions: [], message: "Need at least 2 active rules to analyze" });
+      }
+
+      // Get rule performance stats - only use unique ruleCodes to avoid cross-tenant leakage
+      // Note: Performance stats table is global, so we only query by unique ruleCode (not ruleName)
+      // This prevents conflation with other users' rules that may have the same name
+      const userRuleCodes = activeRules
+        .map(r => r.ruleCode)
+        .filter((code): code is string => !!code && code.length > 0);
+      
+      // Only query performance stats if we have unique ruleCodes
+      let perfMap = new Map<string, { totalTrades: number; winRateWhenFollowed: number | null; avgPnLWhenFollowed: number | null }>();
+      
+      if (userRuleCodes.length > 0) {
+        const performanceStats = await db.select().from(sentinelRulePerformance)
+          .where(inArray(sentinelRulePerformance.ruleCode, userRuleCodes));
+        
+        performanceStats.forEach(p => {
+          if (p.ruleCode) {
+            perfMap.set(p.ruleCode, {
+              totalTrades: p.totalTrades || 0,
+              winRateWhenFollowed: p.winRateWhenFollowed,
+              avgPnLWhenFollowed: p.avgPnLWhenFollowed,
+            });
+          }
+        });
+      }
+
+      // Build enriched rules with performance data (only for rules with unique ruleCode)
+      const enrichedRules = activeRules.map(rule => {
+        // Only use performance data for rules with ruleCode to prevent cross-tenant data
+        const perf = rule.ruleCode ? perfMap.get(rule.ruleCode) : null;
+        return {
+          ...rule,
+          performance: perf ? {
+            totalTrades: perf.totalTrades,
+            winRateWhenFollowed: perf.winRateWhenFollowed,
+            avgPnLWhenFollowed: perf.avgPnLWhenFollowed,
+          } : null
+        };
+      });
+
+      // Check for OpenAI configuration
+      const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+      
+      if (!apiKey) {
+        // Fall back to simple category-based grouping
+        const byCategory: Record<string, typeof enrichedRules> = {};
+        enrichedRules.forEach(r => {
+          const cat = r.category || 'general';
+          if (!byCategory[cat]) byCategory[cat] = [];
+          byCategory[cat].push(r);
+        });
+
+        const suggestions: Array<{
+          ruleIds: number[];
+          rules: Array<{ id: number; name: string; description?: string | null }>;
+          reason: string;
+          suggestedMerge?: { name: string; description: string };
+          performanceIssue?: string;
+        }> = [];
+
+        // Find categories with multiple underperforming rules
+        for (const [category, rules] of Object.entries(byCategory)) {
+          if (rules.length >= 2) {
+            const underperforming = rules.filter(r => {
+              if (!r.performance || r.performance.totalTrades < 5) return false;
+              return (r.performance.winRateWhenFollowed || 0) < 0.5;
+            });
+            
+            if (underperforming.length >= 2) {
+              suggestions.push({
+                ruleIds: underperforming.map(r => r.id),
+                rules: underperforming.map(r => ({ id: r.id, name: r.name, description: r.description })),
+                reason: `Multiple ${category} rules with below-average performance`,
+                performanceIssue: "Win rate below 50% when followed"
+              });
+            }
+          }
+        }
+
+        return res.json({ suggestions, usedAI: false });
+      }
+
+      const openai = new OpenAI({ apiKey, baseURL });
+
+      // Use AI to find semantic groupings and suggest consolidations
+      const rulesForAI = enrichedRules.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description || '',
+        category: r.category,
+        performance: r.performance ? {
+          totalTrades: r.performance.totalTrades,
+          winRate: r.performance.winRateWhenFollowed,
+          avgPnL: r.performance.avgPnLWhenFollowed
+        } : null
+      }));
+
+      const prompt = `You are analyzing trading rules for a trader to suggest consolidation opportunities.
+
+RULES TO ANALYZE:
+${JSON.stringify(rulesForAI, null, 2)}
+
+Find groups of semantically similar rules that could benefit from consolidation. Prioritize:
+1. Rules with overlapping concepts that could be merged into one clearer rule
+2. Rules with poor performance (win rate < 50% or negative avg P&L) that could be combined
+3. Rules that are redundant or contradictory
+
+For each group you identify, suggest a merged rule that captures the essence of all rules in the group.
+
+Return a JSON object with this structure:
+{
+  "suggestions": [
+    {
+      "ruleIds": [<array of rule ids to merge>],
+      "reason": "<why these rules should be consolidated>",
+      "performanceIssue": "<optional - what performance problem this addresses>",
+      "suggestedMerge": {
+        "name": "<proposed merged rule name>",
+        "description": "<proposed merged rule description>"
+      }
+    }
+  ]
+}
+
+Only include groups with 2+ rules that would genuinely benefit from consolidation.
+Return ONLY valid JSON, no other text.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: 1500,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || '{"suggestions": []}';
+      
+      let result;
+      try {
+        result = JSON.parse(responseText.trim());
+      } catch {
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          result = JSON.parse(jsonMatch[0]);
+        } else {
+          result = { suggestions: [] };
+        }
+      }
+
+      // Enrich suggestions with full rule data
+      const enrichedSuggestions = (result.suggestions || []).map((s: {
+        ruleIds: number[];
+        reason: string;
+        performanceIssue?: string;
+        suggestedMerge?: { name: string; description: string };
+      }) => {
+        const matchedRules = s.ruleIds
+          .map(id => enrichedRules.find(r => r.id === id))
+          .filter(Boolean);
+        
+        if (matchedRules.length < 2) return null;
+        
+        return {
+          ruleIds: s.ruleIds,
+          rules: matchedRules.map(r => ({
+            id: r!.id,
+            name: r!.name,
+            description: r!.description,
+            category: r!.category,
+            performance: r!.performance
+          })),
+          reason: s.reason,
+          performanceIssue: s.performanceIssue,
+          suggestedMerge: s.suggestedMerge
+        };
+      }).filter(Boolean);
+
+      res.json({ suggestions: enrichedSuggestions, usedAI: true });
+    } catch (error) {
+      console.error("Rule consolidation error:", error);
+      res.status(500).json({ error: "Failed to analyze rules for consolidation" });
+    }
+  });
+
+  // Execute rule consolidation - merge selected rules into a new one
+  const consolidateSchema = z.object({
+    ruleIds: z.array(z.number()).min(2, "Need at least 2 rule IDs to consolidate"),
+    newRule: z.object({
+      name: z.string().min(3, "Rule name must be at least 3 characters").max(200),
+      description: z.string().min(10, "Description must be at least 10 characters").max(1000),
+      category: z.string().optional(),
+      severity: z.string().optional(),
+      ruleType: z.string().optional(),
+    })
+  });
+
+  app.post("/api/sentinel/rules/consolidate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const parseResult = consolidateSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: parseResult.error.errors[0]?.message || "Invalid request data" 
+        });
+      }
+      
+      const { ruleIds, newRule } = parseResult.data;
+
+      // Verify all rules belong to this user
+      const userRules = await sentinelModels.getRulesByUser(req.session.userId!);
+      const validRuleIds = ruleIds.filter(id => userRules.some(r => r.id === id));
+      
+      if (validRuleIds.length !== ruleIds.length) {
+        return res.status(403).json({ error: "Some rules do not belong to you" });
+      }
+
+      // Get the rules being merged to inherit best properties
+      const rulesToMerge = userRules.filter(r => validRuleIds.includes(r.id));
+      
+      // Determine best category and severity from merged rules
+      const categories = rulesToMerge.map(r => r.category).filter(Boolean);
+      const bestCategory = categories.length > 0 ? categories[0] : 'general';
+      
+      const severities = rulesToMerge.map(r => r.severity).filter(Boolean);
+      const severityOrder = ['auto_reject', 'critical', 'warning', 'info'];
+      const bestSeverity = severities.sort((a, b) => 
+        severityOrder.indexOf(a!) - severityOrder.indexOf(b!)
+      )[0] || 'warning';
+
+      // Merge strategy tags from all rules
+      const allStrategyTags = new Set<string>();
+      rulesToMerge.forEach(r => {
+        if (r.strategyTags) {
+          r.strategyTags.forEach(t => allStrategyTags.add(t));
+        }
+      });
+
+      // Create the new merged rule
+      const [newMergedRule] = await db.insert(sentinelRules).values({
+        userId: req.session.userId!,
+        name: newRule.name,
+        description: newRule.description,
+        category: newRule.category || bestCategory,
+        severity: newRule.severity || bestSeverity,
+        source: 'user',
+        ruleType: newRule.ruleType || 'swing',
+        strategyTags: allStrategyTags.size > 0 ? Array.from(allStrategyTags) : null,
+        isActive: true,
+        isDeleted: false,
+      }).returning();
+
+      // Soft-delete the old rules (mark as deleted, keep for history)
+      await db.update(sentinelRules)
+        .set({ isDeleted: true })
+        .where(inArray(sentinelRules.id, validRuleIds));
+
+      res.json({
+        success: true,
+        newRule: newMergedRule,
+        deletedRuleIds: validRuleIds,
+        message: `Created "${newRule.name}" from ${validRuleIds.length} merged rules`
+      });
+    } catch (error) {
+      console.error("Rule consolidation execute error:", error);
+      res.status(500).json({ error: "Failed to consolidate rules" });
     }
   });
 

@@ -17,7 +17,7 @@ import {
   BookOpen, Shield, Brain, Users, Plus, Edit3, RotateCcw, Check, X, 
   AlertTriangle, Info, AlertCircle, Ban, ChevronDown, ChevronUp,
   Sparkles, TrendingUp, TrendingDown, ArrowUpDown, Loader2,
-  MessageSquare, Send, Trash2, Tag
+  MessageSquare, Send, Trash2, Tag, Layers, Merge
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -122,6 +122,20 @@ export default function SentinelRulesPage() {
   const [aiChatInput, setAIChatInput] = useState("");
   const [aiChatLoading, setAIChatLoading] = useState(false);
   const [newStrategyTag, setNewStrategyTag] = useState("");
+  const [showConsolidationDialog, setShowConsolidationDialog] = useState(false);
+  const [consolidationSuggestions, setConsolidationSuggestions] = useState<Array<{
+    ruleIds: number[];
+    rules: Array<{ id: number; name: string; description?: string | null; category?: string | null; performance?: { totalTrades: number; winRate?: number | null; avgPnL?: number | null } | null }>;
+    reason: string;
+    performanceIssue?: string;
+    suggestedMerge?: { name: string; description: string };
+  }>>([]);
+  const [loadingConsolidation, setLoadingConsolidation] = useState(false);
+  const [selectedConsolidation, setSelectedConsolidation] = useState<{
+    ruleIds: number[];
+    suggestedMerge?: { name: string; description: string };
+  } | null>(null);
+  const [customMerge, setCustomMerge] = useState({ name: "", description: "" });
   
   const [newRule, setNewRule] = useState({
     name: "",
@@ -274,6 +288,46 @@ export default function SentinelRulesPage() {
       toast({ title: "Failed to adopt rule", variant: "destructive" });
     },
   });
+
+  const loadConsolidationSuggestions = async () => {
+    setLoadingConsolidation(true);
+    try {
+      const response = await apiRequest("POST", "/api/sentinel/rules/consolidation-suggestions");
+      const data = await response.json();
+      setConsolidationSuggestions(data.suggestions || []);
+      if (data.suggestions?.length > 0) {
+        setShowConsolidationDialog(true);
+      } else {
+        toast({ title: "No consolidation opportunities found", description: "Your rules are well-organized" });
+      }
+    } catch {
+      toast({ title: "Failed to analyze rules", variant: "destructive" });
+    } finally {
+      setLoadingConsolidation(false);
+    }
+  };
+
+  const executeConsolidation = async (ruleIds: number[], newRuleName: string, newRuleDescription: string) => {
+    try {
+      const response = await apiRequest("POST", "/api/sentinel/rules/consolidate", {
+        ruleIds,
+        newRule: {
+          name: newRuleName,
+          description: newRuleDescription,
+        }
+      });
+      const data = await response.json();
+      if (data.success) {
+        queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
+        toast({ title: "Rules consolidated", description: data.message });
+        setShowConsolidationDialog(false);
+        setSelectedConsolidation(null);
+        setConsolidationSuggestions(prev => prev.filter(s => !s.ruleIds.every(id => ruleIds.includes(id))));
+      }
+    } catch {
+      toast({ title: "Failed to consolidate rules", variant: "destructive" });
+    }
+  };
 
   const getOverrideForRule = (ruleCode?: string) => {
     if (!ruleCode) return null;
@@ -805,13 +859,36 @@ export default function SentinelRulesPage() {
           <TabsContent value="ai" className="space-y-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-primary" />
-                  AI-Suggested Rules
-                </CardTitle>
-                <CardDescription>
-                  Rules discovered through pattern analysis of trading performance
-                </CardDescription>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-primary" />
+                      AI-Suggested Rules
+                    </CardTitle>
+                    <CardDescription>
+                      Rules discovered through pattern analysis of trading performance
+                    </CardDescription>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={loadConsolidationSuggestions}
+                    disabled={loadingConsolidation}
+                    data-testid="button-analyze-consolidation"
+                  >
+                    {loadingConsolidation ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-4 h-4 mr-2" />
+                        Optimize Rules
+                      </>
+                    )}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {suggestions.length === 0 && aiRules.length === 0 ? (
@@ -1311,6 +1388,161 @@ export default function SentinelRulesPage() {
           <p className="text-xs text-muted-foreground mt-2">
             This assistant only discusses trading rules and strategies. Off-topic questions will be politely declined.
           </p>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showConsolidationDialog} onOpenChange={setShowConsolidationDialog}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Merge className="w-5 h-5 text-primary" />
+              Rule Consolidation Suggestions
+            </DialogTitle>
+            <DialogDescription>
+              These rules have been identified as candidates for merging based on similarity and performance
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="flex-1 min-h-[200px] max-h-[50vh]">
+            {consolidationSuggestions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Layers className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No consolidation opportunities found</p>
+              </div>
+            ) : (
+              <div className="space-y-4 pr-4">
+                {consolidationSuggestions.map((suggestion, idx) => (
+                  <Card key={idx} className="border">
+                    <CardContent className="pt-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="text-xs">
+                              {suggestion.rules.length} rules
+                            </Badge>
+                            {suggestion.performanceIssue && (
+                              <Badge variant="destructive" className="text-xs">
+                                {suggestion.performanceIssue}
+                              </Badge>
+                            )}
+                          </div>
+                          
+                          <p className="text-sm text-muted-foreground">{suggestion.reason}</p>
+                          
+                          <div className="space-y-1 mt-2">
+                            <p className="text-xs font-medium text-muted-foreground">Rules to merge:</p>
+                            {suggestion.rules.map(rule => (
+                              <div key={rule.id} className="flex items-center gap-2 text-sm bg-muted/50 px-2 py-1 rounded">
+                                <span className="font-medium">{rule.name}</span>
+                                {rule.performance && (
+                                  <span className="text-xs text-muted-foreground">
+                                    ({rule.performance.totalTrades} trades, 
+                                    {rule.performance.winRate !== null && rule.performance.winRate !== undefined 
+                                      ? ` ${Math.round(rule.performance.winRate * 100)}% win` 
+                                      : ' no data'})
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {suggestion.suggestedMerge && (
+                            <div className="mt-3 p-2 border rounded bg-card">
+                              <p className="text-xs font-medium text-primary mb-1">Suggested merged rule:</p>
+                              <p className="font-medium text-sm">{suggestion.suggestedMerge.name}</p>
+                              <p className="text-sm text-muted-foreground">{suggestion.suggestedMerge.description}</p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            if (suggestion.suggestedMerge) {
+                              executeConsolidation(
+                                suggestion.ruleIds,
+                                suggestion.suggestedMerge.name,
+                                suggestion.suggestedMerge.description
+                              );
+                            } else {
+                              setSelectedConsolidation({
+                                ruleIds: suggestion.ruleIds,
+                                suggestedMerge: undefined
+                              });
+                              setCustomMerge({ name: "", description: "" });
+                            }
+                          }}
+                          data-testid={`button-consolidate-${idx}`}
+                        >
+                          <Merge className="w-3.5 h-3.5 mr-1" />
+                          {suggestion.suggestedMerge ? "Merge" : "Customize & Merge"}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+          
+          {selectedConsolidation && !selectedConsolidation.suggestedMerge && (
+            <div className="border-t pt-4 mt-4 space-y-3">
+              <p className="text-sm font-medium">Create merged rule for {selectedConsolidation.ruleIds.length} selected rules:</p>
+              <div>
+                <Label>Rule Name</Label>
+                <Input
+                  value={customMerge.name}
+                  onChange={(e) => setCustomMerge(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Enter name for the merged rule"
+                  data-testid="input-merge-name"
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={customMerge.description}
+                  onChange={(e) => setCustomMerge(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Describe what this combined rule enforces..."
+                  rows={2}
+                  data-testid="input-merge-description"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedConsolidation(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!customMerge.name.trim() || !customMerge.description.trim()}
+                  onClick={() => {
+                    executeConsolidation(
+                      selectedConsolidation.ruleIds,
+                      customMerge.name.trim(),
+                      customMerge.description.trim()
+                    );
+                    setSelectedConsolidation(null);
+                  }}
+                  data-testid="button-confirm-custom-merge"
+                >
+                  <Merge className="w-3.5 h-3.5 mr-1" />
+                  Create Merged Rule
+                </Button>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => {
+              setShowConsolidationDialog(false);
+              setSelectedConsolidation(null);
+            }}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
