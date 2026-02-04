@@ -3880,9 +3880,20 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         }
       }
       
-      // Insert cards in transaction
+      // Insert cards in transaction - first delete existing import cards to avoid duplicates
+      let deletedCount = 0;
       if (cardsToCreate.length > 0) {
         await db.transaction(async (tx) => {
+          // Delete existing imported cards for this user to prevent duplicates
+          const deleted = await tx.delete(sentinelTrades)
+            .where(and(
+              eq(sentinelTrades.userId, userId),
+              eq(sentinelTrades.source, 'import')
+            ))
+            .returning({ id: sentinelTrades.id });
+          deletedCount = deleted.length;
+          
+          // Insert new cards
           const CHUNK_SIZE = 100;
           for (let i = 0; i < cardsToCreate.length; i += CHUNK_SIZE) {
             const chunk = cardsToCreate.slice(i, i + CHUNK_SIZE);
@@ -3894,6 +3905,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       res.json({ 
         success: true, 
         cardsCreated: cardsToCreate.length,
+        cardsDeleted: deletedCount,
         openPositions: cardsToCreate.filter(c => c.status === 'active').length,
         closedPositions: cardsToCreate.filter(c => c.status === 'closed').length,
       });
