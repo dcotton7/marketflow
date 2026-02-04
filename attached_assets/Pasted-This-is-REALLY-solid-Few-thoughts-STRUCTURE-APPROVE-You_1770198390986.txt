@@ -1,0 +1,114 @@
+This is REALLY solid. Few thoughts:
+
+STRUCTURE - APPROVE ✅
+Your 4-table hierarchy is clean:
+
+Master Setups (pattern archetype)
+Setup Variants (timeframe/duration children)
+Rating Criteria (pattern-specific dimensions)
+Formation Stages (lifecycle tracking)
+
+This lets you:
+
+Train AI on pattern families, not just individual setups
+Inherit criteria from parent but override when needed
+Track stage progression (huge for learning "what comes next")
+
+
+ADDITIONS TO CONSIDER:
+1. Episodic Pivot / Catalyst Setup
+You mentioned this in your Sentinel Decision Models but it's missing here.
+VariantChartDurationFormation Stages
+News CatalystDailyHours-DaysAnticipation → Catalyst Event → Reaction → Follow-ThroughEarnings/FDADailyDays-WeeksLeading Up → Event → Breakout/Breakdown
+Rating Criteria: Catalyst type, anticipation setup quality, sector sympathy, volume spike
+
+2. Pullback/Reclaim Setup
+Also from your Sentinel models - this is different from base breakouts.
+VariantChartDurationFormation Stages
+10-Day PullbackDailyDays-WeeksBreakout → Pullback → Test → ReclaimMoving Avg ReclaimDailyDays-Weeks Below MA → Testing → Reclaim → Hold
+Rating Criteria: Depth of pullback (%), volume on reclaim, MA significance (21/50/200)
+
+3. Gap and Go (Intraday)
+Missing from your intraday setups - very common pattern.
+VariantChartDurationFormation Stages
+Gap and Go1-5minPre-market + first hourGap → HOD breakout → Extension → Consolidation
+Rating Criteria: Gap size %, pre-market volume, float, news catalyst
+
+CRITERIA ADDITIONS:
+For EVERY setup, consider adding these universal dimensions:
+Universal Rating Dimensions:
+
+Market Environment (0-20 pts)
+
+SPY trend alignment
+VIX level
+Sector strength
+Distribution day count
+
+
+Relative Strength (0-20 pts)
+
+RS line vs SPY
+Sector relative strength
+Performance vs peers
+
+
+Volume Quality (0-20 pts)
+
+Above/below avg volume
+Institutional accumulation signs
+Volume dry-up during consolidation
+Volume expansion on breakout
+
+
+Technical Structure (0-20 pts)
+
+MA alignment (21/50/200)
+Distance from MAs
+Prior resistance/support levels
+
+
+Pattern-Specific (0-20 pts)
+
+Your custom criteria per pattern
+Cup depth, VCP contractions, etc.
+
+
+
+This gives you 100-point rubric across all setups while keeping pattern-specific nuance.
+
+FORMATION STAGES - CRITICAL ADDITION:
+Add "Failed" as a terminal stage for every pattern:
+Cup Complete → Handle Forming → **Failed** (handle too deep, breaks cup)
+T3 → T4 → **Failed** (contraction breaks down instead of contracting)
+Why: AI needs to learn failure patterns as much as success patterns. This is how it learns "what not to take."
+
+DATABASE TWEAK:
+Add a 5th table: Rating Weights
+Problem: Not all criteria matter equally for all timeframes.
+Example:
+
+Multi-year cup: Fundamentals matter MORE, intraday volume matters LESS
+Intraday ORB: Relative volume matters MORE, multi-month RS line matters LESS
+
+Solution:
+Rating Weights Table:
+- setup_variant_id
+- criteria_id
+- weight (0.0-1.0)
+This lets you say:
+
+"For Multi-Year Cup: fundamentals = 0.3, volume = 0.15"
+"For 5-min ORB: relative volume = 0.35, fundamentals = 0.05"
+
+AI learns context-dependent importance.
+
+FINAL STRUCTURE:
+1. Master Setups (Cup & Handle, VCP, HTF, etc.)
+2. Setup Variants (timeframe/duration children)
+3. Rating Criteria (universal + pattern-specific)
+4. Formation Stages (including "Failed")
+5. Rating Weights (criteria importance per variant)
+6. Rated Examples (human ratings for training)
+
+Your foundation is strong. Add Episodic Pivot, Pullback/Reclaim, Gap and Go, universal criteria, failure states, and weight customization = complete training system.

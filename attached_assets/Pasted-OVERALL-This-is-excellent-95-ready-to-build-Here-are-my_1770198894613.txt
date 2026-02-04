@@ -1,0 +1,177 @@
+OVERALL: This is excellent. 95% ready to build. Here are my refinements:
+
+✅ APPROVED AS-IS:
+
+6-table structure - Perfect separation of concerns
+Score mapping with gaps - Smart. Forces AI to be confident (80+) or honest about mediocrity
+Formation stages as separate table - Right call. Allows ordering, modifiers, terminal states
+Universal + pattern-specific criteria split - Exactly right
+Rating weights per variant - Critical for context-dependent scoring
+25 criteria × 4 pts = 100 - Good granularity
+
+
+🔧 REFINEMENTS NEEDED:
+1. FORMATION_STAGES - Add Stage Type
+Problem: Not all stages are sequential. Some patterns have parallel paths.
+Add column:
+sqlstage_type: text NOT NULL  -- "sequential", "parallel", "terminal"
+Example - VCP:
+
+After T3, you can go to either:
+
+T4+ (continues contracting) = sequential
+Pivot Ready (done contracting) = sequential
+Failed (breakdown) = terminal
+
+
+
+Example - Cup and Handle:
+
+Cup Complete → could branch to:
+
+Handle Forming (normal)
+Failed (breaks down before handle)
+
+
+
+Why: AI needs to understand that some stages can skip or branch.
+
+2. SETUP_VARIANTS - Add Required Criteria
+Problem: Not all 25 criteria apply to all variants.
+Example:
+
+ORB doesn't care about "cup depth"
+Multi-year cup doesn't care about "5-min relative volume"
+
+Add column:
+sqlrequired_criteria_ids: integer[]  -- Array of criteria IDs that MUST be scored
+Alternative approach: Add to rating_criteria:
+sqlapplicable_variants: integer[]  -- Null = applies to all, else specific variants
+Why: Don't force AI to score irrelevant criteria. Focus on what matters per pattern.
+
+3. RATING_CRITERIA - Split Max Points
+Current: Every criterion = 4 points max
+Problem: Not all criteria are equally important even within a category.
+Example - Market Environment:
+
+SPY trend alignment = Critical (4 pts)
+Distribution day count = Important but secondary (3 pts)
+Breadth = Nice to have (2 pts)
+
+Suggested change:
+sqlmax_points: integer NOT NULL  -- Can be 1-5, not always 4
+Then adjust so each category still totals 20:
+
+Market Environment: 5+4+4+4+3 = 20 pts
+Volume Quality: 5+5+4+3+3 = 20 pts
+
+Why: Captures nuanced importance within categories.
+
+4. RATED_EXAMPLES - Add Context Fields
+Missing critical context for AI learning:
+Add columns:
+sqlmarket_phase: text           -- "bull", "correction", "bear", "choppy"
+sector_performance: text     -- "leading", "inline", "lagging"
+stock_stage: integer         -- O'Neil stage (1-4)
+prior_attempt_count: integer -- How many times tested this level before
+chart_context: jsonb         -- {
+                             --   "distance_from_52w_high": 5.2,
+                             --   "base_depth_pct": -18.5,
+                             --   "days_in_base": 42
+                             -- }
+Why: AI needs to learn that a "4-rated setup" in a bear market means something different than in a bull market. Context is everything.
+
+5. RATING_WEIGHTS - Default vs Override
+Your question 4: "Should rating_weights have a default set that gets copied per user, or be global?"
+Answer: Both.
+Suggested structure:
+sqlrating_weights
+  id: serial PRIMARY KEY
+  setup_variant_id: integer REFERENCES setup_variants
+  criteria_id: integer REFERENCES rating_criteria
+  default_weight: decimal DEFAULT 1.0  -- System default
+  user_id: integer                     -- NULL = global default
+  weight: decimal                      -- User override
+Logic:
+
+On first run, system uses default_weight for all users
+User can override specific weights (e.g., "I care more about volume")
+User overrides stored with user_id, others use defaults
+This allows personalization while maintaining baseline
+
+
+6. FORMATION_STAGES - Add Duration Expectations
+Add columns:
+sqltypical_duration_min: text   -- "1 day", "1 week", "1 month"
+typical_duration_max: text   -- "3 days", "3 weeks", "6 months"
+too_long_threshold: text     -- When stage becomes stale
+Example:
+
+VCP T3 stage: typical = 1-3 weeks, too long = 8+ weeks (likely failed)
+Cup forming: typical = 3-9 months, too long = 24+ months (dead)
+
+Why: AI can flag "this pattern is taking too long, probably stale" and auto-lower score.
+Answers your question 6: Yes, track time in stage.
+
+7. MASTER_SETUPS - Add Minimum Requirements
+Problem: Some patterns have hard requirements that invalidate them entirely.
+Add column:
+sqlinvalidation_rules: jsonb  -- {
+                           --   "min_cup_depth_pct": 12,
+                           --   "max_handle_depth_pct": 50,
+                           --   "min_base_weeks": 3
+                           -- }
+Why: If cup depth < 12%, it's not a cup and handle. Period. AI shouldn't even score it. These are NOT ratings, they're binary gates.
+
+📋 MISSING PATTERN TYPES:
+You have 11 patterns. Consider adding:
+
+Ascending Base (different from flat base)
+Consolidation Breakout (generic tight range, not a specific pattern)
+Failed Base Breakout → Shakeout (inverse setup - what happens after failure)
+
+
+🤔 ANSWERS TO YOUR QUESTIONS:
+Q1: Is the 6-table structure appropriate?
+✅ Yes. Perfect.
+Q2: Should formation stages be stored in a table or as jsonb on master_setups?
+✅ Table is correct. You need ordering, modifiers, and relationships. JSONB would be limiting.
+Q3: Is 5 criteria × 4 points the right granularity?
+⚠️ Almost. Adjust to allow variable max_points (1-5) per criterion while keeping category totals at 20.
+Q4: Should rating_weights be per-user or global?
+✅ Both. Global defaults + user overrides (see refinement #5 above).
+Q5: Any missing pattern types?
+⚠️ See above - Ascending Base, Generic Consolidation, Failed Breakout patterns.
+Q6: Should we track time in stage?
+✅ Yes. Add duration expectations to formation_stages table (see refinement #6).
+
+🚀 FINAL SCHEMA ADDITIONS:
+sql-- Formation stages
+ALTER TABLE formation_stages ADD COLUMN stage_type text NOT NULL DEFAULT 'sequential';
+ALTER TABLE formation_stages ADD COLUMN typical_duration_min text;
+ALTER TABLE formation_stages ADD COLUMN typical_duration_max text;
+ALTER TABLE formation_stages ADD COLUMN too_long_threshold text;
+
+-- Setup variants
+ALTER TABLE setup_variants ADD COLUMN required_criteria_ids integer[];
+
+-- Rating criteria
+ALTER TABLE rating_criteria ALTER COLUMN max_points DROP DEFAULT;
+-- (Allow 1-5 instead of always 4)
+
+-- Master setups
+ALTER TABLE master_setups ADD COLUMN invalidation_rules jsonb;
+
+-- Rated examples
+ALTER TABLE rated_examples ADD COLUMN market_phase text;
+ALTER TABLE rated_examples ADD COLUMN sector_performance text;
+ALTER TABLE rated_examples ADD COLUMN stock_stage integer;
+ALTER TABLE rated_examples ADD COLUMN prior_attempt_count integer DEFAULT 0;
+ALTER TABLE rated_examples ADD COLUMN chart_context jsonb;
+
+-- Rating weights (add user override support)
+ALTER TABLE rating_weights ADD COLUMN default_weight decimal DEFAULT 1.0;
+ALTER TABLE rating_weights ADD COLUMN user_id integer;
+ALTER TABLE rating_weights ADD COLUMN is_default boolean DEFAULT true;
+
+BUILD THIS. It's ready.
