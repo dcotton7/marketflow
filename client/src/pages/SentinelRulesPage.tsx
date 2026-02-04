@@ -150,6 +150,15 @@ export default function SentinelRulesPage() {
   });
   const [createAsSystem, setCreateAsSystem] = useState(false); // Admin: create as system rule
   
+  // Edit user rule state
+  const [showEditUserRuleDialog, setShowEditUserRuleDialog] = useState(false);
+  const [editUserRule, setEditUserRule] = useState<{
+    id: number;
+    name: string;
+    description: string;
+    category: string;
+  } | null>(null);
+  
   // Admin: Promote/demote confirmation
   const [confirmPromote, setConfirmPromote] = useState<{ rule: TradingRule; action: 'promote' | 'demote' } | null>(null);
 
@@ -742,6 +751,29 @@ export default function SentinelRulesPage() {
                     onCheckedChange={(checked) => updateRuleMutation.mutate({ id: rule.id, data: { isActive: checked } })}
                     data-testid={`switch-rule-active-${rule.id}`}
                   />
+                  {/* Edit user rule */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setEditUserRule({
+                            id: rule.id,
+                            name: rule.name,
+                            description: rule.description || "",
+                            category: rule.category || "general",
+                          });
+                          setShowEditUserRuleDialog(true);
+                        }}
+                        data-testid={`button-edit-rule-${rule.id}`}
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Edit rule</TooltipContent>
+                  </Tooltip>
                   {/* Admin: Promote personal rule to system */}
                   {user?.isAdmin && rule.source === 'user' && (
                     <Tooltip>
@@ -1442,6 +1474,79 @@ export default function SentinelRulesPage() {
               data-testid="button-save-override"
             >
               Save Customization
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User Rule Dialog */}
+      <Dialog open={showEditUserRuleDialog} onOpenChange={setShowEditUserRuleDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Rule</DialogTitle>
+            <DialogDescription>
+              Update your trading rule details
+            </DialogDescription>
+          </DialogHeader>
+          {editUserRule && (
+            <div className="space-y-4">
+              <div>
+                <Label>Rule Name</Label>
+                <Input
+                  value={editUserRule.name}
+                  onChange={(e) => setEditUserRule({ ...editUserRule, name: e.target.value })}
+                  placeholder="Enter rule name"
+                  data-testid="input-edit-rule-name"
+                />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea
+                  value={editUserRule.description}
+                  onChange={(e) => setEditUserRule({ ...editUserRule, description: e.target.value })}
+                  placeholder="Describe your rule..."
+                  rows={3}
+                  data-testid="input-edit-rule-description"
+                />
+              </div>
+              <div>
+                <Label>Category</Label>
+                <Select 
+                  value={editUserRule.category}
+                  onValueChange={(v) => setEditUserRule({ ...editUserRule, category: v })}
+                >
+                  <SelectTrigger data-testid="select-edit-rule-category">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RULE_CATEGORIES.map(cat => (
+                      <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditUserRuleDialog(false)}>Cancel</Button>
+            <Button 
+              onClick={() => {
+                if (editUserRule) {
+                  updateRuleMutation.mutate({
+                    id: editUserRule.id,
+                    data: {
+                      name: editUserRule.name,
+                      description: editUserRule.description,
+                      category: editUserRule.category,
+                    }
+                  });
+                  setShowEditUserRuleDialog(false);
+                }
+              }}
+              disabled={updateRuleMutation.isPending || !editUserRule?.name}
+              data-testid="button-save-edit-rule"
+            >
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1090,7 +1090,10 @@ export function registerSentinelRoutes(app: Express): void {
         });
       }
 
-      const data = ruleSchema.partial().extend({ isActive: z.boolean().optional() }).parse(req.body);
+      const data = ruleSchema.partial().extend({ 
+        isActive: z.boolean().optional(),
+        isDeleted: z.boolean().optional(),
+      }).parse(req.body);
       const updated = await sentinelModels.updateRule(id, data);
       res.json(updated);
     } catch (error) {
@@ -2573,7 +2576,7 @@ Only group trades with 2+ members. Ungrouped trades can be suggested individuall
       res.json({
         symbol,
         name: quote.shortName || quote.longName || symbol,
-        price: quote.regularMarketPrice,
+        currentPrice: quote.regularMarketPrice,
         previousClose: quote.regularMarketPreviousClose,
         sector,
         industry,
