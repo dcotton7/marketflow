@@ -1087,6 +1087,7 @@ export default function SentinelDashboardPage() {
     tradeDate: new Date().toISOString().split("T")[0],
     tradeTime: "09:30",
     status: "active" as "considering" | "active",
+    accountName: "", // Account for this trade
   });
   
   // Lot tracking table - each row is a lot entry
@@ -1157,6 +1158,23 @@ export default function SentinelDashboardPage() {
   const { data: allLabels = [] } = useQuery<TradeLabel[]>({
     queryKey: ["/api/sentinel/labels"],
   });
+
+  // User's trading accounts for account selector
+  const { data: accountSettings = [] } = useQuery<Array<{
+    id: number;
+    accountName: string;
+    brokerId: string;
+    accountNumber?: string;
+  }>>({
+    queryKey: ["/api/sentinel/account-settings"],
+  });
+
+  // Set default account when accounts are loaded
+  useEffect(() => {
+    if (accountSettings.length > 0 && !addTradeForm.accountName) {
+      setAddTradeForm(prev => ({ ...prev, accountName: accountSettings[0].accountName }));
+    }
+  }, [accountSettings]);
 
   const { data: tradeSources = [] } = useQuery<TradeSource[]>({
     queryKey: ["/api/sentinel/trades/sources"],
@@ -1605,12 +1623,15 @@ export default function SentinelDashboardPage() {
       tradeDate?: string;
       tradeTime?: string;
       status: "considering" | "active";
+      accountName?: string;
     }) => {
       return apiRequest("POST", "/api/sentinel/trades", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
       setShowAddTrade(false);
+      // Keep accountName as default for next trade entry
+      const defaultAccount = addTradeForm.accountName;
       setAddTradeForm({
         symbol: "",
         direction: "long",
@@ -1622,6 +1643,7 @@ export default function SentinelDashboardPage() {
         tradeDate: new Date().toISOString().split("T")[0],
         tradeTime: "09:30",
         status: "active",
+        accountName: defaultAccount, // Preserve for next entry
       });
       toast({ title: "Trade added successfully" });
     },
@@ -1646,6 +1668,7 @@ export default function SentinelDashboardPage() {
       tradeDate: addTradeForm.tradeDate,
       tradeTime: addTradeForm.tradeTime,
       status: addTradeForm.status,
+      accountName: addTradeForm.accountName || undefined,
     });
   };
 
@@ -2680,6 +2703,31 @@ export default function SentinelDashboardPage() {
                 </Select>
               </div>
             </div>
+            {/* Account selector - only shown if user has accounts configured */}
+            {accountSettings.length > 0 && (
+              <div className="space-y-2">
+                <Label>Trading Account</Label>
+                <Select 
+                  value={addTradeForm.accountName || ""} 
+                  onValueChange={(v) => setAddTradeForm({ ...addTradeForm, accountName: v })}
+                >
+                  <SelectTrigger data-testid="select-add-trade-account">
+                    <SelectValue placeholder="Select account (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No account</SelectItem>
+                    {accountSettings.map((account) => (
+                      <SelectItem key={account.id} value={account.accountName}>
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium">{account.accountName}</span>
+                          <span className="text-muted-foreground text-xs">{account.brokerId}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="add-trade-entry">Entry Price <span className="text-red-500">*</span></Label>

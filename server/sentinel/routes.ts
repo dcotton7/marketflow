@@ -423,12 +423,26 @@ export function registerSentinelRoutes(app: Express): void {
     tradeDate: z.string().optional(), // ISO date string
     tradeTime: z.string().optional(), // HH:MM format
     status: z.enum(["considering", "active"]).default("active"),
+    accountName: z.string().optional(), // Trading account name
   });
 
   app.post("/api/sentinel/trades", requireAuth, async (req: Request, res: Response) => {
     try {
       const data = createTradeSchema.parse(req.body);
       const userId = req.session.userId!;
+
+      // Validate accountName belongs to user if provided
+      let validatedAccountName: string | undefined = undefined;
+      if (data.accountName) {
+        const userAccounts = await db!.select()
+          .from(sentinelAccountSettings)
+          .where(eq(sentinelAccountSettings.userId, userId));
+        const validAccount = userAccounts.find(a => a.accountName === data.accountName);
+        if (validAccount) {
+          validatedAccountName = validAccount.accountName;
+        }
+        // If accountName provided but not valid, silently ignore (don't reject trade creation)
+      }
 
       // Build entry date from tradeDate + tradeTime
       let entryDate: Date | undefined = undefined;
@@ -461,6 +475,7 @@ export function registerSentinelRoutes(app: Express): void {
         setupType: data.setupType,
         status: data.status,
         lotEntries,
+        accountName: validatedAccountName,
       });
 
       await sentinelModels.createEvent({

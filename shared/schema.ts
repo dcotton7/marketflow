@@ -131,6 +131,8 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   taggedAt: timestamp("tagged_at"), // When the trade was tagged
   aiSuggestedSetup: text("ai_suggested_setup"), // AI's suggested setup type
   aiSetupConfidence: doublePrecision("ai_setup_confidence"), // 0-1 confidence score
+  // Account info for hand-entered trades
+  accountName: text("account_name"), // User's trading account name
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
