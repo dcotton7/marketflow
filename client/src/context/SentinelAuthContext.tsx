@@ -10,7 +10,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password?: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -39,8 +39,8 @@ export function SentinelAuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const login = useCallback(async (username: string, password: string) => {
-    const res = await apiRequest("POST", "/api/auth/login", { username, password });
+  const login = useCallback(async (username: string, password?: string) => {
+    const res = await apiRequest("POST", "/api/auth/login", { username });
     const data = await res.json();
     setUser(data);
   }, []);

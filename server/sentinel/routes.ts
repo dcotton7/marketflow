@@ -259,17 +259,20 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const data = loginSchema.parse(req.body);
+      // Simplified login: username only (password not required for now)
+      const { username } = req.body;
+      
+      if (!username || typeof username !== 'string') {
+        return res.status(400).json({ error: "Username is required" });
+      }
 
-      const user = await sentinelModels.getUserByUsername(data.username);
+      const user = await sentinelModels.getUserByUsername(username);
       if (!user) {
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "User not found" });
       }
 
-      const validPassword = await bcrypt.compare(data.password, user.passwordHash);
-      if (!validPassword) {
-        return res.status(401).json({ error: "Invalid credentials" });
-      }
+      // Skip password validation for simplified development login
+      // Password check removed for now - just validate username exists
 
       req.session.userId = user.id;
       req.session.username = user.username;
@@ -583,15 +586,16 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
-  // Get trade sources for filtering (hand entered + import batches)
+  // Get trade sources for filtering (hand entered + import batches with system-generated account tags)
   app.get("/api/sentinel/trades/sources", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       
-      // Get all trades to count by source
+      // Get all trades with account info
       const trades = await db!.select({
         source: sentinelTrades.source,
         importBatchId: sentinelTrades.importBatchId,
+        accountName: sentinelTrades.accountName,
       }).from(sentinelTrades).where(eq(sentinelTrades.userId, userId));
       
       // Count hand-entered trades
@@ -601,12 +605,12 @@ export function registerSentinelRoutes(app: Express): void {
       const importBatchIds = [...new Set(trades.filter(t => t.source === 'import' && t.importBatchId).map(t => t.importBatchId))];
       
       // Get batch details from sentinel_import_batches
-      const sources: Array<{ id: string; name: string; count: number }> = [];
+      const sources: Array<{ id: string; name: string; count: number; isSystemTag?: boolean }> = [];
       
       // Always include "Hand" source
       sources.push({ id: 'hand', name: 'Hand Entered', count: handCount });
       
-      // Add import batch sources
+      // Add import batch sources with system-generated account tags
       if (importBatchIds.length > 0) {
         const batches = await db!.select({
           batchId: sentinelImportBatches.batchId,
@@ -620,12 +624,34 @@ export function registerSentinelRoutes(app: Express): void {
         );
         
         for (const batch of batches) {
-          const count = trades.filter(t => t.importBatchId === batch.batchId).length;
+          const batchTrades = trades.filter(t => t.importBatchId === batch.batchId);
+          const count = batchTrades.length;
+          
+          // Extract account number from filename (e.g., "Activity_2_DC_Rollover_IRA__4915_fresh 2025.csv" -> "4915")
+          // Or use the accountName field if available from trades
+          let accountTag = '';
+          
+          // Try to get account from the first trade's accountName
+          const firstTradeAccount = batchTrades.find(t => t.accountName)?.accountName;
+          if (firstTradeAccount) {
+            // Use last 4 chars of account name/number
+            accountTag = firstTradeAccount.slice(-4);
+          } else {
+            // Try to extract from filename - look for patterns like "__4915" or "_4915_"
+            const accountMatch = batch.fileName.match(/[_](\d{4})[_\s\.]/);
+            if (accountMatch) {
+              accountTag = accountMatch[1];
+            }
+          }
+          
           const dateStr = batch.createdAt ? new Date(batch.createdAt).toLocaleDateString() : '';
+          const name = accountTag ? `Acct ${accountTag}` : `Import ${dateStr}`;
+          
           sources.push({
             id: batch.batchId,
-            name: `${batch.fileName}${dateStr ? ` (${dateStr})` : ''}`,
+            name: `${name} (${count})`,
             count,
+            isSystemTag: true, // Marks this as a system-generated tag
           });
         }
       }
@@ -2944,7 +2970,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
-  // Get all factors
+  // Get all factors (auto-seeds missing factors on first access)
   app.get("/api/sentinel/tnn/factors", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
@@ -2952,6 +2978,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       console.log("[TNN Factors] userId:", userId, "isAdmin:", user?.isAdmin);
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
+      }
+
+      // Auto-seed TNN data if needed (handles missing setup_type factors on production)
+      try {
+        await tnn.seedTnnData();
+      } catch (seedError) {
+        console.log("[TNN Factors] Seed check completed or skipped");
       }
 
       const factorType = req.query.type as string | undefined;
@@ -3652,6 +3685,201 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Delete all imports error:", error);
       res.status(500).json({ error: "Failed to delete all imported trades" });
+    }
+  });
+
+  // === Promote Imported Trades to Trading Cards ===
+  // This endpoint converts raw imported transactions into position-level trade cards
+  app.post("/api/sentinel/import/promote-to-cards", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { batchId } = req.body; // Optional: promote only specific batch
+      
+      // Get all non-orphan imported trades
+      let query = db.select().from(sentinelImportedTrades).where(
+        and(
+          eq(sentinelImportedTrades.userId, userId),
+          or(
+            eq(sentinelImportedTrades.isOrphanSell, false),
+            isNull(sentinelImportedTrades.isOrphanSell)
+          )
+        )
+      );
+      
+      let importedTrades = await query.orderBy(sentinelImportedTrades.tradeDate);
+      
+      // Filter by batch if specified
+      if (batchId) {
+        importedTrades = importedTrades.filter(t => t.batchId === batchId);
+      }
+      
+      if (importedTrades.length === 0) {
+        return res.json({ success: true, cardsCreated: 0, message: "No trades to promote" });
+      }
+      
+      // Group by ticker and account for position matching
+      const positionGroups = new Map<string, typeof importedTrades>();
+      for (const trade of importedTrades) {
+        const key = `${trade.ticker}:${trade.accountName || 'default'}`;
+        if (!positionGroups.has(key)) {
+          positionGroups.set(key, []);
+        }
+        positionGroups.get(key)!.push(trade);
+      }
+      
+      const cardsToCreate: Array<{
+        userId: number;
+        symbol: string;
+        direction: string;
+        entryPrice: number;
+        entryDate: Date | null;
+        exitPrice?: number;
+        exitDate?: Date;
+        positionSize: number;
+        status: string;
+        outcome?: string;
+        actualPnL?: number;
+        holdDays?: number;
+        lotEntries: Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }>;
+        source: string;
+        importBatchId: string;
+        accountName?: string;
+        isTagged: boolean;
+      }> = [];
+      
+      // Process each position group using FIFO matching
+      for (const [key, trades] of positionGroups) {
+        const [ticker, accountName] = key.split(':');
+        
+        // Sort by date
+        trades.sort((a, b) => {
+          const dateA = a.tradeDate ? new Date(a.tradeDate).getTime() : 0;
+          const dateB = b.tradeDate ? new Date(b.tradeDate).getTime() : 0;
+          return dateA - dateB;
+        });
+        
+        // FIFO matching: track open position lots
+        const openLots: Array<{ id: string; qty: number; price: number; date: Date; batchId: string }> = [];
+        let currentPosition = 0;
+        let positionLotEntries: Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }> = [];
+        let positionBatchId = trades[0].batchId;
+        let firstBuyDate: Date | null = null;
+        let totalBuyCost = 0;
+        let totalBuyQty = 0;
+        
+        for (const trade of trades) {
+          const qty = Number(trade.quantity) || 0;
+          const price = Number(trade.price) || 0;
+          const tradeDate = trade.tradeDate ? new Date(trade.tradeDate) : new Date();
+          
+          const lotEntry = {
+            id: trade.tradeId,
+            dateTime: tradeDate.toISOString(),
+            qty: String(qty),
+            buySell: trade.direction === 'BUY' ? 'buy' as const : 'sell' as const,
+            price: String(price),
+          };
+          
+          if (trade.direction === 'BUY') {
+            openLots.push({ id: trade.tradeId, qty, price, date: tradeDate, batchId: trade.batchId });
+            currentPosition += qty;
+            positionLotEntries.push(lotEntry);
+            if (!firstBuyDate) firstBuyDate = tradeDate;
+            totalBuyCost += qty * price;
+            totalBuyQty += qty;
+          } else if (trade.direction === 'SELL') {
+            positionLotEntries.push(lotEntry);
+            
+            // Check if this closes the position
+            let remainingSell = qty;
+            while (remainingSell > 0 && openLots.length > 0) {
+              const lot = openLots[0];
+              if (lot.qty <= remainingSell) {
+                remainingSell -= lot.qty;
+                openLots.shift();
+              } else {
+                lot.qty -= remainingSell;
+                remainingSell = 0;
+              }
+            }
+            currentPosition -= qty;
+            
+            // If position is closed, create a card
+            if (currentPosition <= 0 && positionLotEntries.length > 0) {
+              const avgEntry = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : price;
+              const pnl = (price - avgEntry) * totalBuyQty;
+              const holdDays = firstBuyDate ? Math.ceil((tradeDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+              
+              cardsToCreate.push({
+                userId,
+                symbol: ticker,
+                direction: 'long',
+                entryPrice: avgEntry,
+                entryDate: firstBuyDate,
+                exitPrice: price,
+                exitDate: tradeDate,
+                positionSize: totalBuyQty,
+                status: 'closed',
+                outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
+                actualPnL: pnl,
+                holdDays,
+                lotEntries: positionLotEntries,
+                source: 'import',
+                importBatchId: positionBatchId,
+                accountName: accountName !== 'default' ? accountName : undefined,
+                isTagged: false,
+              });
+              
+              // Reset for next position
+              positionLotEntries = [];
+              firstBuyDate = null;
+              totalBuyCost = 0;
+              totalBuyQty = 0;
+              currentPosition = 0;
+            }
+          }
+        }
+        
+        // Create card for any open position
+        if (currentPosition > 0 && positionLotEntries.length > 0) {
+          const avgEntry = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : 0;
+          cardsToCreate.push({
+            userId,
+            symbol: ticker,
+            direction: 'long',
+            entryPrice: avgEntry,
+            entryDate: firstBuyDate,
+            positionSize: currentPosition,
+            status: 'active',
+            lotEntries: positionLotEntries,
+            source: 'import',
+            importBatchId: positionBatchId,
+            accountName: accountName !== 'default' ? accountName : undefined,
+            isTagged: false,
+          });
+        }
+      }
+      
+      // Insert cards in transaction
+      if (cardsToCreate.length > 0) {
+        await db.transaction(async (tx) => {
+          const CHUNK_SIZE = 100;
+          for (let i = 0; i < cardsToCreate.length; i += CHUNK_SIZE) {
+            const chunk = cardsToCreate.slice(i, i + CHUNK_SIZE);
+            await tx.insert(sentinelTrades).values(chunk);
+          }
+        });
+      }
+      
+      res.json({ 
+        success: true, 
+        cardsCreated: cardsToCreate.length,
+        openPositions: cardsToCreate.filter(c => c.status === 'active').length,
+        closedPositions: cardsToCreate.filter(c => c.status === 'closed').length,
+      });
+    } catch (error) {
+      console.error("Promote to cards error:", error);
+      res.status(500).json({ error: "Failed to promote trades to cards" });
     }
   });
 

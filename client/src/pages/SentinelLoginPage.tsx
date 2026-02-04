@@ -103,18 +103,20 @@ export default function SentinelLoginPage() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  data-testid="input-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  required
-                />
-              </div>
+              {isRegistering && (
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    data-testid="input-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    required
+                  />
+                </div>
+              )}
 
               <Button
                 type="submit"

@@ -241,6 +241,32 @@ export default function SentinelImportPage() {
     },
   });
 
+  const promoteToCardsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/sentinel/import/promote-to-cards', {});
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Promotion failed with status ${response.status}`);
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({ 
+        title: "Trades Promoted to Cards", 
+        description: `Created ${data.cardsCreated || 0} trading cards from ${data.transactionsProcessed || 0} transactions`
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trade-sources'] });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Promotion Failed", 
+        description: error?.message || "Could not promote trades. Please try again.",
+        variant: "destructive" 
+      });
+    },
+  });
+
   const resolveOrphanMutation = useMutation({
     mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve'; costBasis?: number; openDate?: string }) => {
       const response = await apiRequest('PATCH', `/api/sentinel/import/trades/${data.tradeId}/resolve-orphan`, {
@@ -654,16 +680,32 @@ export default function SentinelImportPage() {
                   <CardTitle>Import History</CardTitle>
                   <CardDescription>Previous CSV imports and their status</CardDescription>
                 </div>
-                <Button 
-                  variant="destructive" 
-                  size="sm"
-                  onClick={() => setShowDeleteAllDialog(true)}
-                  disabled={!batches || batches.length === 0}
-                  data-testid="button-delete-all"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete All
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="default" 
+                    size="sm"
+                    onClick={() => promoteToCardsMutation.mutate()}
+                    disabled={!allTrades || allTrades.length === 0 || promoteToCardsMutation.isPending}
+                    data-testid="button-promote-to-cards"
+                  >
+                    {promoteToCardsMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <ArrowUpRight className="h-4 w-4 mr-2" />
+                    )}
+                    Promote to Trading Cards
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    onClick={() => setShowDeleteAllDialog(true)}
+                    disabled={!batches || batches.length === 0}
+                    data-testid="button-delete-all"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete All
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {batchesLoading ? (
