@@ -334,9 +334,10 @@ Your job is to:
 4. Learn from their ratings and English feedback to improve the formula
 5. Suggest formula improvements in plain English
 
-IMPORTANT: Always include this JSON block at the END of your response (after your explanation):
+CRITICAL - YOU MUST ALWAYS include this JSON block at the VERY END of every response:
+\`\`\`json
 {
-  "technicals": ["list", "of", "indicators", "mentioned"],
+  "technicals": ["VWAP", "21 SMA", "Volume"],
   "timeframe": "D",
   "formula": {
     "entryCondition": "description of entry",
@@ -347,9 +348,11 @@ IMPORTANT: Always include this JSON block at the END of your response (after you
   },
   "formulaUpdate": false
 }
+\`\`\`
 
+NEVER omit this JSON block. The frontend depends on it to display chart indicators.
 Set formulaUpdate to true ONLY when you are making changes based on user feedback.
-technicals should list indicators like: "VWAP", "21 EMA", "50 SMA", "9 EMA", "RSI", "Volume", etc.
+technicals MUST contain the actual indicators extracted from the pattern description like: "VWAP", "21 EMA", "50 SMA", "9 EMA", "RSI", "Volume", etc.
 timeframe should be the chart interval based on the pattern context:
   - "D" for daily patterns (swing trades, multi-day holds)
   - "W" for weekly patterns (longer term positions)
@@ -381,10 +384,17 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
     let proposedFormula: Record<string, any> | null = null;
     let extractedTimeframe: string = "D";
     
-    const jsonMatch = aiResponse.match(/\{[\s\S]*"technicals"[\s\S]*\}/);
+    // Try to extract JSON block (with or without code fence)
+    let jsonMatch = aiResponse.match(/```json\s*(\{[\s\S]*?"technicals"[\s\S]*?\})\s*```/);
+    if (!jsonMatch) {
+      // Fallback: try without code fence
+      jsonMatch = aiResponse.match(/(\{[\s\S]*?"technicals"[\s\S]*?\})/);
+    }
+    
     if (jsonMatch) {
       try {
-        const parsed = JSON.parse(jsonMatch[0]);
+        const jsonStr = jsonMatch[1] || jsonMatch[0];
+        const parsed = JSON.parse(jsonStr);
         if (parsed.technicals && Array.isArray(parsed.technicals)) {
           extractedTechnicals = parsed.technicals;
         }
@@ -400,9 +410,26 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
       } catch (e) {
         console.log("Failed to parse AI JSON response:", e);
       }
+    } else {
+      // Fallback: extract indicators from text if no JSON block found
+      const indicatorPatterns = ['VWAP', 'EMA', 'SMA', 'RSI', 'MACD', 'Volume', 'ATR', 'Bollinger'];
+      const foundIndicators: string[] = [];
+      for (const pattern of indicatorPatterns) {
+        const regex = new RegExp(`\\b\\d*\\s*${pattern}\\b`, 'gi');
+        const matches = aiResponse.match(regex);
+        if (matches) {
+          foundIndicators.push(...matches.map(m => m.trim()));
+        }
+      }
+      if (foundIndicators.length > 0) {
+        extractedTechnicals = Array.from(new Set(foundIndicators));
+      }
     }
     
-    const cleanResponse = aiResponse.replace(/\{[\s\S]*"technicals"[\s\S]*\}/, '').trim();
+    const cleanResponse = aiResponse
+      .replace(/```json\s*\{[\s\S]*?"technicals"[\s\S]*?\}\s*```/g, '')
+      .replace(/\{[\s\S]*?"technicals"[\s\S]*?\}/g, '')
+      .trim();
     
     res.json({ 
       response: cleanResponse,
