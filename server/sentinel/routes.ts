@@ -4457,31 +4457,23 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         }
       }
       
-      // Update database: clear non-orphans, mark true orphans
-      if (allTrades.length > 0) {
-        const allTradeIds = allTrades.map(t => t.tradeId);
-        const orphanArray = Array.from(trueOrphanIds);
-        const nonOrphanIds = allTradeIds.filter(id => !trueOrphanIds.has(id));
-        
-        // Clear orphan status for non-orphans
-        if (nonOrphanIds.length > 0) {
-          await db!.update(sentinelImportedTrades)
-            .set({ orphanStatus: null })
-            .where(and(
-              eq(sentinelImportedTrades.userId, userId),
-              inArray(sentinelImportedTrades.tradeId, nonOrphanIds)
-            ));
-        }
-        
-        // Mark true orphans as pending
-        if (orphanArray.length > 0) {
-          await db!.update(sentinelImportedTrades)
-            .set({ orphanStatus: 'pending' })
-            .where(and(
-              eq(sentinelImportedTrades.userId, userId),
-              inArray(sentinelImportedTrades.tradeId, orphanArray)
-            ));
-        }
+      // Update database: clear all, then mark true orphans
+      // First: Clear all orphan statuses for this user
+      await db!.update(sentinelImportedTrades)
+        .set({ orphanStatus: null })
+        .where(eq(sentinelImportedTrades.userId, userId));
+      
+      // Second: Mark true orphans as pending (in batches to avoid query size limits)
+      const orphanArray = Array.from(trueOrphanIds);
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < orphanArray.length; i += BATCH_SIZE) {
+        const batch = orphanArray.slice(i, i + BATCH_SIZE);
+        await db!.update(sentinelImportedTrades)
+          .set({ orphanStatus: 'pending' })
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            inArray(sentinelImportedTrades.tradeId, batch)
+          ));
       }
       
       res.json({
@@ -4490,9 +4482,10 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         orphansCleared: clearedCount,
         trueOrphansFound: trueOrphanIds.size
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Reset and re-detect error:", error);
-      res.status(500).json({ error: "Failed to reset and re-detect orphans" });
+      console.error("Error stack:", error?.stack);
+      res.status(500).json({ error: "Failed to reset and re-detect orphans", details: error?.message || String(error) });
     }
   });
 
