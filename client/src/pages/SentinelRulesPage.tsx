@@ -17,7 +17,8 @@ import {
   BookOpen, Shield, Brain, Users, Plus, Edit3, RotateCcw, Check, X, 
   AlertTriangle, Info, AlertCircle, Ban, ChevronDown, ChevronUp,
   Sparkles, TrendingUp, TrendingDown, ArrowUpDown, Loader2,
-  MessageSquare, Send, Trash2, Tag, Layers, Merge
+  MessageSquare, Send, Trash2, Tag, Layers, Merge,
+  ArrowUpCircle, ArrowDownCircle
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -147,6 +148,10 @@ export default function SentinelRulesPage() {
     strategyTags: [] as string[],
     formula: "",
   });
+  const [createAsSystem, setCreateAsSystem] = useState(false); // Admin: create as system rule
+  
+  // Admin: Promote/demote confirmation
+  const [confirmPromote, setConfirmPromote] = useState<{ rule: TradingRule; action: 'promote' | 'demote' } | null>(null);
 
   const [editOverride, setEditOverride] = useState({
     customName: "",
@@ -185,7 +190,27 @@ export default function SentinelRulesPage() {
   const aiRules = rules.filter(r => (r.source === "ai_collective" || r.source === "ai_agentic") && !r.isDeleted);
 
   const createRuleMutation = useMutation({
-    mutationFn: async (data: typeof newRule) => {
+    mutationFn: async (data: typeof newRule & { asSystem?: boolean }) => {
+      // Admin can create system rules directly
+      if (data.asSystem && user?.isAdmin) {
+        const response = await apiRequest("POST", "/api/sentinel/admin/rules", {
+          name: data.name,
+          description: data.description,
+          category: data.category,
+          severity: data.severity,
+          ruleType: data.ruleType,
+          directionTags: data.directionTags,
+          strategyTags: data.strategyTags,
+          formula: data.formula || null,
+        });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Failed to create system rule");
+        }
+        return response.json();
+      }
+      
+      // Standard personal rule creation
       return apiRequest("POST", "/api/sentinel/rules", {
         name: data.name,
         description: data.description,
@@ -202,10 +227,11 @@ export default function SentinelRulesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
       setShowCreateDialog(false);
       setNewRule({ name: "", description: "", category: "general", severity: "warning", ruleType: "swing", directionTags: ["long"], strategyTags: [], formula: "" });
-      toast({ title: "Rule created successfully" });
+      setCreateAsSystem(false);
+      toast({ title: createAsSystem ? "System rule created" : "Rule created successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to create rule", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: error?.message || "Failed to create rule", variant: "destructive" });
     },
   });
 
@@ -272,6 +298,44 @@ export default function SentinelRulesPage() {
     },
     onError: () => {
       toast({ title: "Failed to restore rule", variant: "destructive" });
+    },
+  });
+
+  // Admin: Promote rule to system
+  const promoteRuleMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await apiRequest("POST", `/api/sentinel/admin/rules/${id}/promote`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to promote rule");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
+      toast({ title: data.message || "Rule promoted to system" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Failed to promote rule", variant: "destructive" });
+    },
+  });
+
+  // Admin: Demote rule to personal
+  const demoteRuleMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await apiRequest("POST", `/api/sentinel/admin/rules/${id}/demote`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to demote rule");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/rules"] });
+      toast({ title: data.message || "Rule demoted to personal" });
+    },
+    onError: (error: any) => {
+      toast({ title: error?.message || "Failed to demote rule", variant: "destructive" });
     },
   });
 
@@ -467,7 +531,7 @@ export default function SentinelRulesPage() {
 
       if (!response.ok) {
         // If similarity check fails, just create the rule
-        createRuleMutation.mutate(newRule);
+        createRuleMutation.mutate({ ...newRule, asSystem: createAsSystem });
         return;
       }
 
@@ -479,11 +543,11 @@ export default function SentinelRulesPage() {
         setShowSimilarityDialog(true);
       } else {
         // No similar rules, create directly
-        createRuleMutation.mutate(newRule);
+        createRuleMutation.mutate({ ...newRule, asSystem: createAsSystem });
       }
     } catch {
       // If error, create directly
-      createRuleMutation.mutate(newRule);
+      createRuleMutation.mutate({ ...newRule, asSystem: createAsSystem });
     } finally {
       setCheckingSimilarity(false);
     }
@@ -492,7 +556,7 @@ export default function SentinelRulesPage() {
   // Force create without checking similarity
   const forceCreateRule = () => {
     setShowSimilarityDialog(false);
-    createRuleMutation.mutate(newRule);
+    createRuleMutation.mutate({ ...newRule, asSystem: createAsSystem });
   };
 
   // Replace existing rule with new one
@@ -509,7 +573,7 @@ export default function SentinelRulesPage() {
     // First archive the existing rule, then create new one
     softDeleteRuleMutation.mutate(existingRuleId, {
       onSuccess: () => {
-        createRuleMutation.mutate(newRule);
+        createRuleMutation.mutate({ ...newRule, asSystem: createAsSystem });
         toast({ title: `Replaced "${ruleToReplace.name}" with new rule` });
       },
       onError: () => {
@@ -652,6 +716,24 @@ export default function SentinelRulesPage() {
                       <TooltipContent>Restore to default</TooltipContent>
                     </Tooltip>
                   )}
+                  {/* Admin: Demote system rule to personal */}
+                  {user?.isAdmin && rule.source === 'starter' && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 text-amber-500"
+                          onClick={() => setConfirmPromote({ rule, action: 'demote' })}
+                          disabled={demoteRuleMutation.isPending}
+                          data-testid={`button-demote-rule-${rule.id}`}
+                        >
+                          <ArrowDownCircle className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Demote to personal rule</TooltipContent>
+                    </Tooltip>
+                  )}
                 </>
               ) : (
                 <>
@@ -660,6 +742,24 @@ export default function SentinelRulesPage() {
                     onCheckedChange={(checked) => updateRuleMutation.mutate({ id: rule.id, data: { isActive: checked } })}
                     data-testid={`switch-rule-active-${rule.id}`}
                   />
+                  {/* Admin: Promote personal rule to system */}
+                  {user?.isAdmin && rule.source === 'user' && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 text-amber-500"
+                          onClick={() => setConfirmPromote({ rule, action: 'promote' })}
+                          disabled={promoteRuleMutation.isPending}
+                          data-testid={`button-promote-rule-${rule.id}`}
+                        >
+                          <ArrowUpCircle className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Promote to system rule</TooltipContent>
+                    </Tooltip>
+                  )}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button 
@@ -1162,6 +1262,27 @@ export default function SentinelRulesPage() {
               )}
             </div>
           </div>
+          
+          {/* Admin: Create as system rule toggle */}
+          {user?.isAdmin && (
+            <div className="pt-4 border-t">
+              <Label className="text-amber-500 text-sm flex items-center gap-2">
+                <Shield className="w-4 h-4" />
+                Admin Options
+              </Label>
+              <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                <Switch
+                  checked={createAsSystem}
+                  onCheckedChange={setCreateAsSystem}
+                  data-testid="switch-create-as-system"
+                />
+                <span className="text-sm">
+                  Create as system rule (visible to all users)
+                </span>
+              </label>
+            </div>
+          )}
+          
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
             <Button 
@@ -1174,6 +1295,8 @@ export default function SentinelRulesPage() {
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Checking...
                 </>
+              ) : createAsSystem ? (
+                "Create System Rule"
               ) : (
                 "Create Rule"
               )}
@@ -1541,6 +1664,59 @@ export default function SentinelRulesPage() {
               setSelectedConsolidation(null);
             }}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Admin: Promote/Demote Confirmation Dialog */}
+      <Dialog open={!!confirmPromote} onOpenChange={(open) => !open && setConfirmPromote(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {confirmPromote?.action === 'promote' ? (
+                <ArrowUpCircle className="w-5 h-5 text-amber-500" />
+              ) : (
+                <ArrowDownCircle className="w-5 h-5 text-amber-500" />
+              )}
+              {confirmPromote?.action === 'promote' ? 'Promote to System Rule' : 'Demote to Personal Rule'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmPromote?.action === 'promote' 
+                ? 'This will make the rule visible to all users as a system rule. System rules can be customized but not deleted by regular users.'
+                : 'This will convert the system rule back to a personal rule. It will no longer be visible to other users.'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {confirmPromote && (
+            <div className="p-3 border rounded-lg bg-muted/30">
+              <div className="font-medium">{confirmPromote.rule.name}</div>
+              {confirmPromote.rule.description && (
+                <p className="text-sm text-muted-foreground mt-1">{confirmPromote.rule.description}</p>
+              )}
+            </div>
+          )}
+          
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmPromote(null)}>
+              Cancel
+            </Button>
+            <Button 
+              variant={confirmPromote?.action === 'promote' ? 'default' : 'secondary'}
+              onClick={() => {
+                if (confirmPromote) {
+                  if (confirmPromote.action === 'promote') {
+                    promoteRuleMutation.mutate(confirmPromote.rule.id);
+                  } else {
+                    demoteRuleMutation.mutate(confirmPromote.rule.id);
+                  }
+                  setConfirmPromote(null);
+                }
+              }}
+              disabled={promoteRuleMutation.isPending || demoteRuleMutation.isPending}
+              data-testid={`button-confirm-${confirmPromote?.action}`}
+            >
+              {confirmPromote?.action === 'promote' ? 'Promote Rule' : 'Demote Rule'}
             </Button>
           </DialogFooter>
         </DialogContent>

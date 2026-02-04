@@ -1202,6 +1202,177 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // Admin: Promote a personal rule to system rule (source: 'user' -> 'starter')
+  app.post("/api/sentinel/admin/rules/:id/promote", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const id = parseInt(req.params.id as string);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid rule ID" });
+      }
+      
+      // Get the rule
+      const [existingRule] = await db.select().from(sentinelRules).where(eq(sentinelRules.id, id));
+      if (!existingRule) {
+        return res.status(404).json({ error: "Rule not found" });
+      }
+      
+      if (existingRule.source === 'starter') {
+        return res.status(400).json({ error: "Rule is already a system rule" });
+      }
+      
+      // Generate a ruleCode if not present (system rules need unique codes for tracking)
+      const ruleCode = existingRule.ruleCode || `SYS_${existingRule.category?.toUpperCase() || 'GEN'}_${Date.now()}`;
+      
+      // Promote to system rule
+      const [updated] = await db.update(sentinelRules)
+        .set({ 
+          source: 'starter',
+          isGlobal: true,
+          ruleCode,
+          updatedAt: new Date()
+        })
+        .where(eq(sentinelRules.id, id))
+        .returning();
+      
+      res.json({ 
+        success: true, 
+        rule: updated,
+        message: `Rule "${updated.name}" promoted to system rule`
+      });
+    } catch (error) {
+      console.error("Promote rule error:", error);
+      res.status(500).json({ error: "Failed to promote rule" });
+    }
+  });
+
+  // Admin: Demote a system rule to personal rule (source: 'starter' -> 'user')
+  app.post("/api/sentinel/admin/rules/:id/demote", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const id = parseInt(req.params.id as string);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid rule ID" });
+      }
+      
+      // Get the rule
+      const [existingRule] = await db.select().from(sentinelRules).where(eq(sentinelRules.id, id));
+      if (!existingRule) {
+        return res.status(404).json({ error: "Rule not found" });
+      }
+      
+      if (existingRule.source !== 'starter') {
+        return res.status(400).json({ error: "Rule is not a system rule (cannot demote)" });
+      }
+      
+      // Demote to personal rule
+      const [updated] = await db.update(sentinelRules)
+        .set({ 
+          source: 'user',
+          isGlobal: false,
+          updatedAt: new Date()
+        })
+        .where(eq(sentinelRules.id, id))
+        .returning();
+      
+      res.json({ 
+        success: true, 
+        rule: updated,
+        message: `Rule "${updated.name}" demoted to personal rule`
+      });
+    } catch (error) {
+      console.error("Demote rule error:", error);
+      res.status(500).json({ error: "Failed to demote rule" });
+    }
+  });
+
+  // Admin: Create a new system rule directly
+  app.post("/api/sentinel/admin/rules", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const systemRuleSchema = z.object({
+        name: z.string().min(3).max(200),
+        description: z.string().min(10).max(2000),
+        category: z.string().optional(),
+        severity: z.enum(['auto_reject', 'critical', 'warning', 'info']).default('warning'),
+        ruleType: z.enum(['swing', 'intraday', 'long_term', 'all']).default('swing'),
+        directionTags: z.array(z.string()).optional(),
+        strategyTags: z.array(z.string()).optional(),
+        formula: z.string().optional(),
+        isAutoReject: z.boolean().default(false),
+      });
+      
+      const result = systemRuleSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+      
+      const data = result.data;
+      
+      // Generate unique ruleCode for system rules
+      const ruleCode = `SYS_${(data.category || 'gen').toUpperCase()}_${Date.now()}`;
+      
+      // Create system rule
+      const [rule] = await db.insert(sentinelRules).values({
+        userId: req.session.userId!,
+        name: data.name,
+        description: data.description,
+        category: data.category || 'general',
+        severity: data.severity,
+        ruleType: data.ruleType,
+        directionTags: data.directionTags,
+        strategyTags: data.strategyTags,
+        formula: data.formula,
+        isAutoReject: data.isAutoReject,
+        source: 'starter',
+        ruleCode,
+        isGlobal: true,
+        isActive: true,
+      }).returning();
+      
+      res.json({ 
+        success: true, 
+        rule,
+        message: `System rule "${rule.name}" created successfully`
+      });
+    } catch (error) {
+      console.error("Create system rule error:", error);
+      res.status(500).json({ error: "Failed to create system rule" });
+    }
+  });
+
+  // Admin: Get all system rules for management
+  app.get("/api/sentinel/admin/rules", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      // Get all system rules (source: 'starter')
+      const systemRules = await db.select().from(sentinelRules)
+        .where(eq(sentinelRules.source, 'starter'))
+        .orderBy(sentinelRules.category, sentinelRules.name);
+      
+      res.json(systemRules);
+    } catch (error) {
+      console.error("Get system rules error:", error);
+      res.status(500).json({ error: "Failed to fetch system rules" });
+    }
+  });
+
   // AI Chat for rule creation assistance
   app.post("/api/sentinel/rules/ai-chat", requireAuth, async (req: Request, res: Response) => {
     try {
