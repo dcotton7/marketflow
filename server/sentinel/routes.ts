@@ -2054,6 +2054,262 @@ Respond in JSON format:
     }
   });
 
+  // AI Batch tagging suggestions - analyze untagged trades and suggest setup types
+  app.post("/api/sentinel/trades/batch-tag-suggestions", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Get untagged closed trades
+      const untaggedTrades = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.status, "closed"),
+          or(
+            eq(sentinelTrades.isTagged, false),
+            isNull(sentinelTrades.isTagged)
+          )
+        ))
+        .orderBy(desc(sentinelTrades.exitDate))
+        .limit(50); // Limit to 50 trades for performance
+      
+      if (untaggedTrades.length === 0) {
+        return res.json({ suggestions: [], message: "No untagged trades to analyze" });
+      }
+      
+      // Check for OpenAI API key
+      const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+      
+      if (!apiKey) {
+        // Fallback: group by symbol and direction only
+        const groups = new Map<string, typeof untaggedTrades>();
+        untaggedTrades.forEach(trade => {
+          const key = `${trade.symbol}_${trade.direction}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key)!.push(trade);
+        });
+        
+        const suggestions = Array.from(groups.entries())
+          .filter(([, trades]) => trades.length >= 2)
+          .map(([key, trades]) => {
+            const [symbol, direction] = key.split('_');
+            return {
+              groupKey: key,
+              symbol,
+              direction,
+              tradeIds: trades.map(t => t.id),
+              tradeCount: trades.length,
+              suggestedSetupType: null,
+              confidence: null,
+              reasoning: "AI analysis unavailable - grouped by symbol and direction",
+              sample: {
+                entryPrice: trades[0].entryPrice,
+                exitPrice: trades[0].exitPrice,
+                entryDate: trades[0].entryDate,
+              }
+            };
+          });
+        
+        return res.json({ 
+          suggestions, 
+          message: "Grouped by pattern (AI analysis not available)",
+          aiEnabled: false
+        });
+      }
+      
+      // Prepare trade summaries for AI analysis
+      const tradeSummaries = untaggedTrades.map(trade => {
+        const entryPrice = Number(trade.entryPrice) || 0;
+        const exitPrice = Number(trade.exitPrice) || entryPrice;
+        const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 * (trade.direction === 'long' ? 1 : -1) : 0;
+        const holdDays = trade.entryDate && trade.exitDate ? 
+          Math.ceil((new Date(trade.exitDate).getTime() - new Date(trade.entryDate).getTime()) / (1000 * 60 * 60 * 24)) : null;
+        
+        return {
+          id: trade.id,
+          symbol: trade.symbol,
+          direction: trade.direction,
+          entryPrice: entryPrice.toFixed(2),
+          exitPrice: exitPrice.toFixed(2),
+          pnlPercent: pnlPercent.toFixed(1),
+          outcome: pnlPercent > 0 ? 'win' : 'loss',
+          holdDays,
+          entryDate: trade.entryDate ? new Date(trade.entryDate).toISOString().split('T')[0] : null,
+          notes: trade.notes?.substring(0, 100) || null,
+          thesis: trade.thesis?.substring(0, 100) || null,
+        };
+      });
+      
+      // Use AI to analyze trades and suggest setup types
+      const OpenAI = await import('openai');
+      const openai = new OpenAI.default({ apiKey, baseURL });
+      
+      const setupTypes = [
+        "breakout - stock breaks above resistance with volume",
+        "pullback - stock pulls back to support after rally",
+        "cup_and_handle - classic cup and handle pattern",
+        "vcp - volatility contraction pattern",
+        "episodic_pivot - earnings or news driven gap up",
+        "reclaim - stock reclaims key moving average",
+        "high_tight_flag - flag pattern after strong move",
+        "low_cheat - shakeout below pivot point",
+        "undercut_rally - false breakdown followed by rally",
+        "orb - opening range breakout",
+        "short_lost_50 - short on stock losing 50 SMA",
+        "short_lost_200 - short on stock losing 200 SMA",
+        "other - doesn't match any specific pattern"
+      ];
+      
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert stock trader analyzing historical trades to identify setup patterns.
+            
+Given a list of closed trades, group similar trades and suggest the most likely setup type for each group.
+
+Available setup types:
+${setupTypes.map(s => `- ${s}`).join('\n')}
+
+Analyze the trades looking for patterns based on:
+- Symbol groupings (same stock = likely same strategy)
+- Entry/exit characteristics
+- Hold duration patterns
+- Win/loss patterns
+- Any notes or thesis hints
+
+Return a JSON object with a "groups" array. Each group should have:
+- tradeIds: array of trade IDs that belong together
+- suggestedSetupType: the setup type code (e.g., "breakout", "pullback")
+- confidence: "high", "medium", or "low"
+- reasoning: brief explanation of why these trades match this setup
+
+Only group trades with 2+ members. Ungrouped trades can be suggested individually if there's strong evidence.`
+          },
+          {
+            role: "user",
+            content: `Analyze these ${tradeSummaries.length} trades and suggest setup types:\n\n${JSON.stringify(tradeSummaries, null, 2)}`
+          }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 2000,
+      });
+      
+      const responseText = completion.choices[0]?.message?.content || "{}";
+      let aiResult: { groups?: Array<{
+        tradeIds: number[];
+        suggestedSetupType: string;
+        confidence: string;
+        reasoning: string;
+      }> } = {};
+      
+      try {
+        aiResult = JSON.parse(responseText);
+      } catch (e) {
+        console.error("Failed to parse AI batch tag response:", e);
+      }
+      
+      // Build suggestions from AI groups
+      const suggestions = (aiResult.groups || []).map((group, index) => {
+        const matchingTrades = untaggedTrades.filter(t => group.tradeIds.includes(t.id));
+        if (matchingTrades.length === 0) return null;
+        
+        const symbols = [...new Set(matchingTrades.map(t => t.symbol))];
+        const directions = [...new Set(matchingTrades.map(t => t.direction))];
+        
+        return {
+          groupKey: `ai_group_${index}`,
+          symbols,
+          symbol: symbols.length === 1 ? symbols[0] : `${symbols.length} symbols`,
+          directions,
+          direction: directions.length === 1 ? directions[0] : 'mixed',
+          tradeIds: matchingTrades.map(t => t.id),
+          tradeCount: matchingTrades.length,
+          suggestedSetupType: group.suggestedSetupType,
+          confidence: group.confidence,
+          reasoning: group.reasoning,
+          sample: {
+            entryPrice: matchingTrades[0].entryPrice,
+            exitPrice: matchingTrades[0].exitPrice,
+            entryDate: matchingTrades[0].entryDate,
+          }
+        };
+      }).filter(Boolean);
+      
+      res.json({ 
+        suggestions, 
+        message: suggestions.length > 0 ? `Found ${suggestions.length} groups with suggested tags` : "No clear patterns found",
+        aiEnabled: true,
+        analyzedCount: untaggedTrades.length,
+      });
+    } catch (error) {
+      console.error("Batch tag suggestions error:", error);
+      res.status(500).json({ error: "Failed to generate batch tag suggestions" });
+    }
+  });
+
+  // Apply batch tags to multiple trades
+  app.post("/api/sentinel/trades/batch-tag", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const batchTagSchema = z.object({
+        tradeIds: z.array(z.number()).min(1, "At least one trade ID required"),
+        setupType: z.string().min(1, "Setup type is required"),
+        outcome: z.enum(["win", "loss", "breakeven"]).optional(),
+      });
+      
+      const result = batchTagSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error.errors[0].message });
+      }
+      
+      const { tradeIds, setupType, outcome } = result.data;
+      const userId = req.session.userId!;
+      
+      // Verify all trades belong to this user
+      const trades = await db.select({ id: sentinelTrades.id })
+        .from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          inArray(sentinelTrades.id, tradeIds)
+        ));
+      
+      if (trades.length !== tradeIds.length) {
+        return res.status(400).json({ error: "Some trades not found or not owned by user" });
+      }
+      
+      // Update trades with tags
+      const now = new Date();
+      let updateData: Record<string, any> = {
+        setupType,
+        isTagged: true,
+        taggedAt: now,
+        updatedAt: now,
+      };
+      
+      if (outcome) {
+        updateData.outcome = outcome;
+      }
+      
+      await db.update(sentinelTrades)
+        .set(updateData)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          inArray(sentinelTrades.id, tradeIds)
+        ));
+      
+      res.json({ 
+        success: true, 
+        updatedCount: tradeIds.length,
+        message: `Tagged ${tradeIds.length} trades as ${setupType}` 
+      });
+    } catch (error) {
+      console.error("Batch tag error:", error);
+      res.status(500).json({ error: "Failed to batch tag trades" });
+    }
+  });
+
   // Closed trades history
   app.get("/api/sentinel/trades/closed", requireAuth, async (req: Request, res: Response) => {
     try {

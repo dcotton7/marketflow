@@ -1122,6 +1122,21 @@ export default function SentinelDashboardPage() {
     avgSellPrice: number;
   } | null>(null);
   const [suggestingSetup, setSuggestingSetup] = useState(false);
+  
+  // Batch tagging state
+  const [showBatchTagDialog, setShowBatchTagDialog] = useState(false);
+  const [batchSuggestions, setBatchSuggestions] = useState<Array<{
+    groupKey: string;
+    symbol: string;
+    symbols?: string[];
+    direction: string;
+    tradeIds: number[];
+    tradeCount: number;
+    suggestedSetupType: string | null;
+    confidence: string | null;
+    reasoning: string;
+  }>>([]);
+  const [batchTaggingLoading, setBatchTaggingLoading] = useState(false);
 
   const { data: dashboard, isLoading, error } = useQuery<DashboardData>({
     queryKey: ["/api/sentinel/dashboard"],
@@ -1344,6 +1359,68 @@ export default function SentinelDashboardPage() {
       });
     },
   });
+  
+  // Batch tag mutation for bulk tagging
+  const batchTagMutation = useMutation({
+    mutationFn: async ({ tradeIds, setupType }: { tradeIds: number[]; setupType: string }) => {
+      const response = await apiRequest("POST", "/api/sentinel/trades/batch-tag", { 
+        tradeIds, 
+        setupType 
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to batch tag trades");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades/untagged"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades/tagging-stats"] });
+      toast({ title: `Tagged ${data.updatedCount} trades` });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Batch Tagging Failed", 
+        description: error?.message || "Could not batch tag trades.",
+        variant: "destructive" 
+      });
+    },
+  });
+  
+  // Fetch batch tag suggestions
+  const fetchBatchSuggestions = async () => {
+    setBatchTaggingLoading(true);
+    try {
+      const response = await apiRequest("POST", "/api/sentinel/trades/batch-tag-suggestions", {});
+      if (!response.ok) throw new Error("Failed to get suggestions");
+      const data = await response.json();
+      setBatchSuggestions(data.suggestions || []);
+      setShowBatchTagDialog(true);
+      if (data.suggestions?.length === 0) {
+        toast({ title: "No patterns found", description: data.message });
+      }
+    } catch (error: any) {
+      toast({ 
+        title: "Failed to analyze trades", 
+        description: error?.message || "Could not analyze trades for patterns.",
+        variant: "destructive" 
+      });
+    } finally {
+      setBatchTaggingLoading(false);
+    }
+  };
+  
+  // Apply batch tag to a group
+  const applyBatchTag = (group: typeof batchSuggestions[0]) => {
+    if (!group.suggestedSetupType) return;
+    batchTagMutation.mutate({ 
+      tradeIds: group.tradeIds, 
+      setupType: group.suggestedSetupType 
+    });
+    // Remove this group from suggestions
+    setBatchSuggestions(prev => prev.filter(s => s.groupKey !== group.groupKey));
+  };
   
   // Open tagging dialog and analyze trade
   const openTaggingDialog = async (trade: TradeWithEvaluation) => {
@@ -2211,8 +2288,18 @@ export default function SentinelDashboardPage() {
                 {/* Untagged trades queue */}
                 {untaggedTrades.length > 0 ? (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="text-sm font-medium">Trades needing review ({untaggedTrades.length})</span>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={fetchBatchSuggestions}
+                        disabled={batchTaggingLoading || untaggedTrades.length < 2}
+                        data-testid="button-batch-tag-suggestions"
+                      >
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        {batchTaggingLoading ? "Analyzing..." : "AI Batch Tag"}
+                      </Button>
                     </div>
                     <div className="space-y-2 max-h-60 overflow-y-auto">
                       {untaggedTrades.slice(0, 10).map((trade) => (
@@ -3380,6 +3467,88 @@ export default function SentinelDashboardPage() {
               data-testid="button-save-tag"
             >
               {tagTradeMutation.isPending ? "Saving..." : "Save Tag"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Batch Tagging Dialog */}
+      <Dialog open={showBatchTagDialog} onOpenChange={setShowBatchTagDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-500" />
+              AI Batch Tagging Suggestions
+            </DialogTitle>
+            <DialogDescription>
+              AI has analyzed your untagged trades and grouped similar patterns. 
+              Apply suggested tags to multiple trades at once.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {batchSuggestions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Target className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>No pattern suggestions available.</p>
+                <p className="text-sm">Try tagging trades individually for more diverse data.</p>
+              </div>
+            ) : (
+              batchSuggestions.map((group) => (
+                <div 
+                  key={group.groupKey}
+                  className="border rounded-lg p-4 space-y-3"
+                  data-testid={`batch-tag-group-${group.groupKey}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={group.direction === "long" ? "default" : "destructive"}>
+                          {group.symbol}
+                        </Badge>
+                        <Badge variant="outline">
+                          {group.tradeCount} trades
+                        </Badge>
+                        {group.suggestedSetupType && (
+                          <Badge variant="secondary" className="bg-purple-500/10 text-purple-600">
+                            {group.suggestedSetupType.replace(/_/g, ' ')}
+                          </Badge>
+                        )}
+                        {group.confidence && (
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            group.confidence === 'high' ? 'bg-green-500/10 text-green-600' :
+                            group.confidence === 'medium' ? 'bg-yellow-500/10 text-yellow-600' :
+                            'bg-gray-500/10 text-gray-500'
+                          }`}>
+                            {group.confidence} confidence
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        {group.reasoning}
+                      </p>
+                    </div>
+                    
+                    {group.suggestedSetupType && (
+                      <Button
+                        size="sm"
+                        onClick={() => applyBatchTag(group)}
+                        disabled={batchTagMutation.isPending}
+                        data-testid={`button-apply-batch-${group.groupKey}`}
+                      >
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        Apply
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBatchTagDialog(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
