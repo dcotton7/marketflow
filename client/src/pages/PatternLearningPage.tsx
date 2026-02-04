@@ -635,7 +635,7 @@ export default function PatternLearningPage() {
                       </Button>
                     </div>
                     
-                    <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4" style={{ minHeight: '350px' }}>
+                    <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4" style={{ height: '560px' }}>
                       <iframe
                         src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=${chartTimeframe}&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=1&allow_symbol_change=1&details=0&studies=${getWidgetStudies()}&show_popup_button=1`}
                         className="w-full h-full border-0"
@@ -693,7 +693,7 @@ export default function PatternLearningPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col overflow-hidden min-h-0">
-                <ScrollArea className="flex-1 pr-4" style={{ maxHeight: '450px' }}>
+                <ScrollArea className="flex-1 pr-4 overflow-y-auto" style={{ height: '560px' }}>
                   <div className="space-y-3">
                     {chatMessages.map((msg, idx) => (
                       <div 
