@@ -20,6 +20,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { PatternChart } from "@/components/PatternChart";
 import { PATTERN_TYPES, PATTERN_TIMEFRAMES, RATING_LABELS, SetupConfidence } from "@shared/schema";
 
 interface Setup {
@@ -635,16 +636,14 @@ export default function PatternLearningPage() {
                       </Button>
                     </div>
                     
-                    <div className="bg-card rounded-lg border overflow-hidden mb-2" style={{ height: '280px' }}>
-                      <iframe
-                        src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=${chartTimeframe}&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=1&allow_symbol_change=1&details=0&studies=${getWidgetStudies()}&show_popup_button=1`}
-                        className="w-full h-full border-0"
-                        title={`Chart for ${currentMatch.ticker}`}
+                    <div className="bg-card rounded-lg border overflow-hidden mb-2">
+                      <PatternChart 
+                        symbol={currentMatch.ticker}
+                        indicators={extractedTechnicals.length > 0 ? extractedTechnicals : (selectedSetup?.requiredTechnicals?.indicators || [])}
+                        height={280}
+                        timeframe={chartTimeframe}
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Note: Indicators (VWAP, SMA, etc.) are visible when you click "Open in TradingView" above.
-                    </p>
                     
                     <div className="space-y-3">
                       <div>
