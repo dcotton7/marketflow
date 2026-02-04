@@ -658,8 +658,17 @@ export type InsertSetupConfidence = z.infer<typeof insertSetupConfidenceSchema>;
 export const RATING_LABELS = {
   1: "Useless",
   2: "Elements Exist", 
-  3: "Formed but Past",
-  4: "Good Setup"
+  3: "Mostly Formed",
+  4: "Formed but Past",
+  5: "Good Setup"
+} as const;
+
+export const RATING_SCORE_RANGES = {
+  1: { min: 0, max: 18, midpoint: 9 },
+  2: { min: 20, max: 38, midpoint: 29 },
+  3: { min: 40, max: 58, midpoint: 49 },
+  4: { min: 60, max: 78, midpoint: 69 },
+  5: { min: 80, max: 98, midpoint: 89 },
 } as const;
 
 export const PATTERN_TYPES = [
@@ -678,4 +687,175 @@ export const PATTERN_TIMEFRAMES = [
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
+] as const;
+
+// ============================================================================
+// PATTERN LEARNING V2 - Hierarchical Setup System with 100-Point Scoring
+// ============================================================================
+
+// Master Setups - Pattern archetypes (Cup and Handle, VCP, etc.)
+export const masterSetups = pgTable("master_setups", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  defaultStages: jsonb("default_stages").$type<string[]>().default([]),
+  invalidationRules: jsonb("invalidation_rules").$type<{
+    minCupDepthPct?: number;
+    maxHandleDepthPct?: number;
+    minBaseWeeks?: number;
+    minContractions?: number;
+    [key: string]: number | undefined;
+  }>(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Setup Variants - Timeframe-specific versions of master setups
+export const setupVariants = pgTable("setup_variants", {
+  id: serial("id").primaryKey(),
+  masterSetupId: integer("master_setup_id").notNull().references(() => masterSetups.id),
+  name: text("name").notNull(),
+  timeframe: text("timeframe").notNull(), // D, W, 5, 15, 60
+  durationMin: text("duration_min"),
+  durationMax: text("duration_max"),
+  chartPeriod: text("chart_period"), // 1y, 6mo, 3mo, 5d
+  requiredCriteriaIds: integer("required_criteria_ids").array(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Formation Stages - Lifecycle stages for each pattern type
+export const formationStages = pgTable("formation_stages", {
+  id: serial("id").primaryKey(),
+  masterSetupId: integer("master_setup_id").notNull().references(() => masterSetups.id),
+  stageName: text("stage_name").notNull(),
+  stageOrder: integer("stage_order").notNull(),
+  stageType: text("stage_type").notNull().default("sequential"), // sequential, parallel, terminal
+  isTerminal: boolean("is_terminal").default(false),
+  scoreModifier: integer("score_modifier").default(0),
+  typicalDurationMin: text("typical_duration_min"),
+  typicalDurationMax: text("typical_duration_max"),
+  tooLongThreshold: text("too_long_threshold"),
+  description: text("description"),
+});
+
+// Rating Criteria - Universal and pattern-specific scoring dimensions
+export const ratingCriteria = pgTable("rating_criteria", {
+  id: serial("id").primaryKey(),
+  category: text("category").notNull(), // market_env, relative_strength, volume_quality, technical_structure, pattern_specific
+  name: text("name").notNull(),
+  description: text("description"),
+  maxPoints: integer("max_points").notNull().default(4), // 1-5, flexible per criterion
+  isUniversal: boolean("is_universal").default(true),
+  masterSetupId: integer("master_setup_id").references(() => masterSetups.id), // null if universal
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Rating Weights - Context-dependent importance per variant (with user overrides)
+export const ratingWeights = pgTable("rating_weights", {
+  id: serial("id").primaryKey(),
+  setupVariantId: integer("setup_variant_id").notNull().references(() => setupVariants.id),
+  criteriaId: integer("criteria_id").notNull().references(() => ratingCriteria.id),
+  defaultWeight: doublePrecision("default_weight").default(1.0),
+  weight: doublePrecision("weight").default(1.0),
+  userId: integer("user_id"), // null = global default
+  isDefault: boolean("is_default").default(true),
+});
+
+// Rated Examples - Human-rated pattern examples for AI training
+export const ratedExamples = pgTable("rated_examples", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  setupVariantId: integer("setup_variant_id").references(() => setupVariants.id),
+  ticker: text("ticker").notNull(),
+  matchDate: text("match_date").notNull(),
+  humanRating: integer("human_rating").notNull(), // 1-5
+  aiScore: integer("ai_score"), // 0-100 granular
+  formationStageId: integer("formation_stage_id").references(() => formationStages.id),
+  criteriaScores: jsonb("criteria_scores").$type<Record<string, number>>().default({}),
+  feedback: text("feedback"),
+  chartSnapshot: text("chart_snapshot"),
+  marketPhase: text("market_phase"), // bull, correction, bear, choppy
+  sectorPerformance: text("sector_performance"), // leading, inline, lagging
+  stockStage: integer("stock_stage"), // O'Neil stage 1-4
+  priorAttemptCount: integer("prior_attempt_count").default(0),
+  chartContext: jsonb("chart_context").$type<{
+    distanceFrom52wHigh?: number;
+    baseDepthPct?: number;
+    daysInBase?: number;
+    [key: string]: number | undefined;
+  }>(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Schema exports for Pattern Learning V2
+export const insertMasterSetupSchema = createInsertSchema(masterSetups).omit({ id: true, createdAt: true });
+export const insertSetupVariantSchema = createInsertSchema(setupVariants).omit({ id: true, createdAt: true });
+export const insertFormationStageSchema = createInsertSchema(formationStages).omit({ id: true });
+export const insertRatingCriteriaSchema = createInsertSchema(ratingCriteria).omit({ id: true, createdAt: true });
+export const insertRatingWeightSchema = createInsertSchema(ratingWeights).omit({ id: true });
+export const insertRatedExampleSchema = createInsertSchema(ratedExamples).omit({ id: true, createdAt: true });
+
+// Type exports for Pattern Learning V2
+export type MasterSetup = typeof masterSetups.$inferSelect;
+export type SetupVariant = typeof setupVariants.$inferSelect;
+export type FormationStage = typeof formationStages.$inferSelect;
+export type RatingCriteria = typeof ratingCriteria.$inferSelect;
+export type RatingWeight = typeof ratingWeights.$inferSelect;
+export type RatedExample = typeof ratedExamples.$inferSelect;
+
+export type InsertMasterSetup = z.infer<typeof insertMasterSetupSchema>;
+export type InsertSetupVariant = z.infer<typeof insertSetupVariantSchema>;
+export type InsertFormationStage = z.infer<typeof insertFormationStageSchema>;
+export type InsertRatingCriteria = z.infer<typeof insertRatingCriteriaSchema>;
+export type InsertRatingWeight = z.infer<typeof insertRatingWeightSchema>;
+export type InsertRatedExample = z.infer<typeof insertRatedExampleSchema>;
+
+// Master setup names for reference
+export const MASTER_SETUP_NAMES = [
+  "Cup and Handle",
+  "VCP",
+  "High Tight Flag",
+  "Flat Base",
+  "Double Bottom",
+  "Bull Flag",
+  "Triangle",
+  "ORB",
+  "Episodic Pivot",
+  "Pullback/Reclaim",
+  "Gap and Go",
+  "Ascending Base",
+  "Consolidation Breakout",
+  "Failed Breakout",
+] as const;
+
+// Rating criteria categories
+export const RATING_CATEGORIES = [
+  { value: "market_env", label: "Market Environment", maxTotal: 20 },
+  { value: "relative_strength", label: "Relative Strength", maxTotal: 20 },
+  { value: "volume_quality", label: "Volume Quality", maxTotal: 20 },
+  { value: "technical_structure", label: "Technical Structure", maxTotal: 20 },
+  { value: "pattern_specific", label: "Pattern Specific", maxTotal: 20 },
+] as const;
+
+// Formation stage types
+export const STAGE_TYPES = [
+  { value: "sequential", label: "Sequential" },
+  { value: "parallel", label: "Parallel" },
+  { value: "terminal", label: "Terminal" },
+] as const;
+
+// Market phase options
+export const MARKET_PHASES = [
+  { value: "bull", label: "Bull Market" },
+  { value: "correction", label: "Correction" },
+  { value: "bear", label: "Bear Market" },
+  { value: "choppy", label: "Choppy/Sideways" },
+] as const;
+
+// Sector performance options
+export const SECTOR_PERFORMANCE = [
+  { value: "leading", label: "Leading" },
+  { value: "inline", label: "In-Line" },
+  { value: "lagging", label: "Lagging" },
 ] as const;

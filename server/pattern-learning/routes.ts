@@ -3,6 +3,7 @@ import { db } from "../db";
 import { patternRules, patternRatings, setupConfidence } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import OpenAI from "openai";
+import { seedPatternLearningV2 } from "./seed-data";
 
 const router = Router();
 
@@ -498,4 +499,8 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
 
 export function registerPatternLearningRoutes(app: any) {
   app.use("/api/pattern-learning", router);
+  
+  seedPatternLearningV2().catch(err => {
+    console.error("[Pattern Learning] Failed to seed data:", err);
+  });
 }
