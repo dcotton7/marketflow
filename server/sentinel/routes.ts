@@ -161,21 +161,22 @@ export function registerSentinelRoutes(app: Express): void {
     })
   );
 
-  // TEMPORARY: Password reset for Mythical user - REMOVE AFTER USE
-  app.post("/api/auth/temp-reset-mythical", async (req: Request, res: Response) => {
+  // TEMPORARY: Password reset for testing - REMOVE AFTER USE
+  app.post("/api/auth/temp-reset/:username", async (req: Request, res: Response) => {
     try {
       if (!db) {
         return res.status(500).json({ error: "Database not available" });
       }
-      const passwordHash = await bcrypt.hash("password", 10);
+      const username = req.params.username;
+      const passwordHash = await bcrypt.hash("testpass123", 10);
       const result = await db.update(sentinelUsers)
         .set({ passwordHash })
-        .where(eq(sentinelUsers.username, "Mythical"))
+        .where(eq(sentinelUsers.username, username))
         .returning({ id: sentinelUsers.id });
       if (result.length === 0) {
         return res.status(404).json({ error: "User not found" });
       }
-      res.json({ success: true, message: "Password reset to 'password'" });
+      res.json({ success: true, message: `Password reset to 'testpass123' for ${username}` });
     } catch (error) {
       console.error("Temp reset error:", error);
       res.status(500).json({ error: "Failed to reset password" });
@@ -1484,8 +1485,7 @@ For strategy tags: Ensure they are concise (1-2 words), relevant to trading, and
       const completion = await openai.chat.completions.create({
         model: "gpt-5.1",
         messages,
-        temperature: 0.7,
-        max_tokens: 1000,
+        max_completion_tokens: 1000,
       });
 
       const responseText = completion.choices[0]?.message?.content || "I couldn't generate a response.";
@@ -2949,12 +2949,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const userId = req.session.userId!;
       const user = await sentinelModels.getUserById(userId);
+      console.log("[TNN Factors] userId:", userId, "isAdmin:", user?.isAdmin);
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
       const factorType = req.query.type as string | undefined;
       const factors = await tnn.getFactors(factorType);
+      console.log("[TNN Factors] Returning", factors.length, "factors, types:", [...new Set(factors.map(f => f.factorType))]);
       res.json(factors);
     } catch (error) {
       console.error("Get factors error:", error);
