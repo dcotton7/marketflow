@@ -101,6 +101,7 @@ export default function SentinelImportPage() {
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
   const [showSkippedDialog, setShowSkippedDialog] = useState(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const [tickerFilter, setTickerFilter] = useState("");
   const [timestampOverride, setTimestampOverride] = useState<string>("");
@@ -297,6 +298,34 @@ export default function SentinelImportPage() {
       toast({ 
         title: "Re-detection Failed", 
         description: error?.message || "Could not re-detect orphans. Please try again.",
+        variant: "destructive" 
+      });
+    },
+  });
+
+  const resetAndRedetectMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/sentinel/import/reset-and-redetect', {});
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to reset and re-detect');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
+      refetchOrphans();
+      toast({ 
+        title: "Reset Complete", 
+        description: `Deleted ${data.cardsDeleted || 0} cards. Cleared ${data.orphansCleared || 0} orphans. ${data.trueOrphansFound || 0} true orphans found.`
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Reset Failed", 
+        description: error?.message || "Could not reset. Please try again.",
         variant: "destructive" 
       });
     },
@@ -777,6 +806,21 @@ export default function SentinelImportPage() {
                       Re-detect Orphans
                     </Button>
                     <Button 
+                      variant="destructive" 
+                      size="sm"
+                      onClick={() => setShowResetConfirmDialog(true)}
+                      disabled={!batches || batches.length === 0 || resetAndRedetectMutation.isPending}
+                      data-testid="button-reset-and-redetect"
+                      title="Deletes all import-created cards, resets orphan status, and re-runs detection with fixed FIFO logic"
+                    >
+                      {resetAndRedetectMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Reset & Re-detect
+                    </Button>
+                    <Button 
                       variant="default" 
                       size="sm"
                       onClick={() => promoteToCardsMutation.mutate()}
@@ -1076,6 +1120,49 @@ export default function SentinelImportPage() {
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting...</>
               ) : (
                 <>Delete All Trades</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showResetConfirmDialog} onOpenChange={setShowResetConfirmDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Reset & Re-detect
+            </DialogTitle>
+            <DialogDescription>
+              This will delete all Trading Cards created from imports and reset all orphan statuses.
+              The orphan detection will be re-run with corrected FIFO logic (buys processed before sells on the same date).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <p className="text-sm text-muted-foreground">This action will:</p>
+            <ul className="text-sm list-disc pl-5 space-y-1">
+              <li>Delete all Trading Cards created from imports</li>
+              <li>Reset all muted/resolved orphan statuses</li>
+              <li>Re-run orphan detection with fixed order</li>
+            </ul>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowResetConfirmDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => {
+                setShowResetConfirmDialog(false);
+                resetAndRedetectMutation.mutate();
+              }}
+              disabled={resetAndRedetectMutation.isPending}
+              data-testid="button-confirm-reset"
+            >
+              {resetAndRedetectMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Resetting...</>
+              ) : (
+                <>Confirm Reset</>
               )}
             </Button>
           </DialogFooter>

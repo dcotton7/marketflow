@@ -4327,5 +4327,174 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  // Reset & Re-detect: Delete import-sourced cards, reset orphan statuses, re-run detection
+  app.post("/api/sentinel/import/reset-and-redetect", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Step 1: Delete all trading cards that came from imports
+      const deletedCards = await db!.transaction(async (tx) => {
+        // Get trade IDs that came from imports
+        const importTrades = await tx.select({ id: sentinelTrades.id })
+          .from(sentinelTrades)
+          .where(and(
+            eq(sentinelTrades.userId, userId),
+            eq(sentinelTrades.source, 'import')
+          ));
+        
+        const tradeIds = importTrades.map(t => t.id);
+        
+        if (tradeIds.length > 0) {
+          // Delete related records first (cascade)
+          await tx.delete(sentinelTradeToLabels)
+            .where(inArray(sentinelTradeToLabels.tradeId, tradeIds));
+          await tx.delete(sentinelEvaluations)
+            .where(inArray(sentinelEvaluations.tradeId, tradeIds));
+          await tx.delete(sentinelEvents)
+            .where(inArray(sentinelEvents.tradeId, tradeIds));
+          
+          // Delete the trades
+          await tx.delete(sentinelTrades)
+            .where(inArray(sentinelTrades.id, tradeIds));
+        }
+        
+        return tradeIds.length;
+      });
+      
+      // Step 2: Reset all orphan statuses to 'pending'
+      await db!.update(sentinelImportedTrades)
+        .set({ orphanStatus: 'pending' })
+        .where(eq(sentinelImportedTrades.userId, userId));
+      
+      // Step 3: Re-run orphan detection with corrected FIFO logic
+      // Get all imported trades for this user
+      const allTrades = await db!.select().from(sentinelImportedTrades)
+        .where(eq(sentinelImportedTrades.userId, userId));
+      
+      // Get account settings for short sale checking
+      const accountSettings = await db!.select().from(sentinelAccountSettings)
+        .where(eq(sentinelAccountSettings.userId, userId));
+      const accountShortAllowed = new Map(
+        accountSettings.map(s => [`${s.brokerId}:${s.accountName || ''}`, s.allowShortSales || false])
+      );
+      
+      // Group by account (brokerId + accountName)
+      const accountGroups = new Map<string, typeof allTrades>();
+      for (const trade of allTrades) {
+        const accountKey = `${trade.brokerId || 'default'}:${trade.accountName || ''}`;
+        if (!accountGroups.has(accountKey)) {
+          accountGroups.set(accountKey, []);
+        }
+        accountGroups.get(accountKey)!.push(trade);
+      }
+      
+      const trueOrphanIds = new Set<string>();
+      let clearedCount = 0;
+      let newOrphanCount = 0;
+      
+      for (const [accountKey, accountTrades] of accountGroups) {
+        // Group by ticker within this account
+        const tickerGroups = new Map<string, typeof accountTrades>();
+        for (const trade of accountTrades) {
+          const ticker = trade.ticker || 'UNKNOWN';
+          if (!tickerGroups.has(ticker)) {
+            tickerGroups.set(ticker, []);
+          }
+          tickerGroups.get(ticker)!.push(trade);
+        }
+        
+        for (const [ticker, trades] of tickerGroups) {
+          // Sort by date, then direction (BUYs before SELLs), then ID for stable ordering
+          trades.sort((a, b) => {
+            const dateA = a.tradeDate ? new Date(a.tradeDate).getTime() : 0;
+            const dateB = b.tradeDate ? new Date(b.tradeDate).getTime() : 0;
+            if (dateA !== dateB) return dateA - dateB;
+            // On same date, process BUYs before SELLs
+            if (a.direction === 'BUY' && b.direction === 'SELL') return -1;
+            if (a.direction === 'SELL' && b.direction === 'BUY') return 1;
+            return a.tradeId.localeCompare(b.tradeId);
+          });
+          
+          // Check short sale settings
+          const shortSalesAllowed = accountShortAllowed.get(accountKey) ?? false;
+          
+          // FIFO position tracking
+          let position = 0;
+          
+          for (const trade of trades) {
+            const qty = Number(trade.quantity) || 0;
+            const wasOrphan = trade.orphanStatus === 'pending' || trade.orphanStatus === 'muted';
+            
+            if (trade.direction === 'BUY') {
+              position += qty;
+              // Clear any orphan status on buys
+              if (wasOrphan) {
+                clearedCount++;
+              }
+            } else {
+              // SELL
+              if (position >= qty) {
+                // Have enough shares to cover
+                position -= qty;
+                if (wasOrphan) {
+                  clearedCount++;
+                }
+              } else if (shortSalesAllowed && position <= 0) {
+                // Short sale allowed
+                position -= qty;
+                if (wasOrphan) {
+                  clearedCount++;
+                }
+              } else {
+                // True orphan - selling more than we have
+                trueOrphanIds.add(trade.tradeId);
+                if (!wasOrphan) {
+                  newOrphanCount++;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Update database: clear non-orphans, mark true orphans
+      if (allTrades.length > 0) {
+        const allTradeIds = allTrades.map(t => t.tradeId);
+        const orphanArray = Array.from(trueOrphanIds);
+        const nonOrphanIds = allTradeIds.filter(id => !trueOrphanIds.has(id));
+        
+        // Clear orphan status for non-orphans
+        if (nonOrphanIds.length > 0) {
+          await db!.update(sentinelImportedTrades)
+            .set({ orphanStatus: null })
+            .where(and(
+              eq(sentinelImportedTrades.userId, userId),
+              inArray(sentinelImportedTrades.tradeId, nonOrphanIds)
+            ));
+        }
+        
+        // Mark true orphans as pending
+        if (orphanArray.length > 0) {
+          await db!.update(sentinelImportedTrades)
+            .set({ orphanStatus: 'pending' })
+            .where(and(
+              eq(sentinelImportedTrades.userId, userId),
+              inArray(sentinelImportedTrades.tradeId, orphanArray)
+            ));
+        }
+      }
+      
+      res.json({
+        success: true,
+        cardsDeleted: deletedCards,
+        orphansCleared: clearedCount,
+        trueOrphansFound: trueOrphanIds.size
+      });
+    } catch (error) {
+      console.error("Reset and re-detect error:", error);
+      res.status(500).json({ error: "Failed to reset and re-detect orphans" });
+    }
+  });
+
   startMonitoring(60000);
 }
