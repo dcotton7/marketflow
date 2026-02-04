@@ -323,9 +323,9 @@ export default function PatternLearningPage() {
       return '';
     }).filter(Boolean);
     
-    // Return unique studies as URL-encoded JSON array
+    // Return unique studies as URL-encoded comma-separated string for TradingView widget
     const uniqueStudies = Array.from(new Set(studies));
-    return encodeURIComponent(JSON.stringify(uniqueStudies));
+    return encodeURIComponent(uniqueStudies.join(','));
   };
 
   return (
@@ -693,7 +693,7 @@ export default function PatternLearningPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col overflow-hidden min-h-0">
-                <ScrollArea className="flex-1 pr-4" style={{ maxHeight: '280px' }}>
+                <ScrollArea className="flex-1 pr-4" style={{ maxHeight: '450px' }}>
                   <div className="space-y-3">
                     {chatMessages.map((msg, idx) => (
                       <div 
