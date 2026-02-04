@@ -20,7 +20,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
-import { PATTERN_TYPES, PATTERN_TIMEFRAMES, RATING_LABELS } from "@shared/schema";
+import { PATTERN_TYPES, PATTERN_TIMEFRAMES, RATING_LABELS, SetupConfidence } from "@shared/schema";
 
 interface Setup {
   id: number;
@@ -53,19 +53,6 @@ interface PatternMatch {
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
-}
-
-interface SetupConfidence {
-  id: number;
-  userId: number;
-  ruleId: number;
-  patternsRated: number;
-  avgRating: number;
-  rating1Count: number;
-  rating2Count: number;
-  rating3Count: number;
-  rating4Count: number;
-  confidenceLevel: string;
 }
 
 const RATING_COLORS = {
