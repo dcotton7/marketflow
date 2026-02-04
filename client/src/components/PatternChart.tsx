@@ -182,6 +182,18 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
       timeScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         timeVisible: true,
+        rightOffset: 5,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
       },
     });
 
