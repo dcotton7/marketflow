@@ -14,7 +14,7 @@ import {
   Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
   ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle,
-  VolumeX, Volume2, RefreshCw
+  VolumeX, Volume2, RefreshCw, Edit3
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -26,6 +26,7 @@ interface ImportBatch {
   batchId: string;
   brokerId: string;
   fileName: string;
+  importName?: string;
   fileType: string;
   totalTradesFound: number;
   totalTradesImported: number;
@@ -394,6 +395,53 @@ export default function SentinelImportPage() {
       });
     },
   });
+  
+  // State for inline editing of import names
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
+  const [editingImportName, setEditingImportName] = useState("");
+  
+  const renameBatchMutation = useMutation({
+    mutationFn: async ({ batchId, importName }: { batchId: string; importName: string }) => {
+      const response = await apiRequest('PATCH', `/api/sentinel/import/batches/${batchId}/rename`, { importName });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Rename failed');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades/sources'] });
+      setEditingBatchId(null);
+      setEditingImportName("");
+      toast({ title: "Import renamed successfully" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Rename failed",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  const startEditingImportName = (batch: ImportBatch) => {
+    setEditingBatchId(batch.batchId);
+    // Default name if not set
+    const defaultName = batch.importName || `FILE${batch.fileName.replace(/\.[^/.]+$/, "").slice(-4).toUpperCase()}`;
+    setEditingImportName(defaultName);
+  };
+  
+  const saveImportName = () => {
+    if (editingBatchId && editingImportName.trim()) {
+      renameBatchMutation.mutate({ batchId: editingBatchId, importName: editingImportName.trim() });
+    }
+  };
+  
+  const cancelEditingImportName = () => {
+    setEditingBatchId(null);
+    setEditingImportName("");
+  };
 
   const handleReviewOrphans = (batchId: string) => {
     setSelectedOrphanBatchId(batchId);
@@ -854,14 +902,55 @@ export default function SentinelImportPage() {
                   </div>
                 ) : batches && batches.length > 0 ? (
                   <div className="space-y-3">
-                    {batches.map((batch) => (
+                    {batches.map((batch) => {
+                      const displayImportName = batch.importName || `FILE${batch.fileName.replace(/\.[^/.]+$/, "").slice(-4).toUpperCase()}`;
+                      return (
                       <Card key={batch.batchId} className="hover-elevate">
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-4">
                               <FileSpreadsheet className="h-8 w-8 text-muted-foreground" />
                               <div>
-                                <div className="font-medium">{batch.fileName}</div>
+                                <div className="flex items-center gap-2">
+                                  {editingBatchId === batch.batchId ? (
+                                    <div className="flex items-center gap-1">
+                                      <Input
+                                        value={editingImportName}
+                                        onChange={(e) => setEditingImportName(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') saveImportName();
+                                          if (e.key === 'Escape') cancelEditingImportName();
+                                        }}
+                                        className="h-7 w-32 text-sm"
+                                        maxLength={50}
+                                        autoFocus
+                                        data-testid={`input-import-name-${batch.batchId}`}
+                                      />
+                                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={saveImportName} disabled={renameBatchMutation.isPending}>
+                                        <Check className="h-3 w-3 text-green-500" />
+                                      </Button>
+                                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={cancelEditingImportName}>
+                                        <X className="h-3 w-3 text-muted-foreground" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <Badge variant="secondary" className="font-medium" data-testid={`badge-import-name-${batch.batchId}`}>
+                                        {displayImportName}
+                                      </Badge>
+                                      <Button 
+                                        size="icon" 
+                                        variant="ghost" 
+                                        className="h-5 w-5" 
+                                        onClick={() => startEditingImportName(batch)}
+                                        data-testid={`button-edit-import-name-${batch.batchId}`}
+                                      >
+                                        <Edit3 className="h-3 w-3 text-muted-foreground" />
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="text-sm text-muted-foreground">{batch.fileName}</div>
                                 <div className="text-sm text-muted-foreground flex items-center gap-2">
                                   <Badge variant="outline">{batch.brokerId}</Badge>
                                   <span>{formatDate(batch.createdAt)}</span>
@@ -940,7 +1029,8 @@ export default function SentinelImportPage() {
                           )}
                         </CardContent>
                       </Card>
-                    ))}
+                    );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
