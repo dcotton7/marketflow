@@ -3435,10 +3435,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             });
           }
           
-          // Sort by date, then by source priority, then by id (stable tie-breaker)
+          // Sort by date, then direction (BUYs before SELLs), then by source priority, then by id (stable tie-breaker)
           allTrades.sort((a, b) => {
             const dateDiff = a.tradeDate.getTime() - b.tradeDate.getTime();
             if (dateDiff !== 0) return dateDiff;
+            // On same date, process BUYs before SELLs for proper FIFO
+            if (a.direction === 'BUY' && b.direction === 'SELL') return -1;
+            if (a.direction === 'SELL' && b.direction === 'BUY') return 1;
             const priorityDiff = a.sourcePriority - b.sourcePriority;
             if (priorityDiff !== 0) return priorityDiff;
             return a.id.localeCompare(b.id);
@@ -3771,11 +3774,16 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       for (const [key, trades] of positionGroups) {
         const [ticker, accountName] = key.split(':');
         
-        // Sort by date
+        // Sort by date, then by direction (BUYs before SELLs on same date for proper FIFO)
         trades.sort((a, b) => {
           const dateA = a.tradeDate ? new Date(a.tradeDate).getTime() : 0;
           const dateB = b.tradeDate ? new Date(b.tradeDate).getTime() : 0;
-          return dateA - dateB;
+          if (dateA !== dateB) return dateA - dateB;
+          // On same date, process BUYs before SELLs
+          if (a.direction === 'BUY' && b.direction === 'SELL') return -1;
+          if (a.direction === 'SELL' && b.direction === 'BUY') return 1;
+          // Same direction, use trade ID for stable ordering
+          return a.tradeId.localeCompare(b.tradeId);
         });
         
         // FIFO matching: track open position lots
@@ -4198,11 +4206,16 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const noLongerOrphanIds = new Set<string>();
       
       for (const [key, trades] of groupedTrades) {
-        // Sort by date
+        // Sort by date, then by direction (BUYs before SELLs on same date for proper FIFO)
         trades.sort((a, b) => {
           const dateA = a.tradeDate ? new Date(a.tradeDate).getTime() : 0;
           const dateB = b.tradeDate ? new Date(b.tradeDate).getTime() : 0;
-          return dateA - dateB;
+          if (dateA !== dateB) return dateA - dateB;
+          // On same date, process BUYs before SELLs
+          if (a.direction === 'BUY' && b.direction === 'SELL') return -1;
+          if (a.direction === 'SELL' && b.direction === 'BUY') return 1;
+          // Same direction, use trade ID for stable ordering
+          return a.tradeId.localeCompare(b.tradeId);
         });
         
         // Check short sale settings for this account
