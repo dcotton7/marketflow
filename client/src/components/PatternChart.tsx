@@ -287,28 +287,29 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
 
     candleSeries.setData(candleData);
 
-    for (const indicator of indicators) {
-      const parsed = parseIndicator(indicator);
-      let lineData: LineData[] = [];
-      
-      if (parsed.type === 'vwap') {
-        lineData = calculateVWAP(stockData);
-      } else if (parsed.type === 'sma' && parsed.period > 0) {
-        lineData = calculateSMA(stockData, parsed.period);
-      } else if (parsed.type === 'ema' && parsed.period > 0) {
-        lineData = calculateEMA(stockData, parsed.period);
-      }
-      
-      if (lineData.length > 0) {
-        const series = chart.addSeries(LineSeries, {
-          color: getIndicatorColor(indicator),
-          lineWidth: 2,
-          priceLineVisible: false,
-          lastValueVisible: false,
-        });
-        series.setData(lineData);
-      }
-    }
+    // TEMPORARILY COMMENTED OUT TO DEBUG CANDLESTICK RENDERING
+    // for (const indicator of indicators) {
+    //   const parsed = parseIndicator(indicator);
+    //   let lineData: LineData[] = [];
+    //   
+    //   if (parsed.type === 'vwap') {
+    //     lineData = calculateVWAP(stockData);
+    //   } else if (parsed.type === 'sma' && parsed.period > 0) {
+    //     lineData = calculateSMA(stockData, parsed.period);
+    //   } else if (parsed.type === 'ema' && parsed.period > 0) {
+    //     lineData = calculateEMA(stockData, parsed.period);
+    //   }
+    //   
+    //   if (lineData.length > 0) {
+    //     const series = chart.addSeries(LineSeries, {
+    //       color: getIndicatorColor(indicator),
+    //       lineWidth: 2,
+    //       priceLineVisible: false,
+    //       lastValueVisible: false,
+    //     });
+    //     series.setData(lineData);
+    //   }
+    // }
 
     chart.timeScale().fitContent();
 
