@@ -3281,8 +3281,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           .orderBy(sentinelImportedTrades.tradeDate, sentinelImportedTrades.id);
         
         // Fetch hand-entered trades for these tickers
-        // Note: Hand-entered trades don't have accountName - they're used as a general position baseline
-        // This is a known limitation - if user has multi-account positions, hand trades are shared
+        // Now includes accountName for per-account position tracking
         const existingHandTrades = await db!.select({
           id: sentinelTrades.id,
           ticker: sentinelTrades.ticker,
@@ -3291,6 +3290,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           entryDate: sentinelTrades.entryDate,
           exitDate: sentinelTrades.exitDate,
           exitShares: sentinelTrades.exitShares,
+          accountName: sentinelTrades.accountName,
         }).from(sentinelTrades)
           .where(and(
             eq(sentinelTrades.userId, userId),
@@ -3347,9 +3347,11 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           
           // Add hand-entered trades (priority 2)
           // Note: Hand-entered trades use aggregate shares, not lot-level FIFO
-          // They're included as a general position baseline (not filtered by account)
-          // This is a known limitation - hand trades don't have account tracking
-          for (const t of existingHandTrades.filter(t => t.ticker === ticker)) {
+          // Filter by accountName if available, otherwise include as general baseline
+          for (const t of existingHandTrades.filter(t => 
+            t.ticker === ticker && 
+            (t.accountName || null) === accountNameFilter
+          )) {
             const entryDirection = t.direction === 'LONG' ? 'BUY' : 'SELL';
             if (t.entryDate && t.shares) {
               allTrades.push({
