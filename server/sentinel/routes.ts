@@ -507,9 +507,10 @@ export function registerSentinelRoutes(app: Express): void {
       const user = await sentinelModels.getUserById(userId);
       const isAdmin = user?.isAdmin ?? false;
 
-      const [considering, active, recentEvents] = await Promise.all([
+      const [considering, active, closed, recentEvents] = await Promise.all([
         sentinelModels.getTradesByStatus(userId, "considering"),
         sentinelModels.getTradesByStatus(userId, "active"),
+        sentinelModels.getTradesByStatus(userId, "closed"),
         sentinelModels.getRecentEvents(userId, 20),
       ]);
 
@@ -548,9 +549,22 @@ export function registerSentinelRoutes(app: Express): void {
               );
           }
           
+          // Fetch importName from batch if trade has an importBatchId
+          let importName: string | undefined = undefined;
+          if (trade.importBatchId) {
+            const batch = await db.select({ importName: sentinelImportBatches.importName })
+              .from(sentinelImportBatches)
+              .where(eq(sentinelImportBatches.batchId, trade.importBatchId))
+              .limit(1);
+            if (batch.length > 0 && batch[0].importName) {
+              importName = batch[0].importName;
+            }
+          }
+          
           return {
             ...trade,
             labels,
+            importName,
             latestEvaluation: latestEval ? {
               score: latestEval.score,
               recommendation: latestEval.recommendation,
@@ -562,6 +576,7 @@ export function registerSentinelRoutes(app: Express): void {
 
       const enrichedConsidering = await enrichTrades(considering);
       const enrichedActive = await enrichTrades(active);
+      const enrichedClosed = await enrichTrades(closed);
 
       const eventsWithTrades: EventWithTrade[] = await Promise.all(
         recentEvents.map(async (event) => {
@@ -576,6 +591,7 @@ export function registerSentinelRoutes(app: Express): void {
       const dashboard: DashboardData = {
         considering: enrichedConsidering,
         active: enrichedActive,
+        closed: enrichedClosed,
         recentEvents: eventsWithTrades,
       };
 

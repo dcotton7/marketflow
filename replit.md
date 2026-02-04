@@ -33,7 +33,14 @@ Detects market sentiment through weekly/daily trends (SPY vs MAs), risk baskets 
 Supports custom, colored trade labels for categorization and filtering. Admin users have elevated permissions, including creating admin-only labels.
 
 ### Trade Source Filtering
-Tracks trade sources ('hand' or 'import') and `importBatchId`. Allows filtering trades by source and provides functionality to delete trades by source.
+Tracks trade sources ('hand' or 'import') and `importBatchId`. Allows filtering trades by source and provides functionality to delete trades by source. Import batches have a customizable `importName` field that defaults to "FILE" + last 4 characters of the filename, which can be renamed in Import History.
+
+### Dashboard UI Enhancements
+The dashboard features an enhanced layout with:
+- **Summary Section**: Four cards showing Open PnL, Realized Gain/Loss, Active Positions count, and Closed Trades count with color-coded values (green positive, red negative).
+- **Advanced Filtering**: Unified filter bar with Month dropdown, Year dropdown, Source multi-select buttons, and Tags multi-select buttons. Sources use OR logic (show trades from ANY selected source since a trade only has one source). Tags use AND logic (must have ALL selected tags). All filter selections persist to localStorage.
+- **Active/Closed Tabs**: Separate tabs for Active (open positions with unrealized P&L) and Closed (completed trades with realized P&L) trades.
+- **Source Display**: Each trade card displays its source as a small indicator - showing the import name for imported trades or "Hand Entered" for manual entries.
 
 ### Interactive AI Suggestions
 An auto-suggest endpoint provides stop, target, and position size suggestions based on technical data, ranked by confidence and relevance. Suggestions are integrated into the UI.

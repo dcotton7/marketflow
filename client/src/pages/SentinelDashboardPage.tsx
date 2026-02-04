@@ -44,6 +44,7 @@ interface TradeWithEvaluation {
   lotEntries?: LotEntry[]; // Order grid lot entries for FIFO tracking
   source?: string; // 'hand' for manual entry, 'import' for CSV imports
   importBatchId?: string; // UUID of the import batch if source is 'import'
+  importName?: string; // Display name for import batch (e.g., "FILE xxxx" or custom name)
   latestEvaluation?: {
     score: number;
     recommendation: string;
@@ -96,6 +97,7 @@ interface TradingRule {
 interface DashboardData {
   considering: TradeWithEvaluation[];
   active: TradeWithEvaluation[];
+  closed: TradeWithEvaluation[];
   recentEvents: TradeEvent[];
 }
 
@@ -519,13 +521,14 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitC
 interface TradeCardProps {
   trade: TradeWithEvaluation;
   isActive?: boolean;
+  isClosed?: boolean;
   onEdit?: (trade: TradeWithEvaluation) => void;
   onClose?: (trade: TradeWithEvaluation) => void;
   onCancel?: (trade: TradeWithEvaluation) => void;
   onPriceUpdate?: (tradeId: number, field: "stopPrice" | "partialPrice" | "targetPrice", value: number) => void;
 }
 
-function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPriceUpdate }: TradeCardProps) {
+function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose, onCancel, onPriceUpdate }: TradeCardProps) {
   const [, setLocation] = useLocation();
   
   // Fetch current market price for accurate P&L
@@ -695,30 +698,42 @@ function TradeCard({ trade, isActive = false, onEdit, onClose, onCancel, onPrice
           )}
         </div>
 
-        {/* Display labels with tooltips */}
-        {trade.labels && trade.labels.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {trade.labels.map((label) => {
-              const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
-              return (
-                <Tooltip key={label.id}>
-                  <TooltipTrigger asChild>
-                    <span
-                      className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
-                      style={{ backgroundColor: label.color }}
-                      data-testid={`label-${trade.id}-${label.id}`}
-                    >
-                      {displayName}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{label.name}</p>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
-        )}
+        {/* Source and Labels Row */}
+        <div className="flex flex-wrap items-center gap-1 mb-2">
+          {/* Source indicator */}
+          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded" data-testid={`source-${trade.id}`}>
+            {trade.source === 'import' && trade.importName 
+              ? trade.importName 
+              : trade.source === 'import' 
+                ? 'Imported' 
+                : 'Hand Entered'}
+          </span>
+          
+          {/* Display labels with tooltips */}
+          {trade.labels && trade.labels.length > 0 && (
+            <>
+              {trade.labels.map((label) => {
+                const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
+                return (
+                  <Tooltip key={label.id}>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
+                        style={{ backgroundColor: label.color }}
+                        data-testid={`label-${trade.id}-${label.id}`}
+                      >
+                        {displayName}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{label.name}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </>
+          )}
+        </div>
 
         {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
         <div className="text-xs space-y-1.5 mb-2">
@@ -1002,8 +1017,10 @@ export default function SentinelDashboardPage() {
   
   // State preservation keys
   const STORAGE_KEY_TAB = "sentinel_dashboard_active_tab";
-  const STORAGE_KEY_LABEL = "sentinel_dashboard_label_filter";
-  const STORAGE_KEY_SOURCE = "sentinel_dashboard_source_filter";
+  const STORAGE_KEY_LABELS = "sentinel_dashboard_label_filters";
+  const STORAGE_KEY_SOURCES = "sentinel_dashboard_source_filters";
+  const STORAGE_KEY_MONTH = "sentinel_dashboard_month_filter";
+  const STORAGE_KEY_YEAR = "sentinel_dashboard_year_filter";
   
   // Initialize activeTab from localStorage
   const [activeTab, setActiveTab] = useState(() => {
@@ -1011,19 +1028,36 @@ export default function SentinelDashboardPage() {
     return saved || "active";
   });
   
-  // Initialize selectedLabelFilter from localStorage
-  const [selectedLabelFilter, setSelectedLabelFilter] = useState<number | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_LABEL);
-    if (saved === null || saved === "null") return null;
-    const parsed = parseInt(saved, 10);
-    return isNaN(parsed) ? null : parsed;
+  // Initialize selectedLabelFilters from localStorage (multi-select with AND logic)
+  const [selectedLabelFilters, setSelectedLabelFilters] = useState<number[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_LABELS);
+    if (!saved || saved === "[]") return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
   });
 
-  // Initialize selectedSourceFilter from localStorage
-  const [selectedSourceFilter, setSelectedSourceFilter] = useState<string | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_SOURCE);
-    if (saved === null || saved === "null") return null;
-    return saved;
+  // Initialize selectedSourceFilters from localStorage (multi-select with AND logic)
+  const [selectedSourceFilters, setSelectedSourceFilters] = useState<string[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_SOURCES);
+    if (!saved || saved === "[]") return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  });
+  
+  // Month and Year filters
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_MONTH);
+    return saved || "all";
+  });
+  
+  const [selectedYear, setSelectedYear] = useState<string>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_YEAR);
+    if (saved) return saved;
+    return "all"; // Default to unfiltered
   });
   
   // Persist activeTab to localStorage
@@ -1031,15 +1065,41 @@ export default function SentinelDashboardPage() {
     localStorage.setItem(STORAGE_KEY_TAB, activeTab);
   }, [activeTab]);
   
-  // Persist selectedLabelFilter to localStorage
+  // Persist selectedLabelFilters to localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_LABEL, selectedLabelFilter === null ? "null" : String(selectedLabelFilter));
-  }, [selectedLabelFilter]);
+    localStorage.setItem(STORAGE_KEY_LABELS, JSON.stringify(selectedLabelFilters));
+  }, [selectedLabelFilters]);
 
-  // Persist selectedSourceFilter to localStorage
+  // Persist selectedSourceFilters to localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_SOURCE, selectedSourceFilter === null ? "null" : selectedSourceFilter);
-  }, [selectedSourceFilter]);
+    localStorage.setItem(STORAGE_KEY_SOURCES, JSON.stringify(selectedSourceFilters));
+  }, [selectedSourceFilters]);
+  
+  // Persist month/year to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_MONTH, selectedMonth);
+  }, [selectedMonth]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_YEAR, selectedYear);
+  }, [selectedYear]);
+  
+  // Toggle functions for multi-select
+  const toggleLabelFilter = (labelId: number) => {
+    setSelectedLabelFilters(prev => 
+      prev.includes(labelId) 
+        ? prev.filter(id => id !== labelId)
+        : [...prev, labelId]
+    );
+  };
+  
+  const toggleSourceFilter = (sourceId: string) => {
+    setSelectedSourceFilters(prev => 
+      prev.includes(sourceId) 
+        ? prev.filter(id => id !== sourceId)
+        : [...prev, sourceId]
+    );
+  };
 
   // Dialogs
   const [showAddWatchlist, setShowAddWatchlist] = useState(false);
@@ -1056,8 +1116,7 @@ export default function SentinelDashboardPage() {
   });
   const [strategyTagInput, setStrategyTagInput] = useState("");
   const [ruleFilter, setRuleFilter] = useState<string>("all");
-  const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<number>>(new Set()); // For toggle mode - all ON by default
-  
+    
   // Trade action dialogs
   const [showEditTrade, setShowEditTrade] = useState(false);
   const [showCloseTrade, setShowCloseTrade] = useState(false);
@@ -1237,57 +1296,107 @@ export default function SentinelDashboardPage() {
     },
   });
 
-  // Filter trades by label and source
+  // Filter trades by source, labels, month, and year
+  // Sources use OR logic (show trades from ANY selected source - a trade only has one source)
+  // Tags use AND logic (show trades that have ALL selected labels)
   const filterTrades = (trades: TradeWithEvaluation[] | undefined) => {
     if (!trades) return trades;
     
     let filtered = trades;
     
-    // Filter by source
-    if (selectedSourceFilter !== null) {
+    // Filter by source (OR logic - show trades from ANY of the selected sources)
+    // Note: A trade can only have one source, so OR is the only logical choice
+    if (selectedSourceFilters.length > 0) {
       filtered = filtered.filter(trade => {
-        if (selectedSourceFilter === 'hand') {
-          return !trade.source || trade.source === 'hand';
-        }
-        return trade.importBatchId === selectedSourceFilter;
+        return selectedSourceFilters.some(sourceId => {
+          if (sourceId === 'hand') {
+            return !trade.source || trade.source === 'hand';
+          }
+          return trade.importBatchId === sourceId;
+        });
       });
     }
     
-    // Filter by label - single selection mode
-    if (selectedLabelFilter !== null) {
-      filtered = filtered.filter(trade => 
-        trade.labels?.some(label => label.id === selectedLabelFilter)
-      );
-    }
-    // Toggle mode - hide trades that have ONLY hidden labels
-    else if (hiddenLabelIds.size > 0) {
+    // Filter by labels (AND logic - must have ALL selected labels)
+    if (selectedLabelFilters.length > 0) {
       filtered = filtered.filter(trade => {
-        // If trade has no labels, show it
-        if (!trade.labels || trade.labels.length === 0) return true;
-        // If ANY label is visible (not hidden), show the trade
-        return trade.labels.some(label => !hiddenLabelIds.has(label.id));
+        if (!trade.labels || trade.labels.length === 0) return false;
+        // Trade must have ALL selected labels
+        return selectedLabelFilters.every(labelId => 
+          trade.labels?.some(label => label.id === labelId)
+        );
+      });
+    }
+    
+    // Filter by year
+    if (selectedYear !== "all") {
+      filtered = filtered.filter(trade => {
+        const tradeDate = trade.entryDate || trade.createdAt;
+        if (!tradeDate) return true;
+        const year = new Date(tradeDate).getFullYear().toString();
+        return year === selectedYear;
+      });
+    }
+    
+    // Filter by month
+    if (selectedMonth !== "all") {
+      filtered = filtered.filter(trade => {
+        const tradeDate = trade.entryDate || trade.createdAt;
+        if (!tradeDate) return true;
+        const month = (new Date(tradeDate).getMonth() + 1).toString().padStart(2, '0');
+        return month === selectedMonth;
       });
     }
     
     return filtered;
   };
   
-  // Toggle a label on/off
-  const toggleLabelVisibility = (labelId: number) => {
-    setHiddenLabelIds(prev => {
-      const next = new Set(prev);
-      if (next.has(labelId)) {
-        next.delete(labelId);
-      } else {
-        next.add(labelId);
+  // Get available years from trades for dropdown
+  const getAvailableYears = () => {
+    const years = new Set<string>();
+    const allTrades = [...(dashboard?.active || []), ...(dashboard?.closed || []), ...(dashboard?.considering || [])];
+    allTrades.forEach(trade => {
+      const tradeDate = trade.entryDate || trade.createdAt;
+      if (tradeDate) {
+        years.add(new Date(tradeDate).getFullYear().toString());
       }
-      return next;
     });
-    setSelectedLabelFilter(null); // Switch to toggle mode
+    return Array.from(years).sort().reverse();
   };
+  
+  const availableYears = getAvailableYears();
 
   const filteredConsidering = filterTrades(dashboard?.considering);
   const filteredActive = filterTrades(dashboard?.active);
+  const filteredClosed = filterTrades(dashboard?.closed);
+  
+  // Calculate summary stats from filtered trades
+  const calculateSummary = () => {
+    let openPnL = 0;
+    let realizedPnL = 0;
+    
+    // Open PnL from active trades (using FIFO)
+    filteredActive?.forEach(trade => {
+      if (trade.lotEntries && trade.lotEntries.length > 0) {
+        const fifo = calculateFifoTracking(trade.lotEntries);
+        // Use current entry price as proxy for current price (should be real-time ideally)
+        const currentPrice = trade.entryPrice;
+        const isLong = trade.direction === 'long';
+        openPnL += fifo.calculateOpenPnL(currentPrice, isLong);
+      }
+    });
+    
+    // Realized PnL from closed trades
+    filteredClosed?.forEach(trade => {
+      if (trade.actualPnL !== undefined && trade.actualPnL !== null) {
+        realizedPnL += trade.actualPnL;
+      }
+    });
+    
+    return { openPnL, realizedPnL };
+  };
+  
+  const summary = calculateSummary();
 
   // Mutations
   const addWatchlistMutation = useMutation({
@@ -1955,18 +2064,167 @@ export default function SentinelDashboardPage() {
           </DropdownMenu>
         </div>
 
+        {/* Summary Section */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Open PnL</div>
+              <div className={`text-xl font-bold ${summary.openPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {summary.openPnL >= 0 ? '+' : ''}{summary.openPnL.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Realized Gain/Loss</div>
+              <div className={`text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {summary.realizedPnL >= 0 ? '+' : ''}{summary.realizedPnL.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Active Positions</div>
+              <div className="text-xl font-bold">{filteredActive?.length || 0}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground">Closed Trades</div>
+              <div className="text-xl font-bold">{filteredClosed?.length || 0}</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Filter Controls */}
+        <Card className="mb-4">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Month Filter */}
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Month:</Label>
+                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                  <SelectTrigger className="w-32" data-testid="filter-month">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="01">January</SelectItem>
+                    <SelectItem value="02">February</SelectItem>
+                    <SelectItem value="03">March</SelectItem>
+                    <SelectItem value="04">April</SelectItem>
+                    <SelectItem value="05">May</SelectItem>
+                    <SelectItem value="06">June</SelectItem>
+                    <SelectItem value="07">July</SelectItem>
+                    <SelectItem value="08">August</SelectItem>
+                    <SelectItem value="09">September</SelectItem>
+                    <SelectItem value="10">October</SelectItem>
+                    <SelectItem value="11">November</SelectItem>
+                    <SelectItem value="12">December</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Year Filter */}
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Year:</Label>
+                <Select value={selectedYear} onValueChange={setSelectedYear}>
+                  <SelectTrigger className="w-24" data-testid="filter-year">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    {availableYears.map(year => (
+                      <SelectItem key={year} value={year}>{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Source Multi-Select */}
+              {tradeSources.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm">Source:</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {tradeSources.map((source) => (
+                      <Button
+                        key={source.id}
+                        size="sm"
+                        variant={selectedSourceFilters.includes(source.id) ? "default" : "outline"}
+                        onClick={() => toggleSourceFilter(source.id)}
+                        className="h-7 text-xs"
+                        data-testid={`filter-source-${source.id}`}
+                      >
+                        {source.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Tags Multi-Select */}
+              {allLabels.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm">Tags:</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {allLabels.map((label) => (
+                      <Button
+                        key={label.id}
+                        size="sm"
+                        variant={selectedLabelFilters.includes(label.id) ? "default" : "outline"}
+                        onClick={() => toggleLabelFilter(label.id)}
+                        className="h-7 text-xs gap-1"
+                        data-testid={`filter-tag-${label.id}`}
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: label.color }}
+                        />
+                        {label.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Clear Filters */}
+              {(selectedSourceFilters.length > 0 || selectedLabelFilters.length > 0 || selectedMonth !== "all" || selectedYear !== "all") && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setSelectedSourceFilters([]);
+                    setSelectedLabelFilters([]);
+                    setSelectedMonth("all");
+                    setSelectedYear("all");
+                  }}
+                  className="h-7 text-xs text-muted-foreground"
+                  data-testid="clear-filters"
+                >
+                  <X className="h-3 w-3 mr-1" />
+                  Clear Filters
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="flex-wrap">
             <TabsTrigger value="active" data-testid="tab-active">
               <Crosshair className="w-4 h-4 mr-1" />
-              Active ({dashboard?.active.length || 0})
+              Active ({filteredActive?.length || 0})
+            </TabsTrigger>
+            <TabsTrigger value="closed" data-testid="tab-closed">
+              <CheckCircle className="w-4 h-4 mr-1" />
+              Closed ({filteredClosed?.length || 0})
             </TabsTrigger>
             <TabsTrigger value="watching" data-testid="tab-watching">
               <Eye className="w-4 h-4 mr-1" />
               Watching ({watchlist.length})
             </TabsTrigger>
             <TabsTrigger value="considering" data-testid="tab-considering">
-              Considering ({dashboard?.considering.length || 0})
+              Considering ({filteredConsidering?.length || 0})
             </TabsTrigger>
             <TabsTrigger value="rules" data-testid="tab-rules">
               <BookOpen className="w-4 h-4 mr-1" />
@@ -1982,78 +2240,10 @@ export default function SentinelDashboardPage() {
           </TabsList>
 
           <TabsContent value="considering" className="space-y-4">
-            {/* Filter bar - Source and Labels */}
-            <div className="flex flex-col gap-3">
-              {/* Source filter badges */}
-              {tradeSources.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2" data-testid="source-filter">
-                  <Label className="text-sm font-medium">Source:</Label>
-                  <Button
-                    size="sm"
-                    variant={selectedSourceFilter === null ? "default" : "outline"}
-                    onClick={() => setSelectedSourceFilter(null)}
-                    data-testid="source-filter-all"
-                  >
-                    All
-                  </Button>
-                  {tradeSources.map((source) => (
-                    <Button
-                      key={source.id}
-                      size="sm"
-                      variant={selectedSourceFilter === source.id ? "default" : "outline"}
-                      onClick={() => setSelectedSourceFilter(source.id)}
-                      data-testid={`source-filter-${source.id}`}
-                    >
-                      {source.name.replace(` (${source.count})`, '')}
-                    </Button>
-                  ))}
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setShowDeleteBySource(true)}
-                    data-testid="button-delete-by-source"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete
-                  </Button>
-                </div>
-              )}
-              
-              {/* Label filter grid */}
-              {allLabels.length > 0 && (
-                <div className="flex flex-wrap gap-2" data-testid="label-filter-grid">
-                  <Button
-                    size="sm"
-                    variant={selectedLabelFilter === null ? "default" : "outline"}
-                    onClick={() => setSelectedLabelFilter(null)}
-                    data-testid="label-filter-all"
-                  >
-                    All Labels
-                  </Button>
-                  {allLabels.map((label) => (
-                    <Button
-                      key={label.id}
-                      size="sm"
-                      variant={selectedLabelFilter === label.id ? "default" : "outline"}
-                      onClick={() => setSelectedLabelFilter(label.id)}
-                      className="gap-1"
-                      data-testid={`label-filter-${label.id}`}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: label.color }}
-                      />
-                      {label.name}
-                      {label.isAdminOnly && <span className="text-xs opacity-70">(admin)</span>}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
             {filteredConsidering?.length === 0 ? (
               <Card>
                 <CardContent className="p-6 text-center text-muted-foreground">
-                  {selectedLabelFilter !== null || selectedSourceFilter !== null
+                  {selectedLabelFilters.length > 0 || selectedSourceFilters.length > 0
                     ? "No trades matching the selected filters."
                     : "No trades under consideration. Click \"New Evaluation\" to get started."}
                 </CardContent>
@@ -2075,77 +2265,10 @@ export default function SentinelDashboardPage() {
           </TabsContent>
 
           <TabsContent value="active" className="space-y-4">
-            {/* Filter bar - Source and Labels */}
-            <div className="flex flex-col gap-3">
-              {/* Source filter badges */}
-              {tradeSources.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2" data-testid="source-filter-active">
-                  <Label className="text-sm font-medium">Source:</Label>
-                  <Button
-                    size="sm"
-                    variant={selectedSourceFilter === null ? "default" : "outline"}
-                    onClick={() => setSelectedSourceFilter(null)}
-                    data-testid="source-filter-all-active"
-                  >
-                    All
-                  </Button>
-                  {tradeSources.map((source) => (
-                    <Button
-                      key={source.id}
-                      size="sm"
-                      variant={selectedSourceFilter === source.id ? "default" : "outline"}
-                      onClick={() => setSelectedSourceFilter(source.id)}
-                      data-testid={`source-filter-active-${source.id}`}
-                    >
-                      {source.name.replace(` (${source.count})`, '')}
-                    </Button>
-                  ))}
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setShowDeleteBySource(true)}
-                    data-testid="button-delete-by-source-active"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete
-                  </Button>
-                </div>
-              )}
-              
-              {/* Label filter grid for active trades */}
-              {allLabels.length > 0 && (
-                <div className="flex flex-wrap gap-2" data-testid="label-filter-grid-active">
-                  <Button
-                    size="sm"
-                    variant={selectedLabelFilter === null ? "default" : "outline"}
-                    onClick={() => setSelectedLabelFilter(null)}
-                    data-testid="label-filter-all-active"
-                  >
-                    All Labels
-                  </Button>
-                  {allLabels.map((label) => (
-                    <Button
-                      key={label.id}
-                      size="sm"
-                      variant={selectedLabelFilter === label.id ? "default" : "outline"}
-                      onClick={() => setSelectedLabelFilter(label.id)}
-                      className="gap-1"
-                      data-testid={`label-filter-active-${label.id}`}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: label.color }}
-                      />
-                      {label.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
             {filteredActive?.length === 0 ? (
               <Card>
                 <CardContent className="p-6 text-center text-muted-foreground">
-                  {selectedLabelFilter !== null || selectedSourceFilter !== null
+                  {selectedLabelFilters.length > 0 || selectedSourceFilters.length > 0
                     ? "No active trades matching the selected filters."
                     : "No active trades. Commit a trade to start tracking it."}
                 </CardContent>
@@ -2159,6 +2282,32 @@ export default function SentinelDashboardPage() {
                     isActive={true}
                     onEdit={handleEditTrade}
                     onClose={handleCloseTrade}
+                    onPriceUpdate={handlePriceUpdate}
+                    onCancel={handleCancelTrade}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="closed" className="space-y-4">
+            {filteredClosed?.length === 0 ? (
+              <Card>
+                <CardContent className="p-6 text-center text-muted-foreground">
+                  {selectedLabelFilters.length > 0 || selectedSourceFilters.length > 0
+                    ? "No closed trades matching the selected filters."
+                    : "No closed trades yet. Complete some trades to see your history here."}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {filteredClosed?.map((trade) => (
+                  <TradeCard 
+                    key={trade.id} 
+                    trade={trade} 
+                    isActive={false}
+                    isClosed={true}
+                    onEdit={handleEditTrade}
                     onPriceUpdate={handlePriceUpdate}
                     onCancel={handleCancelTrade}
                   />

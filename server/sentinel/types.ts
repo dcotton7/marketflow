@@ -125,6 +125,7 @@ export interface TradeUpdate {
 export interface DashboardData {
   considering: TradeWithEvaluation[];
   active: TradeWithEvaluation[];
+  closed: TradeWithEvaluation[];
   recentEvents: EventWithTrade[];
 }
 
