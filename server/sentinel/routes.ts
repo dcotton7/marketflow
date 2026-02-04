@@ -1067,6 +1067,14 @@ export function registerSentinelRoutes(app: Express): void {
         return res.status(404).json({ error: "Rule not found" });
       }
 
+      // Firewall: Prevent non-admins from editing system rules directly
+      // Users should use the overrides endpoint instead
+      if (rule.source === 'starter' && !req.session.isAdmin) {
+        return res.status(403).json({ 
+          error: "Cannot edit system rules directly. Use the customize option to create a personal override." 
+        });
+      }
+
       const data = ruleSchema.partial().extend({ isActive: z.boolean().optional() }).parse(req.body);
       const updated = await sentinelModels.updateRule(id, data);
       res.json(updated);
@@ -1087,6 +1095,14 @@ export function registerSentinelRoutes(app: Express): void {
       
       if (!rule) {
         return res.status(404).json({ error: "Rule not found" });
+      }
+
+      // Firewall: Prevent non-admins from deleting system rules
+      // Users can only disable system rules via overrides
+      if (rule.source === 'starter' && !req.session.isAdmin) {
+        return res.status(403).json({ 
+          error: "Cannot delete system rules. Use the customize option to disable it for your account." 
+        });
       }
 
       await sentinelModels.deleteRule(id);
