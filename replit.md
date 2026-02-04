@@ -39,7 +39,10 @@ Tracks trade sources ('hand' or 'import') and `importBatchId`. Allows filtering 
 An auto-suggest endpoint provides stop, target, and position size suggestions based on technical data, ranked by confidence and relevance. Suggestions are integrated into the UI.
 
 ### Trade Import System
-A multi-broker CSV import system (Fidelity, Schwab, Robinhood) allows importing historical trades. Features include preview-before-confirm, auto-broker detection, partial fill detection, transaction-wrapped batch inserts, and smart orphan sell detection with a review flow.
+A multi-broker CSV import system (Fidelity, Schwab, Robinhood) allows importing historical trades. Features include preview-before-confirm, auto-broker detection, partial fill detection, transaction-wrapped batch inserts, and smart orphan sell detection with a review flow. Orphan detection now respects per-account position tracking for both imported and hand-entered trades.
+
+### Account Selection for Trades
+Hand-entered trades support account selection via a dropdown that shows the user's configured accounts. The first account is auto-selected as default, and selection persists between entries. Backend validates accountName against user's account settings, silently ignoring invalid account names.
 
 ### Trader Neural Network (TNN)
 An admin-only, three-layer adaptive factor weighting system where AI learns from trade outcomes. It adjusts weights for discipline factors (rule categories), setup type factors (patterns), and contextual modifiers (setup × market conditions). Weights are fetched during AI evaluation, and AI suggestions for weight changes require admin approval.
