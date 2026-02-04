@@ -401,17 +401,20 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
     let extractedTimeframe: string = "D";
     let extractedChartPeriod: string = "6mo";
     
-    // Try to extract JSON block (with or without code fence)
-    let jsonMatch = aiResponse.match(/```json\s*(\{[\s\S]*?"technicals"[\s\S]*?\})\s*```/);
+    // Try to extract JSON block - look for any valid JSON with our expected fields
+    // First try with code fence
+    let jsonMatch = aiResponse.match(/```json\s*(\{[\s\S]*?\})\s*```/);
     if (!jsonMatch) {
-      // Fallback: try without code fence
-      jsonMatch = aiResponse.match(/(\{[\s\S]*?"technicals"[\s\S]*?\})/);
+      // Fallback: try to find JSON object containing any of our expected keys
+      jsonMatch = aiResponse.match(/(\{[\s\S]*?(?:"technicals"|"timeframe"|"chartPeriod"|"formula")[\s\S]*?\})/);
     }
     
     if (jsonMatch) {
       try {
         const jsonStr = jsonMatch[1] || jsonMatch[0];
         const parsed = JSON.parse(jsonStr);
+        console.log("[Pattern Learning] Parsed AI JSON:", JSON.stringify(parsed, null, 2));
+        
         if (parsed.technicals && Array.isArray(parsed.technicals)) {
           extractedTechnicals = parsed.technicals;
         }
@@ -423,14 +426,19 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
         }
         if (parsed.timeframe && typeof parsed.timeframe === 'string') {
           extractedTimeframe = parsed.timeframe;
+          console.log("[Pattern Learning] Extracted timeframe:", extractedTimeframe);
         }
         if (parsed.chartPeriod && typeof parsed.chartPeriod === 'string') {
           extractedChartPeriod = parsed.chartPeriod;
+          console.log("[Pattern Learning] Extracted chartPeriod:", extractedChartPeriod);
         }
       } catch (e) {
-        console.log("Failed to parse AI JSON response:", e);
+        console.log("[Pattern Learning] Failed to parse AI JSON response:", e);
+        console.log("[Pattern Learning] Raw match was:", jsonMatch[1] || jsonMatch[0]);
       }
     } else {
+      console.log("[Pattern Learning] No JSON block found in AI response");
+      console.log("[Pattern Learning] AI response excerpt:", aiResponse.substring(0, 500));
       // Fallback: extract indicators from text if no JSON block found
       const indicatorPatterns = ['VWAP', 'EMA', 'SMA', 'RSI', 'MACD', 'Volume', 'ATR', 'Bollinger'];
       const foundIndicators: string[] = [];
@@ -466,10 +474,13 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
       }
     }
     
+    // Clean response by removing JSON blocks (with any of our expected keys)
     const cleanResponse = aiResponse
-      .replace(/```json\s*\{[\s\S]*?"technicals"[\s\S]*?\}\s*```/g, '')
-      .replace(/\{[\s\S]*?"technicals"[\s\S]*?\}/g, '')
+      .replace(/```json\s*\{[\s\S]*?\}\s*```/g, '')
+      .replace(/\{[\s\S]*?(?:"technicals"|"timeframe"|"chartPeriod"|"formula")[\s\S]*?\}/g, '')
       .trim();
+    
+    console.log("[Pattern Learning] Final extraction - timeframe:", extractedTimeframe, "chartPeriod:", extractedChartPeriod);
     
     res.json({ 
       response: cleanResponse,
