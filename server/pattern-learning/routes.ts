@@ -48,7 +48,7 @@ router.post("/rules", async (req, res) => {
       return res.status(500).json({ error: "Database unavailable" });
     }
     
-    const { patternType, timeframe, name, description, formulaParams, id } = req.body;
+    const { patternType, timeframe, name, description, formula, requiredTechnicals, formulaParams, isActive, id } = req.body;
     
     if (id) {
       const [updated] = await db.update(patternRules)
@@ -57,7 +57,10 @@ router.post("/rules", async (req, res) => {
           timeframe,
           name,
           description,
+          formula,
+          requiredTechnicals,
           formulaParams,
+          isActive: isActive !== undefined ? isActive : true,
           version: sql`version + 1`,
           updatedAt: new Date(),
         })
@@ -73,6 +76,8 @@ router.post("/rules", async (req, res) => {
           timeframe,
           name,
           description,
+          formula,
+          requiredTechnicals,
           formulaParams,
         })
         .returning();
@@ -127,7 +132,7 @@ router.post("/ratings", async (req, res) => {
       return res.status(500).json({ error: "Database unavailable" });
     }
     
-    const { ruleId, ticker, matchDate, rating, conditions, notes } = req.body;
+    const { ruleId, ticker, matchDate, rating, feedback, conditions, notes } = req.body;
     
     const [created] = await db.insert(patternRatings)
       .values({
@@ -136,6 +141,7 @@ router.post("/ratings", async (req, res) => {
         ticker,
         matchDate,
         rating,
+        feedback,
         chartConditions: conditions || {},
         notes,
       })
@@ -210,7 +216,7 @@ router.post("/scan", async (req, res) => {
           .set({ formulaParams, updatedAt: new Date() })
           .where(eq(patternRules.id, existingRule.id));
       } else {
-        const patternLabel = {
+        const patternLabels: Record<string, string> = {
           breakout_pullback: "Breakout with Pullback",
           cup_and_handle: "Cup and Handle",
           vcp: "Volatility Contraction Pattern",
@@ -219,7 +225,8 @@ router.post("/scan", async (req, res) => {
           weekly_tight: "Weekly Tight",
           monthly_tight: "Monthly Tight",
           pullback: "Pullback to MA",
-        }[patternType] || patternType;
+        };
+        const patternLabel = patternLabels[patternType] || patternType;
         
         const [newRule] = await db.insert(patternRules)
           .values({
@@ -291,35 +298,45 @@ router.post("/chat", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
     
-    const { message, currentRule, patternType, timeframe } = req.body;
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
     
-    const systemPrompt = `You are an expert trading pattern analyst helping a trader define and refine pattern detection rules.
+    const { message, setupId, currentSetup, recentRatings } = req.body;
+    
+    let ratingsSummary = "";
+    if (recentRatings && recentRatings.length > 0) {
+      const feedbackItems = recentRatings
+        .filter((r: any) => r.feedback)
+        .map((r: any) => `- Rating ${r.rating}: "${r.feedback}"`)
+        .join('\n');
+      
+      if (feedbackItems) {
+        ratingsSummary = `\n\nRecent User Feedback:\n${feedbackItems}`;
+      }
+    }
+    
+    const systemPrompt = `You are an expert trading pattern analyst helping a trader refine their setup detection formulas.
 
-Current Pattern Type: ${patternType}
-Current Timeframe: ${timeframe}
-Current Rule Parameters: ${JSON.stringify(currentRule?.formulaParams || {}, null, 2)}
+Current Setup: ${currentSetup?.name || 'Not selected'}
+Setup Description: ${currentSetup?.description || 'None'}
+Pattern Type: ${currentSetup?.patternType || 'custom'}
+Timeframe: ${currentSetup?.timeframe || 'daily'}
+Required Technicals: ${JSON.stringify(currentSetup?.requiredTechnicals?.indicators || [], null, 2)}
+${ratingsSummary}
 
 Your job is to:
-1. Help the user understand pattern conditions and thresholds
-2. Suggest adjustments to the formula parameters based on their feedback
-3. Explain the tradeoffs of different parameter values
+1. Help the user understand why certain chart patterns matched or didn't match
+2. Learn from their ratings and English feedback to improve the detection formula
+3. Suggest formula improvements in plain English (the system will convert to parameters)
+4. Explain what you're adjusting and why based on their feedback
 
-When suggesting parameter changes, respond in this exact JSON format at the END of your response:
-{"suggestedParams": {"paramName": value, ...}}
+When suggesting formula updates that should be applied, include this JSON at the END of your response:
+{"formulaUpdate": true, "changes": "Description of what changed"}
 
-Available parameters:
-- breakoutMinPct: Min % price must be above resistance (0.003 = 0.3%)
-- breakoutMaxPct: Max % above resistance
-- volumeRatio: Multiple of average volume required (1.3 = 130% of avg)
-- pullbackMinDepth: Min pullback as % of breakout move (0.3 = 30%)
-- pullbackMaxDepth: Max pullback depth
-- maDistance: Max % distance from MA for touch (0.001 = 0.1%)
-- maPeriod: Moving average period (20, 21, 50, etc)
-- maType: Moving average type (sma or ema)
-- entryConfirmPct: % above pullback low for entry signal (0.25 = 25%)
-- invalidationPct: % below MA for invalidation (0.003 = 0.3%)
-
-Be concise and practical. Focus on helping the user find parameters that work for their style.`;
+Be conversational and helpful. Focus on learning from the user's feedback to improve pattern detection.
+For example, if they say "entry was too early", you might suggest tightening the entry confirmation threshold.
+If they say "volume wasn't convincing", suggest increasing the volume ratio requirement.`;
 
     const openai = getOpenAI();
     const response = await openai.chat.completions.create({
@@ -333,21 +350,17 @@ Be concise and practical. Focus on helping the user find parameters that work fo
 
     const aiResponse = response.choices[0]?.message?.content || "I couldn't generate a response.";
     
-    let suggestedParams = null;
-    const jsonMatch = aiResponse.match(/\{"suggestedParams":\s*\{[^}]+\}\}/);
+    let formulaUpdate = false;
+    const jsonMatch = aiResponse.match(/\{"formulaUpdate":\s*true[^}]*\}/);
     if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        suggestedParams = parsed.suggestedParams;
-      } catch (e) {
-      }
+      formulaUpdate = true;
     }
     
-    const cleanResponse = aiResponse.replace(/\{"suggestedParams":\s*\{[^}]+\}\}/, '').trim();
+    const cleanResponse = aiResponse.replace(/\{"formulaUpdate":\s*true[^}]*\}/, '').trim();
     
     res.json({ 
       response: cleanResponse,
-      suggestedParams 
+      formulaUpdate 
     });
   } catch (error) {
     console.error("Error in chat:", error);

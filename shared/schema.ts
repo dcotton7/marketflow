@@ -575,18 +575,24 @@ export const patternRules = pgTable("pattern_rules", {
   patternType: text("pattern_type").notNull(), // 'breakout_pullback', 'cup_and_handle', 'vcp', etc.
   timeframe: text("timeframe").notNull(), // 'intraday', 'daily', 'weekly', 'monthly'
   name: text("name").notNull(), // User-friendly name
-  description: text("description"),
+  description: text("description"), // Human-readable description
+  formula: text("formula"), // Text-based formula definition for AI to interpret
+  requiredTechnicals: jsonb("required_technicals").$type<{
+    indicators: string[]; // e.g., ['21 EMA', 'VWAP', '50 SMA']
+    overlays?: string[]; // e.g., ['Bollinger Bands', 'Keltner Channels']
+    volumeRequired?: boolean;
+  }>().default({ indicators: [], overlays: [], volumeRequired: true }),
   formulaParams: jsonb("formula_params").$type<{
-    breakoutMinPct?: number; // BMIN - min % above resistance
+    breakoutMinPct?: number;
     breakoutMaxPct?: number;
-    volumeRatio?: number; // Multiple of avg volume
-    pullbackMinDepth?: number; // Min pullback as % of breakout move
+    volumeRatio?: number;
+    pullbackMinDepth?: number;
     pullbackMaxDepth?: number;
-    maDistance?: number; // Max % from MA for touch
-    maPeriod?: number; // Which MA to use (20, 21, 50, etc)
-    maType?: string; // 'sma' | 'ema'
-    entryConfirmPct?: number; // % above pullback low for entry
-    invalidationPct?: number; // % below MA for invalidation
+    maDistance?: number;
+    maPeriod?: number;
+    maType?: string;
+    entryConfirmPct?: number;
+    invalidationPct?: number;
     [key: string]: number | string | undefined;
   }>().default({}),
   version: integer("version").default(1),
@@ -603,6 +609,7 @@ export const patternRatings = pgTable("pattern_ratings", {
   ticker: text("ticker").notNull(),
   matchDate: text("match_date").notNull(), // Date the pattern was detected
   rating: integer("rating").notNull(), // 1-4 scale
+  feedback: text("feedback"), // English feedback for AI learning
   chartConditions: jsonb("chart_conditions").$type<{
     breakoutPct?: number;
     volumeRatio?: number;

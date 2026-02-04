@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { Button } from "@/components/ui/button";
@@ -10,24 +10,31 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { 
   Brain, Send, Play, Save, RefreshCw, Loader2,
-  ThumbsDown, ThumbsUp, Minus, Star, ChevronRight,
-  TrendingUp, Clock, BarChart3, Target, AlertCircle
+  ThumbsDown, ThumbsUp, Minus, Star, ChevronRight, ChevronLeft,
+  TrendingUp, Clock, BarChart3, Target, AlertCircle, Plus, Edit, Check, X, ExternalLink
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
-import { MiniChart } from "@/components/MiniChart";
 import { PATTERN_TYPES, PATTERN_TIMEFRAMES, RATING_LABELS } from "@shared/schema";
 
-interface PatternRule {
+interface Setup {
   id: number;
   patternType: string;
   timeframe: string;
   name: string;
   description?: string;
-  formulaParams: Record<string, number | string | undefined>;
+  formula?: string;
+  requiredTechnicals?: {
+    indicators: string[];
+    overlays?: string[];
+    volumeRequired?: boolean;
+  };
+  formulaParams?: Record<string, number | string | undefined>;
   version: number;
   isActive: boolean;
 }
@@ -48,6 +55,19 @@ interface ChatMessage {
   content: string;
 }
 
+interface SetupConfidence {
+  id: number;
+  userId: number;
+  ruleId: number;
+  patternsRated: number;
+  avgRating: number;
+  rating1Count: number;
+  rating2Count: number;
+  rating3Count: number;
+  rating4Count: number;
+  confidenceLevel: string;
+}
+
 const RATING_COLORS = {
   1: "bg-red-500/20 border-red-500 text-red-400",
   2: "bg-yellow-500/20 border-yellow-500 text-yellow-400",
@@ -62,87 +82,118 @@ const RATING_ICONS = {
   4: Star,
 };
 
+const AVAILABLE_INDICATORS = [
+  "VWAP", "21 EMA", "50 SMA", "200 SMA", "9 EMA", "8 EMA", "20 SMA",
+  "Volume", "RSI", "MACD", "Bollinger Bands", "Keltner Channels"
+];
+
 export default function PatternLearningPage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
   
-  const [selectedPatternType, setSelectedPatternType] = useState("breakout_pullback");
-  const [selectedTimeframe, setSelectedTimeframe] = useState("daily");
+  const [selectedSetupId, setSelectedSetupId] = useState<number | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  
+  const [newSetup, setNewSetup] = useState({
+    name: "",
+    description: "",
+    formula: "",
+    patternType: "custom",
+    timeframe: "daily",
+    requiredTechnicals: { indicators: ["21 EMA", "VWAP"], volumeRequired: true }
+  });
+  
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "I'm ready to help you define and test pattern rules. What pattern would you like to work on?" }
+    { role: "assistant", content: "I'm ready to help you refine your trading setup. Select a setup or create a new one, then run a test to find matches. Rate the matches and provide feedback - I'll learn from your input to improve the detection formula." }
   ]);
   const [chatInput, setChatInput] = useState("");
   const [isAiThinking, setIsAiThinking] = useState(false);
-  
-  const [currentRule, setCurrentRule] = useState<Partial<PatternRule>>({
-    patternType: "breakout_pullback",
-    timeframe: "daily",
-    name: "Breakout with Pullback",
-    formulaParams: {
-      breakoutMinPct: 0.003,
-      breakoutMaxPct: 0.02,
-      volumeRatio: 1.3,
-      pullbackMinDepth: 0.3,
-      pullbackMaxDepth: 0.7,
-      maDistance: 0.001,
-      maPeriod: 20,
-      maType: "ema",
-      entryConfirmPct: 0.25,
-      invalidationPct: 0.003,
-    }
-  });
+  const [feedbackInput, setFeedbackInput] = useState("");
   
   const [patternMatches, setPatternMatches] = useState<PatternMatch[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [ratings, setRatings] = useState<Record<string, { rating: number; feedback: string }>>({});
 
-  const { data: savedRules, isLoading: rulesLoading } = useQuery<PatternRule[]>({
+  const { data: setups = [], isLoading: setupsLoading } = useQuery<Setup[]>({
     queryKey: ['/api/pattern-learning/rules'],
   });
 
-  const { data: confidence } = useQuery({
-    queryKey: ['/api/pattern-learning/confidence', currentRule?.id],
-    enabled: !!currentRule?.id,
+  const selectedSetup = setups.find(s => s.id === selectedSetupId);
+
+  const { data: confidence } = useQuery<SetupConfidence | null>({
+    queryKey: ['/api/pattern-learning/confidence', selectedSetupId],
+    enabled: !!selectedSetupId,
   });
 
-  const saveRuleMutation = useMutation({
-    mutationFn: async (rule: Partial<PatternRule>) => {
-      const response = await apiRequest('POST', '/api/pattern-learning/rules', rule);
-      if (!response.ok) throw new Error('Failed to save rule');
+  const createSetupMutation = useMutation({
+    mutationFn: async (setup: typeof newSetup) => {
+      const response = await apiRequest('POST', '/api/pattern-learning/rules', setup);
+      if (!response.ok) throw new Error('Failed to create setup');
       return response.json();
     },
     onSuccess: (data) => {
-      toast({ title: "Rule Saved", description: `Rule "${data.name}" saved successfully` });
-      setCurrentRule(data);
+      toast({ title: "Setup Created", description: `"${data.name}" has been created` });
+      setSelectedSetupId(data.id);
+      setShowCreateDialog(false);
+      setNewSetup({
+        name: "",
+        description: "",
+        formula: "",
+        patternType: "custom",
+        timeframe: "daily",
+        requiredTechnicals: { indicators: ["21 EMA", "VWAP"], volumeRequired: true }
+      });
       queryClient.invalidateQueries({ queryKey: ['/api/pattern-learning/rules'] });
     },
-    onError: (error: any) => {
-      toast({ title: "Save Failed", description: error.message, variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Creation Failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+      const setup = setups.find(s => s.id === id);
+      if (!setup) throw new Error('Setup not found');
+      const response = await apiRequest('POST', '/api/pattern-learning/rules', {
+        ...setup,
+        isActive,
+      });
+      if (!response.ok) throw new Error('Failed to update setup');
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: data.isActive ? "Setup Activated" : "Setup Deactivated" });
+      queryClient.invalidateQueries({ queryKey: ['/api/pattern-learning/rules'] });
     },
   });
 
   const runTestMutation = useMutation({
-    mutationFn: async (params: { patternType: string; timeframe: string; formulaParams: any }) => {
-      const response = await apiRequest('POST', '/api/pattern-learning/scan', params);
+    mutationFn: async (setupId: number) => {
+      const setup = setups.find(s => s.id === setupId);
+      if (!setup) throw new Error('Setup not found');
+      const response = await apiRequest('POST', '/api/pattern-learning/scan', {
+        patternType: setup.patternType,
+        timeframe: setup.timeframe,
+        formulaParams: setup.formulaParams || {},
+        ruleId: setupId,
+      });
       if (!response.ok) throw new Error('Scan failed');
       return response.json();
     },
     onSuccess: (data) => {
       setPatternMatches(data.matches || []);
-      if (data.ruleId) {
-        setCurrentRule(prev => ({ ...prev, id: data.ruleId }));
-      }
+      setCurrentMatchIndex(0);
       toast({ title: "Scan Complete", description: `Found ${data.matches?.length || 0} pattern matches` });
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
       toast({ title: "Scan Failed", description: error.message, variant: "destructive" });
     },
   });
 
   const saveRatingMutation = useMutation({
-    mutationFn: async (data: { ticker: string; matchDate: string; rating: number; conditions: any }) => {
+    mutationFn: async (data: { ticker: string; matchDate: string; rating: number; feedback: string; conditions: any }) => {
       const response = await apiRequest('POST', '/api/pattern-learning/ratings', {
-        ruleId: currentRule.id,
+        ruleId: selectedSetupId,
         ...data
       });
       if (!response.ok) throw new Error('Failed to save rating');
@@ -164,9 +215,12 @@ export default function PatternLearningPage() {
     try {
       const response = await apiRequest('POST', '/api/pattern-learning/chat', {
         message: userMessage,
-        currentRule,
-        patternType: selectedPatternType,
-        timeframe: selectedTimeframe,
+        setupId: selectedSetupId,
+        currentSetup: selectedSetup,
+        recentRatings: Object.entries(ratings).slice(-10).map(([key, val]) => ({
+          key,
+          ...val
+        })),
       });
       
       if (!response.ok) throw new Error('Failed to get AI response');
@@ -174,12 +228,12 @@ export default function PatternLearningPage() {
       
       setChatMessages(prev => [...prev, { role: "assistant", content: data.response }]);
       
-      if (data.suggestedParams) {
-        setCurrentRule(prev => ({
-          ...prev,
-          formulaParams: { ...prev.formulaParams, ...data.suggestedParams }
-        }));
-        toast({ title: "Parameters Updated", description: "AI has suggested new formula parameters" });
+      if (data.formulaUpdate) {
+        toast({ 
+          title: "Formula Updated", 
+          description: "AI has improved the detection formula based on your feedback" 
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/pattern-learning/rules'] });
       }
     } catch (error) {
       setChatMessages(prev => [...prev, { 
@@ -189,41 +243,45 @@ export default function PatternLearningPage() {
     } finally {
       setIsAiThinking(false);
     }
-  }, [chatInput, isAiThinking, currentRule, selectedPatternType, selectedTimeframe]);
+  }, [chatInput, isAiThinking, selectedSetupId, selectedSetup, ratings]);
 
-  const handleRunTest = () => {
-    setIsScanning(true);
-    runTestMutation.mutate({
-      patternType: selectedPatternType,
-      timeframe: selectedTimeframe,
-      formulaParams: currentRule.formulaParams || {},
-    });
-    setTimeout(() => setIsScanning(false), 1000);
-  };
-
-  const handleRating = (ticker: string, matchDate: string, rating: number, conditions: any) => {
+  const handleRating = (ticker: string, matchDate: string, rating: number) => {
     const key = `${ticker}-${matchDate}`;
-    setRatings(prev => ({ ...prev, [key]: rating }));
-    saveRatingMutation.mutate({ ticker, matchDate, rating, conditions });
-  };
-
-  const handleSaveRule = () => {
-    saveRuleMutation.mutate({
-      ...currentRule,
-      patternType: selectedPatternType,
-      timeframe: selectedTimeframe,
+    const currentMatch = patternMatches[currentMatchIndex];
+    const feedback = feedbackInput.trim();
+    
+    setRatings(prev => ({ ...prev, [key]: { rating, feedback } }));
+    saveRatingMutation.mutate({ 
+      ticker, 
+      matchDate, 
+      rating, 
+      feedback,
+      conditions: currentMatch?.conditions || {}
     });
+    setFeedbackInput("");
+    
+    if (currentMatchIndex < patternMatches.length - 1) {
+      setCurrentMatchIndex(prev => prev + 1);
+    }
   };
 
-  const updateFormulaParam = (key: string, value: string) => {
-    const numValue = parseFloat(value);
-    setCurrentRule(prev => ({
-      ...prev,
-      formulaParams: {
-        ...prev.formulaParams,
-        [key]: isNaN(numValue) ? value : numValue
-      }
-    }));
+  const currentMatch = patternMatches[currentMatchIndex];
+  const currentMatchKey = currentMatch ? `${currentMatch.ticker}-${currentMatch.matchDate}` : '';
+  const currentRating = ratings[currentMatchKey];
+
+  const getTradingViewUrl = (ticker: string, date: string) => {
+    const technicals = selectedSetup?.requiredTechnicals?.indicators || [];
+    const studies = technicals.map(t => {
+      if (t.includes('EMA')) return 'EMA@tv-basicstudies';
+      if (t.includes('SMA')) return 'MA@tv-basicstudies';
+      if (t === 'VWAP') return 'VWAP@tv-basicstudies';
+      if (t === 'RSI') return 'RSI@tv-basicstudies';
+      if (t === 'MACD') return 'MACD@tv-basicstudies';
+      if (t === 'Volume') return 'Volume@tv-basicstudies';
+      return '';
+    }).filter(Boolean).join(',');
+    
+    return `https://www.tradingview.com/chart/?symbol=${ticker}&interval=D${studies ? `&studies=${studies}` : ''}`;
   };
 
   return (
@@ -238,160 +296,351 @@ export default function PatternLearningPage() {
               Pattern Learning
             </h1>
             <p className="text-muted-foreground">
-              Define pattern rules, test on historical data, and teach the AI what works
+              Define setups, review chart matches, provide feedback - AI learns what works
             </p>
           </div>
           
           <div className="flex items-center gap-3">
-            <Select value={selectedPatternType} onValueChange={setSelectedPatternType}>
-              <SelectTrigger className="w-48" data-testid="select-pattern-type">
-                <SelectValue placeholder="Pattern Type" />
+            <Select 
+              value={selectedSetupId?.toString() || ""} 
+              onValueChange={(v) => setSelectedSetupId(v ? parseInt(v) : null)}
+            >
+              <SelectTrigger className="w-64" data-testid="select-setup">
+                <SelectValue placeholder="Select a Setup..." />
               </SelectTrigger>
               <SelectContent>
-                {PATTERN_TYPES.map(pt => (
-                  <SelectItem key={pt.value} value={pt.value}>{pt.label}</SelectItem>
+                {setups.map(setup => (
+                  <SelectItem key={setup.id} value={setup.id.toString()}>
+                    <div className="flex items-center gap-2">
+                      {setup.isActive ? (
+                        <Check className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <X className="h-3 w-3 text-muted-foreground" />
+                      )}
+                      {setup.name}
+                    </div>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            
-            <Select value={selectedTimeframe} onValueChange={setSelectedTimeframe}>
-              <SelectTrigger className="w-32" data-testid="select-timeframe">
-                <SelectValue placeholder="Timeframe" />
-              </SelectTrigger>
-              <SelectContent>
-                {PATTERN_TIMEFRAMES.map(tf => (
-                  <SelectItem key={tf.value} value={tf.value}>{tf.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+              <DialogTrigger asChild>
+                <Button variant="outline" data-testid="button-new-setup">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Setup
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Create New Setup</DialogTitle>
+                  <DialogDescription>
+                    Define a trading setup. Describe what you're looking for in plain English - 
+                    the AI will build the detection formula.
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4 py-4">
+                  <div>
+                    <Label>Setup Name</Label>
+                    <Input
+                      value={newSetup.name}
+                      onChange={(e) => setNewSetup(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="e.g., VWAP Reclaim after Morning Dip"
+                      data-testid="input-new-setup-name"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Pattern Type</Label>
+                      <Select 
+                        value={newSetup.patternType} 
+                        onValueChange={(v) => setNewSetup(prev => ({ ...prev, patternType: v }))}
+                      >
+                        <SelectTrigger data-testid="select-new-pattern-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PATTERN_TYPES.map(pt => (
+                            <SelectItem key={pt.value} value={pt.value}>{pt.label}</SelectItem>
+                          ))}
+                          <SelectItem value="custom">Custom</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Timeframe</Label>
+                      <Select 
+                        value={newSetup.timeframe} 
+                        onValueChange={(v) => setNewSetup(prev => ({ ...prev, timeframe: v }))}
+                      >
+                        <SelectTrigger data-testid="select-new-timeframe">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PATTERN_TIMEFRAMES.map(tf => (
+                            <SelectItem key={tf.value} value={tf.value}>{tf.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <Label>Description (How would you explain this setup?)</Label>
+                    <Textarea
+                      value={newSetup.description}
+                      onChange={(e) => setNewSetup(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="e.g., Look for stocks that gap down in the morning, drop below the 21 EMA, then reclaim VWAP with above-average volume. Entry is when price holds above VWAP for 5 minutes."
+                      rows={4}
+                      data-testid="textarea-new-setup-description"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label>Required Technical Indicators</Label>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {AVAILABLE_INDICATORS.map(indicator => {
+                        const isSelected = newSetup.requiredTechnicals.indicators.includes(indicator);
+                        return (
+                          <Badge
+                            key={indicator}
+                            variant={isSelected ? "default" : "outline"}
+                            className="cursor-pointer"
+                            onClick={() => {
+                              setNewSetup(prev => ({
+                                ...prev,
+                                requiredTechnicals: {
+                                  ...prev.requiredTechnicals,
+                                  indicators: isSelected
+                                    ? prev.requiredTechnicals.indicators.filter(i => i !== indicator)
+                                    : [...prev.requiredTechnicals.indicators, indicator]
+                                }
+                              }));
+                            }}
+                            data-testid={`badge-indicator-${indicator.replace(/\s/g, '-')}`}
+                          >
+                            {indicator}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+                
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={() => createSetupMutation.mutate(newSetup)}
+                    disabled={!newSetup.name || createSetupMutation.isPending}
+                    data-testid="button-create-setup"
+                  >
+                    {createSetupMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    Create Setup
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 
-        <div className="grid grid-cols-12 gap-4 h-[calc(100vh-180px)]">
+        {selectedSetup && (
+          <Card className="mb-4">
+            <CardContent className="py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <h3 className="font-semibold">{selectedSetup.name}</h3>
+                    <Badge variant="outline">{selectedSetup.patternType}</Badge>
+                    <Badge variant="outline">{selectedSetup.timeframe}</Badge>
+                    {confidence && (
+                      <Badge variant={
+                        confidence.confidenceLevel === 'high' ? 'default' :
+                        confidence.confidenceLevel === 'medium' ? 'secondary' : 'outline'
+                      }>
+                        {confidence.confidenceLevel} confidence
+                      </Badge>
+                    )}
+                  </div>
+                  {selectedSetup.description && (
+                    <p className="text-sm text-muted-foreground mt-1">{selectedSetup.description}</p>
+                  )}
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="active-toggle" className="text-sm">Active</Label>
+                    <Switch
+                      id="active-toggle"
+                      checked={selectedSetup.isActive}
+                      onCheckedChange={(checked) => toggleActiveMutation.mutate({ id: selectedSetup.id, isActive: checked })}
+                      data-testid="switch-active"
+                    />
+                  </div>
+                  
+                  <Button 
+                    onClick={() => selectedSetupId && runTestMutation.mutate(selectedSetupId)}
+                    disabled={runTestMutation.isPending}
+                    data-testid="button-run-test"
+                  >
+                    {runTestMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Play className="h-4 w-4 mr-2" />
+                    )}
+                    Run Test
+                  </Button>
+                </div>
+              </div>
+              
+              {selectedSetup.requiredTechnicals?.indicators && selectedSetup.requiredTechnicals.indicators.length > 0 && (
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs text-muted-foreground">Technicals:</span>
+                  {selectedSetup.requiredTechnicals.indicators.map(ind => (
+                    <Badge key={ind} variant="secondary" className="text-xs">{ind}</Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-12 gap-4 h-[calc(100vh-280px)]">
           <div className="col-span-7">
             <Card className="h-full flex flex-col">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
                     <BarChart3 className="h-5 w-5" />
-                    Pattern Matches
+                    Pattern Match Review
                   </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={handleRunTest}
-                      disabled={runTestMutation.isPending}
-                      data-testid="button-run-test"
-                    >
-                      {runTestMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Play className="h-4 w-4 mr-2" />
-                      )}
-                      Run Test
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPatternMatches([])}
-                      data-testid="button-clear-matches"
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Clear
-                    </Button>
-                  </div>
+                  {patternMatches.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        disabled={currentMatchIndex === 0}
+                        onClick={() => setCurrentMatchIndex(prev => prev - 1)}
+                        data-testid="button-prev-match"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm tabular-nums">
+                        {currentMatchIndex + 1} / {patternMatches.length}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        disabled={currentMatchIndex === patternMatches.length - 1}
+                        onClick={() => setCurrentMatchIndex(prev => prev + 1)}
+                        data-testid="button-next-match"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <CardDescription>
-                  Rate each pattern match: 1=Useless, 2=Elements, 3=Past Entry, 4=Good
+                  Rate each match: 1=Useless, 2=Some Elements, 3=Good but Past Entry, 4=Valid Setup
                 </CardDescription>
               </CardHeader>
               
-              <CardContent className="flex-1 overflow-hidden">
-                <ScrollArea className="h-full">
-                  {patternMatches.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                      <BarChart3 className="h-12 w-12 mb-4 opacity-50" />
-                      <p>No pattern matches yet</p>
-                      <p className="text-sm">Configure your rule and click "Run Test"</p>
+              <CardContent className="flex-1 flex flex-col overflow-hidden">
+                {!selectedSetup ? (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <Target className="h-12 w-12 mb-4 opacity-50" />
+                    <p>Select a setup to begin</p>
+                  </div>
+                ) : patternMatches.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <BarChart3 className="h-12 w-12 mb-4 opacity-50" />
+                    <p>No pattern matches yet</p>
+                    <p className="text-sm">Click "Run Test" to find matches</p>
+                  </div>
+                ) : currentMatch ? (
+                  <div className="flex flex-col h-full">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl font-bold">{currentMatch.ticker}</span>
+                        <Badge variant="outline">{currentMatch.matchDate}</Badge>
+                        {currentRating && (
+                          <Badge className={RATING_COLORS[currentRating.rating as keyof typeof RATING_COLORS]}>
+                            {RATING_LABELS[currentRating.rating as keyof typeof RATING_LABELS]}
+                          </Badge>
+                        )}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(getTradingViewUrl(currentMatch.ticker, currentMatch.matchDate), '_blank')}
+                        data-testid="button-open-chart"
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Open in TradingView
+                      </Button>
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-4">
-                      {patternMatches.map((match, idx) => {
-                        const key = `${match.ticker}-${match.matchDate}`;
-                        const currentRating = ratings[key];
-                        
-                        return (
-                          <Card key={key} className="overflow-hidden">
-                            <div className="h-32 bg-card">
-                              <MiniChart 
-                                symbol={match.ticker} 
-                                timeframe={selectedTimeframe === "daily" ? "1d" : 
-                                          selectedTimeframe === "weekly" ? "1wk" : 
-                                          selectedTimeframe === "monthly" ? "1mo" : "1d"}
-                              />
-                            </div>
-                            <CardContent className="p-3">
-                              <div className="flex items-center justify-between mb-2">
-                                <div>
-                                  <span className="font-bold">{match.ticker}</span>
-                                  <span className="text-xs text-muted-foreground ml-2">{match.matchDate}</span>
-                                </div>
-                                {currentRating && (
-                                  <Badge className={RATING_COLORS[currentRating as keyof typeof RATING_COLORS]}>
-                                    {RATING_LABELS[currentRating as keyof typeof RATING_LABELS]}
-                                  </Badge>
-                                )}
-                              </div>
-                              
-                              <div className="text-xs text-muted-foreground mb-2 space-y-0.5">
-                                {match.conditions.breakoutPct !== undefined && (
-                                  <div>Breakout: {(match.conditions.breakoutPct * 100).toFixed(2)}%</div>
-                                )}
-                                {match.conditions.volumeRatio !== undefined && (
-                                  <div>Volume: {match.conditions.volumeRatio.toFixed(1)}x avg</div>
-                                )}
-                                {match.conditions.pullbackDepth !== undefined && (
-                                  <div>Pullback: {(match.conditions.pullbackDepth * 100).toFixed(1)}%</div>
-                                )}
-                              </div>
-                              
-                              <div className="flex gap-1">
-                                {[1, 2, 3, 4].map(rating => {
-                                  const Icon = RATING_ICONS[rating as keyof typeof RATING_ICONS];
-                                  const isSelected = currentRating === rating;
-                                  return (
-                                    <Button
-                                      key={rating}
-                                      variant={isSelected ? "default" : "outline"}
-                                      size="sm"
-                                      className={`flex-1 ${isSelected ? RATING_COLORS[rating as keyof typeof RATING_COLORS] : ''}`}
-                                      onClick={() => handleRating(match.ticker, match.matchDate, rating, match.conditions)}
-                                      data-testid={`button-rate-${match.ticker}-${rating}`}
-                                    >
-                                      <Icon className="h-3 w-3" />
-                                    </Button>
-                                  );
-                                })}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
+                    
+                    <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4">
+                      <iframe
+                        src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=D&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=0&allow_symbol_change=1&details=1&studies=[]&show_popup_button=1`}
+                        className="w-full h-full border-0"
+                        title={`Chart for ${currentMatch.ticker}`}
+                      />
                     </div>
-                  )}
-                </ScrollArea>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-sm mb-2 block">Your Feedback (helps AI learn)</Label>
+                        <Textarea
+                          value={feedbackInput}
+                          onChange={(e) => setFeedbackInput(e.target.value)}
+                          placeholder="e.g., Entry was too early, volume spike happened after the breakout, would prefer tighter consolidation..."
+                          rows={2}
+                          data-testid="textarea-feedback"
+                        />
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        {[1, 2, 3, 4].map(rating => {
+                          const Icon = RATING_ICONS[rating as keyof typeof RATING_ICONS];
+                          const isSelected = currentRating?.rating === rating;
+                          const label = RATING_LABELS[rating as keyof typeof RATING_LABELS];
+                          return (
+                            <Button
+                              key={rating}
+                              variant={isSelected ? "default" : "outline"}
+                              className={`flex-1 ${isSelected ? RATING_COLORS[rating as keyof typeof RATING_COLORS] : ''}`}
+                              onClick={() => handleRating(currentMatch.ticker, currentMatch.matchDate, rating)}
+                              data-testid={`button-rate-${rating}`}
+                            >
+                              <Icon className="h-4 w-4 mr-2" />
+                              {label}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           </div>
 
-          <div className="col-span-5 flex flex-col gap-4">
-            <Card className="flex-1 flex flex-col">
+          <div className="col-span-5">
+            <Card className="h-full flex flex-col">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Brain className="h-4 w-4" />
                   AI Assistant
                 </CardTitle>
+                <CardDescription>
+                  Ask questions or request formula improvements based on your ratings
+                </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col overflow-hidden">
                 <ScrollArea className="flex-1 pr-4">
@@ -417,11 +666,40 @@ export default function PatternLearningPage() {
                   </div>
                 </ScrollArea>
                 
-                <div className="flex gap-2 mt-3 pt-3 border-t">
+                <Separator className="my-3" />
+                
+                {confidence && (
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between text-sm mb-2">
+                      <span className="text-muted-foreground">Rating Stats</span>
+                      <Badge variant="outline">{confidence.patternsRated || 0} rated</Badge>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div>
+                        <div className="font-bold text-red-400">{confidence.rating1Count || 0}</div>
+                        <div className="text-muted-foreground">Useless</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-yellow-400">{confidence.rating2Count || 0}</div>
+                        <div className="text-muted-foreground">Elements</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-blue-400">{confidence.rating3Count || 0}</div>
+                        <div className="text-muted-foreground">Past</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-green-400">{confidence.rating4Count || 0}</div>
+                        <div className="text-muted-foreground">Good</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex gap-2">
                   <Input
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Ask AI to adjust parameters..."
+                    placeholder="Ask AI to analyze ratings or improve the formula..."
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendChat()}
                     disabled={isAiThinking}
                     data-testid="input-chat"
@@ -434,164 +712,6 @@ export default function PatternLearningPage() {
                   >
                     <Send className="h-4 w-4" />
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Target className="h-4 w-4" />
-                    Rule Formula
-                  </CardTitle>
-                  <Button 
-                    size="sm" 
-                    onClick={handleSaveRule}
-                    disabled={saveRuleMutation.isPending}
-                    data-testid="button-save-rule"
-                  >
-                    {saveRuleMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4 mr-2" />
-                    )}
-                    Save Rule
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div>
-                    <Label className="text-xs">Rule Name</Label>
-                    <Input
-                      value={currentRule.name || ""}
-                      onChange={(e) => setCurrentRule(prev => ({ ...prev, name: e.target.value }))}
-                      placeholder="Rule name"
-                      className="h-8"
-                      data-testid="input-rule-name"
-                    />
-                  </div>
-                  
-                  <Separator />
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-xs">Breakout Min %</Label>
-                      <Input
-                        type="number"
-                        step="0.001"
-                        value={currentRule.formulaParams?.breakoutMinPct || 0}
-                        onChange={(e) => updateFormulaParam("breakoutMinPct", e.target.value)}
-                        className="h-8"
-                        data-testid="input-breakout-min"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Breakout Max %</Label>
-                      <Input
-                        type="number"
-                        step="0.001"
-                        value={currentRule.formulaParams?.breakoutMaxPct || 0}
-                        onChange={(e) => updateFormulaParam("breakoutMaxPct", e.target.value)}
-                        className="h-8"
-                        data-testid="input-breakout-max"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Volume Ratio</Label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={currentRule.formulaParams?.volumeRatio || 0}
-                        onChange={(e) => updateFormulaParam("volumeRatio", e.target.value)}
-                        className="h-8"
-                        data-testid="input-volume-ratio"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Pullback Depth Min</Label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={currentRule.formulaParams?.pullbackMinDepth || 0}
-                        onChange={(e) => updateFormulaParam("pullbackMinDepth", e.target.value)}
-                        className="h-8"
-                        data-testid="input-pullback-min"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">MA Distance %</Label>
-                      <Input
-                        type="number"
-                        step="0.001"
-                        value={currentRule.formulaParams?.maDistance || 0}
-                        onChange={(e) => updateFormulaParam("maDistance", e.target.value)}
-                        className="h-8"
-                        data-testid="input-ma-distance"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">MA Period</Label>
-                      <Input
-                        type="number"
-                        value={currentRule.formulaParams?.maPeriod || 20}
-                        onChange={(e) => updateFormulaParam("maPeriod", e.target.value)}
-                        className="h-8"
-                        data-testid="input-ma-period"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Entry Confirm %</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={currentRule.formulaParams?.entryConfirmPct || 0}
-                        onChange={(e) => updateFormulaParam("entryConfirmPct", e.target.value)}
-                        className="h-8"
-                        data-testid="input-entry-confirm"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Invalidation %</Label>
-                      <Input
-                        type="number"
-                        step="0.001"
-                        value={currentRule.formulaParams?.invalidationPct || 0}
-                        onChange={(e) => updateFormulaParam("invalidationPct", e.target.value)}
-                        className="h-8"
-                        data-testid="input-invalidation"
-                      />
-                    </div>
-                  </div>
-                  
-                  {confidence && (
-                    <>
-                      <Separator />
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Confidence</span>
-                        <Badge variant="outline">{String((confidence as any).confidenceLevel || 'untested')}</Badge>
-                      </div>
-                      <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                        <div>
-                          <div className="font-bold text-red-400">{String((confidence as any).rating1Count || 0)}</div>
-                          <div className="text-muted-foreground">Useless</div>
-                        </div>
-                        <div>
-                          <div className="font-bold text-yellow-400">{String((confidence as any).rating2Count || 0)}</div>
-                          <div className="text-muted-foreground">Elements</div>
-                        </div>
-                        <div>
-                          <div className="font-bold text-blue-400">{String((confidence as any).rating3Count || 0)}</div>
-                          <div className="text-muted-foreground">Past</div>
-                        </div>
-                        <div>
-                          <div className="font-bold text-green-400">{String((confidence as any).rating4Count || 0)}</div>
-                          <div className="text-muted-foreground">Good</div>
-                        </div>
-                      </div>
-                    </>
-                  )}
                 </div>
               </CardContent>
             </Card>
