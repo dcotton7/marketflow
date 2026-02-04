@@ -2106,8 +2106,10 @@ Respond in JSON format:
   "reasoning": "<brief explanation>"
 }`;
 
-      const openai = await getOpenAIClient();
-      if (!openai) {
+      // Check for OpenAI configuration
+      const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+      const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+      if (!apiKey) {
         // Fallback: use hold time heuristics
         let suggestedSetup = "swing_trade";
         if (holdDays <= 1) suggestedSetup = "momentum";
@@ -2121,6 +2123,7 @@ Respond in JSON format:
         });
       }
       
+      const openai = new OpenAI({ apiKey, baseURL });
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
@@ -3284,17 +3287,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         // Now includes accountName for per-account position tracking
         const existingHandTrades = await db!.select({
           id: sentinelTrades.id,
-          ticker: sentinelTrades.ticker,
+          symbol: sentinelTrades.symbol,
           direction: sentinelTrades.direction,
-          shares: sentinelTrades.shares,
+          positionSize: sentinelTrades.positionSize,
           entryDate: sentinelTrades.entryDate,
           exitDate: sentinelTrades.exitDate,
-          exitShares: sentinelTrades.exitShares,
+          lotEntries: sentinelTrades.lotEntries,
           accountName: sentinelTrades.accountName,
         }).from(sentinelTrades)
           .where(and(
             eq(sentinelTrades.userId, userId),
-            inArray(sentinelTrades.ticker, Array.from(tickersInImport))
+            inArray(sentinelTrades.symbol, Array.from(tickersInImport))
           ))
           .orderBy(sentinelTrades.entryDate, sentinelTrades.id);
         
@@ -3346,30 +3349,35 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           }
           
           // Add hand-entered trades (priority 2)
-          // Note: Hand-entered trades use aggregate shares, not lot-level FIFO
+          // Use lot entries for accurate FIFO tracking
           // Filter by accountName if available, otherwise include as general baseline
           for (const t of existingHandTrades.filter(t => 
-            t.ticker === ticker && 
+            t.symbol === ticker && 
             (t.accountName || null) === accountNameFilter
           )) {
-            const entryDirection = t.direction === 'LONG' ? 'BUY' : 'SELL';
-            if (t.entryDate && t.shares) {
+            // Process lot entries for accurate position tracking
+            const lots = t.lotEntries as Array<{ id: string; dateTime: string; qty: string; buySell: 'buy' | 'sell'; price: string }> || [];
+            if (lots.length > 0) {
+              for (const lot of lots) {
+                allTrades.push({
+                  id: `hand_lot_${t.id}_${lot.id}`,
+                  direction: lot.buySell === 'buy' ? 'BUY' : 'SELL',
+                  quantity: parseFloat(lot.qty) || 0,
+                  tradeDate: new Date(lot.dateTime),
+                  sourcePriority: 2,
+                  isCurrentImport: false,
+                });
+              }
+            } else if (t.entryDate && t.positionSize) {
+              // Fallback to aggregate position if no lot entries
+              // Handle both lowercase and uppercase direction values
+              const isLong = t.direction?.toLowerCase() === 'long';
+              const entryDirection = isLong ? 'BUY' : 'SELL';
               allTrades.push({
-                id: `hand_entry_${t.id}`, // Use DB id for stable ordering
+                id: `hand_entry_${t.id}`,
                 direction: entryDirection,
-                quantity: t.shares,
+                quantity: t.positionSize,
                 tradeDate: new Date(t.entryDate),
-                sourcePriority: 2,
-                isCurrentImport: false,
-              });
-            }
-            if (t.exitDate && t.exitShares) {
-              const exitDirection = t.direction === 'LONG' ? 'SELL' : 'BUY';
-              allTrades.push({
-                id: `hand_exit_${t.id}`, // Use DB id for stable ordering
-                direction: exitDirection,
-                quantity: t.exitShares,
-                tradeDate: new Date(t.exitDate),
                 sourcePriority: 2,
                 isCurrentImport: false,
               });
@@ -3437,7 +3445,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           status: orphanSellsCount > 0 ? "NEEDS_REVIEW" : result.batch.status,
         });
         
-        // Batch insert all trades at once for better performance
+        // Batch insert trades in chunks for better performance with large files
         if (result.trades.length > 0) {
           const tradeValues = result.trades.map((trade) => ({
             tradeId: trade.tradeId,
@@ -3472,7 +3480,12 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             rawSource: trade.rawSource,
           }));
           
-          await tx.insert(sentinelImportedTrades).values(tradeValues);
+          // Insert in chunks of 200 to prevent database timeouts with large files
+          const CHUNK_SIZE = 200;
+          for (let i = 0; i < tradeValues.length; i += CHUNK_SIZE) {
+            const chunk = tradeValues.slice(i, i + CHUNK_SIZE);
+            await tx.insert(sentinelImportedTrades).values(chunk);
+          }
         }
       });
       

@@ -311,6 +311,7 @@ export default function SentinelAdminPage() {
   const recentHistory = history?.slice(0, 10) || [];
 
   const needsSeeding = !factorsLoading && (!factors || factors.length === 0);
+  const needsSetupTypeSeeding = !factorsLoading && factors && factors.length > 0 && setupTypeFactors.length === 0;
 
   const handleCreateModifier = () => {
     const factor = factors?.find(f => f.factorKey === newModifier.factorKey);
@@ -344,6 +345,12 @@ export default function SentinelAdminPage() {
             <Button onClick={() => seedMutation.mutate()} disabled={seedMutation.isPending} data-testid="button-seed-tnn">
               {seedMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Database className="w-4 h-4 mr-2" />}
               Initialize TNN
+            </Button>
+          )}
+          {needsSetupTypeSeeding && (
+            <Button onClick={() => seedMutation.mutate()} disabled={seedMutation.isPending} variant="outline" data-testid="button-seed-setup-types">
+              {seedMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Database className="w-4 h-4 mr-2" />}
+              Add Setup Types
             </Button>
           )}
         </div>

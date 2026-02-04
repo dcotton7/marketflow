@@ -86,38 +86,59 @@ const DEFAULT_SETTINGS = [
 export async function seedTnnData() {
   // Check if already seeded
   const existingFactors = await db.select().from(tnnFactors).limit(1);
-  if (existingFactors.length > 0) {
+  
+  // If no factors exist, do full seed
+  if (existingFactors.length === 0) {
+    console.log("Seeding TNN data...");
+
+    // Seed Discipline Factors
+    for (const factor of DISCIPLINE_FACTORS) {
+      await db.insert(tnnFactors).values({
+        factorType: "discipline",
+        factorKey: factor.factorKey,
+        factorName: factor.factorName,
+        description: factor.description,
+        category: factor.factorKey,
+        baseWeight: factor.baseWeight,
+        aiAdjustedWeight: factor.baseWeight,
+        order: factor.order,
+      });
+    }
+
+    // Seed Setup Type Factors
+    for (const factor of SETUP_TYPE_FACTORS) {
+      await db.insert(tnnFactors).values({
+        factorType: "setup_type",
+        factorKey: factor.factorKey,
+        factorName: factor.factorName,
+        description: factor.description,
+        baseWeight: factor.baseWeight,
+        aiAdjustedWeight: factor.baseWeight,
+        order: factor.order,
+      });
+    }
+  } else {
+    // Check if setup_type factors are missing and seed them
+    const existingSetupTypes = await db.select().from(tnnFactors).where(eq(tnnFactors.factorType, "setup_type")).limit(1);
+    if (existingSetupTypes.length === 0) {
+      console.log("Adding missing setup_type factors...");
+      for (const factor of SETUP_TYPE_FACTORS) {
+        await db.insert(tnnFactors).values({
+          factorType: "setup_type",
+          factorKey: factor.factorKey,
+          factorName: factor.factorName,
+          description: factor.description,
+          baseWeight: factor.baseWeight,
+          aiAdjustedWeight: factor.baseWeight,
+          order: factor.order,
+        });
+      }
+      console.log("Setup type factors added successfully!");
+      return { seeded: true, message: "Added " + SETUP_TYPE_FACTORS.length + " missing setup type factors" };
+    }
+    
     console.log("TNN data already seeded, skipping...");
     return { seeded: false, message: "Already seeded" };
-  }
-
-  console.log("Seeding TNN data...");
-
-  // Seed Discipline Factors
-  for (const factor of DISCIPLINE_FACTORS) {
-    await db.insert(tnnFactors).values({
-      factorType: "discipline",
-      factorKey: factor.factorKey,
-      factorName: factor.factorName,
-      description: factor.description,
-      category: factor.factorKey,
-      baseWeight: factor.baseWeight,
-      aiAdjustedWeight: factor.baseWeight,
-      order: factor.order,
-    });
-  }
-
-  // Seed Setup Type Factors
-  for (const factor of SETUP_TYPE_FACTORS) {
-    await db.insert(tnnFactors).values({
-      factorType: "setup_type",
-      factorKey: factor.factorKey,
-      factorName: factor.factorName,
-      description: factor.description,
-      baseWeight: factor.baseWeight,
-      aiAdjustedWeight: factor.baseWeight,
-      order: factor.order,
-    });
   }
 
   // Seed Baseline Modifiers
