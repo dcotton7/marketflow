@@ -4289,13 +4289,6 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         }
         
         for (const batchId of batchIds) {
-          const orphanCount = await tx.select({ count: sql<number>`count(*)` })
-            .from(sentinelImportedTrades)
-            .where(and(
-              eq(sentinelImportedTrades.batchId, batchId),
-              eq(sentinelImportedTrades.isOrphanSell, true)
-            ));
-          
           const pendingCount = await tx.select({ count: sql<number>`count(*)` })
             .from(sentinelImportedTrades)
             .where(and(
@@ -4304,10 +4297,11 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               eq(sentinelImportedTrades.orphanStatus, 'pending')
             ));
           
+          const pendingOrphans = Number(pendingCount[0]?.count || 0);
           await tx.update(sentinelImportBatches)
             .set({ 
-              orphanSellsCount: orphanCount[0]?.count || 0,
-              status: pendingCount[0]?.count > 0 ? 'NEEDS_REVIEW' : 'completed'
+              orphanSellsCount: pendingOrphans,
+              status: pendingOrphans > 0 ? 'NEEDS_REVIEW' : 'completed'
             })
             .where(eq(sentinelImportBatches.batchId, batchId));
         }
@@ -4472,6 +4466,33 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           .where(and(
             eq(sentinelImportedTrades.userId, userId),
             inArray(sentinelImportedTrades.tradeId, batch)
+          ));
+      }
+      
+      // Third: Update batch statuses based on new orphan counts
+      const userBatches = await db!.select({ batchId: sentinelImportBatches.batchId })
+        .from(sentinelImportBatches)
+        .where(eq(sentinelImportBatches.userId, userId));
+      
+      for (const { batchId } of userBatches) {
+        const [orphanCount] = await db!.select({ count: sql<number>`count(*)` })
+          .from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.isOrphanSell, true),
+            eq(sentinelImportedTrades.orphanStatus, 'pending')
+          ));
+        
+        const pendingOrphans = Number(orphanCount?.count || 0);
+        await db!.update(sentinelImportBatches)
+          .set({ 
+            status: pendingOrphans > 0 ? 'NEEDS_REVIEW' : 'completed',
+            orphanSellsCount: pendingOrphans
+          })
+          .where(and(
+            eq(sentinelImportBatches.userId, userId),
+            eq(sentinelImportBatches.batchId, batchId)
           ));
       }
       
