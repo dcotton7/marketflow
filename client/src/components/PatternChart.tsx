@@ -141,8 +141,10 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     
     let cancelled = false;
     
-    const fetchWithRetry = async (retries = 3, delay = 1000) => {
-      for (let attempt = 0; attempt < retries; attempt++) {
+    const fetchWithRetry = async () => {
+      const delays = [2000, 4000, 6000, 8000, 10000]; // 5 attempts with increasing delays
+      
+      for (let attempt = 0; attempt < delays.length; attempt++) {
         if (cancelled) return;
         
         try {
@@ -151,9 +153,17 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
           // Parse JSON even on error responses to get better messages
           const data = await res.json().catch(() => ({}));
           
+          // Rate limit - keep retrying silently
+          if (res.status === 429) {
+            if (attempt < delays.length - 1) {
+              await new Promise(r => setTimeout(r, delays[attempt]));
+              continue;
+            }
+          }
+          
           if (!res.ok) {
             const errorMsg = data.message || data.error || `HTTP ${res.status}`;
-            throw new Error(res.status === 429 ? 'Rate limited - try again' : errorMsg);
+            throw new Error(errorMsg);
           }
           
           if (cancelled) return;
@@ -172,13 +182,20 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
             throw new Error('No chart data available');
           }
         } catch (err: any) {
-          const isLastAttempt = attempt >= retries - 1;
+          const isRateLimit = err?.message?.toLowerCase().includes('rate');
+          const isLastAttempt = attempt >= delays.length - 1;
+          
+          // For rate limits, keep trying silently until last attempt
+          if (isRateLimit && !isLastAttempt) {
+            await new Promise(r => setTimeout(r, delays[attempt]));
+            continue;
+          }
+          
           if (!isLastAttempt) {
-            await new Promise(r => setTimeout(r, delay * (attempt + 1)));
+            await new Promise(r => setTimeout(r, delays[attempt]));
           } else {
             if (!cancelled) {
-              const message = err?.message || 'Failed to fetch data';
-              setError(message.includes('Rate limit') ? 'Rate limited - try again' : message);
+              setError(err?.message || 'Failed to fetch data');
               setLoading(false);
             }
           }
