@@ -4238,13 +4238,23 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             runningPosition += qty;
           } else if (trade.direction === 'SELL') {
             // Check if this sell has sufficient position (with epsilon tolerance)
-            if (runningPosition < qty - EPSILON && !shortSalesAllowed) {
-              trueOrphanIds.add(trade.tradeId);
-            } else {
-              // This sell has matching buys - it's NOT an orphan
+            if (runningPosition >= qty - EPSILON) {
+              // Full coverage - not an orphan
               noLongerOrphanIds.add(trade.tradeId);
+              runningPosition = Math.max(0, runningPosition - qty);
+            } else if (shortSalesAllowed) {
+              // Short sale allowed
+              noLongerOrphanIds.add(trade.tradeId);
+              runningPosition -= qty;
+            } else if (runningPosition > EPSILON) {
+              // PARTIAL orphan: we have SOME shares but not enough for entire sell
+              // This can still close out remaining position, so NOT a full orphan
+              noLongerOrphanIds.add(trade.tradeId);
+              runningPosition = 0;
+            } else {
+              // True orphan - position is already 0 or negative
+              trueOrphanIds.add(trade.tradeId);
             }
-            runningPosition = Math.max(0, runningPosition - qty);
           }
         }
       }
@@ -4430,7 +4440,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             } else {
               // SELL - use epsilon tolerance for floating point comparison
               if (position >= qty - EPSILON) {
-                // Have enough shares to cover
+                // Have enough shares to cover entire sell
                 position = Math.max(0, position - qty);
                 if (wasOrphan) {
                   clearedCount++;
@@ -4441,8 +4451,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 if (wasOrphan) {
                   clearedCount++;
                 }
+              } else if (position > EPSILON) {
+                // PARTIAL orphan: we have SOME shares but not enough for entire sell
+                // Match what we can (position goes to 0), excess is orphan portion
+                // Don't mark as orphan since it partially closes position
+                // The promote-to-cards FIFO logic will handle this correctly
+                position = 0;
+                if (wasOrphan) {
+                  clearedCount++;
+                }
               } else {
-                // True orphan - selling more than we have
+                // True orphan - position is already 0 or negative, selling with nothing to match
                 trueOrphanIds.add(trade.tradeId);
                 if (!wasOrphan) {
                   newOrphanCount++;
