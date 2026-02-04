@@ -582,6 +582,17 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
   
   const isLongDirection = trade.direction === "long";
   
+  // Calculate breakeven - use FIFO avgCostBasis if available, otherwise fall back to entry_price
+  // For trades with lot entries: use weighted average cost from FIFO
+  // For trades without lot entries: use entry_price (which is the broker's avg cost at import time)
+  let breakEvenData: { shares: number; price: number } | undefined = undefined;
+  if (fifoData && fifoData.totalRemaining > 0 && fifoData.avgCostBasis > 0) {
+    breakEvenData = { shares: fifoData.totalRemaining, price: fifoData.avgCostBasis };
+  } else if (!fifoData && trade.positionSize && trade.positionSize > 0 && trade.entryPrice > 0) {
+    // Fallback for trades without lot entries: use entry_price as breakeven
+    breakEvenData = { shares: trade.positionSize, price: trade.entryPrice };
+  }
+  
   // Open PnL (unrealized) - per-lot calculation: sum of (Current Price - Lot Cost) × Lot Remaining for each lot
   let openPnL: number | undefined = undefined;
   if (trade.status !== "closed" && fifoData && fifoData.totalRemaining > 0) {
@@ -689,7 +700,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
             status={isActive ? "active" : "considering"}
             openPnL={openPnL}
             profitClosed={profitClosed ?? undefined}
-            breakEven={fifoData && fifoData.totalRemaining > 0 ? { shares: fifoData.totalRemaining, price: fifoData.avgCostBasis } : undefined}
+            breakEven={breakEvenData}
           />
           {trade.latestEvaluation && (
             <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
