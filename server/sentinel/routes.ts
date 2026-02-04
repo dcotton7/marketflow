@@ -3550,7 +3550,26 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         .where(eq(sentinelImportBatches.userId, userId))
         .orderBy(sentinelImportBatches.createdAt);
       
-      res.json(batches.reverse());
+      // Dynamically calculate pending orphan count for each batch
+      const batchesWithOrphanCounts = await Promise.all(
+        batches.map(async (batch) => {
+          const pendingOrphans = await db!.select({ count: sql<number>`count(*)` })
+            .from(sentinelImportedTrades)
+            .where(and(
+              eq(sentinelImportedTrades.userId, userId),
+              eq(sentinelImportedTrades.batchId, batch.batchId),
+              eq(sentinelImportedTrades.isOrphanSell, true),
+              eq(sentinelImportedTrades.orphanStatus, 'pending')
+            ));
+          
+          return {
+            ...batch,
+            orphanSellsCount: Number(pendingOrphans[0]?.count || 0),
+          };
+        })
+      );
+      
+      res.json(batchesWithOrphanCounts.reverse());
     } catch (error) {
       console.error("Get batches error:", error);
       res.status(500).json({ error: "Failed to fetch import history" });
@@ -3986,7 +4005,29 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         ))
         .orderBy(sentinelImportedTrades.tradeDate);
       
-      res.json(orphans);
+      // Get all BUY trades from the batch to provide last buy dates for each ticker
+      const allBatchTrades = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId),
+          or(
+            eq(sentinelImportedTrades.direction, 'BUY'),
+            eq(sentinelImportedTrades.direction, 'buy')
+          )
+        ))
+        .orderBy(sentinelImportedTrades.tradeDate);
+      
+      // Build a map of ticker:account -> last buy date
+      const lastBuyDates: Record<string, string> = {};
+      for (const trade of allBatchTrades) {
+        const key = `${trade.ticker}:${trade.accountName || 'default'}`;
+        // Keep updating - last one wins since sorted by date ascending
+        if (trade.tradeDate) {
+          lastBuyDates[key] = trade.tradeDate.toString().split('T')[0];
+        }
+      }
+      
+      res.json({ orphans, lastBuyDates });
     } catch (error) {
       console.error("Get orphan sells error:", error);
       res.status(500).json({ error: "Failed to fetch orphan sells" });
@@ -4028,9 +4069,11 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
       
       if (action === 'mute') {
+        // Toggle mute: if already muted, unmute back to pending; otherwise mute
+        const newStatus = trade.orphanStatus === 'muted' ? 'pending' : 'muted';
         const [updated] = await db!.update(sentinelImportedTrades)
           .set({
-            orphanStatus: 'muted',
+            orphanStatus: newStatus,
           })
           .where(and(
             eq(sentinelImportedTrades.tradeId, tradeId),
@@ -4038,7 +4081,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           ))
           .returning();
         
-        return res.json({ success: true, action: 'muted', trade: updated });
+        return res.json({ success: true, action: newStatus === 'muted' ? 'muted' : 'unmuted', trade: updated });
       }
       
       if (action === 'resolve') {

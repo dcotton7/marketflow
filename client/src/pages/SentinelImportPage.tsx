@@ -117,7 +117,7 @@ export default function SentinelImportPage() {
     queryKey: ['/api/sentinel/import/trades'],
   });
   
-  const { data: orphanSells, isLoading: orphansLoading, refetch: refetchOrphans } = useQuery<ImportedTrade[]>({
+  const { data: orphanData, isLoading: orphansLoading, refetch: refetchOrphans } = useQuery<{ orphans: ImportedTrade[]; lastBuyDates: Record<string, string> }>({
     queryKey: ['/api/sentinel/import/batches', selectedOrphanBatchId, 'orphans'],
     enabled: !!selectedOrphanBatchId,
     queryFn: async () => {
@@ -126,6 +126,13 @@ export default function SentinelImportPage() {
       return res.json();
     }
   });
+  
+  const orphanSells = orphanData?.orphans;
+  const lastBuyDates = orphanData?.lastBuyDates || {};
+
+  // Count total pending orphans across all batches that need review
+  const totalPendingOrphans = batches?.reduce((sum, b) => sum + (b.orphanSellsCount || 0), 0) || 0;
+  const hasPendingOrphans = totalPendingOrphans > 0;
 
   const previewMutation = useMutation({
     mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string }) => {
@@ -287,6 +294,10 @@ export default function SentinelImportPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
       if (data.action === 'muted') {
         toast({ title: "Trade Muted", description: "Hidden from dashboard until cost basis is set" });
+      } else if (data.action === 'unmuted') {
+        toast({ title: "Trade Unmuted", description: "Trade is back in pending state" });
+      } else if (data.action === 'resolved') {
+        toast({ title: "Cost Basis Saved", description: "Trade is ready to be promoted" });
       }
     },
     onError: (error: any) => {
@@ -717,20 +728,27 @@ export default function SentinelImportPage() {
                   <CardDescription>Previous CSV imports and their status</CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button 
-                    variant="default" 
-                    size="sm"
-                    onClick={() => promoteToCardsMutation.mutate()}
-                    disabled={!allTrades || allTrades.length === 0 || promoteToCardsMutation.isPending}
-                    data-testid="button-promote-to-cards"
-                  >
-                    {promoteToCardsMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <ArrowUpRight className="h-4 w-4 mr-2" />
+                  <div className="flex items-center gap-2">
+                    {hasPendingOrphans && (
+                      <span className="text-xs text-yellow-500">
+                        {totalPendingOrphans} orphan{totalPendingOrphans > 1 ? 's' : ''} need review
+                      </span>
                     )}
-                    Promote to Trading Cards
-                  </Button>
+                    <Button 
+                      variant="default" 
+                      size="sm"
+                      onClick={() => promoteToCardsMutation.mutate()}
+                      disabled={!allTrades || allTrades.length === 0 || promoteToCardsMutation.isPending || hasPendingOrphans}
+                      data-testid="button-promote-to-cards"
+                    >
+                      {promoteToCardsMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <ArrowUpRight className="h-4 w-4 mr-2" />
+                      )}
+                      Promote to Trading Cards
+                    </Button>
+                  </div>
                   <Button 
                     variant="destructive" 
                     size="sm"
@@ -1042,28 +1060,33 @@ export default function SentinelImportPage() {
             </DialogDescription>
           </DialogHeader>
           
-          {orphanSells && orphanSells.filter(o => o.orphanStatus === 'pending').length > 0 && (
-            <div className="flex items-center justify-end gap-2 py-2 border-b">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => bulkOrphanMutation.mutate('mute_all')}
-                disabled={bulkOrphanMutation.isPending}
-                data-testid="button-mute-all-orphans"
-              >
-                <VolumeX className="h-4 w-4 mr-1" />
-                Mute All
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => bulkOrphanMutation.mutate('delete_all')}
-                disabled={bulkOrphanMutation.isPending}
-                data-testid="button-delete-all-orphans"
-              >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete All
-              </Button>
+          {orphanSells && orphanSells.filter(o => o.orphanStatus !== 'resolved').length > 0 && (
+            <div className="flex items-center justify-between py-2 border-b">
+              <div className="text-sm text-muted-foreground">
+                {orphanSells.filter(o => o.orphanStatus === 'pending').length} pending, {orphanSells.filter(o => o.orphanStatus === 'muted').length} muted
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => bulkOrphanMutation.mutate('mute_all')}
+                  disabled={bulkOrphanMutation.isPending || orphanSells.filter(o => o.orphanStatus === 'pending').length === 0}
+                  data-testid="button-mute-all-orphans"
+                >
+                  <VolumeX className="h-4 w-4 mr-1" />
+                  Mute All Pending
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => bulkOrphanMutation.mutate('delete_all')}
+                  disabled={bulkOrphanMutation.isPending || orphanSells.filter(o => o.orphanStatus === 'pending').length === 0}
+                  data-testid="button-delete-all-orphans"
+                >
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete All Pending
+                </Button>
+              </div>
             </div>
           )}
           
@@ -1074,8 +1097,14 @@ export default function SentinelImportPage() {
               </div>
             ) : orphanSells && orphanSells.length > 0 ? (
               <div className="space-y-4">
-                {orphanSells.filter(o => o.orphanStatus === 'pending').map((orphan) => (
-                  <Card key={orphan.tradeId} className="border-yellow-500/30">
+                {orphanSells.filter(o => o.orphanStatus !== 'resolved').map((orphan) => {
+                  const isMuted = orphan.orphanStatus === 'muted';
+                  // Look up the last buy date for this ticker:account combo from batch trades
+                  const lookupKey = `${orphan.ticker}:${orphan.accountName || 'default'}`;
+                  const lastBuyDate = lastBuyDates[lookupKey];
+                  
+                  return (
+                  <Card key={orphan.tradeId} className={`${isMuted ? 'border-muted opacity-60' : 'border-yellow-500/30'}`}>
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
@@ -1087,18 +1116,30 @@ export default function SentinelImportPage() {
                           <span className="text-muted-foreground">
                             {orphan.quantity.toFixed(3)} shares @ ${orphan.price.toFixed(2)}
                           </span>
+                          {isMuted && (
+                            <Badge variant="outline" className="bg-muted text-muted-foreground">
+                              <VolumeX className="h-3 w-3 mr-1" />
+                              Muted
+                            </Badge>
+                          )}
                         </div>
                         <div className="text-sm text-muted-foreground">
                           Sold on {formatDate(orphan.tradeDate)}
                         </div>
                       </div>
                       
+                      {lastBuyDate && (
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Defaulting to last purchase date from file: {lastBuyDate}
+                        </p>
+                      )}
+                      
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div className="space-y-2">
                           <Label>Original Purchase Date</Label>
                           <Input
                             type="date"
-                            value={orphanResolutions[orphan.tradeId]?.openDate || ''}
+                            value={orphanResolutions[orphan.tradeId]?.openDate || lastBuyDate || ''}
                             onChange={(e) => setOrphanResolutions(prev => ({
                               ...prev,
                               [orphan.tradeId]: { ...prev[orphan.tradeId], openDate: e.target.value }
@@ -1128,30 +1169,32 @@ export default function SentinelImportPage() {
                       
                       <div className="flex justify-end gap-2">
                         <Button
-                          variant="ghost"
+                          variant={isMuted ? "secondary" : "outline"}
                           size="sm"
                           onClick={() => handleResolveOrphan(orphan.tradeId, 'mute')}
                           disabled={resolveOrphanMutation.isPending}
                           data-testid={`button-mute-orphan-${orphan.tradeId}`}
                         >
-                          <VolumeX className="h-4 w-4 mr-1" />
-                          Mute
+                          {isMuted ? (
+                            <><Volume2 className="h-4 w-4 mr-1" /> Unmute</>
+                          ) : (
+                            <><VolumeX className="h-4 w-4 mr-1" /> Mute</>
+                          )}
                         </Button>
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="icon"
                           className="text-destructive"
                           onClick={() => handleResolveOrphan(orphan.tradeId, 'delete')}
                           disabled={resolveOrphanMutation.isPending}
                           data-testid={`button-delete-orphan-${orphan.tradeId}`}
                         >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Delete
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                         <Button
                           size="sm"
                           onClick={() => handleResolveOrphan(orphan.tradeId, 'resolve')}
-                          disabled={resolveOrphanMutation.isPending}
+                          disabled={resolveOrphanMutation.isPending || isMuted}
                           data-testid={`button-resolve-orphan-${orphan.tradeId}`}
                         >
                           {resolveOrphanMutation.isPending ? (
@@ -1163,7 +1206,7 @@ export default function SentinelImportPage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                )})}
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
