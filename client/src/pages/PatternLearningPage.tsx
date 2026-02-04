@@ -585,15 +585,15 @@ export default function PatternLearningPage() {
                   <div className="col-span-3">
                     <Label className="text-xs text-muted-foreground mb-1 block">Formation Stage</Label>
                     <Select 
-                      value={selectedStageId?.toString() || ""} 
-                      onValueChange={(v) => setSelectedStageId(v ? parseInt(v) : null)}
+                      value={selectedStageId?.toString() || "none"} 
+                      onValueChange={(v) => setSelectedStageId(v && v !== "none" ? parseInt(v) : null)}
                       disabled={!selectedMasterSetupId}
                     >
                       <SelectTrigger data-testid="select-stage">
                         <SelectValue placeholder="Select stage..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Not specified</SelectItem>
+                        <SelectItem value="none">Not specified</SelectItem>
                         {stages.map(stage => (
                           <SelectItem key={stage.id} value={stage.id.toString()}>
                             {stage.stageOrder}. {stage.stageType.replace(/_/g, ' ')}

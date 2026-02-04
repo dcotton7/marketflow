@@ -766,7 +766,7 @@ Respond with ONLY a JSON object in this exact format:
     const totalScore = parsed.totalScore || 0;
     let humanRating = 1;
     for (const [rating, range] of Object.entries(RATING_SCORE_RANGES)) {
-      const [min, max] = range as [number, number];
+      const { min, max } = range as { min: number; max: number; midpoint: number };
       if (totalScore >= min && totalScore <= max) {
         humanRating = parseInt(rating);
         break;
