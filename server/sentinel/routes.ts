@@ -4267,7 +4267,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           clearedCount = cleared.length;
         }
         
-        // Mark true orphans (only if not already marked)
+        // Mark ALL true orphans as pending (reset any muted/resolved back to pending)
         if (trueOrphanIds.size > 0) {
           const marked = await tx.update(sentinelImportedTrades)
             .set({ 
@@ -4276,11 +4276,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             })
             .where(and(
               eq(sentinelImportedTrades.userId, userId),
-              inArray(sentinelImportedTrades.tradeId, Array.from(trueOrphanIds)),
-              or(
-                eq(sentinelImportedTrades.isOrphanSell, false),
-                isNull(sentinelImportedTrades.isOrphanSell)
-              )
+              inArray(sentinelImportedTrades.tradeId, Array.from(trueOrphanIds))
             ))
             .returning();
           newOrphanCount = marked.length;
