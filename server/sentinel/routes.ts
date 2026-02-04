@@ -3453,16 +3453,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           
           // Calculate running position and identify orphans for this account
           let runningPosition = 0;
+          const EPSILON = 0.0001; // Small tolerance for floating point comparison
           
           for (const trade of allTrades) {
             if (trade.direction === 'BUY') {
               runningPosition += trade.quantity;
             } else if (trade.direction === 'SELL') {
-              // For current import sells, check if position is sufficient
-              if (trade.isCurrentImport && runningPosition < trade.quantity && !shortSalesAllowed) {
+              // For current import sells, check if position is sufficient (with epsilon tolerance)
+              if (trade.isCurrentImport && runningPosition < trade.quantity - EPSILON && !shortSalesAllowed) {
                 orphanSellTradeIds.add(trade.id);
               }
-              runningPosition -= trade.quantity;
+              runningPosition = Math.max(0, runningPosition - trade.quantity);
             }
           }
           }
@@ -4225,6 +4226,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         const shortSalesAllowed = accountShortAllowed.get(tradeAccountKey) ?? false;
         
         let runningPosition = 0;
+        const EPSILON = 0.0001; // Small tolerance for floating point comparison
         
         for (const trade of trades) {
           const qty = Number(trade.quantity) || 0;
@@ -4232,14 +4234,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           if (trade.direction === 'BUY') {
             runningPosition += qty;
           } else if (trade.direction === 'SELL') {
-            // Check if this sell has sufficient position
-            if (runningPosition < qty && !shortSalesAllowed) {
+            // Check if this sell has sufficient position (with epsilon tolerance)
+            if (runningPosition < qty - EPSILON && !shortSalesAllowed) {
               trueOrphanIds.add(trade.tradeId);
             } else {
               // This sell has matching buys - it's NOT an orphan
               noLongerOrphanIds.add(trade.tradeId);
             }
-            runningPosition -= qty;
+            runningPosition = Math.max(0, runningPosition - qty);
           }
         }
       }
@@ -4420,6 +4422,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           
           // FIFO position tracking
           let position = 0;
+          const EPSILON = 0.0001; // Small tolerance for floating point comparison
           
           for (const trade of trades) {
             const qty = Number(trade.quantity) || 0;
@@ -4432,14 +4435,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 clearedCount++;
               }
             } else {
-              // SELL
-              if (position >= qty) {
+              // SELL - use epsilon tolerance for floating point comparison
+              if (position >= qty - EPSILON) {
                 // Have enough shares to cover
-                position -= qty;
+                position = Math.max(0, position - qty);
                 if (wasOrphan) {
                   clearedCount++;
                 }
-              } else if (shortSalesAllowed && position <= 0) {
+              } else if (shortSalesAllowed && position <= EPSILON) {
                 // Short sale allowed
                 position -= qty;
                 if (wasOrphan) {
