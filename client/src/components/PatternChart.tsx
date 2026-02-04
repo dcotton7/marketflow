@@ -139,34 +139,26 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     const period = timeframe === 'D' || timeframe === 'W' ? '1y' : '5d';
     const interval = timeframe === 'W' ? '1wk' : timeframe === 'D' ? '1d' : '1h';
     
-    console.log(`[PatternChart] Fetching ${symbol} with period=${period}, interval=${interval}`);
-    fetch(`/api/stock/${symbol}/history?period=${period}&interval=${interval}`)
+    fetch(`/api/stocks/${symbol}/history?period=${period}&interval=${interval}`)
       .then(res => {
-        console.log(`[PatternChart] Response status: ${res.status}, ok: ${res.ok}`);
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
         return res.json();
       })
       .then(data => {
-        console.log(`[PatternChart] Data received:`, typeof data, Array.isArray(data) ? `array len=${data.length}` : data);
         if (data.error || data.message) {
-          console.log(`[PatternChart] Error in response:`, data.error || data.message);
           setError(data.error || data.message);
         } else if (Array.isArray(data) && data.length > 0) {
-          console.log(`[PatternChart] Setting ${data.length} bars, first:`, data[0]);
           setStockData(data);
         } else if (data.data && Array.isArray(data.data)) {
-          console.log(`[PatternChart] Setting ${data.data.length} bars from data.data`);
           setStockData(data.data);
         } else {
-          console.log(`[PatternChart] No valid data structure found`);
           setError('No chart data available');
         }
         setLoading(false);
       })
-      .catch(err => {
-        console.error(`[PatternChart] Fetch error:`, err);
+      .catch(() => {
         setError('Failed to fetch data');
         setLoading(false);
       });
