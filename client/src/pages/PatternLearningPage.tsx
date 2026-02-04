@@ -553,7 +553,7 @@ export default function PatternLearningPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-12 gap-4 h-[calc(100vh-280px)]">
+        <div className="grid grid-cols-12 gap-4" style={{ height: '560px' }}>
           <div className="col-span-7">
             <Card className="h-full flex flex-col">
               <CardHeader className="pb-2">
@@ -635,13 +635,16 @@ export default function PatternLearningPage() {
                       </Button>
                     </div>
                     
-                    <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4" style={{ height: '380px' }}>
+                    <div className="bg-card rounded-lg border overflow-hidden mb-2" style={{ height: '280px' }}>
                       <iframe
                         src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=${chartTimeframe}&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=1&allow_symbol_change=1&details=0&studies=${getWidgetStudies()}&show_popup_button=1`}
                         className="w-full h-full border-0"
                         title={`Chart for ${currentMatch.ticker}`}
                       />
                     </div>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Note: Indicators (VWAP, SMA, etc.) are visible when you click "Open in TradingView" above.
+                    </p>
                     
                     <div className="space-y-3">
                       <div>
@@ -682,7 +685,7 @@ export default function PatternLearningPage() {
           </div>
 
           <div className="col-span-5">
-            <Card className="flex flex-col" style={{ maxHeight: '600px' }}>
+            <Card className="flex flex-col" style={{ height: '560px' }}>
               <CardHeader className="pb-2 flex-shrink-0">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Brain className="h-4 w-4" />
@@ -693,7 +696,7 @@ export default function PatternLearningPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col overflow-hidden min-h-0">
-                <ScrollArea className="flex-1 pr-4 overflow-y-auto" style={{ height: '560px' }}>
+                <ScrollArea className="flex-1 pr-4 overflow-y-auto">
                   <div className="space-y-3">
                     {chatMessages.map((msg, idx) => (
                       <div 
