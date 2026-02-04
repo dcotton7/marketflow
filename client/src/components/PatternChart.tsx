@@ -127,9 +127,11 @@ function parseIndicator(indicator: string): { type: 'sma' | 'ema' | 'vwap' | 'un
 export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D', chartPeriod }: PatternChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const retryCountRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stockData, setStockData] = useState<StockBar[]>([]);
+  const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
     if (!symbol) return;
@@ -223,18 +225,23 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     // Wait for container to have dimensions
     const containerWidth = containerRef.current.clientWidth;
     if (containerWidth <= 0) {
-      // Retry after a small delay
+      // Limit retries to prevent infinite loops (max 5 retries = 500ms total)
+      if (retryCountRef.current >= 5) {
+        console.warn('PatternChart: Container width still 0 after max retries');
+        return;
+      }
+      retryCountRef.current++;
       const timer = setTimeout(() => {
-        if (containerRef.current) {
-          const newWidth = containerRef.current.clientWidth;
-          if (newWidth > 0 && chartRef.current === null) {
-            // Trigger re-render
-            setStockData([...stockData]);
-          }
+        if (containerRef.current && containerRef.current.clientWidth > 0 && chartRef.current === null) {
+          retryCountRef.current = 0; // Reset on success
+          setChartReady(prev => !prev); // Toggle to trigger re-render
         }
       }, 100);
       return () => clearTimeout(timer);
     }
+    
+    // Reset retry counter when chart renders successfully
+    retryCountRef.current = 0;
 
     if (chartRef.current) {
       chartRef.current.remove();
@@ -296,29 +303,29 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
 
     candleSeries.setData(candleData);
 
-    // TEMPORARILY COMMENTED OUT TO DEBUG CANDLESTICK RENDERING
-    // for (const indicator of indicators) {
-    //   const parsed = parseIndicator(indicator);
-    //   let lineData: LineData[] = [];
-    //   
-    //   if (parsed.type === 'vwap') {
-    //     lineData = calculateVWAP(stockData);
-    //   } else if (parsed.type === 'sma' && parsed.period > 0) {
-    //     lineData = calculateSMA(stockData, parsed.period);
-    //   } else if (parsed.type === 'ema' && parsed.period > 0) {
-    //     lineData = calculateEMA(stockData, parsed.period);
-    //   }
-    //   
-    //   if (lineData.length > 0) {
-    //     const series = chart.addSeries(LineSeries, {
-    //       color: getIndicatorColor(indicator),
-    //       lineWidth: 2,
-    //       priceLineVisible: false,
-    //       lastValueVisible: false,
-    //     });
-    //     series.setData(lineData);
-    //   }
-    // }
+    // Add indicator overlays
+    for (const indicator of indicators) {
+      const parsed = parseIndicator(indicator);
+      let lineData: LineData[] = [];
+      
+      if (parsed.type === 'vwap') {
+        lineData = calculateVWAP(stockData);
+      } else if (parsed.type === 'sma' && parsed.period > 0) {
+        lineData = calculateSMA(stockData, parsed.period);
+      } else if (parsed.type === 'ema' && parsed.period > 0) {
+        lineData = calculateEMA(stockData, parsed.period);
+      }
+      
+      if (lineData.length > 0) {
+        const series = chart.addSeries(LineSeries, {
+          color: getIndicatorColor(indicator),
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        series.setData(lineData);
+      }
+    }
 
     chart.timeScale().fitContent();
 
@@ -337,7 +344,7 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
         chartRef.current = null;
       }
     };
-  }, [stockData, indicators, height]);
+  }, [stockData, indicators, height, chartReady]);
 
   if (loading) {
     return (
