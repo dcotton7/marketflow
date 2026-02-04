@@ -565,3 +565,110 @@ export const messages = pgTable("messages", {
 
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+
+// === PATTERN LEARNING TABLES ===
+
+// Pattern Rules - Formula definitions for pattern detection
+export const patternRules = pgTable("pattern_rules", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  patternType: text("pattern_type").notNull(), // 'breakout_pullback', 'cup_and_handle', 'vcp', etc.
+  timeframe: text("timeframe").notNull(), // 'intraday', 'daily', 'weekly', 'monthly'
+  name: text("name").notNull(), // User-friendly name
+  description: text("description"),
+  formulaParams: jsonb("formula_params").$type<{
+    breakoutMinPct?: number; // BMIN - min % above resistance
+    breakoutMaxPct?: number;
+    volumeRatio?: number; // Multiple of avg volume
+    pullbackMinDepth?: number; // Min pullback as % of breakout move
+    pullbackMaxDepth?: number;
+    maDistance?: number; // Max % from MA for touch
+    maPeriod?: number; // Which MA to use (20, 21, 50, etc)
+    maType?: string; // 'sma' | 'ema'
+    entryConfirmPct?: number; // % above pullback low for entry
+    invalidationPct?: number; // % below MA for invalidation
+    [key: string]: number | string | undefined;
+  }>().default({}),
+  version: integer("version").default(1),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Pattern Ratings - User feedback on pattern matches
+export const patternRatings = pgTable("pattern_ratings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ruleId: integer("rule_id").notNull(), // Links to pattern_rules
+  ticker: text("ticker").notNull(),
+  matchDate: text("match_date").notNull(), // Date the pattern was detected
+  rating: integer("rating").notNull(), // 1-4 scale
+  chartConditions: jsonb("chart_conditions").$type<{
+    breakoutPct?: number;
+    volumeRatio?: number;
+    pullbackDepth?: number;
+    maDistance?: number;
+    [key: string]: number | string | undefined;
+  }>().default({}),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Setup Confidence - Aggregated stats per pattern+timeframe
+export const setupConfidence = pgTable("setup_confidence", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ruleId: integer("rule_id").notNull(), // Links to pattern_rules
+  patternsRated: integer("patterns_rated").default(0),
+  avgRating: doublePrecision("avg_rating").default(0),
+  rating1Count: integer("rating_1_count").default(0), // Useless
+  rating2Count: integer("rating_2_count").default(0), // Elements exist
+  rating3Count: integer("rating_3_count").default(0), // Formed but past
+  rating4Count: integer("rating_4_count").default(0), // Good setup
+  tradesTaken: integer("trades_taken").default(0),
+  tradesWon: integer("trades_won").default(0),
+  winRate: doublePrecision("win_rate").default(0),
+  avgReturn: doublePrecision("avg_return").default(0),
+  confidenceLevel: text("confidence_level").default("untested"), // 'untested', 'low', 'medium', 'high'
+  lastUpdated: timestamp("last_updated").defaultNow(),
+});
+
+// Pattern Learning Schemas
+export const insertPatternRuleSchema = createInsertSchema(patternRules).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPatternRatingSchema = createInsertSchema(patternRatings).omit({ id: true, createdAt: true });
+export const insertSetupConfidenceSchema = createInsertSchema(setupConfidence).omit({ id: true, lastUpdated: true });
+
+// Pattern Learning Types
+export type PatternRule = typeof patternRules.$inferSelect;
+export type PatternRating = typeof patternRatings.$inferSelect;
+export type SetupConfidence = typeof setupConfidence.$inferSelect;
+
+export type InsertPatternRule = z.infer<typeof insertPatternRuleSchema>;
+export type InsertPatternRating = z.infer<typeof insertPatternRatingSchema>;
+export type InsertSetupConfidence = z.infer<typeof insertSetupConfidenceSchema>;
+
+// Rating labels for UI
+export const RATING_LABELS = {
+  1: "Useless",
+  2: "Elements Exist", 
+  3: "Formed but Past",
+  4: "Good Setup"
+} as const;
+
+export const PATTERN_TYPES = [
+  { value: "breakout_pullback", label: "Breakout with Pullback" },
+  { value: "cup_and_handle", label: "Cup and Handle" },
+  { value: "vcp", label: "Volatility Contraction Pattern" },
+  { value: "high_tight_flag", label: "High Tight Flag" },
+  { value: "reclaim", label: "MA Reclaim" },
+  { value: "weekly_tight", label: "Weekly Tight" },
+  { value: "monthly_tight", label: "Monthly Tight" },
+  { value: "pullback", label: "Pullback to MA" },
+] as const;
+
+export const PATTERN_TIMEFRAMES = [
+  { value: "intraday", label: "Intraday" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+] as const;

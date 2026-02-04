@@ -6,6 +6,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } from "@shared/patternDetection";
 import { registerSentinelRoutes } from "./sentinel/routes";
+import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 
 // Dynamic import to handle ESM/CJS compatibility
 let yahooFinance: any = null;
@@ -1202,6 +1203,7 @@ export async function registerRoutes(
   }
 
   registerSentinelRoutes(app);
+  registerPatternLearningRoutes(app);
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
