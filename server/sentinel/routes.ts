@@ -4461,9 +4461,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
       
       // Update database: clear all, then mark true orphans
-      // First: Clear all orphan statuses for this user
+      // First: Clear all orphan flags for this user (both isOrphanSell and orphanStatus)
       await db!.update(sentinelImportedTrades)
-        .set({ orphanStatus: null })
+        .set({ isOrphanSell: false, orphanStatus: null })
         .where(eq(sentinelImportedTrades.userId, userId));
       
       // Second: Mark true orphans as pending (in batches to avoid query size limits)
@@ -4472,7 +4472,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       for (let i = 0; i < orphanArray.length; i += BATCH_SIZE) {
         const batch = orphanArray.slice(i, i + BATCH_SIZE);
         await db!.update(sentinelImportedTrades)
-          .set({ orphanStatus: 'pending' })
+          .set({ isOrphanSell: true, orphanStatus: 'pending' })
           .where(and(
             eq(sentinelImportedTrades.userId, userId),
             inArray(sentinelImportedTrades.tradeId, batch)
