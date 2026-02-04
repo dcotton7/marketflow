@@ -4146,5 +4146,161 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  // Re-detect orphans across all batches
+  // This fixes cases where imports were done out of order (e.g., 2026 sells before 2025 buys)
+  app.post("/api/sentinel/import/redetect-orphans", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Get all imported trades for this user
+      const allTrades = await db!.select().from(sentinelImportedTrades)
+        .where(eq(sentinelImportedTrades.userId, userId))
+        .orderBy(sentinelImportedTrades.tradeDate);
+      
+      if (allTrades.length === 0) {
+        return res.json({ success: true, message: "No imported trades to process" });
+      }
+      
+      // Get account settings to check short sale permissions
+      const accountSettings = await db!.select().from(sentinelAccountSettings)
+        .where(eq(sentinelAccountSettings.userId, userId));
+      
+      const accountShortAllowed = new Map<string, boolean>();
+      for (const setting of accountSettings) {
+        const key = `${setting.brokerId}:${setting.accountName || ''}`;
+        accountShortAllowed.set(key, setting.allowsShortSales);
+      }
+      
+      // Group trades by ticker + account
+      const groupedTrades = new Map<string, typeof allTrades>();
+      for (const trade of allTrades) {
+        const key = `${trade.ticker}:${trade.accountName || '__default__'}`;
+        if (!groupedTrades.has(key)) {
+          groupedTrades.set(key, []);
+        }
+        groupedTrades.get(key)!.push(trade);
+      }
+      
+      // Find true orphans by running FIFO across all trades
+      const trueOrphanIds = new Set<string>();
+      const noLongerOrphanIds = new Set<string>();
+      
+      for (const [key, trades] of groupedTrades) {
+        // Sort by date
+        trades.sort((a, b) => {
+          const dateA = a.tradeDate ? new Date(a.tradeDate).getTime() : 0;
+          const dateB = b.tradeDate ? new Date(b.tradeDate).getTime() : 0;
+          return dateA - dateB;
+        });
+        
+        // Check short sale settings for this account
+        const [ticker, accountKey] = key.split(':');
+        const brokerId = trades[0].brokerId;
+        const tradeAccountKey = `${brokerId}:${accountKey === '__default__' ? '' : accountKey}`;
+        const shortSalesAllowed = accountShortAllowed.get(tradeAccountKey) ?? false;
+        
+        let runningPosition = 0;
+        
+        for (const trade of trades) {
+          const qty = Number(trade.quantity) || 0;
+          
+          if (trade.direction === 'BUY') {
+            runningPosition += qty;
+          } else if (trade.direction === 'SELL') {
+            // Check if this sell has sufficient position
+            if (runningPosition < qty && !shortSalesAllowed) {
+              trueOrphanIds.add(trade.tradeId);
+            } else {
+              // This sell has matching buys - it's NOT an orphan
+              noLongerOrphanIds.add(trade.tradeId);
+            }
+            runningPosition -= qty;
+          }
+        }
+      }
+      
+      // Update database: clear orphan status for non-orphans, set for true orphans
+      let clearedCount = 0;
+      let newOrphanCount = 0;
+      
+      await db!.transaction(async (tx) => {
+        // Clear orphan status for trades that now have matching buys
+        if (noLongerOrphanIds.size > 0) {
+          const cleared = await tx.update(sentinelImportedTrades)
+            .set({ 
+              isOrphanSell: false, 
+              orphanStatus: null 
+            })
+            .where(and(
+              eq(sentinelImportedTrades.userId, userId),
+              inArray(sentinelImportedTrades.tradeId, Array.from(noLongerOrphanIds)),
+              eq(sentinelImportedTrades.isOrphanSell, true)
+            ))
+            .returning();
+          clearedCount = cleared.length;
+        }
+        
+        // Mark true orphans (only if not already marked)
+        if (trueOrphanIds.size > 0) {
+          const marked = await tx.update(sentinelImportedTrades)
+            .set({ 
+              isOrphanSell: true, 
+              orphanStatus: 'pending' 
+            })
+            .where(and(
+              eq(sentinelImportedTrades.userId, userId),
+              inArray(sentinelImportedTrades.tradeId, Array.from(trueOrphanIds)),
+              or(
+                eq(sentinelImportedTrades.isOrphanSell, false),
+                isNull(sentinelImportedTrades.isOrphanSell)
+              )
+            ))
+            .returning();
+          newOrphanCount = marked.length;
+        }
+        
+        // Update batch orphan counts
+        const batchIds = new Set<string>();
+        for (const trade of allTrades) {
+          batchIds.add(trade.batchId);
+        }
+        
+        for (const batchId of batchIds) {
+          const orphanCount = await tx.select({ count: sql<number>`count(*)` })
+            .from(sentinelImportedTrades)
+            .where(and(
+              eq(sentinelImportedTrades.batchId, batchId),
+              eq(sentinelImportedTrades.isOrphanSell, true)
+            ));
+          
+          const pendingCount = await tx.select({ count: sql<number>`count(*)` })
+            .from(sentinelImportedTrades)
+            .where(and(
+              eq(sentinelImportedTrades.batchId, batchId),
+              eq(sentinelImportedTrades.isOrphanSell, true),
+              eq(sentinelImportedTrades.orphanStatus, 'pending')
+            ));
+          
+          await tx.update(sentinelImportBatches)
+            .set({ 
+              orphanSellsCount: orphanCount[0]?.count || 0,
+              status: pendingCount[0]?.count > 0 ? 'NEEDS_REVIEW' : 'completed'
+            })
+            .where(eq(sentinelImportBatches.batchId, batchId));
+        }
+      });
+      
+      res.json({ 
+        success: true, 
+        orphansCleared: clearedCount,
+        newOrphansFound: newOrphanCount,
+        totalTrueOrphans: trueOrphanIds.size
+      });
+    } catch (error) {
+      console.error("Re-detect orphans error:", error);
+      res.status(500).json({ error: "Failed to re-detect orphans" });
+    }
+  });
+
   startMonitoring(60000);
 }

@@ -14,7 +14,7 @@ import {
   Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
   ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle,
-  VolumeX, Volume2
+  VolumeX, Volume2, RefreshCw
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -270,6 +270,33 @@ export default function SentinelImportPage() {
       toast({ 
         title: "Promotion Failed", 
         description: error?.message || "Could not promote trades. Please try again.",
+        variant: "destructive" 
+      });
+    },
+  });
+
+  const redetectOrphansMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/sentinel/import/redetect-orphans', {});
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to re-detect orphans');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      refetchOrphans();
+      toast({ 
+        title: "Orphan Re-detection Complete", 
+        description: `Cleared ${data.orphansCleared || 0} false orphans. Found ${data.newOrphansFound || 0} new orphans. ${data.totalTrueOrphans || 0} total orphans remain.`
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Re-detection Failed", 
+        description: error?.message || "Could not re-detect orphans. Please try again.",
         variant: "destructive" 
       });
     },
@@ -734,6 +761,21 @@ export default function SentinelImportPage() {
                         {totalPendingOrphans} orphan{totalPendingOrphans > 1 ? 's' : ''} need review
                       </span>
                     )}
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => redetectOrphansMutation.mutate()}
+                      disabled={!batches || batches.length === 0 || redetectOrphansMutation.isPending}
+                      data-testid="button-redetect-orphans"
+                      title="Re-evaluates all imported trades across all batches to fix false orphans from out-of-order imports"
+                    >
+                      {redetectOrphansMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Re-detect Orphans
+                    </Button>
                     <Button 
                       variant="default" 
                       size="sm"
