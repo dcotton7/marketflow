@@ -1984,28 +1984,29 @@ export default function SentinelDashboardPage() {
           <TabsContent value="considering" className="space-y-4">
             {/* Filter bar - Source and Labels */}
             <div className="flex flex-col gap-3">
-              {/* Source filter dropdown */}
+              {/* Source filter badges */}
               {tradeSources.length > 0 && (
-                <div className="flex items-center gap-2" data-testid="source-filter">
+                <div className="flex flex-wrap items-center gap-2" data-testid="source-filter">
                   <Label className="text-sm font-medium">Source:</Label>
-                  <Select
-                    value={selectedSourceFilter || "all"}
-                    onValueChange={(value) => setSelectedSourceFilter(value === "all" ? null : value)}
+                  <Button
+                    size="sm"
+                    variant={selectedSourceFilter === null ? "default" : "outline"}
+                    onClick={() => setSelectedSourceFilter(null)}
+                    data-testid="source-filter-all"
                   >
-                    <SelectTrigger className="w-[220px]" data-testid="source-filter-trigger">
-                      <SelectValue placeholder="All Sources" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all" data-testid="source-filter-all">
-                        All Sources ({tradeSources.reduce((sum, s) => sum + s.count, 0)})
-                      </SelectItem>
-                      {tradeSources.map((source) => (
-                        <SelectItem key={source.id} value={source.id} data-testid={`source-filter-${source.id}`}>
-                          {source.name} ({source.count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    All
+                  </Button>
+                  {tradeSources.map((source) => (
+                    <Button
+                      key={source.id}
+                      size="sm"
+                      variant={selectedSourceFilter === source.id ? "default" : "outline"}
+                      onClick={() => setSelectedSourceFilter(source.id)}
+                      data-testid={`source-filter-${source.id}`}
+                    >
+                      {source.name.replace(` (${source.count})`, '')}
+                    </Button>
+                  ))}
                   <Button
                     variant="destructive"
                     size="sm"
@@ -2076,28 +2077,29 @@ export default function SentinelDashboardPage() {
           <TabsContent value="active" className="space-y-4">
             {/* Filter bar - Source and Labels */}
             <div className="flex flex-col gap-3">
-              {/* Source filter dropdown */}
+              {/* Source filter badges */}
               {tradeSources.length > 0 && (
-                <div className="flex items-center gap-2" data-testid="source-filter-active">
+                <div className="flex flex-wrap items-center gap-2" data-testid="source-filter-active">
                   <Label className="text-sm font-medium">Source:</Label>
-                  <Select
-                    value={selectedSourceFilter || "all"}
-                    onValueChange={(value) => setSelectedSourceFilter(value === "all" ? null : value)}
+                  <Button
+                    size="sm"
+                    variant={selectedSourceFilter === null ? "default" : "outline"}
+                    onClick={() => setSelectedSourceFilter(null)}
+                    data-testid="source-filter-all-active"
                   >
-                    <SelectTrigger className="w-[220px]" data-testid="source-filter-trigger-active">
-                      <SelectValue placeholder="All Sources" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all" data-testid="source-filter-all-active">
-                        All Sources ({tradeSources.reduce((sum, s) => sum + s.count, 0)})
-                      </SelectItem>
-                      {tradeSources.map((source) => (
-                        <SelectItem key={source.id} value={source.id} data-testid={`source-filter-active-${source.id}`}>
-                          {source.name} ({source.count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    All
+                  </Button>
+                  {tradeSources.map((source) => (
+                    <Button
+                      key={source.id}
+                      size="sm"
+                      variant={selectedSourceFilter === source.id ? "default" : "outline"}
+                      onClick={() => setSelectedSourceFilter(source.id)}
+                      data-testid={`source-filter-active-${source.id}`}
+                    >
+                      {source.name.replace(` (${source.count})`, '')}
+                    </Button>
+                  ))}
                   <Button
                     variant="destructive"
                     size="sm"

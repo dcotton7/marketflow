@@ -644,12 +644,13 @@ export function registerSentinelRoutes(app: Express): void {
             }
           }
           
-          const dateStr = batch.createdAt ? new Date(batch.createdAt).toLocaleDateString() : '';
-          const name = accountTag ? `Acct ${accountTag}` : `Import ${dateStr}`;
+          // Use just the last 4 digits as the tag name, or "Import" + date if no account found
+          const dateStr = batch.createdAt ? new Date(batch.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+          const name = accountTag || `Import ${dateStr}`;
           
           sources.push({
             id: batch.batchId,
-            name: `${name} (${count})`,
+            name,
             count,
             isSystemTag: true, // Marks this as a system-generated tag
           });
@@ -3992,12 +3993,30 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
-  // Resolve an orphan sell (add cost basis or delete)
+  // Resolve an orphan sell (add cost basis, delete, or mute)
   app.patch("/api/sentinel/import/trades/:tradeId/resolve-orphan", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       const { tradeId } = req.params;
       const { action, costBasis, openDate } = req.body;
+      
+      // First verify this is actually a pending orphan sell belonging to the user
+      const [trade] = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.tradeId, tradeId),
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.isOrphanSell, true)
+        ))
+        .limit(1);
+      
+      if (!trade) {
+        return res.status(404).json({ error: "Orphan sell not found" });
+      }
+      
+      // For mute/resolve, only allow if status is pending or muted (to allow re-muting or resolving muted items)
+      if ((action === 'mute' || action === 'resolve') && trade.orphanStatus !== 'pending' && trade.orphanStatus !== 'muted') {
+        return res.status(400).json({ error: "Orphan sell has already been resolved" });
+      }
       
       if (action === 'delete') {
         await db!.delete(sentinelImportedTrades)
@@ -4006,6 +4025,20 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             eq(sentinelImportedTrades.userId, userId)
           ));
         return res.json({ success: true, action: 'deleted' });
+      }
+      
+      if (action === 'mute') {
+        const [updated] = await db!.update(sentinelImportedTrades)
+          .set({
+            orphanStatus: 'muted',
+          })
+          .where(and(
+            eq(sentinelImportedTrades.tradeId, tradeId),
+            eq(sentinelImportedTrades.userId, userId)
+          ))
+          .returning();
+        
+        return res.json({ success: true, action: 'muted', trade: updated });
       }
       
       if (action === 'resolve') {
@@ -4024,10 +4057,49 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         return res.json({ success: true, action: 'resolved', trade: updated });
       }
       
-      res.status(400).json({ error: "Invalid action. Use 'delete' or 'resolve'" });
+      res.status(400).json({ error: "Invalid action. Use 'delete', 'mute', or 'resolve'" });
     } catch (error) {
       console.error("Resolve orphan error:", error);
       res.status(500).json({ error: "Failed to resolve orphan sell" });
+    }
+  });
+
+  // Bulk actions for orphan sells (mute all or delete all)
+  app.post("/api/sentinel/import/batches/:batchId/orphans/bulk", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { batchId } = req.params;
+      const { action } = req.body;
+      
+      if (action === 'delete_all') {
+        const result = await db!.delete(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.isOrphanSell, true),
+            eq(sentinelImportedTrades.orphanStatus, 'pending')
+          ));
+        
+        return res.json({ success: true, action: 'delete_all' });
+      }
+      
+      if (action === 'mute_all') {
+        await db!.update(sentinelImportedTrades)
+          .set({ orphanStatus: 'muted' })
+          .where(and(
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.isOrphanSell, true),
+            eq(sentinelImportedTrades.orphanStatus, 'pending')
+          ));
+        
+        return res.json({ success: true, action: 'mute_all' });
+      }
+      
+      res.status(400).json({ error: "Invalid action. Use 'delete_all' or 'mute_all'" });
+    } catch (error) {
+      console.error("Bulk orphan action error:", error);
+      res.status(500).json({ error: "Failed to perform bulk action" });
     }
   });
 

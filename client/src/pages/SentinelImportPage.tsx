@@ -13,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { 
   Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
-  ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle
+  ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle,
+  VolumeX, Volume2
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -268,7 +269,7 @@ export default function SentinelImportPage() {
   });
 
   const resolveOrphanMutation = useMutation({
-    mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve'; costBasis?: number; openDate?: string }) => {
+    mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve' | 'mute'; costBasis?: number; openDate?: string }) => {
       const response = await apiRequest('PATCH', `/api/sentinel/import/trades/${data.tradeId}/resolve-orphan`, {
         action: data.action,
         costBasis: data.costBasis,
@@ -280,14 +281,47 @@ export default function SentinelImportPage() {
       }
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       refetchOrphans();
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      if (data.action === 'muted') {
+        toast({ title: "Trade Muted", description: "Hidden from dashboard until cost basis is set" });
+      }
     },
     onError: (error: any) => {
       toast({
         title: "Failed to resolve orphan",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const bulkOrphanMutation = useMutation({
+    mutationFn: async (action: 'mute_all' | 'delete_all') => {
+      if (!selectedOrphanBatchId) throw new Error('No batch selected');
+      const response = await apiRequest('POST', `/api/sentinel/import/batches/${selectedOrphanBatchId}/orphans/bulk`, { action });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Bulk action failed');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      refetchOrphans();
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      toast({ 
+        title: data.action === 'mute_all' ? "All Orphans Muted" : "All Orphans Deleted",
+        description: data.action === 'mute_all' 
+          ? "Hidden from dashboard until cost basis is set" 
+          : "All orphan sells removed"
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Bulk action failed",
         description: error?.message || "Please try again",
         variant: "destructive",
       });
@@ -300,7 +334,7 @@ export default function SentinelImportPage() {
     setShowOrphanDialog(true);
   };
 
-  const handleResolveOrphan = (tradeId: string, action: 'delete' | 'resolve') => {
+  const handleResolveOrphan = (tradeId: string, action: 'delete' | 'resolve' | 'mute') => {
     const resolution = orphanResolutions[tradeId];
     if (action === 'resolve') {
       if (!resolution?.costBasis || !resolution?.openDate) {
@@ -317,6 +351,8 @@ export default function SentinelImportPage() {
         costBasis: parseFloat(resolution.costBasis),
         openDate: resolution.openDate,
       });
+    } else if (action === 'mute') {
+      resolveOrphanMutation.mutate({ tradeId, action: 'mute' });
     } else {
       resolveOrphanMutation.mutate({ tradeId, action: 'delete' });
     }
@@ -1006,6 +1042,31 @@ export default function SentinelImportPage() {
             </DialogDescription>
           </DialogHeader>
           
+          {orphanSells && orphanSells.filter(o => o.orphanStatus === 'pending').length > 0 && (
+            <div className="flex items-center justify-end gap-2 py-2 border-b">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => bulkOrphanMutation.mutate('mute_all')}
+                disabled={bulkOrphanMutation.isPending}
+                data-testid="button-mute-all-orphans"
+              >
+                <VolumeX className="h-4 w-4 mr-1" />
+                Mute All
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => bulkOrphanMutation.mutate('delete_all')}
+                disabled={bulkOrphanMutation.isPending}
+                data-testid="button-delete-all-orphans"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete All
+              </Button>
+            </div>
+          )}
+          
           <ScrollArea className="flex-1 max-h-[50vh] pr-4">
             {orphansLoading ? (
               <div className="flex justify-center p-8">
@@ -1066,6 +1127,16 @@ export default function SentinelImportPage() {
                       </div>
                       
                       <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleResolveOrphan(orphan.tradeId, 'mute')}
+                          disabled={resolveOrphanMutation.isPending}
+                          data-testid={`button-mute-orphan-${orphan.tradeId}`}
+                        >
+                          <VolumeX className="h-4 w-4 mr-1" />
+                          Mute
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
