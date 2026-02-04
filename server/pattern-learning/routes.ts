@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { db } from "../db";
-import { patternRules, patternRatings, setupConfidence } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { 
+  patternRules, patternRatings, setupConfidence,
+  masterSetups, setupVariants, formationStages, ratingCriteria, ratingWeights, ratedExamples,
+  RATING_LABELS, RATING_SCORE_RANGES, RATING_CATEGORIES, STAGE_TYPES,
+  InsertRatedExample
+} from "@shared/schema";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import OpenAI from "openai";
 import { seedPatternLearningV2 } from "./seed-data";
 
@@ -494,6 +499,386 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
   } catch (error) {
     console.error("Error in chat:", error);
     res.status(500).json({ error: "Failed to get AI response" });
+  }
+});
+
+// V2 Pattern Learning Endpoints
+
+router.get("/v2/setups", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const setups = await db.select().from(masterSetups).orderBy(masterSetups.name);
+    res.json(setups);
+  } catch (error) {
+    console.error("Error fetching master setups:", error);
+    res.status(500).json({ error: "Failed to fetch setups" });
+  }
+});
+
+router.get("/v2/variants/:setupId", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const setupId = parseInt(req.params.setupId);
+    const variants = await db.select().from(setupVariants)
+      .where(eq(setupVariants.masterSetupId, setupId))
+      .orderBy(setupVariants.timeframe);
+    
+    res.json(variants);
+  } catch (error) {
+    console.error("Error fetching variants:", error);
+    res.status(500).json({ error: "Failed to fetch variants" });
+  }
+});
+
+router.get("/v2/stages/:setupId", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const setupId = parseInt(req.params.setupId);
+    const stages = await db.select().from(formationStages)
+      .where(eq(formationStages.masterSetupId, setupId))
+      .orderBy(formationStages.stageOrder);
+    
+    res.json(stages);
+  } catch (error) {
+    console.error("Error fetching stages:", error);
+    res.status(500).json({ error: "Failed to fetch stages" });
+  }
+});
+
+router.get("/v2/criteria/:variantId", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const variantId = parseInt(req.params.variantId);
+    
+    // Get the variant to find its master setup
+    const [variant] = await db.select().from(setupVariants)
+      .where(eq(setupVariants.id, variantId));
+    
+    if (!variant) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+    
+    // Get universal criteria + pattern-specific criteria for this setup
+    const criteria = await db.select().from(ratingCriteria)
+      .where(
+        sql`${ratingCriteria.isUniversal} = true OR ${ratingCriteria.masterSetupId} = ${variant.masterSetupId}`
+      )
+      .orderBy(ratingCriteria.category, ratingCriteria.name);
+    
+    // Get weights for this variant
+    const weights = await db.select().from(ratingWeights)
+      .where(eq(ratingWeights.setupVariantId, variantId));
+    
+    // Merge weights into criteria
+    const weightMap = new Map(weights.map(w => [w.criteriaId, w]));
+    const criteriaWithWeights = criteria.map(c => ({
+      ...c,
+      weight: weightMap.get(c.id)?.weight ?? 1.0,
+      defaultWeight: weightMap.get(c.id)?.defaultWeight ?? 1.0,
+    }));
+    
+    res.json(criteriaWithWeights);
+  } catch (error) {
+    console.error("Error fetching criteria:", error);
+    res.status(500).json({ error: "Failed to fetch criteria" });
+  }
+});
+
+router.post("/v2/rate", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const { 
+      ticker, 
+      variantId, 
+      formationStageId,
+      chartContext,
+      marketPhase,
+      sectorPerformance,
+      stockStage,
+      priorAttemptCount,
+    } = req.body;
+    
+    if (!ticker || !variantId) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+    
+    // Get the variant and its master setup
+    const [variant] = await db.select({
+      variant: setupVariants,
+      setup: masterSetups,
+    })
+      .from(setupVariants)
+      .leftJoin(masterSetups, eq(setupVariants.masterSetupId, masterSetups.id))
+      .where(eq(setupVariants.id, variantId));
+    
+    if (!variant) {
+      return res.status(404).json({ error: "Variant not found" });
+    }
+    
+    // Get formation stage if provided
+    let stage = null;
+    if (formationStageId) {
+      const [stageResult] = await db.select().from(formationStages)
+        .where(eq(formationStages.id, formationStageId));
+      stage = stageResult;
+    }
+    
+    // Get all applicable criteria with weights
+    const criteria = await db.select().from(ratingCriteria)
+      .where(
+        sql`${ratingCriteria.isUniversal} = true OR ${ratingCriteria.masterSetupId} = ${variant.setup?.id}`
+      );
+    
+    const weights = await db.select().from(ratingWeights)
+      .where(eq(ratingWeights.setupVariantId, variantId));
+    
+    const weightMap = new Map(weights.map(w => [w.criteriaId, w.weight]));
+    
+    // Build the AI prompt
+    const criteriaList = criteria.map(c => ({
+      id: c.id,
+      name: c.name,
+      category: c.category,
+      description: c.description,
+      maxPoints: c.maxPoints,
+      weight: weightMap.get(c.id) ?? 1.0,
+    }));
+    
+    const contextInfo = {
+      ticker,
+      setupName: variant.setup?.name,
+      variantName: variant.variant.name,
+      timeframe: variant.variant.timeframe,
+      duration: variant.variant.duration,
+      formationStage: stage?.stageType || 'not_specified',
+      marketPhase: marketPhase || 'unknown',
+      sectorPerformance: sectorPerformance || 'unknown',
+      stockStage: stockStage || 'unknown',
+      priorAttemptCount: priorAttemptCount || 0,
+      chartContext: chartContext || '',
+    };
+    
+    const systemPrompt = `You are an expert pattern recognition analyst evaluating a trading setup.
+
+CONTEXT:
+- Ticker: ${contextInfo.ticker}
+- Setup Type: ${contextInfo.setupName} (${contextInfo.variantName})
+- Timeframe: ${contextInfo.timeframe}
+- Duration: ${contextInfo.duration}
+- Formation Stage: ${contextInfo.formationStage}
+- Market Phase: ${contextInfo.marketPhase}
+- Sector Performance: ${contextInfo.sectorPerformance}
+- Stock Stage: ${contextInfo.stockStage}
+- Prior Failed Attempts: ${contextInfo.priorAttemptCount}
+${contextInfo.chartContext ? `- Chart Notes: ${contextInfo.chartContext}` : ''}
+
+RATING CRITERIA (rate each 1-5 based on weight):
+${criteriaList.map(c => `- ${c.name} (${c.category}): ${c.description} [max ${c.maxPoints} pts, weight ${c.weight.toFixed(1)}]`).join('\n')}
+
+SCORING SYSTEM:
+- Rate each criterion from 1 to ${RATING_LABELS.length} (1=Poor, 2=Below Avg, 3=Average, 4=Good, 5=Excellent)
+- Each category contributes 20 points to the final score (100 total)
+- Apply weights to calculate weighted scores
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "scores": {
+    "<criteriaId>": <1-5 rating>,
+    ...
+  },
+  "breakdown": {
+    "market_env": <0-20>,
+    "relative_strength": <0-20>,
+    "volume_quality": <0-20>,
+    "technical_structure": <0-20>,
+    "pattern_specific": <0-20>
+  },
+  "totalScore": <0-100>,
+  "humanRating": <1-5>,
+  "confidence": <0-100>,
+  "summary": "<brief analysis>",
+  "keyStrengths": ["<strength1>", "<strength2>"],
+  "keyWeaknesses": ["<weakness1>", "<weakness2>"],
+  "recommendation": "proceed|wait|avoid"
+}`;
+
+    const openai = getOpenAI();
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Evaluate this ${contextInfo.setupName} setup for ${ticker}. Consider all criteria and provide detailed scoring.` }
+      ],
+      max_completion_tokens: 1500,
+      response_format: { type: "json_object" },
+    });
+
+    const aiContent = response.choices[0]?.message?.content || "{}";
+    let parsed;
+    try {
+      parsed = JSON.parse(aiContent);
+    } catch (e) {
+      console.error("[Pattern Learning V2] Failed to parse AI response:", e);
+      return res.status(500).json({ error: "Failed to parse AI response" });
+    }
+    
+    // Calculate the score-to-rating mapping
+    const totalScore = parsed.totalScore || 0;
+    let humanRating = 1;
+    for (const [rating, range] of Object.entries(RATING_SCORE_RANGES)) {
+      const [min, max] = range as [number, number];
+      if (totalScore >= min && totalScore <= max) {
+        humanRating = parseInt(rating);
+        break;
+      }
+    }
+    
+    // Apply formation stage modifier if available
+    let adjustedScore = totalScore;
+    if (stage?.scoreModifier) {
+      adjustedScore = Math.round(totalScore * stage.scoreModifier);
+      adjustedScore = Math.max(0, Math.min(100, adjustedScore));
+    }
+    
+    res.json({
+      ticker,
+      setupName: variant.setup?.name,
+      variantName: variant.variant.name,
+      formationStage: stage?.stageType,
+      scores: parsed.scores || {},
+      breakdown: parsed.breakdown || {},
+      totalScore: adjustedScore,
+      rawScore: totalScore,
+      humanRating,
+      humanRatingLabel: RATING_LABELS[humanRating - 1] || "Unknown",
+      confidence: parsed.confidence || 0,
+      summary: parsed.summary || "",
+      keyStrengths: parsed.keyStrengths || [],
+      keyWeaknesses: parsed.keyWeaknesses || [],
+      recommendation: parsed.recommendation || "wait",
+      stageModifier: stage?.scoreModifier || 1.0,
+    });
+  } catch (error) {
+    console.error("Error rating pattern:", error);
+    res.status(500).json({ error: "Failed to rate pattern" });
+  }
+});
+
+router.post("/v2/save-example", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const {
+      ticker,
+      setupVariantId,
+      formationStageId,
+      humanRating,
+      aiScore,
+      criteriaScores,
+      chartContext,
+      marketPhase,
+      sectorPerformance,
+      stockStage,
+      priorAttemptCount,
+      notes,
+    } = req.body;
+    
+    const example: InsertRatedExample = {
+      userId,
+      ticker,
+      setupVariantId,
+      formationStageId: formationStageId || null,
+      humanRating,
+      aiScore,
+      criteriaScores: criteriaScores || {},
+      chartContext: chartContext || null,
+      marketPhase: marketPhase || null,
+      sectorPerformance: sectorPerformance || null,
+      stockStage: stockStage || null,
+      priorAttemptCount: priorAttemptCount || 0,
+    };
+    
+    const [saved] = await db.insert(ratedExamples).values(example).returning();
+    
+    res.json(saved);
+  } catch (error) {
+    console.error("Error saving example:", error);
+    res.status(500).json({ error: "Failed to save example" });
+  }
+});
+
+router.get("/v2/examples/:variantId", async (req, res) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: "Database unavailable" });
+    }
+    
+    const variantId = parseInt(req.params.variantId);
+    
+    const examples = await db.select().from(ratedExamples)
+      .where(and(
+        eq(ratedExamples.setupVariantId, variantId),
+        eq(ratedExamples.userId, userId)
+      ))
+      .orderBy(desc(ratedExamples.createdAt))
+      .limit(50);
+    
+    res.json(examples);
+  } catch (error) {
+    console.error("Error fetching examples:", error);
+    res.status(500).json({ error: "Failed to fetch examples" });
   }
 });
 

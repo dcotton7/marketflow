@@ -12,16 +12,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Brain, Send, Play, Save, RefreshCw, Loader2,
   ThumbsDown, ThumbsUp, Minus, Star, ChevronRight, ChevronLeft,
-  TrendingUp, Clock, BarChart3, Target, AlertCircle, Plus, Edit, Check, X, ExternalLink
+  TrendingUp, Clock, BarChart3, Target, AlertCircle, Plus, Edit, Check, X, ExternalLink,
+  Gauge, Activity, Zap, CheckCircle2, XCircle
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { PatternChart } from "@/components/PatternChart";
-import { PATTERN_TYPES, PATTERN_TIMEFRAMES, RATING_LABELS, SetupConfidence } from "@shared/schema";
+import { PATTERN_TYPES, PATTERN_TIMEFRAMES, RATING_LABELS, RATING_SCORE_RANGES, MARKET_PHASES, SECTOR_PERFORMANCE, SetupConfidence } from "@shared/schema";
 
 interface Setup {
   id: number;
@@ -56,24 +58,98 @@ interface ChatMessage {
   content: string;
 }
 
+// V2 Interfaces
+interface MasterSetup {
+  id: number;
+  name: string;
+  description?: string;
+  defaultStages?: string[];
+  invalidationRules?: Record<string, any>;
+}
+
+interface SetupVariant {
+  id: number;
+  masterSetupId: number;
+  name: string;
+  timeframe: string;
+  duration?: string;
+  chartPeriod: string;
+}
+
+interface FormationStage {
+  id: number;
+  masterSetupId: number;
+  stageType: string;
+  stageOrder: number;
+  description?: string;
+  isTerminal: boolean;
+  scoreModifier: number;
+  typicalMinDuration?: number;
+  typicalMaxDuration?: number;
+  tooLongThreshold?: number;
+}
+
+interface RatingResult {
+  ticker: string;
+  setupName: string;
+  variantName: string;
+  formationStage?: string;
+  scores: Record<string, number>;
+  breakdown: Record<string, number>;
+  totalScore: number;
+  rawScore: number;
+  humanRating: number;
+  humanRatingLabel: string;
+  confidence: number;
+  summary: string;
+  keyStrengths: string[];
+  keyWeaknesses: string[];
+  recommendation: string;
+  stageModifier: number;
+}
+
 const RATING_COLORS = {
   1: "bg-red-500/20 border-red-500 text-red-400",
-  2: "bg-yellow-500/20 border-yellow-500 text-yellow-400",
-  3: "bg-blue-500/20 border-blue-500 text-blue-400",
-  4: "bg-green-500/20 border-green-500 text-green-400",
+  2: "bg-orange-500/20 border-orange-500 text-orange-400",
+  3: "bg-yellow-500/20 border-yellow-500 text-yellow-400",
+  4: "bg-blue-500/20 border-blue-500 text-blue-400",
+  5: "bg-green-500/20 border-green-500 text-green-400",
 };
 
 const RATING_ICONS = {
-  1: ThumbsDown,
-  2: Minus,
-  3: Clock,
-  4: Star,
+  1: XCircle,
+  2: ThumbsDown,
+  3: Minus,
+  4: Clock,
+  5: Star,
+};
+
+const SCORE_COLORS: Record<string, string> = {
+  proceed: "text-green-400",
+  wait: "text-yellow-400",
+  avoid: "text-red-400",
 };
 
 export default function PatternLearningPage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
   
+  const [activeTab, setActiveTab] = useState<string>("v2");
+  
+  // V2 State
+  const [selectedMasterSetupId, setSelectedMasterSetupId] = useState<number | null>(null);
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
+  const [selectedStageId, setSelectedStageId] = useState<number | null>(null);
+  const [ratingTicker, setRatingTicker] = useState<string>("");
+  const [ratingContext, setRatingContext] = useState<string>("");
+  const [ratingMarketPhase, setRatingMarketPhase] = useState<string>("");
+  const [ratingSectorPerf, setRatingSectorPerf] = useState<string>("");
+  const [ratingStockStage, setRatingStockStage] = useState<string>("1");
+  const [ratingPriorAttempts, setRatingPriorAttempts] = useState<number>(0);
+  const [ratingResult, setRatingResult] = useState<RatingResult | null>(null);
+  const [isRating, setIsRating] = useState(false);
+  
+  // Legacy V1 State
   const [selectedSetupId, setSelectedSetupId] = useState<number | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
@@ -111,6 +187,98 @@ export default function PatternLearningPage() {
     queryKey: ['/api/pattern-learning/confidence', selectedSetupId],
     enabled: !!selectedSetupId,
   });
+
+  // V2 Queries
+  const { data: masterSetups = [] } = useQuery<MasterSetup[]>({
+    queryKey: ['/api/pattern-learning/v2/setups'],
+  });
+
+  const { data: variants = [] } = useQuery<SetupVariant[]>({
+    queryKey: ['/api/pattern-learning/v2/variants', selectedMasterSetupId],
+    enabled: !!selectedMasterSetupId,
+  });
+
+  const { data: stages = [] } = useQuery<FormationStage[]>({
+    queryKey: ['/api/pattern-learning/v2/stages', selectedMasterSetupId],
+    enabled: !!selectedMasterSetupId,
+  });
+
+  const selectedMasterSetup = masterSetups.find(s => s.id === selectedMasterSetupId);
+  const selectedVariant = variants.find(v => v.id === selectedVariantId);
+  const selectedStage = stages.find(s => s.id === selectedStageId);
+
+  // Auto-select first variant when master setup changes
+  useEffect(() => {
+    if (variants.length > 0 && !selectedVariantId) {
+      setSelectedVariantId(variants[0].id);
+      setChartTimeframe(variants[0].timeframe === 'daily' ? 'D' : variants[0].timeframe === 'weekly' ? 'W' : 'D');
+      setChartPeriod(variants[0].chartPeriod || '6mo');
+    }
+  }, [variants, selectedVariantId]);
+
+  // Update chart settings when variant changes
+  useEffect(() => {
+    if (selectedVariant) {
+      const tf = selectedVariant.timeframe;
+      setChartTimeframe(tf === 'daily' ? 'D' : tf === 'weekly' ? 'W' : tf === 'intraday_5m' ? '5' : tf === 'intraday_15m' ? '15' : 'D');
+      setChartPeriod(selectedVariant.chartPeriod || '6mo');
+    }
+  }, [selectedVariant]);
+
+  const handleRatePattern = async () => {
+    if (!ratingTicker || !selectedVariantId) {
+      toast({ title: "Missing Info", description: "Please enter a ticker and select a variant", variant: "destructive" });
+      return;
+    }
+    
+    setIsRating(true);
+    try {
+      const response = await apiRequest('POST', '/api/pattern-learning/v2/rate', {
+        ticker: ratingTicker.toUpperCase(),
+        variantId: selectedVariantId,
+        formationStageId: selectedStageId,
+        chartContext: ratingContext,
+        marketPhase: ratingMarketPhase,
+        sectorPerformance: ratingSectorPerf,
+        stockStage: ratingStockStage,
+        priorAttemptCount: ratingPriorAttempts,
+      });
+      
+      if (!response.ok) throw new Error('Rating failed');
+      const result = await response.json();
+      setRatingResult(result);
+      toast({ title: "Pattern Rated", description: `Score: ${result.totalScore}/100 (${result.recommendation})` });
+    } catch (error) {
+      toast({ title: "Rating Failed", description: "Could not rate the pattern", variant: "destructive" });
+    } finally {
+      setIsRating(false);
+    }
+  };
+
+  const handleSaveExample = async () => {
+    if (!ratingResult || !selectedVariantId) return;
+    
+    try {
+      const response = await apiRequest('POST', '/api/pattern-learning/v2/save-example', {
+        ticker: ratingTicker.toUpperCase(),
+        setupVariantId: selectedVariantId,
+        formationStageId: selectedStageId,
+        humanRating: ratingResult.humanRating,
+        aiScore: ratingResult.totalScore,
+        criteriaScores: ratingResult.scores,
+        chartContext: ratingContext,
+        marketPhase: ratingMarketPhase,
+        sectorPerformance: ratingSectorPerf,
+        stockStage: ratingStockStage,
+        priorAttemptCount: ratingPriorAttempts,
+      });
+      
+      if (!response.ok) throw new Error('Failed to save');
+      toast({ title: "Example Saved", description: "This rating has been saved for learning" });
+    } catch (error) {
+      toast({ title: "Save Failed", description: "Could not save the example", variant: "destructive" });
+    }
+  };
 
   const createSetupMutation = useMutation({
     mutationFn: async (setup: typeof newSetup) => {
@@ -346,33 +514,380 @@ export default function PatternLearningPage() {
               Pattern Learning
             </h1>
             <p className="text-muted-foreground">
-              Define setups, review chart matches, provide feedback - AI learns what works
+              Rate patterns, track formation stages, learn from AI-powered scoring
             </p>
           </div>
           
-          <div className="flex items-center gap-3">
-            <Select 
-              value={selectedSetupId?.toString() || ""} 
-              onValueChange={(v) => setSelectedSetupId(v ? parseInt(v) : null)}
-            >
-              <SelectTrigger className="w-64" data-testid="select-setup">
-                <SelectValue placeholder="Select a Setup..." />
-              </SelectTrigger>
-              <SelectContent>
-                {setups.map(setup => (
-                  <SelectItem key={setup.id} value={setup.id.toString()}>
-                    <div className="flex items-center gap-2">
-                      {setup.isActive ? (
-                        <Check className="h-3 w-3 text-green-500" />
-                      ) : (
-                        <X className="h-3 w-3 text-muted-foreground" />
-                      )}
-                      {setup.name}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList>
+              <TabsTrigger value="v2" data-testid="tab-v2">
+                <Gauge className="h-4 w-4 mr-2" />
+                Pattern Rating
+              </TabsTrigger>
+              <TabsTrigger value="legacy" data-testid="tab-legacy">
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Setup Builder
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        {activeTab === "v2" && (
+          <div className="space-y-4">
+            {/* V2 Setup Selection Row */}
+            <Card>
+              <CardContent className="py-4">
+                <div className="grid grid-cols-12 gap-4">
+                  <div className="col-span-3">
+                    <Label className="text-xs text-muted-foreground mb-1 block">Pattern Type</Label>
+                    <Select 
+                      value={selectedMasterSetupId?.toString() || ""} 
+                      onValueChange={(v) => {
+                        setSelectedMasterSetupId(v ? parseInt(v) : null);
+                        setSelectedVariantId(null);
+                        setSelectedStageId(null);
+                        setRatingResult(null);
+                      }}
+                    >
+                      <SelectTrigger data-testid="select-master-setup">
+                        <SelectValue placeholder="Select pattern..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {masterSetups.map(setup => (
+                          <SelectItem key={setup.id} value={setup.id.toString()}>
+                            {setup.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="col-span-3">
+                    <Label className="text-xs text-muted-foreground mb-1 block">Timeframe Variant</Label>
+                    <Select 
+                      value={selectedVariantId?.toString() || ""} 
+                      onValueChange={(v) => setSelectedVariantId(v ? parseInt(v) : null)}
+                      disabled={!selectedMasterSetupId}
+                    >
+                      <SelectTrigger data-testid="select-variant">
+                        <SelectValue placeholder="Select variant..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {variants.map(variant => (
+                          <SelectItem key={variant.id} value={variant.id.toString()}>
+                            {variant.name} ({variant.duration || 'standard'})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="col-span-3">
+                    <Label className="text-xs text-muted-foreground mb-1 block">Formation Stage</Label>
+                    <Select 
+                      value={selectedStageId?.toString() || ""} 
+                      onValueChange={(v) => setSelectedStageId(v ? parseInt(v) : null)}
+                      disabled={!selectedMasterSetupId}
+                    >
+                      <SelectTrigger data-testid="select-stage">
+                        <SelectValue placeholder="Select stage..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Not specified</SelectItem>
+                        {stages.map(stage => (
+                          <SelectItem key={stage.id} value={stage.id.toString()}>
+                            {stage.stageOrder}. {stage.stageType.replace(/_/g, ' ')}
+                            {stage.isTerminal && ' (terminal)'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="col-span-3">
+                    <Label className="text-xs text-muted-foreground mb-1 block">Ticker Symbol</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={ratingTicker}
+                        onChange={(e) => setRatingTicker(e.target.value.toUpperCase())}
+                        placeholder="AAPL"
+                        className="flex-1"
+                        data-testid="input-ticker"
+                      />
+                      <Button 
+                        onClick={handleRatePattern}
+                        disabled={isRating || !ratingTicker || !selectedVariantId}
+                        data-testid="button-rate"
+                      >
+                        {isRating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                      </Button>
                     </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  </div>
+                </div>
+                
+                {selectedMasterSetup && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedMasterSetup.description}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* V2 Main Content */}
+            <div className="grid grid-cols-12 gap-4" style={{ height: '600px' }}>
+              {/* Chart + Context Panel */}
+              <div className="col-span-7">
+                <Card className="h-full flex flex-col">
+                  <CardHeader className="pb-2 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <BarChart3 className="h-4 w-4" />
+                        {ratingTicker || 'Chart Preview'}
+                      </CardTitle>
+                      {ratingTicker && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(`https://www.tradingview.com/chart/?symbol=${ratingTicker}&interval=${chartTimeframe}`, '_blank')}
+                          data-testid="button-open-tradingview"
+                        >
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          TradingView
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  
+                  <CardContent className="flex-1 flex flex-col overflow-hidden">
+                    {ratingTicker ? (
+                      <div className="bg-card rounded-lg border overflow-hidden flex-1">
+                        <PatternChart 
+                          symbol={ratingTicker}
+                          indicators={[]}
+                          height={300}
+                          timeframe={chartTimeframe}
+                          chartPeriod={chartPeriod}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                        <Target className="h-12 w-12 mb-4 opacity-50" />
+                        <p>Enter a ticker to view chart</p>
+                      </div>
+                    )}
+                    
+                    <Separator className="my-3" />
+                    
+                    {/* Context Fields */}
+                    <div className="grid grid-cols-4 gap-3">
+                      <div>
+                        <Label className="text-xs">Market Phase</Label>
+                        <Select value={ratingMarketPhase} onValueChange={setRatingMarketPhase}>
+                          <SelectTrigger className="h-8" data-testid="select-market-phase">
+                            <SelectValue placeholder="Select..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {MARKET_PHASES.map(phase => (
+                              <SelectItem key={phase.value} value={phase.value}>{phase.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Sector Trend</Label>
+                        <Select value={ratingSectorPerf} onValueChange={setRatingSectorPerf}>
+                          <SelectTrigger className="h-8" data-testid="select-sector">
+                            <SelectValue placeholder="Select..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SECTOR_PERFORMANCE.map(perf => (
+                              <SelectItem key={perf.value} value={perf.value}>{perf.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Stock Stage</Label>
+                        <Select value={ratingStockStage} onValueChange={setRatingStockStage}>
+                          <SelectTrigger className="h-8" data-testid="select-stock-stage">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">Stage 1 (Base)</SelectItem>
+                            <SelectItem value="2">Stage 2 (Advance)</SelectItem>
+                            <SelectItem value="3">Stage 3 (Top)</SelectItem>
+                            <SelectItem value="4">Stage 4 (Decline)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Prior Attempts</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={ratingPriorAttempts}
+                          onChange={(e) => setRatingPriorAttempts(parseInt(e.target.value) || 0)}
+                          className="h-8"
+                          data-testid="input-prior-attempts"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="mt-3">
+                      <Label className="text-xs">Chart Context Notes</Label>
+                      <Textarea
+                        value={ratingContext}
+                        onChange={(e) => setRatingContext(e.target.value)}
+                        placeholder="Any relevant chart observations..."
+                        rows={2}
+                        data-testid="textarea-context"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Rating Results Panel */}
+              <div className="col-span-5">
+                <Card className="h-full flex flex-col">
+                  <CardHeader className="pb-2 flex-shrink-0">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Gauge className="h-4 w-4" />
+                      AI Pattern Score
+                    </CardTitle>
+                    <CardDescription>
+                      100-point weighted scoring across 5 categories
+                    </CardDescription>
+                  </CardHeader>
+                  
+                  <CardContent className="flex-1 overflow-auto">
+                    {ratingResult ? (
+                      <div className="space-y-4">
+                        {/* Score Display */}
+                        <div className="text-center p-4 bg-muted/50 rounded-lg">
+                          <div className={`text-5xl font-bold ${SCORE_COLORS[ratingResult.recommendation]}`}>
+                            {ratingResult.totalScore}
+                          </div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            out of 100
+                          </div>
+                          <div className="flex items-center justify-center gap-2 mt-2">
+                            <Badge className={RATING_COLORS[ratingResult.humanRating as keyof typeof RATING_COLORS]}>
+                              {ratingResult.humanRatingLabel}
+                            </Badge>
+                            <Badge variant={
+                              ratingResult.recommendation === 'proceed' ? 'default' :
+                              ratingResult.recommendation === 'wait' ? 'secondary' : 'destructive'
+                            }>
+                              {ratingResult.recommendation.toUpperCase()}
+                            </Badge>
+                          </div>
+                          {ratingResult.stageModifier !== 1.0 && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Stage modifier: {ratingResult.stageModifier.toFixed(2)}x (raw: {ratingResult.rawScore})
+                            </p>
+                          )}
+                        </div>
+                        
+                        {/* Category Breakdown */}
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Category Breakdown</Label>
+                          {Object.entries(ratingResult.breakdown).map(([category, score]) => (
+                            <div key={category} className="flex items-center gap-2">
+                              <span className="text-xs w-32 truncate capitalize">
+                                {category.replace(/_/g, ' ')}
+                              </span>
+                              <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-primary transition-all" 
+                                  style={{ width: `${(score / 20) * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-mono w-8">{score}/20</span>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Summary */}
+                        {ratingResult.summary && (
+                          <div className="p-3 bg-muted/30 rounded-lg">
+                            <p className="text-sm">{ratingResult.summary}</p>
+                          </div>
+                        )}
+                        
+                        {/* Strengths & Weaknesses */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs text-green-400 flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3" /> Strengths
+                            </Label>
+                            <ul className="text-xs space-y-1 mt-1">
+                              {ratingResult.keyStrengths.map((s, i) => (
+                                <li key={i} className="text-muted-foreground">• {s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-red-400 flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3" /> Weaknesses
+                            </Label>
+                            <ul className="text-xs space-y-1 mt-1">
+                              {ratingResult.keyWeaknesses.map((w, i) => (
+                                <li key={i} className="text-muted-foreground">• {w}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                        
+                        <Button 
+                          className="w-full" 
+                          onClick={handleSaveExample}
+                          data-testid="button-save-example"
+                        >
+                          <Save className="h-4 w-4 mr-2" />
+                          Save as Training Example
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                        <Gauge className="h-12 w-12 mb-4 opacity-50" />
+                        <p>Select a pattern and ticker</p>
+                        <p className="text-sm">then click Rate to get AI scoring</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "legacy" && (
+          <>
+            {/* Legacy V1 Setup Selection */}
+            <div className="flex items-center gap-3 mb-4">
+              <Select 
+                value={selectedSetupId?.toString() || ""} 
+                onValueChange={(v) => setSelectedSetupId(v ? parseInt(v) : null)}
+              >
+                <SelectTrigger className="w-64" data-testid="select-setup">
+                  <SelectValue placeholder="Select a Setup..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {setups.map(setup => (
+                    <SelectItem key={setup.id} value={setup.id.toString()}>
+                      <div className="flex items-center gap-2">
+                        {setup.isActive ? (
+                          <Check className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <X className="h-3 w-3 text-muted-foreground" />
+                        )}
+                        {setup.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
             <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
               <DialogTrigger asChild>
@@ -472,7 +987,6 @@ export default function PatternLearningPage() {
               </DialogContent>
             </Dialog>
           </div>
-        </div>
 
         {selectedSetup && (
           <Card className="mb-4">
@@ -775,6 +1289,8 @@ export default function PatternLearningPage() {
             </Card>
           </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
