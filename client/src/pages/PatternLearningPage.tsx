@@ -643,6 +643,15 @@ export default function PatternLearningPage() {
                       <CardTitle className="flex items-center gap-2 text-base">
                         <BarChart3 className="h-4 w-4" />
                         {ratingTicker || 'Chart Preview'}
+                        {selectedVariant && (
+                          <Badge variant="outline" className="ml-2 text-xs font-normal">
+                            {selectedVariant.timeframe === 'daily' ? 'Daily' : 
+                             selectedVariant.timeframe === 'weekly' ? 'Weekly' : 
+                             selectedVariant.timeframe === 'intraday' ? 'Intraday' : 
+                             selectedVariant.timeframe}
+                            {selectedVariant.chartPeriod && ` • ${selectedVariant.chartPeriod}`}
+                          </Badge>
+                        )}
                       </CardTitle>
                       {ratingTicker && (
                         <Button
