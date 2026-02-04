@@ -282,16 +282,45 @@ export default function PatternLearningPage() {
       ? extractedTechnicals 
       : (selectedSetup?.requiredTechnicals?.indicators || []);
     const studies = technicals.map(t => {
-      if (t.includes('EMA')) return 'EMA@tv-basicstudies';
-      if (t.includes('SMA')) return 'MA@tv-basicstudies';
-      if (t === 'VWAP') return 'VWAP@tv-basicstudies';
-      if (t === 'RSI') return 'RSI@tv-basicstudies';
-      if (t === 'MACD') return 'MACD@tv-basicstudies';
-      if (t === 'Volume') return 'Volume@tv-basicstudies';
+      const tLower = t.toLowerCase();
+      if (tLower.includes('ema')) return 'MAExp@tv-basicstudies';
+      if (tLower.includes('sma') || tLower.includes('ma')) return 'MASimple@tv-basicstudies';
+      if (tLower.includes('vwap')) return 'VWAP@tv-basicstudies';
+      if (tLower.includes('rsi')) return 'RSI@tv-basicstudies';
+      if (tLower.includes('macd')) return 'MACD@tv-basicstudies';
+      if (tLower.includes('volume') || tLower.includes('vol')) return 'Volume@tv-basicstudies';
+      if (tLower.includes('bollinger') || tLower.includes('bb')) return 'BB@tv-basicstudies';
+      if (tLower.includes('atr')) return 'ATR@tv-basicstudies';
       return '';
-    }).filter(Boolean).join(',');
+    }).filter(Boolean);
     
-    return `https://www.tradingview.com/chart/?symbol=${ticker}&interval=D${studies ? `&studies=${studies}` : ''}`;
+    // Remove duplicates
+    const uniqueStudies = Array.from(new Set(studies)).join(',');
+    
+    return `https://www.tradingview.com/chart/?symbol=${ticker}&interval=D${uniqueStudies ? `&studies=${uniqueStudies}` : ''}`;
+  };
+  
+  // Generate studies string for embedded widget
+  const getWidgetStudies = () => {
+    const technicals = extractedTechnicals.length > 0 
+      ? extractedTechnicals 
+      : (selectedSetup?.requiredTechnicals?.indicators || []);
+    const studies = technicals.map(t => {
+      const tLower = t.toLowerCase();
+      if (tLower.includes('ema')) return 'MAExp@tv-basicstudies';
+      if (tLower.includes('sma') || tLower.includes('ma')) return 'MASimple@tv-basicstudies';
+      if (tLower.includes('vwap')) return 'VWAP@tv-basicstudies';
+      if (tLower.includes('rsi')) return 'RSI@tv-basicstudies';
+      if (tLower.includes('macd')) return 'MACD@tv-basicstudies';
+      if (tLower.includes('volume') || tLower.includes('vol')) return 'Volume@tv-basicstudies';
+      if (tLower.includes('bollinger') || tLower.includes('bb')) return 'BB@tv-basicstudies';
+      if (tLower.includes('atr')) return 'ATR@tv-basicstudies';
+      return '';
+    }).filter(Boolean);
+    
+    // Return unique studies as URL-encoded JSON array
+    const uniqueStudies = Array.from(new Set(studies));
+    return encodeURIComponent(JSON.stringify(uniqueStudies));
   };
 
   return (
@@ -594,9 +623,9 @@ export default function PatternLearningPage() {
                       </Button>
                     </div>
                     
-                    <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4">
+                    <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4" style={{ minHeight: '350px' }}>
                       <iframe
-                        src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=D&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=0&allow_symbol_change=1&details=1&studies=[]&show_popup_button=1`}
+                        src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=D&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=1&allow_symbol_change=1&details=0&studies=${getWidgetStudies()}&show_popup_button=1`}
                         className="w-full h-full border-0"
                         title={`Chart for ${currentMatch.ticker}`}
                       />
@@ -641,8 +670,8 @@ export default function PatternLearningPage() {
           </div>
 
           <div className="col-span-5">
-            <Card className="h-full flex flex-col">
-              <CardHeader className="pb-2">
+            <Card className="flex flex-col" style={{ maxHeight: '600px' }}>
+              <CardHeader className="pb-2 flex-shrink-0">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Brain className="h-4 w-4" />
                   AI Assistant
@@ -651,8 +680,8 @@ export default function PatternLearningPage() {
                   Ask questions or request formula improvements based on your ratings
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex-1 flex flex-col overflow-hidden">
-                <ScrollArea className="flex-1 pr-4">
+              <CardContent className="flex-1 flex flex-col overflow-hidden min-h-0">
+                <ScrollArea className="flex-1 pr-4" style={{ maxHeight: '280px' }}>
                   <div className="space-y-3">
                     {chatMessages.map((msg, idx) => (
                       <div 
