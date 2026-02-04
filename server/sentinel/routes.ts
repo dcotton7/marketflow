@@ -610,11 +610,12 @@ export function registerSentinelRoutes(app: Express): void {
       // Always include "Hand" source
       sources.push({ id: 'hand', name: 'Hand Entered', count: handCount });
       
-      // Add import batch sources with system-generated account tags
+      // Add import batch sources with custom or default import names
       if (importBatchIds.length > 0) {
         const batches = await db!.select({
           batchId: sentinelImportBatches.batchId,
           fileName: sentinelImportBatches.fileName,
+          importName: sentinelImportBatches.importName,
           createdAt: sentinelImportBatches.createdAt,
         }).from(sentinelImportBatches).where(
           and(
@@ -627,26 +628,14 @@ export function registerSentinelRoutes(app: Express): void {
           const batchTrades = trades.filter(t => t.importBatchId === batch.batchId);
           const count = batchTrades.length;
           
-          // Extract account number from filename (e.g., "Activity_2_DC_Rollover_IRA__4915_fresh 2025.csv" -> "4915")
-          // Or use the accountName field if available from trades
-          let accountTag = '';
-          
-          // Try to get account from the first trade's accountName
-          const firstTradeAccount = batchTrades.find(t => t.accountName)?.accountName;
-          if (firstTradeAccount) {
-            // Use last 4 chars of account name/number
-            accountTag = firstTradeAccount.slice(-4);
-          } else {
-            // Try to extract from filename - look for patterns like "__4915" or "_4915_"
-            const accountMatch = batch.fileName.match(/[_](\d{4})[_\s\.]/);
-            if (accountMatch) {
-              accountTag = accountMatch[1];
-            }
+          // Use importName if set, otherwise generate default from filename
+          let name = batch.importName;
+          if (!name) {
+            // Generate default: "FILE" + last 4 chars of filename (without extension)
+            const fileNameWithoutExt = batch.fileName.replace(/\.[^/.]+$/, "");
+            const last4Chars = fileNameWithoutExt.slice(-4).toUpperCase();
+            name = `FILE${last4Chars}`;
           }
-          
-          // Use just the last 4 digits as the tag name, or "Import" + date if no account found
-          const dateStr = batch.createdAt ? new Date(batch.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
-          const name = accountTag || `Import ${dateStr}`;
           
           sources.push({
             id: batch.batchId,
@@ -3475,11 +3464,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       // Use a transaction to ensure atomicity - either all trades are saved or none
       await db.transaction(async (tx) => {
         // Save batch first
+        // Generate default import name: "FILE" + last 4 chars of filename (without extension)
+        const fileNameWithoutExt = result.batch.fileName.replace(/\.[^/.]+$/, "");
+        const last4Chars = fileNameWithoutExt.slice(-4).toUpperCase();
+        const defaultImportName = `FILE${last4Chars}`;
+        
         await tx.insert(sentinelImportBatches).values({
           batchId: result.batch.batchId,
           userId,
           brokerId: result.batch.brokerId,
           fileName: result.batch.fileName,
+          importName: defaultImportName,
           fileType: result.batch.fileType,
           totalTradesFound: result.batch.totalTradesFound,
           totalTradesImported: result.batch.totalTradesImported,
@@ -3658,6 +3653,33 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Delete batch error:", error);
       res.status(500).json({ error: "Failed to delete import batch" });
+    }
+  });
+  
+  // Rename an import batch
+  app.patch("/api/sentinel/import/batches/:batchId/rename", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId as string;
+      const { importName } = req.body;
+      
+      if (!importName || typeof importName !== 'string' || importName.trim().length === 0) {
+        return res.status(400).json({ error: "Import name is required" });
+      }
+      
+      const trimmedName = importName.trim().slice(0, 50); // Max 50 chars
+      
+      await db!.update(sentinelImportBatches)
+        .set({ importName: trimmedName })
+        .where(and(
+          eq(sentinelImportBatches.userId, userId),
+          eq(sentinelImportBatches.batchId, batchId)
+        ));
+      
+      res.json({ success: true, importName: trimmedName });
+    } catch (error) {
+      console.error("Rename batch error:", error);
+      res.status(500).json({ error: "Failed to rename import batch" });
     }
   });
 

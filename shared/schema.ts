@@ -453,6 +453,7 @@ export const sentinelImportBatches = pgTable("sentinel_import_batches", {
   brokerId: text("broker_id").notNull(), // 'FIDELITY' | 'SCHWAB' | 'ROBINHOOD' etc.
   accountSettingsId: integer("account_settings_id"), // Links to account settings for this import
   fileName: text("file_name").notNull(),
+  importName: text("import_name"), // Custom display name, defaults to "FILE" + last 4 chars of fileName
   fileType: text("file_type").notNull().default("CSV"), // 'CSV' | 'PDF' | 'XLSX'
   totalTradesFound: integer("total_trades_found").default(0),
   totalTradesImported: integer("total_trades_imported").default(0),
