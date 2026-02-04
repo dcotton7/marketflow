@@ -3554,7 +3554,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         .where(eq(sentinelImportBatches.userId, userId))
         .orderBy(sentinelImportBatches.createdAt);
       
-      // Dynamically calculate pending orphan count for each batch
+      // Dynamically calculate pending orphan count for each batch and derive status
       const batchesWithOrphanCounts = await Promise.all(
         batches.map(async (batch) => {
           const pendingOrphans = await db!.select({ count: sql<number>`count(*)` })
@@ -3566,9 +3566,12 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               eq(sentinelImportedTrades.orphanStatus, 'pending')
             ));
           
+          const orphanCount = Number(pendingOrphans[0]?.count || 0);
           return {
             ...batch,
-            orphanSellsCount: Number(pendingOrphans[0]?.count || 0),
+            orphanSellsCount: orphanCount,
+            // Dynamically set status based on orphan count
+            status: orphanCount > 0 ? 'NEEDS_REVIEW' : (batch.status === 'NEEDS_REVIEW' ? 'completed' : batch.status),
           };
         })
       );
