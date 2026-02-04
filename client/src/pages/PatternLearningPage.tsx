@@ -87,6 +87,7 @@ export default function PatternLearningPage() {
   
   const [currentFormula, setCurrentFormula] = useState<Record<string, any> | null>(null);
   const [extractedTechnicals, setExtractedTechnicals] = useState<string[]>([]);
+  const [chartTimeframe, setChartTimeframe] = useState<string>("D");
   
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "I'm ready to help you refine your trading setup. Select a setup or create a new one, then run a test to find matches. Rate the matches and provide feedback - I'll learn from your input to improve the detection formula." }
@@ -240,6 +241,10 @@ export default function PatternLearningPage() {
         setExtractedTechnicals(data.extractedTechnicals);
       }
       
+      if (data.extractedTimeframe) {
+        setChartTimeframe(data.extractedTimeframe);
+      }
+      
       if (data.proposedFormula) {
         setCurrentFormula(data.proposedFormula);
       }
@@ -297,7 +302,7 @@ export default function PatternLearningPage() {
     // Remove duplicates
     const uniqueStudies = Array.from(new Set(studies)).join(',');
     
-    return `https://www.tradingview.com/chart/?symbol=${ticker}&interval=D${uniqueStudies ? `&studies=${uniqueStudies}` : ''}`;
+    return `https://www.tradingview.com/chart/?symbol=${ticker}&interval=${chartTimeframe}${uniqueStudies ? `&studies=${uniqueStudies}` : ''}`;
   };
   
   // Generate studies string for embedded widget
@@ -606,6 +611,13 @@ export default function PatternLearningPage() {
                       <div className="flex items-center gap-3">
                         <span className="text-xl font-bold">{currentMatch.ticker}</span>
                         <Badge variant="outline">{currentMatch.matchDate}</Badge>
+                        <Badge variant="secondary" data-testid="badge-timeframe">
+                          {chartTimeframe === "D" ? "Daily" : 
+                           chartTimeframe === "W" ? "Weekly" : 
+                           chartTimeframe === "60" ? "1H" : 
+                           chartTimeframe === "15" ? "15m" : 
+                           chartTimeframe === "5" ? "5m" : chartTimeframe}
+                        </Badge>
                         {currentRating && (
                           <Badge className={RATING_COLORS[currentRating.rating as keyof typeof RATING_COLORS]}>
                             {RATING_LABELS[currentRating.rating as keyof typeof RATING_LABELS]}
@@ -625,7 +637,7 @@ export default function PatternLearningPage() {
                     
                     <div className="flex-1 bg-card rounded-lg border overflow-hidden mb-4" style={{ minHeight: '350px' }}>
                       <iframe
-                        src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=D&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=1&allow_symbol_change=1&details=0&studies=${getWidgetStudies()}&show_popup_button=1`}
+                        src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentMatch.ticker}&interval=${chartTimeframe}&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hide_side_toolbar=1&allow_symbol_change=1&details=0&studies=${getWidgetStudies()}&show_popup_button=1`}
                         className="w-full h-full border-0"
                         title={`Chart for ${currentMatch.ticker}`}
                       />

@@ -337,6 +337,7 @@ Your job is to:
 IMPORTANT: Always include this JSON block at the END of your response (after your explanation):
 {
   "technicals": ["list", "of", "indicators", "mentioned"],
+  "timeframe": "D",
   "formula": {
     "entryCondition": "description of entry",
     "volumeRatio": 1.5,
@@ -349,11 +350,19 @@ IMPORTANT: Always include this JSON block at the END of your response (after you
 
 Set formulaUpdate to true ONLY when you are making changes based on user feedback.
 technicals should list indicators like: "VWAP", "21 EMA", "50 SMA", "9 EMA", "RSI", "Volume", etc.
+timeframe should be the chart interval based on the pattern context:
+  - "D" for daily patterns (swing trades, multi-day holds)
+  - "W" for weekly patterns (longer term positions)
+  - "5" for 5-minute intraday (scalps, ORB, opening range plays)
+  - "15" for 15-minute intraday (day trades)
+  - "60" for hourly (intraday swings)
+If the user mentions "intraday", "ORB", "opening range", "scalp", or specific minute intervals, switch to the appropriate intraday timeframe.
 formula should contain key parameters for pattern detection.
 
 Be conversational and helpful. When they describe a pattern, extract the technicals and propose initial formula parameters.
 For example, if they say "reclaim VWAP after dip below 21 MA", extract ["VWAP", "21 EMA"] and propose relevant parameters.
-If they say "entry was too early", adjust confirmationCandles. If "volume wasn't convincing", increase volumeRatio.`;
+If they say "entry was too early", adjust confirmationCandles. If "volume wasn't convincing", increase volumeRatio.
+If they mention "this is an intraday play" or "ORB", change timeframe to "5" or "15".`;
 
     const openai = getOpenAI();
     const response = await openai.chat.completions.create({
@@ -370,6 +379,7 @@ If they say "entry was too early", adjust confirmationCandles. If "volume wasn't
     let formulaUpdate = false;
     let extractedTechnicals: string[] = [];
     let proposedFormula: Record<string, any> | null = null;
+    let extractedTimeframe: string = "D";
     
     const jsonMatch = aiResponse.match(/\{[\s\S]*"technicals"[\s\S]*\}/);
     if (jsonMatch) {
@@ -384,6 +394,9 @@ If they say "entry was too early", adjust confirmationCandles. If "volume wasn't
         if (parsed.formulaUpdate === true) {
           formulaUpdate = true;
         }
+        if (parsed.timeframe && typeof parsed.timeframe === 'string') {
+          extractedTimeframe = parsed.timeframe;
+        }
       } catch (e) {
         console.log("Failed to parse AI JSON response:", e);
       }
@@ -395,7 +408,8 @@ If they say "entry was too early", adjust confirmationCandles. If "volume wasn't
       response: cleanResponse,
       formulaUpdate,
       extractedTechnicals,
-      proposedFormula
+      proposedFormula,
+      extractedTimeframe
     });
   } catch (error) {
     console.error("Error in chat:", error);
