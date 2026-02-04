@@ -139,29 +139,50 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     const period = timeframe === 'D' || timeframe === 'W' ? '1y' : '5d';
     const interval = timeframe === 'W' ? '1wk' : timeframe === 'D' ? '1d' : '1h';
     
-    fetch(`/api/stocks/${symbol}/history?period=${period}&interval=${interval}`)
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+    let cancelled = false;
+    
+    const fetchWithRetry = async (retries = 3, delay = 1000) => {
+      for (let attempt = 0; attempt < retries; attempt++) {
+        if (cancelled) return;
+        
+        try {
+          const res = await fetch(`/api/stocks/${symbol}/history?period=${period}&interval=${interval}`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const data = await res.json();
+          
+          if (cancelled) return;
+          
+          if (data.error || data.message) {
+            throw new Error(data.error || data.message);
+          } else if (Array.isArray(data) && data.length > 0) {
+            setStockData(data);
+            setLoading(false);
+            return;
+          } else if (data.data && Array.isArray(data.data)) {
+            setStockData(data.data);
+            setLoading(false);
+            return;
+          } else {
+            throw new Error('No chart data available');
+          }
+        } catch (err) {
+          if (attempt < retries - 1) {
+            await new Promise(r => setTimeout(r, delay * (attempt + 1)));
+          } else {
+            if (!cancelled) {
+              setError('Failed to fetch data');
+              setLoading(false);
+            }
+          }
         }
-        return res.json();
-      })
-      .then(data => {
-        if (data.error || data.message) {
-          setError(data.error || data.message);
-        } else if (Array.isArray(data) && data.length > 0) {
-          setStockData(data);
-        } else if (data.data && Array.isArray(data.data)) {
-          setStockData(data.data);
-        } else {
-          setError('No chart data available');
-        }
-        setLoading(false);
-      })
-      .catch(() => {
-        setError('Failed to fetch data');
-        setLoading(false);
-      });
+      }
+    };
+    
+    fetchWithRetry();
+    
+    return () => { cancelled = true; };
   }, [symbol, timeframe]);
 
   useEffect(() => {
