@@ -1,0 +1,51 @@
+﻿"Activity 
+1_BrokerageLink *1094 
+as of 02/04/2026 at 01:52:47 PM"
+
+Date,Description,Symbol,Quantity,Price,Amount,Cash Balance,Commission,Fees,Account,Settlement Date,Type
+Feb-4-2026,YOU SOLD,UPRO,-62,115.28,"7,147.36",Processing,--,--,1_BrokerageLink *1094,Feb-5-2026,Cash
+Feb-4-2026,YOU SOLD,UPRO,-188,115.27,"21,670.76",Processing,--,--,1_BrokerageLink *1094,Feb-5-2026,Cash
+Feb-4-2026,YOU SOLD,UPRO,-125,117.54,"14,692.50",Processing,--,--,1_BrokerageLink *1094,Feb-5-2026,Cash
+Feb-4-2026,YOU SOLD,UPRO,-125,117.53,"14,691.25",Processing,--,--,1_BrokerageLink *1094,Feb-5-2026,Cash
+Feb-3-2026,YOU SOLD,UPRO,-40,120.56,"4,822.40","+757,474.51",--,--,1_BrokerageLink *1094,Feb-4-2026,Cash
+Feb-3-2026,YOU SOLD,UPRO,-460,120.55,"55,453.00","+752,652.11",--,--,1_BrokerageLink *1094,Feb-4-2026,Cash
+Feb-2-2026,YOU BOUGHT,UPRO,400,122.14,"-48,856.00","+576,627.80",--,--,1_BrokerageLink *1094,Feb-3-2026,Cash
+Feb-2-2026,YOU BOUGHT,UPRO,100,122.13,"-12,213.00","+625,483.80",--,--,1_BrokerageLink *1094,Feb-3-2026,Cash
+Jan-30-2026,YOU BOUGHT,UPRO,500,119.76,"-59,879.95","+683,905.83",--,--,1_BrokerageLink *1094,Feb-2-2026,Cash
+Jan-30-2026,YOU SOLD,UPRO,-255,118.63,"30,250.65","+743,785.78",--,--,1_BrokerageLink *1094,Feb-2-2026,Cash
+Jan-30-2026,YOU SOLD,UPRO,-345,118.64,"40,930.80","+713,535.13",--,--,1_BrokerageLink *1094,Feb-2-2026,Cash
+Jan-29-2026,YOU BOUGHT,UPRO,"1,100",117.21,"-128,931.00","+658,801.78",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU BOUGHT,UPRO,200,117.21,"-23,441.96","+787,732.78",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU BOUGHT,UPRO,200,117.21,"-23,441.98","+811,174.74",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU SOLD,UPRO,-200,117.89,"23,578.02","+834,616.72",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU SOLD,UPRO,-250,116.15,"29,037.50","+811,038.70",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU SOLD,UPRO,-400,119.57,"47,828.00","+782,001.20",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU SOLD,UPRO,-500,117.40,"58,700.00","+734,173.20",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-29-2026,YOU SOLD,UPRO,-500,118.30,"59,150.00","+675,473.20",--,--,1_BrokerageLink *1094,Jan-30-2026,Cash
+Jan-27-2026,YOU SOLD,UPRO,-0.02,121.86,2.44,"+625,376.65",--,--,1_BrokerageLink *1094,Jan-28-2026,Cash
+Jan-27-2026,YOU SOLD,UPRO,-253,121.87,"30,831.95","+625,374.21",--,--,1_BrokerageLink *1094,Jan-28-2026,Cash
+Jan-26-2026,YOU BOUGHT,UPRO,600,120.08,"-72,051.00","+557,740.94",--,--,1_BrokerageLink *1094,Jan-27-2026,Cash
+Jan-22-2026,YOU BOUGHT,UPRO,300,118.18,"-35,454.00","+853,142.78",--,--,1_BrokerageLink *1094,Jan-23-2026,Cash
+Jan-22-2026,YOU BOUGHT,UPRO,300,119.00,"-35,700.00","+888,596.78",--,--,1_BrokerageLink *1094,Jan-23-2026,Cash
+Jan-14-2026,YOU SOLD,UPRO,-100,119.16,"11,915.50","+459,776.86",--,--,1_BrokerageLink *1094,Jan-15-2026,Cash
+Jan-14-2026,YOU SOLD,UPRO,-182,119.91,"21,823.62","+447,861.36",--,--,1_BrokerageLink *1094,Jan-15-2026,Cash
+Jan-14-2026,YOU SOLD,UPRO,-218,119.92,"26,142.56","+426,037.74",--,--,1_BrokerageLink *1094,Jan-15-2026,Cash
+Jan-14-2026,YOU SOLD,UPRO,-240,119.15,"28,596.00","+399,895.18",--,--,1_BrokerageLink *1094,Jan-15-2026,Cash
+Jan-14-2026,YOU SOLD,UPRO,-260,119.16,"30,981.60","+371,299.18",--,--,1_BrokerageLink *1094,Jan-15-2026,Cash
+Jan-13-2026,YOU SOLD,UPRO,-200,120.90,"24,180.00","+305,892.11",--,--,1_BrokerageLink *1094,Jan-14-2026,Cash
+Jan-9-2026,YOU BOUGHT,UPRO,500,121.40,"-60,700.00","+116,366.06",--,--,1_BrokerageLink *1094,Jan-12-2026,Cash
+Jan-6-2026,YOU BOUGHT,UPRO,200,119.83,"-23,965.84","+416,807.83",--,--,1_BrokerageLink *1094,Jan-7-2026,Cash
+Jan-5-2026,YOU BOUGHT,UPRO,200,118.83,"-23,765.14","+681,541.45",--,--,1_BrokerageLink *1094,Jan-6-2026,Cash
+Jan-5-2026,YOU BOUGHT,UPRO,200,118.83,"-23,765.98","+705,306.59",--,--,1_BrokerageLink *1094,Jan-6-2026,Cash
+Jan-5-2026,YOU BOUGHT,UPRO,100,118.82,"-11,882.00","+729,072.57",--,--,1_BrokerageLink *1094,Jan-6-2026,Cash
+,Totals,,,,"  -1,621.94",,  --,  --,,,
+
+Disclosure
+"The data and information in this spreadsheet is provided to you solely for your use and is not for distribution. 
+The spreadsheet is provided for informational purposes only, and is not intended to provide advice, nor should it be construed as an offer to sell, a solicitation of an offer to buy or a recommendation for any security 
+or digital asset by Fidelity or any third party. Data and information shown is based on information known to Fidelity as of the date it was exported and is subject to change. 
+It should not be used in place of your account statements or trade confirmations and is not intended for tax reporting purposes. 
+For more information on the data included in this spreadsheet, including any limitations thereof, go to Fidelity.com.
+ 
+Brokerage services are provided by Fidelity Brokerage Services LLC (FBS), 900 Salem Street, Smithfield, RI 02917. Custody and other services provided by National Financial Services LLC (NFS). 
+Both are Fidelity Investment companies and members SIPC, NYSE. Neither FBS nor NFS offer crypto as a direct investment nor provide trading or custody services for such assets."
