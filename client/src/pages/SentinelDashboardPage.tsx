@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1071,6 +1071,20 @@ export default function SentinelDashboardPage() {
     return "all"; // Default to unfiltered
   });
   
+  // Ticker search filter
+  const [tickerSearch, setTickerSearch] = useState<string>("");
+  
+  // Sort order for trades
+  const [sortOrder, setSortOrder] = useState<string>(() => {
+    const saved = localStorage.getItem("sentinel_sort_order");
+    return saved || "newest";
+  });
+  
+  // Persist sort order
+  useEffect(() => {
+    localStorage.setItem("sentinel_sort_order", sortOrder);
+  }, [sortOrder]);
+  
   // Persist activeTab to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_TAB, activeTab);
@@ -1358,6 +1372,46 @@ export default function SentinelDashboardPage() {
         return month === selectedMonth;
       });
     }
+    
+    // Filter by ticker search
+    if (tickerSearch.trim() !== "") {
+      const searchTerm = tickerSearch.trim().toUpperCase();
+      filtered = filtered.filter(trade => 
+        trade.symbol.toUpperCase().includes(searchTerm)
+      );
+    }
+    
+    // Sort trades
+    filtered = [...filtered].sort((a, b) => {
+      switch (sortOrder) {
+        case "symbol_asc":
+          return a.symbol.localeCompare(b.symbol);
+        case "symbol_desc":
+          return b.symbol.localeCompare(a.symbol);
+        case "newest": {
+          const aDate = a.entryDate || a.createdAt || 0;
+          const bDate = b.entryDate || b.createdAt || 0;
+          return new Date(bDate).getTime() - new Date(aDate).getTime();
+        }
+        case "oldest": {
+          const aDate = a.entryDate || a.createdAt || 0;
+          const bDate = b.entryDate || b.createdAt || 0;
+          return new Date(aDate).getTime() - new Date(bDate).getTime();
+        }
+        case "pnl_high": {
+          const aPnl = a.actualPnL || 0;
+          const bPnl = b.actualPnL || 0;
+          return bPnl - aPnl;
+        }
+        case "pnl_low": {
+          const aPnl = a.actualPnL || 0;
+          const bPnl = b.actualPnL || 0;
+          return aPnl - bPnl;
+        }
+        default:
+          return 0;
+      }
+    });
     
     return filtered;
   };
@@ -2111,6 +2165,41 @@ export default function SentinelDashboardPage() {
         <Card className="mb-4">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center gap-4">
+              {/* Ticker Search */}
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Search:</Label>
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Ticker..."
+                    value={tickerSearch}
+                    onChange={(e) => setTickerSearch(e.target.value)}
+                    className="pl-8 h-9 w-28"
+                    data-testid="filter-ticker-search"
+                  />
+                </div>
+              </div>
+              
+              {/* Sort Order */}
+              <div className="flex items-center gap-2">
+                <Label className="text-sm">Sort:</Label>
+                <Select value={sortOrder} onValueChange={setSortOrder}>
+                  <SelectTrigger className="w-36" data-testid="filter-sort">
+                    <ArrowUpDown className="h-3 w-3 mr-1" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">Newest First</SelectItem>
+                    <SelectItem value="oldest">Oldest First</SelectItem>
+                    <SelectItem value="symbol_asc">Symbol A→Z</SelectItem>
+                    <SelectItem value="symbol_desc">Symbol Z→A</SelectItem>
+                    <SelectItem value="pnl_high">P&L High→Low</SelectItem>
+                    <SelectItem value="pnl_low">P&L Low→High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
               {/* Month Filter */}
               <div className="flex items-center gap-2">
                 <Label className="text-sm">Month:</Label>
@@ -2199,7 +2288,7 @@ export default function SentinelDashboardPage() {
               )}
               
               {/* Clear Filters */}
-              {(selectedSourceFilters.length > 0 || selectedLabelFilters.length > 0 || selectedMonth !== "all" || selectedYear !== "all") && (
+              {(selectedSourceFilters.length > 0 || selectedLabelFilters.length > 0 || selectedMonth !== "all" || selectedYear !== "all" || tickerSearch.trim() !== "") && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -2208,6 +2297,7 @@ export default function SentinelDashboardPage() {
                     setSelectedLabelFilters([]);
                     setSelectedMonth("all");
                     setSelectedYear("all");
+                    setTickerSearch("");
                   }}
                   className="h-7 text-xs text-muted-foreground"
                   data-testid="clear-filters"
@@ -3190,6 +3280,7 @@ export default function SentinelDashboardPage() {
                           <th className="px-3 py-2 text-left font-medium">BUY/SELL</th>
                           <th className="px-3 py-2 text-left font-medium">Cost Basis / Sell Price</th>
                           <th className="px-3 py-2 text-left font-medium">Lot Remaining</th>
+                          <th className="px-3 py-2 text-left font-medium">Profit</th>
                           <th className="px-3 py-2 text-left font-medium">Running Total</th>
                           <th className="px-2 py-2 w-16"></th>
                         </tr>
@@ -3264,6 +3355,30 @@ export default function SentinelDashboardPage() {
                                   <span className="font-mono text-xs text-red-400">
                                     -{fifoSell.qty}
                                   </span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td className="px-2 py-1">
+                                {/* Profit column: For sells, calculate (sellPrice - buyLotCost) × qty for each matched lot */}
+                                {lot.buySell === 'sell' && fifoSell && fifoSell.depletedFrom.length > 0 ? (
+                                  (() => {
+                                    // Calculate profit for this sell by summing P&L from each matched buy lot
+                                    const sellPrice = parseFloat(lot.price) || 0;
+                                    let sellProfit = 0;
+                                    fifoSell.depletedFrom.forEach(match => {
+                                      const buyLot = fifoResult.buyLots.find(b => b.lotId === match.lotId);
+                                      if (buyLot) {
+                                        sellProfit += (sellPrice - buyLot.price) * match.qtyTaken;
+                                      }
+                                    });
+                                    const isPositive = sellProfit >= 0;
+                                    return (
+                                      <span className={`font-mono text-xs font-medium ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
+                                        {isPositive ? '+' : ''}${sellProfit.toFixed(2)}
+                                      </span>
+                                    );
+                                  })()
                                 ) : (
                                   <span className="text-xs text-muted-foreground">—</span>
                                 )}
