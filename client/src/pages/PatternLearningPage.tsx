@@ -89,6 +89,7 @@ export default function PatternLearningPage() {
   const [currentFormula, setCurrentFormula] = useState<Record<string, any> | null>(null);
   const [extractedTechnicals, setExtractedTechnicals] = useState<string[]>([]);
   const [chartTimeframe, setChartTimeframe] = useState<string>("D");
+  const [chartPeriod, setChartPeriod] = useState<string>("6mo");
   
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "I'm ready to help you refine your trading setup. Select a setup or create a new one, then run a test to find matches. Rate the matches and provide feedback - I'll learn from your input to improve the detection formula." }
@@ -244,6 +245,10 @@ export default function PatternLearningPage() {
       
       if (data.extractedTimeframe) {
         setChartTimeframe(data.extractedTimeframe);
+      }
+      
+      if (data.extractedChartPeriod) {
+        setChartPeriod(data.extractedChartPeriod);
       }
       
       if (data.proposedFormula) {
@@ -642,6 +647,7 @@ export default function PatternLearningPage() {
                         indicators={extractedTechnicals.length > 0 ? extractedTechnicals : (selectedSetup?.requiredTechnicals?.indicators || [])}
                         height={350}
                         timeframe={chartTimeframe}
+                        chartPeriod={chartPeriod}
                       />
                     </div>
                     

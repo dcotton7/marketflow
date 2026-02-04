@@ -6,6 +6,7 @@ interface PatternChartProps {
   indicators: string[];
   height?: number;
   timeframe?: string;
+  chartPeriod?: string;
 }
 
 interface StockBar {
@@ -123,7 +124,7 @@ function parseIndicator(indicator: string): { type: 'sma' | 'ema' | 'vwap' | 'un
   return { type: 'unknown', period: 0 };
 }
 
-export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D' }: PatternChartProps) {
+export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D', chartPeriod }: PatternChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,8 +137,16 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     setLoading(true);
     setError(null);
     
-    const period = timeframe === 'D' || timeframe === 'W' ? '1y' : '5d';
-    const interval = timeframe === 'W' ? '1wk' : timeframe === 'D' ? '1d' : '1h';
+    // Use AI-derived chartPeriod if provided, otherwise default based on timeframe
+    const period = chartPeriod || (timeframe === 'D' || timeframe === 'W' ? '6mo' : '5d');
+    
+    // Map timeframe to Yahoo Finance interval
+    let interval = '1d';
+    if (timeframe === 'W') interval = '1wk';
+    else if (timeframe === 'D') interval = '1d';
+    else if (timeframe === '5' || timeframe === '5m') interval = '5m';
+    else if (timeframe === '15' || timeframe === '15m') interval = '15m';
+    else if (timeframe === '60' || timeframe === '1h') interval = '1h';
     
     let cancelled = false;
     
@@ -206,7 +215,7 @@ export function PatternChart({ symbol, indicators, height = 300, timeframe = 'D'
     fetchWithRetry();
     
     return () => { cancelled = true; };
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, chartPeriod]);
 
   useEffect(() => {
     if (!containerRef.current || stockData.length === 0) return;

@@ -339,6 +339,7 @@ CRITICAL - YOU MUST ALWAYS include this JSON block at the VERY END of every resp
 {
   "technicals": ["VWAP", "21 SMA", "Volume"],
   "timeframe": "D",
+  "chartPeriod": "6mo",
   "formula": {
     "entryCondition": "description of entry",
     "volumeRatio": 1.5,
@@ -359,7 +360,13 @@ timeframe should be the chart interval based on the pattern context:
   - "5" for 5-minute intraday (scalps, ORB, opening range plays)
   - "15" for 15-minute intraday (day trades)
   - "60" for hourly (intraday swings)
-If the user mentions "intraday", "ORB", "opening range", "scalp", or specific minute intervals, switch to the appropriate intraday timeframe.
+chartPeriod determines how much chart history to display:
+  - "5d" for intraday patterns (shows last 5 days of intraday data)
+  - "1mo" for recent daily patterns
+  - "3mo" for multi-week patterns
+  - "6mo" for longer swing patterns (default for daily)
+  - "1y" for multi-month patterns or weekly charts
+If the user mentions "intraday", "ORB", "opening range", "scalp", or specific minute intervals, switch to the appropriate intraday timeframe with "5d" chartPeriod.
 formula should contain key parameters for pattern detection.
 
 Be conversational and helpful. When they describe a pattern, extract the technicals and propose initial formula parameters.
@@ -383,6 +390,7 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
     let extractedTechnicals: string[] = [];
     let proposedFormula: Record<string, any> | null = null;
     let extractedTimeframe: string = "D";
+    let extractedChartPeriod: string = "6mo";
     
     // Try to extract JSON block (with or without code fence)
     let jsonMatch = aiResponse.match(/```json\s*(\{[\s\S]*?"technicals"[\s\S]*?\})\s*```/);
@@ -407,6 +415,9 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
         if (parsed.timeframe && typeof parsed.timeframe === 'string') {
           extractedTimeframe = parsed.timeframe;
         }
+        if (parsed.chartPeriod && typeof parsed.chartPeriod === 'string') {
+          extractedChartPeriod = parsed.chartPeriod;
+        }
       } catch (e) {
         console.log("Failed to parse AI JSON response:", e);
       }
@@ -426,6 +437,26 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
       }
     }
     
+    // Validate and normalize chartPeriod based on timeframe
+    const validPeriods = ['5d', '1mo', '3mo', '6mo', '1y', '2y'];
+    if (!validPeriods.includes(extractedChartPeriod)) {
+      // Invalid period, derive from timeframe
+      if (['5', '15', '60', '5m', '15m', '1h'].includes(extractedTimeframe)) {
+        extractedChartPeriod = '5d';
+      } else if (extractedTimeframe === 'W') {
+        extractedChartPeriod = '1y';
+      } else {
+        extractedChartPeriod = '6mo';
+      }
+    } else {
+      // Check for mismatched period/timeframe (intraday with long period)
+      if (['5', '15', '60', '5m', '15m', '1h'].includes(extractedTimeframe)) {
+        if (!['5d', '1mo'].includes(extractedChartPeriod)) {
+          extractedChartPeriod = '5d'; // Force short period for intraday
+        }
+      }
+    }
+    
     const cleanResponse = aiResponse
       .replace(/```json\s*\{[\s\S]*?"technicals"[\s\S]*?\}\s*```/g, '')
       .replace(/\{[\s\S]*?"technicals"[\s\S]*?\}/g, '')
@@ -436,7 +467,8 @@ If they mention "this is an intraday play" or "ORB", change timeframe to "5" or 
       formulaUpdate,
       extractedTechnicals,
       proposedFormula,
-      extractedTimeframe
+      extractedTimeframe,
+      extractedChartPeriod
     });
   } catch (error) {
     console.error("Error in chat:", error);
