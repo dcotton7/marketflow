@@ -78,6 +78,29 @@ Hand-entered trades support account selection via a dropdown that shows the user
 ### Trader Neural Network (TNN)
 An admin-only, three-layer adaptive factor weighting system where AI learns from trade outcomes. It adjusts weights for discipline factors (rule categories), setup type factors (patterns), and contextual modifiers (setup × market conditions). Weights are fetched during AI evaluation, and AI suggestions for weight changes require admin approval.
 
+### System Settings
+Per-user display customization stored in `sentinel_system_settings` table. Settings include:
+- **Overlay Color**: Theme overlay color (default: #1e3a5f)
+- **Overlay Transparency**: Overlay opacity 0-100% (default: 75%)
+- **Background Color**: Page background color (default: #0f172a)
+- **Logo Transparency**: Watermark logo opacity 0-100% (default: 6%)
+
+Settings are managed via SystemSettingsProvider context and applied across all Sentinel pages. Access settings via Admin → Settings tab.
+
+### User Management (Admin)
+Admin-only user management tab under Admin page:
+- Lists all users with rule counts (starter rules, custom rules)
+- Shows "Needs Seeding" indicator for users without starter rules
+- "Seed Rules" button to provision starter rules for users who don't have them
+- Endpoints: `GET /api/sentinel/admin/users`, `POST /api/sentinel/admin/seed-rules/:userId`
+
+### TickerWidget Display
+The Bloomberg-style ticker widget on trade cards displays:
+- Current price with market % change
+- Direction indicator (LONG/SHORT/WATCH)
+- Position P&L (unrealized gain/loss)
+- **Position Shares**: Shows number of shares held (from FIFO totalRemaining or positionSize fallback) in format "X shs"
+
 ## External Dependencies
 
 ### Database
