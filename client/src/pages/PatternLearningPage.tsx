@@ -506,17 +506,19 @@ export default function PatternLearningPage() {
 
   return (
     <div 
-      className="min-h-screen sentinel-page relative"
+      className="min-h-screen sentinel-page"
       style={{ 
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
+        position: 'relative',
+        zIndex: 1,
       } as React.CSSProperties}
     >
       {/* Watermark logo - fixed behind all content */}
       <div 
         className="fixed inset-0 flex items-center justify-center pointer-events-none"
-        style={{ opacity: cssVariables.logoOpacity, zIndex: -1 }}
+        style={{ opacity: cssVariables.logoOpacity, zIndex: 0 }}
       >
         <img 
           src="/rubricshield-logo.png" 
@@ -525,8 +527,7 @@ export default function PatternLearningPage() {
           aria-hidden="true"
         />
       </div>
-      <div className="relative" style={{ zIndex: 10 }}>
-        <SentinelHeader />
+      <SentinelHeader />
       
       <div className="container mx-auto p-4">
         <div className="flex items-center justify-between mb-4">
@@ -1322,7 +1323,6 @@ export default function PatternLearningPage() {
         </div>
           </>
         )}
-      </div>
       </div>
     </div>
   );

@@ -502,17 +502,19 @@ export default function SentinelEvaluatePage() {
 
   return (
     <div 
-      className="min-h-screen sentinel-page relative"
+      className="min-h-screen sentinel-page"
       style={{ 
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
+        position: 'relative',
+        zIndex: 1,
       } as React.CSSProperties}
     >
       {/* Watermark logo - fixed behind all content */}
       <div 
         className="fixed inset-0 flex items-center justify-center pointer-events-none"
-        style={{ opacity: cssVariables.logoOpacity, zIndex: -1 }}
+        style={{ opacity: cssVariables.logoOpacity, zIndex: 0 }}
       >
         <img 
           src="/rubricshield-logo.png" 
@@ -521,7 +523,7 @@ export default function SentinelEvaluatePage() {
           aria-hidden="true"
         />
       </div>
-      <header className="border-b relative" style={{ backgroundColor: `${systemSettings.overlayColor}d9`, zIndex: 10 }}>
+      <header className="border-b" style={{ backgroundColor: `${systemSettings.overlayColor}d9` }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel/dashboard")} data-testid="button-back">

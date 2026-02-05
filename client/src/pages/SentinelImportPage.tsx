@@ -752,17 +752,19 @@ export default function SentinelImportPage() {
 
   return (
     <div 
-      className="min-h-screen sentinel-page relative"
+      className="min-h-screen sentinel-page"
       style={{ 
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
+        position: 'relative',
+        zIndex: 1,
       } as React.CSSProperties}
     >
       {/* Watermark logo - fixed behind all content */}
       <div 
         className="fixed inset-0 flex items-center justify-center pointer-events-none"
-        style={{ opacity: cssVariables.logoOpacity, zIndex: -1 }}
+        style={{ opacity: cssVariables.logoOpacity, zIndex: 0 }}
       >
         <img 
           src="/rubricshield-logo.png" 
@@ -771,8 +773,7 @@ export default function SentinelImportPage() {
           aria-hidden="true"
         />
       </div>
-      <div className="relative" style={{ zIndex: 10 }}>
-        <SentinelHeader />
+      <SentinelHeader />
       
       <main className="container mx-auto p-4 max-w-6xl">
         <div className="mb-6">
@@ -1851,7 +1852,6 @@ export default function SentinelImportPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </div>
     </div>
   );
 }
