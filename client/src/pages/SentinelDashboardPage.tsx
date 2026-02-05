@@ -2461,6 +2461,7 @@ export default function SentinelDashboardPage() {
                     onEdit={handleEditTrade}
                     onPriceUpdate={handlePriceUpdate}
                     onCancel={handleCancelTrade}
+                    isExpanded={isExpanded}
                   />
                 ))}
               </div>
