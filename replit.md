@@ -39,7 +39,7 @@ Tracks trade sources ('hand' or 'import') and `importBatchId`. Allows filtering 
 ### Dashboard UI Enhancements
 The dashboard features an enhanced layout with:
 - **Summary Section**: Four cards showing Open PnL, Realized Gain/Loss, Active Positions count, and Closed Trades count with color-coded values (green positive, red negative).
-- **Advanced Filtering**: Unified filter bar with Month dropdown, Year dropdown, Source multi-select buttons, and Tags multi-select buttons. Sources use OR logic (show trades from ANY selected source since a trade only has one source). Tags use AND logic (must have ALL selected tags). All filter selections persist to localStorage.
+- **Advanced Filtering**: Unified filter bar with Month dropdown, Year dropdown, Account dropdown, Source multi-select buttons, and Tags multi-select buttons. Account filter allows viewing trades from a specific brokerage account (4015, 1094, etc.) regardless of which import file they came from. Sources use OR logic (show trades from ANY selected source since a trade only has one source). Tags use AND logic (must have ALL selected tags). All filter selections persist to localStorage.
 - **Active/Closed Tabs**: Separate tabs for Active (open positions with unrealized P&L) and Closed (completed trades with realized P&L) trades.
 - **Source Display**: Each trade card displays its source as a small indicator - showing the import name for imported trades or "Hand Entered" for manual entries.
 

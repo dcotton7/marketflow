@@ -270,7 +270,7 @@ function SystemSettingsTab() {
     overlayColor: "#1e3a5f",
     overlayTransparency: 75,
     backgroundColor: "#0f172a",
-    logoTransparency: 6
+    logoTransparency: 12
   });
 
   const { data: settings, isLoading } = useQuery<SystemSettings>({
@@ -384,7 +384,7 @@ function SystemSettingsTab() {
               value={[localSettings.logoTransparency]}
               onValueChange={([value]) => setLocalSettings(prev => ({ ...prev, logoTransparency: value }))}
               min={0}
-              max={30}
+              max={100}
               step={1}
               className="w-full"
               data-testid="slider-logo-transparency"

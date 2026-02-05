@@ -1162,6 +1162,7 @@ export default function SentinelDashboardPage() {
   const STORAGE_KEY_SOURCES = "sentinel_dashboard_source_filters";
   const STORAGE_KEY_MONTH = "sentinel_dashboard_month_filter";
   const STORAGE_KEY_YEAR = "sentinel_dashboard_year_filter";
+  const STORAGE_KEY_ACCOUNT = "sentinel_dashboard_account_filter";
   
   // Initialize activeTab from localStorage
   const [activeTab, setActiveTab] = useState(() => {
@@ -1223,6 +1224,12 @@ export default function SentinelDashboardPage() {
   // Ticker search filter
   const [tickerSearch, setTickerSearch] = useState<string>("");
   
+  // Account filter (single select dropdown)
+  const [selectedAccountFilter, setSelectedAccountFilter] = useState<string>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_ACCOUNT);
+    return saved || "all";
+  });
+  
   // Sort order for trades
   const [sortOrder, setSortOrder] = useState<string>(() => {
     const saved = localStorage.getItem("sentinel_sort_order");
@@ -1257,6 +1264,11 @@ export default function SentinelDashboardPage() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_YEAR, selectedYear);
   }, [selectedYear]);
+  
+  // Persist account filter to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_ACCOUNT, selectedAccountFilter);
+  }, [selectedAccountFilter]);
   
   // Toggle functions for multi-select
   const toggleLabelFilter = (labelId: number) => {
@@ -1477,6 +1489,11 @@ export default function SentinelDashboardPage() {
     if (!trades) return trades;
     
     let filtered = trades;
+    
+    // Filter by account (single select - show trades from selected account)
+    if (selectedAccountFilter !== "all") {
+      filtered = filtered.filter(trade => trade.accountName === selectedAccountFilter);
+    }
     
     // Filter by source (OR logic - show trades from ANY of the selected sources)
     // Note: A trade can only have one source, so OR is the only logical choice
@@ -2410,6 +2427,26 @@ export default function SentinelDashboardPage() {
                 </Select>
               </div>
               
+              {/* Account Filter */}
+              {accountSettings.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm">Account:</Label>
+                  <Select value={selectedAccountFilter} onValueChange={setSelectedAccountFilter}>
+                    <SelectTrigger className="w-24" data-testid="filter-account">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      {accountSettings.map((account) => (
+                        <SelectItem key={account.id} value={account.accountName}>
+                          {account.accountName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              
               {/* Source Multi-Select */}
               {tradeSources.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -2457,7 +2494,7 @@ export default function SentinelDashboardPage() {
               )}
               
               {/* Clear Filters */}
-              {(selectedSourceFilters.length > 0 || selectedLabelFilters.length > 0 || selectedMonth !== "all" || selectedYear !== "all" || tickerSearch.trim() !== "") && (
+              {(selectedSourceFilters.length > 0 || selectedLabelFilters.length > 0 || selectedMonth !== "all" || selectedYear !== "all" || selectedAccountFilter !== "all" || tickerSearch.trim() !== "") && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -2466,6 +2503,7 @@ export default function SentinelDashboardPage() {
                     setSelectedLabelFilters([]);
                     setSelectedMonth("all");
                     setSelectedYear("all");
+                    setSelectedAccountFilter("all");
                     setTickerSearch("");
                   }}
                   className="h-7 text-xs text-muted-foreground"
