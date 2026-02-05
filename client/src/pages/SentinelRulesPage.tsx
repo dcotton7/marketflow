@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -107,6 +108,7 @@ interface AIChatMessage {
 export default function SentinelRulesPage() {
   const { user, logout } = useSentinelAuth();
   const { toast } = useToast();
+  const { settings: systemSettings, cssVariables } = useSystemSettings();
   const [activeTab, setActiveTab] = useState("system");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -820,7 +822,26 @@ export default function SentinelRulesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
+    <div 
+      className="min-h-screen sentinel-page relative"
+      style={{ 
+        backgroundColor: cssVariables.backgroundColor,
+        '--logo-opacity': cssVariables.logoOpacity,
+        '--overlay-bg': cssVariables.overlayBg,
+      } as React.CSSProperties}
+    >
+      {/* Watermark logo */}
+      <div 
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 pointer-events-none z-0"
+        style={{ opacity: cssVariables.logoOpacity }}
+      >
+        <img 
+          src="/rubricshield-logo.png" 
+          alt="" 
+          className="w-full h-full object-contain"
+          aria-hidden="true"
+        />
+      </div>
       <SentinelHeader />
       
       <div className="container mx-auto px-4 py-6">

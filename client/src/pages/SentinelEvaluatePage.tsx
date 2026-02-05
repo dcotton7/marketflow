@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -186,6 +187,7 @@ export default function SentinelEvaluatePage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { settings: systemSettings, cssVariables } = useSystemSettings();
 
   // Get tradeId from URL query params for pre-loading trade data
   const urlParams = new URLSearchParams(window.location.search);
@@ -499,8 +501,27 @@ export default function SentinelEvaluatePage() {
   };
 
   return (
-    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
-      <header className="border-b bg-card/90 backdrop-blur-sm">
+    <div 
+      className="min-h-screen sentinel-page relative"
+      style={{ 
+        backgroundColor: cssVariables.backgroundColor,
+        '--logo-opacity': cssVariables.logoOpacity,
+        '--overlay-bg': cssVariables.overlayBg,
+      } as React.CSSProperties}
+    >
+      {/* Watermark logo */}
+      <div 
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 pointer-events-none z-0"
+        style={{ opacity: cssVariables.logoOpacity }}
+      >
+        <img 
+          src="/rubricshield-logo.png" 
+          alt="" 
+          className="w-full h-full object-contain"
+          aria-hidden="true"
+        />
+      </div>
+      <header className="border-b relative z-10" style={{ backgroundColor: `${systemSettings.overlayColor}d9` }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel/dashboard")} data-testid="button-back">

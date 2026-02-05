@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -104,6 +105,7 @@ const BROKER_OPTIONS = [
 export default function SentinelImportPage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
+  const { settings: systemSettings, cssVariables } = useSystemSettings();
   
   const [activeTab, setActiveTab] = useState("upload");
   const [selectedBrokerId, setSelectedBrokerId] = useState<string>("FIDELITY");
@@ -749,7 +751,26 @@ export default function SentinelImportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
+    <div 
+      className="min-h-screen sentinel-page relative"
+      style={{ 
+        backgroundColor: cssVariables.backgroundColor,
+        '--logo-opacity': cssVariables.logoOpacity,
+        '--overlay-bg': cssVariables.overlayBg,
+      } as React.CSSProperties}
+    >
+      {/* Watermark logo */}
+      <div 
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 pointer-events-none z-0"
+        style={{ opacity: cssVariables.logoOpacity }}
+      >
+        <img 
+          src="/rubricshield-logo.png" 
+          alt="" 
+          className="w-full h-full object-contain"
+          aria-hidden="true"
+        />
+      </div>
       <SentinelHeader />
       
       <main className="container mx-auto p-4 max-w-6xl">

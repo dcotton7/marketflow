@@ -7,6 +7,7 @@ import { ScannerProvider } from "@/context/ScannerContext";
 import { TimeframeProvider } from "@/context/TimeframeContext";
 import { SentinelAuthProvider } from "@/context/SentinelAuthContext";
 import { SentinelProtectedRoute } from "@/components/SentinelProtectedRoute";
+import { SystemSettingsProvider } from "@/context/SystemSettingsContext";
 import NotFound from "@/pages/not-found";
 import ScannerPage from "@/pages/ScannerPage";
 import SymbolPage from "@/pages/SymbolPage";
@@ -84,12 +85,14 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SentinelAuthProvider>
-          <TimeframeProvider>
-            <ScannerProvider>
-              <Toaster />
-              <Router />
-            </ScannerProvider>
-          </TimeframeProvider>
+          <SystemSettingsProvider>
+            <TimeframeProvider>
+              <ScannerProvider>
+                <Toaster />
+                <Router />
+              </ScannerProvider>
+            </TimeframeProvider>
+          </SystemSettingsProvider>
         </SentinelAuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
