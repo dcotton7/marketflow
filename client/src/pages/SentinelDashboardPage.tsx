@@ -453,16 +453,19 @@ function MiniSparkline({ positive, className = "" }: { positive: boolean; classN
 interface TickerWidgetProps {
   symbol: string;
   price: number;
-  marketPctChange?: number; // Daily % change from market data (previousClose)
+  marketPctChange?: number; // Daily % change from market data (previousClose), undefined if no live data
   direction: string;
   status?: string; // "active", "considering", "watch"
   positionPnL?: number; // Position $ change (unrealized P&L)
   positionPctChange?: number; // Position % change from entry
+  hasLiveData?: boolean; // Whether live market data is available
 }
 
-function TickerWidget({ symbol, price, marketPctChange = 0, direction, status, positionPnL, positionPctChange }: TickerWidgetProps) {
-  const isMarketPositive = marketPctChange >= 0;
+function TickerWidget({ symbol, price, marketPctChange, direction, status, positionPnL, positionPctChange, hasLiveData = false }: TickerWidgetProps) {
+  const isMarketPositive = (marketPctChange ?? 0) >= 0;
   const isPnLPositive = (positionPnL ?? 0) >= 0;
+  const hasMarketChange = marketPctChange !== undefined;
+  const hasPnLData = positionPnL !== undefined;
   
   // Direction label
   const directionLabel = status === "watch" ? "WATCH" : (direction === "long" ? "LONG" : "SHORT");
@@ -480,13 +483,15 @@ function TickerWidget({ symbol, price, marketPctChange = 0, direction, status, p
       >
         <span className="font-bold text-foreground" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
         <span className="text-muted-foreground mx-1">|</span>
-        <span className="font-semibold text-foreground" data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
+        <span className={`font-semibold ${hasLiveData ? "text-foreground" : "text-muted-foreground"}`} data-testid={`text-price-${symbol}`}>
+          ${price.toFixed(2)}{!hasLiveData && <span className="text-xs ml-0.5">(e)</span>}
+        </span>
         <span className="text-muted-foreground mx-1">|</span>
         <span 
-          className={`font-bold ${isMarketPositive ? "text-green-500" : "text-red-500"}`} 
+          className={`font-bold ${hasMarketChange ? (isMarketPositive ? "text-green-500" : "text-red-500") : "text-muted-foreground"}`} 
           data-testid={`text-pct-${symbol}`}
         >
-          {isMarketPositive ? "+" : ""}{marketPctChange.toFixed(2)}%
+          {hasMarketChange ? `${isMarketPositive ? "+" : ""}${marketPctChange!.toFixed(2)}%` : "—"}
         </span>
       </div>
 
@@ -499,9 +504,9 @@ function TickerWidget({ symbol, price, marketPctChange = 0, direction, status, p
         <span className={`font-bold px-1 py-0.5 rounded text-white ${directionBgColor}`} data-testid={`badge-status-${symbol}`}>
           {directionLabel}
         </span>
-        {positionPnL !== undefined && (
+        <span className="text-gray-400 mx-1">|</span>
+        {hasPnLData ? (
           <>
-            <span className="text-muted-foreground mx-1">|</span>
             <span 
               className={`font-bold ${isPnLPositive ? "text-green-600" : "text-red-600"}`}
               data-testid={`text-position-pnl-${symbol}`}
@@ -510,7 +515,7 @@ function TickerWidget({ symbol, price, marketPctChange = 0, direction, status, p
             </span>
             {positionPctChange !== undefined && (
               <>
-                <span className="text-muted-foreground mx-1">|</span>
+                <span className="text-gray-400 mx-1">|</span>
                 <span 
                   className={`font-bold ${isPnLPositive ? "text-green-600" : "text-red-600"}`}
                   data-testid={`text-position-pct-${symbol}`}
@@ -520,6 +525,8 @@ function TickerWidget({ symbol, price, marketPctChange = 0, direction, status, p
               </>
             )}
           </>
+        ) : (
+          <span className="text-gray-400 font-medium" data-testid={`text-position-pnl-${symbol}`}>—</span>
         )}
       </div>
     </div>
@@ -539,8 +546,13 @@ interface TradeCardProps {
 function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose, onCancel, onPriceUpdate, isExpanded = true }: TradeCardProps & { isExpanded?: boolean }) {
   const [, setLocation] = useLocation();
   
-  // Fetch current market price for accurate P&L
-  const tickerQuery = useQuery<{ symbol: string; price: number; name?: string }>({
+  // Fetch current market price for accurate P&L - matches API response shape
+  const tickerQuery = useQuery<{ 
+    symbol: string; 
+    currentPrice: number; 
+    previousClose: number;
+    name?: string;
+  }>({
     queryKey: ["/api/sentinel/ticker", trade.symbol],
     enabled: trade.status !== "closed", // Only fetch for active trades
     refetchInterval: 60000, // Refresh every minute
@@ -576,10 +588,17 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
   };
 
   // Use live market price if available, otherwise fall back to entry price
-  const currentPrice = tickerQuery.data?.price ?? trade.entryPrice;
+  const hasLiveData = tickerQuery.isSuccess && tickerQuery.data?.currentPrice !== undefined;
+  const currentPrice = tickerQuery.data?.currentPrice ?? trade.entryPrice;
+  const previousClose = tickerQuery.data?.previousClose;
   
-  // Calculate actual % change from entry price using live market data
-  const pctChange = currentPrice && trade.entryPrice 
+  // Calculate daily market % change from previousClose (only if live data available)
+  const marketPctChange = hasLiveData && previousClose && currentPrice
+    ? ((currentPrice - previousClose) / previousClose * 100)
+    : undefined;
+  
+  // Calculate position % change from entry price (always calculable)
+  const positionPctChange = currentPrice && trade.entryPrice 
     ? ((currentPrice - trade.entryPrice) / trade.entryPrice * 100) 
     : 0;
   
@@ -606,12 +625,13 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
   if (trade.status !== "closed" && fifoData && fifoData.totalRemaining > 0) {
     // Use per-lot calculation instead of avg cost basis
     openPnL = fifoData.calculateOpenPnL(currentPrice, isLongDirection);
-  } else if (trade.status !== "closed" && trade.positionSize && !fifoData) {
-    // Fallback if no lot entries: use entry price
+  } else if (trade.status !== "closed" && trade.positionSize && trade.positionSize > 0 && trade.entryPrice > 0) {
+    // Fallback for active trades with position size: use entry price
     openPnL = isLongDirection
       ? (currentPrice - trade.entryPrice) * trade.positionSize
       : (trade.entryPrice - currentPrice) * trade.positionSize;
   }
+  // Note: If no position size and no lot entries, openPnL stays undefined (shows no P&L in widget)
   
   // Profit Closed (realized) - sum of each sell's P&L: (Sell Price - Buy Lot Cost) × Qty
   // For active trades with sells, show realized profit from partial closes
@@ -698,17 +718,17 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
           </div>
         )}
 
-        {/* Compact Ticker Widget with Sparkline */}
+        {/* Bloomberg-style Ticker Widget */}
         <div className={`flex items-center justify-between mb-1 ${isExpanded && (nearTarget || nearStop) ? "mt-4" : ""}`}>
           <TickerWidget 
             symbol={trade.symbol}
             price={currentPrice}
-            pctChange={pctChange}
+            marketPctChange={marketPctChange}
             direction={trade.direction}
             status={isActive ? "active" : "considering"}
-            openPnL={openPnL}
-            profitClosed={profitClosed ?? undefined}
-            breakEven={breakEvenData}
+            positionPnL={openPnL}
+            positionPctChange={openPnL !== undefined ? positionPctChange : undefined}
+            hasLiveData={hasLiveData}
           />
           {trade.latestEvaluation && (
             <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`} className="ml-2">
