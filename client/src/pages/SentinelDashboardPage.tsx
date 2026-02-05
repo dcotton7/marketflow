@@ -835,6 +835,13 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                 onSave={(value) => onPriceUpdate?.(trade.id, "targetPrice", value)}
                 testId={`monitor-target-${trade.id}`}
               />
+              
+              {/* Share Quantity */}
+              {(fifoData?.totalRemaining || trade.positionSize) && (
+                <div className="text-muted-foreground mt-1 pt-1 border-t border-blue-500/20" data-testid={`shares-${trade.id}`}>
+                  Shares: {fifoData?.totalRemaining?.toLocaleString() || trade.positionSize?.toLocaleString() || 0}
+                </div>
+              )}
             </div>
 
             {/* Risk flags with short names and tooltips */}

@@ -78,6 +78,7 @@
 /* RubricShield Background Watermark */
 .rubricshield-bg {
   position: relative;
+  isolation: isolate;
 }
 
 .rubricshield-bg::before {
@@ -86,15 +87,15 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 60%;
-  height: 60%;
+  width: 50%;
+  height: 50%;
   background-image: url('/rubricshield-logo.png');
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
-  opacity: 0.04;
+  opacity: 0.06;
   pointer-events: none;
-  z-index: -1;
+  z-index: 0;
 }
 
 /* Ensure content stays above watermark */
@@ -103,15 +104,26 @@
   z-index: 1;
 }
 
-/* Transparent glass-effect for cards in sentinel pages */
-.sentinel-page .rounded-xl,
-.sentinel-page .rounded-lg {
-  background: hsl(var(--card) / 0.88) !important;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+/* Transparent glass-effect for Card components in sentinel pages */
+.sentinel-page [data-slot="card"],
+.sentinel-page .bg-card,
+.sentinel-page [class*="rounded-xl"][class*="border"],
+.sentinel-page [class*="rounded-lg"][class*="border"] {
+  background: hsl(var(--card) / 0.85) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Glass effect for trading cards specifically */
+.sentinel-page .grid > div[class*="cursor-pointer"] {
+  background: hsl(var(--card) / 0.82) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 /* Keep header more solid */
 .sentinel-page > header {
-  background: hsl(var(--card) / 0.95) !important;
+  background: hsl(var(--card) / 0.92) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
