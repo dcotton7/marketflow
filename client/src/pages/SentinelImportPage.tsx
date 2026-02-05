@@ -1136,12 +1136,12 @@ export default function SentinelImportPage() {
                               {(batch.duplicatesCount || 0) > 0 ? (
                                 <Badge variant="outline" className="text-orange-500 border-orange-500 gap-1">
                                   <AlertCircle className="h-3 w-3" />
-                                  {batch.duplicatesCount} Duplicates (Step 1)
+                                  {batch.duplicatesCount} Duplicates <span className="text-white">(Step 1)</span>
                                 </Badge>
                               ) : batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 ? (
                                 <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1">
                                   <AlertTriangle className="h-3 w-3" />
-                                  {batch.orphanSellsCount} Orphans (Step 2)
+                                  {batch.orphanSellsCount} Orphans <span className="text-white">(Step 2)</span>
                                 </Badge>
                               ) : (
                                 <Badge variant={batch.status === "COMPLETE" ? "default" : "destructive"}>
