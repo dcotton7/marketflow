@@ -495,9 +495,9 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
         </span>
       </div>
 
-      {/* Right: White box with direction and position P&L */}
+      {/* Right: Light blue box with direction and position P&L */}
       <div 
-        className="flex items-center gap-0 bg-white dark:bg-zinc-100 text-black px-2 py-0.5 rounded text-base tracking-tight"
+        className="flex items-center gap-0 bg-blue-400/30 dark:bg-blue-500/25 text-foreground px-2 py-0.5 rounded text-base tracking-tight"
         style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
         data-testid={`position-box-${symbol}`}
       >
