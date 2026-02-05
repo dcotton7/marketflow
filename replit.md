@@ -48,6 +48,17 @@ An auto-suggest endpoint provides stop, target, and position size suggestions ba
 ### Trade Import System
 A multi-broker CSV import system (Fidelity, Schwab, Robinhood) allows importing historical trades. Features include preview-before-confirm, auto-broker detection, partial fill detection, transaction-wrapped batch inserts, and smart orphan sell detection with a review flow. Orphan detection now respects per-account position tracking for both imported and hand-entered trades.
 
+**Incremental Import Merge Logic**: When promoting imported trades to Trading Cards, the system merges lot entries into existing cards by ticker+account key instead of creating duplicates. Key behaviors:
+- New lots are appended to existing active cards for the same ticker+account
+- Duplicate lots (same ID) are filtered out to prevent duplication
+- FIFO matching recalculates position metrics after merge
+- Auto-close: Positions with abs(position_size) < 0.01 are automatically marked as closed
+- Cost basis calculation:
+  - Open positions: weighted average of remaining open lots only
+  - Closed positions: historical weighted average entry price
+
+**Cleanup Duplicates Utility**: Endpoint `/api/sentinel/import/cleanup-duplicates` merges duplicate active cards (same ticker+account) into one, combining all lot entries with FIFO recalculation and cascade-deleting related evaluations/events/labels for removed duplicates.
+
 ### Import Review & Orphan Management
 Orphan sells (sells without matching buys) are tracked with statuses: 'pending', 'muted', 'resolved'. The review pane shows ALL orphans needing cost basis (pending + muted) with toggle-style mute buttons that switch between pending/muted states. Muted orphans are hidden from Trading Cards but remain visible in review. Bulk MUTE ALL/DELETE ALL actions are available. Default purchase date is derived from the last BUY trade for the same ticker:account in the batch. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync. When unmuting an orphan, visual feedback is provided with a green highlight that fades after 3 seconds.
 
