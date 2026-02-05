@@ -1440,6 +1440,40 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // System Settings - Get user's UI settings
+  app.get("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const settings = await sentinelModels.getSystemSettings(req.session.userId!);
+      // Return defaults if no settings exist
+      res.json(settings || {
+        overlayColor: "#1e3a5f",
+        overlayTransparency: 75,
+        backgroundColor: "#0f172a",
+        logoTransparency: 6
+      });
+    } catch (error) {
+      console.error("Get system settings error:", error);
+      res.status(500).json({ error: "Failed to load settings" });
+    }
+  });
+
+  // System Settings - Update user's UI settings
+  app.patch("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { overlayColor, overlayTransparency, backgroundColor, logoTransparency } = req.body;
+      const settings = await sentinelModels.upsertSystemSettings(req.session.userId!, {
+        overlayColor,
+        overlayTransparency,
+        backgroundColor,
+        logoTransparency
+      });
+      res.json(settings);
+    } catch (error) {
+      console.error("Update system settings error:", error);
+      res.status(500).json({ error: "Failed to save settings" });
+    }
+  });
+
   // AI Chat for rule creation assistance
   app.post("/api/sentinel/rules/ai-chat", requireAuth, async (req: Request, res: Response) => {
     try {

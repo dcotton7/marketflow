@@ -104,6 +104,184 @@ const MARKET_CONDITIONS = [
   { key: "narrow_leadership", name: "Narrow Market Leadership" },
 ];
 
+interface SystemSettings {
+  overlayColor: string;
+  overlayTransparency: number;
+  backgroundColor: string;
+  logoTransparency: number;
+}
+
+function SystemSettingsTab() {
+  const { toast } = useToast();
+  const [localSettings, setLocalSettings] = useState<SystemSettings>({
+    overlayColor: "#1e3a5f",
+    overlayTransparency: 75,
+    backgroundColor: "#0f172a",
+    logoTransparency: 6
+  });
+
+  const { data: settings, isLoading } = useQuery<SystemSettings>({
+    queryKey: ["/api/sentinel/settings/system"],
+  });
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (data: Partial<SystemSettings>) => {
+      const res = await apiRequest("PATCH", "/api/sentinel/settings/system", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Settings Saved", description: "Your display settings have been updated." });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/settings/system"] });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to save settings", variant: "destructive" });
+    },
+  });
+
+  // Sync local state when settings load
+  if (settings && !isLoading && 
+      (localSettings.overlayColor !== settings.overlayColor ||
+       localSettings.overlayTransparency !== settings.overlayTransparency ||
+       localSettings.backgroundColor !== settings.backgroundColor ||
+       localSettings.logoTransparency !== settings.logoTransparency)) {
+    setLocalSettings(settings);
+  }
+
+  const handleSave = () => {
+    updateSettingsMutation.mutate(localSettings);
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Settings className="w-5 h-5" />
+          System Settings
+        </CardTitle>
+        <CardDescription>Customize the appearance of your RubricShield interface</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <Label className="text-base font-medium">Overlay Background Color</Label>
+            <p className="text-sm text-muted-foreground">Color for cards, dialogs, and overlays</p>
+            <div className="flex items-center gap-4">
+              <input
+                type="color"
+                value={localSettings.overlayColor}
+                onChange={(e) => setLocalSettings(prev => ({ ...prev, overlayColor: e.target.value }))}
+                className="w-16 h-10 rounded border cursor-pointer"
+                data-testid="input-overlay-color"
+              />
+              <Input
+                value={localSettings.overlayColor}
+                onChange={(e) => setLocalSettings(prev => ({ ...prev, overlayColor: e.target.value }))}
+                className="w-28 font-mono"
+                data-testid="input-overlay-color-text"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <Label className="text-base font-medium">Overlay Transparency: {localSettings.overlayTransparency}%</Label>
+            <p className="text-sm text-muted-foreground">How see-through cards and overlays appear</p>
+            <Slider
+              value={[localSettings.overlayTransparency]}
+              onValueChange={([value]) => setLocalSettings(prev => ({ ...prev, overlayTransparency: value }))}
+              min={0}
+              max={100}
+              step={5}
+              className="w-full"
+              data-testid="slider-overlay-transparency"
+            />
+          </div>
+
+          <div className="space-y-4">
+            <Label className="text-base font-medium">Page Background Color</Label>
+            <p className="text-sm text-muted-foreground">Main background color for all pages</p>
+            <div className="flex items-center gap-4">
+              <input
+                type="color"
+                value={localSettings.backgroundColor}
+                onChange={(e) => setLocalSettings(prev => ({ ...prev, backgroundColor: e.target.value }))}
+                className="w-16 h-10 rounded border cursor-pointer"
+                data-testid="input-bg-color"
+              />
+              <Input
+                value={localSettings.backgroundColor}
+                onChange={(e) => setLocalSettings(prev => ({ ...prev, backgroundColor: e.target.value }))}
+                className="w-28 font-mono"
+                data-testid="input-bg-color-text"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <Label className="text-base font-medium">Logo Transparency: {localSettings.logoTransparency}%</Label>
+            <p className="text-sm text-muted-foreground">Visibility of the RubricShield watermark</p>
+            <Slider
+              value={[localSettings.logoTransparency]}
+              onValueChange={([value]) => setLocalSettings(prev => ({ ...prev, logoTransparency: value }))}
+              min={0}
+              max={30}
+              step={1}
+              className="w-full"
+              data-testid="slider-logo-transparency"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <Button 
+            onClick={handleSave} 
+            disabled={updateSettingsMutation.isPending}
+            data-testid="button-save-settings"
+          >
+            {updateSettingsMutation.isPending ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</>
+            ) : (
+              "Save Settings"
+            )}
+          </Button>
+        </div>
+
+        <div className="p-4 bg-muted/50 rounded-lg">
+          <h4 className="font-medium mb-2">Preview</h4>
+          <div 
+            className="h-32 rounded-lg flex items-center justify-center relative overflow-hidden"
+            style={{ backgroundColor: localSettings.backgroundColor }}
+          >
+            <div 
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ opacity: localSettings.logoTransparency / 100 }}
+            >
+              <img src="/rubricshield-logo.png" alt="Watermark" className="w-24 h-24 object-contain" />
+            </div>
+            <div 
+              className="px-6 py-3 rounded-lg z-10"
+              style={{ 
+                backgroundColor: `${localSettings.overlayColor}${Math.round(localSettings.overlayTransparency * 2.55).toString(16).padStart(2, '0')}`,
+              }}
+            >
+              <span className="text-white">Sample Card</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SentinelAdminPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
@@ -368,6 +546,10 @@ export default function SentinelAdminPage() {
             <TabsTrigger value="users" className="gap-2" data-testid="tab-users">
               <Users className="w-4 h-4" />
               Users
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="gap-2" data-testid="tab-settings">
+              <Settings className="w-4 h-4" />
+              System Settings
             </TabsTrigger>
           </TabsList>
 
@@ -964,6 +1146,10 @@ export default function SentinelAdminPage() {
                 <p className="text-muted-foreground" data-testid="text-users-coming-soon">User management coming soon...</p>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="settings" data-testid="content-settings">
+            <SystemSettingsTab />
           </TabsContent>
         </Tabs>
       </div>

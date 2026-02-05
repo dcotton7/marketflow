@@ -556,6 +556,22 @@ export const insertSentinelAccountSettingsSchema = createInsertSchema(sentinelAc
 export type SentinelAccountSettings = typeof sentinelAccountSettings.$inferSelect;
 export type InsertSentinelAccountSettings = z.infer<typeof insertSentinelAccountSettingsSchema>;
 
+// System Settings - UI theming and appearance settings per user
+export const sentinelSystemSettings = pgTable("sentinel_system_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().unique(), // One settings row per user
+  overlayColor: text("overlay_color").default("#1e3a5f"), // Card/overlay background color
+  overlayTransparency: integer("overlay_transparency").default(75), // 0-100 percentage
+  backgroundColor: text("background_color").default("#0f172a"), // Page background color
+  logoTransparency: integer("logo_transparency").default(6), // 0-100 percentage for watermark
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSentinelSystemSettingsSchema = createInsertSchema(sentinelSystemSettings).omit({ id: true, createdAt: true, updatedAt: true });
+export type SentinelSystemSettings = typeof sentinelSystemSettings.$inferSelect;
+export type InsertSentinelSystemSettings = z.infer<typeof insertSentinelSystemSettingsSchema>;
+
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),

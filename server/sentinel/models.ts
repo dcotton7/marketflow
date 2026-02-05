@@ -1,10 +1,10 @@
 import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
-  sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides,
+  sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides, sentinelSystemSettings,
   type SentinelUser, type SentinelTrade, type SentinelEvaluation, type SentinelEvent, type SentinelWatchlistItem, type SentinelRule,
-  type SentinelRuleSuggestion, type SentinelRulePerformance, type SentinelRuleOverride,
-  type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule, type InsertSentinelRuleOverride
+  type SentinelRuleSuggestion, type SentinelRulePerformance, type SentinelRuleOverride, type SentinelSystemSettings,
+  type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule, type InsertSentinelRuleOverride, type InsertSentinelSystemSettings
 } from "@shared/schema";
 import { eq, desc, and, asc, or, isNull } from "drizzle-orm";
 import { STARTER_RULES } from "./starterRules";
@@ -443,5 +443,27 @@ export const sentinelModels = {
       .where(eq(sentinelRules.id, ruleId))
       .returning();
     return rule;
+  },
+
+  // System Settings
+  async getSystemSettings(userId: number): Promise<SentinelSystemSettings | undefined> {
+    const [settings] = await db.select().from(sentinelSystemSettings).where(eq(sentinelSystemSettings.userId, userId));
+    return settings;
+  },
+
+  async upsertSystemSettings(userId: number, data: Partial<InsertSentinelSystemSettings>): Promise<SentinelSystemSettings> {
+    const existing = await this.getSystemSettings(userId);
+    if (existing) {
+      const [updated] = await db.update(sentinelSystemSettings)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(sentinelSystemSettings.userId, userId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(sentinelSystemSettings)
+        .values({ userId, ...data })
+        .returning();
+      return created;
+    }
   }
 };
