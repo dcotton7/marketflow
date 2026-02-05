@@ -826,7 +826,7 @@ export default function SentinelRulesPage() {
       <div className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold">Trading Rules</h1>
+            <h1 className="text-2xl font-bold">Rubric (Trading Rules)</h1>
             <p className="text-muted-foreground">Manage your trading discipline and evaluation criteria</p>
           </div>
         </div>

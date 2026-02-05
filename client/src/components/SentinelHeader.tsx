@@ -110,7 +110,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-rules"
             >
               <BookOpen className="w-4 h-4" />
-              <span className="hidden sm:inline">Rules</span>
+              <span className="hidden sm:inline">Rubric</span>
             </Button>
           </Link>
           <Link href="/sentinel/import">
