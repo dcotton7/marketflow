@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -482,25 +482,25 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitC
       {/* Ticker Box - compact without sparkline */}
       <div className="flex items-center gap-1.5 bg-muted/50 rounded-md px-2 py-1 border" data-testid={`ticker-box-${symbol}`}>
         <span className="font-bold text-sm" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
-        <span className="text-sm font-medium" data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
-        <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-pct-${symbol}`}>
-          {isPositive ? "+" : ""}{pctChange.toFixed(1)}%
+        <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
+        <span className={`text-sm font-semibold px-1.5 py-0.5 rounded ${isPositive ? "bg-green-500/20 text-green-500" : "bg-red-500/20 text-red-500"}`} data-testid={`text-pct-${symbol}`}>
+          {isPositive ? "+" : ""}{pctChange.toFixed(2)}%
         </span>
       </div>
-      {/* Direction/Status Badge */}
-      <Badge className={`${statusColor} text-xs`} data-testid={`badge-status-${symbol}`}>
+      {/* Direction/Status Badge - larger */}
+      <Badge className={`${statusColor} text-sm px-3 py-1 font-semibold`} data-testid={`badge-status-${symbol}`}>
         {statusLabel}
       </Badge>
-      {/* P&L Metrics - stacked vertically, left justified */}
+      {/* P&L Metrics - stacked vertically, left justified with larger text */}
       {(profitClosed !== undefined || openPnL !== undefined) && (
         <div className="flex flex-col items-start">
           {profitClosed !== undefined && (
-            <span className={`text-xs ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
+            <span className={`text-sm font-semibold ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
               Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
             </span>
           )}
           {openPnL !== undefined && (
-            <span className={`text-xs ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
+            <span className={`text-sm font-semibold ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
               Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
             </span>
           )}
