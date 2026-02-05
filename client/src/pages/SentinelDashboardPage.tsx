@@ -607,6 +607,20 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
     ? calculateFifoTracking(trade.lotEntries as LotEntry[])
     : null;
   
+  // Debug logging for P&L calculation
+  if (trade.symbol === "GLW" || trade.symbol === "BBY") {
+    console.log(`[P&L Debug ${trade.symbol}]`, {
+      hasLotEntries: !!trade.lotEntries,
+      lotEntriesLength: trade.lotEntries?.length,
+      lotEntriesSample: trade.lotEntries?.slice(0, 2),
+      fifoData: fifoData ? { totalRemaining: fifoData.totalRemaining, avgCostBasis: fifoData.avgCostBasis } : null,
+      currentPrice,
+      hasLiveData,
+      positionSize: trade.positionSize,
+      status: trade.status
+    });
+  }
+  
   const isLongDirection = trade.direction === "long";
   
   // Calculate breakeven - use FIFO avgCostBasis if available, otherwise fall back to entry_price
