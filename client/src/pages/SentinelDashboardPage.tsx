@@ -1571,12 +1571,19 @@ export default function SentinelDashboardPage() {
     
     // Open PnL from active trades (using FIFO with live prices)
     filteredActive?.forEach(trade => {
+      const currentPrice = livePrices[trade.id] ?? trade.entryPrice;
+      const isLong = trade.direction === 'long';
+      
       if (trade.lotEntries && trade.lotEntries.length > 0) {
+        // Use FIFO calculation with live price
         const fifo = calculateFifoTracking(trade.lotEntries);
-        // Use live price if available, otherwise fall back to entry price
-        const currentPrice = livePrices[trade.id] ?? trade.entryPrice;
-        const isLong = trade.direction === 'long';
         openPnL += fifo.calculateOpenPnL(currentPrice, isLong);
+      } else if (trade.positionSize && trade.positionSize > 0 && trade.entryPrice > 0) {
+        // Fallback for trades without lot entries: use position size and entry price
+        const tradePnL = isLong
+          ? (currentPrice - trade.entryPrice) * trade.positionSize
+          : (trade.entryPrice - currentPrice) * trade.positionSize;
+        openPnL += tradePnL;
       }
     });
     
