@@ -506,6 +506,12 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
         <span className={`font-bold px-1 py-0.5 rounded text-white ${directionBgColor}`} data-testid={`badge-status-${symbol}`}>
           {directionLabel}
         </span>
+        <span 
+          className="font-medium text-foreground/80 ml-1.5"
+          data-testid={`text-position-shares-${symbol}`}
+        >
+          qty: {positionShares !== undefined && positionShares > 0 ? positionShares : "—"}
+        </span>
         <span className="text-gray-400 mx-1">|</span>
         {hasPnLData ? (
           <>
@@ -529,17 +535,6 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
           </>
         ) : (
           <span className="text-gray-400 font-medium" data-testid={`text-position-pnl-${symbol}`}>—</span>
-        )}
-        {positionShares !== undefined && positionShares > 0 && (
-          <>
-            <span className="text-gray-400 mx-1">|</span>
-            <span 
-              className="font-medium text-foreground/80"
-              data-testid={`text-position-shares-${symbol}`}
-            >
-              {positionShares} shs
-            </span>
-          </>
         )}
       </div>
     </div>
@@ -775,42 +770,41 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
 
         {isExpanded ? (
           <>
-            {/* Source and Labels Row */}
-            <div className="flex flex-wrap items-center gap-1 mb-2">
-              {/* Source indicator */}
-              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded" data-testid={`source-${trade.id}`}>
-                {trade.source === 'import' && trade.importName 
-                  ? trade.importName 
-                  : trade.source === 'import' 
-                    ? 'Imported' 
-                    : 'Hand Entered'}
-              </span>
-              
-              {/* Display labels with tooltips */}
-              {trade.labels && trade.labels.length > 0 && (
-                <>
-                  {trade.labels.map((label) => {
-                    const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
-                    return (
-                      <Tooltip key={label.id}>
-                        <TooltipTrigger asChild>
-                          <span
-                            className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
-                            style={{ backgroundColor: label.color }}
-                            data-testid={`label-${trade.id}-${label.id}`}
-                          >
-                            {displayName}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{label.name}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </>
-              )}
-            </div>
+            {/* Realized Gain/Loss - below ticker widget, left-justified */}
+            {profitClosed !== undefined && (
+              <div 
+                className={`text-sm font-semibold ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`}
+                style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
+                data-testid={`text-realized-pnl-${trade.id}`}
+              >
+                Realized: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(2)}
+              </div>
+            )}
+
+            {/* Labels Row */}
+            {trade.labels && trade.labels.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 mb-2 mt-1">
+                {trade.labels.map((label) => {
+                  const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
+                  return (
+                    <Tooltip key={label.id}>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
+                          style={{ backgroundColor: label.color }}
+                          data-testid={`label-${trade.id}-${label.id}`}
+                        >
+                          {displayName}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{label.name}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
             <div className="text-xs space-y-1.5 mb-2 bg-blue-500/10 dark:bg-blue-400/10 p-2 rounded-md">
