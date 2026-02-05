@@ -757,11 +757,6 @@ export default function SentinelImportPage() {
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
-        backgroundImage: 'url(/rubricshield-logo.png)',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: '33% auto',
-        backgroundAttachment: 'fixed',
       } as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}

@@ -414,7 +414,7 @@ function SystemSettingsTab() {
           >
             <div 
               className="absolute inset-0 flex items-center justify-center"
-              style={{ opacity: localSettings.logoTransparency / 100 }}
+              style={{ opacity: (100 - localSettings.logoTransparency) / 100 }}
             >
               <img src="/rubricshield-logo.png" alt="Watermark" className="w-24 h-24 object-contain" />
             </div>
@@ -665,11 +665,6 @@ export default function SentinelAdminPage() {
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
-        backgroundImage: 'url(/rubricshield-logo.png)',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: '33% auto',
-        backgroundAttachment: 'fixed',
       } as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}

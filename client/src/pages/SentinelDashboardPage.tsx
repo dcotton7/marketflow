@@ -46,6 +46,7 @@ interface TradeWithEvaluation {
   source?: string; // 'hand' for manual entry, 'import' for CSV imports
   importBatchId?: string; // UUID of the import batch if source is 'import'
   importName?: string; // Display name for import batch (e.g., "FILE xxxx" or custom name)
+  accountName?: string; // Brokerage account name (e.g., "4015", "1094")
   latestEvaluation?: {
     score: number;
     recommendation: string;
@@ -1591,6 +1592,17 @@ export default function SentinelDashboardPage() {
   
   const availableYears = getAvailableYears();
 
+  const uniqueAccountNames = (() => {
+    const accounts = new Set<string>();
+    const allTradesForAccounts = [...(dashboard?.active || []), ...(dashboard?.closed || []), ...(dashboard?.considering || [])];
+    allTradesForAccounts.forEach(trade => {
+      if (trade.accountName) {
+        accounts.add(trade.accountName);
+      }
+    });
+    return Array.from(accounts).sort();
+  })();
+
   const filteredConsidering = filterTrades(dashboard?.considering);
   const filteredActive = filterTrades(dashboard?.active);
   const filteredClosed = filterTrades(dashboard?.closed);
@@ -2263,11 +2275,6 @@ export default function SentinelDashboardPage() {
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
-        backgroundImage: 'url(/rubricshield-logo.png)',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: '33% auto',
-        backgroundAttachment: 'fixed',
       } as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
@@ -2422,7 +2429,7 @@ export default function SentinelDashboardPage() {
               </div>
               
               {/* Account Filter */}
-              {accountSettings.length > 0 && (
+              {uniqueAccountNames.length > 0 && (
                 <div className="flex items-center gap-2">
                   <Label className="text-sm">Account:</Label>
                   <Select value={selectedAccountFilter} onValueChange={setSelectedAccountFilter}>
@@ -2431,9 +2438,9 @@ export default function SentinelDashboardPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
-                      {accountSettings.map((account) => (
-                        <SelectItem key={account.id} value={account.accountName}>
-                          {account.accountName}
+                      {uniqueAccountNames.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
                         </SelectItem>
                       ))}
                     </SelectContent>

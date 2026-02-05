@@ -12,7 +12,7 @@ const defaultSettings: SystemSettings = {
   overlayColor: "#1e3a5f",
   overlayTransparency: 75,
   backgroundColor: "#0f172a",
-  logoTransparency: 6
+  logoTransparency: 12
 };
 
 interface SystemSettingsContextType {
@@ -31,7 +31,7 @@ const SystemSettingsContext = createContext<SystemSettingsContextType>({
   cssVariables: {
     overlayBg: `${defaultSettings.overlayColor}bf`,
     backgroundColor: defaultSettings.backgroundColor,
-    logoOpacity: defaultSettings.logoTransparency / 100,
+    logoOpacity: (100 - defaultSettings.logoTransparency) / 100,
   }
 });
 
@@ -55,7 +55,7 @@ export function SystemSettingsProvider({ children }: SystemSettingsProviderProps
   const cssVariables = {
     overlayBg: `${currentSettings.overlayColor}${Math.round(currentSettings.overlayTransparency * 2.55).toString(16).padStart(2, '0')}`,
     backgroundColor: currentSettings.backgroundColor,
-    logoOpacity: currentSettings.logoTransparency / 100,
+    logoOpacity: (100 - currentSettings.logoTransparency) / 100,
   };
 
   return (
