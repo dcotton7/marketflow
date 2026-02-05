@@ -3236,17 +3236,23 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
   // Preview CSV import (parse without saving)
   app.post("/api/sentinel/import/preview", requireAuth, async (req: Request, res: Response) => {
     try {
+      console.log("[Import Preview] Starting preview request");
       const validationResult = importPreviewSchema.safeParse(req.body);
       if (!validationResult.success) {
+        console.log("[Import Preview] Validation failed:", validationResult.error.errors);
         return res.status(400).json({ error: validationResult.error.errors[0]?.message || "Invalid request" });
       }
       
       const { csvContent, fileName, brokerId } = validationResult.data;
+      console.log(`[Import Preview] Parsing file: ${fileName}, broker: ${brokerId}, content length: ${csvContent.length}`);
       
       const userId = req.session.userId!;
+      console.log(`[Import Preview] User ID: ${userId}`);
       const user = await sentinelModels.getUserById(userId);
+      console.log(`[Import Preview] User found: ${user?.username || 'not found'}`);
       
       const result = parseCSV(csvContent, fileName || "upload.csv", user?.username || "unknown", brokerId as BrokerId);
+      console.log(`[Import Preview] Parse complete: ${result.trades.length} trades, status: ${result.batch.status}`);
       
       res.json({
         batch: result.batch,
@@ -3254,8 +3260,12 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         detectedBroker: detectBroker(csvContent),
       });
     } catch (error) {
-      console.error("Preview import error:", error);
-      res.status(500).json({ error: "Failed to preview import" });
+      console.error("[Import Preview] Error:", error);
+      console.error("[Import Preview] Error stack:", error instanceof Error ? error.stack : "No stack");
+      res.status(500).json({ 
+        error: "Failed to preview import",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
