@@ -1,0 +1,119 @@
+//@version=6
+indicator("MA Labels (Left, Padded) — +VWAP +Custom Rows", overlay=true)
+
+//──────────────────────────────────────────────────────────────────────────────
+// Padding controls (table “movement” is done via empty columns)
+padLeft = input.int(0, "Left Padding (columns)", minval=0, maxval=12)
+padRight = input.int(0, "Right Padding (columns)", minval=0, maxval=12)
+
+totalCols = padLeft + 2 + padRight
+maxRows = 10  // 7 defaults + 3 optional
+
+// Table
+var table legend = table.new(position.top_left, totalCols, maxRows, frame_color=color.black, frame_width=1, border_width=1)
+
+//──────────────────────────────────────────────────────────────────────────────
+// Helpers
+f_styleSymbol(style, width) =>
+    sym = style == "Dotted" ? "··" : style == "Dashed" ? "– –" : "—"
+    sym + " " + str.tostring(width)
+
+// Render row into the next available row index
+f_row(rowIndex, leftTxt, rightTxt, txtColor, bgColor, style, width, leftTextColor) =>
+    c0 = padLeft
+    table.cell(legend, c0, rowIndex, leftTxt, text_color=leftTextColor, bgcolor=bgColor, text_size=size.small)
+    table.cell(legend, c0 + 1, rowIndex, rightTxt + "  " + f_styleSymbol(style, width), text_color=txtColor, bgcolor=bgColor, text_size=size.small)
+
+//──────────────────────────────────────────────────────────────────────────────
+// Default row settings (BG defaults are fully opaque)
+grp1 = "6/20 Row"
+r1_bg = input.color(color.blue, "BG Color", group=grp1, inline="r1")
+r1_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=grp1, inline="r1")
+r1_width = input.int(2, "Width", minval=1, maxval=5, group=grp1, inline="r1")
+
+grp2 = "5d Row"
+r2_bg = input.color(color.green, "BG Color", group=grp2, inline="r2")
+r2_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=grp2, inline="r2")
+r2_width = input.int(2, "Width", minval=1, maxval=5, group=grp2, inline="r2")
+
+grp3 = "10d Row"
+r3_bg = input.color(color.blue, "BG Color", group=grp3, inline="r3")
+r3_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=grp3, inline="r3")
+r3_width = input.int(2, "Width", minval=1, maxval=5, group=grp3, inline="r3")
+
+grp4 = "20d Row"
+r4_bg = input.color(color.fuchsia, "BG Color", group=grp4, inline="r4")
+r4_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=grp4, inline="r4")
+r4_width = input.int(2, "Width", minval=1, maxval=5, group=grp4, inline="r4")
+
+grp5 = "50d Row"
+r5_bg = input.color(color.red, "BG Color", group=grp5, inline="r5")
+r5_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=grp5, inline="r5")
+r5_width = input.int(2, "Width", minval=1, maxval=5, group=grp5, inline="r5")
+
+grp6 = "200d Row"
+r6_bg = input.color(color.black, "BG Color", group=grp6, inline="r6")
+r6_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=grp6, inline="r6")
+r6_width = input.int(2, "Width", minval=1, maxval=5, group=grp6, inline="r6")
+
+grp7 = "VWAP Row (Default)"
+vwap_visible = input.bool(true, "IsVisible", group=grp7, inline="vw")
+vwap_bg = input.color(color.yellow, "BG Color", group=grp7, inline="vw")
+vwap_style = input.string("Dotted", "Style", options=["Solid","Dotted","Dashed"], group=grp7, inline="vw")
+vwap_width = input.int(2, "Width", minval=1, maxval=5, group=grp7, inline="vw")
+
+//──────────────────────────────────────────────────────────────────────────────
+// Optional custom rows (up to 3), each with IsVisible
+cg1 = "Custom Row A"
+c1_visible = input.bool(false, "IsVisible", group=cg1, inline="c1v")
+c1_left = input.string("LabelA", "Left", group=cg1, inline="c1t")
+c1_right = input.string("Label", "Right", group=cg1, inline="c1t")
+c1_color = input.color(color.white, "Line Color", group=cg1, inline="c1s")
+c1_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=cg1, inline="c1s")
+c1_width = input.int(2, "Width", minval=1, maxval=5, group=cg1, inline="c1s")
+c1_bg = input.color(color.gray, "BG", group=cg1)
+
+cg2 = "Custom Row B"
+c2_visible = input.bool(false, "IsVisible", group=cg2, inline="c2v")
+c2_left = input.string("LabelB", "Left", group=cg2, inline="c2t")
+c2_right = input.string("Label", "Right", group=cg2, inline="c2t")
+c2_color = input.color(color.white, "Line Color", group=cg2, inline="c2s")
+c2_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=cg2, inline="c2s")
+c2_width = input.int(2, "Width", minval=1, maxval=5, group=cg2, inline="c2s")
+c2_bg = input.color(color.gray, "BG", group=cg2)
+
+cg3 = "Custom Row C"
+c3_visible = input.bool(false, "IsVisible", group=cg3, inline="c3v")
+c3_left = input.string("LabelC", "Left", group=cg3, inline="c3t")
+c3_right = input.string("Label", "Right", group=cg3, inline="c3t")
+c3_color = input.color(color.white, "Line Color", group=cg3, inline="c3s")
+c3_style = input.string("Solid", "Style", options=["Solid","Dotted","Dashed"], group=cg3, inline="c3s")
+c3_width = input.int(2, "Width", minval=1, maxval=5, group=cg3, inline="c3s")
+c3_bg = input.color(color.gray, "BG", group=cg3)
+
+//──────────────────────────────────────────────────────────────────────────────
+// Draw (last bar only), fix table.clear() signature in v6
+if barstate.islast
+    table.clear(legend, 0, 0, totalCols, maxRows)
+
+    r = 0
+
+    // Defaults (always shown)
+    f_row(r, "6/20", "Blue / Pink", color.blue, r1_bg, r1_style, r1_width, color.white), r += 1
+    f_row(r, "5d", "Green", color.green, r2_bg, r2_style, r2_width, color.white), r += 1
+    f_row(r, "10d", "Blue", color.blue, r3_bg, r3_style, r3_width, color.white), r += 1
+    f_row(r, "20d", "Pink", color.fuchsia, r4_bg, r4_style, r4_width, color.white), r += 1
+    f_row(r, "50d", "Red", color.red, r5_bg, r5_style, r5_width, color.white), r += 1
+    f_row(r, "200d", "Black", color.white, r6_bg, r6_style, r6_width, color.white), r += 1
+
+    // VWAP default row (visible flag)
+    if vwap_visible and r < maxRows
+        f_row(r, "VWAP", "Dotted Yellow", color.yellow, vwap_bg, vwap_style, vwap_width, color.black), r += 1
+
+    // Custom rows A/B/C (visible flags)
+    if c1_visible and r < maxRows
+        f_row(r, c1_left, c1_right, c1_color, c1_bg, c1_style, c1_width, color.white), r += 1
+    if c2_visible and r < maxRows
+        f_row(r, c2_left, c2_right, c2_color, c2_bg, c2_style, c2_width, color.white), r += 1
+    if c3_visible and r < maxRows
+        f_row(r, c3_left, c3_right, c3_color, c3_bg, c3_style, c3_width, color.white), r += 1
