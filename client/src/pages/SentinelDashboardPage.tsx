@@ -478,42 +478,47 @@ function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitC
   }
   
   return (
-    <div className="flex items-center gap-1.5 flex-wrap" data-testid={`ticker-widget-${symbol}`}>
-      {/* Ticker Box - compact without sparkline */}
-      <div className="flex items-center gap-1.5 bg-muted/50 rounded-md px-2 py-1 border" data-testid={`ticker-box-${symbol}`}>
-        <span className="font-bold text-sm" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
-        <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
-        <span className={`text-sm font-semibold px-1.5 py-0.5 rounded ${isPositive ? "bg-green-500/20 text-green-500" : "bg-red-500/20 text-red-500"}`} data-testid={`text-pct-${symbol}`}>
-          {isPositive ? "+" : ""}{pctChange.toFixed(2)}%
-        </span>
-      </div>
-      {/* Direction/Status Badge - larger */}
-      <Badge className={`${statusColor} text-sm px-3 py-1 font-semibold`} data-testid={`badge-status-${symbol}`}>
-        {statusLabel}
-      </Badge>
-      {/* P&L Metrics - stacked vertically, left justified with larger text */}
-      {(profitClosed !== undefined || openPnL !== undefined) && (
-        <div className="flex flex-col items-start">
-          {profitClosed !== undefined && (
-            <span className={`text-sm font-semibold ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
-              Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
-            </span>
-          )}
-          {openPnL !== undefined && (
-            <span className={`text-sm font-semibold ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
-              Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
-            </span>
-          )}
+    <div className="flex items-center justify-between gap-1.5 flex-wrap w-full" data-testid={`ticker-widget-${symbol}`}>
+      <div className="flex items-center gap-1.5">
+        {/* Ticker Box - compact without sparkline */}
+        <div className="flex items-center gap-1.5 bg-muted/50 rounded-md px-2 py-1 border" data-testid={`ticker-box-${symbol}`}>
+          <span className="font-bold text-sm" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
+          <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
+          <span className={`text-sm font-semibold px-1.5 py-0.5 rounded ${isPositive ? "bg-green-500/20 text-green-500" : "bg-red-500/20 text-red-500"}`} data-testid={`text-pct-${symbol}`}>
+            {isPositive ? "+" : ""}{pctChange.toFixed(2)}%
+          </span>
         </div>
-      )}
-      {breakEven && breakEven.shares > 0 && (
-        <span 
-          className={`text-xs ${price >= breakEven.price ? "text-green-500" : "text-red-500"}`} 
-          data-testid={`text-breakeven-${symbol}`}
-        >
-          BreakEven: {breakEven.shares} shares @ ${breakEven.price.toFixed(2)}
-        </span>
-      )}
+        {/* Direction/Status Badge - larger */}
+        <Badge className={`${statusColor} text-sm px-3 py-1 font-semibold`} data-testid={`badge-status-${symbol}`}>
+          {statusLabel}
+        </Badge>
+      </div>
+
+      {/* P&L Metrics - stacked vertically, right justified with larger text */}
+      <div className="flex flex-col items-end text-right">
+        {(profitClosed !== undefined || openPnL !== undefined) && (
+          <>
+            {profitClosed !== undefined && (
+              <span className={`text-base font-bold ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
+                Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
+              </span>
+            )}
+            {openPnL !== undefined && (
+              <span className={`text-base font-bold ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
+                Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
+              </span>
+            )}
+          </>
+        )}
+        {breakEven && breakEven.shares > 0 && (
+          <span 
+            className={`text-sm font-medium ${price >= breakEven.price ? "text-green-500" : "text-red-500"}`} 
+            data-testid={`text-breakeven-${symbol}`}
+          >
+            BreakEven: {breakEven.shares} shares @ ${breakEven.price.toFixed(2)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -528,7 +533,7 @@ interface TradeCardProps {
   onPriceUpdate?: (tradeId: number, field: "stopPrice" | "partialPrice" | "targetPrice", value: number) => void;
 }
 
-function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose, onCancel, onPriceUpdate }: TradeCardProps) {
+function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose, onCancel, onPriceUpdate, isExpanded = true }: TradeCardProps & { isExpanded?: boolean }) {
   const [, setLocation] = useLocation();
   
   // Fetch current market price for accurate P&L
@@ -677,21 +682,21 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
       data-testid={`card-trade-${trade.id}`}
       onClick={handleCardClick}
     >
-      <CardContent className="p-4 pb-10 relative overflow-hidden">
+      <CardContent className={`p-4 ${isExpanded ? 'pb-10' : 'pb-4'} relative overflow-hidden`}>
         {/* Alert banners */}
-        {nearTarget && (
+        {isExpanded && nearTarget && (
           <div className="absolute top-0 left-0 right-0 bg-green-500/20 text-green-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-target-${trade.id}`}>
             <Target className="w-3 h-3" /> NEAR PROFIT TARGET!
           </div>
         )}
-        {nearStop && (
+        {isExpanded && nearStop && (
           <div className="absolute top-0 left-0 right-0 bg-red-500/20 text-red-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-stop-${trade.id}`}>
             <AlertTriangle className="w-3 h-3" /> NEAR STOP LOSS!
           </div>
         )}
 
         {/* Compact Ticker Widget with Sparkline */}
-        <div className={`flex items-center justify-between mb-3 ${nearTarget || nearStop ? "mt-4" : ""}`}>
+        <div className={`flex items-center justify-between mb-3 ${isExpanded && (nearTarget || nearStop) ? "mt-4" : ""}`}>
           <TickerWidget 
             symbol={trade.symbol}
             price={currentPrice}
@@ -702,148 +707,165 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
             profitClosed={profitClosed ?? undefined}
             breakEven={breakEvenData}
           />
-          {trade.latestEvaluation && (
+          {isExpanded && trade.latestEvaluation && (
             <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
               {trade.latestEvaluation.score}/100
             </Badge>
           )}
         </div>
 
-        {/* Source and Labels Row */}
-        <div className="flex flex-wrap items-center gap-1 mb-2">
-          {/* Source indicator */}
-          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded" data-testid={`source-${trade.id}`}>
-            {trade.source === 'import' && trade.importName 
-              ? trade.importName 
-              : trade.source === 'import' 
-                ? 'Imported' 
-                : 'Hand Entered'}
-          </span>
-          
-          {/* Display labels with tooltips */}
-          {trade.labels && trade.labels.length > 0 && (
-            <>
-              {trade.labels.map((label) => {
-                const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
-                return (
-                  <Tooltip key={label.id}>
-                    <TooltipTrigger asChild>
-                      <span
-                        className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
-                        style={{ backgroundColor: label.color }}
-                        data-testid={`label-${trade.id}-${label.id}`}
-                      >
-                        {displayName}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{label.name}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </>
-          )}
-        </div>
-
-        {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
-        <div className="text-xs space-y-1.5 mb-2">
-          {/* Stop Loss - Always shown */}
-          <EditablePriceRow
-            label="STOP"
-            icon={XCircle}
-            value={trade.stopPrice}
-            distance={stopDistance}
-            isAlert={stopAlertColor !== null}
-            alertColor={stopAlertColor || "red"}
-            onSave={(value) => onPriceUpdate?.(trade.id, "stopPrice", value)}
-            testId={`monitor-stop-${trade.id}`}
-          />
-          
-          {/* Partial Profit - Always shown, editable (uses saved value or calculated default) */}
-          <EditablePriceRow
-            label="PARTIAL"
-            icon={CircleDot}
-            value={trade.partialPrice || partialProfitPrice}
-            distance={actualPartialDistance}
-            isAlert={partialAlertColor !== null}
-            alertColor={partialAlertColor || "yellow"}
-            onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
-            testId={`monitor-partial-${trade.id}`}
-          />
-          
-          {/* Profit Target - Always shown */}
-          <EditablePriceRow
-            label="TARGET"
-            icon={Target}
-            value={trade.targetPrice}
-            distance={targetDistance}
-            isAlert={targetAlertColor !== null}
-            alertColor={targetAlertColor || "green"}
-            onSave={(value) => onPriceUpdate?.(trade.id, "targetPrice", value)}
-            testId={`monitor-target-${trade.id}`}
-          />
-        </div>
-
-        {/* Risk flags with short names and tooltips */}
-        {trade.latestEvaluation && trade.latestEvaluation.riskFlags.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {trade.latestEvaluation.riskFlags.slice(0, 4).map((flag, i) => {
-              const { short, full } = getShortRiskFlag(flag);
-              return (
-                <Tooltip key={i}>
-                  <TooltipTrigger asChild>
-                    <Badge variant="outline" className="text-xs cursor-help" data-testid={`badge-risk-${trade.id}-${i}`}>
-                      <AlertTriangle className="w-3 h-3 mr-1 text-yellow-500" />
-                      {short}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs">
-                    <p className="text-sm">{full}</p>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Green arrow action menu at bottom right */}
-        <div className="absolute bottom-2 right-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="text-green-500"
-                data-testid={`button-trade-menu-${trade.id}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ChevronRight className="w-5 h-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuItem onClick={(e) => handleMenuAction('edit', e)} data-testid={`menu-edit-${trade.id}`}>
-                <Edit3 className="w-4 h-4 mr-2" />
-                Edit
-              </DropdownMenuItem>
-              {isActive && (
-                <DropdownMenuItem onClick={(e) => handleMenuAction('close', e)} data-testid={`menu-close-${trade.id}`}>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Close Trade
-                </DropdownMenuItem>
+        {isExpanded && (
+          <>
+            {/* Source and Labels Row */}
+            <div className="flex flex-wrap items-center gap-1 mb-2">
+              {/* Source indicator */}
+              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded" data-testid={`source-${trade.id}`}>
+                {trade.source === 'import' && trade.importName 
+                  ? trade.importName 
+                  : trade.source === 'import' 
+                    ? 'Imported' 
+                    : 'Hand Entered'}
+              </span>
+              
+              {/* Display labels with tooltips */}
+              {trade.labels && trade.labels.length > 0 && (
+                <>
+                  {trade.labels.map((label) => {
+                    const displayName = label.name.length > 10 ? label.name.substring(0, 8) + ".." : label.name;
+                    return (
+                      <Tooltip key={label.id}>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="px-2 py-0.5 text-xs rounded-full text-white cursor-help"
+                            style={{ backgroundColor: label.color }}
+                            data-testid={`label-${trade.id}-${label.id}`}
+                          >
+                            {displayName}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{label.name}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </>
               )}
-              <DropdownMenuItem onClick={(e) => handleMenuAction('cancel', e)} className="text-destructive" data-testid={`menu-cancel-${trade.id}`}>
-                <XCircle className="w-4 h-4 mr-2" />
-                {isActive ? 'Cancel Trade' : 'Delete Item'}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={(e) => handleMenuAction('ivyai', e)} data-testid={`menu-ivyai-${trade.id}`}>
-                <Brain className="w-4 h-4 mr-2 text-primary" />
-                Open Ivy AI
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            </div>
+
+            {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
+            <div className="text-xs space-y-1.5 mb-2">
+              {/* Stop Loss - Always shown */}
+              <EditablePriceRow
+                label="STOP"
+                icon={XCircle}
+                value={trade.stopPrice}
+                distance={stopDistance}
+                isAlert={stopAlertColor !== null}
+                alertColor={stopAlertColor || "red"}
+                onSave={(value) => onPriceUpdate?.(trade.id, "stopPrice", value)}
+                testId={`monitor-stop-${trade.id}`}
+              />
+              
+              {/* Partial Profit - Always shown, editable (uses saved value or calculated default) */}
+              <EditablePriceRow
+                label="PARTIAL"
+                icon={CircleDot}
+                value={trade.partialPrice || partialProfitPrice}
+                distance={actualPartialDistance}
+                isAlert={partialAlertColor !== null}
+                alertColor={partialAlertColor || "yellow"}
+                onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
+                testId={`monitor-partial-${trade.id}`}
+              />
+              
+              {/* Profit Target - Always shown */}
+              <EditablePriceRow
+                label="TARGET"
+                icon={Target}
+                value={trade.targetPrice}
+                distance={targetDistance}
+                isAlert={targetAlertColor !== null}
+                alertColor={targetAlertColor || "green"}
+                onSave={(value) => onPriceUpdate?.(trade.id, "targetPrice", value)}
+                testId={`monitor-target-${trade.id}`}
+              />
+            </div>
+
+            {/* Risk flags with short names and tooltips */}
+            {trade.latestEvaluation && trade.latestEvaluation.riskFlags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {trade.latestEvaluation.riskFlags.slice(0, 4).map((flag, i) => {
+                  const { short, full } = getShortRiskFlag(flag);
+                  return (
+                    <Tooltip key={i}>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className="text-xs cursor-help" data-testid={`badge-risk-${trade.id}-${i}`}>
+                          <AlertTriangle className="w-3 h-3 mr-1 text-yellow-500" />
+                          {short}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        <p className="text-sm">{full}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* [AI] Button and Menu */}
+            <div className="mt-4 flex items-center justify-between">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="text-xs gap-1.5 h-7 px-2"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
+                }}
+              >
+                <Brain className="w-3.5 h-3.5 text-primary" />
+                AI Review
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-green-500 h-7 w-7"
+                    data-testid={`button-trade-menu-${trade.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuItem onClick={(e) => handleMenuAction('edit', e)} data-testid={`menu-edit-${trade.id}`}>
+                    <Edit3 className="w-4 h-4 mr-2" />
+                    Edit
+                  </DropdownMenuItem>
+                  {isActive && (
+                    <DropdownMenuItem onClick={(e) => handleMenuAction('close', e)} data-testid={`menu-close-${trade.id}`}>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Close Trade
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={(e) => handleMenuAction('cancel', e)} className="text-destructive" data-testid={`menu-cancel-${trade.id}`}>
+                    <XCircle className="w-4 h-4 mr-2" />
+                    {isActive ? 'Cancel Trade' : 'Delete Item'}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={(e) => handleMenuAction('ivyai', e)} data-testid={`menu-ivyai-${trade.id}`}>
+                    <Brain className="w-4 h-4 mr-2 text-primary" />
+                    Open Ivy AI
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -2340,6 +2362,32 @@ export default function SentinelDashboardPage() {
             </TabsTrigger>
           </TabsList>
 
+          <div className="flex items-center gap-2 ml-auto">
+            <Label htmlFor="card-view-toggle" className="text-xs text-muted-foreground">View:</Label>
+            <div className="flex bg-muted p-1 rounded-md h-8 items-center gap-1">
+              <Button
+                variant={!isExpanded ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-xs gap-1"
+                onClick={() => setIsExpanded(false)}
+              >
+                <LayoutList className="h-3 w-3" />
+                Collapsed
+              </Button>
+              <Button
+                variant={isExpanded ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-xs gap-1"
+                onClick={() => setIsExpanded(true)}
+              >
+                <LayoutGrid className="h-3 w-3" />
+                Expanded
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsContent value="considering" className="space-y-4">
             {filteredConsidering?.length === 0 ? (
               <Card>
@@ -2359,6 +2407,7 @@ export default function SentinelDashboardPage() {
                     onEdit={handleEditTrade}
                     onCancel={handleCancelTrade}
                     onPriceUpdate={handlePriceUpdate}
+                    isExpanded={isExpanded}
                   />
                 ))}
               </div>
@@ -2385,6 +2434,7 @@ export default function SentinelDashboardPage() {
                     onClose={handleCloseTrade}
                     onPriceUpdate={handlePriceUpdate}
                     onCancel={handleCancelTrade}
+                    isExpanded={isExpanded}
                   />
                 ))}
               </div>
