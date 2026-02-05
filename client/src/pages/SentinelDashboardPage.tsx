@@ -723,7 +723,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
 
   return (
     <Card 
-      className={`cursor-pointer relative ${nearStop ? "ring-2 ring-red-500 ring-inset" : nearTarget ? "ring-2 ring-green-500 ring-inset" : ""}`}
+      className={`cursor-pointer relative glass-card ${nearStop ? "ring-2 ring-red-500 ring-inset" : nearTarget ? "ring-2 ring-green-500 ring-inset" : ""}`}
       data-testid={`card-trade-${trade.id}`}
       onClick={handleCardClick}
     >
@@ -836,12 +836,10 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                 testId={`monitor-target-${trade.id}`}
               />
               
-              {/* Share Quantity */}
-              {(fifoData?.totalRemaining || trade.positionSize) && (
-                <div className="text-muted-foreground mt-1 pt-1 border-t border-blue-500/20" data-testid={`shares-${trade.id}`}>
-                  Shares: {fifoData?.totalRemaining?.toLocaleString() || trade.positionSize?.toLocaleString() || 0}
-                </div>
-              )}
+              {/* Share Quantity - Always show */}
+              <div className="text-muted-foreground mt-1 pt-1 border-t border-blue-500/20" data-testid={`shares-${trade.id}`}>
+                Shares: {(fifoData?.totalRemaining ?? trade.positionSize ?? 0).toLocaleString()}
+              </div>
             </div>
 
             {/* Risk flags with short names and tooltips */}

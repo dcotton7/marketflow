@@ -104,26 +104,32 @@
   z-index: 1;
 }
 
-/* Transparent glass-effect for Card components in sentinel pages */
+/* Glass card effect - 75% opacity with blur */
+.glass-card {
+  background: hsl(var(--card) / 0.75) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Glass effect for all cards and overlays in sentinel pages */
 .sentinel-page [data-slot="card"],
-.sentinel-page .bg-card,
-.sentinel-page [class*="rounded-xl"][class*="border"],
-.sentinel-page [class*="rounded-lg"][class*="border"] {
-  background: hsl(var(--card) / 0.85) !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+.sentinel-page .bg-card {
+  background: hsl(var(--card) / 0.75) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-/* Glass effect for trading cards specifically */
-.sentinel-page .grid > div[class*="cursor-pointer"] {
-  background: hsl(var(--card) / 0.82) !important;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-/* Keep header more solid */
+/* Keep header slightly more solid */
 .sentinel-page > header {
-  background: hsl(var(--card) / 0.92) !important;
+  background: hsl(var(--card) / 0.85) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Glass effect for dialogs and modals */
+.sentinel-page [role="dialog"],
+.sentinel-page [data-radix-dialog-content] {
+  background: hsl(var(--card) / 0.75) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }

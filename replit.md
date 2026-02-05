@@ -5,6 +5,7 @@ This project comprises two applications: **AI Swing Scanner**, a stock market an
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
+Preferred test username: Foreboding
 
 ## System Architecture
 
