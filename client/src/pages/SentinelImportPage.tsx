@@ -757,22 +757,14 @@ export default function SentinelImportPage() {
         backgroundColor: cssVariables.backgroundColor,
         '--logo-opacity': cssVariables.logoOpacity,
         '--overlay-bg': cssVariables.overlayBg,
-        position: 'relative',
-        zIndex: 1,
+        backgroundImage: 'url(/rubricshield-logo.png)',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: '33% auto',
+        backgroundAttachment: 'fixed',
       } as React.CSSProperties}
     >
-      {/* Watermark logo - fixed behind all content */}
-      <div 
-        className="fixed inset-0 flex items-center justify-center pointer-events-none"
-        style={{ opacity: cssVariables.logoOpacity, zIndex: 0 }}
-      >
-        <img 
-          src="/rubricshield-logo.png" 
-          alt="" 
-          className="w-1/3 h-1/3 object-contain"
-          aria-hidden="true"
-        />
-      </div>
+      {/* Watermark applied via background-image on container */}
       <SentinelHeader />
       
       <main className="container mx-auto p-4 max-w-6xl">
