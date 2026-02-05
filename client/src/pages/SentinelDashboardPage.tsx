@@ -791,7 +791,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
             </div>
 
             {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
-            <div className="text-xs space-y-1.5 mb-2">
+            <div className="text-xs space-y-1.5 mb-2 bg-blue-500/10 dark:bg-blue-400/10 p-2 rounded-md">
               {/* Stop Loss - Always shown */}
               <EditablePriceRow
                 label="STOP"

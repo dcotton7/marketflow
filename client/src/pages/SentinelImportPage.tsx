@@ -318,6 +318,9 @@ export default function SentinelImportPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trade-sources'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/labels'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
     },
     onError: (error: any) => {
       toast({ 
