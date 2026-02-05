@@ -1050,6 +1050,7 @@ export default function SentinelDashboardPage() {
   
   // State preservation keys
   const STORAGE_KEY_TAB = "sentinel_dashboard_active_tab";
+  const STORAGE_KEY_EXPANDED = "sentinel_dashboard_card_expanded";
   const STORAGE_KEY_LABELS = "sentinel_dashboard_label_filters";
   const STORAGE_KEY_SOURCES = "sentinel_dashboard_source_filters";
   const STORAGE_KEY_MONTH = "sentinel_dashboard_month_filter";
@@ -1060,6 +1061,15 @@ export default function SentinelDashboardPage() {
     const saved = localStorage.getItem(STORAGE_KEY_TAB);
     return saved || "active";
   });
+
+  const [isExpanded, setIsExpanded] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_EXPANDED);
+    return saved === null ? true : saved === "true";
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_EXPANDED, isExpanded.toString());
+  }, [isExpanded]);
   
   // Initialize selectedLabelFilters from localStorage (multi-select with AND logic)
   const [selectedLabelFilters, setSelectedLabelFilters] = useState<number[]>(() => {
@@ -2363,7 +2373,7 @@ export default function SentinelDashboardPage() {
           </TabsList>
 
           <div className="flex items-center gap-2 ml-auto">
-            <Label htmlFor="card-view-toggle" className="text-xs text-muted-foreground">View:</Label>
+            <Label className="text-xs text-muted-foreground">View:</Label>
             <div className="flex bg-muted p-1 rounded-md h-8 items-center gap-1">
               <Button
                 variant={!isExpanded ? "secondary" : "ghost"}
