@@ -49,7 +49,13 @@ An auto-suggest endpoint provides stop, target, and position size suggestions ba
 A multi-broker CSV import system (Fidelity, Schwab, Robinhood) allows importing historical trades. Features include preview-before-confirm, auto-broker detection, partial fill detection, transaction-wrapped batch inserts, and smart orphan sell detection with a review flow. Orphan detection now respects per-account position tracking for both imported and hand-entered trades.
 
 ### Import Review & Orphan Management
-Orphan sells (sells without matching buys) are tracked with statuses: 'pending', 'muted', 'resolved'. The review pane shows ALL orphans needing cost basis (pending + muted) with toggle-style mute buttons that switch between pending/muted states. Muted orphans are hidden from Trading Cards but remain visible in review. Bulk MUTE ALL/DELETE ALL actions are available. Default purchase date is derived from the last BUY trade for the same ticker:account in the batch. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync.
+Orphan sells (sells without matching buys) are tracked with statuses: 'pending', 'muted', 'resolved'. The review pane shows ALL orphans needing cost basis (pending + muted) with toggle-style mute buttons that switch between pending/muted states. Muted orphans are hidden from Trading Cards but remain visible in review. Bulk MUTE ALL/DELETE ALL actions are available. Default purchase date is derived from the last BUY trade for the same ticker:account in the batch. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync. When unmuting an orphan, visual feedback is provided with a green highlight that fades after 3 seconds.
+
+### Duplicate Detection & Resolution
+Import batches can be scanned for duplicates - trades that match existing Trading Cards or previous imports by ticker, date, price, and quantity. Detected duplicates are flagged with status 'pending'. Users can review duplicates with two resolution options:
+- **Delete**: Remove the import row and keep existing data unchanged
+- **Overwrite**: Update existing records with new import data
+Bulk actions (Delete All / Overwrite All) are available. Duplicate counts are displayed on batch cards with "Review Duplicates" button when pending duplicates exist. A "Check Duplicates" button allows scanning completed batches for potential duplicates.
 
 ### Account Selection for Trades
 Hand-entered trades support account selection via a dropdown that shows the user's configured accounts. The first account is auto-selected as default, and selection persists between entries. Backend validates accountName against user's account settings, silently ignoring invalid account names.

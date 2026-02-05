@@ -4,7 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import OpenAI from "openai";
-import { eq, and, or, inArray, sql, isNull, desc } from "drizzle-orm";
+import { eq, and, or, not, inArray, sql, isNull, desc } from "drizzle-orm";
 import { db } from "../db";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
@@ -3565,8 +3565,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         .where(eq(sentinelImportBatches.userId, userId))
         .orderBy(sentinelImportBatches.createdAt);
       
-      // Dynamically calculate pending orphan count for each batch and derive status
-      const batchesWithOrphanCounts = await Promise.all(
+      // Dynamically calculate pending orphan and duplicate counts for each batch and derive status
+      const batchesWithCounts = await Promise.all(
         batches.map(async (batch) => {
           const pendingOrphans = await db!.select({ count: sql<number>`count(*)` })
             .from(sentinelImportedTrades)
@@ -3577,17 +3577,28 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               eq(sentinelImportedTrades.orphanStatus, 'pending')
             ));
           
+          const pendingDuplicates = await db!.select({ count: sql<number>`count(*)` })
+            .from(sentinelImportedTrades)
+            .where(and(
+              eq(sentinelImportedTrades.userId, userId),
+              eq(sentinelImportedTrades.batchId, batch.batchId),
+              eq(sentinelImportedTrades.isDuplicate, true),
+              eq(sentinelImportedTrades.duplicateStatus, 'pending')
+            ));
+          
           const orphanCount = Number(pendingOrphans[0]?.count || 0);
+          const duplicatesCount = Number(pendingDuplicates[0]?.count || 0);
           return {
             ...batch,
             orphanSellsCount: orphanCount,
+            duplicatesCount: duplicatesCount,
             // Dynamically set status based on orphan count
             status: orphanCount > 0 ? 'NEEDS_REVIEW' : (batch.status === 'NEEDS_REVIEW' ? 'completed' : batch.status),
           };
         })
       );
       
-      res.json(batchesWithOrphanCounts.reverse());
+      res.json(batchesWithCounts.reverse());
     } catch (error) {
       console.error("Get batches error:", error);
       res.status(500).json({ error: "Failed to fetch import history" });
@@ -4566,6 +4577,379 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       console.error("Reset and re-detect error:", error);
       console.error("Error stack:", error?.stack);
       res.status(500).json({ error: "Failed to reset and re-detect orphans", details: error?.message || String(error) });
+    }
+  });
+
+  // === DUPLICATE DETECTION ROUTES ===
+  
+  // Detect duplicates in a batch (trades that match existing Trading Cards or other imports)
+  app.post("/api/sentinel/import/batches/:batchId/detect-duplicates", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId;
+      
+      // Get trades from this batch
+      const batchTrades = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId)
+        ));
+      
+      if (batchTrades.length === 0) {
+        return res.json({ success: true, duplicatesFound: 0, message: "No trades in batch" });
+      }
+      
+      // Get existing Trading Cards for comparison
+      const existingCards = await db!.select({
+        id: sentinelTrades.id,
+        symbol: sentinelTrades.symbol,
+        entryDate: sentinelTrades.entryDate,
+        entryPrice: sentinelTrades.entryPrice,
+        positionSize: sentinelTrades.positionSize,
+        lotEntries: sentinelTrades.lotEntries,
+        accountName: sentinelTrades.accountName,
+      }).from(sentinelTrades)
+        .where(eq(sentinelTrades.userId, userId));
+      
+      // Get other import batches' trades (excluding this batch)
+      const otherImportedTrades = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          not(eq(sentinelImportedTrades.batchId, batchId))
+        ));
+      
+      const duplicateTradeIds = new Set<string>();
+      const duplicateMatches = new Map<string, { matchType: 'card' | 'import', matchId: number }>();
+      
+      for (const trade of batchTrades) {
+        // Check against existing Trading Cards
+        for (const card of existingCards) {
+          // Match by: ticker, date, price (within tolerance), quantity
+          if (card.symbol.toUpperCase() === trade.ticker.toUpperCase()) {
+            // Check lot entries if available
+            if (card.lotEntries && Array.isArray(card.lotEntries)) {
+              for (const lot of card.lotEntries) {
+                const lotDate = lot.dateTime?.split('T')[0] || '';
+                const lotPrice = parseFloat(lot.price) || 0;
+                const lotQty = parseFloat(lot.qty) || 0;
+                const priceMatch = Math.abs(lotPrice - trade.price) < 0.01;
+                const qtyMatch = Math.abs(lotQty - trade.quantity) < 0.0001;
+                const dateMatch = lotDate === trade.tradeDate;
+                
+                if (dateMatch && priceMatch && qtyMatch) {
+                  duplicateTradeIds.add(trade.tradeId);
+                  duplicateMatches.set(trade.tradeId, { matchType: 'card', matchId: card.id });
+                  break;
+                }
+              }
+            } else if (card.entryDate) {
+              // Match by entry date and price
+              const cardDate = new Date(card.entryDate).toISOString().split('T')[0];
+              const priceMatch = card.entryPrice && Math.abs(card.entryPrice - trade.price) < 0.01;
+              const dateMatch = cardDate === trade.tradeDate;
+              
+              if (dateMatch && priceMatch) {
+                duplicateTradeIds.add(trade.tradeId);
+                duplicateMatches.set(trade.tradeId, { matchType: 'card', matchId: card.id });
+              }
+            }
+          }
+        }
+        
+        // Check against other imports if not already matched
+        if (!duplicateTradeIds.has(trade.tradeId)) {
+          for (const otherTrade of otherImportedTrades) {
+            if (otherTrade.ticker.toUpperCase() === trade.ticker.toUpperCase() &&
+                otherTrade.tradeDate === trade.tradeDate &&
+                Math.abs(otherTrade.price - trade.price) < 0.01 &&
+                Math.abs(otherTrade.quantity - trade.quantity) < 0.0001 &&
+                otherTrade.direction === trade.direction) {
+              duplicateTradeIds.add(trade.tradeId);
+              duplicateMatches.set(trade.tradeId, { matchType: 'import', matchId: otherTrade.id });
+              break;
+            }
+          }
+        }
+      }
+      
+      // Update trades with duplicate status
+      let updatedCount = 0;
+      for (const [tradeId, match] of duplicateMatches) {
+        await db!.update(sentinelImportedTrades)
+          .set({ 
+            isDuplicate: true,
+            duplicateStatus: 'pending',
+            duplicateOfTradeId: match.matchType === 'card' ? match.matchId : null,
+            duplicateOfImportId: match.matchType === 'import' ? match.matchId : null,
+          })
+          .where(eq(sentinelImportedTrades.tradeId, tradeId));
+        updatedCount++;
+      }
+      
+      // Update batch duplicate count
+      await db!.update(sentinelImportBatches)
+        .set({ duplicatesCount: duplicateTradeIds.size })
+        .where(eq(sentinelImportBatches.batchId, batchId));
+      
+      res.json({ 
+        success: true, 
+        duplicatesFound: duplicateTradeIds.size,
+        details: Array.from(duplicateMatches.entries()).map(([tradeId, match]) => ({
+          tradeId,
+          matchType: match.matchType,
+          matchId: match.matchId
+        }))
+      });
+    } catch (error) {
+      console.error("Detect duplicates error:", error);
+      res.status(500).json({ error: "Failed to detect duplicates" });
+    }
+  });
+  
+  // Get duplicates for a batch
+  app.get("/api/sentinel/import/batches/:batchId/duplicates", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId;
+      
+      const duplicates = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId),
+          eq(sentinelImportedTrades.isDuplicate, true)
+        ))
+        .orderBy(sentinelImportedTrades.tradeDate);
+      
+      // For each duplicate, get info about what it matches
+      const duplicatesWithMatchInfo = await Promise.all(duplicates.map(async (dup) => {
+        let matchInfo = null;
+        
+        if (dup.duplicateOfTradeId) {
+          const [card] = await db!.select({
+            id: sentinelTrades.id,
+            symbol: sentinelTrades.symbol,
+            entryDate: sentinelTrades.entryDate,
+            entryPrice: sentinelTrades.entryPrice,
+            status: sentinelTrades.status,
+          }).from(sentinelTrades)
+            .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
+          matchInfo = { type: 'card', card };
+        } else if (dup.duplicateOfImportId) {
+          const [importTrade] = await db!.select().from(sentinelImportedTrades)
+            .where(eq(sentinelImportedTrades.id, dup.duplicateOfImportId));
+          matchInfo = { type: 'import', trade: importTrade };
+        }
+        
+        return { ...dup, matchInfo };
+      }));
+      
+      res.json({ duplicates: duplicatesWithMatchInfo });
+    } catch (error) {
+      console.error("Get duplicates error:", error);
+      res.status(500).json({ error: "Failed to fetch duplicates" });
+    }
+  });
+  
+  // Resolve a duplicate (delete from import or overwrite existing)
+  app.patch("/api/sentinel/import/trades/:tradeId/resolve-duplicate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const tradeId = req.params.tradeId;
+      const { action } = req.body; // 'delete' | 'overwrite'
+      
+      // Verify this is a duplicate belonging to the user
+      const [trade] = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.tradeId, tradeId),
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.isDuplicate, true)
+        ));
+      
+      if (!trade) {
+        return res.status(404).json({ error: "Duplicate trade not found" });
+      }
+      
+      if (action === 'delete') {
+        // Delete this import row, keeping the existing data
+        await db!.delete(sentinelImportedTrades)
+          .where(eq(sentinelImportedTrades.tradeId, tradeId));
+        
+        // Update batch count
+        const batchId = trade.batchId;
+        const [countResult] = await db!.select({ count: sql<number>`count(*)` })
+          .from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.isDuplicate, true),
+            eq(sentinelImportedTrades.duplicateStatus, 'pending')
+          ));
+        
+        await db!.update(sentinelImportBatches)
+          .set({ duplicatesCount: Number(countResult?.count || 0) })
+          .where(eq(sentinelImportBatches.batchId, batchId));
+        
+        return res.json({ success: true, action: 'deleted' });
+      }
+      
+      if (action === 'overwrite') {
+        // If matching a Trading Card, update it with new data
+        if (trade.duplicateOfTradeId) {
+          const [existingCard] = await db!.select().from(sentinelTrades)
+            .where(eq(sentinelTrades.id, trade.duplicateOfTradeId));
+          
+          if (existingCard) {
+            // Update the Trading Card with data from import
+            // Merge lot entries if they exist
+            let updatedLotEntries = existingCard.lotEntries || [];
+            const newLotEntry = {
+              id: `import-${trade.tradeId}`,
+              dateTime: trade.executionTime || `${trade.tradeDate}T12:00:00`,
+              qty: trade.quantity.toString(),
+              buySell: trade.direction.toLowerCase() as 'buy' | 'sell',
+              price: trade.price.toString(),
+            };
+            
+            // Check if lot entry already exists (to prevent true duplicates)
+            const exists = updatedLotEntries.some(
+              (le: any) => le.dateTime?.split('T')[0] === trade.tradeDate && 
+                          Math.abs(parseFloat(le.price) - trade.price) < 0.01 &&
+                          Math.abs(parseFloat(le.qty) - trade.quantity) < 0.0001
+            );
+            
+            if (!exists) {
+              updatedLotEntries.push(newLotEntry);
+              await db!.update(sentinelTrades)
+                .set({ lotEntries: updatedLotEntries, updatedAt: new Date() })
+                .where(eq(sentinelTrades.id, trade.duplicateOfTradeId));
+            }
+          }
+        }
+        
+        // If matching another import, delete the older one
+        if (trade.duplicateOfImportId) {
+          await db!.delete(sentinelImportedTrades)
+            .where(eq(sentinelImportedTrades.id, trade.duplicateOfImportId));
+        }
+        
+        // Mark this trade as resolved
+        await db!.update(sentinelImportedTrades)
+          .set({ duplicateStatus: 'overwritten' })
+          .where(eq(sentinelImportedTrades.tradeId, tradeId));
+        
+        // Update batch count
+        const batchId = trade.batchId;
+        const [countResult] = await db!.select({ count: sql<number>`count(*)` })
+          .from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.isDuplicate, true),
+            eq(sentinelImportedTrades.duplicateStatus, 'pending')
+          ));
+        
+        await db!.update(sentinelImportBatches)
+          .set({ duplicatesCount: Number(countResult?.count || 0) })
+          .where(eq(sentinelImportBatches.batchId, batchId));
+        
+        return res.json({ success: true, action: 'overwritten' });
+      }
+      
+      res.status(400).json({ error: "Invalid action. Use 'delete' or 'overwrite'" });
+    } catch (error) {
+      console.error("Resolve duplicate error:", error);
+      res.status(500).json({ error: "Failed to resolve duplicate" });
+    }
+  });
+  
+  // Bulk actions for duplicates (delete all or overwrite all)
+  app.post("/api/sentinel/import/batches/:batchId/duplicates/bulk", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId;
+      const { action } = req.body; // 'delete_all' | 'overwrite_all'
+      
+      const duplicates = await db!.select().from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.batchId, batchId),
+          eq(sentinelImportedTrades.isDuplicate, true),
+          eq(sentinelImportedTrades.duplicateStatus, 'pending')
+        ));
+      
+      if (action === 'delete_all') {
+        // Delete all pending duplicates from this batch
+        await db!.delete(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.isDuplicate, true),
+            eq(sentinelImportedTrades.duplicateStatus, 'pending')
+          ));
+        
+        await db!.update(sentinelImportBatches)
+          .set({ duplicatesCount: 0 })
+          .where(eq(sentinelImportBatches.batchId, batchId));
+        
+        return res.json({ success: true, action: 'delete_all', count: duplicates.length });
+      }
+      
+      if (action === 'overwrite_all') {
+        // Process each duplicate to overwrite existing data
+        for (const dup of duplicates) {
+          if (dup.duplicateOfTradeId) {
+            const [existingCard] = await db!.select().from(sentinelTrades)
+              .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
+            
+            if (existingCard) {
+              let updatedLotEntries = existingCard.lotEntries || [];
+              const newLotEntry = {
+                id: `import-${dup.tradeId}`,
+                dateTime: dup.executionTime || `${dup.tradeDate}T12:00:00`,
+                qty: dup.quantity.toString(),
+                buySell: dup.direction.toLowerCase() as 'buy' | 'sell',
+                price: dup.price.toString(),
+              };
+              
+              const exists = updatedLotEntries.some(
+                (le: any) => le.dateTime?.split('T')[0] === dup.tradeDate && 
+                            Math.abs(parseFloat(le.price) - dup.price) < 0.01 &&
+                            Math.abs(parseFloat(le.qty) - dup.quantity) < 0.0001
+              );
+              
+              if (!exists) {
+                updatedLotEntries.push(newLotEntry);
+                await db!.update(sentinelTrades)
+                  .set({ lotEntries: updatedLotEntries, updatedAt: new Date() })
+                  .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
+              }
+            }
+          }
+          
+          if (dup.duplicateOfImportId) {
+            await db!.delete(sentinelImportedTrades)
+              .where(eq(sentinelImportedTrades.id, dup.duplicateOfImportId));
+          }
+        }
+        
+        // Mark all as overwritten
+        await db!.update(sentinelImportedTrades)
+          .set({ duplicateStatus: 'overwritten' })
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.isDuplicate, true)
+          ));
+        
+        await db!.update(sentinelImportBatches)
+          .set({ duplicatesCount: 0 })
+          .where(eq(sentinelImportBatches.batchId, batchId));
+        
+        return res.json({ success: true, action: 'overwrite_all', count: duplicates.length });
+      }
+      
+      res.status(400).json({ error: "Invalid action. Use 'delete_all' or 'overwrite_all'" });
+    } catch (error) {
+      console.error("Bulk duplicate action error:", error);
+      res.status(500).json({ error: "Failed to perform bulk action" });
     }
   });
 

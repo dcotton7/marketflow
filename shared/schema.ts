@@ -458,6 +458,7 @@ export const sentinelImportBatches = pgTable("sentinel_import_batches", {
   totalTradesFound: integer("total_trades_found").default(0),
   totalTradesImported: integer("total_trades_imported").default(0),
   orphanSellsCount: integer("orphan_sells_count").default(0), // Sells with no matching buy
+  duplicatesCount: integer("duplicates_count").default(0), // Trades that match existing data
   skippedRows: jsonb("skipped_rows").$type<Array<{
     rowIndex: number;
     rawData: string;
@@ -511,9 +512,15 @@ export const sentinelImportedTrades = pgTable("sentinel_imported_trades", {
   
   // Orphan sell tracking (sells with no matching buy in dataset)
   isOrphanSell: boolean("is_orphan_sell").default(false),
-  orphanStatus: text("orphan_status"), // 'pending' | 'resolved' | 'deleted'
+  orphanStatus: text("orphan_status"), // 'pending' | 'resolved' | 'deleted' | 'muted'
   manualCostBasis: doublePrecision("manual_cost_basis"), // User-entered cost basis for orphan sells
   manualOpenDate: text("manual_open_date"), // User-entered open date for orphan sells
+  
+  // Duplicate detection - matches against existing Trading Cards or other imports
+  isDuplicate: boolean("is_duplicate").default(false),
+  duplicateStatus: text("duplicate_status"), // 'pending' | 'overwritten' | 'deleted'
+  duplicateOfTradeId: integer("duplicate_of_trade_id"), // ID of existing sentinelTrades record if duplicate
+  duplicateOfImportId: integer("duplicate_of_import_id"), // ID of existing sentinelImportedTrades record if duplicate
   
   // Audit trail
   rawSource: text("raw_source"), // Original CSV row

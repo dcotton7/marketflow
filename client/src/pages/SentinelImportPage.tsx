@@ -31,6 +31,7 @@ interface ImportBatch {
   totalTradesFound: number;
   totalTradesImported: number;
   orphanSellsCount?: number;
+  duplicatesCount?: number;
   skippedRows: Array<{ rowIndex: number; rawData: string; reason: string }>;
   status: string;
   errorMessage?: string;
@@ -67,6 +68,15 @@ interface ImportedTrade {
   orphanStatus?: string;
   manualCostBasis?: number;
   manualOpenDate?: string;
+  isDuplicate?: boolean;
+  duplicateStatus?: string;
+  duplicateOfTradeId?: number;
+  duplicateOfImportId?: number;
+  matchInfo?: {
+    type: 'card' | 'import';
+    card?: { id: number; symbol: string; entryDate?: string; entryPrice?: number; status: string };
+    trade?: ImportedTrade;
+  };
   rawSource?: string;
   importedAt: string;
 }
@@ -110,6 +120,11 @@ export default function SentinelImportPage() {
   const [showOrphanDialog, setShowOrphanDialog] = useState(false);
   const [selectedOrphanBatchId, setSelectedOrphanBatchId] = useState<string | null>(null);
   const [orphanResolutions, setOrphanResolutions] = useState<Record<string, { costBasis: string; openDate: string }>>({});
+  const [recentlyUnmutedIds, setRecentlyUnmutedIds] = useState<Set<string>>(new Set());
+  
+  // Duplicate detection state
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
+  const [selectedDuplicateBatchId, setSelectedDuplicateBatchId] = useState<string | null>(null);
   
   const { data: batches, isLoading: batchesLoading } = useQuery<ImportBatch[]>({
     queryKey: ['/api/sentinel/import/batches'],
@@ -132,9 +147,26 @@ export default function SentinelImportPage() {
   const orphanSells = orphanData?.orphans;
   const lastBuyDates = orphanData?.lastBuyDates || {};
 
+  // Duplicate data query
+  const { data: duplicateData, isLoading: duplicatesLoading, refetch: refetchDuplicates } = useQuery<{ duplicates: ImportedTrade[] }>({
+    queryKey: ['/api/sentinel/import/batches', selectedDuplicateBatchId, 'duplicates'],
+    enabled: !!selectedDuplicateBatchId,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/import/batches/${selectedDuplicateBatchId}/duplicates`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch duplicates');
+      return res.json();
+    }
+  });
+  
+  const duplicateTrades = duplicateData?.duplicates;
+
   // Count total pending orphans across all batches that need review
   const totalPendingOrphans = batches?.reduce((sum, b) => sum + (b.orphanSellsCount || 0), 0) || 0;
   const hasPendingOrphans = totalPendingOrphans > 0;
+  
+  // Count total pending duplicates across all batches
+  const totalPendingDuplicates = batches?.reduce((sum, b) => sum + (b.duplicatesCount || 0), 0) || 0;
+  const hasPendingDuplicates = totalPendingDuplicates > 0;
 
   const previewMutation = useMutation({
     mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string }) => {
@@ -396,6 +428,99 @@ export default function SentinelImportPage() {
     },
   });
   
+  // Duplicate detection mutation
+  const detectDuplicatesMutation = useMutation({
+    mutationFn: async (batchId: string) => {
+      const response = await apiRequest('POST', `/api/sentinel/import/batches/${batchId}/detect-duplicates`, {});
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to detect duplicates');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      if (data.duplicatesFound > 0) {
+        toast({ 
+          title: "Duplicates Found", 
+          description: `Found ${data.duplicatesFound} duplicate trades that match existing data`
+        });
+      } else {
+        toast({ title: "No Duplicates", description: "No duplicate trades found in this import" });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Detection Failed",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  // Resolve duplicate mutation
+  const resolveDuplicateMutation = useMutation({
+    mutationFn: async (data: { tradeId: string; action: 'delete' | 'overwrite' }) => {
+      const response = await apiRequest('PATCH', `/api/sentinel/import/trades/${data.tradeId}/resolve-duplicate`, {
+        action: data.action,
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to resolve duplicate');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      refetchDuplicates();
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      if (data.action === 'deleted') {
+        toast({ title: "Duplicate Removed", description: "Import row deleted, existing data kept" });
+      } else if (data.action === 'overwritten') {
+        toast({ title: "Data Updated", description: "Existing record updated with new import data" });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to resolve duplicate",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  // Bulk duplicate actions
+  const bulkDuplicateMutation = useMutation({
+    mutationFn: async (action: 'delete_all' | 'overwrite_all') => {
+      if (!selectedDuplicateBatchId) throw new Error('No batch selected');
+      const response = await apiRequest('POST', `/api/sentinel/import/batches/${selectedDuplicateBatchId}/duplicates/bulk`, { action });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Bulk action failed');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      refetchDuplicates();
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      toast({ 
+        title: data.action === 'delete_all' ? "All Duplicates Removed" : "All Records Updated",
+        description: data.action === 'delete_all' 
+          ? `Removed ${data.count} duplicate import rows` 
+          : `Updated ${data.count} existing records with new data`
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Bulk action failed",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+  
   // State for inline editing of import names
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [editingImportName, setEditingImportName] = useState("");
@@ -449,7 +574,7 @@ export default function SentinelImportPage() {
     setShowOrphanDialog(true);
   };
 
-  const handleResolveOrphan = (tradeId: string, action: 'delete' | 'resolve' | 'mute') => {
+  const handleResolveOrphan = (tradeId: string, action: 'delete' | 'resolve' | 'mute', currentStatus?: string) => {
     const resolution = orphanResolutions[tradeId];
     if (action === 'resolve') {
       if (!resolution?.costBasis || !resolution?.openDate) {
@@ -467,10 +592,31 @@ export default function SentinelImportPage() {
         openDate: resolution.openDate,
       });
     } else if (action === 'mute') {
-      resolveOrphanMutation.mutate({ tradeId, action: 'mute' });
+      // Check if we're unmuting (going from muted to pending)
+      const isUnmuting = currentStatus === 'muted';
+      resolveOrphanMutation.mutate({ tradeId, action: 'mute' }, {
+        onSuccess: () => {
+          if (isUnmuting) {
+            // Add to recently unmuted set for visual feedback
+            setRecentlyUnmutedIds(prev => new Set(Array.from(prev).concat(tradeId)));
+            // Remove the highlight after 3 seconds
+            setTimeout(() => {
+              setRecentlyUnmutedIds(prev => {
+                const next = new Set(prev);
+                next.delete(tradeId);
+                return next;
+              });
+            }, 3000);
+          }
+        }
+      });
     } else {
       resolveOrphanMutation.mutate({ tradeId, action: 'delete' });
     }
+  };
+  
+  const handleResolveDuplicate = (tradeId: string, action: 'delete' | 'overwrite') => {
+    resolveDuplicateMutation.mutate({ tradeId, action });
   };
 
   const handleFileDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -967,12 +1113,17 @@ export default function SentinelImportPage() {
                                   <AlertTriangle className="h-3 w-3" />
                                   {batch.orphanSellsCount} Orphans
                                 </Badge>
+                              ) : (batch.duplicatesCount || 0) > 0 ? (
+                                <Badge variant="outline" className="text-orange-500 border-orange-500 gap-1">
+                                  <AlertCircle className="h-3 w-3" />
+                                  {batch.duplicatesCount} Duplicates
+                                </Badge>
                               ) : (
                                 <Badge variant={batch.status === "COMPLETE" ? "default" : "destructive"}>
                                   {batch.status}
                                 </Badge>
                               )}
-                              {batch.status === "NEEDS_REVIEW" && (
+                              {batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 && (
                                 <Button 
                                   variant="outline" 
                                   size="sm"
@@ -980,7 +1131,37 @@ export default function SentinelImportPage() {
                                   className="text-yellow-500 border-yellow-500/50"
                                   data-testid={`button-review-orphans-${batch.batchId}`}
                                 >
-                                  Review
+                                  Review Orphans
+                                </Button>
+                              )}
+                              {(batch.duplicatesCount || 0) > 0 && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedDuplicateBatchId(batch.batchId);
+                                    setShowDuplicateDialog(true);
+                                  }}
+                                  className="text-orange-500 border-orange-500/50"
+                                  data-testid={`button-review-duplicates-${batch.batchId}`}
+                                >
+                                  Review Duplicates
+                                </Button>
+                              )}
+                              {batch.status === "COMPLETE" && (batch.duplicatesCount || 0) === 0 && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => detectDuplicatesMutation.mutate(batch.batchId)}
+                                  disabled={detectDuplicatesMutation.isPending}
+                                  data-testid={`button-detect-duplicates-${batch.batchId}`}
+                                >
+                                  {detectDuplicatesMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                  ) : (
+                                    <AlertCircle className="h-4 w-4 mr-1" />
+                                  )}
+                                  Check Duplicates
                                 </Button>
                               )}
                               <Button 
@@ -1318,12 +1499,13 @@ export default function SentinelImportPage() {
               <div className="space-y-4">
                 {orphanSells.filter(o => o.orphanStatus !== 'resolved').map((orphan) => {
                   const isMuted = orphan.orphanStatus === 'muted';
+                  const isRecentlyUnmuted = recentlyUnmutedIds.has(orphan.tradeId);
                   // Look up the last buy date for this ticker:account combo from batch trades
                   const lookupKey = `${orphan.ticker}:${orphan.accountName || 'default'}`;
                   const lastBuyDate = lastBuyDates[lookupKey];
                   
                   return (
-                  <Card key={orphan.tradeId} className={`${isMuted ? 'border-muted opacity-60' : 'border-yellow-500/30'}`}>
+                  <Card key={orphan.tradeId} className={`transition-all duration-500 ${isMuted ? 'border-muted opacity-60' : isRecentlyUnmuted ? 'border-green-500 bg-green-500/10 ring-2 ring-green-500/30' : 'border-yellow-500/30'}`}>
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
@@ -1390,7 +1572,7 @@ export default function SentinelImportPage() {
                         <Button
                           variant={isMuted ? "secondary" : "outline"}
                           size="sm"
-                          onClick={() => handleResolveOrphan(orphan.tradeId, 'mute')}
+                          onClick={() => handleResolveOrphan(orphan.tradeId, 'mute', orphan.orphanStatus)}
                           disabled={resolveOrphanMutation.isPending}
                           data-testid={`button-mute-orphan-${orphan.tradeId}`}
                         >
@@ -1437,6 +1619,137 @@ export default function SentinelImportPage() {
           
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowOrphanDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicates Dialog */}
+      <Dialog open={showDuplicateDialog} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedDuplicateBatchId(null);
+        }
+        setShowDuplicateDialog(open);
+      }}>
+        <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-orange-500" />
+              Duplicate Trades Found
+            </DialogTitle>
+            <DialogDescription className="space-y-2">
+              <p>These trades match existing data in your Trading Cards or previous imports.</p>
+              <div className="mt-3 p-3 bg-muted rounded-md text-sm space-y-2">
+                <p><strong>Delete:</strong> Remove this import row and keep existing data unchanged.</p>
+                <p><strong>Overwrite:</strong> Update existing records with data from this import.</p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          
+          {duplicateTrades && duplicateTrades.filter(d => d.duplicateStatus === 'pending').length > 0 && (
+            <div className="flex justify-end gap-2 mb-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => bulkDuplicateMutation.mutate('delete_all')}
+                disabled={bulkDuplicateMutation.isPending}
+                data-testid="button-delete-all-duplicates"
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete All
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => bulkDuplicateMutation.mutate('overwrite_all')}
+                disabled={bulkDuplicateMutation.isPending}
+                data-testid="button-overwrite-all-duplicates"
+              >
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Overwrite All
+              </Button>
+            </div>
+          )}
+          
+          <ScrollArea className="flex-1 max-h-[50vh] pr-4">
+            {duplicatesLoading ? (
+              <div className="flex justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </div>
+            ) : duplicateTrades && duplicateTrades.filter(d => d.duplicateStatus === 'pending').length > 0 ? (
+              <div className="space-y-4">
+                {duplicateTrades.filter(d => d.duplicateStatus === 'pending').map((dup) => (
+                  <Card key={dup.tradeId} className="border-orange-500/30">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="font-mono font-bold text-lg">{dup.ticker}</div>
+                          <Badge variant={dup.direction === 'BUY' ? 'default' : 'secondary'} className="gap-1">
+                            {dup.direction === 'BUY' ? (
+                              <><ArrowUpRight className="h-3 w-3" /> BUY</>
+                            ) : (
+                              <><ArrowDownRight className="h-3 w-3" /> SELL</>
+                            )}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {dup.quantity.toFixed(3)} shares @ ${dup.price.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {formatDate(dup.tradeDate)}
+                        </div>
+                      </div>
+                      
+                      {dup.matchInfo && (
+                        <div className="mb-3 p-2 bg-muted rounded-md text-sm">
+                          <span className="text-muted-foreground">Matches: </span>
+                          {dup.matchInfo.type === 'card' ? (
+                            <span>Existing Trading Card for <strong>{dup.matchInfo.card?.symbol}</strong> ({dup.matchInfo.card?.status})</span>
+                          ) : (
+                            <span>Previously imported trade from {dup.matchInfo.trade?.tradeDate}</span>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleResolveDuplicate(dup.tradeId, 'delete')}
+                          disabled={resolveDuplicateMutation.isPending}
+                          data-testid={`button-delete-duplicate-${dup.tradeId}`}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Delete
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleResolveDuplicate(dup.tradeId, 'overwrite')}
+                          disabled={resolveDuplicateMutation.isPending}
+                          data-testid={`button-overwrite-duplicate-${dup.tradeId}`}
+                        >
+                          {resolveDuplicateMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <><RefreshCw className="h-4 w-4 mr-1" /> Overwrite</>
+                          )}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Check className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <p>All duplicates have been resolved!</p>
+              </div>
+            )}
+          </ScrollArea>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDuplicateDialog(false)}>
               Close
             </Button>
           </DialogFooter>
