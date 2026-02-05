@@ -15,7 +15,7 @@ import {
   Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
   ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle,
-  VolumeX, Volume2, RefreshCw, Edit3
+  VolumeX, Volume2, RefreshCw, Edit3, ShieldAlert
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -127,6 +127,13 @@ export default function SentinelImportPage() {
   // Duplicate detection state
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [selectedDuplicateBatchId, setSelectedDuplicateBatchId] = useState<string | null>(null);
+  
+  // Orders import state
+  const [ordersFile, setOrdersFile] = useState<File | null>(null);
+  const [ordersCsvContent, setOrdersCsvContent] = useState<string | null>(null);
+  const [ordersPreview, setOrdersPreview] = useState<any>(null);
+  const [ordersDefaultAccount, setOrdersDefaultAccount] = useState<string>("");
+  const [ordersImporting, setOrdersImporting] = useState(false);
   
   const { data: batches, isLoading: batchesLoading } = useQuery<ImportBatch[]>({
     queryKey: ['/api/sentinel/import/batches'],
@@ -750,6 +757,58 @@ export default function SentinelImportPage() {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
   };
 
+  const handleOrdersFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setOrdersFile(file);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setOrdersCsvContent(event.target?.result as string);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleParseOrders = async () => {
+    if (!ordersCsvContent) return;
+    try {
+      const response = await apiRequest('POST', '/api/sentinel/order-levels/parse-orders-csv', {
+        csvContent: ordersCsvContent,
+        defaultAccountName: ordersDefaultAccount || undefined,
+      });
+      const data = await response.json();
+      setOrdersPreview(data);
+    } catch (error: any) {
+      toast({ title: "Failed to parse orders", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleImportOrders = async () => {
+    if (!ordersPreview) return;
+    setOrdersImporting(true);
+    try {
+      const newOrders = ordersPreview.matched.filter((m: any) => !m.isDuplicate);
+      const response = await apiRequest('POST', '/api/sentinel/order-levels/bulk-import', {
+        orders: newOrders.map((m: any) => ({
+          tradeId: m.trade.id,
+          levelType: m.order.levelType,
+          price: m.order.price,
+          quantity: m.order.quantity,
+          orderNumber: m.order.orderNumber,
+        })),
+      });
+      const result = await response.json();
+      toast({ title: `Imported ${result.imported} order levels (${result.skippedDuplicates} duplicates skipped)` });
+      setOrdersPreview(null);
+      setOrdersCsvContent(null);
+      setOrdersFile(null);
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/dashboard'] });
+    } catch (error: any) {
+      toast({ title: "Failed to import orders", description: error.message, variant: "destructive" });
+    } finally {
+      setOrdersImporting(false);
+    }
+  };
+
   return (
     <div 
       className="min-h-screen sentinel-page"
@@ -769,7 +828,7 @@ export default function SentinelImportPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="grid w-full max-w-md grid-cols-4">
             <TabsTrigger value="upload" className="gap-2" data-testid="tab-upload">
               <Upload className="h-4 w-4" />
               Upload
@@ -781,6 +840,10 @@ export default function SentinelImportPage() {
             <TabsTrigger value="trades" className="gap-2" data-testid="tab-trades">
               <FileSpreadsheet className="h-4 w-4" />
               Trades
+            </TabsTrigger>
+            <TabsTrigger value="orders" className="gap-2" data-testid="tab-orders">
+              <ShieldAlert className="h-4 w-4" />
+              Orders
             </TabsTrigger>
           </TabsList>
 
@@ -1387,6 +1450,180 @@ export default function SentinelImportPage() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="orders" className="mt-6 space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldAlert className="h-5 w-5" />
+                  Import Broker Orders
+                </CardTitle>
+                <CardDescription>
+                  Upload your broker's open orders file to sync stops and profit targets
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div 
+                  className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                  onClick={() => document.getElementById('orders-file-input')?.click()}
+                  data-testid="dropzone-orders-upload"
+                >
+                  <input
+                    type="file"
+                    id="orders-file-input"
+                    className="hidden"
+                    accept=".csv"
+                    onChange={handleOrdersFileSelect}
+                    data-testid="input-orders-file"
+                  />
+                  {ordersFile ? (
+                    <div className="space-y-2">
+                      <FileSpreadsheet className="h-12 w-12 mx-auto text-primary" />
+                      <p className="text-lg font-medium" data-testid="text-orders-filename">{ordersFile.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {ordersCsvContent ? `${ordersCsvContent.split('\n').length} lines` : 'Reading...'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Upload className="h-12 w-12 mx-auto text-muted-foreground" />
+                      <p className="text-muted-foreground">Drop orders CSV file here or click to browse</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="orders-default-account">Default Account Name</Label>
+                  <Input
+                    id="orders-default-account"
+                    placeholder="e.g. Individual Brokerage"
+                    value={ordersDefaultAccount}
+                    onChange={(e) => setOrdersDefaultAccount(e.target.value)}
+                    data-testid="input-orders-default-account"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Specify if the CSV does not contain account info
+                  </p>
+                </div>
+
+                <div className="flex justify-center">
+                  <Button
+                    onClick={handleParseOrders}
+                    disabled={!ordersCsvContent}
+                    data-testid="button-parse-orders"
+                  >
+                    {ordersPreview === undefined ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Parsing...</>
+                    ) : (
+                      <><ShieldAlert className="h-4 w-4 mr-2" /> Parse Orders</>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {ordersPreview && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2" data-testid="text-orders-preview-title">
+                    <ShieldAlert className="h-5 w-5" />
+                    Orders Preview
+                    <Badge variant="outline" className="ml-2">
+                      {ordersPreview.matched?.length || 0} matched, {ordersPreview.unmatched?.length || 0} unmatched
+                    </Badge>
+                  </CardTitle>
+                  {!ordersPreview.hasAccountInfo && (
+                    <div className="flex items-center gap-2 text-sm text-yellow-500 mt-2" data-testid="text-orders-no-account-warning">
+                      <AlertTriangle className="h-4 w-4" />
+                      No account info detected in CSV. Orders matched by ticker only.
+                    </div>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="max-h-[500px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Symbol</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead className="text-right">Price</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead>Account</TableHead>
+                          <TableHead>Matched Trade</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ordersPreview.matched?.map((m: any, i: number) => (
+                          <TableRow key={`matched-${i}`} data-testid={`row-matched-order-${i}`}>
+                            <TableCell className="font-mono font-medium">{m.order.symbol}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={m.order.levelType === 'STOP' ? 'border-red-500 text-red-500' : 'border-green-500 text-green-500'}
+                              >
+                                {m.order.levelType === 'STOP' ? 'STOP' : 'TARGET'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">${Number(m.order.price).toFixed(2)}</TableCell>
+                            <TableCell className="text-right">{m.order.quantity}</TableCell>
+                            <TableCell className="text-xs">{m.order.accountName || '—'}</TableCell>
+                            <TableCell className="text-xs">
+                              {m.trade.symbol} <span className="text-muted-foreground">#{m.trade.id}</span>
+                            </TableCell>
+                            <TableCell>
+                              {m.isDuplicate ? (
+                                <Badge variant="secondary" data-testid={`badge-duplicate-${i}`}>Duplicate</Badge>
+                              ) : (
+                                <Badge variant="default" data-testid={`badge-new-${i}`}>New</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {ordersPreview.unmatched?.map((u: any, i: number) => (
+                          <TableRow key={`unmatched-${i}`} className="opacity-70" data-testid={`row-unmatched-order-${i}`}>
+                            <TableCell className="font-mono font-medium">{u.symbol}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={u.levelType === 'STOP' ? 'border-red-500 text-red-500' : 'border-green-500 text-green-500'}
+                              >
+                                {u.levelType === 'STOP' ? 'STOP' : 'TARGET'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">${Number(u.price).toFixed(2)}</TableCell>
+                            <TableCell className="text-right">{u.quantity}</TableCell>
+                            <TableCell className="text-xs">{u.accountName || '—'}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">No match</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="border-yellow-500 text-yellow-500" data-testid={`badge-unmatched-${i}`}>Unmatched</Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+
+                  <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
+                    <p className="text-sm text-muted-foreground" data-testid="text-orders-summary">
+                      {ordersPreview.matched?.filter((m: any) => !m.isDuplicate).length || 0} new orders to import, {ordersPreview.matched?.filter((m: any) => m.isDuplicate).length || 0} duplicates skipped, {ordersPreview.unmatched?.length || 0} unmatched
+                    </p>
+                    <Button
+                      onClick={handleImportOrders}
+                      disabled={ordersImporting || (ordersPreview.matched?.filter((m: any) => !m.isDuplicate).length || 0) === 0}
+                      data-testid="button-import-orders"
+                    >
+                      {ordersImporting ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
+                      ) : (
+                        <><Check className="h-4 w-4 mr-2" /> Import Orders</>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
         </Tabs>
       </main>

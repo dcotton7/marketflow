@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -24,6 +24,21 @@ interface TradeLabel {
   name: string;
   color: string;
   isAdminOnly?: boolean;
+}
+
+interface OrderLevel {
+  id: number;
+  tradeId: number;
+  userId: number;
+  levelType: 'stop' | 'target';
+  price: number;
+  quantity?: number;
+  source: string;
+  status: string;
+  orderNumber?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface TradeWithEvaluation {
@@ -47,6 +62,7 @@ interface TradeWithEvaluation {
   importBatchId?: string; // UUID of the import batch if source is 'import'
   importName?: string; // Display name for import batch (e.g., "FILE xxxx" or custom name)
   accountName?: string; // Brokerage account name (e.g., "4015", "1094")
+  orderLevels?: OrderLevel[];
   latestEvaluation?: {
     score: number;
     recommendation: string;
@@ -395,6 +411,313 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
           {distance > 0 ? "+" : ""}{distance.toFixed(1)}%
         </span>
       )}
+    </div>
+  );
+}
+
+// Order Levels Display - Shows "Closest Stop" and "Closest Target" with expandable mini-grid
+function OrderLevelsDisplay({ 
+  trade, 
+  currentPrice, 
+  orderLevels = [], 
+  onPriceUpdate,
+  totalShares = 0
+}: { 
+  trade: TradeWithEvaluation; 
+  currentPrice: number; 
+  orderLevels: OrderLevel[];
+  onPriceUpdate?: (tradeId: number, field: "stopPrice" | "partialPrice" | "targetPrice", value: number) => void;
+  totalShares?: number;
+}) {
+  const [showStopGrid, setShowStopGrid] = useState(false);
+  const [showTargetGrid, setShowTargetGrid] = useState(false);
+  const [newStopPrice, setNewStopPrice] = useState("");
+  const [newStopQty, setNewStopQty] = useState("");
+  const [newTargetPrice, setNewTargetPrice] = useState("");
+  const [newTargetQty, setNewTargetQty] = useState("");
+  const { toast } = useToast();
+
+  const openStops = orderLevels.filter(l => l.levelType === 'stop' && l.status === 'open');
+  const openTargets = orderLevels.filter(l => l.levelType === 'target' && l.status === 'open');
+
+  const allStops = [...openStops];
+  if (trade.stopPrice && openStops.length === 0) {
+    allStops.push({ id: -1, tradeId: trade.id, userId: 0, levelType: 'stop', price: trade.stopPrice, source: 'legacy', status: 'open', createdAt: '', updatedAt: '' });
+  }
+  const allTargets = [...openTargets];
+  if (trade.targetPrice && openTargets.length === 0) {
+    allTargets.push({ id: -1, tradeId: trade.id, userId: 0, levelType: 'target', price: trade.targetPrice, source: 'legacy', status: 'open', createdAt: '', updatedAt: '' });
+  }
+
+  const sortedStops = [...allStops].sort((a, b) => Math.abs(currentPrice - a.price) - Math.abs(currentPrice - b.price));
+  const sortedTargets = [...allTargets].sort((a, b) => Math.abs(currentPrice - a.price) - Math.abs(currentPrice - b.price));
+
+  const closestStop = sortedStops[0];
+  const closestTarget = sortedTargets[0];
+
+  const stopPctAway = closestStop ? ((currentPrice - closestStop.price) / currentPrice * 100) : null;
+  const targetPctAway = closestTarget ? ((closestTarget.price - currentPrice) / currentPrice * 100) : null;
+
+  // Partial profit: saved value, or midpoint between entry and closest target
+  const partialProfitPrice = trade.partialPrice 
+    || (closestTarget && trade.entryPrice ? (trade.entryPrice + closestTarget.price) / 2 : undefined);
+  const partialPctAway = (partialProfitPrice != null && currentPrice > 0) 
+    ? ((partialProfitPrice - currentPrice) / currentPrice * 100) 
+    : null;
+
+  const CRITICAL = 0.5;
+  const WARNING = 1.0;
+
+  const stopAlertColor = stopPctAway !== null ? (
+    Math.abs(stopPctAway) <= CRITICAL ? "text-red-500" :
+    Math.abs(stopPctAway) <= WARNING ? "text-orange-500" : "text-muted-foreground"
+  ) : "text-muted-foreground";
+  const stopBg = stopPctAway !== null && Math.abs(stopPctAway) <= WARNING ? "bg-red-500/10" : "bg-muted/30";
+
+  const partialAlertColor = partialPctAway !== null ? (
+    Math.abs(partialPctAway) <= CRITICAL ? "text-yellow-500" :
+    Math.abs(partialPctAway) <= WARNING ? "text-yellow-400" : "text-muted-foreground"
+  ) : "text-muted-foreground";
+
+  const targetAlertColor = targetPctAway !== null ? (
+    Math.abs(targetPctAway) <= CRITICAL ? "text-green-500" :
+    Math.abs(targetPctAway) <= WARNING ? "text-yellow-500" : "text-muted-foreground"
+  ) : "text-muted-foreground";
+  const targetBg = targetPctAway !== null && Math.abs(targetPctAway) <= WARNING ? "bg-green-500/10" : "bg-muted/30";
+
+  const addLevelMutation = useMutation({
+    mutationFn: async (data: { levelType: 'stop' | 'target'; price: number; quantity?: number }) => {
+      const response = await apiRequest('POST', `/api/sentinel/trades/${trade.id}/order-levels`, data);
+      return response.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/dashboard'] });
+      if (variables.levelType === 'stop') { setNewStopPrice(""); setNewStopQty(""); }
+      else { setNewTargetPrice(""); setNewTargetQty(""); }
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to add level", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteLevelMutation = useMutation({
+    mutationFn: async (levelId: number) => {
+      const response = await apiRequest('DELETE', `/api/sentinel/order-levels/${levelId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/dashboard'] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to delete level", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleAddLevel = (levelType: 'stop' | 'target') => {
+    const priceStr = levelType === 'stop' ? newStopPrice : newTargetPrice;
+    const qtyStr = levelType === 'stop' ? newStopQty : newTargetQty;
+    const price = parseFloat(priceStr);
+    if (isNaN(price) || price <= 0) return;
+    const qty = qtyStr ? parseFloat(qtyStr) : undefined;
+    addLevelMutation.mutate({ levelType, price, quantity: qty });
+  };
+
+  const renderMiniGrid = (levels: OrderLevel[], levelType: 'stop' | 'target') => {
+    const isStop = levelType === 'stop';
+    const show = isStop ? showStopGrid : showTargetGrid;
+    if (!show) return null;
+
+    const borderColor = isStop ? 'border-red-500/30' : 'border-green-500/30';
+    const headerBg = isStop ? 'bg-red-500/10' : 'bg-green-500/10';
+    const priceVal = isStop ? newStopPrice : newTargetPrice;
+    const setPrice = isStop ? setNewStopPrice : setNewTargetPrice;
+    const qtyVal = isStop ? newStopQty : newTargetQty;
+    const setQty = isStop ? setNewStopQty : setNewTargetQty;
+
+    return (
+      <div 
+        className={`mt-1 border ${borderColor} rounded-md overflow-hidden`}
+        onClick={(e) => e.stopPropagation()}
+        data-testid={`grid-${levelType}-${trade.id}`}
+      >
+        <table className="w-full text-xs">
+          <thead className={headerBg}>
+            <tr>
+              <th className="px-2 py-1 text-left font-medium" data-testid={`header-price-${levelType}-${trade.id}`}>Price</th>
+              <th className="px-2 py-1 text-left font-medium" data-testid={`header-qty-${levelType}-${trade.id}`}>Qty</th>
+              <th className="px-2 py-1 text-left font-medium" data-testid={`header-pct-${levelType}-${trade.id}`}>% Away</th>
+              <th className="px-2 py-1 text-left font-medium" data-testid={`header-src-${levelType}-${trade.id}`}>Src</th>
+              <th className="px-1 py-1 w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {levels.map((level) => {
+              const pctAway = ((level.price - currentPrice) / currentPrice * 100);
+              return (
+                <tr key={level.id} className="border-t border-muted/20" data-testid={`row-level-${level.id}`}>
+                  <td className="px-2 py-1 font-mono" data-testid={`text-level-price-${level.id}`}>${level.price.toFixed(2)}</td>
+                  <td className="px-2 py-1" data-testid={`text-level-qty-${level.id}`}>{level.quantity ? level.quantity.toLocaleString() : '—'}</td>
+                  <td className="px-2 py-1 font-mono" data-testid={`text-level-pct-${level.id}`}>
+                    <span className={pctAway >= 0 ? 'text-green-500' : 'text-red-500'}>
+                      {pctAway >= 0 ? '+' : ''}{pctAway.toFixed(1)}%
+                    </span>
+                  </td>
+                  <td className="px-2 py-1" data-testid={`text-level-src-${level.id}`}>
+                    <span className="text-muted-foreground">{level.source === 'import' ? 'IMP' : level.source === 'legacy' ? 'LEG' : 'MAN'}</span>
+                  </td>
+                  <td className="px-1 py-1">
+                    {level.id !== -1 && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={(e) => { e.stopPropagation(); deleteLevelMutation.mutate(level.id); }}
+                        disabled={deleteLevelMutation.isPending}
+                        data-testid={`button-delete-level-${level.id}`}
+                      >
+                        <X className="text-destructive" />
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className="border-t border-muted/30">
+              <td className="px-1 py-1">
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="Price"
+                  value={priceVal}
+                  onChange={(e) => setPrice(e.target.value)}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') handleAddLevel(levelType); }}
+                  className="px-1 text-xs"
+                  data-testid={`input-new-${levelType}-price-${trade.id}`}
+                />
+              </td>
+              <td className="px-1 py-1">
+                <Input
+                  type="number"
+                  placeholder="Qty"
+                  value={qtyVal}
+                  onChange={(e) => setQty(e.target.value)}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') handleAddLevel(levelType); }}
+                  className="px-1 text-xs"
+                  data-testid={`input-new-${levelType}-qty-${trade.id}`}
+                />
+              </td>
+              <td className="px-1 py-1" colSpan={2}></td>
+              <td className="px-1 py-1">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={(e) => { e.stopPropagation(); handleAddLevel(levelType); }}
+                  disabled={addLevelMutation.isPending}
+                  data-testid={`button-add-${levelType}-${trade.id}`}
+                >
+                  <Check className="text-green-500" />
+                </Button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  return (
+    <div className="text-xs space-y-1 mb-2 bg-blue-500/10 dark:bg-blue-400/10 p-2 rounded-md" data-testid={`order-levels-${trade.id}`}>
+      {/* Closest Stop row */}
+      <div className={`flex items-center justify-between gap-1 px-2 py-1 rounded ${stopBg}`} data-testid={`row-closest-stop-${trade.id}`}>
+        <div className="flex items-center gap-1.5 flex-1 flex-wrap">
+          <XCircle className={`w-3 h-3 ${stopAlertColor}`} />
+          <span className={stopAlertColor} data-testid={`label-closest-stop-${trade.id}`}>Closest Stop:</span>
+          {closestStop ? (
+            <span className="text-muted-foreground font-mono" data-testid={`text-closest-stop-price-${trade.id}`}>${closestStop.price.toFixed(2)}</span>
+          ) : (
+            <span className="text-muted-foreground italic" data-testid={`text-closest-stop-none-${trade.id}`}>None</span>
+          )}
+          {sortedStops.length > 1 && (
+            <Badge 
+              variant="outline" 
+              className="text-xs ml-1 px-1 py-0 h-4 cursor-pointer no-default-hover-elevate"
+              onClick={(e) => { e.stopPropagation(); setShowStopGrid(!showStopGrid); }}
+              data-testid={`badge-more-stops-${trade.id}`}
+            >
+              +{sortedStops.length - 1} more
+            </Badge>
+          )}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="ml-auto"
+            onClick={(e) => { e.stopPropagation(); setShowStopGrid(!showStopGrid); }}
+            data-testid={`button-expand-stops-${trade.id}`}
+          >
+            <ChevronDown className={`transition-transform ${showStopGrid ? 'rotate-180' : ''}`} />
+          </Button>
+        </div>
+        {stopPctAway !== null && (
+          <span className={`font-mono ml-1 ${stopAlertColor}`} data-testid={`text-stop-pct-${trade.id}`}>
+            {stopPctAway >= 0 ? '+' : ''}{stopPctAway.toFixed(1)}%
+          </span>
+        )}
+      </div>
+      {renderMiniGrid(sortedStops, 'stop')}
+
+      {/* Partial Profit row - editable via click */}
+      <EditablePriceRow
+        label="PARTIAL"
+        icon={CircleDot}
+        value={partialProfitPrice}
+        distance={partialPctAway}
+        isAlert={partialPctAway !== null && Math.abs(partialPctAway) <= WARNING}
+        alertColor={partialPctAway !== null && Math.abs(partialPctAway) <= CRITICAL ? "yellow" : "yellow"}
+        onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
+        testId={`monitor-partial-${trade.id}`}
+      />
+
+      {/* Closest Target row */}
+      <div className={`flex items-center justify-between gap-1 px-2 py-1 rounded ${targetBg}`} data-testid={`row-closest-target-${trade.id}`}>
+        <div className="flex items-center gap-1.5 flex-1 flex-wrap">
+          <Target className={`w-3 h-3 ${targetAlertColor}`} />
+          <span className={targetAlertColor} data-testid={`label-closest-target-${trade.id}`}>Closest Target:</span>
+          {closestTarget ? (
+            <span className="text-muted-foreground font-mono" data-testid={`text-closest-target-price-${trade.id}`}>${closestTarget.price.toFixed(2)}</span>
+          ) : (
+            <span className="text-muted-foreground italic" data-testid={`text-closest-target-none-${trade.id}`}>None</span>
+          )}
+          {sortedTargets.length > 1 && (
+            <Badge 
+              variant="outline" 
+              className="text-xs ml-1 px-1 py-0 h-4 cursor-pointer no-default-hover-elevate"
+              onClick={(e) => { e.stopPropagation(); setShowTargetGrid(!showTargetGrid); }}
+              data-testid={`badge-more-targets-${trade.id}`}
+            >
+              +{sortedTargets.length - 1} more
+            </Badge>
+          )}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="ml-auto"
+            onClick={(e) => { e.stopPropagation(); setShowTargetGrid(!showTargetGrid); }}
+            data-testid={`button-expand-targets-${trade.id}`}
+          >
+            <ChevronDown className={`transition-transform ${showTargetGrid ? 'rotate-180' : ''}`} />
+          </Button>
+        </div>
+        {targetPctAway !== null && (
+          <span className={`font-mono ml-1 ${targetAlertColor}`} data-testid={`text-target-pct-${trade.id}`}>
+            +{targetPctAway.toFixed(1)}%
+          </span>
+        )}
+      </div>
+      {renderMiniGrid(sortedTargets, 'target')}
+
+      {/* Share Quantity */}
+      <div className="text-muted-foreground mt-1 pt-1 border-t border-blue-500/20" data-testid={`shares-${trade.id}`}>
+        Shares: {totalShares.toLocaleString()}
+      </div>
     </div>
   );
 }
@@ -807,49 +1130,14 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
               </div>
             )}
 
-            {/* Price Monitoring: Stop, Partial Profit, Profit Target with % distance - Always visible with click-to-edit */}
-            <div className="text-xs space-y-1.5 mb-2 bg-blue-500/10 dark:bg-blue-400/10 p-2 rounded-md">
-              {/* Stop Loss - Always shown */}
-              <EditablePriceRow
-                label="STOP"
-                icon={XCircle}
-                value={trade.stopPrice}
-                distance={stopDistance}
-                isAlert={stopAlertColor !== null}
-                alertColor={stopAlertColor || "red"}
-                onSave={(value) => onPriceUpdate?.(trade.id, "stopPrice", value)}
-                testId={`monitor-stop-${trade.id}`}
-              />
-              
-              {/* Partial Profit - Always shown, editable (uses saved value or calculated default) */}
-              <EditablePriceRow
-                label="PARTIAL"
-                icon={CircleDot}
-                value={trade.partialPrice || partialProfitPrice}
-                distance={actualPartialDistance}
-                isAlert={partialAlertColor !== null}
-                alertColor={partialAlertColor || "yellow"}
-                onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
-                testId={`monitor-partial-${trade.id}`}
-              />
-              
-              {/* Profit Target - Always shown */}
-              <EditablePriceRow
-                label="TARGET"
-                icon={Target}
-                value={trade.targetPrice}
-                distance={targetDistance}
-                isAlert={targetAlertColor !== null}
-                alertColor={targetAlertColor || "green"}
-                onSave={(value) => onPriceUpdate?.(trade.id, "targetPrice", value)}
-                testId={`monitor-target-${trade.id}`}
-              />
-              
-              {/* Share Quantity - Always show */}
-              <div className="text-muted-foreground mt-1 pt-1 border-t border-blue-500/20" data-testid={`shares-${trade.id}`}>
-                Shares: {(fifoData?.totalRemaining ?? trade.positionSize ?? 0).toLocaleString()}
-              </div>
-            </div>
+            {/* Order Levels Display - Closest Stop / Closest Target with expandable mini-grids */}
+            <OrderLevelsDisplay
+              trade={trade}
+              currentPrice={currentPrice}
+              orderLevels={trade.orderLevels || []}
+              onPriceUpdate={onPriceUpdate}
+              totalShares={fifoData?.totalRemaining ?? trade.positionSize ?? 0}
+            />
 
             {/* Risk flags with short names and tooltips */}
             {trade.latestEvaluation && trade.latestEvaluation.riskFlags.length > 0 && (

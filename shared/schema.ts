@@ -572,6 +572,26 @@ export const insertSentinelSystemSettingsSchema = createInsertSchema(sentinelSys
 export type SentinelSystemSettings = typeof sentinelSystemSettings.$inferSelect;
 export type InsertSentinelSystemSettings = z.infer<typeof insertSentinelSystemSettingsSchema>;
 
+// Order Levels - Multiple stops and profit targets per trade (1-to-many)
+export const sentinelOrderLevels = pgTable("sentinel_order_levels", {
+  id: serial("id").primaryKey(),
+  tradeId: integer("trade_id").notNull(),
+  userId: integer("user_id").notNull(),
+  levelType: text("level_type").notNull(), // 'stop' | 'target'
+  price: doublePrecision("price").notNull(),
+  quantity: doublePrecision("quantity"),
+  source: text("source").default("manual"), // 'manual' | 'import'
+  status: text("status").default("open"), // 'open' | 'filled' | 'cancelled'
+  orderNumber: text("order_number"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSentinelOrderLevelSchema = createInsertSchema(sentinelOrderLevels).omit({ id: true, createdAt: true, updatedAt: true });
+export type SentinelOrderLevel = typeof sentinelOrderLevels.$inferSelect;
+export type InsertSentinelOrderLevel = z.infer<typeof insertSentinelOrderLevelSchema>;
+
 // Chat tables for AI integrations
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),

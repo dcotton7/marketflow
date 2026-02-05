@@ -94,6 +94,16 @@ Admin-only user management tab under Admin page:
 - "Seed Rules" button to provision starter rules for users who don't have them
 - Endpoints: `GET /api/sentinel/admin/users`, `POST /api/sentinel/admin/seed-rules/:userId`
 
+### Order Levels Management
+Supports multiple stop loss and profit target orders per trade via the `sentinel_order_levels` table. Features:
+- **Trade Card Display**: Shows "Closest Stop" and "Closest Target" with % distance from current price, color-coded alerts (red for critical proximity, orange for warning), and "+N more" badges when multiple levels exist
+- **Expandable Mini-Grids**: Chevron toggles reveal a table for each level type (stop/target) showing Price, Qty, % Away, Source (IMP/MAN/LEG), with inline add and delete
+- **Partial Profit**: Editable partial profit level shown between stop and target rows, calculated as midpoint between entry and closest target or from saved value
+- **Legacy Fallback**: If no order levels exist for a trade, the single `stopPrice`/`targetPrice` fields are displayed as legacy levels
+- **Orders Import Tab**: 4th tab on Import page for uploading Fidelity Orders CSV files, parsing stop loss/limit orders, previewing matched/unmatched orders, and bulk importing with duplicate detection
+- **API Endpoints**: `GET/POST /api/sentinel/trades/:tradeId/order-levels`, `PATCH/DELETE /api/sentinel/order-levels/:id`, `POST /api/sentinel/order-levels/bulk-import`, `POST /api/sentinel/order-levels/parse-orders-csv`
+- **Matching Logic**: Orders matched to active trades by ticker + account (fallback to ticker only when no account info)
+
 ### TickerWidget Display
 The Bloomberg-style ticker widget on trade cards displays:
 - Current price with market % change

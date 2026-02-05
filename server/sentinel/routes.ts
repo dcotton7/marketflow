@@ -12,7 +12,7 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels } from "@shared/schema";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 
@@ -561,10 +561,19 @@ export function registerSentinelRoutes(app: Express): void {
             }
           }
           
+          // Fetch order levels (stops and targets)
+          const orderLevels = await db.select().from(sentinelOrderLevels)
+            .where(and(
+              eq(sentinelOrderLevels.tradeId, trade.id),
+              eq(sentinelOrderLevels.userId, userId)
+            ))
+            .orderBy(sentinelOrderLevels.price);
+          
           return {
             ...trade,
             labels,
             importName,
+            orderLevels,
             latestEvaluation: latestEval ? {
               score: latestEval.score,
               recommendation: latestEval.recommendation,
@@ -5358,5 +5367,392 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  // === ORDER LEVELS ENDPOINTS ===
+
+  // GET order levels for a trade
+  app.get("/api/sentinel/trades/:tradeId/order-levels", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const tradeId = parseInt(req.params.tradeId);
+      if (isNaN(tradeId)) return res.status(400).json({ error: "Invalid trade ID" });
+
+      const levels = await db.select().from(sentinelOrderLevels)
+        .where(and(
+          eq(sentinelOrderLevels.tradeId, tradeId),
+          eq(sentinelOrderLevels.userId, userId)
+        ))
+        .orderBy(sentinelOrderLevels.price);
+
+      res.json(levels);
+    } catch (error) {
+      console.error("Get order levels error:", error);
+      res.status(500).json({ error: "Failed to get order levels" });
+    }
+  });
+
+  // POST create a new order level
+  app.post("/api/sentinel/trades/:tradeId/order-levels", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const tradeId = parseInt(req.params.tradeId);
+      if (isNaN(tradeId)) return res.status(400).json({ error: "Invalid trade ID" });
+
+      const schema = z.object({
+        levelType: z.enum(["stop", "target"]),
+        price: z.number().positive(),
+        quantity: z.number().positive().optional(),
+        source: z.enum(["manual", "import"]).optional(),
+        status: z.enum(["open", "filled", "cancelled"]).optional(),
+        orderNumber: z.string().optional(),
+        notes: z.string().optional(),
+      });
+
+      const data = schema.parse(req.body);
+
+      const [level] = await db.insert(sentinelOrderLevels).values({
+        tradeId,
+        userId,
+        levelType: data.levelType,
+        price: data.price,
+        quantity: data.quantity,
+        source: data.source || "manual",
+        status: data.status || "open",
+        orderNumber: data.orderNumber,
+        notes: data.notes,
+      }).returning();
+
+      res.json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Create order level error:", error);
+      res.status(500).json({ error: "Failed to create order level" });
+    }
+  });
+
+  // PATCH update an order level
+  app.patch("/api/sentinel/order-levels/:levelId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const levelId = parseInt(req.params.levelId);
+      if (isNaN(levelId)) return res.status(400).json({ error: "Invalid level ID" });
+
+      const schema = z.object({
+        price: z.number().positive().optional(),
+        quantity: z.number().positive().optional(),
+        status: z.enum(["open", "filled", "cancelled"]).optional(),
+        notes: z.string().optional(),
+      });
+
+      const data = schema.parse(req.body);
+
+      const [updated] = await db.update(sentinelOrderLevels)
+        .set({ ...data, updatedAt: new Date() })
+        .where(and(
+          eq(sentinelOrderLevels.id, levelId),
+          eq(sentinelOrderLevels.userId, userId)
+        ))
+        .returning();
+
+      if (!updated) return res.status(404).json({ error: "Order level not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Update order level error:", error);
+      res.status(500).json({ error: "Failed to update order level" });
+    }
+  });
+
+  // DELETE an order level
+  app.delete("/api/sentinel/order-levels/:levelId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const levelId = parseInt(req.params.levelId);
+      if (isNaN(levelId)) return res.status(400).json({ error: "Invalid level ID" });
+
+      const [deleted] = await db.delete(sentinelOrderLevels)
+        .where(and(
+          eq(sentinelOrderLevels.id, levelId),
+          eq(sentinelOrderLevels.userId, userId)
+        ))
+        .returning();
+
+      if (!deleted) return res.status(404).json({ error: "Order level not found" });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete order level error:", error);
+      res.status(500).json({ error: "Failed to delete order level" });
+    }
+  });
+
+  // POST bulk import order levels from parsed orders CSV
+  app.post("/api/sentinel/order-levels/bulk-import", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+
+      const schema = z.object({
+        orders: z.array(z.object({
+          tradeId: z.number(),
+          levelType: z.enum(["stop", "target"]),
+          price: z.number().positive(),
+          quantity: z.number().positive().optional(),
+          orderNumber: z.string().optional(),
+        })),
+      });
+
+      const { orders } = schema.parse(req.body);
+
+      // Get existing order levels for deduplication
+      const existingLevels = await db.select().from(sentinelOrderLevels)
+        .where(eq(sentinelOrderLevels.userId, userId));
+
+      const newOrders: typeof orders = [];
+      const skippedDuplicates: typeof orders = [];
+
+      for (const order of orders) {
+        const isDuplicate = existingLevels.some(existing =>
+          existing.tradeId === order.tradeId &&
+          existing.levelType === order.levelType &&
+          Math.abs(existing.price - order.price) < 0.01 &&
+          (!order.quantity || !existing.quantity || Math.abs(existing.quantity - order.quantity) < 0.01)
+        );
+
+        if (isDuplicate) {
+          skippedDuplicates.push(order);
+        } else {
+          newOrders.push(order);
+        }
+      }
+
+      let inserted: any[] = [];
+      if (newOrders.length > 0) {
+        inserted = await db.insert(sentinelOrderLevels).values(
+          newOrders.map(o => ({
+            tradeId: o.tradeId,
+            userId,
+            levelType: o.levelType,
+            price: o.price,
+            quantity: o.quantity,
+            source: "import" as const,
+            status: "open" as const,
+            orderNumber: o.orderNumber,
+          }))
+        ).returning();
+      }
+
+      res.json({
+        imported: inserted.length,
+        skippedDuplicates: skippedDuplicates.length,
+        total: orders.length,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Bulk import order levels error:", error);
+      res.status(500).json({ error: "Failed to bulk import order levels" });
+    }
+  });
+
+  // POST parse Fidelity Orders CSV and match to active trades
+  app.post("/api/sentinel/order-levels/parse-orders-csv", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+
+      const schema = z.object({
+        csvContent: z.string(),
+        defaultAccountName: z.string().optional(),
+      });
+
+      const { csvContent, defaultAccountName } = schema.parse(req.body);
+
+      // Parse the Fidelity Orders CSV
+      const lines = csvContent.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+      // Find the header line
+      let headerIdx = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('Symbol,Action,')) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      if (headerIdx === -1) {
+        return res.status(400).json({ error: "Could not find header row in CSV. Expected 'Symbol,Action,...'" });
+      }
+
+      const headers = lines[headerIdx].split(',').map(h => h.trim().replace(/"/g, ''));
+
+      // Parse data rows (stop at Disclosure section)
+      const parsedOrders: Array<{
+        symbol: string;
+        action: string;
+        quantity: number;
+        orderType: string;
+        levelType: 'stop' | 'target';
+        price: number;
+        status: string;
+        account: string;
+        accountName: string;
+        orderNumber: string;
+        tif: string;
+      }> = [];
+
+      for (let i = headerIdx + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith('Disclosure') || line.startsWith('"')) break;
+
+        // Parse CSV row (handle quoted fields)
+        const fields = parseCSVRow(line);
+        if (fields.length < 10) continue;
+
+        const symbolIdx = headers.indexOf('Symbol');
+        const actionIdx = headers.indexOf('Action');
+        const amountIdx = headers.indexOf('Amount');
+        const orderTypeIdx = headers.indexOf('Order Type');
+        const statusIdx = headers.indexOf('Status');
+        const accountIdx = headers.indexOf('Account');
+        const orderNumberIdx = headers.indexOf('Order Number');
+        const tifIdx = headers.indexOf('TIF');
+
+        const symbol = fields[symbolIdx]?.trim();
+        const action = fields[actionIdx]?.trim();
+        const amount = parseInt(fields[amountIdx]?.trim()) || 0;
+        const orderTypeRaw = fields[orderTypeIdx]?.trim() || '';
+        const status = fields[statusIdx]?.trim() || '';
+        const accountRaw = fields[accountIdx]?.trim() || '';
+        const orderNumber = fields[orderNumberIdx]?.trim() || '';
+        const tif = fields[tifIdx]?.trim() || '';
+
+        if (!symbol || !action || amount === 0) continue;
+
+        // Parse order type to extract price and level type
+        let levelType: 'stop' | 'target' | null = null;
+        let price = 0;
+
+        const orderTypeLower = orderTypeRaw.toLowerCase();
+        if (orderTypeLower.includes('stop loss at') || orderTypeLower.includes('stop at')) {
+          levelType = 'stop';
+          const priceMatch = orderTypeRaw.match(/\$?([\d,]+\.?\d*)/);
+          if (priceMatch) price = parseFloat(priceMatch[1].replace(/,/g, ''));
+        } else if (orderTypeLower.includes('limit at')) {
+          levelType = 'target';
+          const priceMatch = orderTypeRaw.match(/\$?([\d,]+\.?\d*)/);
+          if (priceMatch) price = parseFloat(priceMatch[1].replace(/,/g, ''));
+        } else if (orderTypeLower.includes('trailing stop')) {
+          levelType = 'stop';
+          const priceMatch = orderTypeRaw.match(/\$?([\d,]+\.?\d*)/);
+          if (priceMatch) price = parseFloat(priceMatch[1].replace(/,/g, ''));
+        }
+
+        if (!levelType || price <= 0) continue;
+
+        // Extract account name from account string (e.g., "1_BrokerageLink *1094" -> "1094")
+        const accountMatch = accountRaw.match(/\*(\w+)/);
+        const accountName = accountMatch ? accountMatch[1] : (defaultAccountName || '');
+
+        parsedOrders.push({
+          symbol,
+          action,
+          quantity: amount,
+          orderType: orderTypeRaw,
+          levelType,
+          price,
+          status,
+          account: accountRaw,
+          accountName,
+          orderNumber,
+          tif,
+        });
+      }
+
+      // Get user's active trades for matching
+      const activeTrades = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.status, 'active')
+        ));
+
+      // Get existing order levels for deduplication
+      const existingLevels = await db.select().from(sentinelOrderLevels)
+        .where(eq(sentinelOrderLevels.userId, userId));
+
+      // Match orders to trades
+      const matched: Array<{
+        order: typeof parsedOrders[0];
+        trade: typeof activeTrades[0];
+        isDuplicate: boolean;
+      }> = [];
+      const unmatched: typeof parsedOrders = [];
+      const hasAccountInfo = parsedOrders.some(o => o.accountName.length > 0);
+
+      for (const order of parsedOrders) {
+        // Match by ticker + account (case insensitive)
+        let matchedTrade = activeTrades.find(t =>
+          t.symbol.toUpperCase() === order.symbol.toUpperCase() &&
+          (order.accountName ? t.accountName === order.accountName : true)
+        );
+
+        // Fallback: match by ticker only if no account match found
+        if (!matchedTrade) {
+          matchedTrade = activeTrades.find(t =>
+            t.symbol.toUpperCase() === order.symbol.toUpperCase()
+          );
+        }
+
+        if (matchedTrade) {
+          const isDuplicate = existingLevels.some(existing =>
+            existing.tradeId === matchedTrade!.id &&
+            existing.levelType === order.levelType &&
+            Math.abs(existing.price - order.price) < 0.01 &&
+            (!order.quantity || !existing.quantity || Math.abs(existing.quantity - order.quantity) < 0.01)
+          );
+
+          matched.push({ order, trade: matchedTrade, isDuplicate });
+        } else {
+          unmatched.push(order);
+        }
+      }
+
+      res.json({
+        parsed: parsedOrders.length,
+        matched,
+        unmatched,
+        hasAccountInfo,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Parse orders CSV error:", error);
+      res.status(500).json({ error: "Failed to parse orders CSV" });
+    }
+  });
+
   startMonitoring(60000);
+}
+
+// Helper to parse CSV row handling quoted fields with commas
+function parseCSVRow(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
 }
