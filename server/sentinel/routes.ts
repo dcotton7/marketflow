@@ -3951,38 +3951,319 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         }
       }
       
-      // Insert cards in transaction - first delete existing import cards to avoid duplicates
-      let deletedCount = 0;
+      // Merge lot entries into existing cards OR create new ones
+      let mergedCount = 0;
+      let createdCount = 0;
+      let closedCount = 0;
+      
       if (cardsToCreate.length > 0) {
         await db.transaction(async (tx) => {
-          // Delete existing imported cards for this user to prevent duplicates
-          const deleted = await tx.delete(sentinelTrades)
-            .where(and(
-              eq(sentinelTrades.userId, userId),
-              eq(sentinelTrades.source, 'import')
-            ))
-            .returning({ id: sentinelTrades.id });
-          deletedCount = deleted.length;
+          // Get all existing trading cards for this user (any source)
+          const existingCards = await tx.select().from(sentinelTrades)
+            .where(eq(sentinelTrades.userId, userId));
           
-          // Insert new cards
-          const CHUNK_SIZE = 100;
-          for (let i = 0; i < cardsToCreate.length; i += CHUNK_SIZE) {
-            const chunk = cardsToCreate.slice(i, i + CHUNK_SIZE);
-            await tx.insert(sentinelTrades).values(chunk);
+          // Build a map of existing cards by ticker+account
+          const existingCardsMap = new Map<string, typeof existingCards[0]>();
+          for (const card of existingCards) {
+            const key = `${card.symbol.toUpperCase()}:${card.accountName || 'default'}`;
+            // Prefer active cards over closed ones for merging
+            if (!existingCardsMap.has(key) || (card.status === 'active' && existingCardsMap.get(key)?.status !== 'active')) {
+              existingCardsMap.set(key, card);
+            }
+          }
+          
+          for (const newCard of cardsToCreate) {
+            const key = `${newCard.symbol.toUpperCase()}:${newCard.accountName || 'default'}`;
+            const existingCard = existingCardsMap.get(key);
+            
+            if (existingCard && existingCard.status === 'active') {
+              // MERGE: Append lot entries to existing card
+              const existingLots = (existingCard.lotEntries as typeof newCard.lotEntries) || [];
+              
+              // Filter out lots that already exist (by ID) to avoid duplicates
+              const existingLotIds = new Set(existingLots.map(l => l.id));
+              const newLots = newCard.lotEntries.filter(l => !existingLotIds.has(l.id));
+              
+              if (newLots.length > 0) {
+                const mergedLots = [...existingLots, ...newLots];
+                
+                // Sort all lots by date for proper FIFO
+                mergedLots.sort((a, b) => {
+                  const dateA = new Date(a.dateTime).getTime();
+                  const dateB = new Date(b.dateTime).getTime();
+                  if (dateA !== dateB) return dateA - dateB;
+                  if (a.buySell === 'buy' && b.buySell === 'sell') return -1;
+                  if (a.buySell === 'sell' && b.buySell === 'buy') return 1;
+                  return 0;
+                });
+                
+                // Recalculate position metrics from merged lots using proper FIFO
+                let firstBuyDate: Date | null = null;
+                let lastExitDate: Date | null = null;
+                let lastExitPrice: number | null = null;
+                let realizedPnL = 0;
+                let totalBoughtQty = 0;
+                let totalBoughtCost = 0;
+                const openLots: Array<{ qty: number; price: number; date: Date }> = [];
+                
+                for (const lot of mergedLots) {
+                  const qty = parseFloat(lot.qty) || 0;
+                  const price = parseFloat(lot.price) || 0;
+                  const lotDate = new Date(lot.dateTime);
+                  
+                  if (lot.buySell === 'buy') {
+                    openLots.push({ qty, price, date: lotDate });
+                    totalBoughtQty += qty;
+                    totalBoughtCost += qty * price;
+                    if (!firstBuyDate) firstBuyDate = lotDate;
+                  } else {
+                    // FIFO matching for sells
+                    let remainingSell = qty;
+                    while (remainingSell > 0 && openLots.length > 0) {
+                      const openLot = openLots[0];
+                      const matchQty = Math.min(openLot.qty, remainingSell);
+                      realizedPnL += matchQty * (price - openLot.price);
+                      openLot.qty -= matchQty;
+                      remainingSell -= matchQty;
+                      if (openLot.qty <= 0.0001) openLots.shift();
+                    }
+                    lastExitDate = lotDate;
+                    lastExitPrice = price;
+                  }
+                }
+                
+                // Calculate remaining position from REMAINING open lots
+                const remainingPosition = openLots.reduce((sum, l) => sum + l.qty, 0);
+                const remainingCost = openLots.reduce((sum, l) => sum + (l.qty * l.price), 0);
+                // For open positions: cost basis of remaining lots
+                // For closed positions: historical weighted average entry price
+                const avgCostBasis = remainingPosition > 0 
+                  ? remainingCost / remainingPosition 
+                  : (totalBoughtQty > 0 ? totalBoughtCost / totalBoughtQty : 0);
+                
+                // Determine status: if position is near-zero, mark as closed
+                const isNearZero = Math.abs(remainingPosition) < 0.01;
+                const newStatus = isNearZero ? 'closed' : 'active';
+                
+                // Update the existing card with merged data
+                await tx.update(sentinelTrades)
+                  .set({
+                    lotEntries: mergedLots,
+                    positionSize: isNearZero ? 0 : remainingPosition,
+                    entryPrice: avgCostBasis,
+                    entryDate: firstBuyDate || existingCard.entryDate,
+                    status: newStatus,
+                    exitPrice: isNearZero ? lastExitPrice : null,
+                    exitDate: isNearZero ? lastExitDate : null,
+                    actualPnL: isNearZero ? realizedPnL : null,
+                    outcome: isNearZero ? (realizedPnL > 0 ? 'win' : realizedPnL < 0 ? 'loss' : 'breakeven') : null,
+                    holdDays: isNearZero && firstBuyDate && lastExitDate 
+                      ? Math.ceil((lastExitDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) 
+                      : null,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(sentinelTrades.id, existingCard.id));
+                
+                mergedCount++;
+                if (isNearZero) closedCount++;
+              }
+            } else {
+              // CREATE: No existing active card for this ticker+account
+              // Check if the new card should be auto-closed
+              const isNearZero = Math.abs(newCard.positionSize) < 0.01;
+              if (isNearZero) {
+                newCard.status = 'closed';
+                closedCount++;
+              }
+              
+              await tx.insert(sentinelTrades).values(newCard);
+              createdCount++;
+              
+              // Add to map so subsequent cards for same ticker+account merge into this one
+              const insertedCards = await tx.select().from(sentinelTrades)
+                .where(and(
+                  eq(sentinelTrades.userId, userId),
+                  eq(sentinelTrades.symbol, newCard.symbol),
+                  eq(sentinelTrades.accountName, newCard.accountName || null)
+                ))
+                .orderBy(desc(sentinelTrades.createdAt))
+                .limit(1);
+              if (insertedCards.length > 0) {
+                existingCardsMap.set(key, insertedCards[0]);
+              }
+            }
           }
         });
       }
       
       res.json({ 
         success: true, 
-        cardsCreated: cardsToCreate.length,
-        cardsDeleted: deletedCount,
+        cardsMerged: mergedCount,
+        cardsCreated: createdCount,
+        positionsClosed: closedCount,
+        totalProcessed: cardsToCreate.length,
         openPositions: cardsToCreate.filter(c => c.status === 'active').length,
         closedPositions: cardsToCreate.filter(c => c.status === 'closed').length,
       });
     } catch (error) {
       console.error("Promote to cards error:", error);
       res.status(500).json({ error: "Failed to promote trades to cards" });
+    }
+  });
+
+  // === Cleanup Duplicate Trading Cards ===
+  // This endpoint merges duplicate active trading cards (same ticker+account) into one
+  app.post("/api/sentinel/import/cleanup-duplicates", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Get all active trading cards for this user
+      const allCards = await db.select().from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.status, 'active')
+        ))
+        .orderBy(sentinelTrades.createdAt);
+      
+      // Group by ticker+account
+      const cardGroups = new Map<string, typeof allCards>();
+      for (const card of allCards) {
+        const key = `${card.symbol.toUpperCase()}:${card.accountName || 'default'}`;
+        if (!cardGroups.has(key)) {
+          cardGroups.set(key, []);
+        }
+        cardGroups.get(key)!.push(card);
+      }
+      
+      let mergedCount = 0;
+      let deletedCount = 0;
+      let closedCount = 0;
+      
+      await db.transaction(async (tx) => {
+        for (const [key, cards] of cardGroups) {
+          if (cards.length <= 1) continue; // No duplicates
+          
+          // Sort by createdAt to keep the oldest card as the primary
+          cards.sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime());
+          const primaryCard = cards[0];
+          const duplicateCards = cards.slice(1);
+          
+          // Merge all lot entries from duplicates into primary
+          let mergedLots = (primaryCard.lotEntries as Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }>) || [];
+          const existingLotIds = new Set(mergedLots.map(l => l.id));
+          
+          for (const dupCard of duplicateCards) {
+            const dupLots = (dupCard.lotEntries as typeof mergedLots) || [];
+            for (const lot of dupLots) {
+              if (!existingLotIds.has(lot.id)) {
+                mergedLots.push(lot);
+                existingLotIds.add(lot.id);
+              }
+            }
+          }
+          
+          // Sort all lots by date for proper FIFO
+          mergedLots.sort((a, b) => {
+            const dateA = new Date(a.dateTime).getTime();
+            const dateB = new Date(b.dateTime).getTime();
+            if (dateA !== dateB) return dateA - dateB;
+            if (a.buySell === 'buy' && b.buySell === 'sell') return -1;
+            if (a.buySell === 'sell' && b.buySell === 'buy') return 1;
+            return 0;
+          });
+          
+          // Recalculate position metrics from merged lots using proper FIFO
+          let firstBuyDate: Date | null = null;
+          let lastExitDate: Date | null = null;
+          let lastExitPrice: number | null = null;
+          let realizedPnL = 0;
+          let totalBoughtQty = 0;
+          let totalBoughtCost = 0;
+          const openLots: Array<{ qty: number; price: number; date: Date }> = [];
+          
+          for (const lot of mergedLots) {
+            const qty = parseFloat(lot.qty) || 0;
+            const price = parseFloat(lot.price) || 0;
+            const lotDate = new Date(lot.dateTime);
+            
+            if (lot.buySell === 'buy') {
+              openLots.push({ qty, price, date: lotDate });
+              totalBoughtQty += qty;
+              totalBoughtCost += qty * price;
+              if (!firstBuyDate) firstBuyDate = lotDate;
+            } else {
+              // FIFO matching for sells
+              let remainingSell = qty;
+              while (remainingSell > 0 && openLots.length > 0) {
+                const openLot = openLots[0];
+                const matchQty = Math.min(openLot.qty, remainingSell);
+                realizedPnL += matchQty * (price - openLot.price);
+                openLot.qty -= matchQty;
+                remainingSell -= matchQty;
+                if (openLot.qty <= 0.0001) openLots.shift();
+              }
+              lastExitDate = lotDate;
+              lastExitPrice = price;
+            }
+          }
+          
+          // Calculate remaining position from REMAINING open lots
+          const remainingPosition = openLots.reduce((sum, l) => sum + l.qty, 0);
+          const remainingCost = openLots.reduce((sum, l) => sum + (l.qty * l.price), 0);
+          // For open positions: cost basis of remaining lots
+          // For closed positions: historical weighted average entry price
+          const avgCostBasis = remainingPosition > 0 
+            ? remainingCost / remainingPosition 
+            : (totalBoughtQty > 0 ? totalBoughtCost / totalBoughtQty : 0);
+          
+          // Determine status: if position is near-zero, mark as closed
+          const isNearZero = Math.abs(remainingPosition) < 0.01;
+          const newStatus = isNearZero ? 'closed' : 'active';
+          
+          // Update the primary card with merged data
+          await tx.update(sentinelTrades)
+            .set({
+              lotEntries: mergedLots,
+              positionSize: isNearZero ? 0 : remainingPosition,
+              entryPrice: avgCostBasis,
+              entryDate: firstBuyDate || primaryCard.entryDate,
+              status: newStatus,
+              exitPrice: isNearZero ? lastExitPrice : null,
+              exitDate: isNearZero ? lastExitDate : null,
+              actualPnL: isNearZero ? realizedPnL : null,
+              outcome: isNearZero ? (realizedPnL > 0 ? 'win' : realizedPnL < 0 ? 'loss' : 'breakeven') : null,
+              holdDays: isNearZero && firstBuyDate && lastExitDate 
+                ? Math.ceil((lastExitDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) 
+                : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(sentinelTrades.id, primaryCard.id));
+          
+          // Delete the duplicate cards and their related records
+          for (const dupCard of duplicateCards) {
+            // Cascade delete related records
+            await tx.delete(sentinelTradeToLabels).where(eq(sentinelTradeToLabels.tradeId, dupCard.id));
+            await tx.delete(sentinelEvaluations).where(eq(sentinelEvaluations.tradeId, dupCard.id));
+            await tx.delete(sentinelEvents).where(eq(sentinelEvents.tradeId, dupCard.id));
+            // Delete the duplicate trade card
+            await tx.delete(sentinelTrades).where(eq(sentinelTrades.id, dupCard.id));
+            deletedCount++;
+          }
+          
+          mergedCount++;
+          if (isNearZero) closedCount++;
+        }
+      });
+      
+      res.json({
+        success: true,
+        groupsMerged: mergedCount,
+        duplicatesDeleted: deletedCount,
+        positionsClosed: closedCount,
+      });
+    } catch (error) {
+      console.error("Cleanup duplicates error:", error);
+      res.status(500).json({ error: "Failed to cleanup duplicates" });
     }
   });
 
