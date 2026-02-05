@@ -513,19 +513,20 @@ export default function PatternLearningPage() {
         '--overlay-bg': cssVariables.overlayBg,
       } as React.CSSProperties}
     >
-      {/* Watermark logo */}
+      {/* Watermark logo - fixed behind all content */}
       <div 
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 pointer-events-none z-0"
-        style={{ opacity: cssVariables.logoOpacity }}
+        className="fixed inset-0 flex items-center justify-center pointer-events-none"
+        style={{ opacity: cssVariables.logoOpacity, zIndex: -1 }}
       >
         <img 
           src="/rubricshield-logo.png" 
           alt="" 
-          className="w-full h-full object-contain"
+          className="w-1/3 h-1/3 object-contain"
           aria-hidden="true"
         />
       </div>
-      <SentinelHeader />
+      <div className="relative" style={{ zIndex: 10 }}>
+        <SentinelHeader />
       
       <div className="container mx-auto p-4">
         <div className="flex items-center justify-between mb-4">
@@ -1321,6 +1322,7 @@ export default function PatternLearningPage() {
         </div>
           </>
         )}
+      </div>
       </div>
     </div>
   );

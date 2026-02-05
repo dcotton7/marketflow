@@ -2254,19 +2254,19 @@ export default function SentinelDashboardPage() {
         '--overlay-bg': cssVariables.overlayBg,
       } as React.CSSProperties}
     >
-      {/* Watermark logo */}
+      {/* Watermark logo - fixed behind all content */}
       <div 
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1/2 h-1/2 pointer-events-none z-0"
-        style={{ opacity: cssVariables.logoOpacity }}
+        className="fixed inset-0 flex items-center justify-center pointer-events-none"
+        style={{ opacity: cssVariables.logoOpacity, zIndex: -1 }}
       >
         <img 
           src="/rubricshield-logo.png" 
           alt="" 
-          className="w-full h-full object-contain"
+          className="w-1/3 h-1/3 object-contain"
           aria-hidden="true"
         />
       </div>
-      <header className="border-b relative z-10" style={{ backgroundColor: `${systemSettings.overlayColor}d9` }}>
+      <header className="border-b relative" style={{ backgroundColor: `${systemSettings.overlayColor}d9`, zIndex: 10 }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <SentinelHeader showSentiment={true} />
           <div className="flex items-center gap-4">
