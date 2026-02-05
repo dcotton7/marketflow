@@ -503,7 +503,7 @@ export default function PatternLearningPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
       <SentinelHeader />
       
       <div className="container mx-auto p-4">

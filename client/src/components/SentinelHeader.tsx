@@ -4,7 +4,7 @@ import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLe
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import sentinelLogo from "@/assets/images/sentinel-logo.png";
+import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
 
 interface MarketSentiment {
   weekly: {
@@ -82,9 +82,9 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
         <Link href="/sentinel">
           <div className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md p-1" data-testid="link-sentinel-home">
             <img 
-              src={sentinelLogo} 
-              alt="Sentinel" 
-              className="h-8"
+              src={rubricShieldLogo} 
+              alt="RubricShield" 
+              className="h-10"
               data-testid="img-sentinel-header-logo"
             />
           </div>

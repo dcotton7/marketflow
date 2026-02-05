@@ -329,7 +329,7 @@ export default function SentinelAdminPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
       <SentinelHeader />
       
       <div className="container mx-auto p-6 max-w-7xl">

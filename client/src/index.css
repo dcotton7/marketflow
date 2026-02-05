@@ -74,3 +74,44 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
 }
+
+/* RubricShield Background Watermark */
+.rubricshield-bg {
+  position: relative;
+}
+
+.rubricshield-bg::before {
+  content: '';
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 60%;
+  height: 60%;
+  background-image: url('/rubricshield-logo.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Ensure content stays above watermark */
+.sentinel-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Transparent glass-effect for cards in sentinel pages */
+.sentinel-page .rounded-xl,
+.sentinel-page .rounded-lg {
+  background: hsl(var(--card) / 0.88) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* Keep header more solid */
+.sentinel-page > header {
+  background: hsl(var(--card) / 0.95) !important;
+}

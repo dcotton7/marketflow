@@ -2201,8 +2201,8 @@ export default function SentinelDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card">
+    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
+      <header className="border-b bg-card/90 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <SentinelHeader showSentiment={true} />
           <div className="flex items-center gap-4">

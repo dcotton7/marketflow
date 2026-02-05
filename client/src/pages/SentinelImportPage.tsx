@@ -749,7 +749,7 @@ export default function SentinelImportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background rubricshield-bg sentinel-page">
       <SentinelHeader />
       
       <main className="container mx-auto p-4 max-w-6xl">
