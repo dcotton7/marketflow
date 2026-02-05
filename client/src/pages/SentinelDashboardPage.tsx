@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -541,9 +541,10 @@ interface TradeCardProps {
   onClose?: (trade: TradeWithEvaluation) => void;
   onCancel?: (trade: TradeWithEvaluation) => void;
   onPriceUpdate?: (tradeId: number, field: "stopPrice" | "partialPrice" | "targetPrice", value: number) => void;
+  onLivePriceReport?: (tradeId: number, price: number) => void;
 }
 
-function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose, onCancel, onPriceUpdate, isExpanded = true }: TradeCardProps & { isExpanded?: boolean }) {
+function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose, onCancel, onPriceUpdate, onLivePriceReport, isExpanded = true }: TradeCardProps & { isExpanded?: boolean }) {
   const [, setLocation] = useLocation();
   
   // Fetch current market price for accurate P&L - matches API response shape
@@ -555,8 +556,15 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
   }>({
     queryKey: ["/api/sentinel/ticker", trade.symbol],
     enabled: trade.status !== "closed", // Only fetch for active trades
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 30000, // Refresh every 30 seconds for more responsive updates
   });
+  
+  // Report live price to parent for summary calculation
+  useEffect(() => {
+    if (tickerQuery.isSuccess && tickerQuery.data?.currentPrice !== undefined) {
+      onLivePriceReport?.(trade.id, tickerQuery.data.currentPrice);
+    }
+  }, [tickerQuery.data?.currentPrice, trade.id, onLivePriceReport]);
   
   const handleOpenIvyAI = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -1150,6 +1158,16 @@ export default function SentinelDashboardPage() {
     localStorage.setItem(STORAGE_KEY_EXPANDED, isExpanded.toString());
   }, [isExpanded]);
   
+  // Track live prices reported by individual TradeCards for accurate summary P&L
+  const [livePrices, setLivePrices] = useState<Record<number, number>>({});
+  
+  const handleLivePriceReport = useCallback((tradeId: number, price: number) => {
+    setLivePrices(prev => {
+      if (prev[tradeId] === price) return prev; // Avoid unnecessary re-renders
+      return { ...prev, [tradeId]: price };
+    });
+  }, []);
+  
   // Initialize selectedLabelFilters from localStorage (multi-select with AND logic)
   const [selectedLabelFilters, setSelectedLabelFilters] = useState<number[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_LABELS);
@@ -1546,17 +1564,17 @@ export default function SentinelDashboardPage() {
   const filteredActive = filterTrades(dashboard?.active);
   const filteredClosed = filterTrades(dashboard?.closed);
   
-  // Calculate summary stats from filtered trades
+  // Calculate summary stats from filtered trades using live market prices
   const calculateSummary = () => {
     let openPnL = 0;
     let realizedPnL = 0;
     
-    // Open PnL from active trades (using FIFO)
+    // Open PnL from active trades (using FIFO with live prices)
     filteredActive?.forEach(trade => {
       if (trade.lotEntries && trade.lotEntries.length > 0) {
         const fifo = calculateFifoTracking(trade.lotEntries);
-        // Use current entry price as proxy for current price (should be real-time ideally)
-        const currentPrice = trade.entryPrice;
+        // Use live price if available, otherwise fall back to entry price
+        const currentPrice = livePrices[trade.id] ?? trade.entryPrice;
         const isLong = trade.direction === 'long';
         openPnL += fifo.calculateOpenPnL(currentPrice, isLong);
       }
@@ -2496,6 +2514,7 @@ export default function SentinelDashboardPage() {
                     onEdit={handleEditTrade}
                     onCancel={handleCancelTrade}
                     onPriceUpdate={handlePriceUpdate}
+                    onLivePriceReport={handleLivePriceReport}
                     isExpanded={isExpanded}
                   />
                 ))}
@@ -2522,6 +2541,7 @@ export default function SentinelDashboardPage() {
                     onEdit={handleEditTrade}
                     onClose={handleCloseTrade}
                     onPriceUpdate={handlePriceUpdate}
+                    onLivePriceReport={handleLivePriceReport}
                     onCancel={handleCancelTrade}
                     isExpanded={isExpanded}
                   />
@@ -2549,6 +2569,7 @@ export default function SentinelDashboardPage() {
                     isClosed={true}
                     onEdit={handleEditTrade}
                     onPriceUpdate={handlePriceUpdate}
+                    onLivePriceReport={handleLivePriceReport}
                     onCancel={handleCancelTrade}
                     isExpanded={isExpanded}
                   />
