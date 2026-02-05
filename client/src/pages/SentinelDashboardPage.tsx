@@ -352,6 +352,7 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
     <div 
       className={`flex items-center justify-between px-2 py-1 rounded ${isAlert ? alertBg : "bg-muted/30"}`} 
       data-testid={testId}
+      onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center gap-1.5 flex-1">
         <Icon className={`w-3 h-3 ${isAlert ? alertText : "text-muted-foreground"}`} />
@@ -625,7 +626,7 @@ function OrderLevelsDisplay({
   };
 
   return (
-    <div className="text-xs space-y-1 mb-2 bg-blue-500/10 dark:bg-blue-400/10 p-2 rounded-md" data-testid={`order-levels-${trade.id}`}>
+    <div className="text-xs space-y-1 mb-2 bg-blue-500/10 dark:bg-blue-400/10 p-2 rounded-md" data-testid={`order-levels-${trade.id}`} onClick={(e) => e.stopPropagation()}>
       {/* Closest Stop row */}
       <div className={`flex items-center justify-between gap-1 px-2 py-1 rounded ${stopBg}`} data-testid={`row-closest-stop-${trade.id}`}>
         <div className="flex items-center gap-1.5 flex-1 flex-wrap">
@@ -1092,19 +1093,19 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
           )}
         </div>
 
+        {/* Realized Gain/Loss - always visible even in collapsed view */}
+        {profitClosed !== undefined && (
+          <div 
+            className={`text-sm font-semibold mb-2 ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`}
+            style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
+            data-testid={`text-realized-pnl-${trade.id}`}
+          >
+            Realized: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(2)}
+          </div>
+        )}
+
         {isExpanded ? (
           <>
-            {/* Realized Gain/Loss - below ticker widget, left-justified */}
-            {profitClosed !== undefined && (
-              <div 
-                className={`text-sm font-semibold ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`}
-                style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
-                data-testid={`text-realized-pnl-${trade.id}`}
-              >
-                Realized: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(2)}
-              </div>
-            )}
-
             {/* Labels Row */}
             {trade.labels && trade.labels.length > 0 && (
               <div className="flex flex-wrap items-center gap-1 mb-2 mt-1">
