@@ -696,7 +696,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
         )}
 
         {/* Compact Ticker Widget with Sparkline */}
-        <div className={`flex items-center justify-between mb-3 ${isExpanded && (nearTarget || nearStop) ? "mt-4" : ""}`}>
+        <div className={`flex items-center justify-between mb-1 ${isExpanded && (nearTarget || nearStop) ? "mt-4" : ""}`}>
           <TickerWidget 
             symbol={trade.symbol}
             price={currentPrice}
@@ -707,14 +707,14 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
             profitClosed={profitClosed ?? undefined}
             breakEven={breakEvenData}
           />
-          {isExpanded && trade.latestEvaluation && (
-            <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`}>
+          {trade.latestEvaluation && (
+            <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`} className="ml-2">
               {trade.latestEvaluation.score}/100
             </Badge>
           )}
         </div>
 
-        {isExpanded && (
+        {isExpanded ? (
           <>
             {/* Source and Labels Row */}
             <div className="flex flex-wrap items-center gap-1 mb-2">
@@ -865,6 +865,48 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
               </DropdownMenu>
             </div>
           </>
+        ) : (
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-6 w-6 text-primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
+              }}
+            >
+              <Brain className="w-3.5 h-3.5" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6 text-muted-foreground"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={(e) => handleMenuAction('edit', e)}>
+                  <Edit3 className="w-4 h-4 mr-2" />
+                  Edit
+                </DropdownMenuItem>
+                {isActive && (
+                  <DropdownMenuItem onClick={(e) => handleMenuAction('close', e)}>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Close Trade
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={(e) => handleMenuAction('cancel', e)} className="text-destructive">
+                  <XCircle className="w-4 h-4 mr-2" />
+                  {isActive ? 'Cancel' : 'Delete'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -2357,6 +2399,7 @@ export default function SentinelDashboardPage() {
               Watching ({watchlist.length})
             </TabsTrigger>
             <TabsTrigger value="considering" data-testid="tab-considering">
+              <Eye className="w-4 h-4 mr-1" />
               Considering ({filteredConsidering?.length || 0})
             </TabsTrigger>
             <TabsTrigger value="rules" data-testid="tab-rules">
@@ -2368,6 +2411,7 @@ export default function SentinelDashboardPage() {
               AI Insights
             </TabsTrigger>
             <TabsTrigger value="events" data-testid="tab-events">
+              <Crosshair className="w-4 h-4 mr-1" />
               Events
             </TabsTrigger>
           </TabsList>
@@ -2395,9 +2439,7 @@ export default function SentinelDashboardPage() {
               </Button>
             </div>
           </div>
-        </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsContent value="considering" className="space-y-4">
             {filteredConsidering?.length === 0 ? (
               <Card>
