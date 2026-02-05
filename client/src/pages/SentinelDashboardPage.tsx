@@ -449,74 +449,77 @@ function MiniSparkline({ positive, className = "" }: { positive: boolean; classN
   );
 }
 
-// Compact Ticker Widget component
+// Bloomberg-style Ticker Widget component
 interface TickerWidgetProps {
   symbol: string;
   price: number;
-  pctChange?: number;
+  marketPctChange?: number; // Daily % change from market data (previousClose)
   direction: string;
   status?: string; // "active", "considering", "watch"
-  profitClosed?: number; // MTD realized P&L (for closed trades)
-  openPnL?: number; // Unrealized P&L (for active trades)
-  breakEven?: { shares: number; price: number }; // Break-even position info
+  positionPnL?: number; // Position $ change (unrealized P&L)
+  positionPctChange?: number; // Position % change from entry
 }
 
-function TickerWidget({ symbol, price, pctChange = 0, direction, status, profitClosed, openPnL, breakEven }: TickerWidgetProps) {
-  const isPositive = pctChange >= 0;
+function TickerWidget({ symbol, price, marketPctChange = 0, direction, status, positionPnL, positionPctChange }: TickerWidgetProps) {
+  const isMarketPositive = marketPctChange >= 0;
+  const isPnLPositive = (positionPnL ?? 0) >= 0;
   
-  // Determine label based on status
-  let statusLabel: string;
-  let statusColor: string;
-  
-  if (status === "watch") {
-    statusLabel = "WATCH";
-    statusColor = "bg-yellow-600 text-white";
-  } else {
-    // Active or considering - show direction
-    statusLabel = direction === "long" ? "LONG" : "SHORT";
-    statusColor = direction === "long" ? "bg-green-600 text-white" : "bg-red-600 text-white";
-  }
+  // Direction label
+  const directionLabel = status === "watch" ? "WATCH" : (direction === "long" ? "LONG" : "SHORT");
+  const directionBgColor = status === "watch" 
+    ? "bg-yellow-600" 
+    : (direction === "long" ? "bg-green-600" : "bg-red-600");
   
   return (
-    <div className="flex items-center justify-between gap-1.5 flex-wrap w-full" data-testid={`ticker-widget-${symbol}`}>
-      <div className="flex items-center gap-1.5">
-        {/* Ticker Box - compact without sparkline */}
-        <div className="flex items-center gap-1.5 bg-muted/50 rounded-md px-2 py-1 border" data-testid={`ticker-box-${symbol}`}>
-          <span className="font-bold text-sm" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
-          <span className={`text-sm font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
-          <span className={`text-sm font-semibold px-1.5 py-0.5 rounded ${isPositive ? "bg-green-500/20 text-green-500" : "bg-red-500/20 text-red-500"}`} data-testid={`text-pct-${symbol}`}>
-            {isPositive ? "+" : ""}{pctChange.toFixed(2)}%
-          </span>
-        </div>
-        {/* Direction/Status Badge - larger */}
-        <Badge className={`${statusColor} text-sm px-3 py-1 font-semibold`} data-testid={`badge-status-${symbol}`}>
-          {statusLabel}
-        </Badge>
+    <div className="flex items-center justify-between gap-2 w-full" data-testid={`ticker-widget-${symbol}`}>
+      {/* Left: Bloomberg-style ticker with condensed font */}
+      <div 
+        className="flex items-center gap-0 text-base tracking-tight"
+        style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
+        data-testid={`ticker-box-${symbol}`}
+      >
+        <span className="font-bold text-foreground" data-testid={`text-ticker-${symbol}`}>{symbol}</span>
+        <span className="text-muted-foreground mx-1">|</span>
+        <span className="font-semibold text-foreground" data-testid={`text-price-${symbol}`}>${price.toFixed(2)}</span>
+        <span className="text-muted-foreground mx-1">|</span>
+        <span 
+          className={`font-bold ${isMarketPositive ? "text-green-500" : "text-red-500"}`} 
+          data-testid={`text-pct-${symbol}`}
+        >
+          {isMarketPositive ? "+" : ""}{marketPctChange.toFixed(2)}%
+        </span>
       </div>
 
-      {/* P&L Metrics - stacked vertically, right justified with larger text */}
-      <div className="flex flex-col items-end text-right">
-        {(profitClosed !== undefined || openPnL !== undefined) && (
+      {/* Right: White box with direction and position P&L */}
+      <div 
+        className="flex items-center gap-0 bg-white dark:bg-zinc-100 text-black px-2 py-0.5 rounded text-base tracking-tight"
+        style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
+        data-testid={`position-box-${symbol}`}
+      >
+        <span className={`font-bold px-1 py-0.5 rounded text-white ${directionBgColor}`} data-testid={`badge-status-${symbol}`}>
+          {directionLabel}
+        </span>
+        {positionPnL !== undefined && (
           <>
-            {profitClosed !== undefined && (
-              <span className={`text-base font-bold ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-profit-closed-${symbol}`}>
-                Closed: {profitClosed >= 0 ? "+" : ""}${profitClosed.toFixed(0)}
-              </span>
-            )}
-            {openPnL !== undefined && (
-              <span className={`text-base font-bold ${openPnL >= 0 ? "text-green-500" : "text-red-500"}`} data-testid={`text-open-pnl-${symbol}`}>
-                Open: {openPnL >= 0 ? "+" : ""}${openPnL.toFixed(0)}
-              </span>
+            <span className="text-muted-foreground mx-1">|</span>
+            <span 
+              className={`font-bold ${isPnLPositive ? "text-green-600" : "text-red-600"}`}
+              data-testid={`text-position-pnl-${symbol}`}
+            >
+              {isPnLPositive ? "+" : ""}${positionPnL.toFixed(0)}
+            </span>
+            {positionPctChange !== undefined && (
+              <>
+                <span className="text-muted-foreground mx-1">|</span>
+                <span 
+                  className={`font-bold ${isPnLPositive ? "text-green-600" : "text-red-600"}`}
+                  data-testid={`text-position-pct-${symbol}`}
+                >
+                  {isPnLPositive ? "+" : ""}{positionPctChange.toFixed(1)}%
+                </span>
+              </>
             )}
           </>
-        )}
-        {breakEven && breakEven.shares > 0 && (
-          <span 
-            className={`text-sm font-medium ${price >= breakEven.price ? "text-green-500" : "text-red-500"}`} 
-            data-testid={`text-breakeven-${symbol}`}
-          >
-            BreakEven: {breakEven.shares} shares @ ${breakEven.price.toFixed(2)}
-          </span>
         )}
       </div>
     </div>
