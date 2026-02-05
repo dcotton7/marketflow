@@ -383,6 +383,35 @@ export default function SentinelImportPage() {
     },
   });
 
+  const cleanupDuplicatesMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/sentinel/import/cleanup-duplicates', {});
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to cleanup duplicates');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
+      toast({ 
+        title: "Cleanup Complete", 
+        description: data.merged > 0 
+          ? `Merged ${data.merged} duplicate position${data.merged > 1 ? 's' : ''}, removed ${data.deleted} extra card${data.deleted > 1 ? 's' : ''}.${data.closed > 0 ? ` Auto-closed ${data.closed} position${data.closed > 1 ? 's' : ''}.` : ''}`
+          : "No duplicate positions found. Your data is clean!"
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Cleanup Failed", 
+        description: error?.message || "Could not cleanup duplicates. Please try again.",
+        variant: "destructive" 
+      });
+    },
+  });
+
   const resolveOrphanMutation = useMutation({
     mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve' | 'mute'; costBasis?: number; openDate?: string }) => {
       const response = await apiRequest('PATCH', `/api/sentinel/import/trades/${data.tradeId}/resolve-orphan`, {
@@ -1037,6 +1066,21 @@ export default function SentinelImportPage() {
                         <RefreshCw className="h-4 w-4 mr-2" />
                       )}
                       Reset & Re-detect
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => cleanupDuplicatesMutation.mutate()}
+                      disabled={cleanupDuplicatesMutation.isPending}
+                      data-testid="button-cleanup-duplicates"
+                      title="Merges duplicate trading cards (same ticker+account) into one, combining all lot entries"
+                    >
+                      {cleanupDuplicatesMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Cleanup Duplicates
                     </Button>
                     <Button 
                       variant="default" 
