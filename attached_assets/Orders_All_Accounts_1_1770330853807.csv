@@ -1,0 +1,20 @@
+﻿"Orders 
+All Accounts 
+as of 02/05/2026 at 05:33:23 PM"
+
+Symbol,Action,Amount,Order Type,Status,Filled,Last,$ Chg,% Chg,Bid,Mid,Ask,TIF,Conditions,Destination,Order Time,Account,Account Type,Quantity Type,Market Session,Trail Amount,Order Number,CUSIP,Security Description,Basket
+AAPL,Sell,20,Limit at $278.56,Open,--,275.91,-0.58,-0.21,276.2,--,276.25,Day,None,--,5:33:02 PM ET Feb-05-2026,1_BrokerageLink *1094,Cash,Shares,Standard,--,21G2NMV2,037833100,APPLE INC,--
+AAPL,Sell,55,Stop loss at $271.48,Open,--,275.91,-0.58,-0.21,276.2,--,276.25,GTC,None,--,5:32:53 PM ET Feb-05-2026,1_BrokerageLink *1094,Cash,Shares,Standard,--,21G2MZ0P,037833100,APPLE INC,--
+AAPL,Sell,225,Stop loss at $266.95,Open,--,275.91,-0.58,-0.21,276.2,--,276.25,GTC,None,"CITADEL DERIVATIVES GROUP, L.L.C.",9:42:17 AM ET Feb-04-2026,1_BrokerageLink *1094,Cash,Shares,Standard,--,21F03V69,037833100,APPLE INC,--
+VLO,Sell,150,Stop loss at $185.13,Open,--,194.14,-2.07,-1.05,194.02,--,196,GTC,None,"CITADEL DERIVATIVES GROUP, L.L.C.",9:39:51 AM ET Feb-04-2026,2_DC Rollover IRA *4915,Margin,Shares,Standard,--,21F04GBR,91913Y100,VALERO ENERGY CORP COM,--
+COST,Sell,40,Stop loss at $970.88,Open,--,989.29,10.94,1.12,992,--,992.5,GTC,None,"UBS SECURITIES, L.L.C.",12:08:47 PM ET Feb-03-2026,2_DC Rollover IRA *4915,Margin,Shares,Standard,--,21E18Y8G,22160K105,COSTCO WHOLESALE CORP COM,--
+
+Disclosure
+"The data and information in this spreadsheet is provided to you solely for your use and is not for distribution. 
+The spreadsheet is provided for informational purposes only, and is not intended to provide advice, nor should it be construed as an offer to sell, a solicitation of an offer to buy or a recommendation for any security 
+or digital asset by Fidelity or any third party. Data and information shown is based on information known to Fidelity as of the date it was exported and is subject to change. 
+It should not be used in place of your account statements or trade confirmations and is not intended for tax reporting purposes. 
+For more information on the data included in this spreadsheet, including any limitations thereof, go to Fidelity.com.
+ 
+Brokerage services are provided by Fidelity Brokerage Services LLC (FBS), 900 Salem Street, Smithfield, RI 02917. Custody and other services provided by National Financial Services LLC (NFS). 
+Both are Fidelity Investment companies and members SIPC, NYSE. Neither FBS nor NFS offer crypto as a direct investment nor provide trading or custody services for such assets."
