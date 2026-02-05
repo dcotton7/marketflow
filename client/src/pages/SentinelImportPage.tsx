@@ -205,10 +205,10 @@ export default function SentinelImportPage() {
       }
       return response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       toast({
         title: "Import Complete",
-        description: `Successfully imported ${data.tradesImported} trades`,
+        description: `Successfully imported ${data.tradesImported} trades. Checking for duplicates...`,
       });
       setPreviewData(null);
       setCsvContent(null);
@@ -217,6 +217,25 @@ export default function SentinelImportPage() {
       setActiveTab("history");
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      
+      // Auto-detect duplicates immediately after import
+      if (data.batch?.batchId) {
+        try {
+          const dupResponse = await apiRequest('POST', `/api/sentinel/import/batches/${data.batch.batchId}/detect-duplicates`, {});
+          if (dupResponse.ok) {
+            const dupData = await dupResponse.json();
+            queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+            if (dupData.duplicatesFound > 0) {
+              toast({ 
+                title: "Duplicates Found", 
+                description: `Found ${dupData.duplicatesFound} duplicate trades that need review before promoting`
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Auto duplicate detection failed:", err);
+        }
+      }
     },
     onError: (error: any) => {
       const errorMsg = error?.message || "Failed to import trades";
@@ -979,6 +998,11 @@ export default function SentinelImportPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2">
+                    {hasPendingDuplicates && (
+                      <span className="text-xs text-orange-500 font-medium">
+                        {totalPendingDuplicates} duplicate{totalPendingDuplicates > 1 ? 's' : ''} need review first
+                      </span>
+                    )}
                     {hasPendingOrphans && (
                       <span className="text-xs text-yellow-500">
                         {totalPendingOrphans} orphan{totalPendingOrphans > 1 ? 's' : ''} need review
@@ -1018,7 +1042,7 @@ export default function SentinelImportPage() {
                       variant="default" 
                       size="sm"
                       onClick={() => promoteToCardsMutation.mutate()}
-                      disabled={!allTrades || allTrades.length === 0 || promoteToCardsMutation.isPending || hasPendingOrphans}
+                      disabled={!allTrades || allTrades.length === 0 || promoteToCardsMutation.isPending || hasPendingDuplicates || hasPendingOrphans}
                       data-testid="button-promote-to-cards"
                     >
                       {promoteToCardsMutation.isPending ? (
@@ -1108,15 +1132,16 @@ export default function SentinelImportPage() {
                                 <div className="text-lg font-bold text-green-500">{batch.totalTradesImported}</div>
                                 <div className="text-xs text-muted-foreground">trades imported</div>
                               </div>
-                              {batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 ? (
-                                <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1">
-                                  <AlertTriangle className="h-3 w-3" />
-                                  {batch.orphanSellsCount} Orphans
-                                </Badge>
-                              ) : (batch.duplicatesCount || 0) > 0 ? (
+                              {/* Duplicates shown FIRST - must be resolved before orphans */}
+                              {(batch.duplicatesCount || 0) > 0 ? (
                                 <Badge variant="outline" className="text-orange-500 border-orange-500 gap-1">
                                   <AlertCircle className="h-3 w-3" />
-                                  {batch.duplicatesCount} Duplicates
+                                  {batch.duplicatesCount} Duplicates (Step 1)
+                                </Badge>
+                              ) : batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 ? (
+                                <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {batch.orphanSellsCount} Orphans (Step 2)
                                 </Badge>
                               ) : (
                                 <Badge variant={batch.status === "COMPLETE" ? "default" : "destructive"}>
@@ -1129,6 +1154,8 @@ export default function SentinelImportPage() {
                                   size="sm"
                                   onClick={() => handleReviewOrphans(batch.batchId)}
                                   className="text-yellow-500 border-yellow-500/50"
+                                  disabled={(batch.duplicatesCount || 0) > 0}
+                                  title={(batch.duplicatesCount || 0) > 0 ? "Resolve duplicates first" : "Review orphan sells"}
                                   data-testid={`button-review-orphans-${batch.batchId}`}
                                 >
                                   Review Orphans
