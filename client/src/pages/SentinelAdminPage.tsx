@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
@@ -112,6 +112,158 @@ interface SystemSettings {
   logoTransparency: number;
 }
 
+interface AdminUser {
+  id: number;
+  username: string;
+  isAdmin: boolean;
+  createdAt: string;
+  totalRules: number;
+  starterRulesCount: number;
+  userRulesCount: number;
+  needsSeeding: boolean;
+}
+
+function UsersTab() {
+  const { toast } = useToast();
+
+  const { data: users, isLoading, isError, error, refetch } = useQuery<AdminUser[]>({
+    queryKey: ["/api/sentinel/admin/users"],
+    retry: false,
+  });
+
+  const seedRulesMutation = useMutation({
+    mutationFn: async (userId: number) => {
+      const res = await apiRequest("POST", `/api/sentinel/admin/seed-rules/${userId}`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Rules Seeded", description: data.message });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message || "Failed to seed rules", variant: "destructive" });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2" data-testid="text-users-title">
+            <Users className="w-5 h-5" />
+            User Management
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-4">
+            <XCircle className="w-8 h-8 mx-auto mb-2 text-destructive" />
+            <p className="text-muted-foreground">
+              {(error as Error)?.message?.includes("403") 
+                ? "Admin access required to view users" 
+                : "Failed to load users"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <div>
+          <CardTitle className="flex items-center gap-2" data-testid="text-users-title">
+            <Users className="w-5 h-5" />
+            User Management
+          </CardTitle>
+          <CardDescription data-testid="text-users-desc">Manage users and seed starter rules</CardDescription>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-users">
+          <RefreshCw className="w-4 h-4 mr-1" />
+          Refresh
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {users?.map((user) => (
+            <div 
+              key={user.id} 
+              className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border"
+              data-testid={`card-user-${user.id}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col">
+                  <span className="font-medium" data-testid={`text-username-${user.id}`}>
+                    {user.username}
+                    {user.isAdmin && (
+                      <Badge variant="secondary" className="ml-2 text-xs">Admin</Badge>
+                    )}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Joined {new Date(user.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="text-right text-sm">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">
+                      {user.starterRulesCount} Starter
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                      {user.userRulesCount} Custom
+                    </Badge>
+                  </div>
+                </div>
+                
+                {user.needsSeeding && (
+                  <Button
+                    size="sm"
+                    onClick={() => seedRulesMutation.mutate(user.id)}
+                    disabled={seedRulesMutation.isPending}
+                    data-testid={`button-seed-${user.id}`}
+                  >
+                    {seedRulesMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Database className="w-4 h-4 mr-1" />
+                        Seed Rules
+                      </>
+                    )}
+                  </Button>
+                )}
+                
+                {!user.needsSeeding && (
+                  <Badge variant="secondary" className="text-xs text-green-500">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Has Rules
+                  </Badge>
+                )}
+              </div>
+            </div>
+          ))}
+          
+          {(!users || users.length === 0) && (
+            <p className="text-muted-foreground text-center py-4">No users found</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SystemSettingsTab() {
   const { toast } = useToast();
   const [localSettings, setLocalSettings] = useState<SystemSettings>({
@@ -140,13 +292,11 @@ function SystemSettingsTab() {
   });
 
   // Sync local state when settings load
-  if (settings && !isLoading && 
-      (localSettings.overlayColor !== settings.overlayColor ||
-       localSettings.overlayTransparency !== settings.overlayTransparency ||
-       localSettings.backgroundColor !== settings.backgroundColor ||
-       localSettings.logoTransparency !== settings.logoTransparency)) {
-    setLocalSettings(settings);
-  }
+  useEffect(() => {
+    if (settings && !isLoading) {
+      setLocalSettings(settings);
+    }
+  }, [settings, isLoading]);
 
   const handleSave = () => {
     updateSettingsMutation.mutate(localSettings);
@@ -1155,18 +1305,7 @@ export default function SentinelAdminPage() {
           </TabsContent>
 
           <TabsContent value="users" data-testid="content-users">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2" data-testid="text-users-title">
-                  <Users className="w-5 h-5" />
-                  User Management
-                </CardTitle>
-                <CardDescription data-testid="text-users-desc">Manage users and permissions</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground" data-testid="text-users-coming-soon">User management coming soon...</p>
-              </CardContent>
-            </Card>
+            <UsersTab />
           </TabsContent>
 
           <TabsContent value="settings" data-testid="content-settings">

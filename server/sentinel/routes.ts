@@ -1440,6 +1440,86 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // Admin: Seed starter rules for a user who doesn't have them
+  app.post("/api/sentinel/admin/seed-rules/:userId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const targetUserId = parseInt(req.params.userId as string);
+      if (isNaN(targetUserId)) {
+        return res.status(400).json({ error: "Invalid user ID" });
+      }
+      
+      // Check if user exists
+      const targetUser = await sentinelModels.getUserById(targetUserId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Check if user already has starter rules
+      const existingRules = await sentinelModels.getRulesByUser(targetUserId);
+      const starterRules = existingRules.filter(r => r.source === 'starter');
+      
+      if (starterRules.length > 0) {
+        return res.status(400).json({ 
+          error: `User ${targetUser.username} already has ${starterRules.length} starter rules`
+        });
+      }
+      
+      // Seed starter rules
+      const seededRules = await sentinelModels.seedStarterRulesForUser(targetUserId);
+      
+      res.json({ 
+        success: true, 
+        count: seededRules.length,
+        message: `Seeded ${seededRules.length} starter rules for ${targetUser.username}`
+      });
+    } catch (error) {
+      console.error("Seed rules error:", error);
+      res.status(500).json({ error: "Failed to seed rules" });
+    }
+  });
+
+  // Admin: Get all users with rule counts
+  app.get("/api/sentinel/admin/users", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      // Get all users with their rule counts
+      const users = await db.select({
+        id: sentinelUsers.id,
+        username: sentinelUsers.username,
+        isAdmin: sentinelUsers.isAdmin,
+        createdAt: sentinelUsers.createdAt,
+      }).from(sentinelUsers);
+      
+      // Get rule counts for each user
+      const usersWithCounts = await Promise.all(users.map(async (u) => {
+        const rules = await sentinelModels.getRulesByUser(u.id);
+        const starterRules = rules.filter(r => r.source === 'starter');
+        const userRules = rules.filter(r => r.source === 'user');
+        return {
+          ...u,
+          totalRules: rules.length,
+          starterRulesCount: starterRules.length,
+          userRulesCount: userRules.length,
+          needsSeeding: starterRules.length === 0
+        };
+      }));
+      
+      res.json(usersWithCounts);
+    } catch (error) {
+      console.error("Get users error:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
   // System Settings - Get user's UI settings
   app.get("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
     try {
