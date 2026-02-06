@@ -4106,6 +4106,18 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         importBatchId: string;
         accountName?: string;
         isTagged: boolean;
+        hasSyntheticCostBasis?: boolean;
+      }> = [];
+      
+      const syntheticInjections: Array<{
+        ticker: string;
+        account: string;
+        syntheticQty: number;
+        syntheticCostBasis: number;
+        syntheticOpenDate: string;
+        sellTradeId: string;
+        sellQty: number;
+        sellPrice: number;
       }> = [];
       
       // Process each position group using FIFO matching
@@ -4132,6 +4144,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         let firstBuyDate: Date | null = null;
         let totalBuyCost = 0;
         let totalBuyQty = 0;
+        let positionUsedSynthetic = false;
         
         for (const trade of trades) {
           const qty = Number(trade.quantity) || 0;
@@ -4162,6 +4175,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               const costBasis = trade.manualCostBasis != null ? Number(trade.manualCostBasis) : price;
               const openDate = trade.manualOpenDate ? new Date(trade.manualOpenDate) : tradeDate;
               
+              syntheticInjections.push({
+                ticker,
+                account: accountName,
+                syntheticQty: shortfall,
+                syntheticCostBasis: costBasis,
+                syntheticOpenDate: openDate.toISOString(),
+                sellTradeId: trade.tradeId,
+                sellQty: qty,
+                sellPrice: price,
+              });
+              
               const syntheticBuyEntry = {
                 id: `orphan-buy-${trade.tradeId}`,
                 dateTime: openDate.toISOString(),
@@ -4175,6 +4199,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               if (!firstBuyDate || openDate < firstBuyDate) firstBuyDate = openDate;
               totalBuyCost += shortfall * costBasis;
               totalBuyQty += shortfall;
+              positionUsedSynthetic = true;
             }
             
             positionLotEntries.push(lotEntry);
@@ -4217,6 +4242,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 importBatchId: positionBatchId,
                 accountName: accountName !== 'default' ? accountName : undefined,
                 isTagged: false,
+                hasSyntheticCostBasis: positionUsedSynthetic,
               });
               
               // Reset for next position
@@ -4225,6 +4251,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               totalBuyCost = 0;
               totalBuyQty = 0;
               currentPosition = 0;
+              positionUsedSynthetic = false;
             }
           }
         }
@@ -4245,6 +4272,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             importBatchId: positionBatchId,
             accountName: accountName !== 'default' ? accountName : undefined,
             isTagged: false,
+            hasSyntheticCostBasis: positionUsedSynthetic,
           });
         }
       }
@@ -4394,6 +4422,31 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         });
       }
       
+      const syntheticCards = cardsToCreate.filter(c => c.hasSyntheticCostBasis);
+      const realCostBasisCards = cardsToCreate.filter(c => !c.hasSyntheticCostBasis);
+      
+      const syntheticSummary = {
+        totalSyntheticInjections: syntheticInjections.length,
+        cardsUsingSyntheticCostBasis: syntheticCards.length,
+        cardsUsingRealCostBasis: realCostBasisCards.length,
+        syntheticByTicker: syntheticInjections.map(s => ({
+          ticker: s.ticker,
+          account: s.account !== 'default' ? s.account : undefined,
+          syntheticShares: s.syntheticQty,
+          costBasis: s.syntheticCostBasis,
+          openDate: s.syntheticOpenDate,
+          sellShares: s.sellQty,
+          sellPrice: s.sellPrice,
+        })),
+        tickersWithSynthetic: [...new Set(syntheticCards.map(c => c.symbol))],
+        tickersWithRealCostBasis: [...new Set(realCostBasisCards.map(c => c.symbol))],
+      };
+      
+      console.log(`[Promote] Summary: ${cardsToCreate.length} cards total, ${syntheticInjections.length} synthetic injections, ${syntheticCards.length} cards used synthetic cost basis`);
+      if (syntheticInjections.length > 0) {
+        console.log(`[Promote] Synthetic details:`, JSON.stringify(syntheticSummary.syntheticByTicker, null, 2));
+      }
+      
       res.json({ 
         success: true, 
         cardsMerged: mergedCount,
@@ -4402,6 +4455,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         totalProcessed: cardsToCreate.length,
         openPositions: cardsToCreate.filter(c => c.status === 'active').length,
         closedPositions: cardsToCreate.filter(c => c.status === 'closed').length,
+        syntheticCostBasisReport: syntheticSummary,
       });
     } catch (error) {
       console.error("Promote to cards error:", error);

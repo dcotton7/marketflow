@@ -138,6 +138,9 @@ export default function SentinelImportPage() {
   const [selectedDuplicateBatchId, setSelectedDuplicateBatchId] = useState<string | null>(null);
   const [bulkProcessingBatchId, setBulkProcessingBatchId] = useState<string | null>(null);
   
+  // Promote report state
+  const [promoteReport, setPromoteReport] = useState<any>(null);
+  
   // Orders import state
   const [ordersFile, setOrdersFile] = useState<File | null>(null);
   const [ordersCsvContent, setOrdersCsvContent] = useState<string | null>(null);
@@ -381,10 +384,17 @@ export default function SentinelImportPage() {
       return response.json();
     },
     onSuccess: (data) => {
+      const report = data.syntheticCostBasisReport;
+      const synthInfo = report && report.totalSyntheticInjections > 0
+        ? ` | ${report.cardsUsingSyntheticCostBasis} cards used synthetic cost basis (${report.tickersWithSynthetic?.join(', ')})`
+        : ' | All cards used real imported cost basis';
       toast({ 
         title: "Trades Promoted to Cards", 
-        description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}`
+        description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}${synthInfo}`
       });
+      if (report) {
+        setPromoteReport(report);
+      }
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades/sources'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/labels'] });
@@ -1527,6 +1537,51 @@ export default function SentinelImportPage() {
                 })()}
               </CardHeader>
               <CardContent>
+                {promoteReport && (
+                  <div className="mb-4 p-4 rounded-md border bg-card" data-testid="promote-report">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-semibold">Promotion Report - Cost Basis Breakdown</h4>
+                      <Button variant="ghost" size="icon" onClick={() => setPromoteReport(null)} data-testid="button-dismiss-report">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Cards using real imported cost basis:</span>{' '}
+                        <span className="font-medium text-green-500">{promoteReport.cardsUsingRealCostBasis}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Cards using synthetic cost basis:</span>{' '}
+                        <span className="font-medium text-yellow-500">{promoteReport.cardsUsingSyntheticCostBasis}</span>
+                      </div>
+                    </div>
+                    {promoteReport.totalSyntheticInjections > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Synthetic cost basis is used when the original buy transaction was not in any imported CSV.
+                          The cost basis you entered during orphan resolution is used instead.
+                        </p>
+                        <div className="space-y-1">
+                          {promoteReport.syntheticByTicker?.map((s: any, i: number) => (
+                            <div key={i} className="text-xs flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className="text-yellow-500 border-yellow-500/30">
+                                {s.ticker}{s.account ? ` (${s.account})` : ''}
+                              </Badge>
+                              <span className="text-muted-foreground">
+                                {s.syntheticShares} synthetic shares @ ${Number(s.costBasis).toFixed(2)} cost basis
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {promoteReport.totalSyntheticInjections === 0 && (
+                      <p className="mt-2 text-xs text-green-500">
+                        All cards used real imported cost basis from your CSV files. No synthetic data needed.
+                      </p>
+                    )}
+                  </div>
+                )}
                 {batchesLoading ? (
                   <div className="flex justify-center p-8">
                     <Loader2 className="h-8 w-8 animate-spin" />
