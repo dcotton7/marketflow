@@ -4697,7 +4697,49 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         return res.json({ success: true, action: 'mute_all' });
       }
       
-      res.status(400).json({ error: "Invalid action. Use 'delete_all' or 'mute_all'" });
+      if (action === 'resolve_all') {
+        const { items } = req.body;
+        if (!Array.isArray(items) || items.length === 0) {
+          return res.status(400).json({ error: "No items provided for resolve_all" });
+        }
+        
+        let resolvedCount = 0;
+        const resolvedTradeIds: string[] = [];
+        for (const item of items) {
+          const { tradeId, costBasis, openDate, isSyntheticDate } = item;
+          if (!tradeId || costBasis == null || !openDate) continue;
+          const numericCost = Number(costBasis);
+          if (!Number.isFinite(numericCost)) continue;
+          
+          const [trade] = await db!.select().from(sentinelImportedTrades)
+            .where(and(
+              eq(sentinelImportedTrades.tradeId, tradeId),
+              eq(sentinelImportedTrades.userId, userId),
+              eq(sentinelImportedTrades.isOrphanSell, true)
+            ))
+            .limit(1);
+          
+          if (trade && (trade.orphanStatus === 'pending' || trade.orphanStatus === 'muted')) {
+            await db!.update(sentinelImportedTrades)
+              .set({
+                orphanStatus: 'resolved',
+                manualCostBasis: numericCost,
+                manualOpenDate: openDate,
+                isSyntheticDate: isSyntheticDate === true,
+              })
+              .where(and(
+                eq(sentinelImportedTrades.tradeId, tradeId),
+                eq(sentinelImportedTrades.userId, userId)
+              ));
+            resolvedCount++;
+            resolvedTradeIds.push(tradeId);
+          }
+        }
+        
+        return res.json({ success: true, action: 'resolve_all', resolvedCount, resolvedTradeIds });
+      }
+      
+      res.status(400).json({ error: "Invalid action. Use 'delete_all', 'mute_all', or 'resolve_all'" });
     } catch (error) {
       console.error("Bulk all-orphan action error:", error);
       res.status(500).json({ error: "Failed to perform bulk action" });

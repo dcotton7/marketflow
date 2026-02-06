@@ -542,8 +542,8 @@ export default function SentinelImportPage() {
   });
 
   const bulkAllOrphansMutation = useMutation({
-    mutationFn: async (action: 'mute_all' | 'delete_all') => {
-      const response = await apiRequest('POST', '/api/sentinel/import/all-orphans/bulk', { action });
+    mutationFn: async (payload: { action: 'mute_all' | 'delete_all' | 'resolve_all'; items?: Array<{ tradeId: string; costBasis: number; openDate: string; isSyntheticDate: boolean }> }) => {
+      const response = await apiRequest('POST', '/api/sentinel/import/all-orphans/bulk', payload);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Bulk action failed');
@@ -554,12 +554,34 @@ export default function SentinelImportPage() {
       refetchAllOrphans();
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
-      toast({ 
-        title: data.action === 'mute_all' ? "All Orphans Muted" : "All Orphans Deleted",
-        description: data.action === 'mute_all' 
-          ? "Hidden from dashboard until cost basis is set" 
-          : "All orphan sells removed"
-      });
+      if (data.action === 'resolve_all') {
+        if (data.resolvedTradeIds && Array.isArray(data.resolvedTradeIds)) {
+          const resolvedSet = new Set(data.resolvedTradeIds as string[]);
+          setOrphanResolutions(prev => {
+            const next: Record<string, { costBasis: string; openDate: string; isSyntheticDate?: boolean }> = {};
+            for (const key of Object.keys(prev)) {
+              if (!resolvedSet.has(key)) {
+                next[key] = prev[key];
+              }
+            }
+            return next;
+          });
+        } else {
+          setOrphanResolutions({});
+        }
+        setCostBasisMatchCount(null);
+        toast({ 
+          title: "All Matched Orphans Saved",
+          description: `${data.resolvedCount} orphan${data.resolvedCount === 1 ? '' : 's'} resolved. Load another CSV to match remaining orphans.`
+        });
+      } else {
+        toast({ 
+          title: data.action === 'mute_all' ? "All Orphans Muted" : "All Orphans Deleted",
+          description: data.action === 'mute_all' 
+            ? "Hidden from dashboard until cost basis is set" 
+            : "All orphan sells removed"
+        });
+      }
     },
     onError: (error: any) => {
       toast({
@@ -2301,7 +2323,7 @@ export default function SentinelImportPage() {
               Resolve All Orphans
             </DialogTitle>
             <DialogDescription>
-              All pending orphan sells across every import batch. Load your Closed Positions CSV to auto-fill cost basis and synthetic dates, then save or manage each one.
+              All pending orphan sells across every import batch. Load a Closed Positions CSV to auto-fill cost basis, click "Save All Matched" to resolve them, then load another year's CSV if needed.
             </DialogDescription>
           </DialogHeader>
           
@@ -2336,16 +2358,52 @@ export default function SentinelImportPage() {
             </div>
           </div>
           
-          {allOrphanSells && allOrphanSells.length > 0 && (
-            <div className="flex items-center justify-between py-2 border-b">
+          {allOrphanSells && allOrphanSells.length > 0 && (() => {
+            const matchedOrphans = allOrphanSells.filter(o => {
+              const res = orphanResolutions[o.tradeId];
+              return res?.costBasis && res?.openDate && (o.orphanStatus === 'pending' || o.orphanStatus === 'muted');
+            });
+            const matchedCount = matchedOrphans.length;
+            
+            return (
+            <div className="flex items-center justify-between py-2 border-b flex-wrap gap-2">
               <div className="text-sm text-muted-foreground">
                 {allOrphanSells.filter(o => o.orphanStatus === 'pending').length} pending, {allOrphanSells.filter(o => o.orphanStatus === 'muted').length} muted
+                {matchedCount > 0 && (
+                  <span className="text-green-500 ml-2 font-medium">{matchedCount} matched ready to save</span>
+                )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {matchedCount > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const items = matchedOrphans
+                        .map(o => ({
+                          tradeId: o.tradeId,
+                          costBasis: parseFloat(orphanResolutions[o.tradeId].costBasis),
+                          openDate: orphanResolutions[o.tradeId].openDate,
+                          isSyntheticDate: orphanResolutions[o.tradeId].isSyntheticDate === true,
+                        }))
+                        .filter(item => Number.isFinite(item.costBasis) && item.openDate);
+                      if (items.length === 0) return;
+                      bulkAllOrphansMutation.mutate({ action: 'resolve_all', items });
+                    }}
+                    disabled={bulkAllOrphansMutation.isPending}
+                    data-testid="button-save-all-matched"
+                  >
+                    {bulkAllOrphansMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    ) : (
+                      <Check className="h-4 w-4 mr-1" />
+                    )}
+                    Save All Matched ({matchedCount})
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => bulkAllOrphansMutation.mutate('mute_all')}
+                  onClick={() => bulkAllOrphansMutation.mutate({ action: 'mute_all' })}
                   disabled={bulkAllOrphansMutation.isPending || allOrphanSells.filter(o => o.orphanStatus === 'pending').length === 0}
                   data-testid="button-mute-all-orphans-global"
                 >
@@ -2355,7 +2413,7 @@ export default function SentinelImportPage() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => bulkAllOrphansMutation.mutate('delete_all')}
+                  onClick={() => bulkAllOrphansMutation.mutate({ action: 'delete_all' })}
                   disabled={bulkAllOrphansMutation.isPending || allOrphanSells.filter(o => o.orphanStatus === 'pending').length === 0}
                   data-testid="button-delete-all-orphans-global"
                 >
@@ -2364,7 +2422,8 @@ export default function SentinelImportPage() {
                 </Button>
               </div>
             </div>
-          )}
+            );
+          })()}
           
           <ScrollArea className="flex-1 max-h-[50vh] pr-4">
             {allOrphansLoading ? (

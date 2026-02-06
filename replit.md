@@ -68,10 +68,12 @@ Orphan sells (sells without matching buys) are tracked with statuses: 'pending',
 **Resolve All Orphans (Global)**: A cross-batch dialog accessible from Import History via the "Resolve All Orphans" button (shows badge with total pending orphan count). This is the primary workflow for bulk orphan resolution:
 - Shows ALL pending/muted orphans across every batch in one view
 - Includes "Load Cost Basis from CSV" button to load a Closed Positions CSV and auto-match orphans by ticker+shares+date
+- "Save All Matched" button bulk-resolves all orphans that have cost basis filled in (from CSV match) in one click
+- After saving, dialog stays open showing remaining unresolved orphans so users can load another year's CSV (Fidelity limits downloads to one year at a time)
 - Bulk MUTE ALL/DELETE ALL actions available
-- API: `GET /api/sentinel/import/all-orphans`, `POST /api/sentinel/import/all-orphans/bulk`
+- API: `GET /api/sentinel/import/all-orphans`, `POST /api/sentinel/import/all-orphans/bulk` (supports `resolve_all` action with items array, plus `mute_all` and `delete_all`)
 
-**Recommended Workflow**: Upload all transaction CSVs (2025, 2026, etc.) → resolve duplicates per file → skip orphan resolution during individual loads → click "Resolve All Orphans" in Import History → load Closed Positions CSV once to match all orphans across all batches → resolve/save.
+**Recommended Workflow**: Upload all transaction CSVs (2025, 2026, etc.) → resolve duplicates per file → skip orphan resolution during individual loads → click "Resolve All Orphans" in Import History → load Closed Positions CSV → click "Save All Matched" → load next year's CSV → repeat until all resolved.
 
 Muted orphans are hidden from Trading Cards but remain visible in review. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync. When unmuting an orphan, visual feedback is provided with a green highlight that fades after 3 seconds.
 
