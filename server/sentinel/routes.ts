@@ -16,7 +16,8 @@ import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUse
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 import { fetchChartData, calculatePointTechnicals, calculateFullSetupMetrics, findNearestMA, calculateRSvsSPY, calculateAnchoredVWAPValues, countResistanceTouches } from "./patternTrainingEngine";
-import { patternTrainingSetups, patternTrainingPoints } from "@shared/schema";
+import { patternTrainingSetups, patternTrainingPoints, patternTrainingEvaluations } from "@shared/schema";
+import { evaluateSetup, getExistingEvaluation } from "./patternEvaluationEngine";
 
 declare module "express-session" {
   interface SessionData {
@@ -6307,6 +6308,43 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Save points error:", error);
       res.status(500).json({ error: "Failed to save points" });
+    }
+  });
+
+  app.post("/api/sentinel/pattern-training/setups/:id/evaluate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setupId = parseInt(req.params.id);
+
+      const [setup] = await db.select().from(patternTrainingSetups)
+        .where(and(eq(patternTrainingSetups.id, setupId), eq(patternTrainingSetups.userId, userId)));
+
+      if (!setup) return res.status(404).json({ error: "Setup not found" });
+
+      if (!setup.pointsSaved) {
+        return res.status(400).json({ error: "Please save annotated points before evaluating" });
+      }
+
+      const result = await evaluateSetup(setupId, userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Pattern evaluation error:", error);
+      res.status(500).json({ error: error.message || "Failed to evaluate setup" });
+    }
+  });
+
+  app.get("/api/sentinel/pattern-training/setups/:id/evaluation", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setupId = parseInt(req.params.id);
+
+      const evaluation = await getExistingEvaluation(setupId, userId);
+      if (!evaluation) return res.status(404).json({ error: "No evaluation found" });
+
+      res.json(evaluation);
+    } catch (error) {
+      console.error("Get evaluation error:", error);
+      res.status(500).json({ error: "Failed to fetch evaluation" });
     }
   });
 

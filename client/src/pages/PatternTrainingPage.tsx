@@ -16,7 +16,8 @@ import {
   Search, Loader2, Star, Save, Pencil, Trash2,
   Target, TrendingUp, TrendingDown, ArrowDown, ArrowUp,
   CheckCircle2, XCircle, RotateCcw, Plus, X, Filter,
-  BarChart3, Activity, Gauge, Zap, Crosshair, Eye
+  BarChart3, Activity, Gauge, Zap, Crosshair, Eye,
+  Brain, ShieldAlert, Lightbulb, ThumbsUp, ThumbsDown, BookOpen
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -62,6 +63,38 @@ interface SetupData {
   pointsSaved?: boolean;
   points?: PointData[];
   createdAt?: string;
+}
+
+interface EvaluationData {
+  score: number;
+  confidence: number;
+  rrRatio: number | null;
+  verdict: string;
+  strengths: string[];
+  weaknesses: string[];
+  suggestions: string[];
+  riskFlags: string[];
+  similarSetups: {
+    setupId: number;
+    ticker: string;
+    patternType: string;
+    outcome: string;
+    score: number;
+    similarity: string;
+  }[];
+  patternStats: {
+    totalSetups: number;
+    setupsWithOutcomes: number;
+    winRate: number;
+    avgRR: number;
+    byPatternType: Record<string, { count: number; wins: number; winRate: number; avgRR: number }>;
+  };
+  learningContext: {
+    totalSetupsUsed: number;
+    setupsWithOutcomes: number;
+    similarSetupsFound: number;
+    patternTypesKnown: string[];
+  };
 }
 
 const POINT_COLORS: Record<string, string> = {
@@ -115,6 +148,9 @@ export default function PatternTrainingPage() {
   const [metricsLoading, setMetricsLoading] = useState(false);
 
   const [currentSetupId, setCurrentSetupId] = useState<number | null>(null);
+
+  const [evaluation, setEvaluation] = useState<EvaluationData | null>(null);
+  const [evaluationLoading, setEvaluationLoading] = useState(false);
 
   const [libraryFilter, setLibraryFilter] = useState({ patternType: "", rating: 0, ticker: "" });
 
@@ -354,6 +390,36 @@ export default function PatternTrainingPage() {
     });
   };
 
+  const handleAIEvaluate = async () => {
+    if (!currentSetupId) return;
+    setEvaluationLoading(true);
+    setEvaluation(null);
+    try {
+      const res = await apiRequest("POST", `/api/sentinel/pattern-training/setups/${currentSetupId}/evaluate`);
+      const result = await res.json();
+      setEvaluation(result);
+      toast({ title: `AI Score: ${result.score}/10 — ${result.verdict}` });
+    } catch (error: any) {
+      toast({ title: "Evaluation failed", description: error.message || "Please try again", variant: "destructive" });
+    } finally {
+      setEvaluationLoading(false);
+    }
+  };
+
+  const loadExistingEvaluation = async (setupId: number) => {
+    try {
+      const res = await fetch(`/api/sentinel/pattern-training/setups/${setupId}/evaluation`);
+      if (res.ok) {
+        const data = await res.json();
+        setEvaluation(data);
+      } else {
+        setEvaluation(null);
+      }
+    } catch {
+      setEvaluation(null);
+    }
+  };
+
   const handleLoadSetup = (setup: SetupData) => {
     setTicker(setup.ticker);
     setSearchTicker(setup.ticker);
@@ -381,6 +447,10 @@ export default function PatternTrainingPage() {
     }
     setPoints(restoredPoints);
     setActiveTab("create");
+    setEvaluation(null);
+    if (setup.id && setup.pointsSaved) {
+      loadExistingEvaluation(setup.id);
+    }
   };
 
   const resetForm = () => {
@@ -402,6 +472,8 @@ export default function PatternTrainingPage() {
     setFiveMinEMACross(false);
     setMacdCross(false);
     setActivePointRole(null);
+    setEvaluation(null);
+    setEvaluationLoading(false);
   };
 
   const filteredSetups = useMemo(() => {
@@ -537,6 +609,132 @@ export default function PatternTrainingPage() {
                         )}
                       </CardContent>
                     </Card>
+                  )}
+
+                  {pointsSaved && currentSetupId && (
+                    <div className="mt-4 space-y-4">
+                      <Button
+                        onClick={handleAIEvaluate}
+                        disabled={evaluationLoading}
+                        className="w-full gap-2"
+                        variant={evaluation ? "outline" : "default"}
+                        data-testid="button-ai-evaluate"
+                      >
+                        {evaluationLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Brain className="w-4 h-4" />
+                        )}
+                        {evaluationLoading ? "Analyzing Setup..." : evaluation ? "Re-Evaluate with AI" : "AI Evaluate Setup"}
+                      </Button>
+
+                      {evaluation && (
+                        <Card>
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                                <Brain className="w-4 h-4 text-purple-400" />
+                                AI Evaluation
+                              </CardTitle>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <VerdictBadge verdict={evaluation.verdict} />
+                                <Badge variant="secondary" className="text-xs">
+                                  {evaluation.confidence}% confidence
+                                </Badge>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="flex items-center gap-4 flex-wrap">
+                              <ScoreDisplay score={evaluation.score} />
+                              {evaluation.rrRatio != null && (
+                                <div className="text-center">
+                                  <div className="text-xs text-muted-foreground">R/R Ratio</div>
+                                  <div className="text-lg font-bold">{evaluation.rrRatio.toFixed(2)}</div>
+                                </div>
+                              )}
+                            </div>
+
+                            {evaluation.strengths.length > 0 && (
+                              <EvalSection
+                                icon={<ThumbsUp className="w-3.5 h-3.5 text-green-400" />}
+                                title="Strengths"
+                                items={evaluation.strengths}
+                                color="text-green-400"
+                              />
+                            )}
+
+                            {evaluation.riskFlags.length > 0 && (
+                              <EvalSection
+                                icon={<ShieldAlert className="w-3.5 h-3.5 text-red-400" />}
+                                title="Risk Flags"
+                                items={evaluation.riskFlags}
+                                color="text-red-400"
+                              />
+                            )}
+
+                            {evaluation.weaknesses.length > 0 && (
+                              <EvalSection
+                                icon={<ThumbsDown className="w-3.5 h-3.5 text-amber-400" />}
+                                title="Weaknesses"
+                                items={evaluation.weaknesses}
+                                color="text-amber-400"
+                              />
+                            )}
+
+                            {evaluation.suggestions.length > 0 && (
+                              <EvalSection
+                                icon={<Lightbulb className="w-3.5 h-3.5 text-blue-400" />}
+                                title="Suggestions"
+                                items={evaluation.suggestions}
+                                color="text-blue-400"
+                              />
+                            )}
+
+                            {evaluation.similarSetups.length > 0 && (
+                              <div>
+                                <div className="flex items-center gap-1.5 mb-2">
+                                  <BookOpen className="w-3.5 h-3.5 text-purple-400" />
+                                  <span className="text-xs font-medium text-purple-400">Similar Past Setups</span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {evaluation.similarSetups.map((s, i) => (
+                                    <div key={i} className="flex items-center justify-between text-xs bg-muted/30 rounded-md px-2.5 py-1.5">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium">{s.ticker}</span>
+                                        <span className="text-muted-foreground">{s.patternType}</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant={s.outcome === 'win' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                                          {s.outcome}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {evaluation.learningContext && (
+                              <div className="border-t pt-3 mt-3">
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <Activity className="w-3 h-3 text-muted-foreground" />
+                                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Learning Context</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                                  <span>{evaluation.learningContext.totalSetupsUsed} setups learned</span>
+                                  <span>{evaluation.learningContext.setupsWithOutcomes} with outcomes</span>
+                                  <span>{evaluation.learningContext.similarSetupsFound} similar found</span>
+                                  {evaluation.learningContext.patternTypesKnown.length > 0 && (
+                                    <span>{evaluation.learningContext.patternTypesKnown.length} pattern types known</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      )}
+                    </div>
                   )}
 
                   {pointsSaved && (
@@ -988,6 +1186,47 @@ export default function PatternTrainingPage() {
           </TabsContent>
         </Tabs>
       </div>
+    </div>
+  );
+}
+
+function VerdictBadge({ verdict }: { verdict: string }) {
+  const config: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+    STRONG_BUY: { label: "STRONG BUY", variant: "default" },
+    BUY: { label: "BUY", variant: "default" },
+    NEUTRAL: { label: "NEUTRAL", variant: "secondary" },
+    CAUTION: { label: "CAUTION", variant: "outline" },
+    AVOID: { label: "AVOID", variant: "destructive" },
+  };
+  const c = config[verdict] || { label: verdict, variant: "secondary" as const };
+  return <Badge variant={c.variant} className="text-[10px] px-2 py-0">{c.label}</Badge>;
+}
+
+function ScoreDisplay({ score }: { score: number }) {
+  const color = score >= 8 ? "text-green-400" : score >= 6 ? "text-blue-400" : score >= 4 ? "text-amber-400" : "text-red-400";
+  const bgColor = score >= 8 ? "border-green-400/30" : score >= 6 ? "border-blue-400/30" : score >= 4 ? "border-amber-400/30" : "border-red-400/30";
+  return (
+    <div className={`flex items-center gap-1 border-2 ${bgColor} rounded-lg px-3 py-1.5`}>
+      <span className={`text-2xl font-bold ${color}`}>{score}</span>
+      <span className="text-xs text-muted-foreground">/10</span>
+    </div>
+  );
+}
+
+function EvalSection({ icon, title, items, color }: { icon: React.ReactNode; title: string; items: string[]; color: string }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {icon}
+        <span className={`text-xs font-medium ${color}`}>{title}</span>
+      </div>
+      <ul className="space-y-1">
+        {items.map((item, i) => (
+          <li key={i} className="text-xs text-muted-foreground pl-5 relative before:content-[''] before:absolute before:left-1.5 before:top-[7px] before:w-1 before:h-1 before:rounded-full before:bg-muted-foreground/50">
+            {item}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
