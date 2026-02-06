@@ -127,6 +127,10 @@ export default function SentinelImportPage() {
   const [costBasisFileName, setCostBasisFileName] = useState<string>("");
   const [costBasisMatchCount, setCostBasisMatchCount] = useState<{ matched: number; total: number } | null>(null);
   
+  // Delete all trading cards state
+  const [showDeleteCardsDialog, setShowDeleteCardsDialog] = useState(false);
+  const [deleteCardsConfirmText, setDeleteCardsConfirmText] = useState("");
+  
   // Duplicate detection state
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [selectedDuplicateBatchId, setSelectedDuplicateBatchId] = useState<string | null>(null);
@@ -310,6 +314,37 @@ export default function SentinelImportPage() {
       toast({ 
         title: "Delete All Failed", 
         description: error?.message || "Could not delete trades. Please try again.",
+        variant: "destructive" 
+      });
+    },
+  });
+
+  const deleteAllCardsMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('DELETE', '/api/sentinel/trades/all', {
+        confirmDelete: "DELETE"
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Delete failed with status ${response.status}`);
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      const d = data.deleted || {};
+      toast({ 
+        title: "All Trading Cards Deleted", 
+        description: `Removed ${d.trades || 0} cards, ${d.evaluations || 0} evaluations, ${d.events || 0} events, ${d.orderLevels || 0} order levels`
+      });
+      setShowDeleteCardsDialog(false);
+      setDeleteCardsConfirmText("");
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Delete Failed", 
+        description: error?.message || "Could not delete trading cards. Please try again.",
         variant: "destructive" 
       });
     },
@@ -1571,6 +1606,29 @@ export default function SentinelImportPage() {
                 )}
               </CardContent>
             </Card>
+            
+            <Card className="mt-6 border-destructive/30">
+              <CardHeader className="flex flex-row items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-destructive flex items-center gap-2">
+                    <ShieldAlert className="h-5 w-5" />
+                    Danger Zone
+                  </CardTitle>
+                  <CardDescription>
+                    Delete all promoted Trading Cards to start fresh. Import history is preserved.
+                  </CardDescription>
+                </div>
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  onClick={() => setShowDeleteCardsDialog(true)}
+                  data-testid="button-delete-all-cards"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete All Trading Cards
+                </Button>
+              </CardHeader>
+            </Card>
           </TabsContent>
 
           <TabsContent value="orders" className="mt-6 space-y-6">
@@ -1833,6 +1891,58 @@ export default function SentinelImportPage() {
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting...</>
               ) : (
                 <>Delete All Trades</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteCardsDialog} onOpenChange={(open) => {
+        setShowDeleteCardsDialog(open);
+        if (!open) setDeleteCardsConfirmText("");
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive flex items-center gap-2">
+              <AlertCircle className="h-5 w-5" />
+              Delete All Trading Cards
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete all your Trading Cards along with their evaluations, events, labels, and order levels. Your import history will be preserved so you can re-promote.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-2">
+              Type <span className="font-mono font-bold text-foreground">DELETE</span> to confirm:
+            </p>
+            <Input 
+              value={deleteCardsConfirmText}
+              onChange={(e) => setDeleteCardsConfirmText(e.target.value)}
+              placeholder="Type DELETE to confirm"
+              className="font-mono"
+              data-testid="input-delete-cards-confirm"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowDeleteCardsDialog(false);
+                setDeleteCardsConfirmText("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => deleteAllCardsMutation.mutate()}
+              disabled={deleteCardsConfirmText !== "DELETE" || deleteAllCardsMutation.isPending}
+              data-testid="button-confirm-delete-cards"
+            >
+              {deleteAllCardsMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Deleting...</>
+              ) : (
+                <>Delete All Trading Cards</>
               )}
             </Button>
           </DialogFooter>

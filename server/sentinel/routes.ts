@@ -3897,6 +3897,67 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  // Delete ALL Trading Cards and related records for the current user
+  app.delete("/api/sentinel/trades/all", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { confirmDelete } = req.body;
+      
+      if (confirmDelete !== "DELETE") {
+        return res.status(400).json({ 
+          error: "Confirmation required",
+          message: "Send confirmDelete: 'DELETE' to confirm deletion"
+        });
+      }
+      
+      const result = await db.transaction(async (tx) => {
+        const userTradeIds = await tx
+          .select({ id: sentinelTrades.id })
+          .from(sentinelTrades)
+          .where(eq(sentinelTrades.userId, userId));
+        
+        const tradeIds = userTradeIds.map(t => t.id);
+        
+        if (tradeIds.length === 0) {
+          return { trades: 0, evaluations: 0, events: 0, labels: 0, orderLevels: 0 };
+        }
+        
+        const deletedLabels = await tx.delete(sentinelTradeToLabels)
+          .where(inArray(sentinelTradeToLabels.tradeId, tradeIds))
+          .returning({ tradeId: sentinelTradeToLabels.tradeId });
+        
+        const deletedEvals = await tx.delete(sentinelEvaluations)
+          .where(and(eq(sentinelEvaluations.userId, userId), inArray(sentinelEvaluations.tradeId, tradeIds)))
+          .returning({ id: sentinelEvaluations.id });
+        
+        const deletedEvents = await tx.delete(sentinelEvents)
+          .where(and(eq(sentinelEvents.userId, userId), inArray(sentinelEvents.tradeId, tradeIds)))
+          .returning({ id: sentinelEvents.id });
+        
+        const deletedOrders = await tx.delete(sentinelOrderLevels)
+          .where(and(eq(sentinelOrderLevels.userId, userId), inArray(sentinelOrderLevels.tradeId, tradeIds)))
+          .returning({ id: sentinelOrderLevels.id });
+        
+        const deletedTrades = await tx.delete(sentinelTrades)
+          .where(eq(sentinelTrades.userId, userId))
+          .returning({ id: sentinelTrades.id });
+        
+        return {
+          trades: deletedTrades.length,
+          evaluations: deletedEvals.length,
+          events: deletedEvents.length,
+          labels: deletedLabels.length,
+          orderLevels: deletedOrders.length
+        };
+      });
+      
+      res.json({ success: true, deleted: result });
+    } catch (error) {
+      console.error("Delete all trading cards error:", error);
+      res.status(500).json({ error: "Failed to delete all trading cards" });
+    }
+  });
+
   // === Promote Imported Trades to Trading Cards ===
   // This endpoint converts raw imported transactions into position-level trade cards
   app.post("/api/sentinel/import/promote-to-cards", requireAuth, async (req: Request, res: Response) => {
