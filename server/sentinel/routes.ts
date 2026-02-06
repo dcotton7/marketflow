@@ -507,100 +507,135 @@ export function registerSentinelRoutes(app: Express): void {
       const user = await sentinelModels.getUserById(userId);
       const isAdmin = user?.isAdmin ?? false;
 
-      const [considering, active, closed, recentEvents] = await Promise.all([
-        sentinelModels.getTradesByStatus(userId, "considering"),
-        sentinelModels.getTradesByStatus(userId, "active"),
-        sentinelModels.getTradesByStatus(userId, "closed"),
+      const allTrades = await db.select().from(sentinelTrades)
+        .where(eq(sentinelTrades.userId, userId))
+        .orderBy(desc(sentinelTrades.createdAt));
+
+      const tradeIds = allTrades.map(t => t.id);
+
+      if (tradeIds.length === 0) {
+        const recentEvents = await sentinelModels.getRecentEvents(userId, 20);
+        const dashboard: DashboardData = {
+          considering: [],
+          active: [],
+          closed: [],
+          recentEvents: recentEvents.map(e => ({ ...e, trade: undefined })),
+        };
+        return res.json(dashboard);
+      }
+
+      const labelCondition = isAdmin
+        ? inArray(sentinelTradeToLabels.tradeId, tradeIds)
+        : and(
+            inArray(sentinelTradeToLabels.tradeId, tradeIds),
+            eq(sentinelTradeLabels.isAdminOnly, false)
+          );
+
+      const [allEvals, allLabels, allBatches, allOrderLevels, recentEvents] = await Promise.all([
+        db.select().from(sentinelEvaluations)
+          .where(inArray(sentinelEvaluations.tradeId, tradeIds))
+          .orderBy(desc(sentinelEvaluations.createdAt)),
+
+        db.select({
+            tradeId: sentinelTradeToLabels.tradeId,
+            id: sentinelTradeLabels.id,
+            name: sentinelTradeLabels.name,
+            color: sentinelTradeLabels.color,
+            isAdminOnly: sentinelTradeLabels.isAdminOnly,
+          })
+          .from(sentinelTradeToLabels)
+          .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
+          .where(labelCondition),
+
+        db.select({ batchId: sentinelImportBatches.batchId, importName: sentinelImportBatches.importName })
+          .from(sentinelImportBatches)
+          .where(eq(sentinelImportBatches.userId, userId)),
+
+        db.select().from(sentinelOrderLevels)
+          .where(eq(sentinelOrderLevels.userId, userId))
+          .orderBy(sentinelOrderLevels.price),
+
         sentinelModels.getRecentEvents(userId, 20),
       ]);
 
-      const enrichTrades = async (trades: typeof considering): Promise<TradeWithEvaluation[]> => {
-        return Promise.all(trades.map(async (trade) => {
-          const latestEval = await sentinelModels.getLatestEvaluation(trade.id);
-          
-          // Fetch labels with proper admin visibility filtering
-          let labels;
-          if (isAdmin) {
-            labels = await db
-              .select({
-                id: sentinelTradeLabels.id,
-                name: sentinelTradeLabels.name,
-                color: sentinelTradeLabels.color,
-                isAdminOnly: sentinelTradeLabels.isAdminOnly,
-              })
-              .from(sentinelTradeToLabels)
-              .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
-              .where(eq(sentinelTradeToLabels.tradeId, trade.id));
-          } else {
-            labels = await db
-              .select({
-                id: sentinelTradeLabels.id,
-                name: sentinelTradeLabels.name,
-                color: sentinelTradeLabels.color,
-                isAdminOnly: sentinelTradeLabels.isAdminOnly,
-              })
-              .from(sentinelTradeToLabels)
-              .innerJoin(sentinelTradeLabels, eq(sentinelTradeToLabels.labelId, sentinelTradeLabels.id))
-              .where(
-                and(
-                  eq(sentinelTradeToLabels.tradeId, trade.id),
-                  eq(sentinelTradeLabels.isAdminOnly, false)
-                )
-              );
-          }
-          
-          // Fetch importName from batch if trade has an importBatchId
-          let importName: string | undefined = undefined;
-          if (trade.importBatchId) {
-            const batch = await db.select({ importName: sentinelImportBatches.importName })
-              .from(sentinelImportBatches)
-              .where(eq(sentinelImportBatches.batchId, trade.importBatchId))
-              .limit(1);
-            if (batch.length > 0 && batch[0].importName) {
-              importName = batch[0].importName;
-            }
-          }
-          
-          // Fetch order levels (stops and targets)
-          const orderLevels = await db.select().from(sentinelOrderLevels)
-            .where(and(
-              eq(sentinelOrderLevels.tradeId, trade.id),
-              eq(sentinelOrderLevels.userId, userId)
-            ))
-            .orderBy(sentinelOrderLevels.price);
-          
-          return {
-            ...trade,
-            labels,
-            importName,
-            orderLevels,
-            latestEvaluation: latestEval ? {
-              score: latestEval.score,
-              recommendation: latestEval.recommendation,
-              riskFlags: latestEval.riskFlags || [],
-            } : undefined,
-          };
-        }));
+      const evalsByTrade = new Map<number, typeof allEvals[0]>();
+      for (const ev of allEvals) {
+        if (!evalsByTrade.has(ev.tradeId)) {
+          evalsByTrade.set(ev.tradeId, ev);
+        }
+      }
+
+      const labelsByTrade = new Map<number, typeof allLabels>();
+      for (const label of allLabels) {
+        const existing = labelsByTrade.get(label.tradeId) || [];
+        existing.push(label);
+        labelsByTrade.set(label.tradeId, existing);
+      }
+
+      const batchNameMap = new Map<string, string>();
+      for (const b of allBatches) {
+        if (b.importName) batchNameMap.set(b.batchId, b.importName);
+      }
+
+      const ordersByTrade = new Map<number, typeof allOrderLevels>();
+      for (const ol of allOrderLevels) {
+        const existing = ordersByTrade.get(ol.tradeId) || [];
+        existing.push(ol);
+        ordersByTrade.set(ol.tradeId, existing);
+      }
+
+      const tradeSymbolMap = new Map<number, string>();
+      for (const t of allTrades) {
+        tradeSymbolMap.set(t.id, t.symbol);
+      }
+
+      const enrichTrade = (trade: typeof allTrades[0]): TradeWithEvaluation => {
+        const latestEval = evalsByTrade.get(trade.id);
+        const labels = labelsByTrade.get(trade.id) || [];
+        const importName = trade.importBatchId ? batchNameMap.get(trade.importBatchId) : undefined;
+        const orderLevels = ordersByTrade.get(trade.id) || [];
+
+        return {
+          ...trade,
+          labels,
+          importName,
+          orderLevels,
+          latestEvaluation: latestEval ? {
+            score: latestEval.score,
+            recommendation: latestEval.recommendation,
+            riskFlags: latestEval.riskFlags || [],
+          } : undefined,
+        };
       };
 
-      const enrichedConsidering = await enrichTrades(considering);
-      const enrichedActive = await enrichTrades(active);
-      const enrichedClosed = await enrichTrades(closed);
+      const considering = allTrades.filter(t => t.status === "considering").map(enrichTrade);
+      const active = allTrades.filter(t => t.status === "active").map(enrichTrade);
+      const closed = allTrades.filter(t => t.status === "closed").map(enrichTrade);
 
-      const eventsWithTrades: EventWithTrade[] = await Promise.all(
-        recentEvents.map(async (event) => {
-          const trade = await sentinelModels.getTrade(event.tradeId);
-          return {
-            ...event,
-            trade: trade ? { symbol: trade.symbol } : undefined,
-          };
-        })
-      );
+      const missingEventTradeIds = recentEvents
+        .map(e => e.tradeId)
+        .filter(id => !tradeSymbolMap.has(id));
+      if (missingEventTradeIds.length > 0) {
+        const uniqueMissing = [...new Set(missingEventTradeIds)];
+        const missingTrades = await db.select({ id: sentinelTrades.id, symbol: sentinelTrades.symbol })
+          .from(sentinelTrades)
+          .where(inArray(sentinelTrades.id, uniqueMissing));
+        for (const t of missingTrades) {
+          tradeSymbolMap.set(t.id, t.symbol);
+        }
+      }
+
+      const eventsWithTrades: EventWithTrade[] = recentEvents.map(event => ({
+        ...event,
+        trade: tradeSymbolMap.has(event.tradeId) 
+          ? { symbol: tradeSymbolMap.get(event.tradeId)! } 
+          : undefined,
+      }));
 
       const dashboard: DashboardData = {
-        considering: enrichedConsidering,
-        active: enrichedActive,
-        closed: enrichedClosed,
+        considering,
+        active,
+        closed,
         recentEvents: eventsWithTrades,
       };
 
