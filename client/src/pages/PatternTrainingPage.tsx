@@ -43,8 +43,6 @@ interface PointData {
   nearestMa?: string;
   nearestMaDistance?: number;
   technicalData?: Record<string, number | undefined>;
-  secondPointPrice?: number;
-  secondPointDate?: string;
   resistanceTouchCount?: number;
 }
 
@@ -99,7 +97,6 @@ export default function PatternTrainingPage() {
 
   const [activePointRole, setActivePointRole] = useState<PointRole | null>(null);
   const [points, setPoints] = useState<Record<string, PointData>>({});
-  const [resistanceFirstClick, setResistanceFirstClick] = useState<{ price: number; date: string } | null>(null);
   const [pointsSaved, setPointsSaved] = useState(false);
   const [editingPoints, setEditingPoints] = useState(true);
 
@@ -228,50 +225,11 @@ export default function PatternTrainingPage() {
       setEditingPoints(true);
       setCurrentSetupId(null);
       setCalculatedMetrics({});
-      setResistanceFirstClick(null);
     }
   }, [ticker]);
 
   const handleCandleClick = useCallback(async (candle: ChartCandle, clickedPrice: number) => {
     if (!activePointRole || !editingPoints || !searchTicker) return;
-
-    if (activePointRole === "resistance_test") {
-      if (!resistanceFirstClick) {
-        setResistanceFirstClick({ price: clickedPrice, date: candle.date });
-        toast({ title: "Resistance Test: Click second point" });
-        return;
-      }
-
-      try {
-        const res = await fetch("/api/sentinel/pattern-training/point-technicals", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticker: searchTicker, pointDate: candle.date, timeframe }),
-        });
-        const techData = res.ok ? await res.json() : null;
-
-        const avgPrice = (resistanceFirstClick.price + clickedPrice) / 2;
-
-        setPoints(prev => ({
-          ...prev,
-          resistance_test: {
-            pointRole: "resistance_test",
-            price: resistanceFirstClick.price,
-            pointDate: resistanceFirstClick.date,
-            ohlcv: techData?.ohlcv,
-            technicalData: techData?.technicals,
-            secondPointPrice: clickedPrice,
-            secondPointDate: candle.date,
-          },
-        }));
-        setResistanceFirstClick(null);
-        setActivePointRole(null);
-        toast({ title: `Resistance Test set: $${avgPrice.toFixed(2)}` });
-      } catch {
-        toast({ title: "Failed to load technical data", variant: "destructive" });
-      }
-      return;
-    }
 
     try {
       const res = await fetch("/api/sentinel/pattern-training/point-technicals", {
@@ -318,34 +276,16 @@ export default function PatternTrainingPage() {
     } catch {
       toast({ title: "Failed to load technical data", variant: "destructive" });
     }
-  }, [activePointRole, editingPoints, searchTicker, timeframe, points, resistanceFirstClick, toast]);
+  }, [activePointRole, editingPoints, searchTicker, timeframe, points, toast]);
 
   const markers = useMemo(() => {
-    return Object.values(points).flatMap(p => {
-      const items = [{
-        time: Math.floor(new Date(p.pointDate).getTime() / 1000),
-        position: (POINT_SHAPES[p.pointRole] === "arrowDown" ? "belowBar" : "aboveBar") as "aboveBar" | "belowBar",
-        color: POINT_COLORS[p.pointRole] || "#ffffff",
-        shape: POINT_SHAPES[p.pointRole] || "circle" as "circle" | "arrowDown" | "arrowUp",
-        text: TRAINING_POINT_ROLES.find(r => r.value === p.pointRole)?.label || p.pointRole,
-      }];
-      if (p.pointRole === "resistance_test" && p.secondPointDate) {
-        items.push({
-          time: Math.floor(new Date(p.secondPointDate).getTime() / 1000),
-          position: "aboveBar" as "aboveBar" | "belowBar",
-          color: POINT_COLORS.resistance_test,
-          shape: "circle" as "circle" | "arrowDown" | "arrowUp",
-          text: "Resistance 2",
-        });
-      }
-      return items;
-    });
-  }, [points]);
-
-  const resistanceLine = useMemo(() => {
-    const rp = points.resistance_test;
-    if (!rp || !rp.secondPointPrice) return null;
-    return { price1: rp.price, price2: rp.secondPointPrice };
+    return Object.values(points).map(p => ({
+      time: Math.floor(new Date(p.pointDate).getTime() / 1000),
+      position: (POINT_SHAPES[p.pointRole] === "arrowDown" ? "belowBar" : "aboveBar") as "aboveBar" | "belowBar",
+      color: POINT_COLORS[p.pointRole] || "#ffffff",
+      shape: POINT_SHAPES[p.pointRole] || "circle" as "circle" | "arrowDown" | "arrowUp",
+      text: TRAINING_POINT_ROLES.find(r => r.value === p.pointRole)?.label || p.pointRole,
+    }));
   }, [points]);
 
   const priceLines = useMemo(() => {
@@ -474,7 +414,6 @@ export default function PatternTrainingPage() {
     setTags([]);
     setFiveMinEMACross(false);
     setMacdCross(false);
-    setResistanceFirstClick(null);
     setActivePointRole(null);
   };
 
@@ -561,7 +500,6 @@ export default function PatternTrainingPage() {
                       data={chartData}
                       onCandleClick={editingPoints ? handleCandleClick : undefined}
                       markers={markers}
-                      resistanceLine={resistanceLine}
                       priceLines={priceLines}
                       height={controlPointsHeight}
                     />
@@ -798,7 +736,6 @@ export default function PatternTrainingPage() {
                       {TRAINING_POINT_ROLES.map(role => {
                         const point = points[role.value];
                         const isActive = activePointRole === role.value;
-                        const isResistanceWaiting = role.value === "resistance_test" && resistanceFirstClick;
 
                         return (
                           <div
@@ -813,9 +750,6 @@ export default function PatternTrainingPage() {
                             onClick={() => {
                               if (editingPoints) {
                                 setActivePointRole(isActive ? null : role.value);
-                                if (role.value !== "resistance_test") {
-                                  setResistanceFirstClick(null);
-                                }
                               }
                             }}
                             data-testid={`point-box-${role.value}`}
@@ -828,7 +762,6 @@ export default function PatternTrainingPage() {
                               <span className="text-xs font-medium">{role.label}</span>
                               {role.required && <Badge variant="outline" className="text-[10px] px-1 py-0">REQ</Badge>}
                               {!role.required && <span className="text-[10px] text-muted-foreground">optional</span>}
-                              {isResistanceWaiting && <Badge variant="outline" className="text-[10px] px-1 py-0 text-yellow-400 border-yellow-400/30">Click 2nd</Badge>}
                             </div>
                             {point ? (
                               <div className="space-y-0.5 ml-4">
@@ -875,9 +808,9 @@ export default function PatternTrainingPage() {
                                     )}
                                   </>
                                 )}
-                                {role.value === "resistance_test" && point.secondPointPrice && (
+                                {role.value === "resistance_test" && point.percentFromEntry !== undefined && (
                                   <div className="text-[10px] text-yellow-400">
-                                    Line: ${point.price.toFixed(2)} - ${point.secondPointPrice.toFixed(2)}
+                                    {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
                                   </div>
                                 )}
                                 {(role.value === "breakout_confirmed" || role.value === "breakdown") && point.percentFromEntry !== undefined && (

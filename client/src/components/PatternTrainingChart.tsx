@@ -42,11 +42,6 @@ interface ChartMarker {
   text: string;
 }
 
-interface ResistanceLine {
-  price1: number;
-  price2: number;
-}
-
 interface PriceLevelLine {
   price: number;
   color: string;
@@ -60,7 +55,6 @@ interface PatternTrainingChartProps {
   };
   onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
-  resistanceLine?: ResistanceLine | null;
   priceLines?: PriceLevelLine[];
   height?: number;
 }
@@ -77,7 +71,6 @@ export function PatternTrainingChart({
   data,
   onCandleClick,
   markers,
-  resistanceLine,
   priceLines,
   height,
 }: PatternTrainingChartProps) {
@@ -87,7 +80,6 @@ export function PatternTrainingChart({
   const onCandleClickRef = useRef(onCandleClick);
   const candlesRef = useRef(data.candles);
   const markersHandleRef = useRef<any>(null);
-  const resistSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const priceLinesRef = useRef<any[]>([]);
   const chartHeightRef = useRef(height || 500);
 
@@ -138,7 +130,6 @@ export function PatternTrainingChart({
       chartRef.current = null;
       candleSeriesRef.current = null;
       markersHandleRef.current = null;
-      resistSeriesRef.current = [];
       priceLinesRef.current = [];
     }
 
@@ -303,7 +294,6 @@ export function PatternTrainingChart({
         chartRef.current = null;
         candleSeriesRef.current = null;
         markersHandleRef.current = null;
-        resistSeriesRef.current = [];
         priceLinesRef.current = [];
       }
     };
@@ -333,52 +323,6 @@ export function PatternTrainingChart({
       );
     }
   }, [markers]);
-
-  useEffect(() => {
-    if (!chartRef.current || data.candles.length === 0) return;
-
-    for (const s of resistSeriesRef.current) {
-      try {
-        chartRef.current.removeSeries(s);
-      } catch {}
-    }
-    resistSeriesRef.current = [];
-
-    if (!resistanceLine) return;
-
-    const firstTime = data.candles[0].timestamp;
-    const lastTime = data.candles[data.candles.length - 1].timestamp;
-
-    const resistSeries1 = chartRef.current.addSeries(LineSeries, {
-      color: "#f59e0b",
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-    resistSeries1.setData([
-      { time: firstTime as any, value: resistanceLine.price1 },
-      { time: lastTime as any, value: resistanceLine.price1 },
-    ]);
-    resistSeriesRef.current.push(resistSeries1);
-
-    if (resistanceLine.price2 !== resistanceLine.price1) {
-      const resistSeries2 = chartRef.current.addSeries(LineSeries, {
-        color: "#f59e0b",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
-      resistSeries2.setData([
-        { time: firstTime as any, value: resistanceLine.price2 },
-        { time: lastTime as any, value: resistanceLine.price2 },
-      ]);
-      resistSeriesRef.current.push(resistSeries2);
-    }
-  }, [resistanceLine, data.candles]);
 
   useEffect(() => {
     if (chartRef.current) {
