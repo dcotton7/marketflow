@@ -1058,12 +1058,51 @@ export const patternTrainingPoints = pgTable("pattern_training_points", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const patternTrainingEvaluations = pgTable("pattern_training_evaluations", {
+  id: serial("id").primaryKey(),
+  setupId: integer("setup_id").notNull().references(() => patternTrainingSetups.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => sentinelUsers.id),
+  score: integer("score").notNull(),
+  confidence: integer("confidence").notNull(),
+  rrRatio: doublePrecision("rr_ratio"),
+  verdict: text("verdict").notNull(),
+  strengths: text("strengths").array().default([]),
+  weaknesses: text("weaknesses").array().default([]),
+  suggestions: text("suggestions").array().default([]),
+  riskFlags: text("risk_flags").array().default([]),
+  similarSetups: jsonb("similar_setups").$type<{
+    setupId: number;
+    ticker: string;
+    patternType: string;
+    outcome: string;
+    score: number;
+    similarity: string;
+  }[]>().default([]),
+  patternStats: jsonb("pattern_stats").$type<{
+    totalSetups: number;
+    setupsWithOutcomes: number;
+    winRate: number;
+    avgRR: number;
+    byPatternType: Record<string, { count: number; wins: number; winRate: number; avgRR: number }>;
+  }>(),
+  learningContext: jsonb("learning_context").$type<{
+    totalSetupsUsed: number;
+    setupsWithOutcomes: number;
+    similarSetupsFound: number;
+    patternTypesKnown: string[];
+  }>(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Schema exports for Pattern Training
 export const insertPatternTrainingSetupSchema = createInsertSchema(patternTrainingSetups).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertPatternTrainingPointSchema = createInsertSchema(patternTrainingPoints).omit({ id: true, createdAt: true });
+export const insertPatternTrainingEvaluationSchema = createInsertSchema(patternTrainingEvaluations).omit({ id: true, createdAt: true });
 
 // Type exports for Pattern Training
 export type PatternTrainingSetup = typeof patternTrainingSetups.$inferSelect;
 export type PatternTrainingPoint = typeof patternTrainingPoints.$inferSelect;
+export type PatternTrainingEvaluation = typeof patternTrainingEvaluations.$inferSelect;
 export type InsertPatternTrainingSetup = z.infer<typeof insertPatternTrainingSetupSchema>;
 export type InsertPatternTrainingPoint = z.infer<typeof insertPatternTrainingPointSchema>;
+export type InsertPatternTrainingEvaluation = z.infer<typeof insertPatternTrainingEvaluationSchema>;
