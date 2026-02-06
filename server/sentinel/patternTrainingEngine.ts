@@ -37,6 +37,8 @@ export interface ChartDataWithIndicators {
     sma50: (number | null)[];
     sma150: (number | null)[];
     sma200: (number | null)[];
+    avwapHigh?: (number | null)[];
+    avwapLow?: (number | null)[];
   };
   ticker: string;
   timeframe: string;
@@ -179,6 +181,82 @@ function calculateEMASeriesAligned(prices: number[], period: number): (number | 
   return result.reverse();
 }
 
+function calculateSMASeriesForward(prices: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  for (let i = 0; i < prices.length; i++) {
+    if (i < period - 1) {
+      result.push(null);
+    } else {
+      const slice = prices.slice(i - period + 1, i + 1);
+      result.push(slice.reduce((a, b) => a + b, 0) / period);
+    }
+  }
+  return result;
+}
+
+function calculateEMASeriesForward(prices: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  if (prices.length < period) {
+    return prices.map(() => null);
+  }
+  const k = 2 / (period + 1);
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = 0; i < period - 1; i++) {
+    result.push(null);
+  }
+  result.push(ema);
+  for (let i = period; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+    result.push(ema);
+  }
+  return result;
+}
+
+function calculateAVWAPSeries(
+  candles: { high: number; low: number; close: number; volume: number }[],
+  anchorIndex: number
+): (number | null)[] {
+  const result: (number | null)[] = [];
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  for (let i = 0; i < candles.length; i++) {
+    if (i < anchorIndex) {
+      result.push(null);
+    } else {
+      const c = candles[i];
+      const tp = (c.high + c.low + c.close) / 3;
+      cumulativeTPV += tp * c.volume;
+      cumulativeVolume += c.volume;
+      result.push(cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null);
+    }
+  }
+  return result;
+}
+
+function findRecentHighIndex(candles: { high: number; close: number }[], lookback: number = 100): number {
+  const end = candles.length - 1;
+  const start = Math.max(0, end - lookback);
+  let maxIdx = start;
+  for (let i = start; i <= end; i++) {
+    if (candles[i].high >= candles[maxIdx].high) {
+      maxIdx = i;
+    }
+  }
+  return maxIdx;
+}
+
+function findRecentLowIndex(candles: { low: number; close: number }[], lookback: number = 100): number {
+  const end = candles.length - 1;
+  const start = Math.max(0, end - lookback);
+  let minIdx = start;
+  for (let i = start; i <= end; i++) {
+    if (candles[i].low <= candles[minIdx].low) {
+      minIdx = i;
+    }
+  }
+  return minIdx;
+}
+
 function calculateATR(candles: { high: number; low: number; close: number }[], period: number): number {
   if (candles.length < period + 1) return 0;
   let atrSum = 0;
@@ -315,7 +393,7 @@ export async function fetchChartData(
   lookbackDays?: number
 ): Promise<ChartDataWithIndicators | null> {
   try {
-    const days = lookbackDays || (timeframe === "daily" ? 400 : 90);
+    const days = lookbackDays || (timeframe === "daily" ? 750 : 90);
     const interval = timeframe === "daily" ? "1d" : "15m";
     
     const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval);
@@ -334,17 +412,22 @@ export async function fetchChartData(
       volume: b.volume,
     })).reverse();
 
-    const closes = bars.map(b => b.close);
+    const closes = candles.map(c => c.close);
 
-    const sma10 = calculateSMASeries(closes, 10);
-    const ema21 = calculateEMASeriesAligned(closes, 21);
-    const sma50 = calculateSMASeries(closes, 50);
-    const sma150 = calculateSMASeries(closes, 150);
-    const sma200 = calculateSMASeries(closes, 200);
+    const sma10 = calculateSMASeriesForward(closes, 10);
+    const ema21 = calculateEMASeriesForward(closes, 21);
+    const sma50 = calculateSMASeriesForward(closes, 50);
+    const sma150 = calculateSMASeriesForward(closes, 150);
+    const sma200 = calculateSMASeriesForward(closes, 200);
+
+    const avwapHighIdx = findRecentHighIndex(candles, 120);
+    const avwapLowIdx = findRecentLowIndex(candles, 120);
+    const avwapHigh = calculateAVWAPSeries(candles, avwapHighIdx);
+    const avwapLow = calculateAVWAPSeries(candles, avwapLowIdx);
 
     return {
       candles,
-      indicators: { sma10, ema21, sma50, sma150, sma200 },
+      indicators: { sma10, ema21, sma50, sma150, sma200, avwapHigh, avwapLow },
       ticker: ticker.toUpperCase(),
       timeframe,
     };

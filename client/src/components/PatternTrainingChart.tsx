@@ -30,6 +30,8 @@ interface ChartIndicators {
   sma50: (number | null)[];
   sma150: (number | null)[];
   sma200: (number | null)[];
+  avwapHigh?: (number | null)[];
+  avwapLow?: (number | null)[];
 }
 
 interface ChartMarker {
@@ -188,6 +190,35 @@ export function PatternTrainingChart({
       }
     }
 
+    const avwapConfigs = [
+      { key: "avwapHigh" as const, label: "AVWAP High", color: "#e879f9", style: LineStyle.Dashed },
+      { key: "avwapLow" as const, label: "AVWAP Low", color: "#38bdf8", style: LineStyle.Dashed },
+    ];
+
+    for (const avwap of avwapConfigs) {
+      const vals = data.indicators[avwap.key];
+      if (!vals || vals.length === 0) continue;
+
+      const lineData: LineData[] = [];
+      for (let i = 0; i < vals.length; i++) {
+        const val = vals[i];
+        if (val !== null && i < data.candles.length) {
+          lineData.push({ time: data.candles[i].timestamp as any, value: val });
+        }
+      }
+
+      if (lineData.length > 0) {
+        const series = chart.addSeries(LineSeries, {
+          color: avwap.color,
+          lineWidth: 2,
+          lineStyle: avwap.style,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        series.setData(lineData);
+      }
+    }
+
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
       priceScaleId: "volume",
@@ -297,6 +328,18 @@ export function PatternTrainingChart({
             <span className="text-slate-400">{ma.label}</span>
           </div>
         ))}
+        {data.indicators.avwapHigh && data.indicators.avwapHigh.some(v => v !== null) && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <div className="h-0.5 w-3 rounded border-b border-dashed" style={{ borderColor: "#e879f9" }} />
+            <span className="text-slate-400">AVWAP High</span>
+          </div>
+        )}
+        {data.indicators.avwapLow && data.indicators.avwapLow.some(v => v !== null) && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <div className="h-0.5 w-3 rounded border-b border-dashed" style={{ borderColor: "#38bdf8" }} />
+            <span className="text-slate-400">AVWAP Low</span>
+          </div>
+        )}
       </div>
       <div ref={containerRef} className="w-full" style={{ height: 500 }} />
     </div>
