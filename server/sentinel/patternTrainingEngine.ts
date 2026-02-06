@@ -32,10 +32,10 @@ export interface ChartCandle {
 export interface ChartDataWithIndicators {
   candles: ChartCandle[];
   indicators: {
-    sma10: (number | null)[];
-    ema21: (number | null)[];
+    ema5: (number | null)[];
+    ema10: (number | null)[];
+    sma21: (number | null)[];
     sma50: (number | null)[];
-    sma150: (number | null)[];
     sma200: (number | null)[];
     avwapHigh?: (number | null)[];
     avwapLow?: (number | null)[];
@@ -414,10 +414,10 @@ export async function fetchChartData(
 
     const closes = candles.map(c => c.close);
 
-    const sma10 = calculateSMASeriesForward(closes, 10);
-    const ema21 = calculateEMASeriesForward(closes, 21);
+    const ema5 = calculateEMASeriesForward(closes, 5);
+    const ema10 = calculateEMASeriesForward(closes, 10);
+    const sma21 = calculateSMASeriesForward(closes, 21);
     const sma50 = calculateSMASeriesForward(closes, 50);
-    const sma150 = calculateSMASeriesForward(closes, 150);
     const sma200 = calculateSMASeriesForward(closes, 200);
 
     const avwapHighIdx = findRecentHighIndex(candles, 120);
@@ -427,7 +427,7 @@ export async function fetchChartData(
 
     return {
       candles,
-      indicators: { sma10, ema21, sma50, sma150, sma200, avwapHigh, avwapLow },
+      indicators: { ema5, ema10, sma21, sma50, sma200, avwapHigh, avwapLow },
       ticker: ticker.toUpperCase(),
       timeframe,
     };

@@ -25,10 +25,10 @@ export interface ChartCandle {
 }
 
 interface ChartIndicators {
-  sma10: (number | null)[];
-  ema21: (number | null)[];
+  ema5: (number | null)[];
+  ema10: (number | null)[];
+  sma21: (number | null)[];
   sma50: (number | null)[];
-  sma150: (number | null)[];
   sma200: (number | null)[];
   avwapHigh?: (number | null)[];
   avwapLow?: (number | null)[];
@@ -58,11 +58,11 @@ interface PatternTrainingChartProps {
 }
 
 const MA_CONFIG = [
-  { key: "sma10" as const, label: "10 SMA", color: "#42a5f5" },
-  { key: "ema21" as const, label: "21 EMA", color: "#66bb6a" },
+  { key: "ema5" as const, label: "5 EMA", color: "#66bb6a" },
+  { key: "ema10" as const, label: "10 EMA", color: "#42a5f5" },
+  { key: "sma21" as const, label: "21 SMA", color: "#ec4899" },
   { key: "sma50" as const, label: "50 SMA", color: "#ef5350" },
-  { key: "sma150" as const, label: "150 SMA", color: "#9e9e9e" },
-  { key: "sma200" as const, label: "200 SMA", color: "#cccccc" },
+  { key: "sma200" as const, label: "200 SMA", color: "#ffffff" },
 ];
 
 export function PatternTrainingChart({
@@ -74,10 +74,20 @@ export function PatternTrainingChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const onCandleClickRef = useRef(onCandleClick);
+  const candlesRef = useRef(data.candles);
+
+  useEffect(() => {
+    onCandleClickRef.current = onCandleClick;
+  }, [onCandleClick]);
+
+  useEffect(() => {
+    candlesRef.current = data.candles;
+  }, [data.candles]);
 
   const handleChartClick = useCallback(
     (param: any) => {
-      if (!onCandleClick || !param.time || !candleSeriesRef.current) return;
+      if (!onCandleClickRef.current || !param.time || !candleSeriesRef.current) return;
 
       const timestamp =
         typeof param.time === "object"
@@ -88,7 +98,7 @@ export function PatternTrainingChart({
             )
           : (param.time as number);
 
-      const candle = data.candles.find((c) => c.timestamp === timestamp);
+      const candle = candlesRef.current.find((c) => c.timestamp === timestamp);
       if (candle) {
         let clickedPrice = candle.close;
         if (param.point && typeof param.point.y === "number") {
@@ -97,16 +107,20 @@ export function PatternTrainingChart({
             clickedPrice = Math.round(priceFromY * 100) / 100;
           }
         }
-        onCandleClick(candle, clickedPrice);
+        onCandleClickRef.current(candle, clickedPrice);
       }
     },
-    [onCandleClick, data.candles]
+    []
   );
 
   useEffect(() => {
     if (!containerRef.current || data.candles.length === 0) return;
 
+    let savedRange: any = null;
     if (chartRef.current) {
+      try {
+        savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
+      } catch {}
       chartRef.current.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -198,8 +212,8 @@ export function PatternTrainingChart({
     }
 
     const avwapConfigs = [
-      { key: "avwapHigh" as const, label: "AVWAP High", color: "#e879f9", style: LineStyle.Dashed },
-      { key: "avwapLow" as const, label: "AVWAP Low", color: "#38bdf8", style: LineStyle.Dashed },
+      { key: "avwapHigh" as const, label: "VWAP", color: "#f97316", style: LineStyle.Dotted },
+      { key: "avwapLow" as const, label: "Daily VWAP", color: "#38bdf8", style: LineStyle.Dotted },
     ];
 
     for (const avwap of avwapConfigs) {
@@ -298,7 +312,11 @@ export function PatternTrainingChart({
     chart.subscribeCrosshairMove(() => {});
     chart.subscribeClick(handleChartClick);
 
-    chart.timeScale().fitContent();
+    if (savedRange) {
+      chart.timeScale().setVisibleLogicalRange(savedRange);
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -321,7 +339,7 @@ export function PatternTrainingChart({
         candleSeriesRef.current = null;
       }
     };
-  }, [data, markers, resistanceLine, handleChartClick]);
+  }, [data, markers, resistanceLine]);
 
   return (
     <div data-testid="chart-pattern-training" className="relative w-full">
@@ -337,14 +355,14 @@ export function PatternTrainingChart({
         ))}
         {data.indicators.avwapHigh && data.indicators.avwapHigh.some(v => v !== null) && (
           <div className="flex items-center gap-1.5 text-xs">
-            <div className="h-0.5 w-3 rounded border-b border-dashed" style={{ borderColor: "#e879f9" }} />
-            <span className="text-slate-400">AVWAP High</span>
+            <div className="h-0.5 w-3 rounded border-b border-dotted" style={{ borderColor: "#f97316" }} />
+            <span className="text-slate-400">VWAP</span>
           </div>
         )}
         {data.indicators.avwapLow && data.indicators.avwapLow.some(v => v !== null) && (
           <div className="flex items-center gap-1.5 text-xs">
-            <div className="h-0.5 w-3 rounded border-b border-dashed" style={{ borderColor: "#38bdf8" }} />
-            <span className="text-slate-400">AVWAP Low</span>
+            <div className="h-0.5 w-3 rounded border-b border-dotted" style={{ borderColor: "#38bdf8" }} />
+            <span className="text-slate-400">Daily VWAP</span>
           </div>
         )}
       </div>
