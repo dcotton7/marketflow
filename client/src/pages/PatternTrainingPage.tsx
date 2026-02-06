@@ -119,19 +119,6 @@ export default function PatternTrainingPage() {
   const [libraryFilter, setLibraryFilter] = useState({ patternType: "", rating: 0, ticker: "" });
 
   const controlPointsRef = useRef<HTMLDivElement>(null);
-  const [controlPointsHeight, setControlPointsHeight] = useState(500);
-
-  useEffect(() => {
-    if (!controlPointsRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const h = entry.contentRect.height;
-        if (h > 0) setControlPointsHeight(h);
-      }
-    });
-    observer.observe(controlPointsRef.current);
-    return () => observer.disconnect();
-  }, [chartLoaded]);
 
   const { data: chartData, isLoading: chartLoading } = useQuery<{
     candles: ChartCandle[];
@@ -487,11 +474,11 @@ export default function PatternTrainingPage() {
             </div>
 
             {chartLoaded && (
-              <div className="flex gap-4">
-                <div className="flex-1 min-w-0">
+              <div className="flex gap-4 items-stretch">
+                <div className="flex-1 min-w-0 flex flex-col">
                   {chartLoading ? (
-                    <Card>
-                      <CardContent className="flex items-center justify-center" style={{ height: controlPointsHeight }}>
+                    <Card className="flex-1">
+                      <CardContent className="flex items-center justify-center h-full">
                         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                       </CardContent>
                     </Card>
@@ -501,7 +488,6 @@ export default function PatternTrainingPage() {
                       onCandleClick={editingPoints ? handleCandleClick : undefined}
                       markers={markers}
                       priceLines={priceLines}
-                      height={controlPointsHeight}
                     />
                   ) : (
                     <Card>

@@ -56,7 +56,6 @@ interface PatternTrainingChartProps {
   onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
   priceLines?: PriceLevelLine[];
-  height?: number;
 }
 
 const MA_CONFIG = [
@@ -72,7 +71,6 @@ export function PatternTrainingChart({
   onCandleClick,
   markers,
   priceLines,
-  height,
 }: PatternTrainingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -81,8 +79,6 @@ export function PatternTrainingChart({
   const candlesRef = useRef(data.candles);
   const markersHandleRef = useRef<any>(null);
   const priceLinesRef = useRef<any[]>([]);
-  const chartHeightRef = useRef(height || 500);
-
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
@@ -119,9 +115,6 @@ export function PatternTrainingChart({
     []
   );
 
-  const chartHeight = height || 500;
-  chartHeightRef.current = chartHeight;
-
   useEffect(() => {
     if (!containerRef.current || data.candles.length === 0) return;
 
@@ -133,9 +126,10 @@ export function PatternTrainingChart({
       priceLinesRef.current = [];
     }
 
+    const containerHeight = containerRef.current.clientHeight || 500;
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: chartHeightRef.current,
+      height: containerHeight,
       layout: {
         background: { type: ColorType.Solid, color: "#0f172a" },
         textColor: "#94a3b8",
@@ -277,9 +271,11 @@ export function PatternTrainingChart({
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (chartRef.current) {
-          chartRef.current.applyOptions({
-            width: entry.contentRect.width,
-          });
+          const w = entry.contentRect.width;
+          const h = entry.contentRect.height;
+          if (w > 0 && h > 0) {
+            chartRef.current.applyOptions({ width: w, height: h });
+          }
         }
       }
     });
@@ -324,14 +320,6 @@ export function PatternTrainingChart({
     }
   }, [markers]);
 
-  useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.applyOptions({ height: chartHeight });
-    }
-    if (containerRef.current) {
-      containerRef.current.style.height = `${chartHeight}px`;
-    }
-  }, [chartHeight]);
 
   useEffect(() => {
     if (!candleSeriesRef.current) return;
@@ -359,7 +347,7 @@ export function PatternTrainingChart({
   }, [priceLines]);
 
   return (
-    <div data-testid="chart-pattern-training" className="relative w-full">
+    <div data-testid="chart-pattern-training" className="relative w-full h-full flex flex-col">
       <div className="absolute top-2 left-2 z-10 flex flex-col gap-1 rounded bg-slate-900/80 px-2 py-1.5">
         {MA_CONFIG.map((ma) => (
           <div key={ma.key} className="flex items-center gap-1.5 text-xs">
@@ -383,7 +371,7 @@ export function PatternTrainingChart({
           </div>
         )}
       </div>
-      <div ref={containerRef} className="w-full" style={{ height: chartHeight }} />
+      <div ref={containerRef} className="w-full flex-1 min-h-[400px]" />
     </div>
   );
 }
