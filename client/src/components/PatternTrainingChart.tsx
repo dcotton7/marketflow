@@ -52,7 +52,7 @@ interface PatternTrainingChartProps {
     candles: ChartCandle[];
     indicators: ChartIndicators;
   };
-  onCandleClick?: (candle: ChartCandle) => void;
+  onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
   resistanceLine?: ResistanceLine | null;
 }
@@ -90,7 +90,14 @@ export function PatternTrainingChart({
 
       const candle = data.candles.find((c) => c.timestamp === timestamp);
       if (candle) {
-        onCandleClick(candle);
+        let clickedPrice = candle.close;
+        if (param.point && typeof param.point.y === "number") {
+          const priceFromY = candleSeriesRef.current.coordinateToPrice(param.point.y);
+          if (priceFromY !== null && isFinite(priceFromY)) {
+            clickedPrice = Math.round(priceFromY * 100) / 100;
+          }
+        }
+        onCandleClick(candle, clickedPrice);
       }
     },
     [onCandleClick, data.candles]

@@ -215,12 +215,12 @@ export default function PatternTrainingPage() {
     }
   }, [ticker]);
 
-  const handleCandleClick = useCallback(async (candle: ChartCandle) => {
+  const handleCandleClick = useCallback(async (candle: ChartCandle, clickedPrice: number) => {
     if (!activePointRole || !editingPoints || !searchTicker) return;
 
     if (activePointRole === "resistance_test") {
       if (!resistanceFirstClick) {
-        setResistanceFirstClick({ price: candle.close, date: candle.date });
+        setResistanceFirstClick({ price: clickedPrice, date: candle.date });
         toast({ title: "Resistance Test: Click second point" });
         return;
       }
@@ -233,7 +233,7 @@ export default function PatternTrainingPage() {
         });
         const techData = res.ok ? await res.json() : null;
 
-        const avgPrice = (resistanceFirstClick.price + candle.close) / 2;
+        const avgPrice = (resistanceFirstClick.price + clickedPrice) / 2;
 
         setPoints(prev => ({
           ...prev,
@@ -243,7 +243,7 @@ export default function PatternTrainingPage() {
             pointDate: resistanceFirstClick.date,
             ohlcv: techData?.ohlcv,
             technicalData: techData?.technicals,
-            secondPointPrice: candle.close,
+            secondPointPrice: clickedPrice,
             secondPointDate: candle.date,
           },
         }));
@@ -264,14 +264,13 @@ export default function PatternTrainingPage() {
       });
       const techData = res.ok ? await res.json() : null;
 
-      const entryPrice = points.entry?.price || candle.close;
       const percentFromEntry = activePointRole !== "entry" && points.entry
-        ? ((candle.close - points.entry.price) / points.entry.price) * 100
+        ? ((clickedPrice - points.entry.price) / points.entry.price) * 100
         : 0;
 
       const newPoint: PointData = {
         pointRole: activePointRole,
-        price: candle.close,
+        price: clickedPrice,
         pointDate: candle.date,
         ohlcv: techData?.ohlcv || { open: candle.open, high: candle.high, low: candle.low, close: candle.close, volume: candle.volume },
         percentFromEntry: activePointRole === "entry" ? 0 : percentFromEntry,
@@ -289,7 +288,7 @@ export default function PatternTrainingPage() {
             if (role !== "entry" && point.price) {
               updated[role] = {
                 ...point,
-                percentFromEntry: ((point.price - candle.close) / candle.close) * 100,
+                percentFromEntry: ((point.price - clickedPrice) / clickedPrice) * 100,
               };
             }
           }
@@ -298,7 +297,7 @@ export default function PatternTrainingPage() {
       });
 
       setActivePointRole(null);
-      toast({ title: `${TRAINING_POINT_ROLES.find(r => r.value === activePointRole)?.label} set: $${candle.close.toFixed(2)}` });
+      toast({ title: `${TRAINING_POINT_ROLES.find(r => r.value === activePointRole)?.label} set: $${clickedPrice.toFixed(2)}` });
     } catch {
       toast({ title: "Failed to load technical data", variant: "destructive" });
     }
