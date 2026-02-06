@@ -15,7 +15,7 @@ import {
   Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
   ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle,
-  VolumeX, Volume2, RefreshCw, Edit3, ShieldAlert
+  VolumeX, Volume2, RefreshCw, Edit3, ShieldAlert, CheckCircle2, Circle
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1335,42 +1335,13 @@ export default function SentinelImportPage() {
 
           <TabsContent value="history" className="mt-6">
             <Card>
-              <CardHeader className="flex flex-row items-start justify-between gap-4">
-                <div>
-                  <CardTitle>Import History</CardTitle>
-                  <CardDescription>Previous CSV imports and their status</CardDescription>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2">
-                    {hasPendingDuplicates && (
-                      <span className="text-xs text-orange-500 font-medium">
-                        {totalPendingDuplicates} duplicate{totalPendingDuplicates > 1 ? 's' : ''} need review first
-                      </span>
-                    )}
-                    {hasPendingOrphans && (
-                      <span className="text-xs text-yellow-500">
-                        {totalPendingOrphans} orphan{totalPendingOrphans > 1 ? 's' : ''} need review
-                      </span>
-                    )}
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => {
-                        setOrphanResolutions({});
-                        setCostBasisMap(null);
-                        setCostBasisFileName("");
-                        setCostBasisMatchCount(null);
-                        setShowAllOrphansDialog(true);
-                      }}
-                      disabled={!hasPendingOrphans}
-                      data-testid="button-resolve-all-orphans"
-                    >
-                      <AlertTriangle className="h-4 w-4 mr-2" />
-                      Resolve All Orphans
-                      {totalPendingOrphans > 0 && (
-                        <Badge variant="secondary" className="ml-1">{totalPendingOrphans}</Badge>
-                      )}
-                    </Button>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <CardTitle>Import History</CardTitle>
+                    <CardDescription>Previous CSV imports and their status</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Button 
                       variant="outline" 
                       size="sm"
@@ -1416,32 +1387,122 @@ export default function SentinelImportPage() {
                       )}
                       Cleanup Duplicates
                     </Button>
-                    <Button 
-                      variant="default" 
-                      size="sm"
-                      onClick={() => promoteToCardsMutation.mutate()}
-                      disabled={!allTrades || allTrades.length === 0 || promoteToCardsMutation.isPending || hasPendingDuplicates || hasPendingOrphans}
-                      data-testid="button-promote-to-cards"
-                    >
-                      {promoteToCardsMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <ArrowUpRight className="h-4 w-4 mr-2" />
-                      )}
-                      Promote to Trading Cards
-                    </Button>
                   </div>
-                  <Button 
-                    variant="destructive" 
-                    size="sm"
-                    onClick={() => setShowDeleteAllDialog(true)}
-                    disabled={!batches || batches.length === 0}
-                    data-testid="button-delete-all"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete All
-                  </Button>
                 </div>
+                {(() => {
+                  const hasBatches = batches && batches.length > 0;
+                  const hasImportedTrades = allTrades && allTrades.length > 0;
+                  const step1Complete = !!hasBatches;
+                  const step2Complete = step1Complete && !hasPendingDuplicates;
+                  const step3Complete = step2Complete && !hasPendingOrphans;
+
+                  const step1Disabled = hasPendingDuplicates;
+                  const step2Disabled = !step1Complete;
+                  const step3Disabled = !step2Complete;
+
+                  return (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground font-medium mr-1 uppercase tracking-wider">Workflow</span>
+                        <Button
+                          variant={step1Disabled ? "ghost" : "outline"}
+                          size="sm"
+                          onClick={() => setActiveTab("upload")}
+                          disabled={step1Disabled}
+                          data-testid="button-step-import"
+                          className={step1Disabled ? "opacity-50" : ""}
+                        >
+                          {step1Complete ? (
+                            <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                          ) : (
+                            <Circle className="h-4 w-4 mr-2 text-muted-foreground" />
+                          )}
+                          1. Import
+                        </Button>
+                        <Button
+                          variant={!step2Disabled && hasPendingDuplicates ? "outline" : "ghost"}
+                          size="sm"
+                          onClick={() => {
+                            const firstDupBatch = batches?.find(b => (b.duplicatesCount || 0) > 0);
+                            if (firstDupBatch) {
+                              setSelectedDuplicateBatchId(firstDupBatch.batchId);
+                              setShowDuplicateDialog(true);
+                            }
+                          }}
+                          disabled={step2Disabled || !hasPendingDuplicates}
+                          data-testid="button-step-resolve-duplicates"
+                          className={step2Disabled || (!hasPendingDuplicates && !step2Complete) ? "opacity-50" : step2Complete ? "opacity-70" : ""}
+                        >
+                          {step2Complete ? (
+                            <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                          ) : step2Disabled ? (
+                            <Circle className="h-4 w-4 mr-2 text-muted-foreground" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4 mr-2 text-orange-500" />
+                          )}
+                          2. Resolve Duplicates
+                          {hasPendingDuplicates && (
+                            <Badge variant="secondary" className="ml-1">{totalPendingDuplicates}</Badge>
+                          )}
+                        </Button>
+                        <Button
+                          variant={!step3Disabled && hasPendingOrphans ? "outline" : "ghost"}
+                          size="sm"
+                          onClick={() => {
+                            setOrphanResolutions({});
+                            setCostBasisMap(null);
+                            setCostBasisFileName("");
+                            setCostBasisMatchCount(null);
+                            setShowAllOrphansDialog(true);
+                          }}
+                          disabled={step3Disabled || !hasPendingOrphans}
+                          data-testid="button-step-resolve-orphans"
+                          className={step3Disabled || (!hasPendingOrphans && !step3Complete) ? "opacity-50" : step3Complete ? "opacity-70" : ""}
+                        >
+                          {step3Complete ? (
+                            <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                          ) : step3Disabled ? (
+                            <Circle className="h-4 w-4 mr-2 text-muted-foreground" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 mr-2 text-yellow-500" />
+                          )}
+                          3. Resolve Orphans
+                          {hasPendingOrphans && !step3Disabled && (
+                            <Badge variant="secondary" className="ml-1">{totalPendingOrphans}</Badge>
+                          )}
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground font-medium mr-1 uppercase tracking-wider">Actions</span>
+                        <Button 
+                          variant="default" 
+                          size="sm"
+                          onClick={() => promoteToCardsMutation.mutate()}
+                          disabled={!hasImportedTrades || promoteToCardsMutation.isPending || !step3Complete}
+                          data-testid="button-promote-to-cards"
+                          className={!step3Complete ? "opacity-50" : ""}
+                        >
+                          {promoteToCardsMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <ArrowUpRight className="h-4 w-4 mr-2" />
+                          )}
+                          Promote to Trading Cards
+                        </Button>
+                        <Button 
+                          variant="destructive" 
+                          size="sm"
+                          onClick={() => setShowDeleteAllDialog(true)}
+                          disabled={!hasBatches}
+                          data-testid="button-delete-all"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete All
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </CardHeader>
               <CardContent>
                 {batchesLoading ? (
