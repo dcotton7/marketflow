@@ -1089,7 +1089,13 @@ export default function SentinelImportPage() {
           <p className="text-muted-foreground">Upload CSV files from your brokerage to import trade history</p>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={(tab) => {
+          setActiveTab(tab);
+          if (tab === 'history') {
+            queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
+            queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/all-orphans'] });
+          }
+        }}>
           <TabsList className="grid w-full max-w-md grid-cols-4">
             <TabsTrigger value="upload" className="gap-2" data-testid="tab-upload">
               <Upload className="h-4 w-4" />
