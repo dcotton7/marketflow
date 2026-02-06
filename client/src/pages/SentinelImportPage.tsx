@@ -198,10 +198,10 @@ export default function SentinelImportPage() {
   const totalPendingDuplicates = batches?.reduce((sum, b) => sum + (b.duplicatesCount || 0), 0) || 0;
   const hasPendingDuplicates = totalPendingDuplicates > 0;
   
-  const { data: tradeSources } = useQuery<{ source: string; importBatchId: string | null; importName: string | null; count: number }[]>({
-    queryKey: ['/api/sentinel/trade-sources'],
+  const { data: tradeSources } = useQuery<{ id: string; name: string; count: number; isSystemTag?: boolean }[]>({
+    queryKey: ['/api/sentinel/trades/sources'],
   });
-  const hasExistingImportCards = tradeSources?.some(s => s.source === 'import') || false;
+  const hasExistingImportCards = tradeSources?.some(s => s.id !== 'hand' && s.count > 0) || false;
 
   const previewMutation = useMutation({
     mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string }) => {
@@ -386,7 +386,7 @@ export default function SentinelImportPage() {
         description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}`
       });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trade-sources'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades/sources'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/labels'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
