@@ -123,6 +123,9 @@ export default function SentinelImportPage() {
   const [selectedOrphanBatchId, setSelectedOrphanBatchId] = useState<string | null>(null);
   const [orphanResolutions, setOrphanResolutions] = useState<Record<string, { costBasis: string; openDate: string }>>({});
   const [recentlyUnmutedIds, setRecentlyUnmutedIds] = useState<Set<string>>(new Set());
+  const [costBasisMap, setCostBasisMap] = useState<Record<string, number> | null>(null);
+  const [costBasisFileName, setCostBasisFileName] = useState<string>("");
+  const [costBasisMatchCount, setCostBasisMatchCount] = useState<{ matched: number; total: number } | null>(null);
   
   // Duplicate detection state
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
@@ -635,7 +638,101 @@ export default function SentinelImportPage() {
   const handleReviewOrphans = (batchId: string) => {
     setSelectedOrphanBatchId(batchId);
     setOrphanResolutions({});
+    setCostBasisMap(null);
+    setCostBasisFileName("");
+    setCostBasisMatchCount(null);
     setShowOrphanDialog(true);
+  };
+
+  const parseFidelityClosedPositionsCsv = (csvText: string): Record<string, number> => {
+    const cleaned = csvText.replace(/^\uFEFF/, '');
+    const lines = cleaned.split('\n');
+    let headerIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim().startsWith('Symbol,Description,')) {
+        headerIndex = i;
+        break;
+      }
+    }
+    if (headerIndex === -1) return {};
+
+    const result: Record<string, number> = {};
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith('Totals') || line.startsWith('Disclosure') || line.startsWith('"')) break;
+
+      const parts: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let c = 0; c < line.length; c++) {
+        if (line[c] === '"') {
+          inQuotes = !inQuotes;
+        } else if (line[c] === ',' && !inQuotes) {
+          parts.push(current);
+          current = '';
+        } else {
+          current += line[c];
+        }
+      }
+      parts.push(current);
+
+      const symbol = parts[0]?.trim();
+      const avgCostStr = parts[8]?.trim().replace(/,/g, '');
+      if (symbol && avgCostStr) {
+        const avgCost = parseFloat(avgCostStr);
+        if (!isNaN(avgCost) && avgCost > 0) {
+          result[symbol.toUpperCase()] = avgCost;
+        }
+      }
+    }
+    return result;
+  };
+
+  const handleCostBasisCsvUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+
+      const parsed = parseFidelityClosedPositionsCsv(text);
+      const tickerCount = Object.keys(parsed).length;
+
+      if (tickerCount === 0) {
+        toast({
+          title: "No data found",
+          description: "Could not find cost basis data in the uploaded file. Make sure it's a Fidelity Closed Positions CSV.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setCostBasisMap(parsed);
+      setCostBasisFileName(file.name);
+
+      const pendingOrphans = orphanSells?.filter(o => o.orphanStatus === 'pending' || o.orphanStatus === 'muted') || [];
+      let matched = 0;
+      const newResolutions: Record<string, { costBasis: string; openDate: string }> = { ...orphanResolutions };
+
+      for (const orphan of pendingOrphans) {
+        const ticker = orphan.ticker.toUpperCase();
+        if (parsed[ticker] !== undefined) {
+          matched++;
+          newResolutions[orphan.tradeId] = {
+            costBasis: parsed[ticker].toFixed(2),
+            openDate: newResolutions[orphan.tradeId]?.openDate || lastBuyDates[`${orphan.ticker}:${orphan.accountName || 'default'}`] || '',
+          };
+        }
+      }
+
+      setOrphanResolutions(newResolutions);
+      setCostBasisMatchCount({ matched, total: pendingOrphans.length });
+
+      toast({
+        title: `Cost basis loaded from ${file.name}`,
+        description: `Matched ${matched} of ${pendingOrphans.length} orphans with cost basis data (${tickerCount} tickers in file)`,
+      });
+    };
+    reader.readAsText(file);
   };
 
   const handleResolveOrphan = (tradeId: string, action: 'delete' | 'resolve' | 'mute', currentStatus?: string) => {
@@ -1790,6 +1887,9 @@ export default function SentinelImportPage() {
         if (!open) {
           setSelectedOrphanBatchId(null);
           setOrphanResolutions({});
+          setCostBasisMap(null);
+          setCostBasisFileName("");
+          setCostBasisMatchCount(null);
         }
       }}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
@@ -1804,6 +1904,37 @@ export default function SentinelImportPage() {
               You can either add the original purchase info or delete the orphan sell.
             </DialogDescription>
           </DialogHeader>
+          
+          <div className="flex items-center justify-between py-2 border-b">
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                id="cost-basis-csv-upload"
+                data-testid="input-cost-basis-csv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleCostBasisCsvUpload(file);
+                  e.target.value = '';
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => document.getElementById('cost-basis-csv-upload')?.click()}
+                data-testid="button-load-cost-basis-csv"
+              >
+                <FileSpreadsheet className="h-4 w-4 mr-1" />
+                Load Cost Basis from CSV
+              </Button>
+              {costBasisMatchCount && (
+                <span className="text-xs text-muted-foreground">
+                  {costBasisFileName}: {costBasisMatchCount.matched}/{costBasisMatchCount.total} matched
+                </span>
+              )}
+            </div>
+          </div>
           
           {orphanSells && orphanSells.filter(o => o.orphanStatus !== 'resolved').length > 0 && (
             <div className="flex items-center justify-between py-2 border-b">
@@ -1894,7 +2025,15 @@ export default function SentinelImportPage() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Cost Basis per Share</Label>
+                          <Label className="flex items-center gap-2">
+                            Cost Basis per Share
+                            {costBasisMap && costBasisMap[orphan.ticker.toUpperCase()] !== undefined && (
+                              <Badge variant="outline" className="text-green-500 border-green-500/50 text-[10px] py-0">
+                                <Check className="h-3 w-3 mr-0.5" />
+                                CSV
+                              </Badge>
+                            )}
+                          </Label>
                           <div className="relative">
                             <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
