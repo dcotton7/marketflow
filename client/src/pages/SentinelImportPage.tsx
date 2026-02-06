@@ -121,7 +121,7 @@ export default function SentinelImportPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [showOrphanDialog, setShowOrphanDialog] = useState(false);
   const [selectedOrphanBatchId, setSelectedOrphanBatchId] = useState<string | null>(null);
-  const [orphanResolutions, setOrphanResolutions] = useState<Record<string, { costBasis: string; openDate: string }>>({});
+  const [orphanResolutions, setOrphanResolutions] = useState<Record<string, { costBasis: string; openDate: string; isSyntheticDate?: boolean }>>({});
   const [recentlyUnmutedIds, setRecentlyUnmutedIds] = useState<Set<string>>(new Set());
   const [costBasisMap, setCostBasisMap] = useState<Record<string, number> | null>(null);
   const [costBasisFileName, setCostBasisFileName] = useState<string>("");
@@ -464,11 +464,12 @@ export default function SentinelImportPage() {
   });
 
   const resolveOrphanMutation = useMutation({
-    mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve' | 'mute'; costBasis?: number; openDate?: string }) => {
+    mutationFn: async (data: { tradeId: string; action: 'delete' | 'resolve' | 'mute'; costBasis?: number; openDate?: string; isSyntheticDate?: boolean }) => {
       const response = await apiRequest('PATCH', `/api/sentinel/import/trades/${data.tradeId}/resolve-orphan`, {
         action: data.action,
         costBasis: data.costBasis,
         openDate: data.openDate,
+        isSyntheticDate: data.isSyntheticDate,
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -679,6 +680,30 @@ export default function SentinelImportPage() {
     setShowOrphanDialog(true);
   };
 
+  const calculateSyntheticDate = (sellDateStr: string): string => {
+    const sellDate = new Date(sellDateStr + 'T12:00:00');
+    const year = sellDate.getFullYear();
+    const janFirst = new Date(year, 0, 1);
+    
+    let current = new Date(sellDate);
+    let tradingDaysBack = 0;
+    
+    while (tradingDaysBack < 10) {
+      current.setDate(current.getDate() - 1);
+      if (current <= janFirst) {
+        return `${year}-01-01`;
+      }
+      const dayOfWeek = current.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        tradingDaysBack++;
+      }
+    }
+    
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    return `${current.getFullYear()}-${mm}-${dd}`;
+  };
+
   const parseFidelityClosedPositionsCsv = (csvText: string): Record<string, number> => {
     const cleaned = csvText.replace(/^\uFEFF/, '');
     const lines = cleaned.split('\n');
@@ -746,15 +771,22 @@ export default function SentinelImportPage() {
 
       const pendingOrphans = orphanSells?.filter(o => o.orphanStatus === 'pending' || o.orphanStatus === 'muted') || [];
       let matched = 0;
-      const newResolutions: Record<string, { costBasis: string; openDate: string }> = { ...orphanResolutions };
+      const newResolutions: Record<string, { costBasis: string; openDate: string; isSyntheticDate?: boolean }> = { ...orphanResolutions };
 
       for (const orphan of pendingOrphans) {
         const ticker = orphan.ticker.toUpperCase();
         if (parsed[ticker] !== undefined) {
           matched++;
+          const existingDate = newResolutions[orphan.tradeId]?.openDate;
+          const lastBuyDate = lastBuyDates[`${orphan.ticker}:${orphan.accountName || 'default'}`];
+          const realDate = existingDate || lastBuyDate;
+          const isSynthetic = !realDate && !!orphan.tradeDate;
+          const openDate = realDate || (orphan.tradeDate ? calculateSyntheticDate(orphan.tradeDate) : '');
+          
           newResolutions[orphan.tradeId] = {
             costBasis: parsed[ticker].toFixed(2),
-            openDate: newResolutions[orphan.tradeId]?.openDate || lastBuyDates[`${orphan.ticker}:${orphan.accountName || 'default'}`] || '',
+            openDate,
+            isSyntheticDate: isSynthetic,
           };
         }
       }
@@ -786,6 +818,7 @@ export default function SentinelImportPage() {
         action: 'resolve',
         costBasis: parseFloat(resolution.costBasis),
         openDate: resolution.openDate,
+        isSyntheticDate: resolution.isSyntheticDate === true,
       });
     } else if (action === 'mute') {
       // Check if we're unmuting (going from muted to pending)
@@ -2129,10 +2162,15 @@ export default function SentinelImportPage() {
                             value={orphanResolutions[orphan.tradeId]?.openDate || lastBuyDate || ''}
                             onChange={(e) => setOrphanResolutions(prev => ({
                               ...prev,
-                              [orphan.tradeId]: { ...prev[orphan.tradeId], openDate: e.target.value }
+                              [orphan.tradeId]: { ...prev[orphan.tradeId], openDate: e.target.value, isSyntheticDate: false }
                             }))}
                             data-testid={`input-open-date-${orphan.tradeId}`}
                           />
+                          {orphanResolutions[orphan.tradeId]?.isSyntheticDate && (
+                            <p className="text-[11px] text-muted-foreground" data-testid={`text-synthetic-date-${orphan.tradeId}`}>
+                              Synthetic Date due to missing information
+                            </p>
+                          )}
                         </div>
                         <div className="space-y-2">
                           <Label className="flex items-center gap-2">
