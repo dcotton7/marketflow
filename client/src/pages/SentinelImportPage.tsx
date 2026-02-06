@@ -1335,57 +1335,51 @@ export default function SentinelImportPage() {
 
           <TabsContent value="history" className="mt-6">
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div>
-                    <CardTitle>Import History</CardTitle>
-                    <CardDescription>Previous CSV imports and their status</CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <CardTitle>Import History</CardTitle>
+                  <div className="flex items-center gap-1">
                     <Button 
-                      variant="outline" 
-                      size="sm"
+                      variant="ghost" 
+                      size="icon"
                       onClick={() => redetectOrphansMutation.mutate()}
                       disabled={!batches || batches.length === 0 || redetectOrphansMutation.isPending}
                       data-testid="button-redetect-orphans"
-                      title="Re-evaluates all imported trades across all batches to fix false orphans from out-of-order imports"
+                      title="Re-detect Orphans"
                     >
                       {redetectOrphansMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
+                        <RefreshCw className="h-4 w-4" />
                       )}
-                      Re-detect Orphans
                     </Button>
                     <Button 
-                      variant="destructive" 
-                      size="sm"
+                      variant="ghost" 
+                      size="icon"
                       onClick={() => setShowResetConfirmDialog(true)}
                       disabled={!batches || batches.length === 0 || resetAndRedetectMutation.isPending}
                       data-testid="button-reset-and-redetect"
-                      title="Deletes all import-created cards, resets orphan status, and re-runs detection with fixed FIFO logic"
+                      title="Reset & Re-detect"
                     >
                       {resetAndRedetectMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
+                        <ShieldAlert className="h-4 w-4" />
                       )}
-                      Reset & Re-detect
                     </Button>
                     <Button 
-                      variant="outline" 
-                      size="sm"
+                      variant="ghost" 
+                      size="icon"
                       onClick={() => cleanupDuplicatesMutation.mutate()}
                       disabled={cleanupDuplicatesMutation.isPending}
                       data-testid="button-cleanup-duplicates"
-                      title="Merges duplicate trading cards (same ticker+account) into one, combining all lot entries"
+                      title="Cleanup Duplicates"
                     >
                       {cleanupDuplicatesMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
+                        <AlertCircle className="h-4 w-4" />
                       )}
-                      Cleanup Duplicates
                     </Button>
                   </div>
                 </div>
@@ -1401,16 +1395,15 @@ export default function SentinelImportPage() {
                   const step3Disabled = !step2Complete;
 
                   return (
-                    <div className="mt-3 space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-muted-foreground font-medium mr-1 uppercase tracking-wider">Workflow</span>
+                    <div className="mt-2 space-y-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <Button
                           variant={step1Disabled ? "ghost" : "outline"}
                           size="sm"
                           onClick={() => setActiveTab("upload")}
                           disabled={step1Disabled}
                           data-testid="button-step-import"
-                          className={step1Disabled ? "opacity-50" : ""}
+                          className={step1Disabled ? "opacity-40" : ""}
                         >
                           {step1Complete ? (
                             <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
@@ -1431,7 +1424,7 @@ export default function SentinelImportPage() {
                           }}
                           disabled={step2Disabled || !hasPendingDuplicates}
                           data-testid="button-step-resolve-duplicates"
-                          className={step2Disabled || (!hasPendingDuplicates && !step2Complete) ? "opacity-50" : step2Complete ? "opacity-70" : ""}
+                          className={step2Disabled ? "opacity-40" : step2Complete && !hasPendingDuplicates ? "opacity-60" : ""}
                         >
                           {step2Complete ? (
                             <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
@@ -1457,7 +1450,7 @@ export default function SentinelImportPage() {
                           }}
                           disabled={step3Disabled || !hasPendingOrphans}
                           data-testid="button-step-resolve-orphans"
-                          className={step3Disabled || (!hasPendingOrphans && !step3Complete) ? "opacity-50" : step3Complete ? "opacity-70" : ""}
+                          className={step3Disabled ? "opacity-40" : step3Complete && !hasPendingOrphans ? "opacity-60" : ""}
                         >
                           {step3Complete ? (
                             <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
@@ -1472,15 +1465,14 @@ export default function SentinelImportPage() {
                           )}
                         </Button>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-muted-foreground font-medium mr-1 uppercase tracking-wider">Actions</span>
+                      <div className="flex items-center gap-3 flex-wrap">
                         <Button 
                           variant="default" 
                           size="sm"
                           onClick={() => promoteToCardsMutation.mutate()}
                           disabled={!hasImportedTrades || promoteToCardsMutation.isPending || !step3Complete}
                           data-testid="button-promote-to-cards"
-                          className={!step3Complete ? "opacity-50" : ""}
+                          className={!step3Complete ? "opacity-40" : ""}
                         >
                           {promoteToCardsMutation.isPending ? (
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
