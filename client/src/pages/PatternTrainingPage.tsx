@@ -348,6 +348,21 @@ export default function PatternTrainingPage() {
     return { price1: rp.price, price2: rp.secondPointPrice };
   }, [points]);
 
+  const priceLines = useMemo(() => {
+    const lines: { price: number; color: string; label: string }[] = [];
+    for (const [role, point] of Object.entries(points)) {
+      if (point && point.price) {
+        const label = TRAINING_POINT_ROLES.find(r => r.value === role)?.label || role;
+        lines.push({
+          price: point.price,
+          color: POINT_COLORS[role] || "#ffffff",
+          label: `${label}: $${point.price.toFixed(2)}`,
+        });
+      }
+    }
+    return lines;
+  }, [points]);
+
   const handleSavePoints = async () => {
     if (!points.entry || !points.stop || !points.target) {
       toast({ title: "Entry, Stop, and Target are required", variant: "destructive" });
@@ -547,6 +562,7 @@ export default function PatternTrainingPage() {
                       onCandleClick={editingPoints ? handleCandleClick : undefined}
                       markers={markers}
                       resistanceLine={resistanceLine}
+                      priceLines={priceLines}
                       height={controlPointsHeight}
                     />
                   ) : (

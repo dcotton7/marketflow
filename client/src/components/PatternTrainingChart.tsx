@@ -47,6 +47,12 @@ interface ResistanceLine {
   price2: number;
 }
 
+interface PriceLevelLine {
+  price: number;
+  color: string;
+  label: string;
+}
+
 interface PatternTrainingChartProps {
   data: {
     candles: ChartCandle[];
@@ -55,6 +61,7 @@ interface PatternTrainingChartProps {
   onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
   resistanceLine?: ResistanceLine | null;
+  priceLines?: PriceLevelLine[];
   height?: number;
 }
 
@@ -71,6 +78,7 @@ export function PatternTrainingChart({
   onCandleClick,
   markers,
   resistanceLine,
+  priceLines,
   height,
 }: PatternTrainingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +88,8 @@ export function PatternTrainingChart({
   const candlesRef = useRef(data.candles);
   const markersHandleRef = useRef<any>(null);
   const resistSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const priceLinesRef = useRef<any[]>([]);
+  const chartHeightRef = useRef(height || 500);
 
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
@@ -118,6 +128,7 @@ export function PatternTrainingChart({
   );
 
   const chartHeight = height || 500;
+  chartHeightRef.current = chartHeight;
 
   useEffect(() => {
     if (!containerRef.current || data.candles.length === 0) return;
@@ -128,11 +139,12 @@ export function PatternTrainingChart({
       candleSeriesRef.current = null;
       markersHandleRef.current = null;
       resistSeriesRef.current = [];
+      priceLinesRef.current = [];
     }
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: chartHeight,
+      height: chartHeightRef.current,
       layout: {
         background: { type: ColorType.Solid, color: "#0f172a" },
         textColor: "#94a3b8",
@@ -210,6 +222,7 @@ export function PatternTrainingChart({
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
+          crosshairMarkerVisible: false,
         });
         series.setData(lineData);
       }
@@ -239,6 +252,7 @@ export function PatternTrainingChart({
           lineStyle: avwap.style,
           priceLineVisible: false,
           lastValueVisible: false,
+          crosshairMarkerVisible: false,
         });
         series.setData(lineData);
       }
@@ -290,9 +304,10 @@ export function PatternTrainingChart({
         candleSeriesRef.current = null;
         markersHandleRef.current = null;
         resistSeriesRef.current = [];
+        priceLinesRef.current = [];
       }
     };
-  }, [data, chartHeight]);
+  }, [data]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
@@ -369,7 +384,35 @@ export function PatternTrainingChart({
     if (chartRef.current) {
       chartRef.current.applyOptions({ height: chartHeight });
     }
+    if (containerRef.current) {
+      containerRef.current.style.height = `${chartHeight}px`;
+    }
   }, [chartHeight]);
+
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+
+    for (const pl of priceLinesRef.current) {
+      try {
+        candleSeriesRef.current.removePriceLine(pl);
+      } catch {}
+    }
+    priceLinesRef.current = [];
+
+    if (priceLines && priceLines.length > 0) {
+      for (const pl of priceLines) {
+        const line = candleSeriesRef.current.createPriceLine({
+          price: pl.price,
+          color: pl.color,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: pl.label,
+        });
+        priceLinesRef.current.push(line);
+      }
+    }
+  }, [priceLines]);
 
   return (
     <div data-testid="chart-pattern-training" className="relative w-full">
