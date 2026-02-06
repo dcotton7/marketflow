@@ -164,7 +164,7 @@ export default function SentinelImportPage() {
   
   const orphanSells = orphanData?.orphans;
 
-  const { data: allOrphansData, isLoading: allOrphansLoading, refetch: refetchAllOrphans } = useQuery<{ orphans: ImportedTrade[] }>({
+  const { data: allOrphansData, isLoading: allOrphansLoading, refetch: refetchAllOrphans } = useQuery<{ orphans: ImportedTrade[]; totalOrphans: number; resolvedCount: number }>({
     queryKey: ['/api/sentinel/import/all-orphans'],
     enabled: showAllOrphansDialog,
     queryFn: async () => {
@@ -2379,13 +2379,18 @@ export default function SentinelImportPage() {
       }}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-yellow-500">
-              <AlertTriangle className="h-5 w-5" />
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-500" />
               Resolve All Orphans
             </DialogTitle>
-            <DialogDescription>
-              All pending orphan sells across every import batch. Load a Closed Positions CSV to auto-fill cost basis, click "Save All Matched" to resolve them, then load another year's CSV if needed.
-            </DialogDescription>
+            <div className="mt-1">
+              <p className="text-base font-medium text-foreground" data-testid="text-orphan-progress">
+                {allOrphansData ? `${allOrphansData.resolvedCount} of ${allOrphansData.totalOrphans} orphans resolved` : 'Loading...'}
+              </p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Manually resolve, Mute or load another CSV
+              </p>
+            </div>
           </DialogHeader>
           
           <div className="flex items-center justify-between py-2 border-b">
@@ -2617,9 +2622,17 @@ export default function SentinelImportPage() {
             )}
           </ScrollArea>
           
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAllOrphansDialog(false)}>
+          <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => setShowAllOrphansDialog(false)} data-testid="button-close-orphan-dialog">
               Close
+            </Button>
+            <Button
+              onClick={() => setShowAllOrphansDialog(false)}
+              disabled={!allOrphanSells || allOrphanSells.filter(o => o.orphanStatus === 'pending').length > 0}
+              data-testid="button-resolve-batch"
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Resolve Batch
             </Button>
           </DialogFooter>
         </DialogContent>

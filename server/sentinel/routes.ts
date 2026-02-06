@@ -4664,7 +4664,15 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         ))
         .orderBy(sentinelImportedTrades.tradeDate);
       
-      res.json({ orphans });
+      const allOrphanRows = await db!.select({ count: sql<number>`count(*)` }).from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          eq(sentinelImportedTrades.isOrphanSell, true)
+        ));
+      const totalOrphans = Number(allOrphanRows[0]?.count || 0);
+      const resolvedCount = totalOrphans - orphans.length;
+      
+      res.json({ orphans, totalOrphans, resolvedCount });
     } catch (error) {
       console.error("Get all orphan sells error:", error);
       res.status(500).json({ error: "Failed to fetch all orphan sells" });
