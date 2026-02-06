@@ -3904,13 +3904,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const userId = req.session.userId!;
       const { batchId } = req.body; // Optional: promote only specific batch
       
-      // Get all non-orphan imported trades
+      // Get all non-orphan imported trades AND resolved orphans (with cost basis)
       let query = db.select().from(sentinelImportedTrades).where(
         and(
           eq(sentinelImportedTrades.userId, userId),
           or(
             eq(sentinelImportedTrades.isOrphanSell, false),
-            isNull(sentinelImportedTrades.isOrphanSell)
+            isNull(sentinelImportedTrades.isOrphanSell),
+            eq(sentinelImportedTrades.orphanStatus, 'resolved')
           )
         )
       );
@@ -3922,13 +3923,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         importedTrades = importedTrades.filter(t => t.batchId === batchId);
       }
       
-      if (importedTrades.length === 0) {
+      // Separate resolved orphans from normal trades
+      const resolvedOrphans = importedTrades.filter(t => t.isOrphanSell && t.orphanStatus === 'resolved');
+      const normalTrades = importedTrades.filter(t => !t.isOrphanSell || t.orphanStatus !== 'resolved');
+      
+      if (normalTrades.length === 0 && resolvedOrphans.length === 0) {
         return res.json({ success: true, cardsCreated: 0, message: "No trades to promote" });
       }
       
-      // Group by ticker and account for position matching
+      // Group normal trades by ticker and account for position matching
       const positionGroups = new Map<string, typeof importedTrades>();
-      for (const trade of importedTrades) {
+      for (const trade of normalTrades) {
         const key = `${trade.ticker}:${trade.accountName || 'default'}`;
         if (!positionGroups.has(key)) {
           positionGroups.set(key, []);
@@ -4072,6 +4077,55 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             isTagged: false,
           });
         }
+      }
+      
+      // Process resolved orphans: create closed cards using manual cost basis
+      for (const orphan of resolvedOrphans) {
+        const sellQty = Number(orphan.quantity) || 0;
+        const sellPrice = Number(orphan.price) || 0;
+        const costBasis = orphan.manualCostBasis != null ? Number(orphan.manualCostBasis) : sellPrice;
+        const sellDate = orphan.tradeDate ? new Date(orphan.tradeDate) : new Date();
+        const openDate = orphan.manualOpenDate ? new Date(orphan.manualOpenDate) : sellDate;
+        const pnl = (sellPrice - costBasis) * sellQty;
+        const holdDays = Math.max(0, Math.ceil((sellDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24)));
+        const accountName = orphan.accountName || 'default';
+        
+        const lotEntries = [
+          {
+            id: `orphan-buy-${orphan.tradeId}`,
+            dateTime: openDate.toISOString(),
+            qty: String(sellQty),
+            buySell: 'buy' as const,
+            price: String(costBasis),
+          },
+          {
+            id: orphan.tradeId,
+            dateTime: sellDate.toISOString(),
+            qty: String(sellQty),
+            buySell: 'sell' as const,
+            price: String(sellPrice),
+          },
+        ];
+        
+        cardsToCreate.push({
+          userId,
+          symbol: orphan.ticker,
+          direction: 'long',
+          entryPrice: costBasis,
+          entryDate: openDate,
+          exitPrice: sellPrice,
+          exitDate: sellDate,
+          positionSize: sellQty,
+          status: 'closed',
+          outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
+          actualPnL: pnl,
+          holdDays,
+          lotEntries,
+          source: 'import',
+          importBatchId: orphan.batchId,
+          accountName: accountName !== 'default' ? accountName : undefined,
+          isTagged: false,
+        });
       }
       
       // Merge lot entries into existing cards OR create new ones
