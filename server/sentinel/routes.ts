@@ -4071,9 +4071,16 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         return res.json({ success: true, cardsCreated: 0, message: "No trades to promote" });
       }
       
-      // Group normal trades by ticker and account for position matching
+      // Cross-batch orphan fix: Include ALL resolved orphan sells in FIFO matching.
+      // During FIFO, if an orphan sell has no matching buy lots, a synthetic buy
+      // is injected using the orphan's manual cost basis. This handles:
+      // - Cross-batch matches (sell in 2026, buy in 2025): FIFO matches naturally
+      // - True orphans (buy before import period): synthetic buy covers the gap
+      const allTradesForFIFO = [...normalTrades, ...resolvedOrphans];
+      
+      // Group trades by ticker and account for position matching
       const positionGroups = new Map<string, typeof importedTrades>();
-      for (const trade of normalTrades) {
+      for (const trade of allTradesForFIFO) {
         const key = `${trade.ticker}:${trade.accountName || 'default'}`;
         if (!positionGroups.has(key)) {
           positionGroups.set(key, []);
@@ -4147,9 +4154,32 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             totalBuyCost += qty * price;
             totalBuyQty += qty;
           } else if (trade.direction === 'SELL') {
+            // For resolved orphan sells with insufficient open lots,
+            // inject a synthetic buy using manual cost basis before matching
+            const availableQty = openLots.reduce((sum, l) => sum + l.qty, 0);
+            if (availableQty < qty && trade.isOrphanSell && trade.orphanStatus === 'resolved') {
+              const shortfall = qty - availableQty;
+              const costBasis = trade.manualCostBasis != null ? Number(trade.manualCostBasis) : price;
+              const openDate = trade.manualOpenDate ? new Date(trade.manualOpenDate) : tradeDate;
+              
+              const syntheticBuyEntry = {
+                id: `orphan-buy-${trade.tradeId}`,
+                dateTime: openDate.toISOString(),
+                qty: String(shortfall),
+                buySell: 'buy' as const,
+                price: String(costBasis),
+              };
+              positionLotEntries.push(syntheticBuyEntry);
+              openLots.push({ id: `orphan-buy-${trade.tradeId}`, qty: shortfall, price: costBasis, date: openDate, batchId: trade.batchId });
+              currentPosition += shortfall;
+              if (!firstBuyDate || openDate < firstBuyDate) firstBuyDate = openDate;
+              totalBuyCost += shortfall * costBasis;
+              totalBuyQty += shortfall;
+            }
+            
             positionLotEntries.push(lotEntry);
             
-            // Check if this closes the position
+            // FIFO matching for sells
             let remainingSell = qty;
             while (remainingSell > 0 && openLots.length > 0) {
               const lot = openLots[0];
@@ -4217,55 +4247,6 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             isTagged: false,
           });
         }
-      }
-      
-      // Process resolved orphans: create closed cards using manual cost basis
-      for (const orphan of resolvedOrphans) {
-        const sellQty = Number(orphan.quantity) || 0;
-        const sellPrice = Number(orphan.price) || 0;
-        const costBasis = orphan.manualCostBasis != null ? Number(orphan.manualCostBasis) : sellPrice;
-        const sellDate = orphan.tradeDate ? new Date(orphan.tradeDate) : new Date();
-        const openDate = orphan.manualOpenDate ? new Date(orphan.manualOpenDate) : sellDate;
-        const pnl = (sellPrice - costBasis) * sellQty;
-        const holdDays = Math.max(0, Math.ceil((sellDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24)));
-        const accountName = orphan.accountName || 'default';
-        
-        const lotEntries = [
-          {
-            id: `orphan-buy-${orphan.tradeId}`,
-            dateTime: openDate.toISOString(),
-            qty: String(sellQty),
-            buySell: 'buy' as const,
-            price: String(costBasis),
-          },
-          {
-            id: orphan.tradeId,
-            dateTime: sellDate.toISOString(),
-            qty: String(sellQty),
-            buySell: 'sell' as const,
-            price: String(sellPrice),
-          },
-        ];
-        
-        cardsToCreate.push({
-          userId,
-          symbol: orphan.ticker,
-          direction: 'long',
-          entryPrice: costBasis,
-          entryDate: openDate,
-          exitPrice: sellPrice,
-          exitDate: sellDate,
-          positionSize: sellQty,
-          status: 'closed',
-          outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
-          actualPnL: pnl,
-          holdDays,
-          lotEntries,
-          source: 'import',
-          importBatchId: orphan.batchId,
-          accountName: accountName !== 'default' ? accountName : undefined,
-          isTagged: false,
-        });
       }
       
       // Merge lot entries into existing cards OR create new ones
