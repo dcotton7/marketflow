@@ -904,3 +904,166 @@ export const SECTOR_PERFORMANCE = [
   { value: "inline", label: "In-Line" },
   { value: "lagging", label: "Lagging" },
 ] as const;
+
+// ============================================================================
+// PATTERN TRAINING TOOL - Interactive chart-based setup annotation system
+// ============================================================================
+
+export const TRAINING_PATTERN_TYPES = [
+  { value: "cup_and_handle", label: "Cup and Handle" },
+  { value: "vcp", label: "VCP" },
+  { value: "high_tight_flag", label: "High Tight Flag" },
+  { value: "flat_base", label: "Flat Base" },
+  { value: "double_bottom", label: "Double Bottom" },
+  { value: "bull_flag", label: "Bull Flag" },
+  { value: "ascending_base", label: "Ascending Base" },
+  { value: "consolidation_breakout", label: "Consolidation Breakout" },
+  { value: "episodic_pivot", label: "Episodic Pivot" },
+  { value: "pullback_reclaim", label: "Pullback/Reclaim" },
+  { value: "gap_and_go", label: "Gap and Go" },
+  { value: "orb", label: "ORB (Opening Range Breakout)" },
+  { value: "other", label: "Other" },
+] as const;
+
+export const TRAINING_TIMEFRAMES = [
+  { value: "daily", label: "Daily" },
+  { value: "15min", label: "15 Min" },
+] as const;
+
+export const TRAINING_POINT_ROLES = [
+  { value: "entry", label: "Entry", required: true },
+  { value: "stop", label: "Stop", required: true },
+  { value: "target", label: "Target", required: true },
+  { value: "support_bounce", label: "Support Bounce", required: false },
+  { value: "resistance_test", label: "Resistance Test", required: false, multiClick: 2 },
+  { value: "breakout_confirmed", label: "Breakout Confirmed", required: false },
+  { value: "breakdown", label: "Breakdown", required: false },
+] as const;
+
+export const TRAINING_OUTCOMES = [
+  { value: "win", label: "Win" },
+  { value: "loss", label: "Loss" },
+  { value: "pending", label: "Pending" },
+  { value: "scratch", label: "Scratch" },
+] as const;
+
+export const patternTrainingSetups = pgTable("pattern_training_setups", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => sentinelUsers.id),
+  ticker: text("ticker").notNull(),
+  patternType: text("pattern_type").notNull(),
+  timeframe: text("timeframe").notNull(),
+  rating: integer("rating"),
+  outcome: text("outcome"),
+  pnlPercent: doublePrecision("pnl_percent"),
+  daysHeld: integer("days_held"),
+  notes: text("notes"),
+  tags: text("tags").array().default([]),
+  entryTactics: jsonb("entry_tactics").$type<{
+    fiveMinEMACross?: boolean;
+    macdCross?: boolean;
+    other?: string;
+  }>().default({}),
+  calculatedMetrics: jsonb("calculated_metrics").$type<{
+    riskReward?: number;
+    maStacking?: string;
+    volumeRatio?: number;
+    baseDepthPct?: number;
+    baseWidthDays?: number;
+    atrPercent?: number;
+    rsVsSpy?: number;
+    momentum5d?: number;
+    momentum20d?: number;
+    momentum50d?: number;
+    pctFrom52wHigh?: number;
+    bollingerWidth?: number;
+    rangeTightness?: number;
+    upDownVolume?: string;
+    consecutiveUpDays?: number;
+    avwapRecentHigh?: number;
+    avwapRecentLow?: number;
+    avwapEP?: number;
+    ema6_20CrossStatus?: string;
+    macdCrossStatus?: string;
+    sessionVwapDistance?: number;
+    resistanceTouchCount?: number;
+    [key: string]: number | string | undefined;
+  }>().default({}),
+  chartDateRange: jsonb("chart_date_range").$type<{
+    start: string;
+    end: string;
+  }>(),
+  triggerTimeframe: text("trigger_timeframe"),
+  triggerSetupId: integer("trigger_setup_id"),
+  pointsSaved: boolean("points_saved").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const patternTrainingPoints = pgTable("pattern_training_points", {
+  id: serial("id").primaryKey(),
+  setupId: integer("setup_id").notNull().references(() => patternTrainingSetups.id, { onDelete: "cascade" }),
+  pointRole: text("point_role").notNull(),
+  price: doublePrecision("price").notNull(),
+  pointDate: text("point_date").notNull(),
+  ohlcv: jsonb("ohlcv").$type<{
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>(),
+  percentFromEntry: doublePrecision("percent_from_entry"),
+  percentFrom50d: doublePrecision("percent_from_50d"),
+  percentFrom200d: doublePrecision("percent_from_200d"),
+  percentFromVwap: doublePrecision("percent_from_vwap"),
+  avwapDistances: jsonb("avwap_distances").$type<{
+    recentHigh?: number;
+    recentLow?: number;
+    ep?: number;
+  }>(),
+  nearestMa: text("nearest_ma"),
+  nearestMaDistance: doublePrecision("nearest_ma_distance"),
+  technicalData: jsonb("technical_data").$type<{
+    sma10?: number;
+    ema21?: number;
+    sma50?: number;
+    sma150?: number;
+    sma200?: number;
+    distSma10?: number;
+    distEma21?: number;
+    distSma50?: number;
+    distSma150?: number;
+    distSma200?: number;
+    volume?: number;
+    avgVolume50d?: number;
+    volumeRatio?: number;
+    atr14?: number;
+    atrPercent?: number;
+    rsi14?: number;
+    macdLine?: number;
+    macdSignal?: number;
+    macdHistogram?: number;
+    ema6?: number;
+    ema20?: number;
+    sessionVwap?: number;
+    bollingerUpper?: number;
+    bollingerLower?: number;
+    bollingerWidth?: number;
+    [key: string]: number | undefined;
+  }>(),
+  secondPointPrice: doublePrecision("second_point_price"),
+  secondPointDate: text("second_point_date"),
+  resistanceTouchCount: integer("resistance_touch_count"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Schema exports for Pattern Training
+export const insertPatternTrainingSetupSchema = createInsertSchema(patternTrainingSetups).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPatternTrainingPointSchema = createInsertSchema(patternTrainingPoints).omit({ id: true, createdAt: true });
+
+// Type exports for Pattern Training
+export type PatternTrainingSetup = typeof patternTrainingSetups.$inferSelect;
+export type PatternTrainingPoint = typeof patternTrainingPoints.$inferSelect;
+export type InsertPatternTrainingSetup = z.infer<typeof insertPatternTrainingSetupSchema>;
+export type InsertPatternTrainingPoint = z.infer<typeof insertPatternTrainingPointSchema>;

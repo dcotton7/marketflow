@@ -15,6 +15,8 @@ import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation
 import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels } from "@shared/schema";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
+import { fetchChartData, calculatePointTechnicals, calculateFullSetupMetrics, findNearestMA, calculateRSvsSPY, calculateAnchoredVWAPValues, countResistanceTouches } from "./patternTrainingEngine";
+import { patternTrainingSetups, patternTrainingPoints } from "@shared/schema";
 
 declare module "express-session" {
   interface SessionData {
@@ -6055,6 +6057,256 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
       console.error("Parse orders CSV error:", error);
       res.status(500).json({ error: "Failed to parse orders CSV" });
+    }
+  });
+
+  // ============================================================================
+  // PATTERN TRAINING TOOL ROUTES
+  // ============================================================================
+
+  app.get("/api/sentinel/pattern-training/chart-data", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const ticker = String(req.query.ticker || "").toUpperCase();
+      const timeframe = String(req.query.timeframe || "daily");
+      if (!ticker) return res.status(400).json({ error: "Ticker is required" });
+
+      const data = await fetchChartData(ticker, timeframe);
+      if (!data) return res.status(404).json({ error: `No chart data found for ${ticker}` });
+
+      res.json(data);
+    } catch (error) {
+      console.error("Chart data error:", error);
+      res.status(500).json({ error: "Failed to fetch chart data" });
+    }
+  });
+
+  app.post("/api/sentinel/pattern-training/point-technicals", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { ticker, pointDate, timeframe } = req.body;
+      if (!ticker || !pointDate) return res.status(400).json({ error: "Ticker and pointDate required" });
+
+      const result = await calculatePointTechnicals(ticker, pointDate, timeframe || "daily");
+      if (!result) return res.status(404).json({ error: "Could not calculate technicals" });
+
+      const nearest = findNearestMA(result.technicals, result.ohlcv.close);
+      res.json({ ...result, nearestMA: nearest });
+    } catch (error) {
+      console.error("Point technicals error:", error);
+      res.status(500).json({ error: "Failed to calculate technicals" });
+    }
+  });
+
+  app.post("/api/sentinel/pattern-training/setup-metrics", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { ticker, entryDate, stopPrice, targetPrice, entryPrice, avwapAnchors, resistancePrice } = req.body;
+      if (!ticker || !entryDate) return res.status(400).json({ error: "Ticker and entryDate required" });
+
+      const [metrics, rsVsSpy] = await Promise.all([
+        calculateFullSetupMetrics(ticker, entryDate, stopPrice, targetPrice, entryPrice),
+        calculateRSvsSPY(ticker),
+      ]);
+
+      metrics.rsVsSpy = rsVsSpy;
+
+      if (avwapAnchors) {
+        const avwaps = await calculateAnchoredVWAPValues(ticker, avwapAnchors, entryDate);
+        if (avwaps.recentHigh && entryPrice) {
+          metrics.avwapRecentHigh = ((entryPrice - avwaps.recentHigh) / avwaps.recentHigh) * 100;
+        }
+        if (avwaps.recentLow && entryPrice) {
+          metrics.avwapRecentLow = ((entryPrice - avwaps.recentLow) / avwaps.recentLow) * 100;
+        }
+        if (avwaps.ep && entryPrice) {
+          metrics.avwapEP = ((entryPrice - avwaps.ep) / avwaps.ep) * 100;
+        }
+      }
+
+      if (resistancePrice) {
+        const { fetchChartData: fc } = await import("./patternTrainingEngine");
+        const chartData = await fc(ticker, "daily");
+        if (chartData) {
+          const bars = chartData.candles.map(c => ({ date: new Date(c.date), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }));
+          metrics.resistanceTouchCount = countResistanceTouches(bars, resistancePrice);
+        }
+      }
+
+      res.json(metrics);
+    } catch (error) {
+      console.error("Setup metrics error:", error);
+      res.status(500).json({ error: "Failed to calculate setup metrics" });
+    }
+  });
+
+  app.post("/api/sentinel/pattern-training/setups", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { ticker, patternType, timeframe, rating, outcome, pnlPercent, daysHeld, notes, tags, entryTactics, calculatedMetrics, chartDateRange } = req.body;
+
+      if (!ticker || !patternType || !timeframe) {
+        return res.status(400).json({ error: "Ticker, patternType, and timeframe are required" });
+      }
+
+      const [setup] = await db.insert(patternTrainingSetups).values({
+        userId,
+        ticker: ticker.toUpperCase(),
+        patternType,
+        timeframe,
+        rating: rating || null,
+        outcome: outcome || null,
+        pnlPercent: pnlPercent || null,
+        daysHeld: daysHeld || null,
+        notes: notes || null,
+        tags: tags || [],
+        entryTactics: entryTactics || {},
+        calculatedMetrics: calculatedMetrics || {},
+        chartDateRange: chartDateRange || null,
+        pointsSaved: false,
+      }).returning();
+
+      res.json(setup);
+    } catch (error) {
+      console.error("Create setup error:", error);
+      res.status(500).json({ error: "Failed to create setup" });
+    }
+  });
+
+  app.get("/api/sentinel/pattern-training/setups", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setups = await db.select().from(patternTrainingSetups)
+        .where(eq(patternTrainingSetups.userId, userId))
+        .orderBy(desc(patternTrainingSetups.createdAt));
+
+      const setupsWithPoints = await Promise.all(setups.map(async (setup) => {
+        const points = await db.select().from(patternTrainingPoints)
+          .where(eq(patternTrainingPoints.setupId, setup.id));
+        return { ...setup, points };
+      }));
+
+      res.json(setupsWithPoints);
+    } catch (error) {
+      console.error("Get setups error:", error);
+      res.status(500).json({ error: "Failed to fetch setups" });
+    }
+  });
+
+  app.get("/api/sentinel/pattern-training/setups/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setupId = parseInt(req.params.id);
+
+      const [setup] = await db.select().from(patternTrainingSetups)
+        .where(and(eq(patternTrainingSetups.id, setupId), eq(patternTrainingSetups.userId, userId)));
+
+      if (!setup) return res.status(404).json({ error: "Setup not found" });
+
+      const points = await db.select().from(patternTrainingPoints)
+        .where(eq(patternTrainingPoints.setupId, setupId));
+
+      res.json({ ...setup, points });
+    } catch (error) {
+      console.error("Get setup error:", error);
+      res.status(500).json({ error: "Failed to fetch setup" });
+    }
+  });
+
+  app.patch("/api/sentinel/pattern-training/setups/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setupId = parseInt(req.params.id);
+
+      const [existing] = await db.select().from(patternTrainingSetups)
+        .where(and(eq(patternTrainingSetups.id, setupId), eq(patternTrainingSetups.userId, userId)));
+
+      if (!existing) return res.status(404).json({ error: "Setup not found" });
+
+      const updates: any = {};
+      const allowedFields = ['patternType', 'timeframe', 'rating', 'outcome', 'pnlPercent', 'daysHeld', 'notes', 'tags', 'entryTactics', 'calculatedMetrics', 'chartDateRange', 'pointsSaved'];
+      for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+      updates.updatedAt = new Date();
+
+      const [updated] = await db.update(patternTrainingSetups)
+        .set(updates)
+        .where(eq(patternTrainingSetups.id, setupId))
+        .returning();
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Update setup error:", error);
+      res.status(500).json({ error: "Failed to update setup" });
+    }
+  });
+
+  app.delete("/api/sentinel/pattern-training/setups/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setupId = parseInt(req.params.id);
+
+      const [existing] = await db.select().from(patternTrainingSetups)
+        .where(and(eq(patternTrainingSetups.id, setupId), eq(patternTrainingSetups.userId, userId)));
+
+      if (!existing) return res.status(404).json({ error: "Setup not found" });
+
+      await db.delete(patternTrainingPoints).where(eq(patternTrainingPoints.setupId, setupId));
+      await db.delete(patternTrainingSetups).where(eq(patternTrainingSetups.id, setupId));
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete setup error:", error);
+      res.status(500).json({ error: "Failed to delete setup" });
+    }
+  });
+
+  app.post("/api/sentinel/pattern-training/setups/:id/points", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const setupId = parseInt(req.params.id);
+
+      const [setup] = await db.select().from(patternTrainingSetups)
+        .where(and(eq(patternTrainingSetups.id, setupId), eq(patternTrainingSetups.userId, userId)));
+
+      if (!setup) return res.status(404).json({ error: "Setup not found" });
+
+      const { points } = req.body;
+      if (!Array.isArray(points) || points.length === 0) {
+        return res.status(400).json({ error: "Points array is required" });
+      }
+
+      await db.delete(patternTrainingPoints).where(eq(patternTrainingPoints.setupId, setupId));
+
+      const insertedPoints = await db.insert(patternTrainingPoints).values(
+        points.map((p: any) => ({
+          setupId,
+          pointRole: p.pointRole,
+          price: p.price,
+          pointDate: p.pointDate,
+          ohlcv: p.ohlcv || null,
+          percentFromEntry: p.percentFromEntry || null,
+          percentFrom50d: p.percentFrom50d || null,
+          percentFrom200d: p.percentFrom200d || null,
+          percentFromVwap: p.percentFromVwap || null,
+          avwapDistances: p.avwapDistances || null,
+          nearestMa: p.nearestMa || null,
+          nearestMaDistance: p.nearestMaDistance || null,
+          technicalData: p.technicalData || null,
+          secondPointPrice: p.secondPointPrice || null,
+          secondPointDate: p.secondPointDate || null,
+          resistanceTouchCount: p.resistanceTouchCount || null,
+        }))
+      ).returning();
+
+      await db.update(patternTrainingSetups)
+        .set({ pointsSaved: true, updatedAt: new Date() })
+        .where(eq(patternTrainingSetups.id, setupId));
+
+      res.json(insertedPoints);
+    } catch (error) {
+      console.error("Save points error:", error);
+      res.status(500).json({ error: "Failed to save points" });
     }
   });
 

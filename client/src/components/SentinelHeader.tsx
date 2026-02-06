@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Crosshair } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -74,6 +74,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
   const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
   const isImportPage = location === "/sentinel/import";
   const isPatternsPage = location === "/sentinel/patterns";
+  const isTrainingPage = location === "/sentinel/pattern-training";
   const isAdminPage = location.startsWith("/sentinel/admin");
 
   return (
@@ -133,6 +134,17 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
             >
               <Brain className="w-4 h-4" />
               <span className="hidden sm:inline">Patterns</span>
+            </Button>
+          </Link>
+          <Link href="/sentinel/pattern-training">
+            <Button 
+              variant={isTrainingPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-training"
+            >
+              <Crosshair className="w-4 h-4" />
+              <span className="hidden sm:inline">Training</span>
             </Button>
           </Link>
           {userInfo?.isAdmin && (
