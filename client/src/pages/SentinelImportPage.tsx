@@ -2052,7 +2052,7 @@ export default function SentinelImportPage() {
 
                   <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
                     <p className="text-sm text-muted-foreground" data-testid="text-orders-summary">
-                      {ordersPreview.matched?.filter((m: any) => !m.isDuplicate).length || 0} new orders to import, {ordersPreview.matched?.filter((m: any) => m.isDuplicate).length || 0} duplicates skipped, {ordersPreview.unmatched?.length || 0} unmatched
+                      {ordersPreview.matched?.filter((m: any) => !m.isDuplicate).length || 0} new orders to import, {ordersPreview.matched?.filter((m: any) => m.isDuplicate).length || 0} duplicates skipped, {ordersPreview.unmatched?.length || 0} unmatched{ordersPreview.skipped > 0 ? `, ${ordersPreview.skipped} cancelled/expired/filled filtered out` : ''}
                     </p>
                     <Button
                       onClick={handleImportOrders}

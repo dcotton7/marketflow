@@ -116,7 +116,8 @@ Supports multiple stop loss and profit target orders per trade via the `sentinel
 - **Expandable Mini-Grids**: Chevron toggles reveal a table for each level type (stop/target) showing Price, Qty, % Away, Source (IMP/MAN/LEG), with inline add and delete
 - **Partial Profit**: Editable partial profit level shown between stop and target rows, calculated as midpoint between entry and closest target or from saved value
 - **Legacy Fallback**: If no order levels exist for a trade, the single `stopPrice`/`targetPrice` fields are displayed as legacy levels
-- **Orders Import Tab**: 4th tab on Import page for uploading Fidelity Orders CSV files, parsing stop loss/limit orders, previewing matched/unmatched orders, and bulk importing with duplicate detection
+- **Orders Import Tab**: 4th tab on Import page for uploading Fidelity Orders CSV files, parsing stop loss/limit orders, previewing matched/unmatched orders, and bulk importing with duplicate detection. Cancelled, expired, filled, rejected, and deleted orders are automatically filtered out during parsing, with a count shown in the preview summary.
+- **Partial Profit Source**: The partial profit level between stops and targets is system-derived (labeled "DER") — calculated as midpoint between entry and closest target, editable by the user
 - **API Endpoints**: `GET/POST /api/sentinel/trades/:tradeId/order-levels`, `PATCH/DELETE /api/sentinel/order-levels/:id`, `POST /api/sentinel/order-levels/bulk-import`, `POST /api/sentinel/order-levels/parse-orders-csv`
 - **Matching Logic**: Orders matched to active trades by ticker + account (fallback to ticker only when no account info)
 

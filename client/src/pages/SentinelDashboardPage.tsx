@@ -302,9 +302,10 @@ interface EditablePriceRowProps {
   alertColor?: "red" | "orange" | "green" | "yellow";
   onSave: (value: number) => void;
   testId: string;
+  sourceLabel?: string;
 }
 
-function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false, alertColor = "red", onSave, testId }: EditablePriceRowProps) {
+function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false, alertColor = "red", onSave, testId, sourceLabel }: EditablePriceRowProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value?.toFixed(2) || "");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -407,10 +408,15 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
         )}
       </div>
       
-      {distance !== null && !isEditing && (
-        <span className={`font-mono ${isAlert ? `${alertText} font-bold` : "text-muted-foreground"}`}>
-          {distance > 0 ? "+" : ""}{distance.toFixed(1)}%
-        </span>
+      {!isEditing && (
+        <div className="flex items-center gap-1.5">
+          {distance !== null && (
+            <span className={`font-mono ${isAlert ? `${alertText} font-bold` : "text-muted-foreground"}`}>
+              {distance > 0 ? "+" : ""}{distance.toFixed(1)}%
+            </span>
+          )}
+          {sourceLabel && <span className="text-muted-foreground text-[10px]" data-testid={`${testId}-source`}>{sourceLabel}</span>}
+        </div>
       )}
     </div>
   );
@@ -564,7 +570,7 @@ function OrderLevelsDisplay({
                     </span>
                   </td>
                   <td className="px-2 py-1" data-testid={`text-level-src-${level.id}`}>
-                    <span className="text-muted-foreground">{level.source === 'import' ? 'IMP' : level.source === 'legacy' ? 'LEG' : 'MAN'}</span>
+                    <span className="text-muted-foreground">{level.source === 'import' ? 'IMP' : level.source === 'legacy' ? 'LEG' : level.source === 'derived' ? 'DER' : 'MAN'}</span>
                   </td>
                   <td className="px-1 py-1">
                     {level.id !== -1 && (
@@ -675,6 +681,7 @@ function OrderLevelsDisplay({
         alertColor={partialPctAway !== null && Math.abs(partialPctAway) <= CRITICAL ? "yellow" : "yellow"}
         onSave={(value) => onPriceUpdate?.(trade.id, "partialPrice", value)}
         testId={`monitor-partial-${trade.id}`}
+        sourceLabel="DER"
       />
 
       {/* Closest Target row */}

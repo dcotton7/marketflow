@@ -5901,6 +5901,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const headers = lines[headerIdx].split(',').map(h => h.trim().replace(/"/g, ''));
 
       // Parse data rows (stop at Disclosure section)
+      const skippedOrders: Array<{ symbol: string; status: string; orderType: string; quantity: number; orderNumber: string }> = [];
       const parsedOrders: Array<{
         symbol: string;
         action: string;
@@ -5942,6 +5943,15 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         const tif = fields[tifIdx]?.trim() || '';
 
         if (!symbol || !action || amount === 0) continue;
+
+        const statusLower = (status || '').toLowerCase().trim();
+        const isInactiveOrder = statusLower.includes('cancel') || statusLower.includes('expired') ||
+          statusLower.includes('rejected') || statusLower.includes('deleted') ||
+          (statusLower.includes('filled') && !statusLower.includes('partially'));
+        if (isInactiveOrder) {
+          skippedOrders.push({ symbol, status, orderType: orderTypeRaw, quantity: amount, orderNumber });
+          continue;
+        }
 
         // Parse order type to extract price and level type
         let levelType: 'stop' | 'target' | null = null;
@@ -6036,6 +6046,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         matched,
         unmatched,
         hasAccountInfo,
+        skipped: skippedOrders.length,
+        skippedOrders,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
