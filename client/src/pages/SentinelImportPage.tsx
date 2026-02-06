@@ -1484,9 +1484,8 @@ export default function SentinelImportPage() {
                             variant="outline" 
                             size="sm"
                             onClick={() => setShowRepromoteDialog(true)}
-                            disabled={!hasImportedTrades || promoteToCardsMutation.isPending || !step3Complete}
+                            disabled={!hasImportedTrades || promoteToCardsMutation.isPending}
                             data-testid="button-repromote-to-cards"
-                            className={!step3Complete ? "opacity-40" : ""}
                           >
                             {promoteToCardsMutation.isPending ? (
                               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
