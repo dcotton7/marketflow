@@ -4676,7 +4676,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const userId = req.session.userId!;
       const { tradeId } = req.params;
-      const { action, costBasis, openDate } = req.body;
+      const { action, costBasis, openDate, isSyntheticDate } = req.body;
       
       // First verify this is actually a pending orphan sell belonging to the user
       const [trade] = await db!.select().from(sentinelImportedTrades)
@@ -4727,6 +4727,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             orphanStatus: 'resolved',
             manualCostBasis: costBasis,
             manualOpenDate: openDate,
+            isSyntheticDate: isSyntheticDate === true,
           })
           .where(and(
             eq(sentinelImportedTrades.tradeId, tradeId),

@@ -515,6 +515,7 @@ export const sentinelImportedTrades = pgTable("sentinel_imported_trades", {
   orphanStatus: text("orphan_status"), // 'pending' | 'resolved' | 'deleted' | 'muted'
   manualCostBasis: doublePrecision("manual_cost_basis"), // User-entered cost basis for orphan sells
   manualOpenDate: text("manual_open_date"), // User-entered open date for orphan sells
+  isSyntheticDate: boolean("is_synthetic_date").default(false), // True when date was auto-generated due to missing info
   
   // Duplicate detection - matches against existing Trading Cards or other imports
   isDuplicate: boolean("is_duplicate").default(false),
