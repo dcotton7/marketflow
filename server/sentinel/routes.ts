@@ -4642,32 +4642,65 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         ))
         .orderBy(sentinelImportedTrades.tradeDate);
       
-      // Get all BUY trades from the batch to provide last buy dates for each ticker
-      const allBatchTrades = await db!.select().from(sentinelImportedTrades)
+      res.json({ orphans });
+    } catch (error) {
+      console.error("Get orphan sells error:", error);
+      res.status(500).json({ error: "Failed to fetch orphan sells" });
+    }
+  });
+
+  app.get("/api/sentinel/import/all-orphans", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      const orphans = await db!.select().from(sentinelImportedTrades)
         .where(and(
           eq(sentinelImportedTrades.userId, userId),
-          eq(sentinelImportedTrades.batchId, batchId),
+          eq(sentinelImportedTrades.isOrphanSell, true),
           or(
-            eq(sentinelImportedTrades.direction, 'BUY'),
-            eq(sentinelImportedTrades.direction, 'buy')
+            eq(sentinelImportedTrades.orphanStatus, 'pending'),
+            eq(sentinelImportedTrades.orphanStatus, 'muted')
           )
         ))
         .orderBy(sentinelImportedTrades.tradeDate);
       
-      // Build a map of ticker:account -> last buy date
-      const lastBuyDates: Record<string, string> = {};
-      for (const trade of allBatchTrades) {
-        const key = `${trade.ticker}:${trade.accountName || 'default'}`;
-        // Keep updating - last one wins since sorted by date ascending
-        if (trade.tradeDate) {
-          lastBuyDates[key] = trade.tradeDate.toString().split('T')[0];
-        }
+      res.json({ orphans });
+    } catch (error) {
+      console.error("Get all orphan sells error:", error);
+      res.status(500).json({ error: "Failed to fetch all orphan sells" });
+    }
+  });
+
+  app.post("/api/sentinel/import/all-orphans/bulk", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { action } = req.body;
+      
+      if (action === 'delete_all') {
+        await db!.delete(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.isOrphanSell, true),
+            eq(sentinelImportedTrades.orphanStatus, 'pending')
+          ));
+        return res.json({ success: true, action: 'delete_all' });
       }
       
-      res.json({ orphans, lastBuyDates });
+      if (action === 'mute_all') {
+        await db!.update(sentinelImportedTrades)
+          .set({ orphanStatus: 'muted' })
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.isOrphanSell, true),
+            eq(sentinelImportedTrades.orphanStatus, 'pending')
+          ));
+        return res.json({ success: true, action: 'mute_all' });
+      }
+      
+      res.status(400).json({ error: "Invalid action. Use 'delete_all' or 'mute_all'" });
     } catch (error) {
-      console.error("Get orphan sells error:", error);
-      res.status(500).json({ error: "Failed to fetch orphan sells" });
+      console.error("Bulk all-orphan action error:", error);
+      res.status(500).json({ error: "Failed to perform bulk action" });
     }
   });
 
