@@ -61,7 +61,19 @@ A multi-broker CSV import system (Fidelity, Schwab, Robinhood) allows importing 
 **Cleanup Duplicates Utility**: Endpoint `/api/sentinel/import/cleanup-duplicates` merges duplicate active cards (same ticker+account) into one, combining all lot entries with FIFO recalculation and cascade-deleting related evaluations/events/labels for removed duplicates.
 
 ### Import Review & Orphan Management
-Orphan sells (sells without matching buys) are tracked with statuses: 'pending', 'muted', 'resolved'. The review pane shows ALL orphans needing cost basis (pending + muted) with toggle-style mute buttons that switch between pending/muted states. Muted orphans are hidden from Trading Cards but remain visible in review. Bulk MUTE ALL/DELETE ALL actions are available. Default purchase date is derived from the last BUY trade for the same ticker:account in the batch. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync. When unmuting an orphan, visual feedback is provided with a green highlight that fades after 3 seconds.
+Orphan sells (sells without matching buys) are tracked with statuses: 'pending', 'muted', 'resolved'. Two orphan resolution workflows exist:
+
+**Per-Batch Orphan Dialog**: Available per import batch for manual one-off fixes. Shows orphans for that specific batch with manual cost basis/date entry, mute/delete actions. No CSV loader.
+
+**Resolve All Orphans (Global)**: A cross-batch dialog accessible from Import History via the "Resolve All Orphans" button (shows badge with total pending orphan count). This is the primary workflow for bulk orphan resolution:
+- Shows ALL pending/muted orphans across every batch in one view
+- Includes "Load Cost Basis from CSV" button to load a Closed Positions CSV and auto-match orphans by ticker+shares+date
+- Bulk MUTE ALL/DELETE ALL actions available
+- API: `GET /api/sentinel/import/all-orphans`, `POST /api/sentinel/import/all-orphans/bulk`
+
+**Recommended Workflow**: Upload all transaction CSVs (2025, 2026, etc.) → resolve duplicates per file → skip orphan resolution during individual loads → click "Resolve All Orphans" in Import History → load Closed Positions CSV once to match all orphans across all batches → resolve/save.
+
+Muted orphans are hidden from Trading Cards but remain visible in review. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync. When unmuting an orphan, visual feedback is provided with a green highlight that fades after 3 seconds.
 
 **Synthetic Dates**: When the Closed Positions CSV fills in cost basis but no purchase date is available, the system auto-generates a "synthetic date" set to 10 trading days (weekdays) before the sell date, floored at January 1st of the same year. Synthetic dates are marked with `isSyntheticDate: true` in the database (`sentinel_imported_trades.is_synthetic_date` column) and shown in the UI with a small gray note "Synthetic Date due to missing information" below the date field. If the user manually changes the date, the synthetic flag is cleared.
 
