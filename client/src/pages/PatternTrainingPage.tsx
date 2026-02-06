@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
@@ -121,14 +121,31 @@ export default function PatternTrainingPage() {
 
   const [libraryFilter, setLibraryFilter] = useState({ patternType: "", rating: 0, ticker: "" });
 
+  const controlPointsRef = useRef<HTMLDivElement>(null);
+  const [controlPointsHeight, setControlPointsHeight] = useState(500);
+
+  useEffect(() => {
+    if (!controlPointsRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const h = entry.contentRect.height;
+        if (h > 0) setControlPointsHeight(h);
+      }
+    });
+    observer.observe(controlPointsRef.current);
+    return () => observer.disconnect();
+  }, [chartLoaded]);
+
   const { data: chartData, isLoading: chartLoading } = useQuery<{
     candles: ChartCandle[];
     indicators: {
-      sma10: (number | null)[];
-      ema21: (number | null)[];
+      ema5: (number | null)[];
+      ema10: (number | null)[];
+      sma21: (number | null)[];
       sma50: (number | null)[];
-      sma150: (number | null)[];
       sma200: (number | null)[];
+      avwapHigh?: (number | null)[];
+      avwapLow?: (number | null)[];
     };
     ticker: string;
     timeframe: string;
@@ -520,7 +537,7 @@ export default function PatternTrainingPage() {
                 <div className="flex-1 min-w-0">
                   {chartLoading ? (
                     <Card>
-                      <CardContent className="flex items-center justify-center h-[500px]">
+                      <CardContent className="flex items-center justify-center" style={{ height: controlPointsHeight }}>
                         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                       </CardContent>
                     </Card>
@@ -530,6 +547,7 @@ export default function PatternTrainingPage() {
                       onCandleClick={editingPoints ? handleCandleClick : undefined}
                       markers={markers}
                       resistanceLine={resistanceLine}
+                      height={controlPointsHeight}
                     />
                   ) : (
                     <Card>
@@ -741,7 +759,7 @@ export default function PatternTrainingPage() {
                   )}
                 </div>
 
-                <div className="w-72 shrink-0">
+                <div className="w-72 shrink-0" ref={controlPointsRef}>
                   <Card>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
                       <CardTitle className="text-sm font-medium">Setup Points</CardTitle>

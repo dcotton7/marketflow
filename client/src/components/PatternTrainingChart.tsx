@@ -55,6 +55,7 @@ interface PatternTrainingChartProps {
   onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
   resistanceLine?: ResistanceLine | null;
+  height?: number;
 }
 
 const MA_CONFIG = [
@@ -70,12 +71,15 @@ export function PatternTrainingChart({
   onCandleClick,
   markers,
   resistanceLine,
+  height,
 }: PatternTrainingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const onCandleClickRef = useRef(onCandleClick);
   const candlesRef = useRef(data.candles);
+  const markersHandleRef = useRef<any>(null);
+  const resistSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
 
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
@@ -113,22 +117,22 @@ export function PatternTrainingChart({
     []
   );
 
+  const chartHeight = height || 500;
+
   useEffect(() => {
     if (!containerRef.current || data.candles.length === 0) return;
 
-    let savedRange: any = null;
     if (chartRef.current) {
-      try {
-        savedRange = chartRef.current.timeScale().getVisibleLogicalRange();
-      } catch {}
       chartRef.current.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      markersHandleRef.current = null;
+      resistSeriesRef.current = [];
     }
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 500,
+      height: chartHeight,
       layout: {
         background: { type: ColorType.Solid, color: "#0f172a" },
         textColor: "#94a3b8",
@@ -260,63 +264,10 @@ export function PatternTrainingChart({
 
     volumeSeries.setData(volumeData);
 
-    if (markers && markers.length > 0) {
-      const sorted = [...markers].sort((a, b) => a.time - b.time);
-      const seriesMarkers = createSeriesMarkers(
-        candleSeries,
-        sorted.map((m) => ({
-          time: m.time as any,
-          position: m.position,
-          shape: m.shape,
-          color: m.color,
-          text: m.text,
-        }))
-      );
-    }
-
-    if (resistanceLine) {
-      const resistSeries1 = chart.addSeries(LineSeries, {
-        color: "#f59e0b",
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
-
-      const firstTime = data.candles[0].timestamp;
-      const lastTime = data.candles[data.candles.length - 1].timestamp;
-
-      resistSeries1.setData([
-        { time: firstTime as any, value: resistanceLine.price1 },
-        { time: lastTime as any, value: resistanceLine.price1 },
-      ]);
-
-      if (resistanceLine.price2 !== resistanceLine.price1) {
-        const resistSeries2 = chart.addSeries(LineSeries, {
-          color: "#f59e0b",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-
-        resistSeries2.setData([
-          { time: firstTime as any, value: resistanceLine.price2 },
-          { time: lastTime as any, value: resistanceLine.price2 },
-        ]);
-      }
-    }
-
     chart.subscribeCrosshairMove(() => {});
     chart.subscribeClick(handleChartClick);
 
-    if (savedRange) {
-      chart.timeScale().setVisibleLogicalRange(savedRange);
-    } else {
-      chart.timeScale().fitContent();
-    }
+    chart.timeScale().fitContent();
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -337,9 +288,88 @@ export function PatternTrainingChart({
         chartRef.current.remove();
         chartRef.current = null;
         candleSeriesRef.current = null;
+        markersHandleRef.current = null;
+        resistSeriesRef.current = [];
       }
     };
-  }, [data, markers, resistanceLine]);
+  }, [data, chartHeight]);
+
+  useEffect(() => {
+    if (!chartRef.current || !candleSeriesRef.current) return;
+
+    if (markersHandleRef.current) {
+      try {
+        markersHandleRef.current.detach();
+      } catch {}
+      markersHandleRef.current = null;
+    }
+
+    if (markers && markers.length > 0) {
+      const sorted = [...markers].sort((a, b) => a.time - b.time);
+      markersHandleRef.current = createSeriesMarkers(
+        candleSeriesRef.current,
+        sorted.map((m) => ({
+          time: m.time as any,
+          position: m.position,
+          shape: m.shape,
+          color: m.color,
+          text: m.text,
+        }))
+      );
+    }
+  }, [markers]);
+
+  useEffect(() => {
+    if (!chartRef.current || data.candles.length === 0) return;
+
+    for (const s of resistSeriesRef.current) {
+      try {
+        chartRef.current.removeSeries(s);
+      } catch {}
+    }
+    resistSeriesRef.current = [];
+
+    if (!resistanceLine) return;
+
+    const firstTime = data.candles[0].timestamp;
+    const lastTime = data.candles[data.candles.length - 1].timestamp;
+
+    const resistSeries1 = chartRef.current.addSeries(LineSeries, {
+      color: "#f59e0b",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    resistSeries1.setData([
+      { time: firstTime as any, value: resistanceLine.price1 },
+      { time: lastTime as any, value: resistanceLine.price1 },
+    ]);
+    resistSeriesRef.current.push(resistSeries1);
+
+    if (resistanceLine.price2 !== resistanceLine.price1) {
+      const resistSeries2 = chartRef.current.addSeries(LineSeries, {
+        color: "#f59e0b",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      resistSeries2.setData([
+        { time: firstTime as any, value: resistanceLine.price2 },
+        { time: lastTime as any, value: resistanceLine.price2 },
+      ]);
+      resistSeriesRef.current.push(resistSeries2);
+    }
+  }, [resistanceLine, data.candles]);
+
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({ height: chartHeight });
+    }
+  }, [chartHeight]);
 
   return (
     <div data-testid="chart-pattern-training" className="relative w-full">
@@ -366,7 +396,7 @@ export function PatternTrainingChart({
           </div>
         )}
       </div>
-      <div ref={containerRef} className="w-full" style={{ height: 500 }} />
+      <div ref={containerRef} className="w-full" style={{ height: chartHeight }} />
     </div>
   );
 }
