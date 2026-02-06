@@ -63,6 +63,8 @@ A multi-broker CSV import system (Fidelity, Schwab, Robinhood) allows importing 
 ### Import Review & Orphan Management
 Orphan sells (sells without matching buys) are tracked with statuses: 'pending', 'muted', 'resolved'. The review pane shows ALL orphans needing cost basis (pending + muted) with toggle-style mute buttons that switch between pending/muted states. Muted orphans are hidden from Trading Cards but remain visible in review. Bulk MUTE ALL/DELETE ALL actions are available. Default purchase date is derived from the last BUY trade for the same ticker:account in the batch. Promoting to Trading Cards is blocked until all pending orphans are addressed. Orphan counts are dynamically calculated from the database to stay in sync. When unmuting an orphan, visual feedback is provided with a green highlight that fades after 3 seconds.
 
+**Synthetic Dates**: When the Closed Positions CSV fills in cost basis but no purchase date is available, the system auto-generates a "synthetic date" set to 10 trading days (weekdays) before the sell date, floored at January 1st of the same year. Synthetic dates are marked with `isSyntheticDate: true` in the database (`sentinel_imported_trades.is_synthetic_date` column) and shown in the UI with a small gray note "Synthetic Date due to missing information" below the date field. If the user manually changes the date, the synthetic flag is cleared.
+
 ### Duplicate Detection & Resolution
 Duplicate detection runs **automatically after import confirmation** and must be resolved **before** orphan review. The workflow order is: Import → Duplicate Review (Step 1) → Orphan Review (Step 2) → Promote to Trading Cards.
 
