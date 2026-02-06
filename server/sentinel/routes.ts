@@ -3998,7 +3998,51 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
   app.post("/api/sentinel/import/promote-to-cards", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
-      const { batchId } = req.body; // Optional: promote only specific batch
+      const { batchId, clean } = req.body; // Optional: promote only specific batch; clean=true to wipe existing import cards first
+      
+      // Check if import cards already exist (prevent double-promotion unless clean mode)
+      const existingImportCards = await db.select({ id: sentinelTrades.id }).from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.source, 'import')
+        ))
+        .limit(1);
+      
+      if (existingImportCards.length > 0 && !clean) {
+        return res.status(409).json({ 
+          error: "Import cards already exist. Use clean re-promote to rebuild them.",
+          hasExistingCards: true
+        });
+      }
+      
+      // If clean mode, delete all existing import-source trading cards and related data
+      if (clean) {
+        await db.transaction(async (tx) => {
+          const importCardIdsSubquery = tx.select({ id: sentinelTrades.id }).from(sentinelTrades)
+            .where(and(
+              eq(sentinelTrades.userId, userId),
+              eq(sentinelTrades.source, 'import')
+            ));
+          
+          const importCardIds = await importCardIdsSubquery;
+          
+          if (importCardIds.length > 0) {
+            const ids = importCardIds.map(c => c.id);
+            const BATCH_SIZE = 500;
+            for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+              const batch = ids.slice(i, i + BATCH_SIZE);
+              await tx.delete(sentinelTradeToLabels).where(inArray(sentinelTradeToLabels.tradeId, batch));
+              await tx.delete(sentinelEvaluations).where(inArray(sentinelEvaluations.tradeId, batch));
+              await tx.delete(sentinelEvents).where(inArray(sentinelEvents.tradeId, batch));
+              await tx.delete(sentinelOrderLevels).where(inArray(sentinelOrderLevels.tradeId, batch));
+            }
+            await tx.delete(sentinelTrades).where(and(
+              eq(sentinelTrades.userId, userId),
+              eq(sentinelTrades.source, 'import')
+            ));
+          }
+        });
+      }
       
       // Get all non-orphan imported trades AND resolved orphans (with cost basis)
       let query = db.select().from(sentinelImportedTrades).where(

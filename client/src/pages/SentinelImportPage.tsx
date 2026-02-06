@@ -115,6 +115,7 @@ export default function SentinelImportPage() {
   const [showSkippedDialog, setShowSkippedDialog] = useState(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
+  const [showRepromoteDialog, setShowRepromoteDialog] = useState(false);
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const [tickerFilter, setTickerFilter] = useState("");
   const [timestampOverride, setTimestampOverride] = useState<string>("");
@@ -196,6 +197,11 @@ export default function SentinelImportPage() {
   // Count total pending duplicates across all batches
   const totalPendingDuplicates = batches?.reduce((sum, b) => sum + (b.duplicatesCount || 0), 0) || 0;
   const hasPendingDuplicates = totalPendingDuplicates > 0;
+  
+  const { data: tradeSources } = useQuery<{ source: string; importBatchId: string | null; importName: string | null; count: number }[]>({
+    queryKey: ['/api/sentinel/trade-sources'],
+  });
+  const hasExistingImportCards = tradeSources?.some(s => s.source === 'import') || false;
 
   const previewMutation = useMutation({
     mutationFn: async (data: { csvContent: string; fileName: string; brokerId: string }) => {
@@ -363,10 +369,13 @@ export default function SentinelImportPage() {
   });
 
   const promoteToCardsMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/sentinel/import/promote-to-cards', {});
+    mutationFn: async (options?: { clean?: boolean }) => {
+      const response = await apiRequest('POST', '/api/sentinel/import/promote-to-cards', { clean: options?.clean });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        if (errorData.hasExistingCards) {
+          throw Object.assign(new Error(errorData.error), { hasExistingCards: true });
+        }
         throw new Error(errorData.error || `Promotion failed with status ${response.status}`);
       }
       return response.json();
@@ -374,7 +383,7 @@ export default function SentinelImportPage() {
     onSuccess: (data) => {
       toast({ 
         title: "Trades Promoted to Cards", 
-        description: `Created ${data.cardsCreated || 0} trading cards from ${data.transactionsProcessed || 0} transactions`
+        description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}`
       });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trades'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/trade-sources'] });
@@ -383,6 +392,10 @@ export default function SentinelImportPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
     },
     onError: (error: any) => {
+      if (error?.hasExistingCards) {
+        setShowRepromoteDialog(true);
+        return;
+      }
       toast({ 
         title: "Promotion Failed", 
         description: error?.message || "Could not promote trades. Please try again.",
@@ -1466,21 +1479,39 @@ export default function SentinelImportPage() {
                         </Button>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
-                        <Button 
-                          variant="default" 
-                          size="sm"
-                          onClick={() => promoteToCardsMutation.mutate()}
-                          disabled={!hasImportedTrades || promoteToCardsMutation.isPending || !step3Complete}
-                          data-testid="button-promote-to-cards"
-                          className={!step3Complete ? "opacity-40" : ""}
-                        >
-                          {promoteToCardsMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <ArrowUpRight className="h-4 w-4 mr-2" />
-                          )}
-                          Promote to Trading Cards
-                        </Button>
+                        {hasExistingImportCards ? (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setShowRepromoteDialog(true)}
+                            disabled={!hasImportedTrades || promoteToCardsMutation.isPending || !step3Complete}
+                            data-testid="button-repromote-to-cards"
+                            className={!step3Complete ? "opacity-40" : ""}
+                          >
+                            {promoteToCardsMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Re-promote (Clean)
+                          </Button>
+                        ) : (
+                          <Button 
+                            variant="default" 
+                            size="sm"
+                            onClick={() => promoteToCardsMutation.mutate({})}
+                            disabled={!hasImportedTrades || promoteToCardsMutation.isPending || !step3Complete}
+                            data-testid="button-promote-to-cards"
+                            className={!step3Complete ? "opacity-40" : ""}
+                          >
+                            {promoteToCardsMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <ArrowUpRight className="h-4 w-4 mr-2" />
+                            )}
+                            Promote to Trading Cards
+                          </Button>
+                        )}
                         <Button 
                           variant="destructive" 
                           size="sm"
@@ -2161,6 +2192,48 @@ export default function SentinelImportPage() {
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Resetting...</>
               ) : (
                 <>Confirm Reset</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showRepromoteDialog} onOpenChange={setShowRepromoteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Re-promote Trading Cards
+            </DialogTitle>
+            <DialogDescription>
+              This will delete all existing import-created Trading Cards and rebuild them fresh from your imported transactions.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <p className="text-sm text-muted-foreground">This action will:</p>
+            <ul className="text-sm list-disc pl-5 space-y-1">
+              <li>Remove all Trading Cards created from imports</li>
+              <li>Remove associated evaluations, labels, events, and order levels</li>
+              <li>Re-create cards from your imported transactions with correct FIFO matching</li>
+            </ul>
+            <p className="text-sm text-muted-foreground mt-2">Hand-entered trades will not be affected.</p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowRepromoteDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                setShowRepromoteDialog(false);
+                promoteToCardsMutation.mutate({ clean: true });
+              }}
+              disabled={promoteToCardsMutation.isPending}
+              data-testid="button-confirm-repromote"
+            >
+              {promoteToCardsMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Re-promoting...</>
+              ) : (
+                <>Confirm Re-promote</>
               )}
             </Button>
           </DialogFooter>
