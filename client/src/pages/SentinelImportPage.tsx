@@ -127,6 +127,7 @@ export default function SentinelImportPage() {
   // Duplicate detection state
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [selectedDuplicateBatchId, setSelectedDuplicateBatchId] = useState<string | null>(null);
+  const [bulkProcessingBatchId, setBulkProcessingBatchId] = useState<string | null>(null);
   
   // Orders import state
   const [ordersFile, setOrdersFile] = useState<File | null>(null);
@@ -554,6 +555,7 @@ export default function SentinelImportPage() {
   const bulkDuplicateMutation = useMutation({
     mutationFn: async (action: 'delete_all' | 'overwrite_all') => {
       if (!selectedDuplicateBatchId) throw new Error('No batch selected');
+      setBulkProcessingBatchId(selectedDuplicateBatchId);
       const response = await apiRequest('POST', `/api/sentinel/import/batches/${selectedDuplicateBatchId}/duplicates/bulk`, { action });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -562,6 +564,7 @@ export default function SentinelImportPage() {
       return response.json();
     },
     onSuccess: (data) => {
+      setBulkProcessingBatchId(null);
       refetchDuplicates();
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
@@ -573,6 +576,7 @@ export default function SentinelImportPage() {
       });
     },
     onError: (error: any) => {
+      setBulkProcessingBatchId(null);
       toast({
         title: "Bulk action failed",
         description: error?.message || "Please try again",
@@ -1255,8 +1259,15 @@ export default function SentinelImportPage() {
                               {/* Duplicates shown FIRST - must be resolved before orphans */}
                               {(batch.duplicatesCount || 0) > 0 ? (
                                 <Badge variant="outline" className="text-orange-500 border-orange-500 gap-1">
-                                  <AlertCircle className="h-3 w-3" />
-                                  {batch.duplicatesCount} Duplicates <span className="text-white">(Step 1)</span>
+                                  {bulkProcessingBatchId === batch.batchId ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <AlertCircle className="h-3 w-3" />
+                                  )}
+                                  {bulkProcessingBatchId === batch.batchId 
+                                    ? "Processing duplicates..." 
+                                    : <>{batch.duplicatesCount} Duplicates <span className="text-white">(Step 1)</span></>
+                                  }
                                 </Badge>
                               ) : batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 ? (
                                 <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1">
@@ -1282,18 +1293,31 @@ export default function SentinelImportPage() {
                                 </Button>
                               )}
                               {(batch.duplicatesCount || 0) > 0 && (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedDuplicateBatchId(batch.batchId);
-                                    setShowDuplicateDialog(true);
-                                  }}
-                                  className="text-orange-500 border-orange-500/50"
-                                  data-testid={`button-review-duplicates-${batch.batchId}`}
-                                >
-                                  Review Duplicates
-                                </Button>
+                                bulkProcessingBatchId === batch.batchId ? (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    disabled
+                                    className="text-orange-500 border-orange-500/50"
+                                    data-testid={`button-review-duplicates-${batch.batchId}`}
+                                  >
+                                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                    Processing...
+                                  </Button>
+                                ) : (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedDuplicateBatchId(batch.batchId);
+                                      setShowDuplicateDialog(true);
+                                    }}
+                                    className="text-orange-500 border-orange-500/50"
+                                    data-testid={`button-review-duplicates-${batch.batchId}`}
+                                  >
+                                    Review Duplicates
+                                  </Button>
+                                )
                               )}
                               {batch.status === "COMPLETE" && (batch.duplicatesCount || 0) === 0 && (
                                 <Button 
@@ -1977,8 +2001,12 @@ export default function SentinelImportPage() {
                 disabled={bulkDuplicateMutation.isPending}
                 data-testid="button-delete-all-duplicates"
               >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete All
+                {bulkDuplicateMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <Trash2 className="h-4 w-4 mr-1" />
+                )}
+                {bulkDuplicateMutation.isPending ? 'Processing...' : 'Delete All'}
               </Button>
               <Button
                 variant="secondary"
@@ -1987,8 +2015,12 @@ export default function SentinelImportPage() {
                 disabled={bulkDuplicateMutation.isPending}
                 data-testid="button-overwrite-all-duplicates"
               >
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Overwrite All
+                {bulkDuplicateMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                )}
+                {bulkDuplicateMutation.isPending ? 'Processing...' : 'Overwrite All'}
               </Button>
             </div>
           )}
