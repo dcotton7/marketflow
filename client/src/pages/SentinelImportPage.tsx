@@ -151,7 +151,7 @@ export default function SentinelImportPage() {
     queryKey: ['/api/sentinel/import/trades'],
   });
   
-  const { data: orphanData, isLoading: orphansLoading, refetch: refetchOrphans } = useQuery<{ orphans: ImportedTrade[]; lastBuyDates: Record<string, string> }>({
+  const { data: orphanData, isLoading: orphansLoading, refetch: refetchOrphans } = useQuery<{ orphans: ImportedTrade[] }>({
     queryKey: ['/api/sentinel/import/batches', selectedOrphanBatchId, 'orphans'],
     enabled: !!selectedOrphanBatchId,
     queryFn: async () => {
@@ -162,7 +162,6 @@ export default function SentinelImportPage() {
   });
   
   const orphanSells = orphanData?.orphans;
-  const lastBuyDates = orphanData?.lastBuyDates || {};
 
   // Duplicate data query
   const { data: duplicateData, isLoading: duplicatesLoading, refetch: refetchDuplicates } = useQuery<{ duplicates: ImportedTrade[] }>({
@@ -683,7 +682,7 @@ export default function SentinelImportPage() {
   const calculateSyntheticDate = (sellDateStr: string): string => {
     const sellDate = new Date(sellDateStr + 'T12:00:00');
     const year = sellDate.getFullYear();
-    const janFirst = new Date(year, 0, 1);
+    const janFirst = new Date(year, 0, 1, 12, 0, 0);
     
     let current = new Date(sellDate);
     let tradingDaysBack = 0;
@@ -691,7 +690,13 @@ export default function SentinelImportPage() {
     while (tradingDaysBack < 10) {
       current.setDate(current.getDate() - 1);
       if (current <= janFirst) {
-        return `${year}-01-01`;
+        const jan1 = new Date(year, 0, 1, 12, 0, 0);
+        const dow = jan1.getDay();
+        if (dow === 0) jan1.setDate(2);
+        else if (dow === 6) jan1.setDate(3);
+        const mm = String(jan1.getMonth() + 1).padStart(2, '0');
+        const dd = String(jan1.getDate()).padStart(2, '0');
+        return `${year}-${mm}-${dd}`;
       }
       const dayOfWeek = current.getDay();
       if (dayOfWeek !== 0 && dayOfWeek !== 6) {
@@ -778,10 +783,9 @@ export default function SentinelImportPage() {
         if (parsed[ticker] !== undefined) {
           matched++;
           const existingDate = newResolutions[orphan.tradeId]?.openDate;
-          const lastBuyDate = lastBuyDates[`${orphan.ticker}:${orphan.accountName || 'default'}`];
-          const realDate = existingDate || lastBuyDate;
-          const isSynthetic = !realDate && !!orphan.tradeDate;
-          const openDate = realDate || (orphan.tradeDate ? calculateSyntheticDate(orphan.tradeDate) : '');
+          const hasUserDate = !!existingDate && !newResolutions[orphan.tradeId]?.isSyntheticDate;
+          const openDate = hasUserDate ? existingDate : (orphan.tradeDate ? calculateSyntheticDate(orphan.tradeDate) : '');
+          const isSynthetic = !hasUserDate && !!orphan.tradeDate;
           
           newResolutions[orphan.tradeId] = {
             costBasis: parsed[ticker].toFixed(2),
@@ -2119,9 +2123,6 @@ export default function SentinelImportPage() {
                 {orphanSells.filter(o => o.orphanStatus !== 'resolved').map((orphan) => {
                   const isMuted = orphan.orphanStatus === 'muted';
                   const isRecentlyUnmuted = recentlyUnmutedIds.has(orphan.tradeId);
-                  // Look up the last buy date for this ticker:account combo from batch trades
-                  const lookupKey = `${orphan.ticker}:${orphan.accountName || 'default'}`;
-                  const lastBuyDate = lastBuyDates[lookupKey];
                   
                   return (
                   <Card key={orphan.tradeId} className={`transition-all duration-500 ${isMuted ? 'border-muted opacity-60' : isRecentlyUnmuted ? 'border-green-500 bg-green-500/10 ring-2 ring-green-500/30' : 'border-yellow-500/30'}`}>
@@ -2148,18 +2149,12 @@ export default function SentinelImportPage() {
                         </div>
                       </div>
                       
-                      {lastBuyDate && (
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Defaulting to last purchase date from file: {lastBuyDate}
-                        </p>
-                      )}
-                      
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div className="space-y-2">
                           <Label>Original Purchase Date</Label>
                           <Input
                             type="date"
-                            value={orphanResolutions[orphan.tradeId]?.openDate || lastBuyDate || ''}
+                            value={orphanResolutions[orphan.tradeId]?.openDate || ''}
                             onChange={(e) => setOrphanResolutions(prev => ({
                               ...prev,
                               [orphan.tradeId]: { ...prev[orphan.tradeId], openDate: e.target.value, isSyntheticDate: false }
