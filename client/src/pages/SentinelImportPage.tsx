@@ -682,10 +682,15 @@ export default function SentinelImportPage() {
     mutationFn: async (action: 'delete_all' | 'overwrite_all') => {
       if (!selectedDuplicateBatchId) throw new Error('No batch selected');
       setBulkProcessingBatchId(selectedDuplicateBatchId);
-      const response = await apiRequest('POST', `/api/sentinel/import/batches/${selectedDuplicateBatchId}/duplicates/bulk`, { action });
+      const response = await fetch(`/api/sentinel/import/batches/${selectedDuplicateBatchId}/duplicates/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action }),
+      });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Bulk action failed');
+        throw new Error(errorData.error || `Bulk action failed (${response.status})`);
       }
       return response.json();
     },

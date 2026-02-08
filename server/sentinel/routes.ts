@@ -5595,7 +5595,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const userId = req.session.userId!;
       const batchId = req.params.batchId;
-      const { action } = req.body; // 'delete_all' | 'overwrite_all'
+      const { action } = req.body;
+
+      if (!action || !['delete_all', 'overwrite_all'].includes(action)) {
+        return res.status(400).json({ error: "Invalid action. Use 'delete_all' or 'overwrite_all'" });
+      }
+      
+      console.log(`[Bulk Duplicate] User ${userId}, batch ${batchId}, action: ${action}`);
       
       const duplicates = await db!.select().from(sentinelImportedTrades)
         .where(and(
@@ -5605,9 +5611,82 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           eq(sentinelImportedTrades.duplicateStatus, 'pending')
         ));
       
+      console.log(`[Bulk Duplicate] Found ${duplicates.length} pending duplicates`);
+
+      if (duplicates.length === 0) {
+        return res.json({ success: true, action, count: 0 });
+      }
+      
       if (action === 'delete_all') {
-        // Delete all pending duplicates from this batch
         await db!.delete(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.batchId, batchId),
+            eq(sentinelImportedTrades.isDuplicate, true),
+            eq(sentinelImportedTrades.duplicateStatus, 'pending')
+          ));
+        
+        try {
+          await db!.update(sentinelImportBatches)
+            .set({ duplicatesCount: 0 })
+            .where(and(
+              eq(sentinelImportBatches.batchId, batchId),
+              eq(sentinelImportBatches.userId, userId)
+            ));
+        } catch (batchUpdateErr) {
+          console.error(`[Bulk Duplicate] Non-critical: failed to update batch duplicatesCount:`, batchUpdateErr);
+        }
+        
+        console.log(`[Bulk Duplicate] Deleted ${duplicates.length} duplicates`);
+        return res.json({ success: true, action: 'delete_all', count: duplicates.length });
+      }
+      
+      if (action === 'overwrite_all') {
+        let processedCount = 0;
+        for (const dup of duplicates) {
+          try {
+            if (dup.duplicateOfTradeId) {
+              const cardResults = await db!.select().from(sentinelTrades)
+                .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
+              const existingCard = cardResults[0];
+              
+              if (existingCard) {
+                let updatedLotEntries = existingCard.lotEntries || [];
+                const newLotEntry = {
+                  id: `import-${dup.tradeId}`,
+                  dateTime: dup.executionTime || `${dup.tradeDate}T12:00:00`,
+                  qty: dup.quantity.toString(),
+                  buySell: dup.direction.toLowerCase() as 'buy' | 'sell',
+                  price: dup.price.toString(),
+                };
+                
+                const exists = updatedLotEntries.some(
+                  (le: any) => le.dateTime?.split('T')[0] === dup.tradeDate && 
+                              Math.abs(parseFloat(le.price) - dup.price) < 0.01 &&
+                              Math.abs(parseFloat(le.qty) - dup.quantity) < 0.0001
+                );
+                
+                if (!exists) {
+                  updatedLotEntries.push(newLotEntry);
+                  await db!.update(sentinelTrades)
+                    .set({ lotEntries: updatedLotEntries, updatedAt: new Date() })
+                    .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
+                }
+              }
+            }
+            
+            if (dup.duplicateOfImportId) {
+              await db!.delete(sentinelImportedTrades)
+                .where(eq(sentinelImportedTrades.id, dup.duplicateOfImportId));
+            }
+            processedCount++;
+          } catch (dupError) {
+            console.error(`[Bulk Duplicate] Error processing dup id=${dup.id}:`, dupError);
+          }
+        }
+        
+        await db!.update(sentinelImportedTrades)
+          .set({ duplicateStatus: 'overwritten' })
           .where(and(
             eq(sentinelImportedTrades.userId, userId),
             eq(sentinelImportedTrades.batchId, batchId),
@@ -5617,69 +5696,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         
         await db!.update(sentinelImportBatches)
           .set({ duplicatesCount: 0 })
-          .where(eq(sentinelImportBatches.batchId, batchId));
-        
-        return res.json({ success: true, action: 'delete_all', count: duplicates.length });
-      }
-      
-      if (action === 'overwrite_all') {
-        // Process each duplicate to overwrite existing data
-        for (const dup of duplicates) {
-          if (dup.duplicateOfTradeId) {
-            const [existingCard] = await db!.select().from(sentinelTrades)
-              .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
-            
-            if (existingCard) {
-              let updatedLotEntries = existingCard.lotEntries || [];
-              const newLotEntry = {
-                id: `import-${dup.tradeId}`,
-                dateTime: dup.executionTime || `${dup.tradeDate}T12:00:00`,
-                qty: dup.quantity.toString(),
-                buySell: dup.direction.toLowerCase() as 'buy' | 'sell',
-                price: dup.price.toString(),
-              };
-              
-              const exists = updatedLotEntries.some(
-                (le: any) => le.dateTime?.split('T')[0] === dup.tradeDate && 
-                            Math.abs(parseFloat(le.price) - dup.price) < 0.01 &&
-                            Math.abs(parseFloat(le.qty) - dup.quantity) < 0.0001
-              );
-              
-              if (!exists) {
-                updatedLotEntries.push(newLotEntry);
-                await db!.update(sentinelTrades)
-                  .set({ lotEntries: updatedLotEntries, updatedAt: new Date() })
-                  .where(eq(sentinelTrades.id, dup.duplicateOfTradeId));
-              }
-            }
-          }
-          
-          if (dup.duplicateOfImportId) {
-            await db!.delete(sentinelImportedTrades)
-              .where(eq(sentinelImportedTrades.id, dup.duplicateOfImportId));
-          }
-        }
-        
-        // Mark all as overwritten
-        await db!.update(sentinelImportedTrades)
-          .set({ duplicateStatus: 'overwritten' })
           .where(and(
-            eq(sentinelImportedTrades.userId, userId),
-            eq(sentinelImportedTrades.batchId, batchId),
-            eq(sentinelImportedTrades.isDuplicate, true)
+            eq(sentinelImportBatches.batchId, batchId),
+            eq(sentinelImportBatches.userId, userId)
           ));
         
-        await db!.update(sentinelImportBatches)
-          .set({ duplicatesCount: 0 })
-          .where(eq(sentinelImportBatches.batchId, batchId));
-        
-        return res.json({ success: true, action: 'overwrite_all', count: duplicates.length });
+        console.log(`[Bulk Duplicate] Overwritten ${processedCount}/${duplicates.length} duplicates`);
+        return res.json({ success: true, action: 'overwrite_all', count: processedCount });
       }
-      
-      res.status(400).json({ error: "Invalid action. Use 'delete_all' or 'overwrite_all'" });
-    } catch (error) {
-      console.error("Bulk duplicate action error:", error);
-      res.status(500).json({ error: "Failed to perform bulk action" });
+    } catch (error: any) {
+      console.error("Bulk duplicate action error:", error?.message || error, error?.stack);
+      res.status(500).json({ error: `Failed to perform bulk action: ${error?.message || 'Unknown error'}` });
     }
   });
 
