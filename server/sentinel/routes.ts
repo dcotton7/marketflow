@@ -969,6 +969,56 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // Refine lot entry execution time - user clicks intraday chart to pin exact time
+  app.patch("/api/sentinel/trades/:tradeId/refine-lot-time", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const tradeId = parseInt(req.params.tradeId as string);
+      if (isNaN(tradeId)) {
+        return res.status(400).json({ error: "Invalid tradeId" });
+      }
+      
+      const refineLotTimeSchema = z.object({
+        lotId: z.string().min(1, "lotId is required"),
+        newDateTime: z.string().refine((val) => {
+          const d = new Date(val);
+          return !isNaN(d.getTime()) && d.getTime() > 0;
+        }, "newDateTime must be a valid ISO date string"),
+      });
+      
+      const parsed = refineLotTimeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors.map(e => e.message).join(", ") });
+      }
+      const { lotId, newDateTime } = parsed.data;
+      
+      const trade = await sentinelModels.getTrade(tradeId);
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+      if (trade.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      const lotEntries = trade.lotEntries as Array<{ id: string; dateTime: string; qty: string; buySell: string; price: string }>;
+      if (!lotEntries || !Array.isArray(lotEntries)) {
+        return res.status(400).json({ error: "Trade has no lot entries" });
+      }
+      
+      const lotIndex = lotEntries.findIndex(l => l.id === lotId);
+      if (lotIndex === -1) {
+        return res.status(404).json({ error: "Lot entry not found" });
+      }
+      
+      lotEntries[lotIndex].dateTime = new Date(newDateTime).toISOString();
+      
+      const updatedTrade = await sentinelModels.updateTrade(tradeId, { lotEntries } as any);
+      res.json(updatedTrade);
+    } catch (error) {
+      console.error("Refine lot time error:", error);
+      res.status(500).json({ error: "Failed to refine lot time" });
+    }
+  });
+
   // Delete trade
   app.delete("/api/sentinel/trade/:tradeId", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -4123,7 +4173,10 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sellPrice: number;
       }> = [];
       
-      // Process each position group using FIFO matching
+      // Process each position group using FIFO matching with calendar-day position splitting.
+      // Rule: All buys/sells on the same calendar day belong to the same position.
+      // Position only closes when end-of-day share count hits zero.
+      // Next day's buy opens a new Trading Card.
       for (const [key, trades] of positionGroups) {
         const [ticker, accountName] = key.split(':');
         
@@ -4132,14 +4185,21 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           const dateA = a.tradeDate ? new Date(a.tradeDate).getTime() : 0;
           const dateB = b.tradeDate ? new Date(b.tradeDate).getTime() : 0;
           if (dateA !== dateB) return dateA - dateB;
-          // On same date, process BUYs before SELLs
           if (a.direction === 'BUY' && b.direction === 'SELL') return -1;
           if (a.direction === 'SELL' && b.direction === 'BUY') return 1;
-          // Same direction, use trade ID for stable ordering
           return a.tradeId.localeCompare(b.tradeId);
         });
         
-        // FIFO matching: track open position lots
+        // Group trades by calendar day for end-of-day position checks
+        const dayGroups = new Map<string, typeof trades>();
+        for (const trade of trades) {
+          const dayKey = trade.tradeDate ? trade.tradeDate.substring(0, 10) : 'unknown';
+          if (!dayGroups.has(dayKey)) dayGroups.set(dayKey, []);
+          dayGroups.get(dayKey)!.push(trade);
+        }
+        const sortedDays = [...dayGroups.keys()].sort();
+        
+        // FIFO matching state across days
         const openLots: Array<{ id: string; qty: number; price: number; date: Date; batchId: string }> = [];
         let currentPosition = 0;
         let positionLotEntries: Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }> = [];
@@ -4148,119 +4208,140 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         let totalBuyCost = 0;
         let totalBuyQty = 0;
         let positionUsedSynthetic = false;
+        let lastSellPrice = 0;
+        let lastSellDate: Date | null = null;
+        let realizedPnLForPosition = 0;
         
-        for (const trade of trades) {
-          const qty = Number(trade.quantity) || 0;
-          const price = Number(trade.price) || 0;
-          const tradeDate = trade.tradeDate ? new Date(trade.tradeDate) : new Date();
+        // Helper: finalize current position as a closed card
+        const finalizeClosedPosition = () => {
+          if (positionLotEntries.length === 0) return;
+          const avgEntry = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : lastSellPrice;
+          const holdDays = firstBuyDate && lastSellDate 
+            ? Math.ceil((lastSellDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) 
+            : 0;
           
-          const lotEntry = {
-            id: trade.tradeId,
-            dateTime: tradeDate.toISOString(),
-            qty: String(qty),
-            buySell: trade.direction === 'BUY' ? 'buy' as const : 'sell' as const,
-            price: String(price),
-          };
+          cardsToCreate.push({
+            userId,
+            symbol: ticker,
+            direction: 'long',
+            entryPrice: avgEntry,
+            entryDate: firstBuyDate,
+            exitPrice: lastSellPrice,
+            exitDate: lastSellDate || undefined,
+            positionSize: totalBuyQty,
+            status: 'closed',
+            outcome: realizedPnLForPosition > 0 ? 'win' : realizedPnLForPosition < 0 ? 'loss' : 'breakeven',
+            actualPnL: realizedPnLForPosition,
+            holdDays,
+            lotEntries: positionLotEntries,
+            source: 'import',
+            importBatchId: positionBatchId,
+            accountName: accountName !== 'default' ? accountName : undefined,
+            isTagged: false,
+            hasSyntheticCostBasis: positionUsedSynthetic,
+          });
+        };
+        
+        // Helper: reset position state for a new Trading Card
+        const resetPosition = () => {
+          positionLotEntries = [];
+          firstBuyDate = null;
+          totalBuyCost = 0;
+          totalBuyQty = 0;
+          currentPosition = 0;
+          positionUsedSynthetic = false;
+          lastSellPrice = 0;
+          lastSellDate = null;
+          realizedPnLForPosition = 0;
+        };
+        
+        for (const dayKey of sortedDays) {
+          const dayTrades = dayGroups.get(dayKey)!;
           
-          if (trade.direction === 'BUY') {
-            openLots.push({ id: trade.tradeId, qty, price, date: tradeDate, batchId: trade.batchId });
-            currentPosition += qty;
-            positionLotEntries.push(lotEntry);
-            if (!firstBuyDate) firstBuyDate = tradeDate;
-            totalBuyCost += qty * price;
-            totalBuyQty += qty;
-          } else if (trade.direction === 'SELL') {
-            // For resolved orphan sells with insufficient open lots,
-            // inject a synthetic buy using manual cost basis before matching
-            const availableQty = openLots.reduce((sum, l) => sum + l.qty, 0);
-            if (availableQty < qty && trade.isOrphanSell && trade.orphanStatus === 'resolved') {
-              const shortfall = qty - availableQty;
-              const costBasis = trade.manualCostBasis != null ? Number(trade.manualCostBasis) : price;
-              const openDate = trade.manualOpenDate ? new Date(trade.manualOpenDate) : tradeDate;
-              
-              syntheticInjections.push({
-                ticker,
-                account: accountName,
-                syntheticQty: shortfall,
-                syntheticCostBasis: costBasis,
-                syntheticOpenDate: openDate.toISOString(),
-                sellTradeId: trade.tradeId,
-                sellQty: qty,
-                sellPrice: price,
-              });
-              
-              const syntheticBuyEntry = {
-                id: `orphan-buy-${trade.tradeId}`,
-                dateTime: openDate.toISOString(),
-                qty: String(shortfall),
-                buySell: 'buy' as const,
-                price: String(costBasis),
-              };
-              positionLotEntries.push(syntheticBuyEntry);
-              openLots.push({ id: `orphan-buy-${trade.tradeId}`, qty: shortfall, price: costBasis, date: openDate, batchId: trade.batchId });
-              currentPosition += shortfall;
-              if (!firstBuyDate || openDate < firstBuyDate) firstBuyDate = openDate;
-              totalBuyCost += shortfall * costBasis;
-              totalBuyQty += shortfall;
-              positionUsedSynthetic = true;
-            }
+          for (const trade of dayTrades) {
+            const qty = Number(trade.quantity) || 0;
+            const price = Number(trade.price) || 0;
+            const tradeDate = trade.tradeDate ? new Date(trade.tradeDate) : new Date();
             
-            positionLotEntries.push(lotEntry);
+            const lotEntry = {
+              id: trade.tradeId,
+              dateTime: tradeDate.toISOString(),
+              qty: String(qty),
+              buySell: trade.direction === 'BUY' ? 'buy' as const : 'sell' as const,
+              price: String(price),
+            };
             
-            // FIFO matching for sells
-            let remainingSell = qty;
-            while (remainingSell > 0 && openLots.length > 0) {
-              const lot = openLots[0];
-              if (lot.qty <= remainingSell) {
-                remainingSell -= lot.qty;
-                openLots.shift();
-              } else {
-                lot.qty -= remainingSell;
-                remainingSell = 0;
+            if (trade.direction === 'BUY') {
+              openLots.push({ id: trade.tradeId, qty, price, date: tradeDate, batchId: trade.batchId });
+              currentPosition += qty;
+              positionLotEntries.push(lotEntry);
+              if (!firstBuyDate) firstBuyDate = tradeDate;
+              totalBuyCost += qty * price;
+              totalBuyQty += qty;
+              positionBatchId = trade.batchId;
+            } else if (trade.direction === 'SELL') {
+              // For resolved orphan sells with insufficient open lots,
+              // inject a synthetic buy using manual cost basis before matching
+              const availableQty = openLots.reduce((sum, l) => sum + l.qty, 0);
+              if (availableQty < qty && trade.isOrphanSell && trade.orphanStatus === 'resolved') {
+                const shortfall = qty - availableQty;
+                const costBasis = trade.manualCostBasis != null ? Number(trade.manualCostBasis) : price;
+                const openDate = trade.manualOpenDate ? new Date(trade.manualOpenDate) : tradeDate;
+                
+                syntheticInjections.push({
+                  ticker,
+                  account: accountName,
+                  syntheticQty: shortfall,
+                  syntheticCostBasis: costBasis,
+                  syntheticOpenDate: openDate.toISOString(),
+                  sellTradeId: trade.tradeId,
+                  sellQty: qty,
+                  sellPrice: price,
+                });
+                
+                const syntheticBuyEntry = {
+                  id: `orphan-buy-${trade.tradeId}`,
+                  dateTime: openDate.toISOString(),
+                  qty: String(shortfall),
+                  buySell: 'buy' as const,
+                  price: String(costBasis),
+                };
+                positionLotEntries.push(syntheticBuyEntry);
+                openLots.push({ id: `orphan-buy-${trade.tradeId}`, qty: shortfall, price: costBasis, date: openDate, batchId: trade.batchId });
+                currentPosition += shortfall;
+                if (!firstBuyDate || openDate < firstBuyDate) firstBuyDate = openDate;
+                totalBuyCost += shortfall * costBasis;
+                totalBuyQty += shortfall;
+                positionUsedSynthetic = true;
               }
-            }
-            currentPosition -= qty;
-            
-            // If position is closed, create a card
-            if (currentPosition <= 0 && positionLotEntries.length > 0) {
-              const avgEntry = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : price;
-              const pnl = (price - avgEntry) * totalBuyQty;
-              const holdDays = firstBuyDate ? Math.ceil((tradeDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
               
-              cardsToCreate.push({
-                userId,
-                symbol: ticker,
-                direction: 'long',
-                entryPrice: avgEntry,
-                entryDate: firstBuyDate,
-                exitPrice: price,
-                exitDate: tradeDate,
-                positionSize: totalBuyQty,
-                status: 'closed',
-                outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
-                actualPnL: pnl,
-                holdDays,
-                lotEntries: positionLotEntries,
-                source: 'import',
-                importBatchId: positionBatchId,
-                accountName: accountName !== 'default' ? accountName : undefined,
-                isTagged: false,
-                hasSyntheticCostBasis: positionUsedSynthetic,
-              });
+              positionLotEntries.push(lotEntry);
               
-              // Reset for next position
-              positionLotEntries = [];
-              firstBuyDate = null;
-              totalBuyCost = 0;
-              totalBuyQty = 0;
-              currentPosition = 0;
-              positionUsedSynthetic = false;
+              // FIFO matching for sells - track realized P&L
+              let remainingSell = qty;
+              while (remainingSell > 0 && openLots.length > 0) {
+                const lot = openLots[0];
+                const matchQty = Math.min(lot.qty, remainingSell);
+                realizedPnLForPosition += matchQty * (price - lot.price);
+                lot.qty -= matchQty;
+                remainingSell -= matchQty;
+                if (lot.qty <= 0.0001) openLots.shift();
+              }
+              currentPosition -= qty;
+              lastSellPrice = price;
+              lastSellDate = tradeDate;
             }
+          }
+          
+          // End-of-day check: if position is at or below zero, close the Trading Card
+          if (currentPosition <= 0.0001 && positionLotEntries.length > 0) {
+            finalizeClosedPosition();
+            resetPosition();
           }
         }
         
-        // Create card for any open position
-        if (currentPosition > 0 && positionLotEntries.length > 0) {
+        // Create card for any open position remaining after all days processed
+        if (currentPosition > 0.0001 && positionLotEntries.length > 0) {
           const avgEntry = totalBuyQty > 0 ? totalBuyCost / totalBuyQty : 0;
           cardsToCreate.push({
             userId,

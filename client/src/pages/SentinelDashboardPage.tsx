@@ -12,12 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { TradingChart, type ChartCandle, type ChartIndicators, type PriceLevelLine } from "@/components/TradingChart";
 
 interface TradeLabel {
   id: number;
@@ -912,6 +913,8 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
     setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
   };
 
+  const [showChartView, setShowChartView] = useState(false);
+
   const handleMenuAction = (action: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -927,6 +930,9 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
         break;
       case 'ivyai':
         setLocation(`/sentinel/evaluate?tradeId=${trade.id}`);
+        break;
+      case 'chart':
+        setShowChartView(true);
         break;
     }
   };
@@ -1211,6 +1217,10 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                     <XCircle className="w-4 h-4 mr-2" />
                     {isActive ? 'Cancel Trade' : 'Delete Item'}
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => handleMenuAction('chart', e)} data-testid={`menu-chart-${trade.id}`}>
+                    <BarChart3 className="w-4 h-4 mr-2" />
+                    Show Chart
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => handleMenuAction('ivyai', e)} data-testid={`menu-ivyai-${trade.id}`}>
                     <Brain className="w-4 h-4 mr-2 text-primary" />
@@ -1264,7 +1274,219 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
           </div>
         )}
       </CardContent>
+      {showChartView && (
+        <TradeChartDialog
+          trade={trade}
+          open={showChartView}
+          onOpenChange={setShowChartView}
+        />
+      )}
     </Card>
+  );
+}
+
+function TradeChartDialog({ trade, open, onOpenChange }: {
+  trade: TradeWithEvaluation;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
+  const [refiningLotId, setRefiningLotId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const refineMutation = useMutation({
+    mutationFn: async ({ tradeId, lotId, newDateTime }: { tradeId: number; lotId: string; newDateTime: string }) => {
+      return apiRequest("PATCH", `/api/sentinel/trades/${tradeId}/refine-lot-time`, { lotId, newDateTime });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades"] });
+      setRefiningLotId(null);
+      toast({ title: "Execution time refined", description: "The lot entry time has been updated." });
+    },
+    onError: () => {
+      toast({ title: "Failed to refine time", variant: "destructive" });
+    },
+  });
+
+  const handleIntradayClick = (candle: ChartCandle, clickedPrice: number) => {
+    if (!refiningLotId) return;
+    refineMutation.mutate({
+      tradeId: trade.id,
+      lotId: refiningLotId,
+      newDateTime: candle.date,
+    });
+  };
+
+  type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
+
+  const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
+    queryKey: ["/api/sentinel/pattern-training/chart-data", trade.symbol, "daily"],
+    enabled: open,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${trade.symbol}&timeframe=daily`);
+      if (!res.ok) throw new Error("Failed to fetch daily chart data");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
+    queryKey: ["/api/sentinel/pattern-training/chart-data", trade.symbol, intradayTimeframe],
+    enabled: open,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${trade.symbol}&timeframe=${intradayTimeframe}`);
+      if (!res.ok) throw new Error("Failed to fetch intraday chart data");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const lotEntries = trade.lotEntries as Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }> | null;
+  const orderLevels = (trade as any).orderLevels as Array<{ id: number; levelType: string; price: number; status: string }> | undefined;
+
+  const priceLines: PriceLevelLine[] = [];
+  if (lotEntries) {
+    const buyEntries = lotEntries.filter(l => l.buySell === "buy");
+    const sellEntries = lotEntries.filter(l => l.buySell === "sell");
+    if (buyEntries.length > 0) {
+      const avgBuy = buyEntries.reduce((s, l) => s + parseFloat(l.price) * parseFloat(l.qty), 0) /
+        buyEntries.reduce((s, l) => s + parseFloat(l.qty), 0);
+      priceLines.push({ price: avgBuy, color: "#22c55e", label: `Avg Entry $${avgBuy.toFixed(2)}`, lineStyle: "solid" });
+    }
+    if (sellEntries.length > 0) {
+      const avgSell = sellEntries.reduce((s, l) => s + parseFloat(l.price) * parseFloat(l.qty), 0) /
+        sellEntries.reduce((s, l) => s + parseFloat(l.qty), 0);
+      priceLines.push({ price: avgSell, color: "#f97316", label: `Avg Exit $${avgSell.toFixed(2)}`, lineStyle: "solid" });
+    }
+  }
+  if (trade.stopPrice) {
+    priceLines.push({ price: trade.stopPrice, color: "#ef4444", label: `Stop $${trade.stopPrice.toFixed(2)}`, lineStyle: "dashed" });
+  }
+  if (trade.targetPrice) {
+    priceLines.push({ price: trade.targetPrice, color: "#3b82f6", label: `Target $${trade.targetPrice.toFixed(2)}`, lineStyle: "dashed" });
+  }
+  if (orderLevels) {
+    orderLevels.filter(o => o.status === "open").forEach(o => {
+      const isStop = o.levelType === "stop";
+      priceLines.push({
+        price: o.price,
+        color: isStop ? "#ef4444" : "#3b82f6",
+        label: `${isStop ? "Stop" : "Target"} $${o.price.toFixed(2)}`,
+        lineStyle: "dotted",
+      });
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-6xl w-[95vw]" onClick={(e) => e.stopPropagation()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <BarChart3 className="w-5 h-5" />
+            {trade.symbol} Position Chart
+          </DialogTitle>
+          <DialogDescription>
+            {trade.status === "closed" ? "Closed position" : "Active position"} 
+            {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col">
+            <div className="text-xs text-muted-foreground mb-1 px-1 font-medium">Daily</div>
+            {dailyLoading ? (
+              <Card>
+                <CardContent className="flex items-center justify-center h-[380px]">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ) : dailyData ? (
+              <TradingChart
+                data={dailyData}
+                priceLines={priceLines}
+                timeframe="daily"
+                height={380}
+                showLegend={false}
+              />
+            ) : (
+              <Card>
+                <CardContent className="flex items-center justify-center h-[380px] text-muted-foreground text-sm">
+                  No daily data
+                </CardContent>
+              </Card>
+            )}
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 mb-1 px-1">
+              <span className="text-xs text-muted-foreground font-medium">Intraday</span>
+              <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
+                <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-trade-chart-intraday">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5min">5m</SelectItem>
+                  <SelectItem value="15min">15m</SelectItem>
+                  <SelectItem value="30min">30m</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {intradayLoading ? (
+              <Card>
+                <CardContent className="flex items-center justify-center h-[380px]">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ) : intradayData ? (
+              <TradingChart
+                data={intradayData}
+                onCandleClick={refiningLotId ? handleIntradayClick : undefined}
+                priceLines={priceLines}
+                timeframe={intradayTimeframe}
+                height={380}
+                showLegend={false}
+              />
+            ) : (
+              <Card>
+                <CardContent className="flex items-center justify-center h-[380px] text-muted-foreground text-sm">
+                  No intraday data
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+        {lotEntries && lotEntries.length > 0 && (
+          <div className="mt-3">
+            <div className="text-xs text-muted-foreground mb-2 font-medium">
+              Lot Entries {refiningLotId && <Badge variant="default" className="ml-2 text-[10px]">Click intraday chart to pin time</Badge>}
+            </div>
+            <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto">
+              {lotEntries.map((lot) => {
+                const isPinned = lot.dateTime.includes("T") && !lot.dateTime.includes("T09:30:00");
+                const isSelected = refiningLotId === lot.id;
+                return (
+                  <div
+                    key={lot.id}
+                    className={`flex items-center gap-2 px-2 py-1 rounded text-xs cursor-pointer transition-colors ${
+                      isSelected ? "bg-primary/20 ring-1 ring-primary" : "hover-elevate"
+                    }`}
+                    onClick={() => setRefiningLotId(isSelected ? null : lot.id)}
+                    data-testid={`lot-refine-${lot.id}`}
+                  >
+                    <Badge variant={lot.buySell === "buy" ? "default" : "secondary"} className="text-[10px] px-1">
+                      {lot.buySell.toUpperCase()}
+                    </Badge>
+                    <span>{parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}</span>
+                    <span className={`ml-auto ${isPinned ? "text-green-500" : "text-yellow-500"}`}>
+                      {isPinned ? new Date(lot.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "unpinned"}
+                    </span>
+                    <Crosshair className={`w-3 h-3 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

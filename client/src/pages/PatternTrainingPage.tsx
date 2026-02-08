@@ -22,7 +22,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
-import { PatternTrainingChart, type ChartCandle } from "@/components/PatternTrainingChart";
+import { TradingChart, type ChartCandle } from "@/components/TradingChart";
 import {
   TRAINING_PATTERN_TYPES,
   TRAINING_TIMEFRAMES,
@@ -101,8 +101,9 @@ const POINT_COLORS: Record<string, string> = {
   entry: "#22c55e",
   stop: "#ef4444",
   target: "#3b82f6",
+  sell: "#f59e0b",
   support_bounce: "#a855f7",
-  resistance_test: "#f59e0b",
+  resistance_test: "#eab308",
   breakout_confirmed: "#06b6d4",
   breakdown: "#f97316",
 };
@@ -111,11 +112,29 @@ const POINT_SHAPES: Record<string, "circle" | "arrowDown" | "arrowUp"> = {
   entry: "arrowUp",
   stop: "arrowDown",
   target: "arrowUp",
+  sell: "arrowDown",
   support_bounce: "circle",
   resistance_test: "circle",
   breakout_confirmed: "arrowUp",
   breakdown: "arrowDown",
 };
+
+function getPointsForRole(points: PointData[], role: string): PointData[] {
+  return points.filter(p => p.pointRole === role);
+}
+
+function getFirstEntry(points: PointData[]): PointData | undefined {
+  return points.find(p => p.pointRole === "entry");
+}
+
+function hasRole(points: PointData[], role: string): boolean {
+  return points.some(p => p.pointRole === role);
+}
+
+function isMultiPointRole(role: string): boolean {
+  const roleDef = TRAINING_POINT_ROLES.find(r => r.value === role);
+  return !!(roleDef && 'multiPoint' in roleDef && roleDef.multiPoint);
+}
 
 export default function PatternTrainingPage() {
   const { user } = useSentinelAuth();
@@ -126,10 +145,12 @@ export default function PatternTrainingPage() {
   const [ticker, setTicker] = useState("");
   const [searchTicker, setSearchTicker] = useState("");
   const [timeframe, setTimeframe] = useState("daily");
+  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const [chartLoaded, setChartLoaded] = useState(false);
+  const [dualChartMode, setDualChartMode] = useState(false);
 
   const [activePointRole, setActivePointRole] = useState<PointRole | null>(null);
-  const [points, setPoints] = useState<Record<string, PointData>>({});
+  const [points, setPoints] = useState<PointData[]>([]);
   const [pointsSaved, setPointsSaved] = useState(false);
   const [editingPoints, setEditingPoints] = useState(true);
 
@@ -156,7 +177,7 @@ export default function PatternTrainingPage() {
 
   const controlPointsRef = useRef<HTMLDivElement>(null);
 
-  const { data: chartData, isLoading: chartLoading } = useQuery<{
+  type ChartDataShape = {
     candles: ChartCandle[];
     indicators: {
       ema5: (number | null)[];
@@ -169,12 +190,27 @@ export default function PatternTrainingPage() {
     };
     ticker: string;
     timeframe: string;
-  }>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", searchTicker, timeframe],
+  };
+
+  const activeTimeframe = dualChartMode ? "daily" : timeframe;
+
+  const { data: chartData, isLoading: chartLoading } = useQuery<ChartDataShape>({
+    queryKey: ["/api/sentinel/pattern-training/chart-data", searchTicker, activeTimeframe],
     enabled: !!searchTicker,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${searchTicker}&timeframe=${timeframe}`);
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${searchTicker}&timeframe=${activeTimeframe}`);
       if (!res.ok) throw new Error("Failed to fetch chart data");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: intradayChartData, isLoading: intradayChartLoading } = useQuery<ChartDataShape>({
+    queryKey: ["/api/sentinel/pattern-training/chart-data", searchTicker, intradayTimeframe],
+    enabled: !!searchTicker && dualChartMode,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${searchTicker}&timeframe=${intradayTimeframe}`);
+      if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
@@ -243,7 +279,7 @@ export default function PatternTrainingPage() {
     if (ticker.trim()) {
       setSearchTicker(ticker.trim().toUpperCase());
       setChartLoaded(true);
-      setPoints({});
+      setPoints([]);
       setPointsSaved(false);
       setEditingPoints(true);
       setCurrentSetupId(null);
@@ -262,8 +298,9 @@ export default function PatternTrainingPage() {
       });
       const techData = res.ok ? await res.json() : null;
 
-      const percentFromEntry = activePointRole !== "entry" && points.entry
-        ? ((clickedPrice - points.entry.price) / points.entry.price) * 100
+      const firstEntry = getFirstEntry(points);
+      const percentFromEntry = activePointRole !== "entry" && firstEntry
+        ? ((clickedPrice - firstEntry.price) / firstEntry.price) * 100
         : 0;
 
       const newPoint: PointData = {
@@ -280,21 +317,28 @@ export default function PatternTrainingPage() {
       };
 
       setPoints(prev => {
-        const updated = { ...prev, [activePointRole!]: newPoint };
+        const multi = isMultiPointRole(activePointRole!);
+        let updated: PointData[];
+        if (multi) {
+          updated = [...prev, newPoint];
+        } else {
+          updated = [...prev.filter(p => p.pointRole !== activePointRole), newPoint];
+        }
         if (activePointRole === "entry") {
-          for (const [role, point] of Object.entries(updated)) {
-            if (role !== "entry" && point.price) {
-              updated[role] = {
-                ...point,
-                percentFromEntry: ((point.price - clickedPrice) / clickedPrice) * 100,
-              };
+          const entryPrice = clickedPrice;
+          updated = updated.map(p => {
+            if (p.pointRole !== "entry" && p.price) {
+              return { ...p, percentFromEntry: ((p.price - entryPrice) / entryPrice) * 100 };
             }
-          }
+            return p;
+          });
         }
         return updated;
       });
 
-      setActivePointRole(null);
+      if (!isMultiPointRole(activePointRole)) {
+        setActivePointRole(null);
+      }
       toast({ title: `${TRAINING_POINT_ROLES.find(r => r.value === activePointRole)?.label} set: $${clickedPrice.toFixed(2)}` });
     } catch {
       toast({ title: "Failed to load technical data", variant: "destructive" });
@@ -302,32 +346,39 @@ export default function PatternTrainingPage() {
   }, [activePointRole, editingPoints, searchTicker, timeframe, points, toast]);
 
   const markers = useMemo(() => {
-    return Object.values(points).map(p => ({
-      time: Math.floor(new Date(p.pointDate).getTime() / 1000),
-      position: (POINT_SHAPES[p.pointRole] === "arrowDown" ? "belowBar" : "aboveBar") as "aboveBar" | "belowBar",
-      color: POINT_COLORS[p.pointRole] || "#ffffff",
-      shape: POINT_SHAPES[p.pointRole] || "circle" as "circle" | "arrowDown" | "arrowUp",
-      text: TRAINING_POINT_ROLES.find(r => r.value === p.pointRole)?.label || p.pointRole,
-    }));
+    return points.map((p, idx) => {
+      const rolePoints = getPointsForRole(points, p.pointRole);
+      const roleIdx = rolePoints.indexOf(p);
+      const suffix = rolePoints.length > 1 ? ` #${roleIdx + 1}` : "";
+      return {
+        time: Math.floor(new Date(p.pointDate).getTime() / 1000),
+        position: (POINT_SHAPES[p.pointRole] === "arrowDown" ? "belowBar" : "aboveBar") as "aboveBar" | "belowBar",
+        color: POINT_COLORS[p.pointRole] || "#ffffff",
+        shape: POINT_SHAPES[p.pointRole] || "circle" as "circle" | "arrowDown" | "arrowUp",
+        text: `${TRAINING_POINT_ROLES.find(r => r.value === p.pointRole)?.label || p.pointRole}${suffix}`,
+      };
+    });
   }, [points]);
 
   const priceLines = useMemo(() => {
-    const lines: { price: number; color: string; label: string }[] = [];
-    for (const [role, point] of Object.entries(points)) {
-      if (point && point.price) {
-        const label = TRAINING_POINT_ROLES.find(r => r.value === role)?.label || role;
-        lines.push({
-          price: point.price,
-          color: POINT_COLORS[role] || "#ffffff",
-          label: `${label}: $${point.price.toFixed(2)}`,
-        });
-      }
-    }
-    return lines;
+    return points.map((p, idx) => {
+      const rolePoints = getPointsForRole(points, p.pointRole);
+      const roleIdx = rolePoints.indexOf(p);
+      const suffix = rolePoints.length > 1 ? ` #${roleIdx + 1}` : "";
+      const label = TRAINING_POINT_ROLES.find(r => r.value === p.pointRole)?.label || p.pointRole;
+      return {
+        price: p.price,
+        color: POINT_COLORS[p.pointRole] || "#ffffff",
+        label: `${label}${suffix}: $${p.price.toFixed(2)}`,
+      };
+    });
   }, [points]);
 
   const handleSavePoints = async () => {
-    if (!points.entry || !points.stop || !points.target) {
+    const firstEntry = getFirstEntry(points);
+    const firstStop = points.find(p => p.pointRole === "stop");
+    const firstTarget = points.find(p => p.pointRole === "target");
+    if (!firstEntry || !firstStop || !firstTarget) {
       toast({ title: "Entry, Stop, and Target are required", variant: "destructive" });
       return;
     }
@@ -342,21 +393,21 @@ export default function PatternTrainingPage() {
       setupId = setup.id;
     }
 
-    const pointsArray = Object.values(points);
-    await savePointsMutation.mutateAsync({ setupId, points: pointsArray });
+    await savePointsMutation.mutateAsync({ setupId: setupId!, points });
 
     setMetricsLoading(true);
     try {
+      const resistancePoint = points.find(p => p.pointRole === "resistance_test");
       const res = await fetch("/api/sentinel/pattern-training/setup-metrics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ticker: searchTicker,
-          entryDate: points.entry.pointDate,
-          stopPrice: points.stop.price,
-          targetPrice: points.target.price,
-          entryPrice: points.entry.price,
-          resistancePrice: points.resistance_test?.price,
+          entryDate: firstEntry.pointDate,
+          stopPrice: firstStop.price,
+          targetPrice: firstTarget.price,
+          entryPrice: firstEntry.price,
+          resistancePrice: resistancePoint?.price,
         }),
       });
       if (res.ok) {
@@ -439,13 +490,7 @@ export default function PatternTrainingPage() {
     setPointsSaved(setup.pointsSaved || false);
     setEditingPoints(!setup.pointsSaved);
 
-    const restoredPoints: Record<string, PointData> = {};
-    if (setup.points) {
-      for (const p of setup.points) {
-        restoredPoints[p.pointRole] = p;
-      }
-    }
-    setPoints(restoredPoints);
+    setPoints(setup.points || []);
     setActiveTab("create");
     setEvaluation(null);
     if (setup.id && setup.pointsSaved) {
@@ -457,7 +502,7 @@ export default function PatternTrainingPage() {
     setTicker("");
     setSearchTicker("");
     setChartLoaded(false);
-    setPoints({});
+    setPoints([]);
     setPointsSaved(false);
     setEditingPoints(true);
     setCurrentSetupId(null);
@@ -491,7 +536,7 @@ export default function PatternTrainingPage() {
     if (settings.backgroundColor) bgStyle.backgroundColor = settings.backgroundColor;
   }
 
-  const hasRequiredPoints = !!points.entry && !!points.stop && !!points.target;
+  const hasRequiredPoints = hasRole(points, "entry") && hasRole(points, "stop") && hasRole(points, "target");
 
   return (
     <div className="min-h-screen bg-background" style={bgStyle}>
@@ -518,7 +563,7 @@ export default function PatternTrainingPage() {
           </div>
 
           <TabsContent value="create">
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
               <div className="relative flex-1 max-w-xs">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
@@ -530,43 +575,126 @@ export default function PatternTrainingPage() {
                   data-testid="input-ticker"
                 />
               </div>
-              <Select value={timeframe} onValueChange={setTimeframe}>
-                <SelectTrigger className="w-28" data-testid="select-timeframe">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TRAINING_TIMEFRAMES.map(t => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {!dualChartMode && (
+                <Select value={timeframe} onValueChange={setTimeframe}>
+                  <SelectTrigger className="w-28" data-testid="select-timeframe">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRAINING_TIMEFRAMES.map(t => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Button onClick={loadChart} disabled={!ticker.trim() || chartLoading} data-testid="button-load-chart">
                 {chartLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Load Chart"}
+              </Button>
+              <Button
+                variant={dualChartMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDualChartMode(!dualChartMode)}
+                data-testid="button-dual-chart"
+              >
+                <BarChart3 className="w-4 h-4 mr-1" />
+                Dual Chart
               </Button>
             </div>
 
             {chartLoaded && (
               <div className="flex gap-4 items-stretch">
                 <div className="flex-1 min-w-0 flex flex-col">
-                  {chartLoading ? (
-                    <Card className="flex-1">
-                      <CardContent className="flex items-center justify-center h-full">
-                        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                      </CardContent>
-                    </Card>
-                  ) : chartData ? (
-                    <PatternTrainingChart
-                      data={chartData}
-                      onCandleClick={editingPoints ? handleCandleClick : undefined}
-                      markers={markers}
-                      priceLines={priceLines}
-                    />
+                  {dualChartMode ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col">
+                        <div className="text-xs text-muted-foreground mb-1 px-1 font-medium">Daily</div>
+                        {chartLoading ? (
+                          <Card className="flex-1">
+                            <CardContent className="flex items-center justify-center h-[400px]">
+                              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                            </CardContent>
+                          </Card>
+                        ) : chartData ? (
+                          <TradingChart
+                            data={chartData}
+                            onCandleClick={editingPoints ? handleCandleClick : undefined}
+                            markers={markers}
+                            priceLines={priceLines}
+                            timeframe="daily"
+                            height={400}
+                            showLegend={false}
+                          />
+                        ) : (
+                          <Card>
+                            <CardContent className="flex items-center justify-center h-[400px] text-muted-foreground text-sm">
+                              No daily data
+                            </CardContent>
+                          </Card>
+                        )}
+                      </div>
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2 mb-1 px-1">
+                          <span className="text-xs text-muted-foreground font-medium">Intraday</span>
+                          <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
+                            <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-intraday-timeframe">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TRAINING_TIMEFRAMES.filter(t => t.value !== "daily").map(t => (
+                                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {intradayChartLoading ? (
+                          <Card className="flex-1">
+                            <CardContent className="flex items-center justify-center h-[400px]">
+                              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                            </CardContent>
+                          </Card>
+                        ) : intradayChartData ? (
+                          <TradingChart
+                            data={intradayChartData}
+                            onCandleClick={editingPoints ? handleCandleClick : undefined}
+                            markers={markers}
+                            priceLines={priceLines}
+                            timeframe={intradayTimeframe}
+                            height={400}
+                            showLegend={false}
+                          />
+                        ) : (
+                          <Card>
+                            <CardContent className="flex items-center justify-center h-[400px] text-muted-foreground text-sm">
+                              No intraday data
+                            </CardContent>
+                          </Card>
+                        )}
+                      </div>
+                    </div>
                   ) : (
-                    <Card>
-                      <CardContent className="flex items-center justify-center h-[500px] text-muted-foreground">
-                        No data available for {searchTicker}
-                      </CardContent>
-                    </Card>
+                    <>
+                      {chartLoading ? (
+                        <Card className="flex-1">
+                          <CardContent className="flex items-center justify-center h-full">
+                            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                          </CardContent>
+                        </Card>
+                      ) : chartData ? (
+                        <TradingChart
+                          data={chartData}
+                          onCandleClick={editingPoints ? handleCandleClick : undefined}
+                          markers={markers}
+                          priceLines={priceLines}
+                          timeframe={timeframe}
+                        />
+                      ) : (
+                        <Card>
+                          <CardContent className="flex items-center justify-center h-[500px] text-muted-foreground">
+                            No data available for {searchTicker}
+                          </CardContent>
+                        </Card>
+                      )}
+                    </>
                   )}
 
                   {pointsSaved && Object.keys(calculatedMetrics).length > 0 && (
@@ -918,8 +1046,9 @@ export default function PatternTrainingPage() {
                         <p className="text-xs text-muted-foreground mb-2">Click a box, then click the chart</p>
                       )}
                       {TRAINING_POINT_ROLES.map(role => {
-                        const point = points[role.value];
+                        const rolePoints = getPointsForRole(points, role.value);
                         const isActive = activePointRole === role.value;
+                        const multi = isMultiPointRole(role.value);
 
                         return (
                           <div
@@ -927,7 +1056,7 @@ export default function PatternTrainingPage() {
                             className={`rounded-md border p-2.5 cursor-pointer transition-colors ${
                               isActive
                                 ? "border-primary bg-primary/10"
-                                : point
+                                : rolePoints.length > 0
                                 ? "border-border"
                                 : "border-dashed border-border/50"
                             }`}
@@ -946,78 +1075,91 @@ export default function PatternTrainingPage() {
                               <span className="text-xs font-medium">{role.label}</span>
                               {role.required && <Badge variant="outline" className="text-[10px] px-1 py-0">REQ</Badge>}
                               {!role.required && <span className="text-[10px] text-muted-foreground">optional</span>}
+                              {multi && rolePoints.length > 0 && (
+                                <Badge variant="secondary" className="text-[10px] px-1 py-0">{rolePoints.length}</Badge>
+                              )}
                             </div>
-                            {point ? (
-                              <div className="space-y-0.5 ml-4">
-                                <div className="text-sm font-mono">${point.price.toFixed(2)}</div>
-                                {role.value === "entry" && (
-                                  <>
-                                    <div className="text-[10px] text-muted-foreground">
-                                      {point.percentFrom50d !== undefined && (
-                                        <span className={point.percentFrom50d >= 0 ? "text-green-400" : "text-red-400"}>
-                                          {point.percentFrom50d >= 0 ? "+" : ""}{point.percentFrom50d.toFixed(1)}% from 50d
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground">
-                                      {point.percentFrom200d !== undefined && (
-                                        <span className={point.percentFrom200d >= 0 ? "text-green-400" : "text-red-400"}>
-                                          {point.percentFrom200d >= 0 ? "+" : ""}{point.percentFrom200d.toFixed(1)}% from 200d
-                                        </span>
-                                      )}
-                                    </div>
-                                  </>
-                                )}
-                                {role.value === "stop" && point.percentFromEntry !== undefined && (
-                                  <div className="text-[10px] text-red-400">
-                                    {point.percentFromEntry.toFixed(1)}% from entry
-                                  </div>
-                                )}
-                                {role.value === "target" && point.percentFromEntry !== undefined && (
-                                  <div className="text-[10px] text-green-400">
-                                    +{point.percentFromEntry.toFixed(1)}% from entry
-                                  </div>
-                                )}
-                                {role.value === "support_bounce" && (
-                                  <>
-                                    {point.nearestMa && (
-                                      <div className="text-[10px] text-muted-foreground">
-                                        Nearest: {point.nearestMa}
-                                      </div>
+                            {rolePoints.length > 0 ? (
+                              <div className="space-y-1.5 ml-4">
+                                {rolePoints.map((point, pIdx) => (
+                                  <div key={pIdx} className="space-y-0.5">
+                                    {multi && rolePoints.length > 1 && (
+                                      <div className="text-[10px] text-muted-foreground font-medium">#{pIdx + 1}</div>
                                     )}
-                                    {point.percentFromEntry !== undefined && (
-                                      <div className="text-[10px] text-muted-foreground">
+                                    <div className="text-sm font-mono">${point.price.toFixed(2)}</div>
+                                    {role.value === "entry" && (
+                                      <>
+                                        {point.percentFrom50d !== undefined && (
+                                          <div className="text-[10px] text-muted-foreground">
+                                            <span className={point.percentFrom50d >= 0 ? "text-green-400" : "text-red-400"}>
+                                              {point.percentFrom50d >= 0 ? "+" : ""}{point.percentFrom50d.toFixed(1)}% from 50d
+                                            </span>
+                                          </div>
+                                        )}
+                                        {point.percentFrom200d !== undefined && (
+                                          <div className="text-[10px] text-muted-foreground">
+                                            <span className={point.percentFrom200d >= 0 ? "text-green-400" : "text-red-400"}>
+                                              {point.percentFrom200d >= 0 ? "+" : ""}{point.percentFrom200d.toFixed(1)}% from 200d
+                                            </span>
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                    {(role.value === "stop" || role.value === "sell") && point.percentFromEntry !== undefined && (
+                                      <div className="text-[10px] text-red-400">
                                         {point.percentFromEntry.toFixed(1)}% from entry
                                       </div>
                                     )}
-                                  </>
-                                )}
-                                {role.value === "resistance_test" && point.percentFromEntry !== undefined && (
-                                  <div className="text-[10px] text-yellow-400">
-                                    {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
+                                    {role.value === "target" && point.percentFromEntry !== undefined && (
+                                      <div className="text-[10px] text-green-400">
+                                        +{point.percentFromEntry.toFixed(1)}% from entry
+                                      </div>
+                                    )}
+                                    {role.value === "support_bounce" && (
+                                      <>
+                                        {point.nearestMa && (
+                                          <div className="text-[10px] text-muted-foreground">
+                                            Nearest: {point.nearestMa}
+                                          </div>
+                                        )}
+                                        {point.percentFromEntry !== undefined && (
+                                          <div className="text-[10px] text-muted-foreground">
+                                            {point.percentFromEntry.toFixed(1)}% from entry
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                    {role.value === "resistance_test" && point.percentFromEntry !== undefined && (
+                                      <div className="text-[10px] text-yellow-400">
+                                        {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
+                                      </div>
+                                    )}
+                                    {(role.value === "breakout_confirmed" || role.value === "breakdown") && point.percentFromEntry !== undefined && (
+                                      <div className={`text-[10px] ${role.value === "breakout_confirmed" ? "text-cyan-400" : "text-orange-400"}`}>
+                                        {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
+                                      </div>
+                                    )}
+                                    {editingPoints && (
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setPoints(prev => {
+                                            if (multi) {
+                                              const rolePts = getPointsForRole(prev, role.value);
+                                              const toRemove = rolePts[pIdx];
+                                              return prev.filter(p => p !== toRemove);
+                                            }
+                                            return prev.filter(p => p.pointRole !== role.value);
+                                          });
+                                        }}
+                                        className="text-[10px] text-muted-foreground hover:text-destructive mt-1"
+                                        data-testid={`button-clear-${role.value}-${pIdx}`}
+                                      >
+                                        <RotateCcw className="w-3 h-3 inline mr-0.5" /> {multi && rolePoints.length > 1 ? "Remove" : "Reset"}
+                                      </button>
+                                    )}
                                   </div>
-                                )}
-                                {(role.value === "breakout_confirmed" || role.value === "breakdown") && point.percentFromEntry !== undefined && (
-                                  <div className={`text-[10px] ${role.value === "breakout_confirmed" ? "text-cyan-400" : "text-orange-400"}`}>
-                                    {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
-                                  </div>
-                                )}
-                                {editingPoints && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPoints(prev => {
-                                        const updated = { ...prev };
-                                        delete updated[role.value];
-                                        return updated;
-                                      });
-                                    }}
-                                    className="text-[10px] text-muted-foreground hover:text-destructive mt-1"
-                                    data-testid={`button-clear-${role.value}`}
-                                  >
-                                    <RotateCcw className="w-3 h-3 inline mr-0.5" /> Reset
-                                  </button>
-                                )}
+                                ))}
                               </div>
                             ) : (
                               <div className="text-xs text-muted-foreground ml-4">

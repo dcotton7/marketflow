@@ -927,13 +927,22 @@ export const TRAINING_PATTERN_TYPES = [
 
 export const TRAINING_TIMEFRAMES = [
   { value: "daily", label: "Daily" },
+  { value: "5min", label: "5 Min" },
   { value: "15min", label: "15 Min" },
+  { value: "30min", label: "30 Min" },
 ] as const;
 
+export const INTRADAY_LOOKBACK_DAYS: Record<string, number> = {
+  "5min": 30,
+  "15min": 45,
+  "30min": 60,
+};
+
 export const TRAINING_POINT_ROLES = [
-  { value: "entry", label: "Entry", required: true },
-  { value: "stop", label: "Stop", required: true },
-  { value: "target", label: "Target", required: true },
+  { value: "entry", label: "Entry", required: true, multiPoint: true },
+  { value: "stop", label: "Stop", required: true, multiPoint: true },
+  { value: "target", label: "Target", required: true, multiPoint: true },
+  { value: "sell", label: "Sell", required: false, multiPoint: true },
   { value: "support_bounce", label: "Support Bounce", required: false },
   { value: "resistance_test", label: "Resistance Test", required: false, multiClick: 2 },
   { value: "breakout_confirmed", label: "Breakout Confirmed", required: false },

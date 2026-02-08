@@ -393,8 +393,11 @@ export async function fetchChartData(
   lookbackDays?: number
 ): Promise<ChartDataWithIndicators | null> {
   try {
-    const days = lookbackDays || (timeframe === "daily" ? 750 : 90);
-    const interval = timeframe === "daily" ? "1d" : "15m";
+    const intradayLookback: Record<string, number> = { "5min": 30, "15min": 45, "30min": 60 };
+    const isIntraday = timeframe !== "daily";
+    const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 45) : 750);
+    const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
+    const interval = intervalMap[timeframe] || "1d";
     
     const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval);
     if (bars.length < 10) {
@@ -402,17 +405,28 @@ export async function fetchChartData(
       return null;
     }
 
-    const candles: ChartCandle[] = bars.map(b => ({
-      date: new Date(b.date).toISOString().split('T')[0],
-      timestamp: Math.floor(new Date(b.date).getTime() / 1000),
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-      volume: b.volume,
-    })).reverse();
+    const candles: ChartCandle[] = bars.map(b => {
+      const d = new Date(b.date);
+      return {
+        date: isIntraday ? d.toISOString() : d.toISOString().split('T')[0],
+        timestamp: Math.floor(d.getTime() / 1000),
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      };
+    }).reverse();
 
-    const closes = candles.map(c => c.close);
+    const seen = new Set<number>();
+    const dedupedCandles = candles.filter(c => {
+      if (seen.has(c.timestamp)) return false;
+      seen.add(c.timestamp);
+      return true;
+    });
+
+    const finalCandles = dedupedCandles;
+    const closes = finalCandles.map(c => c.close);
 
     const ema5 = calculateEMASeriesForward(closes, 5);
     const ema10 = calculateEMASeriesForward(closes, 10);
@@ -420,13 +434,13 @@ export async function fetchChartData(
     const sma50 = calculateSMASeriesForward(closes, 50);
     const sma200 = calculateSMASeriesForward(closes, 200);
 
-    const avwapHighIdx = findRecentHighIndex(candles, 120);
-    const avwapLowIdx = findRecentLowIndex(candles, 120);
-    const avwapHigh = calculateAVWAPSeries(candles, avwapHighIdx);
-    const avwapLow = calculateAVWAPSeries(candles, avwapLowIdx);
+    const avwapHighIdx = findRecentHighIndex(finalCandles, 120);
+    const avwapLowIdx = findRecentLowIndex(finalCandles, 120);
+    const avwapHigh = calculateAVWAPSeries(finalCandles, avwapHighIdx);
+    const avwapLow = calculateAVWAPSeries(finalCandles, avwapLowIdx);
 
     return {
-      candles,
+      candles: finalCandles,
       indicators: { ema5, ema10, sma21, sma50, sma200, avwapHigh, avwapLow },
       ticker: ticker.toUpperCase(),
       timeframe,
@@ -443,17 +457,28 @@ export async function calculatePointTechnicals(
   timeframe: string = "daily"
 ): Promise<{ technicals: PointTechnicalData; ohlcv: { open: number; high: number; low: number; close: number; volume: number } } | null> {
   try {
-    const days = timeframe === "daily" ? 400 : 90;
-    const interval = timeframe === "daily" ? "1d" : "15m";
+    const intradayLookback: Record<string, number> = { "5min": 30, "15min": 45, "30min": 60 };
+    const isIntraday = timeframe !== "daily";
+    const days = isIntraday ? (intradayLookback[timeframe] || 45) : 400;
+    const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
+    const interval = intervalMap[timeframe] || "1d";
     const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval);
     
     if (bars.length < 10) return null;
 
-    const targetDateStr = pointDate.split('T')[0];
-    const targetIdx = bars.findIndex(b => {
-      const barDate = new Date(b.date).toISOString().split('T')[0];
-      return barDate === targetDateStr;
-    });
+    let targetIdx: number;
+    if (isIntraday && pointDate.includes('T')) {
+      const targetTs = new Date(pointDate).getTime();
+      targetIdx = bars.findIndex(b => {
+        return Math.abs(new Date(b.date).getTime() - targetTs) < 60000;
+      });
+    } else {
+      const targetDateStr = pointDate.split('T')[0];
+      targetIdx = bars.findIndex(b => {
+        const barDate = new Date(b.date).toISOString().split('T')[0];
+        return barDate === targetDateStr;
+      });
+    }
 
     if (targetIdx < 0) {
       const targetTs = new Date(pointDate).getTime();
