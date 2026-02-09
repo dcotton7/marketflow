@@ -1349,11 +1349,20 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
     const year = get("year");
     const month = get("month");
     const day = get("day");
-    const hours = get("hour");
+    let hours = get("hour");
+    if (hours === "24") hours = "00";
     const minutes = get("minute");
     const isDST = get("timeZoneName") === "EDT";
     const offset = isDST ? "-04:00" : "-05:00";
     const newDateTime = `${year}-${month}-${day}T${hours}:${minutes}:00${offset}`;
+    console.log("[LotRefine] handleIntradayClick:", {
+      candleTimestamp: candle.timestamp,
+      candleUTC: d.toISOString(),
+      etParts: Object.fromEntries(etParts.map(p => [p.type, p.value])),
+      newDateTime,
+      lotId: refiningLotId,
+      serverWillStore: new Date(newDateTime).toISOString(),
+    });
     refineMutation.mutate({
       tradeId: trade.id,
       lotId: refiningLotId,
@@ -1411,11 +1420,17 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
   const rthData = useMemo(() => {
     if (!intradayData) return null;
+    const rthFmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit", minute: "2-digit",
+      hour12: false,
+    });
     const rthIndices: number[] = [];
     intradayData.candles.forEach((c, i) => {
-      const d = new Date(c.timestamp * 1000);
-      const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" });
-      const [etH, etM] = etStr.split(":").map(Number);
+      const parts = rthFmt.formatToParts(new Date(c.timestamp * 1000));
+      let etH = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
+      if (etH === 24) etH = 0;
+      const etM = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
       const totalMin = etH * 60 + etM;
       if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
     });
@@ -1655,7 +1670,18 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
           };
 
           const isLotPinned = (lot: LotEntry) => {
-            return lot.dateTime.includes("T") && !lot.dateTime.includes("T09:30:00");
+            if (!lot.dateTime.includes("T")) return false;
+            const d = new Date(lot.dateTime);
+            const etFmt = new Intl.DateTimeFormat("en-US", {
+              timeZone: "America/New_York",
+              hour: "2-digit", minute: "2-digit",
+              hour12: false,
+            });
+            const parts = etFmt.formatToParts(d);
+            let h = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
+            if (h === 24) h = 0;
+            const m = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
+            return !(h === 9 && m === 30);
           };
 
           const getSellPnlColor = (_lot: LotEntry) => {

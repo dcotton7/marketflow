@@ -344,6 +344,11 @@ export function TradingChart({
     return map;
   }, [data.candles, displayData.candles, isIntraday]);
 
+  const shiftedToOriginalRef = useRef(shiftedToOriginal);
+  useEffect(() => {
+    shiftedToOriginalRef.current = shiftedToOriginal;
+  }, [shiftedToOriginal]);
+
   const handleChartClick = useCallback(
     (param: any) => {
       if (!onCandleClickRef.current || !param.time || !candleSeriesRef.current) return;
@@ -359,17 +364,30 @@ export function TradingChart({
         timestamp = param.time as number;
       }
 
+      const currentMap = shiftedToOriginalRef.current;
+
       let candle: ChartCandle | undefined;
-      if (shiftedToOriginal) {
-        candle = shiftedToOriginal.get(timestamp);
+      if (currentMap) {
+        candle = currentMap.get(timestamp);
         if (!candle) {
           let closestKey = 0;
           let minDiff = Infinity;
-          shiftedToOriginal.forEach((_val, key) => {
+          const clickedDay = new Date(timestamp * 1000).toISOString().slice(0, 10);
+          currentMap.forEach((_val, key) => {
+            const keyDay = new Date(key * 1000).toISOString().slice(0, 10);
+            if (keyDay !== clickedDay) return;
             const diff = Math.abs(key - timestamp);
             if (diff < minDiff) { minDiff = diff; closestKey = key; }
           });
-          if (minDiff < 3600) candle = shiftedToOriginal.get(closestKey);
+          if (minDiff < 3600) candle = currentMap.get(closestKey);
+        }
+        if (candle) {
+          console.log("[ChartClick] shiftedToOriginal resolved:", {
+            clickedShifted: timestamp,
+            clickedShiftedDate: new Date(timestamp * 1000).toISOString(),
+            originalTimestamp: candle.timestamp,
+            originalDate: new Date(candle.timestamp * 1000).toISOString(),
+          });
         }
       } else {
         candle = candlesRef.current.find((c) => c.timestamp === timestamp);
@@ -382,6 +400,10 @@ export function TradingChart({
           }
           if (minDiff < 3600) candle = closest;
         }
+        console.log("[ChartClick] no shiftedToOriginal map, direct lookup:", {
+          clickedTimestamp: timestamp,
+          foundCandle: candle ? candle.timestamp : "none",
+        });
       }
       if (candle) {
         let clickedPrice = candle.close;

@@ -389,8 +389,10 @@ async function fetchHistoricalBars(symbol: string, days: number, interval: strin
         .filter((q: any) => {
           if (q.open == null || q.high == null || q.low == null || q.close == null) return false;
           const d = q.date instanceof Date ? q.date : new Date(q.date);
-          const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" });
-          const [etH, etM] = etStr.split(":").map(Number);
+          const etParts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" }).formatToParts(d);
+          let etH = parseInt(etParts.find((p: any) => p.type === "hour")?.value || "0", 10);
+          if (etH === 24) etH = 0;
+          const etM = parseInt(etParts.find((p: any) => p.type === "minute")?.value || "0", 10);
           const totalMin = etH * 60 + etM;
           if (totalMin < 570 || totalMin >= 960) return false;
           return true;
