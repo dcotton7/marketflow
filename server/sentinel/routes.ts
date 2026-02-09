@@ -4523,25 +4523,40 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                   }
                   
                   // End-of-day check: if position is at or below zero, finalize this position
+                  // Only create a card if there were actual buys (skip sell-only sequences)
                   if (mCurrentPosition <= 0.0001 && mPositionLots.length > 0) {
-                    mergePositions.push({
-                      lots: [...mPositionLots],
-                      firstBuyDate: mFirstBuyDate,
-                      lastExitDate: mLastExitDate,
-                      lastExitPrice: mLastExitPrice,
-                      realizedPnL: mRealizedPnL,
-                      totalBoughtQty: mTotalBoughtQty,
-                      totalBoughtCost: mTotalBoughtCost,
-                      remainingPosition: 0,
-                    });
-                    mPositionLots = [];
-                    mFirstBuyDate = null;
-                    mLastExitDate = null;
-                    mLastExitPrice = null;
-                    mRealizedPnL = 0;
-                    mTotalBoughtQty = 0;
-                    mTotalBoughtCost = 0;
-                    mCurrentPosition = 0;
+                    // Skip creating a card if there are no buys (sell-only sequences are orphans)
+                    if (mTotalBoughtQty <= 0) {
+                      mPositionLots = [];
+                      mFirstBuyDate = null;
+                      mLastExitDate = null;
+                      mLastExitPrice = null;
+                      mRealizedPnL = 0;
+                      mTotalBoughtQty = 0;
+                      mTotalBoughtCost = 0;
+                      mCurrentPosition = 0;
+                      mOpenLots.length = 0;
+                    } else {
+                      mergePositions.push({
+                        lots: [...mPositionLots],
+                        firstBuyDate: mFirstBuyDate,
+                        lastExitDate: mLastExitDate,
+                        lastExitPrice: mLastExitPrice,
+                        realizedPnL: mRealizedPnL,
+                        totalBoughtQty: mTotalBoughtQty,
+                        totalBoughtCost: mTotalBoughtCost,
+                        remainingPosition: 0,
+                      });
+                      mPositionLots = [];
+                      mFirstBuyDate = null;
+                      mLastExitDate = null;
+                      mLastExitPrice = null;
+                      mRealizedPnL = 0;
+                      mTotalBoughtQty = 0;
+                      mTotalBoughtCost = 0;
+                      mCurrentPosition = 0;
+                      mOpenLots.length = 0;
+                    }
                   }
                 }
                 

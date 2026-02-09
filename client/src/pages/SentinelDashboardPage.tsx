@@ -1308,7 +1308,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
   );
 }
 
-function TradeChartDialog({ trade, open, onOpenChange }: {
+function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
   trade: TradeWithEvaluation;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1321,6 +1321,13 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
   const maSettingsRecentlyClosed = useRef(false);
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
+  const [localLotEntries, setLocalLotEntries] = useState<Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }> | null>(
+    tradeProp.lotEntries as any
+  );
+  useEffect(() => {
+    setLocalLotEntries(tradeProp.lotEntries as any);
+  }, [tradeProp.lotEntries]);
+  const trade = { ...tradeProp, lotEntries: localLotEntries };
 
   const { data: maSettingsData } = useQuery<any[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -1346,9 +1353,13 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
   const refineMutation = useMutation({
     mutationFn: async ({ tradeId, lotId, newDateTime }: { tradeId: number; lotId: string; newDateTime: string }) => {
-      return apiRequest("PATCH", `/api/sentinel/trades/${tradeId}/refine-lot-time`, { lotId, newDateTime });
+      const res = await apiRequest("PATCH", `/api/sentinel/trades/${tradeId}/refine-lot-time`, { lotId, newDateTime });
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (updatedTrade: any) => {
+      if (updatedTrade?.lotEntries) {
+        setLocalLotEntries(updatedTrade.lotEntries);
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/trades"] });
       setRefiningLotId(null);
       toast({ title: "Execution time refined", description: "The lot entry time has been updated." });
