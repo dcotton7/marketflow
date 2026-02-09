@@ -374,6 +374,21 @@ export function TradingChart({
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
+    const resetCrosshair = () => {
+      if (!chartRef.current) return;
+      chartRef.current.applyOptions({
+        crosshair: {
+          mode: 1,
+          horzLine: {
+            visible: true,
+            labelVisible: true,
+            color: "rgba(148, 163, 184, 0.3)" as any,
+            width: 1 as any,
+            style: LineStyle.Dashed,
+          },
+        },
+      });
+    };
     if (snapToPrice != null) {
       chartRef.current.applyOptions({
         crosshair: {
@@ -399,20 +414,11 @@ export function TradingChart({
       return () => {
         if (chartRef.current) {
           chartRef.current.unsubscribeCrosshairMove(handler);
-          chartRef.current.applyOptions({
-            crosshair: {
-              mode: 1,
-              horzLine: {
-                visible: true,
-                labelVisible: true,
-                color: undefined as any,
-                width: 1 as any,
-                style: LineStyle.Dashed,
-              },
-            },
-          });
         }
+        resetCrosshair();
       };
+    } else {
+      resetCrosshair();
     }
   }, [snapToPrice]);
 

@@ -1360,23 +1360,43 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
     staleTime: 5 * 60 * 1000,
   });
 
+  interface TradeChartMetrics {
+    currentPrice: number;
+    adr50d: number;
+    extensionFrom200d: number;
+    macd: string;
+    sectorEtf: string;
+    sectorEtfChange: number;
+  }
+
+  const { data: chartMetrics } = useQuery<TradeChartMetrics>({
+    queryKey: ["/api/sentinel/trade-chart-metrics", trade.symbol],
+    enabled: open,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${trade.symbol}`);
+      if (!res.ok) throw new Error("Failed to fetch metrics");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+  });
+
   const lotEntries = trade.lotEntries as Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }> | null;
   const orderLevels = (trade as any).orderLevels as Array<{ id: number; levelType: string; price: number; status: string }> | undefined;
 
   const priceLines: PriceLevelLine[] = [];
   if (lotEntries) {
-    const buyEntries = lotEntries.filter(l => l.buySell === "buy");
-    const sellEntries = lotEntries.filter(l => l.buySell === "sell");
-    if (buyEntries.length > 0) {
-      const avgBuy = buyEntries.reduce((s, l) => s + parseFloat(l.price) * parseFloat(l.qty), 0) /
-        buyEntries.reduce((s, l) => s + parseFloat(l.qty), 0);
-      priceLines.push({ price: avgBuy, color: "#22c55e", label: `Avg Entry $${avgBuy.toFixed(2)}`, lineStyle: "solid" });
-    }
-    if (sellEntries.length > 0) {
-      const avgSell = sellEntries.reduce((s, l) => s + parseFloat(l.price) * parseFloat(l.qty), 0) /
-        sellEntries.reduce((s, l) => s + parseFloat(l.qty), 0);
-      priceLines.push({ price: avgSell, color: "#f97316", label: `Avg Exit $${avgSell.toFixed(2)}`, lineStyle: "solid" });
-    }
+    lotEntries.forEach((lot, i) => {
+      const price = parseFloat(lot.price);
+      if (isNaN(price) || price <= 0) return;
+      const isBuy = lot.buySell === "buy";
+      const qty = parseFloat(lot.qty);
+      priceLines.push({
+        price,
+        color: isBuy ? "#22c55e" : "#f97316",
+        label: `${isBuy ? "Buy" : "Sell"} ${qty}@$${price.toFixed(2)}`,
+        lineStyle: "solid",
+      });
+    });
   }
   if (trade.stopPrice) {
     priceLines.push({ price: trade.stopPrice, color: "#ef4444", label: `Stop $${trade.stopPrice.toFixed(2)}`, lineStyle: "dashed" });
@@ -1483,6 +1503,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
           type LotEntry = { id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string };
 
           const buyLots = lotEntries.filter((l: LotEntry) => l.buySell === "buy");
+          const sellLots = lotEntries.filter((l: LotEntry) => l.buySell === "sell");
           const avgBuyPrice = buyLots.length > 0
             ? buyLots.reduce((s, l) => s + parseFloat(l.price) * parseFloat(l.qty), 0) / buyLots.reduce((s, l) => s + parseFloat(l.qty), 0)
             : 0;
@@ -1504,76 +1525,119 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
               : { text: "text-red-400", border: "border-red-500/30" };
           };
 
+          const renderLotBox = (lot: LotEntry) => {
+            const isPinned = isLotPinned(lot);
+            const isSelected = refiningLotId === lot.id;
+            const isBuy = lot.buySell === "buy";
+            const lotDate = formatLotDate(lot.dateTime);
+            const lotTime = isPinned
+              ? new Date(lot.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : null;
+
+            let baseColor: string;
+            let borderColor: string;
+
+            if (!isPinned) {
+              baseColor = "text-yellow-400";
+              borderColor = "border-yellow-500/30";
+            } else if (isBuy) {
+              baseColor = "text-green-400";
+              borderColor = "border-green-500/30";
+            } else {
+              const sellColors = getSellPnlColor(lot);
+              baseColor = sellColors.text;
+              borderColor = sellColors.border;
+            }
+
+            return (
+              <div
+                key={lot.id}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer transition-colors w-[200px] ${borderColor} ${
+                  isSelected ? "bg-primary/20 ring-1 ring-primary" : "hover-elevate"
+                }`}
+                onClick={() => setRefiningLotId(isSelected ? null : lot.id)}
+                data-testid={`lot-refine-${lot.id}`}
+              >
+                <Crosshair className={`w-5 h-5 flex-shrink-0 ${isSelected ? "text-primary" : baseColor}`} />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className={`text-sm font-medium leading-tight ${baseColor}`}>
+                    {isBuy ? "Buy" : "Sell"}: {parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}
+                  </span>
+                  <span className={`text-[9px] leading-tight ${isPinned ? baseColor : "text-yellow-500/70"}`}>
+                    {lotDate}{lotTime ? ` ${lotTime}` : ""}
+                    {!isPinned && (
+                      <span className="italic ml-1">click chart</span>
+                    )}
+                  </span>
+                </div>
+                {isSelected && (
+                  <button
+                    className="flex-shrink-0 p-0.5 rounded hover:bg-destructive/20 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setRefiningLotId(null); }}
+                    data-testid={`lot-cancel-${lot.id}`}
+                  >
+                    <X className="w-3.5 h-3.5 text-destructive" />
+                  </button>
+                )}
+              </div>
+            );
+          };
+
           return (
-            <Card className="mt-2 flex-shrink-0">
-              <CardContent className="p-3">
-                <div className="flex items-center gap-2 mb-2">
-                  {refiningLotId && (
-                    <Badge variant="default" className="text-[10px]">Click intraday chart to pin time</Badge>
+            <div className="mt-2 flex-shrink-0 flex flex-wrap items-start gap-4">
+              <div>
+                <div className="mb-1.5">
+                  <span className="text-xs font-bold text-foreground">Click the targets to set trade time</span>
+                </div>
+                <div className="inline-flex flex-col gap-1 border border-border rounded p-2">
+                  {buyLots.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 items-start">
+                      {buyLots.map(renderLotBox)}
+                    </div>
                   )}
-                  <span className="text-xs font-medium text-muted-foreground ml-auto">Lot Entries</span>
+                  {sellLots.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 items-start">
+                      {sellLots.map(renderLotBox)}
+                    </div>
+                  )}
                 </div>
-                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
-                  {lotEntries.map((lot: LotEntry) => {
-                    const isPinned = isLotPinned(lot);
-                    const isSelected = refiningLotId === lot.id;
-                    const isBuy = lot.buySell === "buy";
-                    const lotDate = formatLotDate(lot.dateTime);
-                    const lotTime = isPinned
-                      ? new Date(lot.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                      : null;
-
-                    let baseColor: string;
-                    let borderColor: string;
-
-                    if (!isPinned) {
-                      baseColor = "text-yellow-400";
-                      borderColor = "border-yellow-500/30";
-                    } else if (isBuy) {
-                      baseColor = "text-green-400";
-                      borderColor = "border-green-500/30";
-                    } else {
-                      const sellColors = getSellPnlColor(lot);
-                      baseColor = sellColors.text;
-                      borderColor = sellColors.border;
-                    }
-
-                    return (
-                      <div
-                        key={lot.id}
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer transition-colors w-[200px] ${borderColor} ${
-                          isSelected ? "bg-primary/20 ring-1 ring-primary" : "hover-elevate"
-                        }`}
-                        onClick={() => setRefiningLotId(isSelected ? null : lot.id)}
-                        data-testid={`lot-refine-${lot.id}`}
-                      >
-                        <Crosshair className={`w-5 h-5 flex-shrink-0 ${isSelected ? "text-primary" : baseColor}`} />
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <span className={`text-[11px] font-medium leading-tight ${baseColor}`}>
-                            {isBuy ? "Buy" : "Sell"}: {parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}
-                          </span>
-                          <span className={`text-[9px] leading-tight ${isPinned ? baseColor : "text-yellow-500/70"}`}>
-                            {lotDate}{lotTime ? ` ${lotTime}` : ""}
-                            {!isPinned && (
-                              <span className="italic ml-1">click chart</span>
-                            )}
-                          </span>
-                        </div>
-                        {isSelected && (
-                          <button
-                            className="flex-shrink-0 p-0.5 rounded hover:bg-destructive/20 transition-colors"
-                            onClick={(e) => { e.stopPropagation(); setRefiningLotId(null); }}
-                            data-testid={`lot-cancel-${lot.id}`}
-                          >
-                            <X className="w-3.5 h-3.5 text-destructive" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+              </div>
+              {chartMetrics && (
+                <div className="border border-border rounded p-2 flex flex-col gap-1.5 min-w-[180px]" data-testid="trade-chart-metrics">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground">Current Price</span>
+                    <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground">ADR (50d)</span>
+                    <span className="text-sm font-medium text-foreground">{chartMetrics.adr50d}x</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground">Ext from 200d</span>
+                    <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground">MACD</span>
+                    <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                      {chartMetrics.macd}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground">Sector ETF</span>
+                    <span className="text-sm font-medium text-foreground">
+                      {chartMetrics.sectorEtf}
+                      {chartMetrics.sectorEtf !== "N/A" && (
+                        <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+              )}
+            </div>
           );
         })()}
       </DialogContent>

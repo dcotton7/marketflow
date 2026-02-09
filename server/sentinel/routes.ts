@@ -6317,6 +6317,121 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  const SECTOR_ETF_MAP: Record<string, string> = {
+    "Technology": "XLK",
+    "Information Technology": "XLK",
+    "Financial Services": "XLF",
+    "Financials": "XLF",
+    "Healthcare": "XLV",
+    "Health Care": "XLV",
+    "Consumer Cyclical": "XLY",
+    "Consumer Discretionary": "XLY",
+    "Consumer Defensive": "XLP",
+    "Consumer Staples": "XLP",
+    "Industrials": "XLI",
+    "Energy": "XLE",
+    "Utilities": "XLU",
+    "Real Estate": "XLRE",
+    "Basic Materials": "XLB",
+    "Materials": "XLB",
+    "Communication Services": "XLC",
+  };
+
+  app.get("/api/sentinel/trade-chart-metrics", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const ticker = String(req.query.ticker || "").toUpperCase();
+      if (!ticker) return res.status(400).json({ error: "Ticker is required" });
+
+      const YahooFinanceModule = await import('yahoo-finance2') as any;
+      const yf = YahooFinanceModule.default?.default || YahooFinanceModule.default || YahooFinanceModule;
+
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 400);
+
+      const [quotes, quoteData] = await Promise.all([
+        yf.chart(ticker, { period1: startDate, period2: endDate, interval: "1d" }).then((r: any) => r.quotes || []).catch(() => []),
+        yf.quote(ticker).catch(() => null),
+      ]);
+
+      if (!quotes.length) {
+        return res.status(404).json({ error: `No data found for ${ticker}` });
+      }
+
+      const validQuotes = quotes.filter((q: any) => q.open != null && q.close != null && q.high != null && q.low != null);
+      const currentPrice = validQuotes[validQuotes.length - 1]?.close || 0;
+
+      let adrMultiplier = 0;
+      if (validQuotes.length >= 50) {
+        const last50 = validQuotes.slice(-50);
+        const adr = last50.reduce((sum: number, q: any) => sum + (q.high - q.low), 0) / 50;
+        adrMultiplier = adr > 0 ? Math.round((currentPrice / adr) * 10) / 10 : 0;
+      }
+
+      let extensionFrom200d = 0;
+      if (validQuotes.length >= 200) {
+        const last200 = validQuotes.slice(-200);
+        const sma200 = last200.reduce((sum: number, q: any) => sum + q.close, 0) / 200;
+        extensionFrom200d = sma200 > 0 ? Math.round(((currentPrice - sma200) / sma200) * 1000) / 10 : 0;
+      }
+
+      let macdStatus = "N/A";
+      if (validQuotes.length >= 35) {
+        const closes = validQuotes.map((q: any) => q.close);
+        const ema = (data: number[], period: number) => {
+          const k = 2 / (period + 1);
+          const result: number[] = [data[0]];
+          for (let i = 1; i < data.length; i++) {
+            result.push(data[i] * k + result[i - 1] * (1 - k));
+          }
+          return result;
+        };
+        const ema12 = ema(closes, 12);
+        const ema26 = ema(closes, 26);
+        const macdLine = ema12.map((v, i) => v - ema26[i]);
+        const signalLine = ema(macdLine, 9);
+        const lastMacd = macdLine[macdLine.length - 1];
+        const lastSignal = signalLine[signalLine.length - 1];
+        macdStatus = lastMacd >= lastSignal ? "Open" : "Closed";
+      }
+
+      let sectorEtf = "";
+      let sectorEtfChange = 0;
+      try {
+        let sector = quoteData?.sector || "";
+        if (!sector) {
+          try {
+            const summary = await yf.quoteSummary(ticker, { modules: ["assetProfile"] });
+            sector = summary?.assetProfile?.sector || "";
+          } catch {}
+        }
+        sectorEtf = SECTOR_ETF_MAP[sector] || "";
+        if (sectorEtf) {
+          const etfQuote = await yf.quote(sectorEtf).catch(() => null);
+          if (etfQuote) {
+            sectorEtfChange = Math.round((etfQuote.regularMarketChangePercent || 0) * 100) / 100;
+          }
+        } else {
+          sectorEtf = "N/A";
+        }
+      } catch (e) {
+        sectorEtf = "N/A";
+      }
+
+      res.json({
+        currentPrice: Math.round(currentPrice * 100) / 100,
+        adr50d: adrMultiplier,
+        extensionFrom200d,
+        macd: macdStatus,
+        sectorEtf,
+        sectorEtfChange,
+      });
+    } catch (error) {
+      console.error("Trade chart metrics error:", error);
+      res.status(500).json({ error: "Failed to fetch metrics" });
+    }
+  });
+
   app.post("/api/sentinel/pattern-training/point-technicals", requireAuth, async (req: Request, res: Response) => {
     try {
       const { ticker, pointDate, timeframe } = req.body;
