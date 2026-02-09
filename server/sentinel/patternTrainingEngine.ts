@@ -1,3 +1,5 @@
+import { getPeriodsForTimeframe } from "../../shared/indicatorTemplates";
+
 let yahooFinance: any = null;
 
 async function getYahooFinance() {
@@ -456,11 +458,18 @@ export async function fetchChartData(
     const finalCandles = dedupedCandles;
     const closes = finalCandles.map(c => c.close);
 
-    const ema5 = calculateEMASeriesForward(closes, 5);
-    const ema10 = calculateEMASeriesForward(closes, 10);
-    const sma21 = calculateSMASeriesForward(closes, 21);
-    const sma50 = calculateSMASeriesForward(closes, 50);
-    const sma200 = calculateSMASeriesForward(closes, 200);
+    const maConfig = getPeriodsForTimeframe(timeframe);
+    const ma5Def = maConfig.find(m => m.id === "ma5");
+    const ma10Def = maConfig.find(m => m.id === "ma10");
+    const ma20Def = maConfig.find(m => m.id === "ma20");
+    const ma50Def = maConfig.find(m => m.id === "ma50");
+    const ma200Def = maConfig.find(m => m.id === "ma200");
+
+    const ma5 = ma5Def ? (ma5Def.type === "ema" ? calculateEMASeriesForward(closes, ma5Def.period) : calculateSMASeriesForward(closes, ma5Def.period)) : calculateSMASeriesForward(closes, 5);
+    const ma10 = ma10Def ? (ma10Def.type === "ema" ? calculateEMASeriesForward(closes, ma10Def.period) : calculateSMASeriesForward(closes, ma10Def.period)) : calculateSMASeriesForward(closes, 10);
+    const ma20 = ma20Def ? (ma20Def.type === "ema" ? calculateEMASeriesForward(closes, ma20Def.period) : calculateSMASeriesForward(closes, ma20Def.period)) : calculateSMASeriesForward(closes, 21);
+    const ma50 = ma50Def ? (ma50Def.type === "ema" ? calculateEMASeriesForward(closes, ma50Def.period) : calculateSMASeriesForward(closes, ma50Def.period)) : calculateSMASeriesForward(closes, 50);
+    const ma200 = ma200Def ? (ma200Def.type === "ema" ? calculateEMASeriesForward(closes, ma200Def.period) : calculateSMASeriesForward(closes, ma200Def.period)) : calculateSMASeriesForward(closes, 200);
 
     const avwapHighIdx = findRecentHighIndex(finalCandles, 120);
     const avwapLowIdx = findRecentLowIndex(finalCandles, 120);
@@ -469,7 +478,7 @@ export async function fetchChartData(
 
     return {
       candles: finalCandles,
-      indicators: { ema5, ema10, sma21, sma50, sma200, avwapHigh, avwapLow },
+      indicators: { ema5: ma5, ema10: ma10, sma21: ma20, sma50: ma50, sma200: ma200, avwapHigh, avwapLow },
       ticker: ticker.toUpperCase(),
       timeframe,
     };

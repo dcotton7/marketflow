@@ -13,6 +13,7 @@ import {
   createSeriesMarkers,
   ISeriesApi,
 } from "lightweight-charts";
+import { DEFAULT_MA_TEMPLATE } from "@shared/indicatorTemplates";
 
 export interface ChartCandle {
   date: string;
@@ -65,13 +66,23 @@ export interface TradingChartProps {
   showDayDividers?: boolean;
 }
 
-const MA_CONFIG = [
-  { key: "ema5" as const, label: "5 EMA", color: "#66bb6a" },
-  { key: "ema10" as const, label: "10 EMA", color: "#42a5f5" },
-  { key: "sma21" as const, label: "21 SMA", color: "#ec4899" },
-  { key: "sma50" as const, label: "50 SMA", color: "#ef5350" },
-  { key: "sma200" as const, label: "200 SMA", color: "#ffffff" },
+const INDICATOR_FIELD_MAP: { field: keyof ChartIndicators; templateId: string }[] = [
+  { field: "ema5",   templateId: "ma5" },
+  { field: "ema10",  templateId: "ma10" },
+  { field: "sma21",  templateId: "ma20" },
+  { field: "sma50",  templateId: "ma50" },
+  { field: "sma200", templateId: "ma200" },
 ];
+
+const MA_CONFIG = INDICATOR_FIELD_MAP.map(({ field, templateId }) => {
+  const def = DEFAULT_MA_TEMPLATE.find(d => d.id === templateId);
+  return {
+    key: field,
+    label: def ? `${def.label} ${def.type.toUpperCase()}` : field,
+    color: def?.color ?? "#94a3b8",
+    lineWidth: def?.lineWidth ?? 1,
+  };
+});
 
 export function TradingChart({
   data,
@@ -257,7 +268,7 @@ export function TradingChart({
       if (lineData.length > 0) {
         const series = chart.addSeries(LineSeries, {
           color: ma.color,
-          lineWidth: 1,
+          lineWidth: (ma.lineWidth || 1) as 1 | 2 | 3 | 4,
           priceLineVisible: false,
           lastValueVisible: false,
           crosshairMarkerVisible: false,

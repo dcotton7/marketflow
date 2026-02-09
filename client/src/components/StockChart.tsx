@@ -17,6 +17,7 @@ import {
   SeriesType
 } from "lightweight-charts";
 import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } from "@shared/patternDetection";
+import { getBarPeriod, DEFAULT_MA_TEMPLATE } from "@shared/indicatorTemplates";
 
 interface StockChartProps {
   symbol: string;
@@ -663,16 +664,23 @@ export function StockChart({
     }));
     volumeSeries.setData(volumeData);
 
-    // Calculate all indicators (will only display those that are enabled)
-    const sma5 = calculateSMA(history, 5);
-    const sma6 = calculateSMA(history, 6);
-    const sma10 = calculateSMA(history, 10);
-    const sma20 = calculateSMA(history, 20);
-    const sma21 = calculateSMA(history, 21);
-    const sma50 = calculateSMA(history, 50);
-    const sma200 = calculateSMA(history, 200);
-    const ema21 = calculateEMA(history, 21);
-    const sma3Month = calculateSMA(history, 63); // ~3 months of trading days
+    // Calculate all indicators using timeframe-converted periods from shared template
+    const p5  = getBarPeriod(5, interval);
+    const p10 = getBarPeriod(10, interval);
+    const p20 = getBarPeriod(20, interval);
+    const p21 = getBarPeriod(21, interval);
+    const p50 = getBarPeriod(50, interval);
+    const p200 = getBarPeriod(200, interval);
+
+    const sma5 = calculateSMA(history, p5);
+    const sma6 = calculateSMA(history, getBarPeriod(6, interval));
+    const sma10 = calculateSMA(history, p10);
+    const sma20 = calculateSMA(history, p20);
+    const sma21 = calculateSMA(history, p21);
+    const sma50 = calculateSMA(history, p50);
+    const sma200 = calculateSMA(history, p200);
+    const ema21 = calculateEMA(history, p21);
+    const sma3Month = calculateSMA(history, getBarPeriod(63, interval));
     const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
     const vwap = calculateVWAP(history, isIntraday);
     const anchoredVwapResult = calculateAnchoredVWAP(history);
@@ -694,45 +702,51 @@ export function StockChart({
       return series;
     };
     
-    // Add indicators based on enabledIndicators state
+    // Add indicators based on enabledIndicators state, using shared template colors
+    const tpl5   = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma5");
+    const tpl10  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma10");
+    const tpl20  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma20");
+    const tpl50  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma50");
+    const tpl200 = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma200");
+
     // SMA 5 - Green
     if (enabledIndicators.has('sma5')) {
-      addIndicatorSeries(sma5, '#22c55e', 1); // Green
+      addIndicatorSeries(sma5, tpl5?.color ?? '#22c55e', tpl5?.lineWidth ?? 1);
     }
     
     // SMA 6 - Pink (for 6/20 Cross)
     if (enabledIndicators.has('sma6')) {
-      addIndicatorSeries(sma6, '#f472b6', 2); // Pink
+      addIndicatorSeries(sma6, '#f472b6', 2);
     }
     
     // SMA 10 - Blue
     if (enabledIndicators.has('sma10')) {
-      addIndicatorSeries(sma10, '#3b82f6', 1); // Blue
+      addIndicatorSeries(sma10, tpl10?.color ?? '#3b82f6', tpl10?.lineWidth ?? 1);
     }
     
-    // SMA 20 - Blue (thicker for 6/20 Cross)
+    // SMA 20 - Pink
     if (enabledIndicators.has('sma20')) {
-      addIndicatorSeries(sma20, '#3b82f6', 3); // Blue, thick
+      addIndicatorSeries(sma20, tpl20?.color ?? '#f472b6', tpl20?.lineWidth ?? 2);
     }
     
     // SMA 50 - Red
     if (enabledIndicators.has('sma50')) {
-      addIndicatorSeries(sma50, '#dc2626', 2); // Red
+      addIndicatorSeries(sma50, tpl50?.color ?? '#dc2626', tpl50?.lineWidth ?? 2);
     }
     
-    // SMA 200 - Black/White
+    // SMA 200 - White
     if (enabledIndicators.has('sma200')) {
-      addIndicatorSeries(sma200, isDark ? '#ffffff' : '#000000', 2);
+      addIndicatorSeries(sma200, tpl200?.color ?? '#ffffff', tpl200?.lineWidth ?? 2);
     }
     
     // EMA 21 - Pink (thicker)
     if (enabledIndicators.has('ema21')) {
-      addIndicatorSeries(ema21, '#f472b6', 3); // Pink, thick
+      addIndicatorSeries(ema21, tpl20?.color ?? '#f472b6', 3);
     }
     
     // SMA 21 - Pink (for weekly/monthly)
     if (enabledIndicators.has('sma21')) {
-      addIndicatorSeries(sma21, '#f472b6', 2); // Pink
+      addIndicatorSeries(sma21, tpl20?.color ?? '#f472b6', 2);
     }
     
     // 3 Month SMA - Pink
@@ -1216,15 +1230,20 @@ export function StockChart({
           <div className="flex gap-1 items-center flex-wrap">
             {/* Timeframe-based indicator toggles */}
             {getAvailableIndicators(interval, isDailyFixed).map((key) => {
+              const _tpl5   = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma5");
+              const _tpl10  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma10");
+              const _tpl20  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma20");
+              const _tpl50  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma50");
+              const _tpl200 = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma200");
               const indicatorStyles: Record<IndicatorKey, { color: string; label: string; isDotted?: boolean }> = {
-                sma5: { color: '#22c55e', label: 'SMA 5' },
+                sma5: { color: _tpl5?.color ?? '#22c55e', label: `${_tpl5?.label ?? '5 Day'} SMA` },
                 sma6: { color: '#f472b6', label: 'SMA 6' },
-                sma10: { color: '#3b82f6', label: 'SMA 10' },
-                sma20: { color: '#3b82f6', label: 'SMA 20' }, // Blue for 5m timeframe
-                sma21: { color: '#f472b6', label: 'SMA 21' },
-                sma50: { color: '#dc2626', label: 'SMA 50' },
-                sma200: { color: '#000000', label: 'SMA 200' },
-                ema21: { color: '#f472b6', label: 'EMA 21' },
+                sma10: { color: _tpl10?.color ?? '#3b82f6', label: `${_tpl10?.label ?? '10 Day'} SMA` },
+                sma20: { color: _tpl20?.color ?? '#f472b6', label: `${_tpl20?.label ?? '20 Day'} SMA` },
+                sma21: { color: _tpl20?.color ?? '#f472b6', label: `${_tpl20?.label ?? '20 Day'} SMA` },
+                sma50: { color: _tpl50?.color ?? '#dc2626', label: `${_tpl50?.label ?? '50 Day'} SMA` },
+                sma200: { color: _tpl200?.color ?? '#000000', label: `${_tpl200?.label ?? '200 Day'} SMA` },
+                ema21: { color: _tpl20?.color ?? '#f472b6', label: `${_tpl20?.label ?? '20 Day'} EMA` },
                 sma3Month: { color: '#f472b6', label: '3M SMA' },
                 autoVwap: { color: '#f97316', label: 'VWAP', isDotted: true },
                 anchoredVwap: { color: 'rgba(234, 179, 8, 0.7)', label: 'AVWAP 6MOS' },
