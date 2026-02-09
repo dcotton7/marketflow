@@ -1552,8 +1552,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 })() : null}
               />
               );
-            })()
-            ) : (
+            })() : (
               <Card className="flex-1">
                 <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
                   No intraday data
