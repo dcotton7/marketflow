@@ -1442,32 +1442,10 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             <BarChart3 className="w-5 h-5" />
             {trade.symbol} Position Chart
           </DialogTitle>
-          <div className="flex items-center gap-4">
-            <DialogDescription className="flex-1">
-              {trade.status === "closed" ? "Closed position" : "Active position"} 
-              {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
-            </DialogDescription>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <Button
-                size="sm"
-                variant={showStops ? "default" : "outline"}
-                className={`text-[10px] h-6 px-2 toggle-elevate ${showStops ? "toggle-elevated" : ""}`}
-                onClick={() => setShowStops(!showStops)}
-                data-testid="toggle-stops"
-              >
-                Stops
-              </Button>
-              <Button
-                size="sm"
-                variant={showTargets ? "default" : "outline"}
-                className={`text-[10px] h-6 px-2 toggle-elevate ${showTargets ? "toggle-elevated" : ""}`}
-                onClick={() => setShowTargets(!showTargets)}
-                data-testid="toggle-targets"
-              >
-                Targets
-              </Button>
-            </div>
-          </div>
+          <DialogDescription>
+            {trade.status === "closed" ? "Closed position" : "Active position"} 
+            {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
+          </DialogDescription>
         </DialogHeader>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
@@ -1507,6 +1485,26 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                   <SelectItem value="30min">30m</SelectItem>
                 </SelectContent>
               </Select>
+              <div className="flex items-center gap-1 ml-auto">
+                <Button
+                  size="sm"
+                  variant={showStops ? "default" : "outline"}
+                  className={`text-[10px] h-6 px-2 toggle-elevate ${showStops ? "toggle-elevated" : ""}`}
+                  onClick={() => setShowStops(!showStops)}
+                  data-testid="toggle-stops"
+                >
+                  Stops
+                </Button>
+                <Button
+                  size="sm"
+                  variant={showTargets ? "default" : "outline"}
+                  className={`text-[10px] h-6 px-2 toggle-elevate ${showTargets ? "toggle-elevated" : ""}`}
+                  onClick={() => setShowTargets(!showTargets)}
+                  data-testid="toggle-targets"
+                >
+                  Targets
+                </Button>
+              </div>
             </div>
             {intradayLoading ? (
               <Card className="flex-1">
@@ -1558,47 +1556,6 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             )}
           </div>
         </div>
-        {chartMetrics && (
-          <div className="border border-border rounded p-2 flex flex-wrap gap-x-6 gap-y-1.5 mt-2 flex-shrink-0" data-testid="trade-chart-metrics">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Current Price</span>
-              <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">ADR (50d)</span>
-              <span className="text-sm font-medium text-foreground">{chartMetrics.adr50d}x</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Ext from 50d</span>
-              <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Ext from 200d</span>
-              <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">MACD</span>
-              <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
-                {chartMetrics.macd}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Sector ETF</span>
-              <span className="text-sm font-medium text-foreground">
-                {chartMetrics.sectorEtf}
-                {chartMetrics.sectorEtf !== "N/A" && (
-                  <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
-                  </span>
-                )}
-              </span>
-            </div>
-          </div>
-        )}
         {lotEntries && lotEntries.length > 0 && (() => {
           type LotEntry = { id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string };
 
@@ -1701,6 +1658,47 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             </div>
           );
         })()}
+        {chartMetrics && (
+          <div className="border border-border rounded p-2 flex flex-wrap gap-x-6 gap-y-1.5 mt-2 flex-shrink-0" data-testid="trade-chart-metrics">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">Current Price</span>
+              <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">ADR (50d)</span>
+              <span className="text-sm font-medium text-foreground">{chartMetrics.adr50d}x</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">Ext from 50d</span>
+              <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">Ext from 200d</span>
+              <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">MACD</span>
+              <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                {chartMetrics.macd}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">Sector ETF</span>
+              <span className="text-sm font-medium text-foreground">
+                {chartMetrics.sectorEtf}
+                {chartMetrics.sectorEtf !== "N/A" && (
+                  <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
