@@ -1296,6 +1296,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
   const [showStops, setShowStops] = useState(true);
   const [showTargets, setShowTargets] = useState(true);
   const [showMaSettings, setShowMaSettings] = useState(false);
+  const maSettingsRecentlyClosed = useRef(false);
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
 
@@ -1469,7 +1470,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(v) => { if (!showMaSettings && !maSettingsRecentlyClosed.current) onOpenChange(v); }}>
       <DialogContent
         className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -1732,7 +1733,13 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
         })()}
       </DialogContent>
     </Dialog>
-    <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
+    <MaSettingsDialog open={showMaSettings} onOpenChange={(v) => {
+      setShowMaSettings(v);
+      if (!v) {
+        maSettingsRecentlyClosed.current = true;
+        setTimeout(() => { maSettingsRecentlyClosed.current = false; }, 300);
+      }
+    }} />
     </>
   );
 }

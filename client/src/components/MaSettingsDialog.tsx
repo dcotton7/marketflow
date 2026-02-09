@@ -8,6 +8,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Trash2, Plus, Loader2 } from "lucide-react";
+import { BARS_PER_DAY } from "@shared/indicatorTemplates";
 
 interface MaSettingRow {
   id?: number;
@@ -39,6 +40,13 @@ const MA_TYPE_OPTIONS = [
   { value: "ema", label: "EMA" },
   { value: "vwap", label: "VWAP" },
 ];
+
+function calcBars(dayPeriod: number | null, timeframe: string): number | null {
+  if (dayPeriod == null) return null;
+  const bpd = BARS_PER_DAY[timeframe];
+  if (bpd == null || bpd <= 0) return dayPeriod;
+  return Math.max(1, Math.round(dayPeriod * bpd));
+}
 
 export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [rows, setRows] = useState<MaSettingRow[]>([]);
@@ -96,8 +104,13 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[80vh] overflow-y-auto" data-testid="dialog-ma-settings">
+    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
+      <DialogContent
+        className="max-w-5xl max-h-[80vh] overflow-y-auto"
+        data-testid="dialog-ma-settings"
+        onCloseAutoFocus={e => e.preventDefault()}
+        onInteractOutside={e => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle data-testid="title-ma-settings">Moving Average Settings</DialogTitle>
         </DialogHeader>
@@ -210,36 +223,64 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                         />
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <Switch
-                          checked={row.dailyOn}
-                          onCheckedChange={v => updateRow(row.rowId, "dailyOn", v)}
-                          className="scale-75"
-                          data-testid={`switch-daily-${index}`}
-                        />
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Switch
+                            checked={row.dailyOn}
+                            onCheckedChange={v => updateRow(row.rowId, "dailyOn", v)}
+                            className="scale-75"
+                            data-testid={`switch-daily-${index}`}
+                          />
+                          {row.maType !== "vwap" && row.period != null && (
+                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-daily-${index}`}>
+                              {calcBars(row.period, "1d")}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <Switch
-                          checked={row.fiveMinOn}
-                          onCheckedChange={v => updateRow(row.rowId, "fiveMinOn", v)}
-                          className="scale-75"
-                          data-testid={`switch-5m-${index}`}
-                        />
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Switch
+                            checked={row.fiveMinOn}
+                            onCheckedChange={v => updateRow(row.rowId, "fiveMinOn", v)}
+                            className="scale-75"
+                            data-testid={`switch-5m-${index}`}
+                          />
+                          {row.maType !== "vwap" && row.period != null && (
+                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-5m-${index}`}>
+                              {calcBars(row.period, "5m")}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <Switch
-                          checked={row.fifteenMinOn}
-                          onCheckedChange={v => updateRow(row.rowId, "fifteenMinOn", v)}
-                          className="scale-75"
-                          data-testid={`switch-15m-${index}`}
-                        />
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Switch
+                            checked={row.fifteenMinOn}
+                            onCheckedChange={v => updateRow(row.rowId, "fifteenMinOn", v)}
+                            className="scale-75"
+                            data-testid={`switch-15m-${index}`}
+                          />
+                          {row.maType !== "vwap" && row.period != null && (
+                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-15m-${index}`}>
+                              {calcBars(row.period, "15m")}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <Switch
-                          checked={row.thirtyMinOn}
-                          onCheckedChange={v => updateRow(row.rowId, "thirtyMinOn", v)}
-                          className="scale-75"
-                          data-testid={`switch-30m-${index}`}
-                        />
+                        <div className="flex flex-col items-center gap-0.5">
+                          <Switch
+                            checked={row.thirtyMinOn}
+                            onCheckedChange={v => updateRow(row.rowId, "thirtyMinOn", v)}
+                            className="scale-75"
+                            data-testid={`switch-30m-${index}`}
+                          />
+                          {row.maType !== "vwap" && row.period != null && (
+                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-30m-${index}`}>
+                              {calcBars(row.period, "30m")}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1.5 px-1">
                         {!row.isSystem && (
@@ -266,7 +307,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
               </Button>
               <Button
                 size="sm"
-                onClick={() => saveMutation.mutate()}
+                onClick={(e) => { e.stopPropagation(); saveMutation.mutate(); }}
                 disabled={saveMutation.isPending}
                 data-testid="button-save-ma-settings"
               >
