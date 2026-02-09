@@ -1537,7 +1537,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
           const formatLotDate = (dateTime: string) => {
             const d = new Date(dateTime);
-            return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+            return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: "America/New_York" });
           };
 
           const isLotPinned = (lot: LotEntry) => {
@@ -1554,7 +1554,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             const isBuy = lot.buySell === "buy";
             const lotDate = formatLotDate(lot.dateTime);
             const lotTime = isPinned
-              ? new Date(lot.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              ? new Date(lot.dateTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" })
               : null;
 
             let baseColor: string;
@@ -1586,7 +1586,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                   <span className={`text-sm font-medium leading-tight ${baseColor}`}>
                     {isBuy ? "Buy" : "Sell"}: {parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}
                   </span>
-                  <span className={`text-[9px] leading-tight ${isPinned ? baseColor : "text-yellow-500/70"}`}>
+                  <span className={`text-[11px] leading-tight ${isPinned ? baseColor : "text-yellow-500/70"}`}>
                     {lotDate}{lotTime ? ` ${lotTime}` : ""}
                     {!isPinned && (
                       <span className="italic ml-1">click chart</span>
