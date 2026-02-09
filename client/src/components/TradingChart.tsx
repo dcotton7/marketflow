@@ -61,6 +61,7 @@ export interface TradingChartProps {
   showLegend?: boolean;
   height?: number;
   timeframe?: string;
+  snapToPrice?: number | null;
 }
 
 const MA_CONFIG = [
@@ -79,6 +80,7 @@ export function TradingChart({
   showLegend = true,
   height,
   timeframe = "daily",
+  snapToPrice,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -369,6 +371,50 @@ export function TradingChart({
       }
     }
   }, [priceLines]);
+
+  useEffect(() => {
+    if (!chartRef.current || !candleSeriesRef.current) return;
+    if (snapToPrice != null) {
+      chartRef.current.applyOptions({
+        crosshair: {
+          mode: 0,
+          horzLine: {
+            visible: true,
+            labelVisible: true,
+            color: "rgba(250, 204, 21, 0.5)",
+            width: 2 as any,
+            style: LineStyle.Solid,
+          },
+        },
+      });
+      let isSnapping = false;
+      const handler = (param: any) => {
+        if (isSnapping) return;
+        if (!param.time || !candleSeriesRef.current || !chartRef.current) return;
+        isSnapping = true;
+        chartRef.current.setCrosshairPosition(snapToPrice, param.time, candleSeriesRef.current);
+        isSnapping = false;
+      };
+      chartRef.current.subscribeCrosshairMove(handler);
+      return () => {
+        if (chartRef.current) {
+          chartRef.current.unsubscribeCrosshairMove(handler);
+          chartRef.current.applyOptions({
+            crosshair: {
+              mode: 1,
+              horzLine: {
+                visible: true,
+                labelVisible: true,
+                color: undefined as any,
+                width: 1 as any,
+                style: LineStyle.Dashed,
+              },
+            },
+          });
+        }
+      };
+    }
+  }, [snapToPrice]);
 
   return (
     <div data-testid="chart-trading" className="relative w-full h-full flex flex-col">

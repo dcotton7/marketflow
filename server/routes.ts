@@ -117,10 +117,22 @@ async function getChartData(yf: any, symbol: string, period: string = '1y', inte
   if (!result.quotes || result.quotes.length === 0) {
     return [];
   }
+  const isIntraday = interval.includes('m');
   return result.quotes
-    .filter((item: any) => item.open != null && item.close != null)
+    .filter((item: any) => {
+      if (item.open == null || item.close == null) return false;
+      if (isIntraday) {
+        const d = new Date(item.date);
+        const eastern = new Date(d.toLocaleString("en-US", { timeZone: "America/New_York" }));
+        const h = eastern.getHours();
+        const m = eastern.getMinutes();
+        const totalMin = h * 60 + m;
+        if (totalMin < 570 || totalMin > 960) return false;
+      }
+      return true;
+    })
     .map((item: any) => ({
-      date: interval.includes('m') ? new Date(item.date).toISOString() : new Date(item.date).toISOString().split('T')[0],
+      date: isIntraday ? new Date(item.date).toISOString() : new Date(item.date).toISOString().split('T')[0],
       open: item.open,
       high: item.high,
       low: item.low,
