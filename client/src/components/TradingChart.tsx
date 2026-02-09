@@ -63,6 +63,7 @@ export interface MaSettingForChart {
   fiveMinOn: boolean;
   fifteenMinOn: boolean;
   thirtyMinOn: boolean;
+  calcOn?: "daily" | "intraday";
 }
 
 export interface TradingChartProps {

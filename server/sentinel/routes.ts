@@ -6504,14 +6504,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
   });
 
   const DEFAULT_MA_ROWS = [
-    { rowId: "sys_sma5",    title: "SMA 5d",    maType: "sma",  period: 5,    color: "#22c55e", lineType: 0, isSystem: true, sortOrder: 0 },
-    { rowId: "sys_sma10",   title: "SMA 10d",   maType: "sma",  period: 10,   color: "#3b82f6", lineType: 0, isSystem: true, sortOrder: 1 },
-    { rowId: "sys_sma20",   title: "SMA 20d",   maType: "sma",  period: 20,   color: "#f472b6", lineType: 0, isSystem: true, sortOrder: 2 },
-    { rowId: "sys_sma50",   title: "SMA 50d",   maType: "sma",  period: 50,   color: "#dc2626", lineType: 0, isSystem: true, sortOrder: 3 },
-    { rowId: "sys_sma200",  title: "SMA 200d",  maType: "sma",  period: 200,  color: "#ffffff", lineType: 0, isSystem: true, sortOrder: 4 },
-    { rowId: "sys_vwap",    title: "VWAP",      maType: "vwap", period: null,  color: "#fbbf24", lineType: 0, isSystem: true, sortOrder: 5 },
-    { rowId: "sys_vwap_hi", title: "VWAP Hi",   maType: "vwap_hi", period: null, color: "#4ade80", lineType: 2, isSystem: true, sortOrder: 6 },
-    { rowId: "sys_vwap_lo", title: "VWAP Lo",   maType: "vwap_lo", period: null, color: "#f87171", lineType: 2, isSystem: true, sortOrder: 7 },
+    { rowId: "sys_sma5",    title: "SMA 5d",    maType: "sma",  period: 5,    color: "#22c55e", lineType: 0, isSystem: true, sortOrder: 0, calcOn: "daily" as const },
+    { rowId: "sys_sma10",   title: "SMA 10d",   maType: "sma",  period: 10,   color: "#3b82f6", lineType: 0, isSystem: true, sortOrder: 1, calcOn: "daily" as const },
+    { rowId: "sys_sma20",   title: "SMA 20d",   maType: "sma",  period: 20,   color: "#f472b6", lineType: 0, isSystem: true, sortOrder: 2, calcOn: "daily" as const },
+    { rowId: "sys_sma50",   title: "SMA 50d",   maType: "sma",  period: 50,   color: "#dc2626", lineType: 0, isSystem: true, sortOrder: 3, calcOn: "daily" as const },
+    { rowId: "sys_sma200",  title: "SMA 200d",  maType: "sma",  period: 200,  color: "#ffffff", lineType: 0, isSystem: true, sortOrder: 4, calcOn: "daily" as const },
+    { rowId: "sys_vwap",    title: "VWAP",      maType: "vwap", period: null,  color: "#fbbf24", lineType: 0, isSystem: true, sortOrder: 5, calcOn: "daily" as const },
+    { rowId: "sys_vwap_hi", title: "VWAP Hi",   maType: "vwap_hi", period: null, color: "#4ade80", lineType: 2, isSystem: true, sortOrder: 6, calcOn: "daily" as const },
+    { rowId: "sys_vwap_lo", title: "VWAP Lo",   maType: "vwap_lo", period: null, color: "#f87171", lineType: 2, isSystem: true, sortOrder: 7, calcOn: "daily" as const },
   ];
 
   app.get("/api/sentinel/ma-settings", requireAuth, async (req: Request, res: Response) => {
@@ -6568,6 +6568,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           fifteenMinOn: r.fifteenMinOn ?? false,
           thirtyMinOn: r.thirtyMinOn ?? false,
           sortOrder: i,
+          calcOn: r.calcOn || "daily",
         }));
         await db.insert(userMaSettings).values(inserts);
       }

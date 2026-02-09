@@ -25,6 +25,7 @@ interface MaSettingRow {
   fifteenMinOn: boolean;
   thirtyMinOn: boolean;
   sortOrder: number;
+  calcOn: "daily" | "intraday";
 }
 
 const LINE_TYPE_OPTIONS = [
@@ -46,6 +47,10 @@ function calcBars(dayPeriod: number | null, timeframe: string): number | null {
   const bpd = BARS_PER_DAY[timeframe];
   if (bpd == null || bpd <= 0) return dayPeriod;
   return Math.max(1, Math.round(dayPeriod * bpd));
+}
+
+function isNonVwap(row: MaSettingRow): boolean {
+  return row.maType !== "vwap" && row.maType !== "vwap_hi" && row.maType !== "vwap_lo";
 }
 
 export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -95,6 +100,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
       fifteenMinOn: false,
       thirtyMinOn: false,
       sortOrder: rows.length,
+      calcOn: "daily",
     };
     setRows(prev => [...prev, newRow]);
   };
@@ -128,6 +134,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     <th className="text-left py-2 px-1 font-medium">Title</th>
                     <th className="text-left py-2 px-1 font-medium">Type</th>
                     <th className="text-left py-2 px-1 font-medium">Period</th>
+                    <th className="text-center py-2 px-1 font-medium">Calc On</th>
                     <th className="text-left py-2 px-1 font-medium">Color</th>
                     <th className="text-left py-2 px-1 font-medium">Line Type</th>
                     <th className="text-center py-2 px-1 font-medium">Visible</th>
@@ -193,6 +200,21 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                           />
                         )}
                       </td>
+                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
+                        {row.maType === "vwap" || row.maType === "vwap_hi" || row.maType === "vwap_lo" ? (
+                          <span className="text-[10px] text-muted-foreground">-</span>
+                        ) : (
+                          <Select value={row.calcOn || "daily"} onValueChange={v => updateRow(row.rowId, "calcOn", v)}>
+                            <SelectTrigger className="h-7 text-xs w-20" data-testid={`select-calcon-${index}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="daily">Daily</SelectItem>
+                              <SelectItem value="intraday">Intraday</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
                       <td className="py-1.5 px-1">
                         <input
                           type="color"
@@ -230,9 +252,9 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                             className="scale-75"
                             data-testid={`switch-daily-${index}`}
                           />
-                          {row.maType !== "vwap" && row.period != null && (
+                          {isNonVwap(row) && row.period != null && (
                             <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-daily-${index}`}>
-                              {calcBars(row.period, "1d")}
+                              {row.period}
                             </span>
                           )}
                         </div>
@@ -245,10 +267,16 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                             className="scale-75"
                             data-testid={`switch-5m-${index}`}
                           />
-                          {row.maType !== "vwap" && row.period != null && (
-                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-5m-${index}`}>
-                              {calcBars(row.period, "5m")}
-                            </span>
+                          {isNonVwap(row) && row.period != null && (
+                            row.calcOn === "daily" ? (
+                              <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-5m-${index}`}>
+                                {calcBars(row.period, "5m")}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-muted-foreground/40 leading-none" data-testid={`bars-5m-${index}`}>
+                                {row.period}
+                              </span>
+                            )
                           )}
                         </div>
                       </td>
@@ -260,10 +288,16 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                             className="scale-75"
                             data-testid={`switch-15m-${index}`}
                           />
-                          {row.maType !== "vwap" && row.period != null && (
-                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-15m-${index}`}>
-                              {calcBars(row.period, "15m")}
-                            </span>
+                          {isNonVwap(row) && row.period != null && (
+                            row.calcOn === "daily" ? (
+                              <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-15m-${index}`}>
+                                {calcBars(row.period, "15m")}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-muted-foreground/40 leading-none" data-testid={`bars-15m-${index}`}>
+                                {row.period}
+                              </span>
+                            )
                           )}
                         </div>
                       </td>
@@ -275,10 +309,16 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                             className="scale-75"
                             data-testid={`switch-30m-${index}`}
                           />
-                          {row.maType !== "vwap" && row.period != null && (
-                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-30m-${index}`}>
-                              {calcBars(row.period, "30m")}
-                            </span>
+                          {isNonVwap(row) && row.period != null && (
+                            row.calcOn === "daily" ? (
+                              <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-30m-${index}`}>
+                                {calcBars(row.period, "30m")}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-muted-foreground/40 leading-none" data-testid={`bars-30m-${index}`}>
+                                {row.period}
+                              </span>
+                            )
                           )}
                         </div>
                       </td>

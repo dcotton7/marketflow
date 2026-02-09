@@ -1120,6 +1120,7 @@ export const userMaSettings = pgTable("user_ma_settings", {
   fifteenMinOn: boolean("fifteen_min_on").notNull().default(true),
   thirtyMinOn: boolean("thirty_min_on").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
+  calcOn: text("calc_on").notNull().default("daily"),
 });
 
 export const insertUserMaSettingSchema = createInsertSchema(userMaSettings).omit({ id: true });
