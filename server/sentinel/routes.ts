@@ -4062,7 +4062,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const userId = req.session.userId!;
       const { batchId, clean } = req.body; // Optional: promote only specific batch; clean=true to wipe existing import cards first
       
-      // Check if import cards already exist (prevent double-promotion unless clean mode)
+      // Check if import cards already exist
       const existingImportCards = await db.select({ id: sentinelTrades.id }).from(sentinelTrades)
         .where(and(
           eq(sentinelTrades.userId, userId),
@@ -4070,12 +4070,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         ))
         .limit(1);
       
-      if (existingImportCards.length > 0 && !clean) {
-        return res.status(409).json({ 
-          error: "Import cards already exist. Use clean re-promote to rebuild them.",
-          hasExistingCards: true
-        });
-      }
+      const hasExistingCards = existingImportCards.length > 0;
+      const isIncrementalMerge = hasExistingCards && !clean;
       
       // If clean mode, delete all existing import-source trading cards and related data
       // BUT preserve order levels so they can be re-attached to matching new cards
@@ -4144,17 +4140,23 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         });
       }
       
-      // Get all non-orphan imported trades AND resolved orphans (with cost basis)
-      let query = db.select().from(sentinelImportedTrades).where(
-        and(
-          eq(sentinelImportedTrades.userId, userId),
-          or(
-            eq(sentinelImportedTrades.isOrphanSell, false),
-            isNull(sentinelImportedTrades.isOrphanSell),
-            eq(sentinelImportedTrades.orphanStatus, 'resolved')
-          )
-        )
-      );
+      // Get imported trades to process
+      // In incremental merge mode: only get un-promoted trades
+      // In clean/initial mode: get all trades
+      const baseConditions = [
+        eq(sentinelImportedTrades.userId, userId),
+        or(
+          eq(sentinelImportedTrades.isOrphanSell, false),
+          isNull(sentinelImportedTrades.isOrphanSell),
+          eq(sentinelImportedTrades.orphanStatus, 'resolved')
+        ),
+      ];
+      
+      if (isIncrementalMerge) {
+        baseConditions.push(isNull(sentinelImportedTrades.promotedToCardId));
+      }
+      
+      let query = db.select().from(sentinelImportedTrades).where(and(...baseConditions));
       
       let importedTrades = await query.orderBy(sentinelImportedTrades.tradeDate);
       
@@ -4412,6 +4414,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       let mergedCount = 0;
       let createdCount = 0;
       let closedCount = 0;
+      const promotedTradeIdToCardId = new Map<string, number>();
       
       if (cardsToCreate.length > 0) {
         await db.transaction(async (tx) => {
@@ -4523,6 +4526,10 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 
                 mergedCount++;
                 if (isNearZero) closedCount++;
+                
+                for (const lot of newLots) {
+                  promotedTradeIdToCardId.set(lot.id, existingCard.id);
+                }
               }
             } else {
               // CREATE: No existing active card for this ticker+account
@@ -4547,10 +4554,57 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                 .limit(1);
               if (insertedCards.length > 0) {
                 existingCardsMap.set(key, insertedCards[0]);
+                for (const lot of newCard.lotEntries) {
+                  promotedTradeIdToCardId.set(lot.id, insertedCards[0].id);
+                }
               }
             }
           }
         });
+      }
+      
+      // Mark imported trades as promoted with their card IDs
+      if (promotedTradeIdToCardId.size > 0) {
+        const now = new Date();
+        const PROMO_BATCH = 100;
+        const entries = [...promotedTradeIdToCardId.entries()];
+        for (let i = 0; i < entries.length; i += PROMO_BATCH) {
+          const batch = entries.slice(i, i + PROMO_BATCH);
+          for (const [tradeId, cardId] of batch) {
+            await db.update(sentinelImportedTrades)
+              .set({ promotedToCardId: cardId, promotedAt: now })
+              .where(and(
+                eq(sentinelImportedTrades.tradeId, tradeId),
+                eq(sentinelImportedTrades.userId, userId)
+              ));
+          }
+        }
+        console.log(`[Promote] Marked ${promotedTradeIdToCardId.size} imported trades as promoted`);
+      }
+      
+      // If clean mode, also mark ALL imported trades as promoted since we rebuilt everything
+      if (clean && !isIncrementalMerge) {
+        const allImportedTrades = await db.select({ tradeId: sentinelImportedTrades.tradeId }).from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            or(
+              eq(sentinelImportedTrades.isOrphanSell, false),
+              isNull(sentinelImportedTrades.isOrphanSell),
+              eq(sentinelImportedTrades.orphanStatus, 'resolved')
+            )
+          ));
+        const now = new Date();
+        for (const t of allImportedTrades) {
+          const cardId = promotedTradeIdToCardId.get(t.tradeId);
+          if (cardId) {
+            await db.update(sentinelImportedTrades)
+              .set({ promotedToCardId: cardId, promotedAt: now })
+              .where(and(
+                eq(sentinelImportedTrades.tradeId, t.tradeId),
+                eq(sentinelImportedTrades.userId, userId)
+              ));
+          }
+        }
       }
       
       // Re-attach preserved order levels to matching new active cards
@@ -4659,10 +4713,12 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       
       res.json({ 
         success: true, 
+        mode: isIncrementalMerge ? 'incremental' : (clean ? 'clean' : 'initial'),
         cardsMerged: mergedCount,
         cardsCreated: createdCount,
         positionsClosed: closedCount,
         totalProcessed: cardsToCreate.length,
+        tradesPromoted: promotedTradeIdToCardId.size,
         openPositions: cardsToCreate.filter(c => c.status === 'active').length,
         closedPositions: cardsToCreate.filter(c => c.status === 'closed').length,
         orderLevelsPreserved: reattachedOrderLevels,
@@ -4672,6 +4728,61 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Promote to cards error:", error);
       res.status(500).json({ error: "Failed to promote trades to cards" });
+    }
+  });
+
+  // === Get un-promoted trade count for incremental merge UI ===
+  app.get("/api/sentinel/import/unpromoted-stats", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      const [unpromotedCount] = await db.select({ count: sql<number>`count(*)` })
+        .from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          isNull(sentinelImportedTrades.promotedToCardId),
+          or(
+            eq(sentinelImportedTrades.isOrphanSell, false),
+            isNull(sentinelImportedTrades.isOrphanSell),
+            eq(sentinelImportedTrades.orphanStatus, 'resolved')
+          ),
+          or(
+            eq(sentinelImportedTrades.isDuplicate, false),
+            isNull(sentinelImportedTrades.isDuplicate)
+          )
+        ));
+      
+      const [totalCount] = await db.select({ count: sql<number>`count(*)` })
+        .from(sentinelImportedTrades)
+        .where(and(
+          eq(sentinelImportedTrades.userId, userId),
+          or(
+            eq(sentinelImportedTrades.isOrphanSell, false),
+            isNull(sentinelImportedTrades.isOrphanSell),
+            eq(sentinelImportedTrades.orphanStatus, 'resolved')
+          ),
+          or(
+            eq(sentinelImportedTrades.isDuplicate, false),
+            isNull(sentinelImportedTrades.isDuplicate)
+          )
+        ));
+      
+      const hasExistingCards = (await db.select({ id: sentinelTrades.id })
+        .from(sentinelTrades)
+        .where(and(
+          eq(sentinelTrades.userId, userId),
+          eq(sentinelTrades.source, 'import')
+        ))
+        .limit(1)).length > 0;
+      
+      res.json({
+        unpromotedCount: Number(unpromotedCount?.count || 0),
+        totalPromotable: Number(totalCount?.count || 0),
+        hasExistingCards,
+      });
+    } catch (error) {
+      console.error("Get unpromoted stats error:", error);
+      res.status(500).json({ error: "Failed to get unpromoted stats" });
     }
   });
 
@@ -4943,16 +5054,24 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
   app.get("/api/sentinel/import/all-orphans", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
+      const includeResolved = req.query.includeResolved === 'true';
       
-      const orphans = await db!.select().from(sentinelImportedTrades)
-        .where(and(
-          eq(sentinelImportedTrades.userId, userId),
-          eq(sentinelImportedTrades.isOrphanSell, true),
+      const conditions = [
+        eq(sentinelImportedTrades.userId, userId),
+        eq(sentinelImportedTrades.isOrphanSell, true),
+      ];
+      
+      if (!includeResolved) {
+        conditions.push(
           or(
             eq(sentinelImportedTrades.orphanStatus, 'pending'),
             eq(sentinelImportedTrades.orphanStatus, 'muted')
-          )
-        ))
+          )!
+        );
+      }
+      
+      const orphans = await db!.select().from(sentinelImportedTrades)
+        .where(and(...conditions))
         .orderBy(sentinelImportedTrades.tradeDate);
       
       const allOrphanRows = await db!.select({ count: sql<number>`count(*)` }).from(sentinelImportedTrades)
@@ -4961,9 +5080,11 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           eq(sentinelImportedTrades.isOrphanSell, true)
         ));
       const totalOrphans = Number(allOrphanRows[0]?.count || 0);
-      const resolvedCount = totalOrphans - orphans.length;
+      const pendingCount = orphans.filter(o => o.orphanStatus === 'pending').length;
+      const mutedCount = orphans.filter(o => o.orphanStatus === 'muted').length;
+      const resolvedCount = includeResolved ? orphans.filter(o => o.orphanStatus === 'resolved').length : (totalOrphans - orphans.length);
       
-      res.json({ orphans, totalOrphans, resolvedCount });
+      res.json({ orphans, totalOrphans, resolvedCount, pendingCount, mutedCount });
     } catch (error) {
       console.error("Get all orphan sells error:", error);
       res.status(500).json({ error: "Failed to fetch all orphan sells" });

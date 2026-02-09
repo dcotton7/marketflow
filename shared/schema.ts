@@ -523,6 +523,10 @@ export const sentinelImportedTrades = pgTable("sentinel_imported_trades", {
   duplicateOfTradeId: integer("duplicate_of_trade_id"), // ID of existing sentinelTrades record if duplicate
   duplicateOfImportId: integer("duplicate_of_import_id"), // ID of existing sentinelImportedTrades record if duplicate
   
+  // Promotion tracking
+  promotedToCardId: integer("promoted_to_card_id"),
+  promotedAt: timestamp("promoted_at"),
+  
   // Audit trail
   rawSource: text("raw_source"), // Original CSV row
   importedAt: timestamp("imported_at").defaultNow(),

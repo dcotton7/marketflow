@@ -12,10 +12,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { 
-  Upload, FileSpreadsheet, Check, X, Loader2, Trash2, 
+  Upload, FileSpreadsheet, Check, X, Loader2, Trash2, Search,
   ArrowUpRight, ArrowDownRight, Clock, AlertCircle, History,
   ChevronDown, ChevronUp, Building2, Calendar, DollarSign, AlertTriangle,
-  VolumeX, Volume2, RefreshCw, Edit3, ShieldAlert, CheckCircle2, Circle
+  VolumeX, Volume2, RefreshCw, Edit3, ShieldAlert, CheckCircle2, Circle, Eye
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -134,6 +134,15 @@ export default function SentinelImportPage() {
   const [showDeleteCardsDialog, setShowDeleteCardsDialog] = useState(false);
   const [deleteCardsConfirmText, setDeleteCardsConfirmText] = useState("");
   
+  // Orphans tab state
+  const [orphanTickerSearch, setOrphanTickerSearch] = useState("");
+  const [orphanSortField, setOrphanSortField] = useState<"tradeDate" | "importedAt" | "ticker">("tradeDate");
+  const [orphanSortDir, setOrphanSortDir] = useState<"asc" | "desc">("desc");
+  const [orphanStatusFilter, setOrphanStatusFilter] = useState<"all" | "pending" | "resolved" | "muted">("all");
+  const [orphanEditingId, setOrphanEditingId] = useState<string | null>(null);
+  const [orphanEditCostBasis, setOrphanEditCostBasis] = useState("");
+  const [orphanEditOpenDate, setOrphanEditOpenDate] = useState("");
+  
   // Duplicate detection state
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [selectedDuplicateBatchId, setSelectedDuplicateBatchId] = useState<string | null>(null);
@@ -169,11 +178,14 @@ export default function SentinelImportPage() {
   
   const orphanSells = orphanData?.orphans;
 
-  const { data: allOrphansData, isLoading: allOrphansLoading, refetch: refetchAllOrphans } = useQuery<{ orphans: ImportedTrade[]; totalOrphans: number; resolvedCount: number }>({
-    queryKey: ['/api/sentinel/import/all-orphans'],
-    enabled: showAllOrphansDialog,
+  const { data: unpromotedStats } = useQuery<{ unpromotedCount: number; totalPromotable: number; hasExistingCards: boolean }>({
+    queryKey: ['/api/sentinel/import/unpromoted-stats'],
+  });
+  
+  const { data: allOrphansData, isLoading: allOrphansLoading, refetch: refetchAllOrphans } = useQuery<{ orphans: ImportedTrade[]; totalOrphans: number; resolvedCount: number; pendingCount: number; mutedCount: number }>({
+    queryKey: ['/api/sentinel/import/all-orphans', 'includeResolved'],
     queryFn: async () => {
-      const res = await fetch('/api/sentinel/import/all-orphans', { credentials: 'include' });
+      const res = await fetch('/api/sentinel/import/all-orphans?includeResolved=true', { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch all orphan sells');
       return res.json();
     }
@@ -377,9 +389,6 @@ export default function SentinelImportPage() {
       const response = await apiRequest('POST', '/api/sentinel/import/promote-to-cards', { clean: options?.clean });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        if (errorData.hasExistingCards) {
-          throw Object.assign(new Error(errorData.error), { hasExistingCards: true });
-        }
         throw new Error(errorData.error || `Promotion failed with status ${response.status}`);
       }
       return response.json();
@@ -392,9 +401,10 @@ export default function SentinelImportPage() {
       const orderInfo = data.orderLevelsPreserved > 0 
         ? ` | ${data.orderLevelsPreserved} order levels preserved` 
         : '';
+      const modeLabel = data.mode === 'incremental' ? 'Incremental Merge' : data.mode === 'clean' ? 'Clean Re-promote' : 'Initial Promote';
       toast({ 
-        title: "Trades Promoted to Cards", 
-        description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}${synthInfo}${orderInfo}`
+        title: `${modeLabel} Complete`, 
+        description: `${data.tradesPromoted || 0} trades processed. Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}${synthInfo}${orderInfo}`
       });
       if (report) {
         setPromoteReport(report);
@@ -404,12 +414,9 @@ export default function SentinelImportPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/labels'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/unpromoted-stats'] });
     },
     onError: (error: any) => {
-      if (error?.hasExistingCards) {
-        setShowRepromoteDialog(true);
-        return;
-      }
       toast({ 
         title: "Promotion Failed", 
         description: error?.message || "Could not promote trades. Please try again.",
@@ -521,6 +528,7 @@ export default function SentinelImportPage() {
       refetchAllOrphans();
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/unpromoted-stats'] });
       if (data.action === 'muted') {
         toast({ title: "Trade Muted", description: "Hidden from dashboard until cost basis is set" });
       } else if (data.action === 'unmuted') {
@@ -1105,7 +1113,7 @@ export default function SentinelImportPage() {
             queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/all-orphans'] });
           }
         }}>
-          <TabsList className="grid w-full max-w-md grid-cols-4">
+          <TabsList className="grid w-full max-w-lg grid-cols-5">
             <TabsTrigger value="upload" className="gap-2" data-testid="tab-upload">
               <Upload className="h-4 w-4" />
               Upload
@@ -1117,6 +1125,13 @@ export default function SentinelImportPage() {
             <TabsTrigger value="trades" className="gap-2" data-testid="tab-trades">
               <FileSpreadsheet className="h-4 w-4" />
               Trades
+            </TabsTrigger>
+            <TabsTrigger value="orphans" className="gap-2" data-testid="tab-orphans">
+              <AlertTriangle className="h-4 w-4" />
+              Orphans
+              {(allOrphansData?.orphans?.length || 0) > 0 && (
+                <Badge variant="secondary" className="ml-1">{allOrphansData?.orphans?.length}</Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="orders" className="gap-2" data-testid="tab-orders">
               <ShieldAlert className="h-4 w-4" />
@@ -1515,21 +1530,36 @@ export default function SentinelImportPage() {
                         </Button>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
-                        {hasExistingImportCards ? (
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => setShowRepromoteDialog(true)}
-                            disabled={!hasImportedTrades || promoteToCardsMutation.isPending}
-                            data-testid="button-repromote-to-cards"
-                          >
-                            {promoteToCardsMutation.isPending ? (
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : (
+                        {unpromotedStats?.hasExistingCards ? (
+                          <>
+                            <Button 
+                              variant="default" 
+                              size="sm"
+                              onClick={() => promoteToCardsMutation.mutate({})}
+                              disabled={!hasImportedTrades || promoteToCardsMutation.isPending || (unpromotedStats?.unpromotedCount || 0) === 0}
+                              data-testid="button-merge-new-trades"
+                            >
+                              {promoteToCardsMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              ) : (
+                                <ArrowUpRight className="h-4 w-4 mr-2" />
+                              )}
+                              Merge New Trades
+                              {(unpromotedStats?.unpromotedCount || 0) > 0 && (
+                                <Badge variant="secondary" className="ml-1">{unpromotedStats?.unpromotedCount}</Badge>
+                              )}
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => setShowRepromoteDialog(true)}
+                              disabled={!hasImportedTrades || promoteToCardsMutation.isPending}
+                              data-testid="button-repromote-to-cards"
+                            >
                               <RefreshCw className="h-4 w-4 mr-2" />
-                            )}
-                            Re-promote (Clean)
-                          </Button>
+                              Re-promote (Clean)
+                            </Button>
+                          </>
                         ) : (
                           <Button 
                             variant="default" 
@@ -1914,6 +1944,298 @@ export default function SentinelImportPage() {
                   Delete All Trading Cards
                 </Button>
               </CardHeader>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="orphans" className="mt-6 space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" />
+                  Orphan Sells Manager
+                </CardTitle>
+                <CardDescription>
+                  Sells without matching buys in your imported data. Add cost basis and open date to resolve them, then merge into your Trading Cards.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-3 mb-4 flex-wrap">
+                  <div className="relative flex-1 min-w-[200px] max-w-xs">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by ticker..."
+                      value={orphanTickerSearch}
+                      onChange={(e) => setOrphanTickerSearch(e.target.value.toUpperCase())}
+                      className="pl-9"
+                      data-testid="input-orphan-ticker-search"
+                    />
+                  </div>
+                  <Select value={orphanStatusFilter} onValueChange={(v) => setOrphanStatusFilter(v as any)}>
+                    <SelectTrigger className="w-[140px]" data-testid="select-orphan-status-filter">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="resolved">Resolved</SelectItem>
+                      <SelectItem value="muted">Muted</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={orphanSortField} onValueChange={(v) => setOrphanSortField(v as any)}>
+                    <SelectTrigger className="w-[140px]" data-testid="select-orphan-sort">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tradeDate">Trade Date</SelectItem>
+                      <SelectItem value="importedAt">Import Date</SelectItem>
+                      <SelectItem value="ticker">Ticker</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setOrphanSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                    data-testid="button-orphan-sort-dir"
+                  >
+                    {orphanSortDir === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
+                  <div className="flex items-center gap-2 ml-auto text-sm text-muted-foreground">
+                    {allOrphansData && (
+                      <>
+                        <span>{allOrphansData.pendingCount} pending</span>
+                        <span className="text-muted-foreground/50">|</span>
+                        <span>{allOrphansData.resolvedCount} resolved</span>
+                        <span className="text-muted-foreground/50">|</span>
+                        <span>{allOrphansData.mutedCount} muted</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {allOrphansLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : !allOrphansData?.orphans?.length ? (
+                  <div className="text-center py-12 text-muted-foreground" data-testid="text-no-orphans">
+                    No orphan sells found
+                  </div>
+                ) : (() => {
+                  let filtered = allOrphansData.orphans.filter(o => {
+                    if (orphanTickerSearch && !o.ticker.includes(orphanTickerSearch)) return false;
+                    if (orphanStatusFilter !== 'all' && o.orphanStatus !== orphanStatusFilter) return false;
+                    return true;
+                  });
+                  
+                  filtered.sort((a, b) => {
+                    let cmp = 0;
+                    if (orphanSortField === 'tradeDate') {
+                      cmp = (a.tradeDate || '').localeCompare(b.tradeDate || '');
+                    } else if (orphanSortField === 'importedAt') {
+                      cmp = (a.importedAt || '').localeCompare(b.importedAt || '');
+                    } else if (orphanSortField === 'ticker') {
+                      cmp = a.ticker.localeCompare(b.ticker);
+                    }
+                    return orphanSortDir === 'asc' ? cmp : -cmp;
+                  });
+                  
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No orphans match your filters
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <ScrollArea className="max-h-[600px]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[80px]">Ticker</TableHead>
+                            <TableHead className="w-[80px]">Side</TableHead>
+                            <TableHead className="w-[60px]">Qty</TableHead>
+                            <TableHead className="w-[80px]">Price</TableHead>
+                            <TableHead className="w-[100px]">Trade Date</TableHead>
+                            <TableHead className="w-[100px]">Import Date</TableHead>
+                            <TableHead className="w-[80px]">Status</TableHead>
+                            <TableHead className="w-[100px]">Cost Basis</TableHead>
+                            <TableHead className="w-[110px]">Open Date</TableHead>
+                            <TableHead className="w-[100px]">Account</TableHead>
+                            <TableHead className="w-[140px]">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filtered.map((orphan) => {
+                            const isEditing = orphanEditingId === orphan.tradeId;
+                            const isPending = orphan.orphanStatus === 'pending';
+                            const isResolved = orphan.orphanStatus === 'resolved';
+                            const isMuted = orphan.orphanStatus === 'muted';
+                            
+                            return (
+                              <TableRow key={orphan.tradeId} data-testid={`row-orphan-${orphan.tradeId}`}>
+                                <TableCell className="font-mono font-medium">{orphan.ticker}</TableCell>
+                                <TableCell>
+                                  <Badge variant={orphan.direction === 'SELL' ? 'destructive' : 'default'}>
+                                    {orphan.direction}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{orphan.quantity}</TableCell>
+                                <TableCell>${orphan.price.toFixed(2)}</TableCell>
+                                <TableCell className="text-sm">{orphan.tradeDate}</TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {new Date(orphan.importedAt).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={isResolved ? 'default' : isMuted ? 'secondary' : 'outline'}>
+                                    {orphan.orphanStatus || 'pending'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {isEditing ? (
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      value={orphanEditCostBasis}
+                                      onChange={(e) => setOrphanEditCostBasis(e.target.value)}
+                                      placeholder="Cost basis"
+                                      className="w-[90px]"
+                                      data-testid="input-orphan-cost-basis"
+                                    />
+                                  ) : orphan.manualCostBasis != null ? (
+                                    <span className="text-green-500">${orphan.manualCostBasis.toFixed(2)}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {isEditing ? (
+                                    <Input
+                                      type="date"
+                                      value={orphanEditOpenDate}
+                                      onChange={(e) => setOrphanEditOpenDate(e.target.value)}
+                                      className="w-[120px]"
+                                      data-testid="input-orphan-open-date"
+                                    />
+                                  ) : orphan.manualOpenDate ? (
+                                    <span className="text-sm">{orphan.manualOpenDate}</span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {orphan.accountName || '-'}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-1">
+                                    {isEditing ? (
+                                      <>
+                                        <Button
+                                          variant="default"
+                                          size="sm"
+                                          onClick={() => {
+                                            if (!orphanEditCostBasis || !orphanEditOpenDate) {
+                                              toast({ title: "Missing Info", description: "Enter both cost basis and open date", variant: "destructive" });
+                                              return;
+                                            }
+                                            resolveOrphanMutation.mutate({
+                                              tradeId: orphan.tradeId,
+                                              action: 'resolve',
+                                              costBasis: parseFloat(orphanEditCostBasis),
+                                              openDate: orphanEditOpenDate,
+                                            }, {
+                                              onSuccess: () => {
+                                                setOrphanEditingId(null);
+                                                setOrphanEditCostBasis("");
+                                                setOrphanEditOpenDate("");
+                                              }
+                                            });
+                                          }}
+                                          disabled={resolveOrphanMutation.isPending}
+                                          data-testid="button-orphan-save"
+                                        >
+                                          {resolveOrphanMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => {
+                                            setOrphanEditingId(null);
+                                            setOrphanEditCostBasis("");
+                                            setOrphanEditOpenDate("");
+                                          }}
+                                          data-testid="button-orphan-cancel"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        {(isPending || isMuted) && (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                              setOrphanEditingId(orphan.tradeId);
+                                              setOrphanEditCostBasis(orphan.manualCostBasis?.toString() || '');
+                                              setOrphanEditOpenDate(orphan.manualOpenDate || '');
+                                            }}
+                                            data-testid="button-orphan-edit"
+                                          >
+                                            <Edit3 className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                        {isPending && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => resolveOrphanMutation.mutate({ tradeId: orphan.tradeId, action: 'mute' })}
+                                            disabled={resolveOrphanMutation.isPending}
+                                            data-testid="button-orphan-mute"
+                                          >
+                                            <VolumeX className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                        {isMuted && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => resolveOrphanMutation.mutate({ tradeId: orphan.tradeId, action: 'resolve', costBasis: orphan.manualCostBasis || orphan.price, openDate: orphan.manualOpenDate || orphan.tradeDate })}
+                                            disabled={resolveOrphanMutation.isPending}
+                                            data-testid="button-orphan-unmute"
+                                          >
+                                            <Volume2 className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                        {(isPending || isMuted) && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => resolveOrphanMutation.mutate({ tradeId: orphan.tradeId, action: 'delete' })}
+                                            disabled={resolveOrphanMutation.isPending}
+                                            data-testid="button-orphan-delete"
+                                          >
+                                            <Trash2 className="h-3 w-3 text-destructive" />
+                                          </Button>
+                                        )}
+                                        {isResolved && (
+                                          <span className="text-xs text-green-500 flex items-center gap-1">
+                                            <CheckCircle2 className="h-3 w-3" /> Ready
+                                          </span>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  );
+                })()}
+              </CardContent>
             </Card>
           </TabsContent>
 
