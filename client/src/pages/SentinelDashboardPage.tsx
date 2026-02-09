@@ -1427,7 +1427,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 priceLines={priceLines}
                 timeframe="daily"
                 height={chartHeight}
-                showLegend={false}
+                showLegend={true}
               />
             ) : (
               <Card className="flex-1">
@@ -1464,7 +1464,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 priceLines={priceLines}
                 timeframe={intradayTimeframe}
                 height={chartHeight}
-                showLegend={false}
+                showLegend={true}
               />
             ) : (
               <Card className="flex-1">
@@ -1475,38 +1475,94 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             )}
           </div>
         </div>
-        {lotEntries && lotEntries.length > 0 && (
-          <div className="mt-3">
-            <div className="text-xs text-muted-foreground mb-2 font-medium">
-              Lot Entries {refiningLotId && <Badge variant="default" className="ml-2 text-[10px]">Click intraday chart to pin time</Badge>}
-            </div>
-            <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto">
-              {lotEntries.map((lot) => {
-                const isPinned = lot.dateTime.includes("T") && !lot.dateTime.includes("T09:30:00");
-                const isSelected = refiningLotId === lot.id;
-                return (
-                  <div
-                    key={lot.id}
-                    className={`flex items-center gap-2 px-2 py-1 rounded text-xs cursor-pointer transition-colors ${
-                      isSelected ? "bg-primary/20 ring-1 ring-primary" : "hover-elevate"
-                    }`}
-                    onClick={() => setRefiningLotId(isSelected ? null : lot.id)}
-                    data-testid={`lot-refine-${lot.id}`}
-                  >
-                    <Badge variant={lot.buySell === "buy" ? "default" : "secondary"} className="text-[10px] px-1">
-                      {lot.buySell.toUpperCase()}
-                    </Badge>
-                    <span>{parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}</span>
-                    <span className={`ml-auto ${isPinned ? "text-green-500" : "text-yellow-500"}`}>
-                      {isPinned ? new Date(lot.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "unpinned"}
-                    </span>
-                    <Crosshair className={`w-3 h-3 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {lotEntries && lotEntries.length > 0 && (() => {
+          type LotEntry = { id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string };
+
+          const buyLots = lotEntries.filter((l: LotEntry) => l.buySell === "buy");
+          const avgBuyPrice = buyLots.length > 0
+            ? buyLots.reduce((s, l) => s + parseFloat(l.price) * parseFloat(l.qty), 0) / buyLots.reduce((s, l) => s + parseFloat(l.qty), 0)
+            : 0;
+
+          const formatLotDate = (dateTime: string) => {
+            const d = new Date(dateTime);
+            return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+          };
+
+          const isLotPinned = (lot: LotEntry) => {
+            return lot.dateTime.includes("T") && !lot.dateTime.includes("T09:30:00");
+          };
+
+          const getSellPnlColor = (lot: LotEntry) => {
+            const sellPrice = parseFloat(lot.price);
+            if (avgBuyPrice <= 0) return { text: "text-blue-400", border: "border-blue-500/30" };
+            return sellPrice >= avgBuyPrice
+              ? { text: "text-blue-400", border: "border-blue-500/30" }
+              : { text: "text-red-400", border: "border-red-500/30" };
+          };
+
+          return (
+            <Card className="mt-2 flex-shrink-0">
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-xs font-medium text-muted-foreground">Lot Entries</span>
+                  {refiningLotId && (
+                    <Badge variant="default" className="text-[10px]">Click intraday chart to pin time</Badge>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 max-h-40 overflow-y-auto">
+                  {lotEntries.map((lot: LotEntry) => {
+                    const isPinned = isLotPinned(lot);
+                    const isSelected = refiningLotId === lot.id;
+                    const isBuy = lot.buySell === "buy";
+                    const lotDate = formatLotDate(lot.dateTime);
+                    const lotTime = isPinned
+                      ? new Date(lot.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      : null;
+
+                    let baseColor: string;
+                    let borderColor: string;
+
+                    if (!isPinned) {
+                      baseColor = "text-yellow-400";
+                      borderColor = "border-yellow-500/30";
+                    } else if (isBuy) {
+                      baseColor = "text-green-400";
+                      borderColor = "border-green-500/30";
+                    } else {
+                      const sellColors = getSellPnlColor(lot);
+                      baseColor = sellColors.text;
+                      borderColor = sellColors.border;
+                    }
+
+                    return (
+                      <div
+                        key={lot.id}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded border cursor-pointer transition-colors ${borderColor} ${
+                          isSelected ? "bg-primary/20 ring-1 ring-primary" : "hover-elevate"
+                        }`}
+                        onClick={() => setRefiningLotId(isSelected ? null : lot.id)}
+                        data-testid={`lot-refine-${lot.id}`}
+                      >
+                        <Crosshair className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? "text-primary" : baseColor}`} />
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className={`text-xs font-medium ${baseColor}`}>
+                            {isBuy ? "Buy" : "Sell"}: {parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}
+                          </span>
+                          <span className={`text-[10px] ${isPinned ? baseColor : "text-yellow-500/70"}`}>
+                            {lotDate}{lotTime ? ` ${lotTime}` : ""}
+                            {!isPinned && (
+                              <span className="italic ml-1">click chart to set time</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );
