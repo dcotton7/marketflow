@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -1393,43 +1393,70 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
     staleTime: 60 * 1000,
   });
 
+  const rthData = useMemo(() => {
+    if (!intradayData) return null;
+    const rthIndices: number[] = [];
+    intradayData.candles.forEach((c, i) => {
+      const d = new Date(c.timestamp * 1000);
+      const totalMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+      if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
+    });
+    if (rthIndices.length === 0) return intradayData;
+    return {
+      ...intradayData,
+      candles: rthIndices.map(i => intradayData.candles[i]),
+      indicators: {
+        ema5: rthIndices.map(i => intradayData.indicators.ema5[i] ?? null),
+        ema10: rthIndices.map(i => intradayData.indicators.ema10[i] ?? null),
+        sma21: rthIndices.map(i => intradayData.indicators.sma21[i] ?? null),
+        sma50: rthIndices.map(i => intradayData.indicators.sma50[i] ?? null),
+        sma200: rthIndices.map(i => intradayData.indicators.sma200[i] ?? null),
+        avwapHigh: intradayData.indicators.avwapHigh ? rthIndices.map(i => intradayData.indicators.avwapHigh![i] ?? null) : undefined,
+        avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
+      },
+    };
+  }, [intradayData]);
+
   const lotEntries = trade.lotEntries as Array<{ id: string; dateTime: string; qty: string; buySell: "buy" | "sell"; price: string }> | null;
   const orderLevels = (trade as any).orderLevels as Array<{ id: number; levelType: string; price: number; status: string }> | undefined;
 
-  const priceLines: PriceLevelLine[] = [];
-  if (lotEntries) {
-    lotEntries.forEach((lot, i) => {
-      const price = parseFloat(lot.price);
-      if (isNaN(price) || price <= 0) return;
-      const isBuy = lot.buySell === "buy";
-      const qty = parseFloat(lot.qty);
-      priceLines.push({
-        price,
-        color: isBuy ? "#22c55e" : "#ffffff",
-        label: `${isBuy ? "Buy" : "Sell"} ${qty}@$${price.toFixed(2)}`,
-        lineStyle: "solid",
+  const priceLines = useMemo(() => {
+    const lines: PriceLevelLine[] = [];
+    if (lotEntries) {
+      lotEntries.forEach((lot) => {
+        const price = parseFloat(lot.price);
+        if (isNaN(price) || price <= 0) return;
+        const isBuy = lot.buySell === "buy";
+        const qty = parseFloat(lot.qty);
+        lines.push({
+          price,
+          color: isBuy ? "#22c55e" : "#ffffff",
+          label: `${isBuy ? "Buy" : "Sell"} ${qty}@$${price.toFixed(2)}`,
+          lineStyle: "solid",
+        });
       });
-    });
-  }
-  if (showStops && trade.stopPrice) {
-    priceLines.push({ price: trade.stopPrice, color: "#ef4444", label: `Stop $${trade.stopPrice.toFixed(2)}`, lineStyle: "dashed" });
-  }
-  if (showTargets && trade.targetPrice) {
-    priceLines.push({ price: trade.targetPrice, color: "#3b82f6", label: `Target $${trade.targetPrice.toFixed(2)}`, lineStyle: "dashed" });
-  }
-  if (orderLevels) {
-    orderLevels.filter(o => o.status === "open").forEach(o => {
-      const isStop = o.levelType === "stop";
-      if (isStop && !showStops) return;
-      if (!isStop && !showTargets) return;
-      priceLines.push({
-        price: o.price,
-        color: isStop ? "#ef4444" : "#3b82f6",
-        label: `${isStop ? "Stop" : "Target"} $${o.price.toFixed(2)}`,
-        lineStyle: "dotted",
+    }
+    if (showStops && trade.stopPrice) {
+      lines.push({ price: trade.stopPrice, color: "#ef4444", label: `Stop $${trade.stopPrice.toFixed(2)}`, lineStyle: "dashed" });
+    }
+    if (showTargets && trade.targetPrice) {
+      lines.push({ price: trade.targetPrice, color: "#3b82f6", label: `Target $${trade.targetPrice.toFixed(2)}`, lineStyle: "dashed" });
+    }
+    if (orderLevels) {
+      orderLevels.filter(o => o.status === "open").forEach(o => {
+        const isStop = o.levelType === "stop";
+        if (isStop && !showStops) return;
+        if (!isStop && !showTargets) return;
+        lines.push({
+          price: o.price,
+          color: isStop ? "#ef4444" : "#3b82f6",
+          label: `${isStop ? "Stop" : "Target"} $${o.price.toFixed(2)}`,
+          lineStyle: "dotted",
+        });
       });
-    });
-  }
+    }
+    return lines;
+  }, [lotEntries, showStops, showTargets, trade.stopPrice, trade.targetPrice, orderLevels]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1514,27 +1541,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </CardContent>
               </Card>
-            ) : intradayData ? (() => {
-              const rthIndices: number[] = [];
-              intradayData.candles.forEach((c, i) => {
-                const d = new Date(c.timestamp * 1000);
-                const totalMin = d.getUTCHours() * 60 + d.getUTCMinutes();
-                if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
-              });
-              const rthData = rthIndices.length > 0 ? {
-                ...intradayData,
-                candles: rthIndices.map(i => intradayData.candles[i]),
-                indicators: {
-                  ema5: rthIndices.map(i => intradayData.indicators.ema5[i] ?? null),
-                  ema10: rthIndices.map(i => intradayData.indicators.ema10[i] ?? null),
-                  sma21: rthIndices.map(i => intradayData.indicators.sma21[i] ?? null),
-                  sma50: rthIndices.map(i => intradayData.indicators.sma50[i] ?? null),
-                  sma200: rthIndices.map(i => intradayData.indicators.sma200[i] ?? null),
-                  avwapHigh: intradayData.indicators.avwapHigh ? rthIndices.map(i => intradayData.indicators.avwapHigh![i] ?? null) : undefined,
-                  avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
-                },
-              } : intradayData;
-              return (
+            ) : rthData ? (
                 <TradingChart
                   data={rthData}
                   onCandleClick={refiningLotId ? handleIntradayClick : undefined}
@@ -1548,8 +1555,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                     return lot ? parseFloat(lot.price) : null;
                   })() : null}
                 />
-              );
-            })() : (
+            ) : (
               <Card className="flex-1">
                 <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
                   No intraday data
