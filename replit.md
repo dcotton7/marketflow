@@ -6,6 +6,7 @@ This project consists of two core applications: **AI Swing Scanner** and **Senti
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 Preferred test username: Foreboding
+Debugging rule: ALWAYS query the PRODUCTION database when investigating user-reported issues. Never use the development database for troubleshooting live app problems.
 
 ## System Architecture
 
