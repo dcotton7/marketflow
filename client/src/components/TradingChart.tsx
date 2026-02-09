@@ -13,7 +13,44 @@ import {
   createSeriesMarkers,
   ISeriesApi,
 } from "lightweight-charts";
-import { DEFAULT_MA_TEMPLATE } from "@shared/indicatorTemplates";
+import { DEFAULT_MA_TEMPLATE, BARS_PER_DAY } from "@shared/indicatorTemplates";
+
+function computeSMA(closes: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (i < period - 1) { result.push(null); continue; }
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+    result.push(sum / period);
+  }
+  return result;
+}
+
+function computeEMA(closes: number[], period: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  const k = 2 / (period + 1);
+  let ema: number | null = null;
+  for (let i = 0; i < closes.length; i++) {
+    if (ema === null) {
+      if (i < period - 1) { result.push(null); continue; }
+      let sum = 0;
+      for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+      ema = sum / period;
+    } else {
+      ema = closes[i] * k + ema * (1 - k);
+    }
+    result.push(ema);
+  }
+  return result;
+}
+
+function getEffectivePeriod(setting: MaSettingForChart, timeframe: string): number | null {
+  if (setting.period == null) return null;
+  if (setting.calcOn === "intraday") return setting.period;
+  const bpd = BARS_PER_DAY[timeframe];
+  if (bpd == null || bpd <= 0) return setting.period;
+  return Math.max(1, Math.round(setting.period * bpd));
+}
 
 export interface ChartCandle {
   date: string;
@@ -296,14 +333,25 @@ export function TradingChart({
     const renderedMaEntries: { label: string; color: string; lineStyle: number }[] = [];
 
     if (maSettings && maSettings.length > 0) {
+      const closes = data.candles.map(c => c.close);
       for (const setting of maSettings) {
         if (!setting.isVisible) continue;
         if (!getTimeframeToggle(setting, timeframe)) continue;
 
-        const field = SYSTEM_ROW_TO_FIELD[setting.rowId];
-        if (!field) continue;
+        let indicatorValues: (number | null)[] | undefined;
 
-        const indicatorValues = data.indicators[field];
+        const field = SYSTEM_ROW_TO_FIELD[setting.rowId];
+        if (field) {
+          indicatorValues = data.indicators[field];
+        } else if (setting.maType === "sma" || setting.maType === "ema") {
+          const effectivePeriod = getEffectivePeriod(setting, timeframe);
+          if (effectivePeriod != null && effectivePeriod > 0 && closes.length > 0) {
+            indicatorValues = setting.maType === "ema"
+              ? computeEMA(closes, effectivePeriod)
+              : computeSMA(closes, effectivePeriod);
+          }
+        }
+
         if (!indicatorValues || indicatorValues.length === 0) continue;
 
         const lineData: LineData[] = [];
@@ -581,7 +629,7 @@ export function TradingChart({
   const legendItems = useMemo(() => {
     if (maSettings && maSettings.length > 0) {
       return maSettings
-        .filter(s => s.isVisible && getTimeframeToggle(s, timeframe) && SYSTEM_ROW_TO_FIELD[s.rowId])
+        .filter(s => s.isVisible && getTimeframeToggle(s, timeframe) && (SYSTEM_ROW_TO_FIELD[s.rowId] || s.maType === "sma" || s.maType === "ema"))
         .map(s => ({
           key: s.rowId,
           label: s.title,
