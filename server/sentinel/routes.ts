@@ -12,7 +12,7 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings } from "@shared/schema";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 import { fetchChartData, calculatePointTechnicals, calculateFullSetupMetrics, findNearestMA, calculateRSvsSPY, calculateAnchoredVWAPValues, countResistanceTouches } from "./patternTrainingEngine";
@@ -6340,6 +6340,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
   app.get("/api/sentinel/trade-chart-metrics", async (req: Request, res: Response) => {
     try {
       const ticker = String(req.query.ticker || "").toUpperCase();
+      const timeframe = String(req.query.timeframe || "daily");
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
 
       const YahooFinanceModule = await import('yahoo-finance2') as any;
@@ -6357,55 +6358,76 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 400);
 
-      const [quotes, quoteData] = await Promise.all([
+      const emaCalc = (data: number[], period: number) => {
+        const k = 2 / (period + 1);
+        const result: number[] = [data[0]];
+        for (let i = 1; i < data.length; i++) {
+          result.push(data[i] * k + result[i - 1] * (1 - k));
+        }
+        return result;
+      };
+
+      const isIntraday = timeframe === "5min" || timeframe === "15min" || timeframe === "30min";
+      const yfInterval = isIntraday
+        ? (timeframe === "5min" ? "5m" : timeframe === "15min" ? "15m" : "30m")
+        : "1d";
+      const intradayStart = new Date();
+      if (isIntraday) {
+        intradayStart.setDate(intradayStart.getDate() - (timeframe === "5min" ? 25 : timeframe === "15min" ? 40 : 55));
+      }
+
+      const [dailyQuotes, intradayQuotes, quoteData] = await Promise.all([
         yf.chart(ticker, { period1: startDate, period2: endDate, interval: "1d" }).then((r: any) => r.quotes || []).catch(() => []),
+        isIntraday
+          ? yf.chart(ticker, { period1: intradayStart, period2: endDate, interval: yfInterval }).then((r: any) => r.quotes || []).catch(() => [])
+          : Promise.resolve([]),
         yf.quote(ticker).catch(() => null),
       ]);
 
-      if (!quotes.length) {
+      if (!dailyQuotes.length) {
         return res.status(404).json({ error: `No data found for ${ticker}` });
       }
 
-      const validQuotes = quotes.filter((q: any) => q.open != null && q.close != null && q.high != null && q.low != null);
-      const currentPrice = validQuotes[validQuotes.length - 1]?.close || 0;
+      const validDaily = dailyQuotes.filter((q: any) => q.open != null && q.close != null && q.high != null && q.low != null);
+      const currentPrice = validDaily[validDaily.length - 1]?.close || 0;
 
-      let adrMultiplier = 0;
-      if (validQuotes.length >= 50) {
-        const last50 = validQuotes.slice(-50);
-        const adr = last50.reduce((sum: number, q: any) => sum + (q.high - q.low), 0) / 50;
-        adrMultiplier = adr > 0 ? Math.round((currentPrice / adr) * 10) / 10 : 0;
+      let atr14 = 0;
+      if (validDaily.length >= 15) {
+        const trueRanges: number[] = [];
+        for (let i = 1; i < validDaily.length; i++) {
+          const high = validDaily[i].high;
+          const low = validDaily[i].low;
+          const prevClose = validDaily[i - 1].close;
+          trueRanges.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+        }
+        const last14 = trueRanges.slice(-14);
+        atr14 = last14.reduce((s: number, v: number) => s + v, 0) / 14;
       }
 
       let extensionFrom200d = 0;
-      if (validQuotes.length >= 200) {
-        const last200 = validQuotes.slice(-200);
+      if (validDaily.length >= 200) {
+        const last200 = validDaily.slice(-200);
         const sma200 = last200.reduce((sum: number, q: any) => sum + q.close, 0) / 200;
         extensionFrom200d = sma200 > 0 ? Math.round(((currentPrice - sma200) / sma200) * 1000) / 10 : 0;
       }
 
-      let extensionFrom50dAdr = 0;
-      if (validQuotes.length >= 50) {
-        const last50 = validQuotes.slice(-50);
+      let extensionFrom50dAtr = 0;
+      if (validDaily.length >= 50 && atr14 > 0) {
+        const last50 = validDaily.slice(-50);
         const sma50 = last50.reduce((sum: number, q: any) => sum + q.close, 0) / 50;
-        const adr50 = last50.reduce((sum: number, q: any) => sum + (q.high - q.low), 0) / 50;
-        extensionFrom50dAdr = adr50 > 0 ? Math.round(((currentPrice - sma50) / adr50) * 10) / 10 : 0;
+        extensionFrom50dAtr = Math.round(((currentPrice - sma50) / atr14) * 10) / 10;
       }
 
       let macdStatus = "N/A";
-      if (validQuotes.length >= 35) {
-        const closes = validQuotes.map((q: any) => q.close);
-        const ema = (data: number[], period: number) => {
-          const k = 2 / (period + 1);
-          const result: number[] = [data[0]];
-          for (let i = 1; i < data.length; i++) {
-            result.push(data[i] * k + result[i - 1] * (1 - k));
-          }
-          return result;
-        };
-        const ema12 = ema(closes, 12);
-        const ema26 = ema(closes, 26);
-        const macdLine = ema12.map((v, i) => v - ema26[i]);
-        const signalLine = ema(macdLine, 9);
+      const macdData = isIntraday && intradayQuotes.length >= 35
+        ? intradayQuotes.filter((q: any) => q.close != null)
+        : validDaily;
+      if (macdData.length >= 35) {
+        const closes = macdData.map((q: any) => q.close);
+        const ema12 = emaCalc(closes, 12);
+        const ema26 = emaCalc(closes, 26);
+        const macdLine = ema12.map((v: number, i: number) => v - ema26[i]);
+        const signalLine = emaCalc(macdLine, 9);
         const lastMacd = macdLine[macdLine.length - 1];
         const lastSignal = signalLine[signalLine.length - 1];
         macdStatus = lastMacd >= lastSignal ? "Open" : "Closed";
@@ -6434,18 +6456,114 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf = "N/A";
       }
 
+      let nextEarningsDate = "";
+      let nextEarningsDays = -1;
+      try {
+        const earningsDate = quoteData?.earningsTimestamp || quoteData?.earningsTimestampStart;
+        if (earningsDate) {
+          const ed = new Date(earningsDate instanceof Date ? earningsDate : earningsDate * 1000);
+          const now = new Date();
+          const diffMs = ed.getTime() - now.getTime();
+          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          if (diffDays >= 0) {
+            nextEarningsDate = ed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            nextEarningsDays = diffDays;
+          }
+        }
+      } catch {}
+
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
-        adr50d: adrMultiplier,
-        extensionFrom50dAdr,
+        atr14: Math.round(atr14 * 100) / 100,
+        extensionFrom50dAtr,
         extensionFrom200d,
         macd: macdStatus,
+        macdTimeframe: isIntraday ? timeframe : "daily",
         sectorEtf,
         sectorEtfChange,
+        nextEarningsDate: nextEarningsDate || "N/A",
+        nextEarningsDays,
       });
     } catch (error) {
       console.error("Trade chart metrics error:", error);
       res.status(500).json({ error: "Failed to fetch metrics" });
+    }
+  });
+
+  const DEFAULT_MA_ROWS = [
+    { rowId: "sys_sma5",    title: "SMA 5d",    maType: "sma",  period: 5,    color: "#22c55e", lineType: 0, isSystem: true, sortOrder: 0 },
+    { rowId: "sys_sma10",   title: "SMA 10d",   maType: "sma",  period: 10,   color: "#3b82f6", lineType: 0, isSystem: true, sortOrder: 1 },
+    { rowId: "sys_sma20",   title: "SMA 20d",   maType: "sma",  period: 20,   color: "#f472b6", lineType: 0, isSystem: true, sortOrder: 2 },
+    { rowId: "sys_sma50",   title: "SMA 50d",   maType: "sma",  period: 50,   color: "#dc2626", lineType: 0, isSystem: true, sortOrder: 3 },
+    { rowId: "sys_sma200",  title: "SMA 200d",  maType: "sma",  period: 200,  color: "#ffffff", lineType: 0, isSystem: true, sortOrder: 4 },
+    { rowId: "sys_vwap",    title: "VWAP",      maType: "vwap", period: null,  color: "#fbbf24", lineType: 0, isSystem: true, sortOrder: 5 },
+    { rowId: "sys_vwap_hi", title: "VWAP Hi",   maType: "vwap_hi", period: null, color: "#4ade80", lineType: 2, isSystem: true, sortOrder: 6 },
+    { rowId: "sys_vwap_lo", title: "VWAP Lo",   maType: "vwap_lo", period: null, color: "#f87171", lineType: 2, isSystem: true, sortOrder: 7 },
+  ];
+
+  app.get("/api/sentinel/ma-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+
+      let rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
+
+      if (rows.length === 0) {
+        const inserts = DEFAULT_MA_ROWS.map(r => ({
+          userId,
+          ...r,
+          isVisible: true,
+          dailyOn: true,
+          fiveMinOn: true,
+          fifteenMinOn: true,
+          thirtyMinOn: true,
+        }));
+        await db.insert(userMaSettings).values(inserts);
+        rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
+      }
+
+      res.json(rows);
+    } catch (error) {
+      console.error("Get MA settings error:", error);
+      res.status(500).json({ error: "Failed to fetch MA settings" });
+    }
+  });
+
+  app.put("/api/sentinel/ma-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+
+      const rows = req.body.rows as any[];
+      if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array required" });
+
+      await db.delete(userMaSettings).where(eq(userMaSettings.userId, userId));
+
+      if (rows.length > 0) {
+        const inserts = rows.map((r: any, i: number) => ({
+          userId,
+          rowId: r.rowId || `user_${Date.now()}_${i}`,
+          title: r.title || "Custom MA",
+          maType: r.maType || "sma",
+          period: r.period ?? null,
+          color: r.color || "#ffffff",
+          lineType: r.lineType ?? 0,
+          isSystem: r.isSystem ?? false,
+          isVisible: r.isVisible ?? true,
+          dailyOn: r.dailyOn ?? false,
+          fiveMinOn: r.fiveMinOn ?? false,
+          fifteenMinOn: r.fifteenMinOn ?? false,
+          thirtyMinOn: r.thirtyMinOn ?? false,
+          sortOrder: i,
+        }));
+        await db.insert(userMaSettings).values(inserts);
+      }
+
+      const updated = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
+      res.json(updated);
+    } catch (error) {
+      console.error("Save MA settings error:", error);
+      res.status(500).json({ error: "Failed to save MA settings" });
     }
   });
 

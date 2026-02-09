@@ -1103,6 +1103,29 @@ export const patternTrainingEvaluations = pgTable("pattern_training_evaluations"
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// User MA Settings - per-user indicator configuration for charts
+export const userMaSettings = pgTable("user_ma_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  rowId: text("row_id").notNull(),
+  title: text("title").notNull(),
+  maType: text("ma_type").notNull(),
+  period: integer("period"),
+  color: text("color").notNull().default("#ffffff"),
+  lineType: integer("line_type").notNull().default(0),
+  isSystem: boolean("is_system").notNull().default(false),
+  isVisible: boolean("is_visible").notNull().default(true),
+  dailyOn: boolean("daily_on").notNull().default(true),
+  fiveMinOn: boolean("five_min_on").notNull().default(true),
+  fifteenMinOn: boolean("fifteen_min_on").notNull().default(true),
+  thirtyMinOn: boolean("thirty_min_on").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const insertUserMaSettingSchema = createInsertSchema(userMaSettings).omit({ id: true });
+export type UserMaSetting = typeof userMaSettings.$inferSelect;
+export type InsertUserMaSetting = z.infer<typeof insertUserMaSettingSchema>;
+
 // Schema exports for Pattern Training
 export const insertPatternTrainingSetupSchema = createInsertSchema(patternTrainingSetups).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertPatternTrainingPointSchema = createInsertSchema(patternTrainingPoints).omit({ id: true, createdAt: true });

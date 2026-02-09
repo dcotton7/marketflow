@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2 } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2, Settings2 } from "lucide-react";
+import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1294,8 +1295,13 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
   const [refiningLotId, setRefiningLotId] = useState<string | null>(null);
   const [showStops, setShowStops] = useState(true);
   const [showTargets, setShowTargets] = useState(true);
+  const [showMaSettings, setShowMaSettings] = useState(false);
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
+
+  const { data: maSettingsData } = useQuery<any[]>({
+    queryKey: ["/api/sentinel/ma-settings"],
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -1374,19 +1380,22 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
   interface TradeChartMetrics {
     currentPrice: number;
-    adr50d: number;
-    extensionFrom50dAdr: number;
+    atr14: number;
+    extensionFrom50dAtr: number;
     extensionFrom200d: number;
     macd: string;
+    macdTimeframe: string;
     sectorEtf: string;
     sectorEtfChange: number;
+    nextEarningsDate: string;
+    nextEarningsDays: number;
   }
 
   const { data: chartMetrics } = useQuery<TradeChartMetrics>({
-    queryKey: ["/api/sentinel/trade-chart-metrics", trade.symbol],
+    queryKey: ["/api/sentinel/trade-chart-metrics", trade.symbol, intradayTimeframe],
     enabled: open,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${trade.symbol}`, { credentials: "include" });
+      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${trade.symbol}&timeframe=${intradayTimeframe}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch metrics");
       return res.json();
     },
@@ -1459,6 +1468,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
   }, [lotEntries, showStops, showTargets, trade.stopPrice, trade.targetPrice, orderLevels]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
@@ -1468,6 +1478,9 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
           <DialogTitle className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5" />
             {trade.symbol} Position Chart
+            <Button size="icon" variant="ghost" className="ml-auto" onClick={() => setShowMaSettings(true)} data-testid="button-ma-settings">
+              <Settings2 className="w-4 h-4" />
+            </Button>
           </DialogTitle>
           <DialogDescription>
             {trade.status === "closed" ? "Closed position" : "Active position"} 
@@ -1512,6 +1525,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 timeframe="daily"
                 height={chartHeight}
                 showLegend={true}
+                maSettings={maSettingsData}
               />
             ) : (
               <Card className="flex-1">
@@ -1550,6 +1564,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                   height={chartHeight}
                   showLegend={true}
                   showDayDividers={true}
+                  maSettings={maSettingsData}
                   snapToPrice={refiningLotId && lotEntries ? (() => {
                     const lot = lotEntries.find(l => l.id === refiningLotId);
                     return lot ? parseFloat(lot.price) : null;
@@ -1563,42 +1578,50 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
               </Card>
             )}
             {chartMetrics && (
-              <div className="border border-border rounded p-2 flex flex-wrap gap-x-4 gap-y-1 mt-1 flex-shrink-0" data-testid="trade-chart-metrics">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">Price</span>
-                  <span className="text-xs font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
+              <div className="border border-border rounded p-2.5 flex flex-wrap gap-x-5 gap-y-1.5 mt-1 flex-shrink-0" data-testid="trade-chart-metrics">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Price</span>
+                  <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">ADR 50d</span>
-                  <span className="text-xs font-medium text-foreground">{chartMetrics.adr50d}x</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">ATR(14)</span>
+                  <span className="text-sm font-medium text-foreground">{chartMetrics.atr14}</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">Ext 50d</span>
-                  <span className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">50d Ext</span>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAtr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom50dAtr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAtr}x
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">Ext 200d</span>
-                  <span className={`text-xs font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">200d Ext</span>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">MACD</span>
-                  <span className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span>
+                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
                     {chartMetrics.macd}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground">Sector</span>
-                  <span className="text-xs font-medium text-foreground">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Sector</span>
+                  <span className="text-sm font-medium text-foreground">
                     {chartMetrics.sectorEtf}
                     {chartMetrics.sectorEtf !== "N/A" && (
-                      <span className={`ml-0.5 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
                         {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
                       </span>
                     )}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Earnings</span>
+                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-yellow-400" : "text-foreground"}`}>
+                    {chartMetrics.nextEarningsDate !== "N/A"
+                      ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
+                      : "N/A"}
                   </span>
                 </div>
               </div>
@@ -1709,6 +1732,8 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
         })()}
       </DialogContent>
     </Dialog>
+    <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
+    </>
   );
 }
 

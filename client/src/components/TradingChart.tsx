@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import {
   createChart,
   IChartApi,
@@ -51,6 +51,20 @@ export interface PriceLevelLine {
   lineWidth?: number;
 }
 
+export interface MaSettingForChart {
+  rowId: string;
+  title: string;
+  maType: string;
+  period: number | null;
+  color: string;
+  lineType: number;
+  isVisible: boolean;
+  dailyOn: boolean;
+  fiveMinOn: boolean;
+  fifteenMinOn: boolean;
+  thirtyMinOn: boolean;
+}
+
 export interface TradingChartProps {
   data: {
     candles: ChartCandle[];
@@ -64,6 +78,33 @@ export interface TradingChartProps {
   timeframe?: string;
   snapToPrice?: number | null;
   showDayDividers?: boolean;
+  maSettings?: MaSettingForChart[];
+}
+
+const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
+  sys_sma5: "ema5",
+  sys_sma10: "ema10",
+  sys_sma20: "sma21",
+  sys_sma50: "sma50",
+  sys_sma200: "sma200",
+  sys_vwap_hi: "avwapHigh",
+  sys_vwap_lo: "avwapLow",
+};
+
+const LINE_TYPE_TO_STYLE: Record<number, number> = {
+  0: LineStyle.Solid,
+  1: LineStyle.Dashed,
+  2: LineStyle.Dotted,
+  3: LineStyle.LargeDashed,
+  4: LineStyle.SparseDotted,
+};
+
+function getTimeframeToggle(setting: MaSettingForChart, timeframe: string): boolean {
+  if (timeframe === "daily" || timeframe === "1d") return setting.dailyOn;
+  if (timeframe === "5min" || timeframe === "5m") return setting.fiveMinOn;
+  if (timeframe === "15min" || timeframe === "15m") return setting.fifteenMinOn;
+  if (timeframe === "30min" || timeframe === "30m") return setting.thirtyMinOn;
+  return setting.dailyOn;
 }
 
 const INDICATOR_FIELD_MAP: { field: keyof ChartIndicators; templateId: string }[] = [
@@ -94,6 +135,7 @@ export function TradingChart({
   timeframe = "daily",
   snapToPrice,
   showDayDividers = false,
+  maSettings,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -250,60 +292,99 @@ export function TradingChart({
 
     candleSeries.setData(candleData);
 
-    for (const ma of MA_CONFIG) {
-      const indicatorValues = data.indicators[ma.key];
-      if (!indicatorValues || indicatorValues.length === 0) continue;
+    const renderedMaEntries: { label: string; color: string; lineStyle: number }[] = [];
 
-      const lineData: LineData[] = [];
-      for (let i = 0; i < indicatorValues.length; i++) {
-        const val = indicatorValues[i];
-        if (val !== null && i < data.candles.length) {
-          lineData.push({
-            time: data.candles[i].timestamp as any,
-            value: val,
+    if (maSettings && maSettings.length > 0) {
+      for (const setting of maSettings) {
+        if (!setting.isVisible) continue;
+        if (!getTimeframeToggle(setting, timeframe)) continue;
+
+        const field = SYSTEM_ROW_TO_FIELD[setting.rowId];
+        if (!field) continue;
+
+        const indicatorValues = data.indicators[field];
+        if (!indicatorValues || indicatorValues.length === 0) continue;
+
+        const lineData: LineData[] = [];
+        for (let i = 0; i < indicatorValues.length; i++) {
+          const val = indicatorValues[i];
+          if (val !== null && i < data.candles.length) {
+            lineData.push({ time: data.candles[i].timestamp as any, value: val });
+          }
+        }
+
+        if (lineData.length > 0) {
+          const lwStyle = LINE_TYPE_TO_STYLE[setting.lineType] ?? LineStyle.Solid;
+          const series = chart.addSeries(LineSeries, {
+            color: setting.color,
+            lineWidth: (setting.maType === "vwap" || setting.maType === "vwap_hi" || setting.maType === "vwap_lo" ? 2 : (setting.period && setting.period >= 20 ? 2 : 1)) as 1 | 2 | 3 | 4,
+            lineStyle: lwStyle,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
           });
+          series.setData(lineData);
+          renderedMaEntries.push({ label: setting.title, color: setting.color, lineStyle: setting.lineType });
+        }
+      }
+    } else {
+      for (const ma of MA_CONFIG) {
+        const indicatorValues = data.indicators[ma.key];
+        if (!indicatorValues || indicatorValues.length === 0) continue;
+
+        const lineData: LineData[] = [];
+        for (let i = 0; i < indicatorValues.length; i++) {
+          const val = indicatorValues[i];
+          if (val !== null && i < data.candles.length) {
+            lineData.push({
+              time: data.candles[i].timestamp as any,
+              value: val,
+            });
+          }
+        }
+
+        if (lineData.length > 0) {
+          const series = chart.addSeries(LineSeries, {
+            color: ma.color,
+            lineWidth: (ma.lineWidth || 1) as 1 | 2 | 3 | 4,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+          series.setData(lineData);
+          renderedMaEntries.push({ label: ma.label, color: ma.color, lineStyle: 0 });
         }
       }
 
-      if (lineData.length > 0) {
-        const series = chart.addSeries(LineSeries, {
-          color: ma.color,
-          lineWidth: (ma.lineWidth || 1) as 1 | 2 | 3 | 4,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        series.setData(lineData);
-      }
-    }
+      const avwapConfigs = [
+        { key: "avwapHigh" as const, label: "VWAP", color: "#f97316", style: LineStyle.Dotted },
+        { key: "avwapLow" as const, label: "Daily VWAP", color: "#38bdf8", style: LineStyle.Dotted },
+      ];
 
-    const avwapConfigs = [
-      { key: "avwapHigh" as const, label: "VWAP", color: "#f97316", style: LineStyle.Dotted },
-      { key: "avwapLow" as const, label: "Daily VWAP", color: "#38bdf8", style: LineStyle.Dotted },
-    ];
+      for (const avwap of avwapConfigs) {
+        const vals = data.indicators[avwap.key];
+        if (!vals || vals.length === 0) continue;
 
-    for (const avwap of avwapConfigs) {
-      const vals = data.indicators[avwap.key];
-      if (!vals || vals.length === 0) continue;
-
-      const lineData: LineData[] = [];
-      for (let i = 0; i < vals.length; i++) {
-        const val = vals[i];
-        if (val !== null && i < data.candles.length) {
-          lineData.push({ time: data.candles[i].timestamp as any, value: val });
+        const lineData: LineData[] = [];
+        for (let i = 0; i < vals.length; i++) {
+          const val = vals[i];
+          if (val !== null && i < data.candles.length) {
+            lineData.push({ time: data.candles[i].timestamp as any, value: val });
+          }
         }
-      }
 
-      if (lineData.length > 0) {
-        const series = chart.addSeries(LineSeries, {
-          color: avwap.color,
-          lineWidth: 2,
-          lineStyle: avwap.style,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        series.setData(lineData);
+        if (lineData.length > 0) {
+          const series = chart.addSeries(LineSeries, {
+            color: avwap.color,
+            lineWidth: 2,
+            lineStyle: avwap.style,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+          series.setData(lineData);
+          renderedMaEntries.push({ label: avwap.label, color: avwap.color, lineStyle: 2 });
+        }
       }
     }
 
@@ -390,7 +471,7 @@ export function TradingChart({
         priceLinesRef.current = [];
       }
     };
-  }, [data, height, isIntraday, showDayDividers]);
+  }, [data, height, isIntraday, showDayDividers, maSettings, timeframe]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
@@ -496,31 +577,50 @@ export function TradingChart({
     }
   }, [snapToPrice]);
 
+  const legendItems = useMemo(() => {
+    if (maSettings && maSettings.length > 0) {
+      return maSettings
+        .filter(s => s.isVisible && getTimeframeToggle(s, timeframe) && SYSTEM_ROW_TO_FIELD[s.rowId])
+        .map(s => ({
+          key: s.rowId,
+          label: s.title,
+          color: s.color,
+          isDotted: s.lineType === 2 || s.lineType === 4,
+          isDashed: s.lineType === 1 || s.lineType === 3,
+        }));
+    }
+    const items: { key: string; label: string; color: string; isDotted: boolean; isDashed: boolean }[] = MA_CONFIG.map(ma => ({
+      key: ma.key,
+      label: ma.label,
+      color: ma.color,
+      isDotted: false,
+      isDashed: false,
+    }));
+    if (data.indicators.avwapHigh?.some(v => v !== null)) {
+      items.push({ key: "avwapHigh", label: "VWAP", color: "#f97316", isDotted: true, isDashed: false });
+    }
+    if (data.indicators.avwapLow?.some(v => v !== null)) {
+      items.push({ key: "avwapLow", label: "Daily VWAP", color: "#38bdf8", isDotted: true, isDashed: false });
+    }
+    return items;
+  }, [maSettings, timeframe, data.indicators]);
+
   return (
     <div data-testid="chart-trading" className="relative w-full h-full flex flex-col">
-      {showLegend && (
+      {showLegend && legendItems.length > 0 && (
         <div className="absolute top-2 left-2 z-10 flex flex-col gap-1 rounded bg-slate-900/80 px-2 py-1.5">
-          {MA_CONFIG.map((ma) => (
-            <div key={ma.key} className="flex items-center gap-1.5 text-xs">
+          {legendItems.map((item: { key: string; label: string; color: string; isDotted: boolean; isDashed: boolean }) => (
+            <div key={item.key} className="flex items-center gap-1.5 text-xs">
               <div
                 className="h-0.5 w-3 rounded"
-                style={{ backgroundColor: ma.color }}
+                style={item.isDotted || item.isDashed
+                  ? { borderBottomWidth: "1px", borderBottomStyle: item.isDotted ? "dotted" : "dashed", borderColor: item.color }
+                  : { backgroundColor: item.color }
+                }
               />
-              <span className="text-slate-400">{ma.label}</span>
+              <span className="text-slate-400">{item.label}</span>
             </div>
           ))}
-          {data.indicators.avwapHigh && data.indicators.avwapHigh.some(v => v !== null) && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <div className="h-0.5 w-3 rounded border-b border-dotted" style={{ borderColor: "#f97316" }} />
-              <span className="text-slate-400">VWAP</span>
-            </div>
-          )}
-          {data.indicators.avwapLow && data.indicators.avwapLow.some(v => v !== null) && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <div className="h-0.5 w-3 rounded border-b border-dotted" style={{ borderColor: "#38bdf8" }} />
-              <span className="text-slate-400">Daily VWAP</span>
-            </div>
-          )}
         </div>
       )}
       <div ref={containerRef} className="w-full flex-1 min-h-[400px]" />

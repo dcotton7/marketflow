@@ -17,8 +17,9 @@ import {
   Target, TrendingUp, TrendingDown, ArrowDown, ArrowUp,
   CheckCircle2, XCircle, RotateCcw, Plus, X, Filter,
   BarChart3, Activity, Gauge, Zap, Crosshair, Eye,
-  Brain, ShieldAlert, Lightbulb, ThumbsUp, ThumbsDown, BookOpen
+  Brain, ShieldAlert, Lightbulb, ThumbsUp, ThumbsDown, BookOpen, Settings2
 } from "lucide-react";
+import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
@@ -164,9 +165,14 @@ export default function PatternTrainingPage() {
   const [newTag, setNewTag] = useState("");
   const [fiveMinEMACross, setFiveMinEMACross] = useState(false);
   const [macdCross, setMacdCross] = useState(false);
+  const [showMaSettings, setShowMaSettings] = useState(false);
 
   const [calculatedMetrics, setCalculatedMetrics] = useState<Record<string, number | string | undefined>>({});
   const [metricsLoading, setMetricsLoading] = useState(false);
+
+  const { data: maSettingsData } = useQuery<any[]>({
+    queryKey: ["/api/sentinel/ma-settings"],
+  });
 
   const [currentSetupId, setCurrentSetupId] = useState<number | null>(null);
 
@@ -635,6 +641,9 @@ export default function PatternTrainingPage() {
                 <BarChart3 className="w-4 h-4 mr-1" />
                 Dual Chart
               </Button>
+              <Button size="icon" variant="ghost" onClick={() => setShowMaSettings(true)} data-testid="button-ma-settings-pattern">
+                <Settings2 className="w-4 h-4" />
+              </Button>
             </div>
 
             {chartLoaded && (
@@ -659,6 +668,7 @@ export default function PatternTrainingPage() {
                             timeframe="daily"
                             height={400}
                             showLegend={false}
+                            maSettings={maSettingsData}
                           />
                         ) : (
                           <Card>
@@ -697,6 +707,7 @@ export default function PatternTrainingPage() {
                             timeframe={intradayTimeframe}
                             height={400}
                             showLegend={false}
+                            maSettings={maSettingsData}
                           />
                         ) : (
                           <Card>
@@ -763,6 +774,7 @@ export default function PatternTrainingPage() {
                           markers={markers}
                           priceLines={priceLines}
                           timeframe={timeframe}
+                          maSettings={maSettingsData}
                         />
                       ) : (
                         <Card>
@@ -1405,6 +1417,7 @@ export default function PatternTrainingPage() {
           </TabsContent>
         </Tabs>
       </div>
+      <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
     </div>
   );
 }
