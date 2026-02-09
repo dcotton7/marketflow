@@ -6337,13 +6337,21 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     "Communication Services": "XLC",
   };
 
-  app.get("/api/sentinel/trade-chart-metrics", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/sentinel/trade-chart-metrics", async (req: Request, res: Response) => {
     try {
       const ticker = String(req.query.ticker || "").toUpperCase();
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
 
       const YahooFinanceModule = await import('yahoo-finance2') as any;
-      const yf = YahooFinanceModule.default?.default || YahooFinanceModule.default || YahooFinanceModule;
+      const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
+      let yf: any;
+      if (typeof YahooFinance === 'function') {
+        yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+      } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
+        yf = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+      } else {
+        yf = YahooFinance;
+      }
 
       const endDate = new Date();
       const startDate = new Date();
