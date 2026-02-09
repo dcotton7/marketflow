@@ -187,10 +187,19 @@ export function TradingChart({
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
 
+  const dataFingerprint = useMemo(() => {
+    const c = data.candles;
+    if (c.length === 0) return "";
+    return `${c.length}:${c[0].timestamp}:${c[c.length - 1].timestamp}`;
+  }, [data.candles]);
+
   useEffect(() => {
     candlesRef.current = data.candles;
-    savedLogicalRangeRef.current = null;
   }, [data.candles]);
+
+  useEffect(() => {
+    savedLogicalRangeRef.current = null;
+  }, [dataFingerprint]);
 
   const isIntraday = timeframe !== "daily";
 
@@ -237,10 +246,6 @@ export function TradingChart({
     if (!containerRef.current || data.candles.length === 0) return;
 
     if (chartRef.current) {
-      try {
-        const lr = chartRef.current.timeScale().getVisibleLogicalRange();
-        if (lr) savedLogicalRangeRef.current = { from: lr.from, to: lr.to };
-      } catch {}
       chartRef.current.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -525,6 +530,10 @@ export function TradingChart({
     return () => {
       resizeObserver.disconnect();
       if (chartRef.current) {
+        try {
+          const lr = chartRef.current.timeScale().getVisibleLogicalRange();
+          if (lr) savedLogicalRangeRef.current = { from: lr.from, to: lr.to };
+        } catch {}
         chartRef.current.unsubscribeClick(handleChartClick);
         chartRef.current.remove();
         chartRef.current = null;
