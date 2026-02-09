@@ -1292,6 +1292,25 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 }) {
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const [refiningLotId, setRefiningLotId] = useState<string | null>(null);
+  const chartGridRef = useRef<HTMLDivElement>(null);
+  const [chartHeight, setChartHeight] = useState(500);
+
+  useEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      if (chartGridRef.current) {
+        const gridH = chartGridRef.current.clientHeight;
+        const labelH = 24;
+        setChartHeight(Math.max(300, gridH - labelH));
+      }
+    };
+    const timer = setTimeout(measure, 100);
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(measure);
+    });
+    if (chartGridRef.current) observer.observe(chartGridRef.current);
+    return () => { clearTimeout(timer); observer.disconnect(); };
+  }, [open]);
   const { toast } = useToast();
 
   const refineMutation = useMutation({
@@ -1379,8 +1398,11 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl w-[95vw]" onClick={(e) => e.stopPropagation()}>
-        <DialogHeader>
+      <DialogContent
+        className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5" />
             {trade.symbol} Position Chart
@@ -1390,12 +1412,12 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex flex-col">
-            <div className="text-xs text-muted-foreground mb-1 px-1 font-medium">Daily</div>
+        <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
+          <div className="flex flex-col min-h-0">
+            <div className="text-xs text-muted-foreground mb-1 px-1 font-medium flex-shrink-0">Daily</div>
             {dailyLoading ? (
-              <Card>
-                <CardContent className="flex items-center justify-center h-[380px]">
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full">
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </CardContent>
               </Card>
@@ -1404,19 +1426,19 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 data={dailyData}
                 priceLines={priceLines}
                 timeframe="daily"
-                height={380}
+                height={chartHeight}
                 showLegend={false}
               />
             ) : (
-              <Card>
-                <CardContent className="flex items-center justify-center h-[380px] text-muted-foreground text-sm">
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
                   No daily data
                 </CardContent>
               </Card>
             )}
           </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2 mb-1 px-1">
+          <div className="flex flex-col min-h-0">
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
               <span className="text-xs text-muted-foreground font-medium">Intraday</span>
               <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
                 <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-trade-chart-intraday">
@@ -1430,8 +1452,8 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
               </Select>
             </div>
             {intradayLoading ? (
-              <Card>
-                <CardContent className="flex items-center justify-center h-[380px]">
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full">
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </CardContent>
               </Card>
@@ -1441,12 +1463,12 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 onCandleClick={refiningLotId ? handleIntradayClick : undefined}
                 priceLines={priceLines}
                 timeframe={intradayTimeframe}
-                height={380}
+                height={chartHeight}
                 showLegend={false}
               />
             ) : (
-              <Card>
-                <CardContent className="flex items-center justify-center h-[380px] text-muted-foreground text-sm">
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
                   No intraday data
                 </CardContent>
               </Card>

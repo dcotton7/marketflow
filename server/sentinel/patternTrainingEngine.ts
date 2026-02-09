@@ -374,6 +374,28 @@ async function fetchHistoricalBars(symbol: string, days: number, interval: strin
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
+    const isIntraday = ["1m", "2m", "5m", "15m", "30m", "60m", "90m"].includes(interval);
+
+    if (isIntraday) {
+      const chartResult = await yf.chart(symbol, {
+        period1: startDate,
+        period2: endDate,
+        interval,
+      });
+      const quotes = chartResult?.quotes || [];
+      return quotes
+        .filter((q: any) => q.open != null && q.high != null && q.low != null && q.close != null)
+        .map((q: any) => ({
+          date: q.date instanceof Date ? q.date : new Date(q.date),
+          open: q.open,
+          high: q.high,
+          low: q.low,
+          close: q.close,
+          volume: q.volume || 0,
+        }))
+        .sort((a: HistoricalBar, b: HistoricalBar) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
     const result = await yf.historical(symbol, {
       period1: startDate,
       period2: endDate,
