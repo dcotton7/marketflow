@@ -17,7 +17,7 @@ import {
   Target, TrendingUp, TrendingDown, ArrowDown, ArrowUp,
   CheckCircle2, XCircle, RotateCcw, Plus, X, Filter,
   BarChart3, Activity, Gauge, Zap, Crosshair, Eye,
-  Brain, ShieldAlert, Lightbulb, ThumbsUp, ThumbsDown, BookOpen, Settings2
+  Brain, ShieldAlert, Lightbulb, ThumbsUp, ThumbsDown, BookOpen
 } from "lucide-react";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -641,9 +641,6 @@ export default function PatternTrainingPage() {
                 <BarChart3 className="w-4 h-4 mr-1" />
                 Dual Chart
               </Button>
-              <Button size="icon" variant="ghost" onClick={() => setShowMaSettings(true)} data-testid="button-ma-settings-pattern">
-                <Settings2 className="w-4 h-4" />
-              </Button>
             </div>
 
             {chartLoaded && (
@@ -691,6 +688,12 @@ export default function PatternTrainingPage() {
                               ))}
                             </SelectContent>
                           </Select>
+                          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setShowMaSettings(true)} data-testid="button-ma-settings-pattern">
+                            <svg width="16" height="16" viewBox="0 0 28 28" className="text-muted-foreground">
+                              <path d="M4 14c2-4 4-8 6-4s4 8 6 4 4-8 6-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M4 20c2-2 4-4 6-2s4 4 6 2 4-4 6-2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
+                            </svg>
+                          </Button>
                         </div>
                         {intradayChartLoading ? (
                           <Card className="flex-1">

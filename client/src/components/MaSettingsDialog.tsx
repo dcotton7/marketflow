@@ -5,7 +5,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Trash2, Plus, Loader2 } from "lucide-react";
 import { BARS_PER_DAY } from "@shared/indicatorTemplates";
@@ -116,6 +115,8 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
         data-testid="dialog-ma-settings"
         onCloseAutoFocus={e => e.preventDefault()}
         onInteractOutside={e => e.preventDefault()}
+        onPointerDown={e => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <DialogHeader>
           <DialogTitle data-testid="title-ma-settings">Moving Average Settings</DialogTitle>
@@ -151,14 +152,13 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                       key={row.rowId}
                       className={`border-b ${row.isSystem ? "bg-muted/30" : ""}`}
                       data-testid={`row-ma-setting-${index}`}
+                      onClick={e => e.stopPropagation()}
+                      onPointerDown={e => e.stopPropagation()}
                     >
                       <td className="py-1.5 px-1">
                         <div className="flex items-center gap-1">
                           {row.isSystem ? (
-                            <>
-                              <span className="text-sm text-muted-foreground" data-testid={`text-title-${index}`}>{row.title}</span>
-                              <Badge variant="outline" className="text-[10px] px-1 py-0">System</Badge>
-                            </>
+                            <span className="text-sm text-muted-foreground" data-testid={`text-title-${index}`}>{row.title}</span>
                           ) : (
                             <Input
                               value={row.title}
@@ -341,7 +341,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
             </div>
 
             <div className="flex items-center justify-between gap-2 flex-wrap pt-2">
-              <Button size="sm" variant="outline" onClick={addRow} data-testid="button-add-row">
+              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); addRow(); }} onPointerDown={e => e.stopPropagation()} data-testid="button-add-row">
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Add Row
               </Button>

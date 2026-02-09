@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2, Settings2 } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2 } from "lucide-react";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -1479,9 +1479,6 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
           <DialogTitle className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5" />
             {trade.symbol} Position Chart
-            <Button size="icon" variant="ghost" className="ml-auto" onClick={() => setShowMaSettings(true)} data-testid="button-ma-settings">
-              <Settings2 className="w-4 h-4" />
-            </Button>
           </DialogTitle>
           <DialogDescription>
             {trade.status === "closed" ? "Closed position" : "Active position"} 
@@ -1549,6 +1546,12 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                   <SelectItem value="30min">30m</SelectItem>
                 </SelectContent>
               </Select>
+              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setShowMaSettings(true)} data-testid="button-ma-settings">
+                <svg width="16" height="16" viewBox="0 0 28 28" className="text-muted-foreground">
+                  <path d="M4 14c2-4 4-8 6-4s4 8 6 4 4-8 6-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M4 20c2-2 4-4 6-2s4 4 6 2 4-4 6-2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
+                </svg>
+              </Button>
             </div>
             {intradayLoading ? (
               <Card className="flex-1">
