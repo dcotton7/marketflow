@@ -172,6 +172,18 @@ export function TradingChart({
         timeVisible: isIntraday,
         secondsVisible: false,
         rightOffset: 5,
+        tickMarkFormatter: (time: any) => {
+          const d = new Date(time * 1000);
+          if (isIntraday) {
+            let h = d.getUTCHours();
+            const m = d.getUTCMinutes();
+            const ampm = h >= 12 ? "PM" : "AM";
+            h = h % 12 || 12;
+            return m === 0 ? `${h} ${ampm}` : `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
+          }
+          const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+        },
       },
       handleScroll: {
         mouseWheel: true,
