@@ -182,12 +182,14 @@ export function TradingChart({
   const candlesRef = useRef(data.candles);
   const markersHandleRef = useRef<any>(null);
   const priceLinesRef = useRef<any[]>([]);
+  const savedLogicalRangeRef = useRef<{ from: number; to: number } | null>(null);
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
 
   useEffect(() => {
     candlesRef.current = data.candles;
+    savedLogicalRangeRef.current = null;
   }, [data.candles]);
 
   const isIntraday = timeframe !== "daily";
@@ -235,6 +237,10 @@ export function TradingChart({
     if (!containerRef.current || data.candles.length === 0) return;
 
     if (chartRef.current) {
+      try {
+        const lr = chartRef.current.timeScale().getVisibleLogicalRange();
+        if (lr) savedLogicalRangeRef.current = { from: lr.from, to: lr.to };
+      } catch {}
       chartRef.current.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -492,7 +498,15 @@ export function TradingChart({
     chart.subscribeCrosshairMove(() => {});
     chart.subscribeClick(handleChartClick);
 
-    chart.timeScale().fitContent();
+    if (savedLogicalRangeRef.current) {
+      try {
+        chart.timeScale().setVisibleLogicalRange(savedLogicalRangeRef.current);
+      } catch {
+        chart.timeScale().fitContent();
+      }
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {

@@ -122,7 +122,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
         onClick={e => e.stopPropagation()}
       >
         <DialogHeader>
-          <DialogTitle data-testid="title-ma-settings">Moving Average Settings</DialogTitle>
+          <DialogTitle data-testid="title-ma-settings">Indicator Settings</DialogTitle>
         </DialogHeader>
 
         {isLoading ? (
