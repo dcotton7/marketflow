@@ -141,7 +141,6 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     <th className="text-center py-2 px-1 font-medium">Calc On</th>
                     <th className="text-left py-2 px-1 font-medium">Color</th>
                     <th className="text-left py-2 px-1 font-medium">Line Type</th>
-                    <th className="text-center py-2 px-1 font-medium">Visible</th>
                     <th className="text-center py-2 px-1 font-medium">Daily</th>
                     <th className="text-center py-2 px-1 font-medium">5m</th>
                     <th className="text-center py-2 px-1 font-medium">15m</th>
@@ -238,14 +237,6 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                             ))}
                           </SelectContent>
                         </Select>
-                      </td>
-                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <Switch
-                          checked={row.isVisible}
-                          onCheckedChange={v => updateRow(row.rowId, "isVisible", v)}
-                          className="scale-75"
-                          data-testid={`switch-visible-${index}`}
-                        />
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
                         <div className="flex flex-col items-center gap-0.5">

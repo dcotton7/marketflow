@@ -335,7 +335,6 @@ export function TradingChart({
     if (maSettings && maSettings.length > 0) {
       const closes = data.candles.map(c => c.close);
       for (const setting of maSettings) {
-        if (!setting.isVisible) continue;
         if (!getTimeframeToggle(setting, timeframe)) continue;
 
         let indicatorValues: (number | null)[] | undefined;
@@ -629,7 +628,7 @@ export function TradingChart({
   const legendItems = useMemo(() => {
     if (maSettings && maSettings.length > 0) {
       return maSettings
-        .filter(s => s.isVisible && getTimeframeToggle(s, timeframe) && (SYSTEM_ROW_TO_FIELD[s.rowId] || s.maType === "sma" || s.maType === "ema"))
+        .filter(s => getTimeframeToggle(s, timeframe) && (SYSTEM_ROW_TO_FIELD[s.rowId] || s.maType === "sma" || s.maType === "ema"))
         .map(s => ({
           key: s.rowId,
           label: s.title,

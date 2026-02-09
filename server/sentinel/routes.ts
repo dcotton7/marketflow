@@ -6535,7 +6535,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
       }
 
-      res.json(rows);
+      res.json(rows.map(r => ({ ...r, isVisible: true })));
     } catch (error) {
       console.error("Get MA settings error:", error);
       res.status(500).json({ error: "Failed to fetch MA settings" });
@@ -6562,7 +6562,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           color: r.color || "#ffffff",
           lineType: r.lineType ?? 0,
           isSystem: r.isSystem ?? false,
-          isVisible: r.isVisible ?? true,
+          isVisible: true,
           dailyOn: r.dailyOn ?? false,
           fiveMinOn: r.fiveMinOn ?? false,
           fifteenMinOn: r.fifteenMinOn ?? false,
