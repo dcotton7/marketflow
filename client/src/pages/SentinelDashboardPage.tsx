@@ -1562,6 +1562,47 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                 </CardContent>
               </Card>
             )}
+            {chartMetrics && (
+              <div className="border border-border rounded p-2 flex flex-wrap gap-x-4 gap-y-1 mt-1 flex-shrink-0" data-testid="trade-chart-metrics">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground">Price</span>
+                  <span className="text-xs font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground">ADR 50d</span>
+                  <span className="text-xs font-medium text-foreground">{chartMetrics.adr50d}x</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground">Ext 50d</span>
+                  <span className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground">Ext 200d</span>
+                  <span className={`text-xs font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground">MACD</span>
+                  <span className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                    {chartMetrics.macd}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground">Sector</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {chartMetrics.sectorEtf}
+                    {chartMetrics.sectorEtf !== "N/A" && (
+                      <span className={`ml-0.5 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
+                      </span>
+                    )}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         {lotEntries && lotEntries.length > 0 && (() => {
@@ -1666,47 +1707,6 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             </div>
           );
         })()}
-        {chartMetrics && (
-          <div className="border border-border rounded p-2 flex flex-wrap gap-x-6 gap-y-1.5 mt-2 flex-shrink-0" data-testid="trade-chart-metrics">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Current Price</span>
-              <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">ADR (50d)</span>
-              <span className="text-sm font-medium text-foreground">{chartMetrics.adr50d}x</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Ext from 50d</span>
-              <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Ext from 200d</span>
-              <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">MACD</span>
-              <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
-                {chartMetrics.macd}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Sector ETF</span>
-              <span className="text-sm font-medium text-foreground">
-                {chartMetrics.sectorEtf}
-                {chartMetrics.sectorEtf !== "N/A" && (
-                  <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
-                  </span>
-                )}
-              </span>
-            </div>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );
