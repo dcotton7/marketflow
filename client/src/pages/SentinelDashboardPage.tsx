@@ -1365,6 +1365,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
   interface TradeChartMetrics {
     currentPrice: number;
     adr50d: number;
+    extensionFrom50dAdr: number;
     extensionFrom200d: number;
     macd: string;
     sectorEtf: string;
@@ -1394,7 +1395,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
       const qty = parseFloat(lot.qty);
       priceLines.push({
         price,
-        color: isBuy ? "#22c55e" : "#f97316",
+        color: isBuy ? "#22c55e" : "#ffffff",
         label: `${isBuy ? "Buy" : "Sell"} ${qty}@$${price.toFixed(2)}`,
         lineStyle: "solid",
       });
@@ -1543,12 +1544,8 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             return lot.dateTime.includes("T") && !lot.dateTime.includes("T09:30:00");
           };
 
-          const getSellPnlColor = (lot: LotEntry) => {
-            const sellPrice = parseFloat(lot.price);
-            if (avgBuyPrice <= 0) return { text: "text-blue-400", border: "border-blue-500/30" };
-            return sellPrice >= avgBuyPrice
-              ? { text: "text-blue-400", border: "border-blue-500/30" }
-              : { text: "text-red-400", border: "border-red-500/30" };
+          const getSellPnlColor = (_lot: LotEntry) => {
+            return { text: "text-white", border: "border-white/30" };
           };
 
           const renderLotBox = (lot: LotEntry) => {
@@ -1637,6 +1634,12 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-[10px] text-muted-foreground">ADR (50d)</span>
                     <span className="text-sm font-medium text-foreground">{chartMetrics.adr50d}x</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-muted-foreground">Ext from 50d</span>
+                    <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
+                    </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-[10px] text-muted-foreground">Ext from 200d</span>

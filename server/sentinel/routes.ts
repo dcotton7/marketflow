@@ -6375,6 +6375,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         extensionFrom200d = sma200 > 0 ? Math.round(((currentPrice - sma200) / sma200) * 1000) / 10 : 0;
       }
 
+      let extensionFrom50dAdr = 0;
+      if (validQuotes.length >= 50) {
+        const last50 = validQuotes.slice(-50);
+        const sma50 = last50.reduce((sum: number, q: any) => sum + q.close, 0) / 50;
+        const adr50 = last50.reduce((sum: number, q: any) => sum + (q.high - q.low), 0) / 50;
+        extensionFrom50dAdr = adr50 > 0 ? Math.round(((currentPrice - sma50) / adr50) * 10) / 10 : 0;
+      }
+
       let macdStatus = "N/A";
       if (validQuotes.length >= 35) {
         const closes = validQuotes.map((q: any) => q.close);
@@ -6421,6 +6429,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
         adr50d: adrMultiplier,
+        extensionFrom50dAdr,
         extensionFrom200d,
         macd: macdStatus,
         sectorEtf,
