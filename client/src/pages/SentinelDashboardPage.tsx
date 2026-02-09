@@ -1386,7 +1386,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
     queryKey: ["/api/sentinel/trade-chart-metrics", trade.symbol],
     enabled: open,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${trade.symbol}`);
+      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${trade.symbol}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch metrics");
       return res.json();
     },
