@@ -169,6 +169,22 @@ export function TradingChart({
       rightPriceScale: {
         borderColor: "rgba(148, 163, 184, 0.12)",
       },
+      localization: {
+        timeFormatter: (time: any) => {
+          const ts = typeof time === "object" && time !== null ? (time as any).timestamp ?? time : time;
+          const d = new Date(ts * 1000);
+          if (isIntraday) {
+            const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+            let h = d.getUTCHours();
+            const m = d.getUTCMinutes();
+            const ampm = h >= 12 ? "PM" : "AM";
+            h = h % 12 || 12;
+            return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${h}:${m.toString().padStart(2, "0")} ${ampm}`;
+          }
+          const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+        },
+      },
       timeScale: {
         borderColor: "rgba(148, 163, 184, 0.12)",
         timeVisible: isIntraday,
