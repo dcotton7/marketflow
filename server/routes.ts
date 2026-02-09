@@ -123,7 +123,9 @@ async function getChartData(yf: any, symbol: string, period: string = '1y', inte
       if (item.open == null || item.close == null) return false;
       if (isIntraday) {
         const d = new Date(item.date);
-        const totalMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+        const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" });
+        const [etH, etM] = etStr.split(":").map(Number);
+        const totalMin = etH * 60 + etM;
         if (totalMin < 570 || totalMin >= 960) return false;
       }
       return true;

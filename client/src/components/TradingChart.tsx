@@ -15,6 +15,27 @@ import {
 } from "lightweight-charts";
 import { DEFAULT_MA_TEMPLATE, BARS_PER_DAY } from "@shared/indicatorTemplates";
 
+const etFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+  hour12: false,
+});
+
+function shiftToEastern(utcTimestamp: number): number {
+  const d = new Date(utcTimestamp * 1000);
+  const parts = etFormatter.formatToParts(d);
+  const get = (t: string) => parseInt(parts.find(p => p.type === t)?.value || "0", 10);
+  const etYear = get("year");
+  const etMonth = get("month") - 1;
+  const etDay = get("day");
+  const etHour = get("hour") === 24 ? 0 : get("hour");
+  const etMin = get("minute");
+  const etSec = get("second");
+  const fakeUtc = Date.UTC(etYear, etMonth, etDay, etHour, etMin, etSec);
+  return Math.floor(fakeUtc / 1000);
+}
+
 function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];
   for (let i = 0; i < closes.length; i++) {
@@ -305,6 +326,24 @@ export function TradingChart({
 
   const isIntraday = timeframe !== "daily";
 
+  const displayData = useMemo(() => {
+    if (!isIntraday) return data;
+    const shiftedCandles = data.candles.map(c => ({
+      ...c,
+      timestamp: shiftToEastern(c.timestamp),
+    }));
+    return { ...data, candles: shiftedCandles };
+  }, [data, isIntraday]);
+
+  const shiftedToOriginal = useMemo(() => {
+    if (!isIntraday) return null;
+    const map = new Map<number, ChartCandle>();
+    for (let i = 0; i < data.candles.length; i++) {
+      map.set(displayData.candles[i].timestamp, data.candles[i]);
+    }
+    return map;
+  }, [data.candles, displayData.candles, isIntraday]);
+
   const handleChartClick = useCallback(
     (param: any) => {
       if (!onCandleClickRef.current || !param.time || !candleSeriesRef.current) return;
@@ -320,15 +359,29 @@ export function TradingChart({
         timestamp = param.time as number;
       }
 
-      let candle = candlesRef.current.find((c) => c.timestamp === timestamp);
-      if (!candle && candlesRef.current.length > 0) {
-        let closest = candlesRef.current[0];
-        let minDiff = Math.abs(closest.timestamp - timestamp);
-        for (const c of candlesRef.current) {
-          const diff = Math.abs(c.timestamp - timestamp);
-          if (diff < minDiff) { minDiff = diff; closest = c; }
+      let candle: ChartCandle | undefined;
+      if (shiftedToOriginal) {
+        candle = shiftedToOriginal.get(timestamp);
+        if (!candle) {
+          let closestKey = 0;
+          let minDiff = Infinity;
+          shiftedToOriginal.forEach((_val, key) => {
+            const diff = Math.abs(key - timestamp);
+            if (diff < minDiff) { minDiff = diff; closestKey = key; }
+          });
+          if (minDiff < 3600) candle = shiftedToOriginal.get(closestKey);
         }
-        if (minDiff < 3600) candle = closest;
+      } else {
+        candle = candlesRef.current.find((c) => c.timestamp === timestamp);
+        if (!candle && candlesRef.current.length > 0) {
+          let closest = candlesRef.current[0];
+          let minDiff = Math.abs(closest.timestamp - timestamp);
+          for (const c of candlesRef.current) {
+            const diff = Math.abs(c.timestamp - timestamp);
+            if (diff < minDiff) { minDiff = diff; closest = c; }
+          }
+          if (minDiff < 3600) candle = closest;
+        }
       }
       if (candle) {
         let clickedPrice = candle.close;
@@ -345,7 +398,7 @@ export function TradingChart({
   );
 
   useEffect(() => {
-    if (!containerRef.current || data.candles.length === 0) return;
+    if (!containerRef.current || displayData.candles.length === 0) return;
 
     if (chartRef.current) {
       chartRef.current.remove();
@@ -433,7 +486,7 @@ export function TradingChart({
 
     candleSeriesRef.current = candleSeries;
 
-    const candleData: CandlestickData[] = data.candles.map((c) => ({
+    const candleData: CandlestickData[] = displayData.candles.map((c) => ({
       time: c.timestamp as any,
       open: c.open,
       high: c.high,
@@ -443,7 +496,7 @@ export function TradingChart({
 
     candleSeries.setData(candleData);
 
-    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, data, timeframe);
+    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, displayData, timeframe);
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -454,7 +507,7 @@ export function TradingChart({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
-    const volumeData: HistogramData[] = data.candles.map((c) => ({
+    const volumeData: HistogramData[] = displayData.candles.map((c) => ({
       time: c.timestamp as any,
       value: c.volume,
       color:
@@ -465,10 +518,10 @@ export function TradingChart({
 
     volumeSeries.setData(volumeData);
 
-    if (showDayDividers && isIntraday && data.candles.length > 0) {
+    if (showDayDividers && isIntraday && displayData.candles.length > 0) {
       const dayBoundaryTimestamps: number[] = [];
       let prevDateStr = "";
-      for (const c of data.candles) {
+      for (const c of displayData.candles) {
         const d = new Date(c.timestamp * 1000);
         const dateStr = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
         if (dateStr !== prevDateStr && prevDateStr !== "") {
@@ -488,7 +541,7 @@ export function TradingChart({
           scaleMargins: { top: 0, bottom: 0 },
           visible: false,
         });
-        const maxPrice = Math.max(...data.candles.map(c => c.high));
+        const maxPrice = Math.max(...displayData.candles.map(c => c.high));
         const dividerData: HistogramData[] = dayBoundaryTimestamps.map(ts => ({
           time: ts as any,
           value: maxPrice * 10,
@@ -529,7 +582,7 @@ export function TradingChart({
         maLineSeriesRef.current = [];
       }
     };
-  }, [data, height, isIntraday, showDayDividers, timeframe]);
+  }, [displayData, height, isIntraday, showDayDividers, timeframe]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -537,7 +590,7 @@ export function TradingChart({
     for (const s of maLineSeriesRef.current) {
       try { chart.removeSeries(s); } catch {}
     }
-    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, data, timeframe);
+    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, displayData, timeframe);
   }, [maSettings]);
 
   useEffect(() => {
@@ -551,7 +604,10 @@ export function TradingChart({
     }
 
     if (markers && markers.length > 0) {
-      const sorted = [...markers].sort((a, b) => a.time - b.time);
+      const displayMarkers = isIntraday
+        ? markers.map(m => ({ ...m, time: shiftToEastern(m.time) }))
+        : markers;
+      const sorted = [...displayMarkers].sort((a, b) => a.time - b.time);
       markersHandleRef.current = createSeriesMarkers(
         candleSeriesRef.current,
         sorted.map((m) => ({
@@ -563,7 +619,7 @@ export function TradingChart({
         }))
       );
     }
-  }, [markers]);
+  }, [markers, isIntraday]);
 
 
   useEffect(() => {

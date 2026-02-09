@@ -1339,13 +1339,19 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
   const handleIntradayClick = (candle: ChartCandle, clickedPrice: number) => {
     if (!refiningLotId) return;
     const d = new Date(candle.timestamp * 1000);
-    const year = d.getUTCFullYear();
-    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(d.getUTCDate()).padStart(2, "0");
-    const hours = String(d.getUTCHours()).padStart(2, "0");
-    const minutes = String(d.getUTCMinutes()).padStart(2, "0");
-    const testFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "short" });
-    const isDST = testFormatter.formatToParts(new Date(`${year}-${month}-${day}T12:00:00Z`)).find(p => p.type === "timeZoneName")?.value === "EDT";
+    const etParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false, timeZoneName: "short",
+    }).formatToParts(d);
+    const get = (type: string) => etParts.find(p => p.type === type)?.value || "";
+    const year = get("year");
+    const month = get("month");
+    const day = get("day");
+    const hours = get("hour");
+    const minutes = get("minute");
+    const isDST = get("timeZoneName") === "EDT";
     const offset = isDST ? "-04:00" : "-05:00";
     const newDateTime = `${year}-${month}-${day}T${hours}:${minutes}:00${offset}`;
     refineMutation.mutate({
@@ -1408,7 +1414,9 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
     const rthIndices: number[] = [];
     intradayData.candles.forEach((c, i) => {
       const d = new Date(c.timestamp * 1000);
-      const totalMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+      const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" });
+      const [etH, etM] = etStr.split(":").map(Number);
+      const totalMin = etH * 60 + etM;
       if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
     });
     if (rthIndices.length === 0) return intradayData;
