@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -66,8 +66,11 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
     }
   }, [data]);
 
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+
   const saveMutation = useMutation({
-    mutationFn: () => apiRequest("PUT", "/api/sentinel/ma-settings", { rows }),
+    mutationFn: (currentRows: MaSettingRow[]) => apiRequest("PUT", "/api/sentinel/ma-settings", { rows: currentRows }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/ma-settings"] });
       onOpenChange(false);
@@ -347,7 +350,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
               </Button>
               <Button
                 size="sm"
-                onClick={(e) => { e.stopPropagation(); saveMutation.mutate(); }}
+                onClick={(e) => { e.stopPropagation(); saveMutation.mutate(rowsRef.current); }}
                 disabled={saveMutation.isPending}
                 data-testid="button-save-ma-settings"
               >
