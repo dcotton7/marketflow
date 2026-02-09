@@ -4457,78 +4457,201 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
                   return 0;
                 });
                 
-                // Recalculate position metrics from merged lots using proper FIFO
-                let firstBuyDate: Date | null = null;
-                let lastExitDate: Date | null = null;
-                let lastExitPrice: number | null = null;
-                let realizedPnL = 0;
-                let totalBoughtQty = 0;
-                let totalBoughtCost = 0;
-                const openLots: Array<{ qty: number; price: number; date: Date }> = [];
-                
+                // Apply position splitting rule: group merged lots by calendar day
+                // and split into separate positions when end-of-day share count hits zero
+                const mergeDayGroups = new Map<string, typeof mergedLots>();
                 for (const lot of mergedLots) {
-                  const qty = parseFloat(lot.qty) || 0;
-                  const price = parseFloat(lot.price) || 0;
-                  const lotDate = new Date(lot.dateTime);
+                  const dayKey = lot.dateTime.substring(0, 10);
+                  if (!mergeDayGroups.has(dayKey)) mergeDayGroups.set(dayKey, []);
+                  mergeDayGroups.get(dayKey)!.push(lot);
+                }
+                const mergeSortedDays = [...mergeDayGroups.keys()].sort();
+                
+                // Track multiple positions from the merged lots
+                type MergePosition = {
+                  lots: typeof mergedLots;
+                  firstBuyDate: Date | null;
+                  lastExitDate: Date | null;
+                  lastExitPrice: number | null;
+                  realizedPnL: number;
+                  totalBoughtQty: number;
+                  totalBoughtCost: number;
+                  remainingPosition: number;
+                };
+                const mergePositions: MergePosition[] = [];
+                
+                let mFirstBuyDate: Date | null = null;
+                let mLastExitDate: Date | null = null;
+                let mLastExitPrice: number | null = null;
+                let mRealizedPnL = 0;
+                let mTotalBoughtQty = 0;
+                let mTotalBoughtCost = 0;
+                let mCurrentPosition = 0;
+                let mPositionLots: typeof mergedLots = [];
+                const mOpenLots: Array<{ qty: number; price: number; date: Date }> = [];
+                
+                for (const dayKey of mergeSortedDays) {
+                  const dayLots = mergeDayGroups.get(dayKey)!;
                   
-                  if (lot.buySell === 'buy') {
-                    openLots.push({ qty, price, date: lotDate });
-                    totalBoughtQty += qty;
-                    totalBoughtCost += qty * price;
-                    if (!firstBuyDate) firstBuyDate = lotDate;
-                  } else {
-                    // FIFO matching for sells
-                    let remainingSell = qty;
-                    while (remainingSell > 0 && openLots.length > 0) {
-                      const openLot = openLots[0];
-                      const matchQty = Math.min(openLot.qty, remainingSell);
-                      realizedPnL += matchQty * (price - openLot.price);
-                      openLot.qty -= matchQty;
-                      remainingSell -= matchQty;
-                      if (openLot.qty <= 0.0001) openLots.shift();
+                  for (const lot of dayLots) {
+                    const qty = parseFloat(lot.qty) || 0;
+                    const price = parseFloat(lot.price) || 0;
+                    const lotDate = new Date(lot.dateTime);
+                    
+                    mPositionLots.push(lot);
+                    
+                    if (lot.buySell === 'buy') {
+                      mOpenLots.push({ qty, price, date: lotDate });
+                      mCurrentPosition += qty;
+                      mTotalBoughtQty += qty;
+                      mTotalBoughtCost += qty * price;
+                      if (!mFirstBuyDate) mFirstBuyDate = lotDate;
+                    } else {
+                      let remainingSell = qty;
+                      while (remainingSell > 0 && mOpenLots.length > 0) {
+                        const openLot = mOpenLots[0];
+                        const matchQty = Math.min(openLot.qty, remainingSell);
+                        mRealizedPnL += matchQty * (price - openLot.price);
+                        openLot.qty -= matchQty;
+                        remainingSell -= matchQty;
+                        if (openLot.qty <= 0.0001) mOpenLots.shift();
+                      }
+                      mCurrentPosition -= qty;
+                      mLastExitDate = lotDate;
+                      mLastExitPrice = price;
                     }
-                    lastExitDate = lotDate;
-                    lastExitPrice = price;
+                  }
+                  
+                  // End-of-day check: if position is at or below zero, finalize this position
+                  if (mCurrentPosition <= 0.0001 && mPositionLots.length > 0) {
+                    mergePositions.push({
+                      lots: [...mPositionLots],
+                      firstBuyDate: mFirstBuyDate,
+                      lastExitDate: mLastExitDate,
+                      lastExitPrice: mLastExitPrice,
+                      realizedPnL: mRealizedPnL,
+                      totalBoughtQty: mTotalBoughtQty,
+                      totalBoughtCost: mTotalBoughtCost,
+                      remainingPosition: 0,
+                    });
+                    mPositionLots = [];
+                    mFirstBuyDate = null;
+                    mLastExitDate = null;
+                    mLastExitPrice = null;
+                    mRealizedPnL = 0;
+                    mTotalBoughtQty = 0;
+                    mTotalBoughtCost = 0;
+                    mCurrentPosition = 0;
                   }
                 }
                 
-                // Calculate remaining position from REMAINING open lots
-                const remainingPosition = openLots.reduce((sum, l) => sum + l.qty, 0);
-                const remainingCost = openLots.reduce((sum, l) => sum + (l.qty * l.price), 0);
-                // For open positions: cost basis of remaining lots
-                // For closed positions: historical weighted average entry price
-                const avgCostBasis = remainingPosition > 0 
-                  ? remainingCost / remainingPosition 
-                  : (totalBoughtQty > 0 ? totalBoughtCost / totalBoughtQty : 0);
+                // Any remaining open position after all days
+                if (mPositionLots.length > 0) {
+                  const remainingPos = mOpenLots.reduce((sum, l) => sum + l.qty, 0);
+                  mergePositions.push({
+                    lots: [...mPositionLots],
+                    firstBuyDate: mFirstBuyDate,
+                    lastExitDate: mLastExitDate,
+                    lastExitPrice: mLastExitPrice,
+                    realizedPnL: mRealizedPnL,
+                    totalBoughtQty: mTotalBoughtQty,
+                    totalBoughtCost: mTotalBoughtCost,
+                    remainingPosition: remainingPos,
+                  });
+                }
                 
-                // Determine status: if position is near-zero, mark as closed
-                const isNearZero = Math.abs(remainingPosition) < 0.01;
-                const newStatus = isNearZero ? 'closed' : 'active';
-                
-                // Update the existing card with merged data
-                await tx.update(sentinelTrades)
-                  .set({
-                    lotEntries: mergedLots,
-                    positionSize: isNearZero ? 0 : remainingPosition,
-                    entryPrice: avgCostBasis,
-                    entryDate: firstBuyDate || existingCard.entryDate,
-                    status: newStatus,
-                    exitPrice: isNearZero ? lastExitPrice : null,
-                    exitDate: isNearZero ? lastExitDate : null,
-                    actualPnL: isNearZero ? realizedPnL : null,
-                    outcome: isNearZero ? (realizedPnL > 0 ? 'win' : realizedPnL < 0 ? 'loss' : 'breakeven') : null,
-                    holdDays: isNearZero && firstBuyDate && lastExitDate 
-                      ? Math.ceil((lastExitDate.getTime() - firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) 
-                      : null,
-                    updatedAt: new Date(),
-                  })
-                  .where(eq(sentinelTrades.id, existingCard.id));
-                
-                mergedCount++;
-                if (isNearZero) closedCount++;
-                
-                for (const lot of newLots) {
-                  promotedTradeIdToCardId.set(lot.id, existingCard.id);
+                // First position updates the existing card; subsequent positions create new cards
+                for (let pi = 0; pi < mergePositions.length; pi++) {
+                  const pos = mergePositions[pi];
+                  const isNearZero = Math.abs(pos.remainingPosition) < 0.01;
+                  const posStatus = isNearZero ? 'closed' : 'active';
+                  const remainingCost = isNearZero ? 0 : mOpenLots.reduce((sum, l) => sum + (l.qty * l.price), 0);
+                  const avgCostBasis = isNearZero
+                    ? (pos.totalBoughtQty > 0 ? pos.totalBoughtCost / pos.totalBoughtQty : 0)
+                    : (pos.remainingPosition > 0 ? remainingCost / pos.remainingPosition : 0);
+                  
+                  if (pi === 0) {
+                    // Update existing card with first position
+                    await tx.update(sentinelTrades)
+                      .set({
+                        lotEntries: pos.lots,
+                        positionSize: isNearZero ? 0 : pos.remainingPosition,
+                        entryPrice: avgCostBasis,
+                        entryDate: pos.firstBuyDate || existingCard.entryDate,
+                        status: posStatus,
+                        exitPrice: isNearZero ? pos.lastExitPrice : null,
+                        exitDate: isNearZero ? pos.lastExitDate : null,
+                        actualPnL: isNearZero ? pos.realizedPnL : null,
+                        outcome: isNearZero ? (pos.realizedPnL > 0 ? 'win' : pos.realizedPnL < 0 ? 'loss' : 'breakeven') : null,
+                        holdDays: isNearZero && pos.firstBuyDate && pos.lastExitDate 
+                          ? Math.ceil((pos.lastExitDate.getTime() - pos.firstBuyDate.getTime()) / (1000 * 60 * 60 * 24)) 
+                          : null,
+                        updatedAt: new Date(),
+                      })
+                      .where(eq(sentinelTrades.id, existingCard.id));
+                    
+                    mergedCount++;
+                    if (isNearZero) closedCount++;
+                    
+                    for (const lot of pos.lots) {
+                      if (!existingLotIds.has(lot.id)) {
+                        promotedTradeIdToCardId.set(lot.id, existingCard.id);
+                      }
+                    }
+                    
+                    // Update existingCardsMap to reflect the new status so subsequent
+                    // cards for the same ticker won't incorrectly merge into a now-closed card
+                    const updatedCard = await tx.select().from(sentinelTrades)
+                      .where(eq(sentinelTrades.id, existingCard.id))
+                      .limit(1);
+                    if (updatedCard.length > 0) {
+                      existingCardsMap.set(key, updatedCard[0]);
+                    }
+                  } else {
+                    // Create new cards for subsequent positions (position reopened after zero)
+                    const splitAvgEntry = pos.totalBoughtQty > 0 ? pos.totalBoughtCost / pos.totalBoughtQty : 0;
+                    const splitCard = {
+                      userId,
+                      symbol: newCard.symbol,
+                      direction: 'long',
+                      entryPrice: splitAvgEntry,
+                      entryDate: pos.firstBuyDate,
+                      exitPrice: isNearZero ? pos.lastExitPrice : undefined,
+                      exitDate: isNearZero ? (pos.lastExitDate || undefined) : undefined,
+                      positionSize: isNearZero ? 0 : pos.remainingPosition,
+                      status: posStatus,
+                      outcome: isNearZero ? (pos.realizedPnL > 0 ? 'win' : pos.realizedPnL < 0 ? 'loss' : 'breakeven') : undefined,
+                      actualPnL: isNearZero ? pos.realizedPnL : undefined,
+                      holdDays: isNearZero && pos.firstBuyDate && pos.lastExitDate
+                        ? Math.ceil((pos.lastExitDate.getTime() - pos.firstBuyDate.getTime()) / (1000 * 60 * 60 * 24))
+                        : undefined,
+                      lotEntries: pos.lots,
+                      source: 'import' as const,
+                      importBatchId: newCard.importBatchId,
+                      accountName: newCard.accountName,
+                      isTagged: false,
+                    };
+                    
+                    await tx.insert(sentinelTrades).values(splitCard);
+                    createdCount++;
+                    if (isNearZero) closedCount++;
+                    
+                    // Fetch the new card and update map
+                    const insertedSplitCards = await tx.select().from(sentinelTrades)
+                      .where(and(
+                        eq(sentinelTrades.userId, userId),
+                        eq(sentinelTrades.symbol, newCard.symbol),
+                        eq(sentinelTrades.accountName, newCard.accountName || null)
+                      ))
+                      .orderBy(desc(sentinelTrades.createdAt))
+                      .limit(1);
+                    if (insertedSplitCards.length > 0) {
+                      existingCardsMap.set(key, insertedSplitCards[0]);
+                      for (const lot of pos.lots) {
+                        promotedTradeIdToCardId.set(lot.id, insertedSplitCards[0].id);
+                      }
+                    }
+                  }
                 }
               }
             } else {
