@@ -62,6 +62,7 @@ export interface TradingChartProps {
   height?: number;
   timeframe?: string;
   snapToPrice?: number | null;
+  showDayDividers?: boolean;
 }
 
 const MA_CONFIG = [
@@ -81,6 +82,7 @@ export function TradingChart({
   height,
   timeframe = "daily",
   snapToPrice,
+  showDayDividers = false,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -298,6 +300,39 @@ export function TradingChart({
 
     volumeSeries.setData(volumeData);
 
+    if (showDayDividers && isIntraday && data.candles.length > 0) {
+      const dayBoundaryTimestamps: number[] = [];
+      let prevDateStr = "";
+      for (const c of data.candles) {
+        const d = new Date(c.timestamp * 1000);
+        const dateStr = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        if (dateStr !== prevDateStr && prevDateStr !== "") {
+          dayBoundaryTimestamps.push(c.timestamp);
+        }
+        prevDateStr = dateStr;
+      }
+
+      if (dayBoundaryTimestamps.length > 0) {
+        const dividerSeries = chart.addSeries(HistogramSeries, {
+          priceFormat: { type: "volume" },
+          priceScaleId: "dayDividers",
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        chart.priceScale("dayDividers").applyOptions({
+          scaleMargins: { top: 0, bottom: 0 },
+          visible: false,
+        });
+        const maxPrice = Math.max(...data.candles.map(c => c.high));
+        const dividerData: HistogramData[] = dayBoundaryTimestamps.map(ts => ({
+          time: ts as any,
+          value: maxPrice * 10,
+          color: "rgba(148, 163, 184, 0.15)",
+        }));
+        dividerSeries.setData(dividerData);
+      }
+    }
+
     chart.subscribeCrosshairMove(() => {});
     chart.subscribeClick(handleChartClick);
 
@@ -328,7 +363,7 @@ export function TradingChart({
         priceLinesRef.current = [];
       }
     };
-  }, [data, height, isIntraday]);
+  }, [data, height, isIntraday, showDayDividers]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
