@@ -94,6 +94,7 @@ interface PreviewResult {
   };
   trades: ImportedTrade[];
   detectedBroker: string;
+  dateRange?: { earliest: string; latest: string; totalTrades: number } | null;
 }
 
 const BROKER_OPTIONS = [
@@ -388,9 +389,12 @@ export default function SentinelImportPage() {
       const synthInfo = report && report.totalSyntheticInjections > 0
         ? ` | ${report.cardsUsingSyntheticCostBasis} cards used synthetic cost basis (${report.tickersWithSynthetic?.join(', ')})`
         : ' | All cards used real imported cost basis';
+      const orderInfo = data.orderLevelsPreserved > 0 
+        ? ` | ${data.orderLevelsPreserved} order levels preserved` 
+        : '';
       toast({ 
         title: "Trades Promoted to Cards", 
-        description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}${synthInfo}`
+        description: `Created ${data.cardsCreated || 0} cards, merged ${data.cardsMerged || 0}. Open: ${data.openPositions || 0}, Closed: ${data.closedPositions || 0}${synthInfo}${orderInfo}`
       });
       if (report) {
         setPromoteReport(report);
@@ -1262,6 +1266,11 @@ export default function SentinelImportPage() {
                   </CardTitle>
                   <CardDescription>
                     Found {previewData.trades.length} trades from {previewData.batch.brokerId}
+                    {previewData.dateRange && (
+                      <span className="ml-2 font-medium">
+                        ({previewData.dateRange.earliest} to {previewData.dateRange.latest})
+                      </span>
+                    )}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -1280,6 +1289,12 @@ export default function SentinelImportPage() {
                         {formatCurrency(previewData.trades.reduce((sum, t) => sum + t.totalAmount, 0))}
                       </div>
                     </div>
+                    {previewData.dateRange && (
+                      <div className="bg-muted p-3 rounded-lg">
+                        <div className="text-sm text-muted-foreground">Date Range</div>
+                        <div className="text-lg font-bold">{previewData.dateRange.earliest} to {previewData.dateRange.latest}</div>
+                      </div>
+                    )}
                   </div>
 
                   {previewData.batch.skippedRows.length > 0 && (

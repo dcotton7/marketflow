@@ -3465,10 +3465,19 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const result = parseCSV(csvContent, fileName || "upload.csv", user?.username || "unknown", brokerId as BrokerId);
       console.log(`[Import Preview] Parse complete: ${result.trades.length} trades, status: ${result.batch.status}`);
       
+      const tradeDates = result.trades
+        .map(t => t.tradeDate)
+        .filter(Boolean)
+        .sort();
+      const dateRange = tradeDates.length > 0 
+        ? { earliest: tradeDates[0], latest: tradeDates[tradeDates.length - 1], totalTrades: result.trades.length }
+        : null;
+      
       res.json({
         batch: result.batch,
         trades: result.trades,
         detectedBroker: detectBroker(csvContent),
+        dateRange,
       });
     } catch (error) {
       console.error("[Import Preview] Error:", error);
@@ -4069,18 +4078,56 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
       
       // If clean mode, delete all existing import-source trading cards and related data
+      // BUT preserve order levels so they can be re-attached to matching new cards
+      let preservedOrderLevels: Array<{
+        levelType: string;
+        price: number;
+        quantity: number | null;
+        source: string | null;
+        status: string | null;
+        orderNumber: string | null;
+        notes: string | null;
+        tickerAccount: string;
+      }> = [];
+      
       if (clean) {
         await db.transaction(async (tx) => {
-          const importCardIdsSubquery = tx.select({ id: sentinelTrades.id }).from(sentinelTrades)
+          const importCards = await tx.select({
+            id: sentinelTrades.id,
+            symbol: sentinelTrades.symbol,
+            accountName: sentinelTrades.accountName,
+          }).from(sentinelTrades)
             .where(and(
               eq(sentinelTrades.userId, userId),
               eq(sentinelTrades.source, 'import')
             ));
           
-          const importCardIds = await importCardIdsSubquery;
-          
-          if (importCardIds.length > 0) {
-            const ids = importCardIds.map(c => c.id);
+          if (importCards.length > 0) {
+            const ids = importCards.map(c => c.id);
+            
+            // Build a map from tradeId -> ticker:account for order level preservation
+            const cardKeyMap = new Map<number, string>();
+            for (const card of importCards) {
+              cardKeyMap.set(card.id, `${card.symbol.toUpperCase()}:${card.accountName || 'default'}`);
+            }
+            
+            // Save all order levels before deletion, keyed by ticker+account
+            const allOrderLevels = await tx.select().from(sentinelOrderLevels)
+              .where(inArray(sentinelOrderLevels.tradeId, ids));
+            
+            preservedOrderLevels = allOrderLevels.map(ol => ({
+              levelType: ol.levelType,
+              price: ol.price,
+              quantity: ol.quantity,
+              source: ol.source,
+              status: ol.status,
+              orderNumber: ol.orderNumber,
+              notes: ol.notes,
+              tickerAccount: cardKeyMap.get(ol.tradeId) || 'unknown',
+            }));
+            
+            console.log(`[Promote] Preserving ${preservedOrderLevels.length} order levels across ${new Set(preservedOrderLevels.map(o => o.tickerAccount)).size} positions`);
+            
             const BATCH_SIZE = 500;
             for (let i = 0; i < ids.length; i += BATCH_SIZE) {
               const batch = ids.slice(i, i + BATCH_SIZE);
@@ -4506,6 +4553,85 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         });
       }
       
+      // Re-attach preserved order levels to matching new active cards
+      let reattachedOrderLevels = 0;
+      if (preservedOrderLevels.length > 0) {
+        const newActiveCards = await db.select({
+          id: sentinelTrades.id,
+          symbol: sentinelTrades.symbol,
+          accountName: sentinelTrades.accountName,
+        }).from(sentinelTrades)
+          .where(and(
+            eq(sentinelTrades.userId, userId),
+            eq(sentinelTrades.source, 'import'),
+            eq(sentinelTrades.status, 'active')
+          ));
+        
+        // Map ticker+account to ALL matching active card IDs (there may be multiple)
+        const newCardsByKey = new Map<string, number[]>();
+        for (const card of newActiveCards) {
+          const key = `${card.symbol.toUpperCase()}:${card.accountName || 'default'}`;
+          if (!newCardsByKey.has(key)) newCardsByKey.set(key, []);
+          newCardsByKey.get(key)!.push(card.id);
+        }
+        
+        // Get existing order levels on new active cards to avoid duplicates
+        const allNewCardIds = newActiveCards.map(c => c.id);
+        const existingOLs = allNewCardIds.length > 0 
+          ? await db.select().from(sentinelOrderLevels).where(inArray(sentinelOrderLevels.tradeId, allNewCardIds))
+          : [];
+        const existingOLKeys = new Set(existingOLs.map(ol => `${ol.tradeId}:${ol.levelType}:${ol.price}:${ol.source || ''}`));
+        
+        const orderLevelsToInsert: Array<{
+          tradeId: number;
+          userId: number;
+          levelType: string;
+          price: number;
+          quantity: number | null;
+          source: string | null;
+          status: string | null;
+          orderNumber: string | null;
+          notes: string | null;
+        }> = [];
+        
+        for (const ol of preservedOrderLevels) {
+          const matchingCardIds = newCardsByKey.get(ol.tickerAccount);
+          if (matchingCardIds && matchingCardIds.length > 0) {
+            // Attach to the first matching active card for this ticker+account
+            const targetCardId = matchingCardIds[0];
+            const dedupKey = `${targetCardId}:${ol.levelType}:${ol.price}:${ol.source || ''}`;
+            if (!existingOLKeys.has(dedupKey)) {
+              existingOLKeys.add(dedupKey);
+              orderLevelsToInsert.push({
+                tradeId: targetCardId,
+                userId,
+                levelType: ol.levelType,
+                price: ol.price,
+                quantity: ol.quantity,
+                source: ol.source,
+                status: ol.status,
+                orderNumber: ol.orderNumber,
+                notes: ol.notes,
+              });
+            }
+          }
+        }
+        
+        if (orderLevelsToInsert.length > 0) {
+          const OL_BATCH = 100;
+          for (let i = 0; i < orderLevelsToInsert.length; i += OL_BATCH) {
+            await db.insert(sentinelOrderLevels).values(orderLevelsToInsert.slice(i, i + OL_BATCH));
+          }
+          reattachedOrderLevels = orderLevelsToInsert.length;
+          console.log(`[Promote] Re-attached ${reattachedOrderLevels} order levels to active cards`);
+        }
+        
+        const orphanedCount = preservedOrderLevels.length - reattachedOrderLevels;
+        if (orphanedCount > 0) {
+          console.log(`[Promote] ${orphanedCount} order levels from closed positions not re-attached`);
+        }
+      }
+      
       const syntheticCards = cardsToCreate.filter(c => c.hasSyntheticCostBasis);
       const realCostBasisCards = cardsToCreate.filter(c => !c.hasSyntheticCostBasis);
       
@@ -4539,6 +4665,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         totalProcessed: cardsToCreate.length,
         openPositions: cardsToCreate.filter(c => c.status === 'active').length,
         closedPositions: cardsToCreate.filter(c => c.status === 'closed').length,
+        orderLevelsPreserved: reattachedOrderLevels,
+        orderLevelsOrphaned: preservedOrderLevels.length - reattachedOrderLevels,
         syntheticCostBasisReport: syntheticSummary,
       });
     } catch (error) {
