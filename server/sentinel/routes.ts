@@ -6411,11 +6411,24 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         extensionFrom200d = sma200 > 0 ? Math.round(((currentPrice - sma200) / sma200) * 1000) / 10 : 0;
       }
 
+      let atr20 = 0;
+      if (validDaily.length >= 21) {
+        const trueRanges20: number[] = [];
+        for (let i = 1; i < validDaily.length; i++) {
+          const high = validDaily[i].high;
+          const low = validDaily[i].low;
+          const prevClose = validDaily[i - 1].close;
+          trueRanges20.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+        }
+        const last20 = trueRanges20.slice(-20);
+        atr20 = last20.reduce((s: number, v: number) => s + v, 0) / 20;
+      }
+
       let extensionFrom50dAtr = 0;
-      if (validDaily.length >= 50 && atr14 > 0) {
+      if (validDaily.length >= 50 && atr20 > 0) {
         const last50 = validDaily.slice(-50);
         const sma50 = last50.reduce((sum: number, q: any) => sum + q.close, 0) / 50;
-        extensionFrom50dAtr = Math.round(((currentPrice - sma50) / atr14) * 10) / 10;
+        extensionFrom50dAtr = Math.round(((currentPrice - sma50) / atr20) * 10) / 10;
       }
 
       let macdStatus = "N/A";

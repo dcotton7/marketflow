@@ -201,7 +201,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                           </SelectContent>
                         </Select>
                       </td>
-                      <td className="py-1.5 px-1 text-center">
+                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
                           checked={row.isVisible}
                           onCheckedChange={v => updateRow(row.rowId, "isVisible", v)}
@@ -209,7 +209,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                           data-testid={`switch-visible-${index}`}
                         />
                       </td>
-                      <td className="py-1.5 px-1 text-center">
+                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
                           checked={row.dailyOn}
                           onCheckedChange={v => updateRow(row.rowId, "dailyOn", v)}
@@ -217,7 +217,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                           data-testid={`switch-daily-${index}`}
                         />
                       </td>
-                      <td className="py-1.5 px-1 text-center">
+                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
                           checked={row.fiveMinOn}
                           onCheckedChange={v => updateRow(row.rowId, "fiveMinOn", v)}
@@ -225,7 +225,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                           data-testid={`switch-5m-${index}`}
                         />
                       </td>
-                      <td className="py-1.5 px-1 text-center">
+                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
                           checked={row.fifteenMinOn}
                           onCheckedChange={v => updateRow(row.rowId, "fifteenMinOn", v)}
@@ -233,7 +233,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                           data-testid={`switch-15m-${index}`}
                         />
                       </td>
-                      <td className="py-1.5 px-1 text-center">
+                      <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
                         <Switch
                           checked={row.thirtyMinOn}
                           onCheckedChange={v => updateRow(row.rowId, "thirtyMinOn", v)}
