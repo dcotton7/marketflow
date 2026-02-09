@@ -495,6 +495,42 @@ export default function PatternTrainingPage() {
     setEvaluation(null);
     if (setup.id && setup.pointsSaved) {
       loadExistingEvaluation(setup.id);
+      const hasMetrics = setup.calculatedMetrics && Object.keys(setup.calculatedMetrics).length > 0;
+      if (!hasMetrics && setup.points && setup.points.length > 0) {
+        const pts = setup.points;
+        const entry = pts.find((p: any) => p.pointRole === "entry");
+        const stop = pts.find((p: any) => p.pointRole === "stop");
+        const target = pts.find((p: any) => p.pointRole === "target");
+        const resistance = pts.find((p: any) => p.pointRole === "resistance_test");
+        if (entry && stop && target) {
+          const loadedId = setup.id;
+          setMetricsLoading(true);
+          fetch("/api/sentinel/pattern-training/setup-metrics", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticker: setup.ticker,
+              entryDate: entry.pointDate,
+              stopPrice: stop.price,
+              targetPrice: target.price,
+              entryPrice: entry.price,
+              resistancePrice: resistance?.price,
+            }),
+          }).then(async (res) => {
+            if (res.ok) {
+              const metrics = await res.json();
+              setCalculatedMetrics(metrics);
+              if (loadedId) {
+                updateSetupMutation.mutateAsync({ id: loadedId, data: { calculatedMetrics: metrics } });
+              }
+            }
+          }).catch(() => {
+            console.error("Failed to auto-calculate metrics");
+          }).finally(() => {
+            setMetricsLoading(false);
+          });
+        }
+      }
     }
   };
 
@@ -669,6 +705,47 @@ export default function PatternTrainingPage() {
                             </CardContent>
                           </Card>
                         )}
+                        {(pointsSaved && (Object.keys(calculatedMetrics).length > 0 || metricsLoading)) && (
+                          <Card className="mt-3">
+                            <CardHeader className="pb-2">
+                              <CardTitle className="text-sm font-medium text-muted-foreground">Calculated Data</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              {metricsLoading ? (
+                                <div className="flex items-center justify-center py-4">
+                                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                  <MetricCard label="Risk/Reward" value={calculatedMetrics.riskReward} format="ratio" />
+                                  <MetricCard label="MA Stacking" value={calculatedMetrics.maStacking} format="text" />
+                                  <MetricCard label="Volume Ratio" value={calculatedMetrics.volumeRatio} format="x" />
+                                  <MetricCard label="Base Depth" value={calculatedMetrics.baseDepthPct} format="pct" />
+                                  <MetricCard label="Base Width" value={calculatedMetrics.baseWidthDays} format="days" />
+                                  <MetricCard label="ATR %" value={calculatedMetrics.atrPercent} format="pct" />
+                                  <MetricCard label="RS vs SPY" value={calculatedMetrics.rsVsSpy} format="pct" />
+                                  <MetricCard label="5d Momentum" value={calculatedMetrics.momentum5d} format="pct" />
+                                  <MetricCard label="20d Momentum" value={calculatedMetrics.momentum20d} format="pct" />
+                                  <MetricCard label="50d Momentum" value={calculatedMetrics.momentum50d} format="pct" />
+                                  <MetricCard label="% from 52w Hi" value={calculatedMetrics.pctFrom52wHigh} format="pct" />
+                                  <MetricCard label="Bollinger Width" value={calculatedMetrics.bollingerWidth} format="pct" />
+                                  <MetricCard label="Range Tightness" value={calculatedMetrics.rangeTightness} format="pct" />
+                                  <MetricCard label="Up/Down Vol" value={calculatedMetrics.upDownVolume} format="text" />
+                                  <MetricCard label="Consec Up Days" value={calculatedMetrics.consecutiveUpDays} format="num" />
+                                  {calculatedMetrics.ema6_20CrossStatus && (
+                                    <MetricCard label="6/20 EMA Cross" value={calculatedMetrics.ema6_20CrossStatus} format="text" />
+                                  )}
+                                  {calculatedMetrics.macdCrossStatus && (
+                                    <MetricCard label="MACD" value={calculatedMetrics.macdCrossStatus} format="text" />
+                                  )}
+                                  {calculatedMetrics.resistanceTouchCount !== undefined && (
+                                    <MetricCard label="Resistance Touches" value={calculatedMetrics.resistanceTouchCount} format="num" />
+                                  )}
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -697,7 +774,7 @@ export default function PatternTrainingPage() {
                     </>
                   )}
 
-                  {pointsSaved && Object.keys(calculatedMetrics).length > 0 && (
+                  {!dualChartMode && pointsSaved && (Object.keys(calculatedMetrics).length > 0 || metricsLoading) && (
                     <Card className="mt-4">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium text-muted-foreground">Calculated Data</CardTitle>
