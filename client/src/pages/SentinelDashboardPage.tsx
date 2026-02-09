@@ -1292,6 +1292,8 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 }) {
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const [refiningLotId, setRefiningLotId] = useState<string | null>(null);
+  const [showStops, setShowStops] = useState(true);
+  const [showTargets, setShowTargets] = useState(true);
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
 
@@ -1398,15 +1400,17 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
       });
     });
   }
-  if (trade.stopPrice) {
+  if (showStops && trade.stopPrice) {
     priceLines.push({ price: trade.stopPrice, color: "#ef4444", label: `Stop $${trade.stopPrice.toFixed(2)}`, lineStyle: "dashed" });
   }
-  if (trade.targetPrice) {
+  if (showTargets && trade.targetPrice) {
     priceLines.push({ price: trade.targetPrice, color: "#3b82f6", label: `Target $${trade.targetPrice.toFixed(2)}`, lineStyle: "dashed" });
   }
   if (orderLevels) {
     orderLevels.filter(o => o.status === "open").forEach(o => {
       const isStop = o.levelType === "stop";
+      if (isStop && !showStops) return;
+      if (!isStop && !showTargets) return;
       priceLines.push({
         price: o.price,
         color: isStop ? "#ef4444" : "#3b82f6",
@@ -1427,10 +1431,32 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             <BarChart3 className="w-5 h-5" />
             {trade.symbol} Position Chart
           </DialogTitle>
-          <DialogDescription>
-            {trade.status === "closed" ? "Closed position" : "Active position"} 
-            {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
-          </DialogDescription>
+          <div className="flex items-center gap-4">
+            <DialogDescription className="flex-1">
+              {trade.status === "closed" ? "Closed position" : "Active position"} 
+              {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
+            </DialogDescription>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <Button
+                size="sm"
+                variant={showStops ? "default" : "outline"}
+                className={`text-[10px] h-6 px-2 toggle-elevate ${showStops ? "toggle-elevated" : ""}`}
+                onClick={() => setShowStops(!showStops)}
+                data-testid="toggle-stops"
+              >
+                Stops
+              </Button>
+              <Button
+                size="sm"
+                variant={showTargets ? "default" : "outline"}
+                className={`text-[10px] h-6 px-2 toggle-elevate ${showTargets ? "toggle-elevated" : ""}`}
+                onClick={() => setShowTargets(!showTargets)}
+                data-testid="toggle-targets"
+              >
+                Targets
+              </Button>
+            </div>
+          </div>
         </DialogHeader>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
