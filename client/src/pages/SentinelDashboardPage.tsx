@@ -21,6 +21,28 @@ import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { TradingChart, type ChartCandle, type ChartIndicators, type PriceLevelLine } from "@/components/TradingChart";
 
+function isDateOnly(dateStr: string): boolean {
+  return dateStr.endsWith('T00:00:00.000Z') || dateStr.endsWith('T00:00:00Z') || !dateStr.includes('T');
+}
+
+function formatTradeDate(dateStr: string, opts?: { month?: "short" | "2-digit" | "numeric"; day?: "2-digit" | "numeric"; year?: "numeric" }): string {
+  if (isDateOnly(dateStr)) {
+    const [y, m, d] = dateStr.substring(0, 10).split('-').map(Number);
+    const local = new Date(y, m - 1, d);
+    return local.toLocaleDateString("en-US", {
+      month: opts?.month ?? "short",
+      day: opts?.day ?? "2-digit",
+      year: opts?.year ?? "numeric",
+    });
+  }
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    month: opts?.month ?? "short",
+    day: opts?.day ?? "2-digit",
+    year: opts?.year ?? "numeric",
+    timeZone: "America/New_York",
+  });
+}
+
 interface TradeLabel {
   id: number;
   name: string;
@@ -1505,7 +1527,7 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
           </DialogTitle>
           <DialogDescription>
             {trade.status === "closed" ? "Closed position" : "Active position"} 
-            {trade.entryDate ? ` opened ${new Date(trade.entryDate).toLocaleDateString()}` : ""}
+            {trade.entryDate ? ` opened ${formatTradeDate(trade.entryDate)}` : ""}
           </DialogDescription>
         </DialogHeader>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
@@ -1665,12 +1687,12 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
             : 0;
 
           const formatLotDate = (dateTime: string) => {
-            const d = new Date(dateTime);
-            return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: "America/New_York" });
+            return formatTradeDate(dateTime);
           };
 
           const isLotPinned = (lot: LotEntry) => {
             if (!lot.dateTime.includes("T")) return false;
+            if (isDateOnly(lot.dateTime)) return false;
             const d = new Date(lot.dateTime);
             const etFmt = new Intl.DateTimeFormat("en-US", {
               timeZone: "America/New_York",
@@ -2328,7 +2350,7 @@ export default function SentinelDashboardPage() {
       filtered = filtered.filter(trade => {
         const tradeDate = trade.entryDate || trade.createdAt;
         if (!tradeDate) return true;
-        const year = new Date(tradeDate).getFullYear().toString();
+        const year = tradeDate.substring(0, 4);
         return year === selectedYear;
       });
     }
@@ -2338,7 +2360,7 @@ export default function SentinelDashboardPage() {
       filtered = filtered.filter(trade => {
         const tradeDate = trade.entryDate || trade.createdAt;
         if (!tradeDate) return true;
-        const month = (new Date(tradeDate).getMonth() + 1).toString().padStart(2, '0');
+        const month = tradeDate.substring(5, 7);
         return month === selectedMonth;
       });
     }
@@ -2393,7 +2415,7 @@ export default function SentinelDashboardPage() {
     allTrades.forEach(trade => {
       const tradeDate = trade.entryDate || trade.createdAt;
       if (tradeDate) {
-        years.add(new Date(tradeDate).getFullYear().toString());
+        years.add(tradeDate.substring(0, 4));
       }
     });
     return Array.from(years).sort().reverse();
@@ -3638,7 +3660,7 @@ export default function SentinelDashboardPage() {
                               {trade.symbol}
                             </Badge>
                             <span className="text-sm text-muted-foreground">
-                              {trade.entryDate ? new Date(trade.entryDate).toLocaleDateString() : "N/A"}
+                              {trade.entryDate ? formatTradeDate(trade.entryDate) : "N/A"}
                             </span>
                             <span className={`text-sm font-medium ${
                               trade.actualPnL && trade.actualPnL > 0 ? "text-green-500" : 

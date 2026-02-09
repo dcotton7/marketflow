@@ -1027,8 +1027,14 @@ export default function SentinelImportPage() {
   ) || [];
 
   const formatDate = (dateStr: string) => {
+    const isDateOnlyVal = dateStr.endsWith('T00:00:00.000Z') || dateStr.endsWith('T00:00:00Z') || !dateStr.includes('T');
+    if (isDateOnlyVal) {
+      const [y, m, d] = dateStr.substring(0, 10).split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
     return new Date(dateStr).toLocaleDateString('en-US', { 
-      month: 'short', day: 'numeric', year: 'numeric' 
+      month: 'short', day: 'numeric', year: 'numeric',
+      timeZone: 'America/New_York'
     });
   };
 
