@@ -384,7 +384,13 @@ async function fetchHistoricalBars(symbol: string, days: number, interval: strin
       });
       const quotes = chartResult?.quotes || [];
       return quotes
-        .filter((q: any) => q.open != null && q.high != null && q.low != null && q.close != null)
+        .filter((q: any) => {
+          if (q.open == null || q.high == null || q.low == null || q.close == null) return false;
+          const d = q.date instanceof Date ? q.date : new Date(q.date);
+          const totalMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+          if (totalMin < 570 || totalMin >= 960) return false;
+          return true;
+        })
         .map((q: any) => ({
           date: q.date instanceof Date ? q.date : new Date(q.date),
           open: q.open,
