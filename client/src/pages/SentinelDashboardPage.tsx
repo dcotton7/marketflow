@@ -1331,10 +1331,20 @@ function TradeChartDialog({ trade, open, onOpenChange }: {
 
   const handleIntradayClick = (candle: ChartCandle, clickedPrice: number) => {
     if (!refiningLotId) return;
+    const d = new Date(candle.timestamp * 1000);
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    const hours = String(d.getUTCHours()).padStart(2, "0");
+    const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+    const testFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "short" });
+    const isDST = testFormatter.formatToParts(new Date(`${year}-${month}-${day}T12:00:00Z`)).find(p => p.type === "timeZoneName")?.value === "EDT";
+    const offset = isDST ? "-04:00" : "-05:00";
+    const newDateTime = `${year}-${month}-${day}T${hours}:${minutes}:00${offset}`;
     refineMutation.mutate({
       tradeId: trade.id,
       lotId: refiningLotId,
-      newDateTime: candle.date,
+      newDateTime,
     });
   };
 
