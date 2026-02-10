@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect, Component, type ReactNode, type ErrorInfo } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -1105,9 +1105,11 @@ export default function BigIdeaPage() {
                         key={r.symbol}
                         className="flex items-center justify-between rounded-md border px-2.5 py-1.5 cursor-pointer hover-elevate"
                         data-testid={`result-stock-${r.symbol}`}
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
                           setChartViewerIndex(idx);
-                          setChartViewerOpen(true);
+                          setTimeout(() => setChartViewerOpen(true), 0);
                         }}
                       >
                         <div>
@@ -1484,6 +1486,34 @@ export default function BigIdeaPage() {
   );
 }
 
+class ChartErrorBoundary extends Component<
+  { children: ReactNode; onClose: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode; onClose: () => void }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[ScanChartViewer] Chart render error:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4">
+          <p className="text-destructive text-sm">Chart failed to load</p>
+          <p className="text-muted-foreground text-xs max-w-md text-center">{this.state.error?.message}</p>
+          <Button variant="outline" size="sm" onClick={() => this.props.onClose()}>Close</Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function ScanChartViewer({
   results,
   currentIndex,
@@ -1698,6 +1728,7 @@ function ScanChartViewer({
           ))}
         </div>
 
+        <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
             <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
@@ -1814,6 +1845,7 @@ function ScanChartViewer({
             )}
           </div>
         </div>
+        </ChartErrorBoundary>
       </div>
     </div>,
     document.body
