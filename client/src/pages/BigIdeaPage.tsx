@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ReactFlow,
@@ -1621,49 +1622,81 @@ function ScanChartViewer({
     return () => window.removeEventListener("keydown", handler);
   }, [open, currentIndex, results.length, onIndexChange]);
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
-        onInteractOutside={(e) => e.preventDefault()}
-      >
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-3">
-            <BarChart3 className="w-5 h-5" />
-            <Button
-              size="icon"
-              variant="outline"
-              disabled={currentIndex === 0}
-              onClick={() => onIndexChange(currentIndex - 1)}
-              data-testid="button-chart-prev"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-lg font-bold" data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-sm text-muted-foreground" data-testid="text-chart-position">
-              {currentIndex + 1} of {results.length}
-            </span>
-            <Button
-              size="icon"
-              variant="outline"
-              disabled={currentIndex === results.length - 1}
-              onClick={() => onIndexChange(currentIndex + 1)}
-              data-testid="button-chart-next"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-mono text-muted-foreground ml-auto">
-              ${current?.price.toFixed(2)}
-            </span>
-          </DialogTitle>
-          <DialogDescription className="flex items-center gap-1 flex-wrap">
-            {current?.passedPaths.map((p) => (
-              <Badge key={p} variant="outline" className="text-[10px]">
-                {p}
-              </Badge>
-            ))}
-          </DialogDescription>
-        </DialogHeader>
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onOpenChange(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(() => overlayRef.current?.focus());
+    return () => {
+      window.removeEventListener("keydown", handler);
+      document.body.style.overflow = "";
+    };
+  }, [open, onOpenChange]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      ref={overlayRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ outline: "none" }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      data-testid="scan-chart-overlay"
+    >
+      <div className="absolute inset-0 bg-black/80" />
+      <div className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-6">
+        <div className="flex items-center gap-3 flex-shrink-0 mb-3">
+          <BarChart3 className="w-5 h-5" />
+          <Button
+            size="icon"
+            variant="outline"
+            disabled={currentIndex === 0}
+            onClick={() => onIndexChange(currentIndex - 1)}
+            data-testid="button-chart-prev"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-lg font-bold" data-testid="text-chart-symbol">{symbol}</span>
+          <span className="text-sm text-muted-foreground" data-testid="text-chart-position">
+            {currentIndex + 1} of {results.length}
+          </span>
+          <Button
+            size="icon"
+            variant="outline"
+            disabled={currentIndex === results.length - 1}
+            onClick={() => onIndexChange(currentIndex + 1)}
+            data-testid="button-chart-next"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <span className="text-sm font-mono text-muted-foreground ml-auto">
+            ${current?.price.toFixed(2)}
+          </span>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            data-testid="button-chart-close"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-1 flex-wrap mb-2 flex-shrink-0">
+          {current?.passedPaths.map((p) => (
+            <Badge key={p} variant="outline" className="text-[10px]">
+              {p}
+            </Badge>
+          ))}
+        </div>
 
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
@@ -1781,7 +1814,8 @@ function ScanChartViewer({
             )}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>,
+    document.body
   );
 }
