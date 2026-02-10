@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -50,6 +51,7 @@ import {
   SlidersHorizontal,
   Target,
   X,
+  HelpCircle,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -80,6 +82,73 @@ const UNIVERSE_OPTIONS = [
   { value: "dow30", label: "Dow 30" },
   { value: "russell2000", label: "Russell 2000" },
 ];
+
+const PARAM_DESCRIPTIONS: Record<string, string> = {
+  period: "Number of trading days used to calculate the average",
+  direction: "Whether the price should be above or below the indicator",
+  maType: "Simple (SMA) or Exponential (EMA) moving average type",
+  minPct: "Minimum percentage distance from the indicator",
+  maxPct: "Maximum percentage distance from the indicator",
+  slopeDays: "Number of days used to measure the trend angle",
+  minSlope: "Minimum slope angle as a percentage",
+  order: "Bullish = short MA above long; Bearish = reversed",
+  ma1: "Period for the shortest moving average",
+  ma2: "Period for the middle moving average",
+  ma3: "Period for the longest moving average",
+  fastPeriod: "Period for the faster (shorter) moving average",
+  slowPeriod: "Period for the slower (longer) moving average",
+  maxDistance: "Maximum allowed gap between the two MAs (%)",
+  lookback: "Number of recent days to check for the signal",
+  crossType: "Bullish = fast crosses above slow; Bearish = reversed",
+  minMultiple: "Minimum volume multiple vs the average",
+  recentPeriod: "Number of recent days to measure",
+  baselinePeriod: "Number of earlier days used as a comparison baseline",
+  threshold: "Minimum change required to trigger (%)",
+  minRatio: "Minimum ratio of up-volume to down-volume",
+  maxRatio: "Maximum ratio of up-volume to down-volume",
+  ratioPeriod: "Number of days to calculate the volume ratio",
+  consolidationDays: "Minimum number of days in the consolidation range",
+  maxRange: "Maximum price range allowed during consolidation (%)",
+  breakoutDir: "Direction of the breakout: up or down",
+  nearHighPct: "How close the price must be to the high (%)",
+  highLookback: "Number of days to look back for the high",
+  fromHigh: "Whether to measure the drop from the highest price",
+  minDrop: "Minimum percentage drop from the high",
+  maxDrop: "Maximum percentage drop from the high",
+  minGain: "Minimum percentage gain required",
+  days: "Number of days over which to measure the change",
+  aboveVWAP: "Whether price should be above or below VWAP",
+  gapDir: "Direction of the gap: up or down",
+  minGapPct: "Minimum gap size as a percentage",
+  bodyRatio: "Minimum candle body size relative to total range",
+  upperShadowMax: "Maximum upper shadow as a ratio of body size",
+  lowerShadowMax: "Maximum lower shadow as a ratio of body size",
+  pattern: "Type of candlestick pattern to detect",
+  tolerance: "Allowed deviation from exact match (%)",
+  minRSI: "Minimum RSI value (0 = most oversold)",
+  maxRSI: "Maximum RSI value (100 = most overbought)",
+  signalPeriod: "Period for the MACD signal line",
+  condition: "Specific signal condition to check for",
+  minADX: "Minimum ADX value (higher = stronger trend)",
+  requireBullish: "Only pass if +DI is greater than -DI",
+  stdDev: "Bollinger Band width multiplier (standard deviations)",
+  maxWidth: "Maximum band width as a percentage",
+  minWidth: "Minimum band width as a percentage",
+  atrPeriod: "Period for Average True Range calculation",
+  recentDays: "Number of recent days to compare",
+  baselineDays: "Number of earlier days used as a baseline",
+  percentile: "Rank position in the specified range (0-100)",
+  minPercentile: "Minimum percentile rank required",
+  maxPercentile: "Maximum percentile rank required",
+  rankPeriod: "Number of days for the ranking window",
+  avgPeriod: "Number of days for the averaging window",
+  rsMinPct: "Minimum relative strength percentage",
+  benchmarkPeriod: "Benchmark comparison period in days",
+  minPrice: "Minimum stock price allowed",
+  maxPrice: "Maximum stock price allowed",
+  minVolume: "Minimum average daily volume",
+  minMarketCap: "Minimum market capitalization (in millions)",
+};
 
 interface ScanResultItem {
   symbol: string;
@@ -909,7 +978,19 @@ export default function BigIdeaPage() {
                         <CardContent className="p-2.5 pt-0 space-y-2">
                           {criterion.params.map((param) => (
                             <div key={param.name}>
-                              <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
+                                {PARAM_DESCRIPTIONS[param.name] && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`help-${param.name}`} />
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[200px] text-xs">
+                                      {PARAM_DESCRIPTIONS[param.name]}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                              </div>
                               {param.type === "number" && (
                                 <div className="flex items-center gap-2 mt-1">
                                   <Slider
@@ -1036,7 +1117,19 @@ export default function BigIdeaPage() {
                       <span className="text-xs font-medium">{criterion.label}</span>
                       {criterion.params?.map((param: ScannerCriterionParam) => (
                         <div key={param.name}>
-                          <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
+                          <div className="flex items-center gap-1">
+                            <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
+                            {PARAM_DESCRIPTIONS[param.name] && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`ai-help-${param.name}`} />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[200px] text-xs">
+                                  {PARAM_DESCRIPTIONS[param.name]}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
                           {param.type === "number" && (
                             <div className="flex items-center gap-2 mt-1">
                               <Slider
