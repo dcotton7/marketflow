@@ -420,6 +420,27 @@ export default function BigIdeaPage() {
   const [chartViewerOpen, setChartViewerOpen] = useState(false);
   const [chartViewerIndex, setChartViewerIndex] = useState(0);
 
+  const [thoughtsPanelWidth, setThoughtsPanelWidth] = useState(280);
+  const thoughtsResizing = useRef(false);
+
+  const handleThoughtsResizeStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    thoughtsResizing.current = true;
+    const startX = e.clientX;
+    const startW = thoughtsPanelWidth;
+    const onMove = (ev: PointerEvent) => {
+      const delta = ev.clientX - startX;
+      setThoughtsPanelWidth(Math.max(200, Math.min(500, startW + delta)));
+    };
+    const onUp = () => {
+      thoughtsResizing.current = false;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  }, [thoughtsPanelWidth]);
+
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
   const [aiProposal, setAiProposal] = useState<any>(null);
@@ -897,7 +918,10 @@ export default function BigIdeaPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-[280px] border-r flex flex-col bg-card/50">
+        <div
+          className="border-r flex flex-col bg-card/50 relative flex-shrink-0"
+          style={{ width: thoughtsPanelWidth }}
+        >
           <div className="p-3 border-b flex items-center justify-between gap-2">
             <span className="text-sm font-semibold">Thought Library</span>
             <Button
@@ -941,12 +965,23 @@ export default function BigIdeaPage() {
                         >
                           <div className="flex items-center gap-1.5">
                             <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                            <span className="text-sm font-medium truncate">{thought.name}</span>
+                            <span className="text-sm font-medium truncate flex-1">{thought.name}</span>
                             {thought.timeframe && thought.timeframe !== "daily" && (
                               <Badge variant="outline" className="text-[9px] px-1 py-0 flex-shrink-0">
                                 {thought.timeframe === "5min" ? "5m" : thought.timeframe === "15min" ? "15m" : thought.timeframe === "30min" ? "30m" : thought.timeframe}
                               </Badge>
                             )}
+                            <button
+                              className="flex-shrink-0 p-0.5 rounded text-muted-foreground/50 hover:text-destructive transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setDeleteConfirm({ thoughtId: thought.id, name: thought.name });
+                              }}
+                              data-testid={`button-delete-thought-${thought.id}`}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
                           </div>
                           {thought.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 ml-[18px]">
@@ -961,6 +996,11 @@ export default function BigIdeaPage() {
               )}
             </div>
           </ScrollArea>
+          <div
+            className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
+            onPointerDown={handleThoughtsResizeStart}
+            data-testid="thoughts-resize-handle"
+          />
         </div>
 
         <div className="flex-1 relative" ref={reactFlowWrapper}>
@@ -1064,9 +1104,9 @@ export default function BigIdeaPage() {
                         key={r.symbol}
                         className="flex items-center justify-between rounded-md border px-2.5 py-1.5 cursor-pointer hover-elevate"
                         data-testid={`result-stock-${r.symbol}`}
-                        onClick={() => {
+                        onPointerUp={() => {
                           setChartViewerIndex(idx);
-                          setChartViewerOpen(true);
+                          requestAnimationFrame(() => setChartViewerOpen(true));
                         }}
                       >
                         <div>
@@ -1461,6 +1501,11 @@ function ScanChartViewer({
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
+  const openedAt = useRef(0);
+
+  useEffect(() => {
+    if (open) openedAt.current = Date.now();
+  }, [open]);
 
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
@@ -1498,6 +1543,30 @@ function ScanChartViewer({
     enabled: open,
   });
   const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
+
+  interface ScanChartMetrics {
+    currentPrice: number;
+    atr14: number;
+    extensionFrom50dAtr: number;
+    extensionFrom200d: number;
+    macd: string;
+    macdTimeframe: string;
+    sectorEtf: string;
+    sectorEtfChange: number;
+    nextEarningsDate: string;
+    nextEarningsDays: number;
+  }
+
+  const { data: chartMetrics } = useQuery<ScanChartMetrics>({
+    queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe],
+    enabled: open && !!symbol,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${symbol}&timeframe=${intradayTimeframe}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch metrics");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+  });
 
   const rthData = useMemo(() => {
     if (!intradayData) return null;
@@ -1564,6 +1633,9 @@ function ScanChartViewer({
       <DialogContent
         className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        onPointerDownOutside={(e) => {
+          if (Date.now() - openedAt.current < 300) e.preventDefault();
+        }}
       >
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-3">
@@ -1667,6 +1739,55 @@ function ScanChartViewer({
                   No intraday data
                 </CardContent>
               </Card>
+            )}
+            {chartMetrics && (
+              <div className="border border-border rounded p-2.5 flex flex-wrap gap-x-5 gap-y-1.5 mt-1 flex-shrink-0" data-testid="scan-chart-metrics">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Price</span>
+                  <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">ATR(14)</span>
+                  <span className="text-sm font-medium text-foreground">{chartMetrics.atr14}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">50d Ext</span>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAtr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom50dAtr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAtr}x
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">200d Ext</span>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span>
+                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                    {chartMetrics.macd}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Sector</span>
+                  <span className="text-sm font-medium text-foreground">
+                    {chartMetrics.sectorEtf}
+                    {chartMetrics.sectorEtf !== "N/A" && (
+                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Earnings</span>
+                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-yellow-400" : "text-foreground"}`}>
+                    {chartMetrics.nextEarningsDate !== "N/A"
+                      ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
+                      : "N/A"}
+                  </span>
+                </div>
+              </div>
             )}
           </div>
         </div>
