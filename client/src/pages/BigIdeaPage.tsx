@@ -1104,9 +1104,9 @@ export default function BigIdeaPage() {
                         key={r.symbol}
                         className="flex items-center justify-between rounded-md border px-2.5 py-1.5 cursor-pointer hover-elevate"
                         data-testid={`result-stock-${r.symbol}`}
-                        onPointerUp={() => {
+                        onClick={() => {
                           setChartViewerIndex(idx);
-                          requestAnimationFrame(() => setChartViewerOpen(true));
+                          setChartViewerOpen(true);
                         }}
                       >
                         <div>
@@ -1449,15 +1449,13 @@ export default function BigIdeaPage() {
         </DialogContent>
       </Dialog>
 
-      {chartViewerOpen && sortedResults.length > 0 && (
-        <ScanChartViewer
-          results={sortedResults}
-          currentIndex={chartViewerIndex}
-          open={chartViewerOpen}
-          onOpenChange={setChartViewerOpen}
-          onIndexChange={setChartViewerIndex}
-        />
-      )}
+      <ScanChartViewer
+        results={sortedResults}
+        currentIndex={chartViewerIndex}
+        open={chartViewerOpen}
+        onOpenChange={setChartViewerOpen}
+        onIndexChange={setChartViewerIndex}
+      />
 
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
         <AlertDialogContent>
@@ -1501,11 +1499,6 @@ function ScanChartViewer({
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
-  const openedAt = useRef(0);
-
-  useEffect(() => {
-    if (open) openedAt.current = Date.now();
-  }, [open]);
 
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
@@ -1632,10 +1625,6 @@ function ScanChartViewer({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-        onPointerDownOutside={(e) => {
-          if (Date.now() - openedAt.current < 300) e.preventDefault();
-        }}
       >
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-3">
