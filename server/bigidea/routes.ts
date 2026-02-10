@@ -498,6 +498,13 @@ You must respond with valid JSON in this exact format:
   ]
 }
 
+IMPORTANT GUIDELINES for indicator selection:
+- To compare two moving averages (e.g. "50 SMA above 200 SMA", "EMA cross", "golden cross"), use MA-8 (MA Comparison) with the direction parameter. Do NOT use MA-6 for this purpose.
+- MA-6 (MA Distance/Convergence) is ONLY for measuring how close two MAs are to each other in percentage terms. It does NOT check which one is above the other.
+- MA-1/MA-2 compare PRICE vs a single MA, not two MAs against each other.
+- When the user says "MA above/below another MA", always use MA-8 with direction "fast_above_slow" or "fast_below_slow".
+- For golden cross detection, use MA-8 with fastPeriod=50, slowPeriod=200, direction=fast_above_slow.
+
 Select the most appropriate indicators and set parameters that match the user's description. Use multiple criteria when the description implies multiple conditions. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
 
       const openai = getOpenAI();
