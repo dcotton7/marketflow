@@ -30,10 +30,23 @@ export const DEFAULT_MA_TEMPLATE: IndicatorDef[] = [
   { id: "ma200", type: "sma", dayPeriod: 200, color: "#ffffff", lineWidth: 2, label: "200 Day", defaultOn: true  },
 ];
 
+const MAX_INTRADAY_BARS: Record<string, number> = {
+  "5m": 2300,
+  "5min": 2300,
+  "15m": 900,
+  "15min": 900,
+  "30m": 500,
+  "30min": 500,
+  "60m": 250,
+};
+
 export function getBarPeriod(dayPeriod: number, timeframe: string): number {
   const barsPerDay = BARS_PER_DAY[timeframe];
   if (barsPerDay == null || barsPerDay <= 0) return dayPeriod;
-  return Math.max(1, Math.round(dayPeriod * barsPerDay));
+  const raw = Math.max(1, Math.round(dayPeriod * barsPerDay));
+  const cap = MAX_INTRADAY_BARS[timeframe];
+  if (cap != null && raw > cap) return cap;
+  return raw;
 }
 
 export function getPeriodsForTimeframe(timeframe: string): { id: string; type: "sma" | "ema"; period: number; color: string; lineWidth: 1 | 2 | 3 | 4; label: string; defaultOn: boolean }[] {

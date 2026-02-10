@@ -91,8 +91,12 @@ async function getYahooFinance() {
 function getPeriodStartDate(period: string): Date {
   const now = new Date();
   switch (period) {
+    case '59d':
+      return new Date(now.setDate(now.getDate() - 59));
     case '1mo':
       return new Date(now.setMonth(now.getMonth() - 1));
+    case '2mo':
+      return new Date(now.setMonth(now.getMonth() - 2));
     case '3mo':
       return new Date(now.setMonth(now.getMonth() - 3));
     case '6mo':
@@ -1280,7 +1284,7 @@ export async function registerRoutes(
     
     // For intraday, use shorter periods (Yahoo API limits)
     if (['5m', '15m', '30m'].includes(interval)) {
-      period = '1mo'; // Yahoo limits intraday to ~60 days
+      period = '59d'; // Yahoo caps intraday at 60 days; request 59 to stay within limit
     } else if (interval === '60m') {
       period = '3mo';
     } else if (interval === '1wk' || interval === '1mo') {
