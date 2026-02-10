@@ -197,7 +197,8 @@ function repairCriterion(criterion: any): { indicatorId: string; params: Record<
 function evaluateThoughtCriteria(
   criteria: any[],
   candles: CandleData[],
-  benchmarkCandles?: CandleData[]
+  benchmarkCandles?: CandleData[],
+  candlesByTimeframe?: Record<string, CandleData[]>
 ): boolean {
   if (!criteria || criteria.length === 0) return false;
 
@@ -209,7 +210,12 @@ function evaluateThoughtCriteria(
     const indicator = INDICATOR_LIBRARY.find((ind) => ind.id === repaired.indicatorId);
     if (!indicator) continue;
 
-    let result = indicator.evaluate(candles, repaired.params, benchmarkCandles);
+    const overrideTf = criterion.timeframeOverride;
+    const useCandles = (overrideTf && candlesByTimeframe && candlesByTimeframe[overrideTf])
+      ? candlesByTimeframe[overrideTf]
+      : candles;
+
+    let result = indicator.evaluate(useCandles, repaired.params, benchmarkCandles);
     if (criterion.inverted) result = !result;
     if (!result) return false;
   }
@@ -546,6 +552,7 @@ You must respond with valid JSON in this exact format:
       "indicatorId": "The indicator ID from the library",
       "label": "Human readable label for this criterion",
       "inverted": false,
+      "timeframeOverride": "daily or omit",
       "params": [
         {
           "name": "param name matching the indicator",
@@ -557,6 +564,9 @@ You must respond with valid JSON in this exact format:
     }
   ]
 }
+
+TIMEFRAME OVERRIDE RULE:
+Each criterion can optionally specify a "timeframeOverride" field. When set to "daily", this criterion will evaluate against daily candles even when the thought itself runs on an intraday timeframe (5min, 15min, 30min). This is critical for criteria that reference daily-level indicators like the 50-day SMA, 200-day SMA, daily RSI, etc. If the user mentions "daily" bars, "daily SMA", "D1", "50-day", "200-day", or similar daily-level references, set timeframeOverride to "daily". Omit the field entirely when the criterion should use the thought's own timeframe.
 
 CRITICAL RULE FOR DESCRIPTIONS:
 The "description" field MUST accurately describe what the chosen indicators and parameters actually measure — NOT what the user asked for. If the user asks for "stocks bouncing off the 50 SMA" but the best available indicator only checks proximity to the SMA (not a bounce/reversal), the description must say "Screens for stocks whose price is currently within X% of the 50 SMA" rather than claiming it detects a bounce. Never oversell or exaggerate what the criteria can detect. Be precise and honest about what the screening actually does.
@@ -576,8 +586,8 @@ Generate exactly as many criteria as the user's idea requires — no more, no le
 Examples:
 - "Price within 1% of 50 SMA" → 1 criterion: MA-3 Price vs MA Distance: period=50, minPct=0, maxPct=1
 - "Price above 50 SMA" → 1 criterion: MA-1 SMA Value: period=50, direction=above
-- "Price crossed below 50 SMA recently" → 1 criterion: MA-9 Price Crosses MA: maPeriod=50, maType=sma, lookback=5, crossType=below
-- "Price broke above 20 EMA" → 1 criterion: MA-9 Price Crosses MA: maPeriod=20, maType=ema, lookback=3, crossType=above
+- "Price crossed below the daily 50 SMA recently" → 1 criterion: MA-9 Price Crosses MA: maPeriod=50, maType=sma, lookback=5, crossType=below, timeframeOverride="daily"
+- "Price broke above 20 EMA" → 1 criterion: MA-9 Price Crosses MA: maPeriod=20, maType=ema, lookback=3, crossType=above (no timeframeOverride since it uses the thought's timeframe)
 - "Pullback to 50 SMA with volume dry-up in uptrend" → 3 criteria: (1) MA-3 proximity, (2) VOL-4 volume dry-up, (3) MA-1 above 200 SMA for uptrend context
 - "Breakout with volume" → 2 criteria: (1) PA-7 Breakout Detection: basePeriod=20, lookback=3, (2) VOL-5 Volume Surge: period=50, surgeMultiple=2.0, priceUp=true
 - "Strong uptrend" → 3 criteria: (1) MA-1 SMA Value: period=50, direction=above, (2) MA-8 MA Comparison: fastPeriod=50, slowPeriod=200, direction=fast_above_slow, (3) MA-4 MA Slope: period=50, slopeDays=10, minSlope=0.5
@@ -639,6 +649,9 @@ Select the most appropriate indicators and set parameters that match the user's 
       const timeframesNeeded = new Set<string>();
       for (const tn of thoughtNodes) {
         timeframesNeeded.add(tn.thoughtTimeframe || "daily");
+        for (const c of (tn.thoughtCriteria || [])) {
+          if (c.timeframeOverride) timeframesNeeded.add(c.timeframeOverride);
+        }
       }
       const timeframesArray = Array.from(timeframesNeeded);
       console.log(`[BigIdea Scan] Universe: ${universe}, tickers: ${tickers.length}, thought nodes: ${thoughtNodes.length}, timeframes: [${timeframesArray.join(", ")}]`);
@@ -693,7 +706,8 @@ Select the most appropriate indicators and set parameters that match the user's 
                 let passed = evaluateThoughtCriteria(
                   node.thoughtCriteria,
                   candles,
-                  spyCandles.length > 0 ? spyCandles : undefined
+                  spyCandles.length > 0 ? spyCandles : undefined,
+                  candlesByTimeframe
                 );
                 if (node.isNot) passed = !passed;
                 nodeResults[node.id] = passed;

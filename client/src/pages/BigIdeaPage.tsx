@@ -775,6 +775,24 @@ export default function BigIdeaPage() {
     [setNodes]
   );
 
+  const setCriterionTimeframeOverride = useCallback(
+    (nodeId: string, criterionIdx: number, value: string | undefined) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const criteria = [...(n.data.criteria as ScannerCriterion[])];
+            const criterion = { ...criteria[criterionIdx] };
+            criterion.timeframeOverride = value;
+            criteria[criterionIdx] = criterion;
+            return { ...n, data: { ...n.data, criteria } };
+          }
+          return n;
+        })
+      );
+    },
+    [setNodes]
+  );
+
   const toggleCriterionMute = useCallback(
     (nodeId: string, criterionIdx: number) => {
       setNodes((nds) =>
@@ -1392,6 +1410,36 @@ export default function BigIdeaPage() {
                           </div>
                         </CardHeader>
                         <CardContent className="p-2.5 pt-0 space-y-2">
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <Label className="text-[11px] text-muted-foreground">Data Timeframe</Label>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[260px] text-xs">
+                                  Override which candle timeframe this criterion evaluates against. Use "daily" on an intraday thought to check daily-level conditions like the daily 50 SMA.
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                            <Select
+                              value={criterion.timeframeOverride || "__inherit__"}
+                              onValueChange={(v) =>
+                                setCriterionTimeframeOverride(selectedNode.id, idx, v === "__inherit__" ? undefined : v)
+                              }
+                            >
+                              <SelectTrigger className="h-7 text-xs mt-1" data-testid={`select-tf-override-${idx}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__inherit__">Inherit from thought</SelectItem>
+                                <SelectItem value="daily">Daily</SelectItem>
+                                <SelectItem value="5min">5 min</SelectItem>
+                                <SelectItem value="15min">15 min</SelectItem>
+                                <SelectItem value="30min">30 min</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                           {criterion.params.map((param) => (
                             <div key={param.name}>
                               <div className="flex items-center gap-1">

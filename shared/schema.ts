@@ -1203,6 +1203,7 @@ export interface ScannerCriterion {
   label: string;
   inverted: boolean;
   muted?: boolean;
+  timeframeOverride?: string;
   params: ScannerCriterionParam[];
 }
 
