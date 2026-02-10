@@ -1434,8 +1434,9 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
 
   interface TradeChartMetrics {
     currentPrice: number;
-    atr14: number;
-    extensionFrom50dAtr: number;
+    adr20: number;
+    extensionFrom50dAdr: number;
+    extensionFrom50dPct: number;
     extensionFrom200d: number;
     macd: string;
     macdTimeframe: string;
@@ -1651,13 +1652,19 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">ATR(14)</span>
-                  <span className="text-sm font-medium text-foreground">{chartMetrics.atr14}</span>
+                  <span className="text-[11px] text-muted-foreground">ADR(20)</span>
+                  <span className="text-sm font-medium text-foreground">{chartMetrics.adr20}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">50d Ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAtr >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {chartMetrics.extensionFrom50dAtr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAtr}x
+                  <span className="text-[11px] text-muted-foreground">50d ext (adr)</span>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">50d ext</span>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom50dPct >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dPct}%
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
