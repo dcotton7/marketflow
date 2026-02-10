@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useStockHistory } from "@/hooks/use-stocks";
 import { Loader2, Layers, Ruler, Minus, Trash2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,52 @@ import {
   SeriesType
 } from "lightweight-charts";
 import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } from "@shared/patternDetection";
-import { getBarPeriod, DEFAULT_MA_TEMPLATE } from "@shared/indicatorTemplates";
+import { getBarPeriod, DEFAULT_MA_TEMPLATE, BARS_PER_DAY } from "@shared/indicatorTemplates";
+
+interface MaSettingFromConfig {
+  rowId: string;
+  title: string;
+  maType: string;
+  period: number | null;
+  color: string;
+  lineType: number;
+  isSystem: boolean;
+  isVisible: boolean;
+  dailyOn: boolean;
+  fiveMinOn: boolean;
+  fifteenMinOn: boolean;
+  thirtyMinOn: boolean;
+  sortOrder: number;
+  calcOn: string;
+}
+
+function getMaTimeframeToggle(setting: MaSettingFromConfig, timeframe: string): boolean {
+  if (timeframe === "1d" || timeframe === "daily") return setting.dailyOn;
+  if (timeframe === "5m" || timeframe === "5min") return setting.fiveMinOn;
+  if (timeframe === "15m" || timeframe === "15min") return setting.fifteenMinOn;
+  if (timeframe === "30m" || timeframe === "30min") return setting.thirtyMinOn;
+  if (timeframe === "60m") return setting.thirtyMinOn;
+  if (timeframe === "1wk" || timeframe === "1mo") return setting.dailyOn;
+  return setting.dailyOn;
+}
+
+function getMaIndicatorKey(setting: MaSettingFromConfig): IndicatorKey | null {
+  if (setting.maType === "vwap" || setting.maType === "vwap_hi" || setting.maType === "vwap_lo") return null;
+  if (!setting.period) return null;
+  const p = setting.period;
+  if (setting.maType === "ema") {
+    if (p === 21) return "ema21";
+    return null;
+  }
+  if (p === 5) return "sma5";
+  if (p === 6) return "sma6";
+  if (p === 10) return "sma10";
+  if (p === 20) return "sma20";
+  if (p === 21) return "sma21";
+  if (p === 50) return "sma50";
+  if (p === 200) return "sma200";
+  return null;
+}
 
 interface StockChartProps {
   symbol: string;
@@ -390,66 +436,95 @@ interface IndicatorConfig {
   colorClass: string;
 }
 
-// Get available indicators (visible toggles) per timeframe
-// isDailyFixed: true for the fixed daily chart (top chart in dual layout)
-function getAvailableIndicators(timeframe: string, isDailyFixed: boolean = false): IndicatorKey[] {
-  // Daily-fixed chart has specific fixed indicators: SMA 5, SMA 21, SMA 50, SMA 200
-  if (isDailyFixed) {
-    return ['sma5', 'sma21', 'sma50', 'sma200'];
+function getAvailableIndicatorsFromConfig(
+  maSettings: MaSettingFromConfig[] | undefined,
+  timeframe: string,
+  isDailyFixed: boolean = false
+): IndicatorKey[] {
+  const maKeys: IndicatorKey[] = [];
+
+  if (maSettings && maSettings.length > 0) {
+    for (const s of maSettings) {
+      if (!s.isVisible) continue;
+      const key = getMaIndicatorKey(s);
+      if (!key) continue;
+      const tf = isDailyFixed ? "1d" : timeframe;
+      if (!getMaTimeframeToggle(s, tf)) continue;
+      if (!maKeys.includes(key)) maKeys.push(key);
+    }
+  } else {
+    if (isDailyFixed) {
+      return ['sma5', 'sma21', 'sma50', 'sma200'];
+    }
+    switch (timeframe) {
+      case '5m':
+        return ['sma6', 'sma20', 'autoVwap'];
+      case '15m':
+        return ['sma5', 'sma21', 'autoVwap'];
+      case '30m':
+        return ['sma5', 'sma21', 'sma50', 'autoVwap'];
+      case '60m':
+        return ['sma5', 'ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+      case '1d':
+        return ['sma5', 'sma10', 'sma20', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+      case '1wk':
+      case '1mo':
+        return ['sma21', 'sma50', 'sma200', 'vwap40Week', 'anchoredVwap'];
+      default:
+        return ['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+    }
   }
-  
+
+  const vwapKeys = getVwapKeysForTimeframe(timeframe, isDailyFixed);
+  return [...maKeys, ...vwapKeys];
+}
+
+function getVwapKeysForTimeframe(timeframe: string, isDailyFixed: boolean): IndicatorKey[] {
+  if (isDailyFixed) return [];
   switch (timeframe) {
     case '5m':
-      // 5min: 6 SMA Pink, 20 SMA Blue
-      return ['sma6', 'sma20'];
     case '15m':
-      // 15min: 5 DAY SMA Green, 21 DAY SMA Pink, Daily VWAP Orange Dotted
-      return ['sma5', 'sma21', 'autoVwap'];
     case '30m':
-      // 30min: 5 DAY SMA Green, 21 DAY SMA Pink, 50 DAY SMA Red, Daily VWAP Orange Dotted
-      return ['sma5', 'sma21', 'sma50', 'autoVwap'];
+      return ['autoVwap'];
     case '60m':
-      // 60min: SMA 5d, EMA 21d, SMA 50d, SMA 200d, VWAP, AVWAP 6MOS
-      return ['sma5', 'ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+      return ['autoVwap', 'anchoredVwap'];
     case '1d':
-      // Daily variable: SMA 5, SMA 10, SMA 20 (pink), SMA 50, SMA 200, VWAP, AVWAP 6MOS
-      return ['sma5', 'sma10', 'sma20', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+      return ['autoVwap', 'anchoredVwap'];
     case '1wk':
     case '1mo':
-      // Weekly/Monthly: SMA 21d, SMA 50d, SMA 200d, 40W VWAP, AVWAP 6mos low
-      return ['sma21', 'sma50', 'sma200', 'vwap40Week', 'anchoredVwap'];
+      return ['vwap40Week', 'anchoredVwap'];
     default:
-      return ['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'];
+      return ['autoVwap', 'anchoredVwap'];
   }
 }
 
-// Get default enabled indicators (ON by default) per timeframe
-// isDailyFixed: true for the fixed daily chart
-function getDefaultIndicators(timeframe?: string, isDailyFixed: boolean = false): Set<IndicatorKey> {
-  // Daily-fixed chart: SMA 5 Green, SMA 21 Pink, SMA 50 Red, SMA 200 Black - all ON
+function getMaColorForKey(key: IndicatorKey, maSettings: MaSettingFromConfig[] | undefined): { color: string; lineType: number; label: string } | null {
+  if (!maSettings) return null;
+  for (const s of maSettings) {
+    if (getMaIndicatorKey(s) === key) {
+      return { color: s.color, lineType: s.lineType, label: s.title };
+    }
+  }
+  return null;
+}
+
+function getDefaultIndicatorsFallback(timeframe?: string, isDailyFixed: boolean = false): Set<IndicatorKey> {
   if (isDailyFixed) {
     return new Set(['sma5', 'sma21', 'sma50', 'sma200'] as IndicatorKey[]);
   }
-  
   switch (timeframe) {
     case '5m':
-      // 5min: 6 SMA Pink, 20 SMA Blue - all ON
       return new Set(['sma6', 'sma20'] as IndicatorKey[]);
     case '15m':
-      // 15min: 5 DAY SMA Green, 21 DAY SMA Pink, Daily VWAP Orange Dotted - all ON
       return new Set(['sma5', 'sma21', 'autoVwap'] as IndicatorKey[]);
     case '30m':
-      // 30min: 5 DAY SMA Green, 21 DAY SMA Pink, 50 DAY SMA Red, Daily VWAP Orange Dotted - all ON
       return new Set(['sma5', 'sma21', 'sma50', 'autoVwap'] as IndicatorKey[]);
     case '60m':
-      // 60min: EMA 21d, SMA 50d, SMA 200d, VWAP, AVWAP ON; SMA 5d OFF
       return new Set(['ema21', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
     case '1d':
-      // Daily variable: SMA 5, SMA 50, SMA 200, VWAP, AVWAP ON; SMA 10, SMA 20 OFF
       return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
     case '1wk':
     case '1mo':
-      // Weekly/Monthly: SMA 21d, SMA 50d, SMA 200d, 40W VWAP, AVWAP 6mos - all ON
       return new Set(['sma21', 'sma50', 'sma200', 'vwap40Week', 'anchoredVwap'] as IndicatorKey[]);
     default:
       return new Set(['sma5', 'sma50', 'sma200', 'autoVwap', 'anchoredVwap'] as IndicatorKey[]);
@@ -463,26 +538,28 @@ export function StockChart({
   technicalSignal, 
   initialInterval, 
   pullbackUpPeriod,
-  chartMode = 'variable', // Default to variable mode (existing behavior)
-  showToolsArea = true, // Default to showing tools
-  chartHeight = 500 // Default height
+  chartMode = 'variable',
+  showToolsArea = true,
+  chartHeight = 500
 }: StockChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [channels, setChannels] = useState<ConsolidationChannel[]>([]);
   const { globalTimeframe, setGlobalTimeframe } = useTimeframeContext();
   
-  // In daily-fixed mode, always use daily timeframe
   const isDailyFixed = chartMode === 'daily-fixed';
   
-  // Track if user has manually changed the interval
+  const { data: maSettingsData } = useQuery<MaSettingFromConfig[]>({
+    queryKey: ['/api/sentinel/ma-settings'],
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  
   const [userSelectedInterval, setUserSelectedInterval] = useState(false);
-  // Auto-select timeframe based on: URL param > globalTimeframe > technicalSignal > default
   const getDefaultInterval = () => {
-    if (isDailyFixed) return '1d'; // Always daily for fixed chart
+    if (isDailyFixed) return '1d';
     if (initialInterval) return initialInterval;
     if (technicalSignal === '6_20_cross') return '5m';
-    // Use global timeframe if no special signal/pattern dictates otherwise
     return globalTimeframe;
   };
   const [interval, setIntervalState] = useState(getDefaultInterval());
@@ -494,17 +571,20 @@ export function StockChart({
   const [measureResult, setMeasureResult] = useState<{ priceDiff: number; pctChange: number; barCount: number } | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   
-  // Indicator toggles - initialized based on timeframe and chart mode
+  const configAvailable = useMemo(() => getAvailableIndicatorsFromConfig(maSettingsData, interval, isDailyFixed), [maSettingsData, interval, isDailyFixed]);
+
   const [enabledIndicators, setEnabledIndicators] = useState<Set<IndicatorKey>>(() => 
-    getDefaultIndicators(interval, isDailyFixed)
+    getDefaultIndicatorsFallback(interval, isDailyFixed)
   );
   
-  // Update enabled indicators when timeframe changes (but not for daily-fixed mode)
   useEffect(() => {
-    if (!isDailyFixed) {
-      setEnabledIndicators(getDefaultIndicators(interval, isDailyFixed));
+    if (maSettingsData && maSettingsData.length > 0) {
+      const available = getAvailableIndicatorsFromConfig(maSettingsData, interval, isDailyFixed);
+      setEnabledIndicators(new Set(available));
+    } else {
+      setEnabledIndicators(getDefaultIndicatorsFallback(interval, isDailyFixed));
     }
-  }, [interval, isDailyFixed]);
+  }, [interval, isDailyFixed, maSettingsData]);
   
   const toggleIndicator = (key: IndicatorKey) => {
     setEnabledIndicators(prev => {
@@ -702,51 +782,61 @@ export function StockChart({
       return series;
     };
     
-    // Add indicators based on enabledIndicators state, using shared template colors
+    const LINE_TYPE_MAP: Record<number, number> = {
+      0: LineStyle.Solid, 1: LineStyle.Dashed, 2: LineStyle.Dotted,
+      3: LineStyle.LargeDashed, 4: LineStyle.SparseDotted,
+    };
+
     const tpl5   = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma5");
     const tpl10  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma10");
     const tpl20  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma20");
     const tpl50  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma50");
     const tpl200 = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma200");
 
-    // SMA 5 - Green
+    const cfgColor = (key: IndicatorKey, fallbackColor: string, fallbackWidth: 1 | 2 | 3 | 4 = 1): { c: string; w: 1 | 2 | 3 | 4; ls: number } => {
+      const cfg = getMaColorForKey(key, maSettingsData);
+      if (cfg) return { c: cfg.color, w: fallbackWidth, ls: LINE_TYPE_MAP[cfg.lineType] ?? LineStyle.Solid };
+      return { c: fallbackColor, w: fallbackWidth, ls: LineStyle.Solid };
+    };
+
     if (enabledIndicators.has('sma5')) {
-      addIndicatorSeries(sma5, tpl5?.color ?? '#22c55e', tpl5?.lineWidth ?? 1);
+      const s = cfgColor('sma5', tpl5?.color ?? '#22c55e', tpl5?.lineWidth ?? 1);
+      addIndicatorSeries(sma5, s.c, s.w, s.ls);
     }
     
-    // SMA 6 - Pink (for 6/20 Cross)
     if (enabledIndicators.has('sma6')) {
-      addIndicatorSeries(sma6, '#f472b6', 2);
+      const s = cfgColor('sma6', '#f472b6', 2);
+      addIndicatorSeries(sma6, s.c, s.w, s.ls);
     }
     
-    // SMA 10 - Blue
     if (enabledIndicators.has('sma10')) {
-      addIndicatorSeries(sma10, tpl10?.color ?? '#3b82f6', tpl10?.lineWidth ?? 1);
+      const s = cfgColor('sma10', tpl10?.color ?? '#3b82f6', tpl10?.lineWidth ?? 1);
+      addIndicatorSeries(sma10, s.c, s.w, s.ls);
     }
     
-    // SMA 20 - Pink
     if (enabledIndicators.has('sma20')) {
-      addIndicatorSeries(sma20, tpl20?.color ?? '#f472b6', tpl20?.lineWidth ?? 2);
+      const s = cfgColor('sma20', tpl20?.color ?? '#f472b6', tpl20?.lineWidth ?? 2);
+      addIndicatorSeries(sma20, s.c, s.w, s.ls);
     }
     
-    // SMA 50 - Red
     if (enabledIndicators.has('sma50')) {
-      addIndicatorSeries(sma50, tpl50?.color ?? '#dc2626', tpl50?.lineWidth ?? 2);
+      const s = cfgColor('sma50', tpl50?.color ?? '#dc2626', tpl50?.lineWidth ?? 2);
+      addIndicatorSeries(sma50, s.c, s.w, s.ls);
     }
     
-    // SMA 200 - White
     if (enabledIndicators.has('sma200')) {
-      addIndicatorSeries(sma200, tpl200?.color ?? '#ffffff', tpl200?.lineWidth ?? 2);
+      const s = cfgColor('sma200', tpl200?.color ?? '#ffffff', tpl200?.lineWidth ?? 2);
+      addIndicatorSeries(sma200, s.c, s.w, s.ls);
     }
     
-    // EMA 21 - Pink (thicker)
     if (enabledIndicators.has('ema21')) {
-      addIndicatorSeries(ema21, tpl20?.color ?? '#f472b6', 3);
+      const s = cfgColor('ema21', tpl20?.color ?? '#f472b6', 3);
+      addIndicatorSeries(ema21, s.c, s.w, s.ls);
     }
     
-    // SMA 21 - Pink (for weekly/monthly)
     if (enabledIndicators.has('sma21')) {
-      addIndicatorSeries(sma21, tpl20?.color ?? '#f472b6', 2);
+      const s = cfgColor('sma21', tpl20?.color ?? '#f472b6', 2);
+      addIndicatorSeries(sma21, s.c, s.w, s.ls);
     }
     
     // 3 Month SMA - Pink
@@ -1116,7 +1206,7 @@ export function StockChart({
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators, symbol, pullbackUpPeriod]);
+  }, [history, interval, showChannels, showPatternViz, selectedPattern, technicalSignal, lineDefinitions, enabledIndicators, symbol, pullbackUpPeriod, maSettingsData]);
   
   // Handle chart clicks for tools
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1228,14 +1318,14 @@ export function StockChart({
             {isDailyFixed ? 'Daily Chart' : 'Indicator Toggles'}
           </h3>
           <div className="flex gap-1 items-center flex-wrap">
-            {/* Timeframe-based indicator toggles */}
-            {getAvailableIndicators(interval, isDailyFixed).map((key) => {
+            {configAvailable.map((key) => {
+              const cfg = getMaColorForKey(key, maSettingsData);
               const _tpl5   = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma5");
               const _tpl10  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma10");
               const _tpl20  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma20");
               const _tpl50  = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma50");
               const _tpl200 = DEFAULT_MA_TEMPLATE.find(t => t.id === "ma200");
-              const indicatorStyles: Record<IndicatorKey, { color: string; label: string; isDotted?: boolean }> = {
+              const fallbackStyles: Record<IndicatorKey, { color: string; label: string; isDotted?: boolean }> = {
                 sma5: { color: _tpl5?.color ?? '#22c55e', label: `${_tpl5?.label ?? '5 Day'} SMA` },
                 sma6: { color: '#f472b6', label: 'SMA 6' },
                 sma10: { color: _tpl10?.color ?? '#3b82f6', label: `${_tpl10?.label ?? '10 Day'} SMA` },
@@ -1250,7 +1340,10 @@ export function StockChart({
                 vwap12Week: { color: 'rgba(234, 179, 8, 0.9)', label: '12W VWAP' },
                 vwap40Week: { color: 'rgba(234, 179, 8, 0.9)', label: '40W VWAP' },
               };
-              const style = indicatorStyles[key];
+              const fallback = fallbackStyles[key];
+              const displayColor = cfg ? cfg.color : fallback.color;
+              const displayLabel = cfg ? cfg.label : fallback.label;
+              const isDotted = cfg ? (cfg.lineType === 2 || cfg.lineType === 4) : !!fallback.isDotted;
               const isSma200 = key === 'sma200';
               
               return (
@@ -1262,14 +1355,14 @@ export function StockChart({
                   className="gap-1 h-7 px-2"
                   data-testid={`toggle-${key}`}
                 >
-                  {style.isDotted ? (
-                    <span className="w-4 h-0.5 inline-block" style={{ borderTop: `2px dotted ${style.color}` }}></span>
-                  ) : isSma200 ? (
+                  {isDotted ? (
+                    <span className="w-4 h-0.5 inline-block" style={{ borderTop: `2px dotted ${displayColor}` }}></span>
+                  ) : isSma200 && !cfg ? (
                     <span className="w-3 h-0.5 rounded bg-black dark:bg-white"></span>
                   ) : (
-                    <span className="w-3 h-0.5 rounded" style={{ backgroundColor: style.color }}></span>
+                    <span className="w-3 h-0.5 rounded" style={{ backgroundColor: displayColor }}></span>
                   )}
-                  <span className="text-xs">{style.label}</span>
+                  <span className="text-xs">{displayLabel}</span>
                 </Button>
               );
             })}
