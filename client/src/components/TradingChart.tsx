@@ -449,8 +449,18 @@ export function TradingChart({
   const measureStartRef = useRef<MeasurePoint | null>(null);
   const shiftKeyRef = useRef(false);
   const measureModeRef = useRef(measureMode);
+  const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
+  const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   useEffect(() => {
     measureModeRef.current = measureMode;
+    if (!measureMode) {
+      setMeasureStartPrice(null);
+      setMeasureEndPrice(null);
+      measureStartRef.current = null;
+      if (measurePrimitiveRef.current) {
+        measurePrimitiveRef.current.setPoints(null, null);
+      }
+    }
   }, [measureMode]);
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
@@ -509,6 +519,8 @@ export function TradingChart({
     if (measurePrimitiveRef.current) {
       measurePrimitiveRef.current.setPoints(null, null);
     }
+    setMeasureStartPrice(null);
+    setMeasureEndPrice(null);
   }, []);
 
   const handleChartClick = useCallback(
@@ -537,6 +549,8 @@ export function TradingChart({
       if ((shiftKeyRef.current || measureModeRef.current) && clickedPrice !== null) {
         if (!measureStartRef.current) {
           measureStartRef.current = { time: timestamp, price: clickedPrice };
+          setMeasureStartPrice(clickedPrice);
+          setMeasureEndPrice(null);
           if (measurePrimitiveRef.current) {
             measurePrimitiveRef.current.setPoints(null, null);
           }
@@ -545,6 +559,7 @@ export function TradingChart({
           if (measurePrimitiveRef.current) {
             measurePrimitiveRef.current.setPoints(measureStartRef.current, endPoint);
           }
+          setMeasureEndPrice(clickedPrice);
           measureStartRef.current = null;
         }
         return;
@@ -977,7 +992,30 @@ export function TradingChart({
           ))}
         </div>
       )}
-      <div className="absolute top-2 right-2 z-10">
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+        {measureMode && (
+          <div className="flex items-center gap-1.5 mr-1 pointer-events-none">
+            <div className="flex items-center gap-1 bg-slate-900/80 rounded px-2 py-1">
+              <span className="text-[10px] text-slate-400 whitespace-nowrap">Start Price (click):</span>
+              <span className={`text-[11px] font-mono ${measureStartPrice !== null ? "text-yellow-400" : "text-slate-500"}`} data-testid="text-measure-start-price">
+                {measureStartPrice !== null ? `$${measureStartPrice.toFixed(2)}` : "$\u2014"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 bg-slate-900/80 rounded px-2 py-1">
+              <span className="text-[10px] text-slate-400 whitespace-nowrap">End Price (click):</span>
+              <span className={`text-[11px] font-mono ${measureEndPrice !== null ? "text-yellow-400" : "text-slate-500"}`} data-testid="text-measure-end-price">
+                {measureEndPrice !== null ? `$${measureEndPrice.toFixed(2)}` : "$\u2014"}
+              </span>
+            </div>
+            {measureStartPrice !== null && measureEndPrice !== null && (
+              <div className="flex items-center gap-1 bg-slate-900/80 rounded px-2 py-1">
+                <span className={`text-[11px] font-mono font-semibold ${measureEndPrice >= measureStartPrice ? "text-emerald-400" : "text-red-400"}`} data-testid="text-measure-delta">
+                  {measureEndPrice >= measureStartPrice ? "+" : ""}{(measureEndPrice - measureStartPrice).toFixed(2)} ({measureEndPrice >= measureStartPrice ? "+" : ""}{(((measureEndPrice - measureStartPrice) / measureStartPrice) * 100).toFixed(2)}%)
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         <Button
           size="icon"
           variant="ghost"
