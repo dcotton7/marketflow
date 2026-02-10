@@ -201,7 +201,10 @@ function evaluateThoughtCriteria(
 ): boolean {
   if (!criteria || criteria.length === 0) return false;
 
-  for (const criterion of criteria) {
+  const activeCriteria = criteria.filter((c: any) => !c.muted);
+  if (activeCriteria.length === 0) return false;
+
+  for (const criterion of activeCriteria) {
     const repaired = repairCriterion(criterion);
     const indicator = INDICATOR_LIBRARY.find((ind) => ind.id === repaired.indicatorId);
     if (!indicator) continue;
@@ -566,14 +569,16 @@ IMPORTANT GUIDELINES for indicator selection:
 - For golden cross detection, use MA-8 with fastPeriod=50, slowPeriod=200, direction=fast_above_slow.
 
 CRITICAL RULE FOR CRITERIA COUNT:
-Always generate 2-5 criteria per thought. A single criterion is almost never sufficient to describe a meaningful screening idea. Think about what CONFIRMS the pattern, what FILTERS noise, and what provides CONTEXT. Break the idea into its component conditions. Only use indicatorId values from the indicator library provided above — never invent indicator IDs.
+Generate exactly as many criteria as the user's idea requires — no more, no less. If the user asks for something specific and narrow like "price within 1% of the 50 SMA", that is ONE criterion. Do NOT pad with extra filters the user didn't ask for. If the user describes something compound like "breakout with volume above rising 50 SMA", that naturally decomposes into multiple criteria. Only use indicatorId values from the indicator library provided above — never invent indicator IDs.
 
-Examples of how to decompose ideas into multiple criteria using real indicator IDs:
-- "Pullback to 50 SMA" → (1) MA-3 Price vs MA Distance: period=50, minPct=0, maxPct=3 (price near 50 SMA), (2) MA-1 SMA Value: period=200, direction=above (uptrend context), (3) VOL-4 Volume Dry-Up: period=50, dryUpDays=5, maxMultiple=0.5 (quiet pullback), (4) RS-4 RSI: period=14, minRSI=40, maxRSI=55 (room to bounce)
-- "Breakout with volume" → (1) PA-7 Breakout Detection: basePeriod=20, lookback=3 (price broke above recent consolidation high), (2) VOL-5 Volume Surge: period=50, surgeMultiple=2.0, priceUp=true (volume confirmation), (3) MA-1 SMA Value: period=50, direction=above (trend filter), (4) PA-2 ATR Percent: period=14, minPct=3, maxPct=15 (sufficient volatility)
-- "Strong uptrend" → (1) MA-1 SMA Value: period=50, direction=above (price above 50 SMA), (2) MA-8 MA Comparison: fastPeriod=50, slowPeriod=200, direction=fast_above_slow (bullish MA structure), (3) MA-4 MA Slope: period=50, slopeDays=10, minSlope=0.5 (rising 50 SMA), (4) VOL-1 Volume vs Average: period=50, minMultiple=1.0 (healthy volume)
+Examples:
+- "Price within 1% of 50 SMA" → 1 criterion: MA-3 Price vs MA Distance: period=50, minPct=0, maxPct=1
+- "Price above 50 SMA" → 1 criterion: MA-1 SMA Value: period=50, direction=above
+- "Pullback to 50 SMA with volume dry-up in uptrend" → 3 criteria: (1) MA-3 proximity, (2) VOL-4 volume dry-up, (3) MA-1 above 200 SMA for uptrend context
+- "Breakout with volume" → 2 criteria: (1) PA-7 Breakout Detection: basePeriod=20, lookback=3, (2) VOL-5 Volume Surge: period=50, surgeMultiple=2.0, priceUp=true
+- "Strong uptrend" → 3 criteria: (1) MA-1 SMA Value: period=50, direction=above, (2) MA-8 MA Comparison: fastPeriod=50, slowPeriod=200, direction=fast_above_slow, (3) MA-4 MA Slope: period=50, slopeDays=10, minSlope=0.5
 
-Even if the user describes something simple like "price above 50 SMA", add 2-4 confirming criteria from the library that make the screen more useful (e.g., trend direction via MA-8, volume via VOL-1/VOL-4, momentum via RS-4 RSI).
+The number of criteria should match the complexity of the idea. Simple ideas get 1 criterion. Complex multi-condition ideas get as many as needed.
 
 Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
 

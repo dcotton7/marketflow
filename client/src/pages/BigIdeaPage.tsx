@@ -207,7 +207,9 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
   const isNot = data.isNot as boolean;
   const passCount = data.passCount as number | undefined;
   const category = data.category as string;
-  const criteriaCount = (data.criteria as ScannerCriterion[])?.length || 0;
+  const allCriteria = (data.criteria as ScannerCriterion[]) || [];
+  const activeCriteriaCount = allCriteria.filter(c => !c.muted).length;
+  const mutedCount = allCriteria.length - activeCriteriaCount;
   const onClear = data.onClear as (() => void) | undefined;
   const onDelete = data.onDelete as (() => void) | undefined;
 
@@ -255,7 +257,7 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <Badge variant="outline" className="text-xs">
-          {criteriaCount} criteria
+          {activeCriteriaCount} criteria{mutedCount > 0 ? ` (${mutedCount} muted)` : ""}
         </Badge>
         {!!data.timeframe && String(data.timeframe) !== "daily" && (
           <Badge variant="outline" className="text-[10px] bg-blue-500/20 text-blue-400 border-blue-500/30">
@@ -773,6 +775,68 @@ export default function BigIdeaPage() {
     [setNodes]
   );
 
+  const toggleCriterionMute = useCallback(
+    (nodeId: string, criterionIdx: number) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const criteria = [...(n.data.criteria as ScannerCriterion[])];
+            const criterion = { ...criteria[criterionIdx] };
+            criterion.muted = !criterion.muted;
+            criteria[criterionIdx] = criterion;
+            const active = criteria.filter(c => !c.muted);
+            const newLabel = active.length === 0 ? "Empty Thought" : active.length === 1 ? active[0].label : active.length === 2 ? `${active[0].label} + ${active[1].label}` : `${active[0].label} + ${active.length - 1} more`;
+            return { ...n, data: { ...n.data, criteria, label: newLabel } };
+          }
+          return n;
+        })
+      );
+    },
+    [setNodes]
+  );
+
+  const deleteCriterion = useCallback(
+    (nodeId: string, criterionIdx: number) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const criteria = [...(n.data.criteria as ScannerCriterion[])];
+            criteria.splice(criterionIdx, 1);
+            const active = criteria.filter(c => !c.muted);
+            const newLabel = active.length === 0 ? "Empty Thought" : active.length === 1 ? active[0].label : active.length === 2 ? `${active[0].label} + ${active[1].label}` : `${active[0].label} + ${active.length - 1} more`;
+            return { ...n, data: { ...n.data, criteria, label: newLabel } };
+          }
+          return n;
+        })
+      );
+    },
+    [setNodes]
+  );
+
+  const generateTitleFromCriteria = useCallback((criteria: ScannerCriterion[]): string => {
+    const active = criteria.filter(c => !c.muted);
+    if (active.length === 0) return "Empty Thought";
+    if (active.length === 1) return active[0].label;
+    if (active.length === 2) return `${active[0].label} + ${active[1].label}`;
+    return `${active[0].label} + ${active.length - 1} more`;
+  }, []);
+
+  const updateNodeTitle = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const criteria = (n.data.criteria as ScannerCriterion[]) || [];
+            const newLabel = generateTitleFromCriteria(criteria);
+            return { ...n, data: { ...n.data, label: newLabel } };
+          }
+          return n;
+        })
+      );
+    },
+    [setNodes, generateTitleFromCriteria]
+  );
+
   const loadIdea = useCallback(
     (idea: ScannerIdea) => {
       setCurrentIdeaId(idea.id);
@@ -1181,7 +1245,19 @@ export default function BigIdeaPage() {
               {!showResults && selectedNode && selectedNode.type === "thought" && (
                 <div className="p-3 space-y-4">
                   <div>
-                    <h3 className="text-sm font-semibold">{selectedNode.data.label as string}</h3>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold flex-1">{selectedNode.data.label as string}</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[10px] px-1.5 shrink-0"
+                        onClick={() => updateNodeTitle(selectedNode.id)}
+                        data-testid="button-auto-rename"
+                        title="Auto-rename from criteria"
+                      >
+                        Rename
+                      </Button>
+                    </div>
                     {selectedNode.data.description ? (
                       <p className="text-xs text-muted-foreground mt-1">
                         {String(selectedNode.data.description)}
@@ -1280,19 +1356,39 @@ export default function BigIdeaPage() {
                       Criteria
                     </Label>
                     {(selectedNode.data.criteria as ScannerCriterion[])?.map((criterion, idx) => (
-                      <Card key={idx} className="overflow-visible">
+                      <Card key={idx} className={`overflow-visible ${criterion.muted ? "opacity-40" : ""}`}>
                         <CardHeader className="p-2.5 pb-1.5">
                           <div className="flex items-center justify-between gap-2">
-                            <CardTitle className="text-xs">{criterion.label}</CardTitle>
-                            <Button
-                              variant={criterion.inverted ? "destructive" : "ghost"}
-                              size="sm"
-                              onClick={() => toggleCriterionInvert(selectedNode.id, idx)}
-                              className="h-6 text-[10px] px-1.5"
-                              data-testid={`button-invert-criterion-${idx}`}
-                            >
-                              {criterion.inverted ? "Inverted" : "Normal"}
-                            </Button>
+                            <CardTitle className={`text-xs flex-1 ${criterion.muted ? "line-through" : ""}`}>{criterion.label}</CardTitle>
+                            <div className="flex items-center gap-0.5">
+                              <Button
+                                variant={criterion.inverted ? "destructive" : "ghost"}
+                                size="sm"
+                                onClick={() => toggleCriterionInvert(selectedNode.id, idx)}
+                                className="h-6 text-[10px] px-1.5"
+                                data-testid={`button-invert-criterion-${idx}`}
+                              >
+                                {criterion.inverted ? "Inverted" : "Normal"}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => toggleCriterionMute(selectedNode.id, idx)}
+                                className="h-6 w-6"
+                                data-testid={`button-mute-criterion-${idx}`}
+                              >
+                                <Ban className={`h-3 w-3 ${criterion.muted ? "text-yellow-500" : ""}`} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => deleteCriterion(selectedNode.id, idx)}
+                                className="h-6 w-6"
+                                data-testid={`button-delete-criterion-${idx}`}
+                              >
+                                <Trash2 className="h-3 w-3 text-destructive" />
+                              </Button>
+                            </div>
                           </div>
                         </CardHeader>
                         <CardContent className="p-2.5 pt-0 space-y-2">

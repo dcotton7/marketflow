@@ -1202,6 +1202,7 @@ export interface ScannerCriterion {
   indicatorId: string;
   label: string;
   inverted: boolean;
+  muted?: boolean;
   params: ScannerCriterionParam[];
 }
 
