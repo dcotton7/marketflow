@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ReactFlow,
@@ -32,6 +32,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TradingChart } from "@/components/TradingChart";
+import type { ChartCandle, ChartIndicators } from "@/components/TradingChart";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -49,6 +51,8 @@ import {
   Ban,
   ArrowDown,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   SlidersHorizontal,
   Target,
   X,
@@ -407,6 +411,9 @@ export default function BigIdeaPage() {
   const [showResults, setShowResults] = useState(false);
   const [resultSort, setResultSort] = useState<"ticker" | "price">("ticker");
   const [resultSortDir, setResultSortDir] = useState<"asc" | "desc">("asc");
+
+  const [chartViewerOpen, setChartViewerOpen] = useState(false);
+  const [chartViewerIndex, setChartViewerIndex] = useState(0);
 
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
@@ -1038,11 +1045,15 @@ export default function BigIdeaPage() {
                   </div>
 
                   <div className="space-y-1">
-                    {sortedResults.map((r) => (
+                    {sortedResults.map((r, idx) => (
                       <div
                         key={r.symbol}
-                        className="flex items-center justify-between rounded-md border px-2.5 py-1.5"
+                        className="flex items-center justify-between rounded-md border px-2.5 py-1.5 cursor-pointer hover-elevate"
                         data-testid={`result-stock-${r.symbol}`}
+                        onClick={() => {
+                          setChartViewerIndex(idx);
+                          setChartViewerOpen(true);
+                        }}
                       >
                         <div>
                           <span className="text-sm font-medium">{r.symbol}</span>
@@ -1366,6 +1377,16 @@ export default function BigIdeaPage() {
         </DialogContent>
       </Dialog>
 
+      {chartViewerOpen && sortedResults.length > 0 && (
+        <ScanChartViewer
+          results={sortedResults}
+          currentIndex={chartViewerIndex}
+          open={chartViewerOpen}
+          onOpenChange={setChartViewerOpen}
+          onIndexChange={setChartViewerIndex}
+        />
+      )}
+
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1389,5 +1410,226 @@ export default function BigIdeaPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function ScanChartViewer({
+  results,
+  currentIndex,
+  open,
+  onOpenChange,
+  onIndexChange,
+}: {
+  results: ScanResultItem[];
+  currentIndex: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onIndexChange: (idx: number) => void;
+}) {
+  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
+  const chartGridRef = useRef<HTMLDivElement>(null);
+  const [chartHeight, setChartHeight] = useState(500);
+
+  const current = results[currentIndex];
+  const symbol = current?.symbol || "";
+
+  const { data: maSettingsData } = useQuery<any[]>({
+    queryKey: ["/api/sentinel/ma-settings"],
+  });
+
+  type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
+
+  const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
+    queryKey: ["/api/sentinel/pattern-training/chart-data", symbol, "daily"],
+    enabled: open && !!symbol,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${symbol}&timeframe=daily`);
+      if (!res.ok) throw new Error("Failed to fetch daily chart data");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
+    queryKey: ["/api/sentinel/pattern-training/chart-data", symbol, intradayTimeframe],
+    enabled: open && !!symbol,
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${symbol}&timeframe=${intradayTimeframe}`);
+      if (!res.ok) throw new Error("Failed to fetch intraday chart data");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const rthData = useMemo(() => {
+    if (!intradayData) return null;
+    const rthFmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit", minute: "2-digit",
+      hour12: false,
+    });
+    const rthIndices: number[] = [];
+    intradayData.candles.forEach((c, i) => {
+      const parts = rthFmt.formatToParts(new Date(c.timestamp * 1000));
+      let etH = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
+      if (etH === 24) etH = 0;
+      const etM = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
+      const totalMin = etH * 60 + etM;
+      if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
+    });
+    if (rthIndices.length === 0) return intradayData;
+    return {
+      ...intradayData,
+      candles: rthIndices.map(i => intradayData.candles[i]),
+      indicators: {
+        ema5: rthIndices.map(i => intradayData.indicators.ema5[i] ?? null),
+        ema10: rthIndices.map(i => intradayData.indicators.ema10[i] ?? null),
+        sma21: rthIndices.map(i => intradayData.indicators.sma21[i] ?? null),
+        sma50: rthIndices.map(i => intradayData.indicators.sma50[i] ?? null),
+        sma200: rthIndices.map(i => intradayData.indicators.sma200[i] ?? null),
+        avwapHigh: intradayData.indicators.avwapHigh ? rthIndices.map(i => intradayData.indicators.avwapHigh![i] ?? null) : undefined,
+        avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
+      },
+    };
+  }, [intradayData]);
+
+  useEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      if (chartGridRef.current) {
+        const gridH = chartGridRef.current.clientHeight;
+        setChartHeight(Math.max(300, gridH - 24));
+      }
+    };
+    const timer = setTimeout(measure, 100);
+    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
+    if (chartGridRef.current) observer.observe(chartGridRef.current);
+    return () => { clearTimeout(timer); observer.disconnect(); };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") {
+        onIndexChange(Math.max(0, currentIndex - 1));
+      } else if (e.key === "ArrowRight") {
+        onIndexChange(Math.min(results.length - 1, currentIndex + 1));
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, currentIndex, results.length, onIndexChange]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle className="flex items-center gap-3">
+            <BarChart3 className="w-5 h-5" />
+            <Button
+              size="icon"
+              variant="outline"
+              disabled={currentIndex === 0}
+              onClick={() => onIndexChange(currentIndex - 1)}
+              data-testid="button-chart-prev"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-lg font-bold" data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-sm text-muted-foreground" data-testid="text-chart-position">
+              {currentIndex + 1} of {results.length}
+            </span>
+            <Button
+              size="icon"
+              variant="outline"
+              disabled={currentIndex === results.length - 1}
+              onClick={() => onIndexChange(currentIndex + 1)}
+              data-testid="button-chart-next"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-mono text-muted-foreground ml-auto">
+              ${current?.price.toFixed(2)}
+            </span>
+          </DialogTitle>
+          <DialogDescription className="flex items-center gap-1 flex-wrap">
+            {current?.passedPaths.map((p) => (
+              <Badge key={p} variant="outline" className="text-[10px]">
+                {p}
+              </Badge>
+            ))}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
+          <div className="flex flex-col min-h-0">
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
+              <span className="text-xs text-muted-foreground font-medium">Daily</span>
+            </div>
+            {dailyLoading ? (
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ) : dailyData ? (
+              <TradingChart
+                data={dailyData}
+                timeframe="daily"
+                height={chartHeight}
+                showLegend={true}
+                maSettings={maSettingsData}
+              />
+            ) : (
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  No daily data
+                </CardContent>
+              </Card>
+            )}
+          </div>
+          <div className="flex flex-col min-h-0">
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
+              <span className="text-xs text-muted-foreground font-medium">Intraday</span>
+              <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
+                <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-scan-chart-intraday">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5min">5m</SelectItem>
+                  <SelectItem value="15min">15m</SelectItem>
+                  <SelectItem value="30min">30m</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {intradayLoading ? (
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ) : rthData ? (
+              <TradingChart
+                data={rthData}
+                timeframe={intradayTimeframe}
+                height={chartHeight}
+                showLegend={true}
+                showDayDividers={true}
+                maSettings={maSettingsData}
+              />
+            ) : (
+              <Card className="flex-1">
+                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  No intraday data
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
