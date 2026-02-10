@@ -443,7 +443,7 @@ export function TradingChart({
         horzLines: { color: "rgba(148, 163, 184, 0.06)" },
       },
       crosshair: {
-        mode: 1,
+        mode: 0,
       },
       rightPriceScale: {
         borderColor: "rgba(148, 163, 184, 0.12)",
@@ -678,7 +678,7 @@ export function TradingChart({
       if (!chartRef.current) return;
       chartRef.current.applyOptions({
         crosshair: {
-          mode: 1,
+          mode: 0,
           horzLine: {
             visible: true,
             labelVisible: true,
@@ -692,7 +692,7 @@ export function TradingChart({
     if (snapToPrice != null) {
       chartRef.current.applyOptions({
         crosshair: {
-          mode: 0,
+          mode: 1,
           horzLine: {
             visible: true,
             labelVisible: true,
