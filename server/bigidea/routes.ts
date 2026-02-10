@@ -151,7 +151,7 @@ function evaluateThoughtCriteria(
 export function registerBigIdeaRoutes(app: Express): void {
   app.get("/api/bigidea/thoughts", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -172,7 +172,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.post("/api/bigidea/thoughts", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -198,7 +198,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.patch("/api/bigidea/thoughts/:id", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -238,7 +238,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.delete("/api/bigidea/thoughts/:id", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -266,7 +266,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.get("/api/bigidea/ideas", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -287,7 +287,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.get("/api/bigidea/ideas/:id", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -315,7 +315,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.post("/api/bigidea/ideas", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -348,7 +348,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.patch("/api/bigidea/ideas/:id", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -389,7 +389,7 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.delete("/api/bigidea/ideas/:id", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -433,8 +433,11 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.post("/api/bigidea/ai/create-thought", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        console.error("[BigIdea AI] Auth failed - no userId in session. Session ID:", req.sessionID, "Session keys:", Object.keys(req.session || {}));
+        return res.status(401).json({ error: "Not logged in. Please refresh the page and try again." });
+      }
 
       const { description } = req.body;
       if (!description) {
@@ -508,15 +511,21 @@ Select the most appropriate indicators and set parameters that match the user's 
 
       const thought = JSON.parse(content);
       res.json(thought);
-    } catch (error) {
-      console.error("Error creating AI thought:", error);
-      res.status(500).json({ error: "Failed to generate thought definition" });
+    } catch (error: any) {
+      console.error("[BigIdea AI] Error creating thought:", error?.message || error);
+      if (error?.status === 401 || error?.code === 'invalid_api_key') {
+        return res.status(500).json({ error: "AI service credentials are invalid. Please check the API key configuration." });
+      }
+      if (error?.status === 429) {
+        return res.status(429).json({ error: "AI rate limit reached. Please wait a moment and try again." });
+      }
+      res.status(500).json({ error: "Failed to generate thought definition. " + (error?.message || "") });
     }
   });
 
   app.post("/api/bigidea/scan", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       const { nodes, edges, universe } = req.body;
@@ -651,7 +660,7 @@ Select the most appropriate indicators and set parameters that match the user's 
 
   app.post("/api/bigidea/favorites", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -677,7 +686,7 @@ Select the most appropriate indicators and set parameters that match the user's 
 
   app.get("/api/bigidea/favorites/:ideaId", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
@@ -701,7 +710,7 @@ Select the most appropriate indicators and set parameters that match the user's 
 
   app.delete("/api/bigidea/favorites/:id", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.sentinelUserId;
+      const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!isDatabaseAvailable() || !db) {
