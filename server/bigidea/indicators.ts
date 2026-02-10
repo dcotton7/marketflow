@@ -381,6 +381,29 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       return false;
     },
   },
+  {
+    id: "MA-8",
+    name: "MA Comparison",
+    category: "Moving Averages",
+    description: "Checks if one moving average is above or below another (e.g. 50 SMA above 200 SMA for bullish trend)",
+    params: [
+      { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
+      { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
+      { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
+      { name: "direction", label: "Direction", type: "select", defaultValue: "fast_above_slow", options: ["fast_above_slow", "fast_below_slow"] },
+    ],
+    evaluate: (candles, params) => {
+      const fastP = params.fastPeriod ?? 50;
+      const slowP = params.slowPeriod ?? 200;
+      const maType = params.maType ?? "sma";
+      const direction = params.direction ?? "fast_above_slow";
+      if (candles.length < Math.max(fastP, slowP)) return false;
+      const fastMA = getMA(candles, fastP, maType);
+      const slowMA = getMA(candles, slowP, maType);
+      if (direction === "fast_above_slow") return fastMA > slowMA;
+      return fastMA < slowMA;
+    },
+  },
 ];
 
 const VOLUME: IndicatorDefinition[] = [

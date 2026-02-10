@@ -7,11 +7,22 @@ import OpenAI from "openai";
 
 let yahooFinance: any = null;
 async function getYahooFinance() {
-  if (!yahooFinance) {
-    const mod = await import("yahoo-finance2");
-    yahooFinance = mod.default || mod;
+  if (yahooFinance) return yahooFinance;
+  try {
+    const YahooFinanceModule = await import("yahoo-finance2") as any;
+    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
+    if (typeof YahooFinance === "function") {
+      yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey", "ripHistorical"] });
+    } else if (YahooFinance.default && typeof YahooFinance.default === "function") {
+      yahooFinance = new YahooFinance.default({ suppressNotices: ["yahooSurvey", "ripHistorical"] });
+    } else {
+      yahooFinance = YahooFinance;
+    }
+    return yahooFinance;
+  } catch (error) {
+    console.error("Failed to initialize YahooFinance:", error);
+    throw error;
   }
-  return yahooFinance;
 }
 
 function getOpenAI(): OpenAI | null {
@@ -539,10 +550,15 @@ Select the most appropriate indicators and set parameters that match the user's 
       }
 
       const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && n.thoughtCriteria);
+      console.log(`[BigIdea Scan] Universe: ${universe}, tickers: ${tickers.length}, thought nodes: ${thoughtNodes.length}`);
+      for (const tn of thoughtNodes) {
+        console.log(`[BigIdea Scan] Thought: "${tn.thoughtName}" (${tn.id}), criteria:`, JSON.stringify(tn.thoughtCriteria?.map((c: any) => ({ id: c.indicatorId, label: c.label, params: c.params?.map((p: any) => `${p.name}=${p.value}`) }))));
+      }
 
       let spyCandles: CandleData[] = [];
       try {
         spyCandles = await fetchOHLCV("SPY");
+        console.log(`[BigIdea Scan] SPY candles: ${spyCandles.length}`);
       } catch (e) {
         console.warn("Could not fetch SPY benchmark data");
       }
@@ -554,6 +570,8 @@ Select the most appropriate indicators and set parameters that match the user's 
         thoughtCounts[node.id] = 0;
       }
 
+      let fetchFailCount = 0;
+      let tooFewCandlesCount = 0;
       const BATCH_SIZE = 10;
       for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
         const batch = tickers.slice(i, i + BATCH_SIZE);
@@ -561,7 +579,10 @@ Select the most appropriate indicators and set parameters that match the user's 
           batch.map(async (symbol) => {
             try {
               const candles = await fetchOHLCV(symbol);
-              if (candles.length < 20) return null;
+              if (candles.length < 20) {
+                tooFewCandlesCount++;
+                return null;
+              }
 
               const nodeResults: Record<string, boolean> = {};
 
@@ -639,8 +660,9 @@ Select the most appropriate indicators and set parameters that match the user's 
               }
 
               return null;
-            } catch (err) {
-              console.error(`Scan error for ${symbol}:`, err);
+            } catch (err: any) {
+              fetchFailCount++;
+              if (fetchFailCount <= 3) console.error(`[BigIdea Scan] Fetch error for ${symbol}:`, err?.message || err);
               return null;
             }
           })
@@ -651,6 +673,8 @@ Select the most appropriate indicators and set parameters that match the user's 
         }
       }
 
+      console.log(`[BigIdea Scan] Complete: ${results.length} results from ${tickers.length} tickers (fetchFails=${fetchFailCount}, tooFewCandles=${tooFewCandlesCount})`);
+      console.log(`[BigIdea Scan] ThoughtCounts:`, JSON.stringify(thoughtCounts));
       res.json({ results, thoughtCounts });
     } catch (error) {
       console.error("Error executing scan:", error);
