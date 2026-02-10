@@ -174,6 +174,11 @@ export default function PatternTrainingPage() {
     queryKey: ["/api/sentinel/ma-settings"],
   });
 
+  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+    queryKey: ["/api/sentinel/chart-preferences"],
+  });
+  const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
+
   const [currentSetupId, setCurrentSetupId] = useState<number | null>(null);
 
   const [evaluation, setEvaluation] = useState<EvaluationData | null>(null);
@@ -666,6 +671,7 @@ export default function PatternTrainingPage() {
                             height={400}
                             showLegend={false}
                             maSettings={maSettingsData}
+                            maxBars={maxBars}
                           />
                         ) : (
                           <Card>
@@ -711,6 +717,7 @@ export default function PatternTrainingPage() {
                             height={400}
                             showLegend={false}
                             maSettings={maSettingsData}
+                            maxBars={maxBars}
                           />
                         ) : (
                           <Card>
@@ -778,6 +785,7 @@ export default function PatternTrainingPage() {
                           priceLines={priceLines}
                           timeframe={timeframe}
                           maSettings={maSettingsData}
+                          maxBars={maxBars}
                         />
                       ) : (
                         <Card>

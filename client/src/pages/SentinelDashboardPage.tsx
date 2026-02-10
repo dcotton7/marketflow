@@ -1333,6 +1333,11 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
     queryKey: ["/api/sentinel/ma-settings"],
   });
 
+  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+    queryKey: ["/api/sentinel/chart-preferences"],
+  });
+  const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
+
   useEffect(() => {
     if (!open) return;
     const measure = () => {
@@ -1580,6 +1585,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                 height={chartHeight}
                 showLegend={true}
                 maSettings={maSettingsData}
+                maxBars={maxBars}
               />
             ) : (
               <Card className="flex-1">
@@ -1625,6 +1631,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   showLegend={true}
                   showDayDividers={true}
                   maSettings={maSettingsData}
+                  maxBars={maxBars}
                   snapToPrice={refiningLotId && lotEntries ? (() => {
                     const lot = lotEntries.find(l => l.id === refiningLotId);
                     return lot ? parseFloat(lot.price) : null;

@@ -1131,6 +1131,14 @@ export const insertUserMaSettingSchema = createInsertSchema(userMaSettings).omit
 export type UserMaSetting = typeof userMaSettings.$inferSelect;
 export type InsertUserMaSetting = z.infer<typeof insertUserMaSettingSchema>;
 
+export const userChartPreferences = pgTable("user_chart_preferences", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().unique(),
+  defaultBarsOnScreen: integer("default_bars_on_screen").notNull().default(200),
+});
+
+export type UserChartPreference = typeof userChartPreferences.$inferSelect;
+
 // Schema exports for Pattern Training
 export const insertPatternTrainingSetupSchema = createInsertSchema(patternTrainingSetups).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertPatternTrainingPointSchema = createInsertSchema(patternTrainingPoints).omit({ id: true, createdAt: true });

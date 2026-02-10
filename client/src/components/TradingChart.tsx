@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import {
   createChart,
   IChartApi,
@@ -14,6 +14,9 @@ import {
   ISeriesApi,
 } from "lightweight-charts";
 import { DEFAULT_MA_TEMPLATE, BARS_PER_DAY } from "@shared/indicatorTemplates";
+import { Settings2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 
 const etFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -138,6 +141,7 @@ export interface TradingChartProps {
   snapToPrice?: number | null;
   showDayDividers?: boolean;
   maSettings?: MaSettingForChart[];
+  maxBars?: number;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -419,7 +423,7 @@ class MeasurePrimitive {
 }
 
 export function TradingChart({
-  data,
+  data: rawData,
   onCandleClick,
   markers,
   priceLines,
@@ -429,6 +433,7 @@ export function TradingChart({
   snapToPrice,
   showDayDividers = false,
   maSettings,
+  maxBars,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -444,6 +449,25 @@ export function TradingChart({
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
+
+  const data = useMemo(() => {
+    if (!maxBars || rawData.candles.length <= maxBars) return rawData;
+    const start = rawData.candles.length - maxBars;
+    const sl = (arr: any[] | undefined) => arr ? arr.slice(start) : [];
+    return {
+      ...rawData,
+      candles: rawData.candles.slice(start),
+      indicators: {
+        ema5: sl(rawData.indicators.ema5),
+        ema10: sl(rawData.indicators.ema10),
+        sma21: sl(rawData.indicators.sma21),
+        sma50: sl(rawData.indicators.sma50),
+        sma200: sl(rawData.indicators.sma200),
+        avwapHigh: rawData.indicators.avwapHigh ? rawData.indicators.avwapHigh.slice(start) : undefined,
+        avwapLow: rawData.indicators.avwapLow ? rawData.indicators.avwapLow.slice(start) : undefined,
+      },
+    };
+  }, [rawData, maxBars]);
 
   useEffect(() => {
     candlesRef.current = data.candles;
@@ -927,6 +951,8 @@ export function TradingChart({
     };
   }, [clearMeasure]);
 
+  const [showMaSettings, setShowMaSettings] = useState(false);
+
   return (
     <div data-testid="chart-trading" className="relative w-full h-full flex flex-col">
       {showLegend && legendItems.length > 0 && (
@@ -945,7 +971,19 @@ export function TradingChart({
           ))}
         </div>
       )}
+      <div className="absolute top-2 right-2 z-10">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7 bg-slate-900/60 hover-elevate"
+          onClick={(e) => { e.stopPropagation(); setShowMaSettings(true); }}
+          data-testid="button-chart-indicator-settings"
+        >
+          <Settings2 className="h-3.5 w-3.5 text-slate-400" />
+        </Button>
+      </div>
       <div ref={containerRef} className="w-full flex-1 min-h-[400px]" />
+      <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
     </div>
   );
 }

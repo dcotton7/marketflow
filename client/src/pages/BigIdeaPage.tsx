@@ -1493,31 +1493,11 @@ function ScanChartViewer({
     staleTime: 5 * 60 * 1000,
   });
 
-  const MAX_BARS = 200;
-
-  const sliceLast = (d: ChartDataResponse, n: number): ChartDataResponse => {
-    if (d.candles.length <= n) return d;
-    const start = d.candles.length - n;
-    const sl = (arr: any[] | undefined) => arr ? arr.slice(start) : [];
-    return {
-      ...d,
-      candles: d.candles.slice(start),
-      indicators: {
-        ema5: sl(d.indicators.ema5),
-        ema10: sl(d.indicators.ema10),
-        sma21: sl(d.indicators.sma21),
-        sma50: sl(d.indicators.sma50),
-        sma200: sl(d.indicators.sma200),
-        avwapHigh: d.indicators.avwapHigh ? d.indicators.avwapHigh.slice(start) : undefined,
-        avwapLow: d.indicators.avwapLow ? d.indicators.avwapLow.slice(start) : undefined,
-      },
-    };
-  };
-
-  const trimmedDailyData = useMemo(() => {
-    if (!dailyData) return null;
-    return sliceLast(dailyData, MAX_BARS);
-  }, [dailyData]);
+  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+    queryKey: ["/api/sentinel/chart-preferences"],
+    enabled: open,
+  });
+  const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
 
   const rthData = useMemo(() => {
     if (!intradayData) return null;
@@ -1535,7 +1515,7 @@ function ScanChartViewer({
       const totalMin = etH * 60 + etM;
       if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
     });
-    if (rthIndices.length === 0) return sliceLast(intradayData, MAX_BARS);
+    if (rthIndices.length === 0) return intradayData;
     const rthResult: ChartDataResponse = {
       ...intradayData,
       candles: rthIndices.map(i => intradayData.candles[i]),
@@ -1549,7 +1529,7 @@ function ScanChartViewer({
         avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
       },
     };
-    return sliceLast(rthResult, MAX_BARS);
+    return rthResult;
   }, [intradayData]);
 
   useEffect(() => {
@@ -1634,13 +1614,14 @@ function ScanChartViewer({
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </CardContent>
               </Card>
-            ) : trimmedDailyData ? (
+            ) : dailyData ? (
               <TradingChart
-                data={trimmedDailyData}
+                data={dailyData}
                 timeframe="daily"
                 height={chartHeight}
                 showLegend={true}
                 maSettings={maSettingsData}
+                maxBars={maxBars}
               />
             ) : (
               <Card className="flex-1">
@@ -1678,6 +1659,7 @@ function ScanChartViewer({
                 showLegend={true}
                 showDayDividers={true}
                 maSettings={maSettingsData}
+                maxBars={maxBars}
               />
             ) : (
               <Card className="flex-1">

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Trash2, Plus, Loader2 } from "lucide-react";
 import { BARS_PER_DAY } from "@shared/indicatorTemplates";
 
@@ -54,9 +55,15 @@ function isNonVwap(row: MaSettingRow): boolean {
 
 export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [rows, setRows] = useState<MaSettingRow[]>([]);
+  const [defaultBars, setDefaultBars] = useState(200);
 
   const { data, isLoading } = useQuery<MaSettingRow[]>({
     queryKey: ["/api/sentinel/ma-settings"],
+    enabled: open,
+  });
+
+  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+    queryKey: ["/api/sentinel/chart-preferences"],
     enabled: open,
   });
 
@@ -66,13 +73,25 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
     }
   }, [data]);
 
+  useEffect(() => {
+    if (chartPrefs) {
+      setDefaultBars(chartPrefs.defaultBarsOnScreen);
+    }
+  }, [chartPrefs]);
+
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
+  const defaultBarsRef = useRef(defaultBars);
+  defaultBarsRef.current = defaultBars;
 
   const saveMutation = useMutation({
-    mutationFn: (currentRows: MaSettingRow[]) => apiRequest("PUT", "/api/sentinel/ma-settings", { rows: currentRows }),
+    mutationFn: async (currentRows: MaSettingRow[]) => {
+      await apiRequest("PUT", "/api/sentinel/ma-settings", { rows: currentRows });
+      await apiRequest("PUT", "/api/sentinel/chart-preferences", { defaultBarsOnScreen: defaultBarsRef.current });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/ma-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/chart-preferences"] });
       onOpenChange(false);
     },
   });
@@ -335,10 +354,26 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
             </div>
 
             <div className="flex items-center justify-between gap-2 flex-wrap pt-2">
-              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); addRow(); }} onPointerDown={e => e.stopPropagation()} data-testid="button-add-row">
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                Add Row
-              </Button>
+              <div className="flex items-center gap-3 flex-wrap">
+                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); addRow(); }} onPointerDown={e => e.stopPropagation()} data-testid="button-add-row">
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Add Row
+                </Button>
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <Label htmlFor="defaultBars" className="text-xs text-muted-foreground whitespace-nowrap">Default Bars OnScreen</Label>
+                  <Input
+                    id="defaultBars"
+                    type="number"
+                    value={defaultBars}
+                    onChange={e => setDefaultBars(Math.max(50, Math.min(1000, parseInt(e.target.value) || 200)))}
+                    className="h-8 w-20 text-xs"
+                    min={50}
+                    max={1000}
+                    step={10}
+                    data-testid="input-default-bars"
+                  />
+                </div>
+              </div>
               <Button
                 size="sm"
                 onClick={(e) => { e.stopPropagation(); saveMutation.mutate(rowsRef.current); }}

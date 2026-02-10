@@ -12,7 +12,7 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userChartPreferences } from "@shared/schema";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 import { fetchChartData, calculatePointTechnicals, calculateFullSetupMetrics, findNearestMA, calculateRSvsSPY, calculateAnchoredVWAPValues, countResistanceTouches } from "./patternTrainingEngine";
@@ -6837,6 +6837,41 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Save MA settings error:", error);
       res.status(500).json({ error: "Failed to save MA settings" });
+    }
+  });
+
+  app.get("/api/sentinel/chart-preferences", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      let [pref] = await db.select().from(userChartPreferences).where(eq(userChartPreferences.userId, userId));
+      if (!pref) {
+        [pref] = await db.insert(userChartPreferences).values({ userId, defaultBarsOnScreen: 200 }).returning();
+      }
+      res.json(pref);
+    } catch (error) {
+      console.error("Get chart preferences error:", error);
+      res.status(500).json({ error: "Failed to fetch chart preferences" });
+    }
+  });
+
+  app.put("/api/sentinel/chart-preferences", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      const { defaultBarsOnScreen } = req.body;
+      const barsVal = Math.max(50, Math.min(1000, parseInt(defaultBarsOnScreen) || 200));
+      const existing = await db.select().from(userChartPreferences).where(eq(userChartPreferences.userId, userId));
+      let pref;
+      if (existing.length === 0) {
+        [pref] = await db.insert(userChartPreferences).values({ userId, defaultBarsOnScreen: barsVal }).returning();
+      } else {
+        [pref] = await db.update(userChartPreferences).set({ defaultBarsOnScreen: barsVal }).where(eq(userChartPreferences.userId, userId)).returning();
+      }
+      res.json(pref);
+    } catch (error) {
+      console.error("Save chart preferences error:", error);
+      res.status(500).json({ error: "Failed to save chart preferences" });
     }
   });
 
