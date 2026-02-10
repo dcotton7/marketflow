@@ -439,7 +439,7 @@ export function TradingChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const onCandleClickRef = useRef(onCandleClick);
-  const candlesRef = useRef(data.candles);
+  const candlesRef = useRef(rawData.candles);
   const markersHandleRef = useRef<any>(null);
   const priceLinesRef = useRef<any[]>([]);
   const maLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
