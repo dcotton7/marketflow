@@ -697,7 +697,7 @@ Select the most appropriate indicators and set parameters that match the user's 
               const anyEdgeToResults = edges.some((e: any) => e.target === resultsNode.id);
               if (!anyEdgeToResults) return null;
 
-              function computeEffectivePass(nodeId: string, visited: Set<string> = new Set()): boolean {
+              const computeEffectivePass = (nodeId: string, visited: Set<string> = new Set()): boolean => {
                 if (visited.has(nodeId)) return nodeResults[nodeId] ?? false;
                 visited.add(nodeId);
 
@@ -711,12 +711,14 @@ Select the most appropriate indicators and set parameters that match the user's 
                 const andEdges = incoming.filter((e: any) => (e.logicType || "AND") === "AND");
                 const orEdges = incoming.filter((e: any) => e.logicType === "OR");
 
+                const copyVisited = () => { const s = new Set<string>(); visited.forEach(v => s.add(v)); return s; };
+
                 const andPass = andEdges.length === 0 || andEdges.every((e: any) =>
-                  computeEffectivePass(e.source, new Set(visited))
+                  computeEffectivePass(e.source, copyVisited())
                 );
 
                 const orPass = orEdges.length === 0 || orEdges.some((e: any) =>
-                  computeEffectivePass(e.source, new Set(visited))
+                  computeEffectivePass(e.source, copyVisited())
                 );
 
                 if (ownResult === undefined) {
@@ -728,23 +730,26 @@ Select the most appropriate indicators and set parameters that match the user's 
                 } else {
                   return ownResult && andPass;
                 }
-              }
+              };
 
-              function collectPassedPaths(nodeId: string, visited: Set<string> = new Set()): string[] {
+              const collectPassedPaths = (nodeId: string, visited: Set<string> = new Set()): string[] => {
                 if (visited.has(nodeId)) return [];
                 visited.add(nodeId);
                 const paths: string[] = [];
                 const incoming = edges.filter((e: any) => e.target === nodeId);
                 for (const e of incoming) {
-                  const srcEffective = computeEffectivePass(e.source, new Set());
-                  if (srcEffective) {
-                    const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
-                    if (srcNode) paths.push(srcNode.thoughtName || srcNode.id);
+                  const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
+                  if (srcNode && nodeResults[srcNode.id] === true) {
+                    paths.push(srcNode.thoughtName || srcNode.id);
                   }
-                  paths.push(...collectPassedPaths(e.source, new Set(visited)));
+                  const cvs = new Set<string>(); visited.forEach(v => cvs.add(v));
+                  paths.push(...collectPassedPaths(e.source, cvs));
                 }
-                return [...new Set(paths)];
-              }
+                const unique: string[] = [];
+                const seen = new Set<string>();
+                for (const p of paths) { if (!seen.has(p)) { seen.add(p); unique.push(p); } }
+                return unique;
+              };
 
               const passesFlow = computeEffectivePass(resultsNode.id);
               const passedPaths = passesFlow ? collectPassedPaths(resultsNode.id) : [];
