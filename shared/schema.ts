@@ -1143,3 +1143,85 @@ export type PatternTrainingEvaluation = typeof patternTrainingEvaluations.$infer
 export type InsertPatternTrainingSetup = z.infer<typeof insertPatternTrainingSetupSchema>;
 export type InsertPatternTrainingPoint = z.infer<typeof insertPatternTrainingPointSchema>;
 export type InsertPatternTrainingEvaluation = z.infer<typeof insertPatternTrainingEvaluationSchema>;
+
+// === BIG IDEA SCANNER ===
+
+export const scannerThoughts = pgTable("scanner_thoughts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  description: text("description"),
+  criteria: jsonb("criteria").$type<ScannerCriterion[]>().notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const scannerIdeas = pgTable("scanner_ideas", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  universe: text("universe").notNull().default("sp500"),
+  nodes: jsonb("nodes").$type<IdeaNode[]>().notNull(),
+  edges: jsonb("edges").$type<IdeaEdge[]>().notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const scannerFavorites = pgTable("scanner_favorites", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ideaId: integer("idea_id").notNull(),
+  symbol: text("symbol").notNull(),
+  addedAt: timestamp("added_at").defaultNow(),
+});
+
+export interface ScannerCriterionParam {
+  name: string;
+  label: string;
+  type: "number" | "select" | "boolean";
+  value: number | string | boolean;
+  options?: string[];
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface ScannerCriterion {
+  indicatorId: string;
+  label: string;
+  inverted: boolean;
+  params: ScannerCriterionParam[];
+}
+
+export interface IdeaNode {
+  id: string;
+  type: "thought" | "results";
+  thoughtId?: number;
+  thoughtName?: string;
+  thoughtCategory?: string;
+  thoughtDescription?: string;
+  thoughtCriteria?: ScannerCriterion[];
+  isNot?: boolean;
+  position: { x: number; y: number };
+  passCount?: number;
+}
+
+export interface IdeaEdge {
+  id: string;
+  source: string;
+  target: string;
+  logicType: "AND" | "OR";
+}
+
+export const insertScannerThoughtSchema = createInsertSchema(scannerThoughts).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertScannerIdeaSchema = createInsertSchema(scannerIdeas).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertScannerFavoriteSchema = createInsertSchema(scannerFavorites).omit({ id: true, addedAt: true });
+
+export type ScannerThought = typeof scannerThoughts.$inferSelect;
+export type ScannerIdea = typeof scannerIdeas.$inferSelect;
+export type ScannerFavorite = typeof scannerFavorites.$inferSelect;
+export type InsertScannerThought = z.infer<typeof insertScannerThoughtSchema>;
+export type InsertScannerIdea = z.infer<typeof insertScannerIdeaSchema>;
+export type InsertScannerFavorite = z.infer<typeof insertScannerFavoriteSchema>;

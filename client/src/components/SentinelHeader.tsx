@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Crosshair } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Crosshair, Lightbulb } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -76,6 +76,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
   const isPatternsPage = location === "/sentinel/patterns";
   const isTrainingPage = location === "/sentinel/pattern-training";
   const isAdminPage = location.startsWith("/sentinel/admin");
+  const isBigIdeaPage = location === "/sentinel/bigidea";
 
   return (
     <div className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3 bg-card">
@@ -145,6 +146,17 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
             >
               <Crosshair className="w-4 h-4" />
               <span className="hidden sm:inline">Training</span>
+            </Button>
+          </Link>
+          <Link href="/sentinel/bigidea">
+            <Button 
+              variant={isBigIdeaPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-bigidea"
+            >
+              <Lightbulb className="w-4 h-4" />
+              <span className="hidden sm:inline">Big Idea</span>
             </Button>
           </Link>
           {userInfo?.isAdmin && (
