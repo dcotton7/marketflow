@@ -565,7 +565,17 @@ IMPORTANT GUIDELINES for indicator selection:
 - When the user says "MA above/below another MA", always use MA-8 with direction "fast_above_slow" or "fast_below_slow".
 - For golden cross detection, use MA-8 with fastPeriod=50, slowPeriod=200, direction=fast_above_slow.
 
-Select the most appropriate indicators and set parameters that match the user's description. Use multiple criteria when the description implies multiple conditions. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
+CRITICAL RULE FOR CRITERIA COUNT:
+Always generate 2-5 criteria per thought. A single criterion is almost never sufficient to describe a meaningful screening idea. Think about what CONFIRMS the pattern, what FILTERS noise, and what provides CONTEXT. Break the idea into its component conditions. Only use indicatorId values from the indicator library provided above — never invent indicator IDs.
+
+Examples of how to decompose ideas into multiple criteria using real indicator IDs:
+- "Pullback to 50 SMA" → (1) MA-3 Price vs MA Distance: period=50, minPct=0, maxPct=3 (price near 50 SMA), (2) MA-1 SMA Value: period=200, direction=above (uptrend context), (3) VOL-4 Volume Dry-Up: period=50, dryUpDays=5, maxMultiple=0.5 (quiet pullback), (4) RS-4 RSI: period=14, minRSI=40, maxRSI=55 (room to bounce)
+- "Breakout with volume" → (1) PA-7 Breakout Detection: basePeriod=20, lookback=3 (price broke above recent consolidation high), (2) VOL-5 Volume Surge: period=50, surgeMultiple=2.0, priceUp=true (volume confirmation), (3) MA-1 SMA Value: period=50, direction=above (trend filter), (4) PA-2 ATR Percent: period=14, minPct=3, maxPct=15 (sufficient volatility)
+- "Strong uptrend" → (1) MA-1 SMA Value: period=50, direction=above (price above 50 SMA), (2) MA-8 MA Comparison: fastPeriod=50, slowPeriod=200, direction=fast_above_slow (bullish MA structure), (3) MA-4 MA Slope: period=50, slopeDays=10, minSlope=0.5 (rising 50 SMA), (4) VOL-1 Volume vs Average: period=50, minMultiple=1.0 (healthy volume)
+
+Even if the user describes something simple like "price above 50 SMA", add 2-4 confirming criteria from the library that make the screen more useful (e.g., trend direction via MA-8, volume via VOL-1/VOL-4, momentum via RS-4 RSI).
+
+Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
 
       const openai = getOpenAI();
       if (!openai) {
