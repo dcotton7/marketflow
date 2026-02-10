@@ -1625,6 +1625,7 @@ function ScanChartViewer({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-[95vw] w-[95vw] h-[90vh] flex flex-col"
+        onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-3">
