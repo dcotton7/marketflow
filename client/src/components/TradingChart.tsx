@@ -296,6 +296,128 @@ function renderMaLinesToChart(
   return addedSeries;
 }
 
+interface MeasurePoint {
+  time: number;
+  price: number;
+}
+
+class MeasurePrimitive {
+  _series: any = null;
+  _startPoint: MeasurePoint | null = null;
+  _endPoint: MeasurePoint | null = null;
+  _requestUpdate: (() => void) | null = null;
+
+  setPoints(start: MeasurePoint | null, end: MeasurePoint | null) {
+    this._startPoint = start;
+    this._endPoint = end;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  attached({ series, requestUpdate }: any) {
+    this._series = series;
+    this._requestUpdate = requestUpdate;
+  }
+
+  detached() {
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  updateAllViews() {
+    return this;
+  }
+
+  paneViews() {
+    return [this];
+  }
+
+  zOrder(): "top" {
+    return "top";
+  }
+
+  renderer() {
+    return this;
+  }
+
+  draw(target: any) {
+    if (!this._startPoint || !this._endPoint || !this._series) return;
+
+    target.useBitmapCoordinateSpace((scope: any) => {
+      const ctx = scope.context;
+      const ratio = scope.horizontalPixelRatio;
+      const vRatio = scope.verticalPixelRatio;
+      const ts = this._series.chart().timeScale();
+
+      const x1Raw = ts.timeToCoordinate(this._startPoint!.time as any);
+      const x2Raw = ts.timeToCoordinate(this._endPoint!.time as any);
+      const y1Raw = this._series.priceToCoordinate(this._startPoint!.price);
+      const y2Raw = this._series.priceToCoordinate(this._endPoint!.price);
+
+      if (x1Raw == null || x2Raw == null || y1Raw == null || y2Raw == null) return;
+
+      const x1 = Math.round(x1Raw * ratio);
+      const x2 = Math.round(x2Raw * ratio);
+      const y1 = Math.round(y1Raw * vRatio);
+      const y2 = Math.round(y2Raw * vRatio);
+
+      ctx.save();
+
+      ctx.setLineDash([6 * ratio, 4 * ratio]);
+      ctx.strokeStyle = "rgba(250, 204, 21, 0.8)";
+      ctx.lineWidth = 1.5 * ratio;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+
+      const circleR = 4 * ratio;
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(250, 204, 21, 0.9)";
+      ctx.beginPath();
+      ctx.arc(x1, y1, circleR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x2, y2, circleR, 0, Math.PI * 2);
+      ctx.fill();
+
+      const priceDiff = this._endPoint!.price - this._startPoint!.price;
+      const pctChange = ((priceDiff / this._startPoint!.price) * 100);
+      const sign = priceDiff >= 0 ? "+" : "";
+      const label = `${sign}${priceDiff.toFixed(2)}  (${sign}${pctChange.toFixed(2)}%)`;
+
+      const fontSize = Math.round(11 * ratio);
+      ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
+
+      const textMetrics = ctx.measureText(label);
+      const textWidth = textMetrics.width;
+      const textHeight = fontSize;
+      const padX = 6 * ratio;
+      const padY = 4 * ratio;
+
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const boxX = midX - textWidth / 2 - padX;
+      const boxY = midY - textHeight / 2 - padY - 10 * vRatio;
+
+      const bgColor = priceDiff >= 0 ? "rgba(34, 197, 94, 0.85)" : "rgba(239, 68, 68, 0.85)";
+      ctx.fillStyle = bgColor;
+      const boxW = textWidth + padX * 2;
+      const boxH = textHeight + padY * 2;
+      const cornerR = 4 * ratio;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, cornerR);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.fillText(label, midX, boxY + boxH / 2);
+
+      ctx.restore();
+    });
+  }
+}
+
 export function TradingChart({
   data,
   onCandleClick,
@@ -316,6 +438,9 @@ export function TradingChart({
   const markersHandleRef = useRef<any>(null);
   const priceLinesRef = useRef<any[]>([]);
   const maLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const measurePrimitiveRef = useRef<MeasurePrimitive | null>(null);
+  const measureStartRef = useRef<MeasurePoint | null>(null);
+  const shiftKeyRef = useRef(false);
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
@@ -349,9 +474,16 @@ export function TradingChart({
     shiftedToOriginalRef.current = shiftedToOriginal;
   }, [shiftedToOriginal]);
 
+  const clearMeasure = useCallback(() => {
+    measureStartRef.current = null;
+    if (measurePrimitiveRef.current) {
+      measurePrimitiveRef.current.setPoints(null, null);
+    }
+  }, []);
+
   const handleChartClick = useCallback(
     (param: any) => {
-      if (!onCandleClickRef.current || !param.time || !candleSeriesRef.current) return;
+      if (!param.time || !candleSeriesRef.current) return;
 
       let timestamp: number;
       if (typeof param.time === "object") {
@@ -363,6 +495,32 @@ export function TradingChart({
       } else {
         timestamp = param.time as number;
       }
+
+      let clickedPrice: number | null = null;
+      if (param.point && typeof param.point.y === "number") {
+        const priceFromY = candleSeriesRef.current.coordinateToPrice(param.point.y);
+        if (priceFromY !== null && isFinite(priceFromY)) {
+          clickedPrice = Math.round(priceFromY * 100) / 100;
+        }
+      }
+
+      if (shiftKeyRef.current && clickedPrice !== null) {
+        if (!measureStartRef.current) {
+          measureStartRef.current = { time: timestamp, price: clickedPrice };
+          if (measurePrimitiveRef.current) {
+            measurePrimitiveRef.current.setPoints(null, null);
+          }
+        } else {
+          const endPoint: MeasurePoint = { time: timestamp, price: clickedPrice };
+          if (measurePrimitiveRef.current) {
+            measurePrimitiveRef.current.setPoints(measureStartRef.current, endPoint);
+          }
+          measureStartRef.current = null;
+        }
+        return;
+      }
+
+      if (!onCandleClickRef.current) return;
 
       const currentMap = shiftedToOriginalRef.current;
 
@@ -406,14 +564,11 @@ export function TradingChart({
         });
       }
       if (candle) {
-        let clickedPrice = candle.close;
-        if (param.point && typeof param.point.y === "number") {
-          const priceFromY = candleSeriesRef.current.coordinateToPrice(param.point.y);
-          if (priceFromY !== null && isFinite(priceFromY)) {
-            clickedPrice = Math.round(priceFromY * 100) / 100;
-          }
+        let resolvedPrice = candle.close;
+        if (clickedPrice !== null) {
+          resolvedPrice = clickedPrice;
         }
-        onCandleClickRef.current(candle, clickedPrice);
+        onCandleClickRef.current(candle, resolvedPrice);
       }
     },
     []
@@ -573,6 +728,10 @@ export function TradingChart({
       }
     }
 
+    const measurePrimitive = new MeasurePrimitive();
+    candleSeries.attachPrimitive(measurePrimitive);
+    measurePrimitiveRef.current = measurePrimitive;
+
     chart.subscribeCrosshairMove(() => {});
     chart.subscribeClick(handleChartClick);
 
@@ -594,6 +753,8 @@ export function TradingChart({
 
     return () => {
       resizeObserver.disconnect();
+      measurePrimitiveRef.current = null;
+      measureStartRef.current = null;
       if (chartRef.current) {
         chartRef.current.unsubscribeClick(handleChartClick);
         chartRef.current.remove();
@@ -749,6 +910,22 @@ export function TradingChart({
     }
     return items;
   }, [maSettings, timeframe, data.indicators]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftKeyRef.current = true;
+      if (e.key === "Escape") clearMeasure();
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") shiftKeyRef.current = false;
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [clearMeasure]);
 
   return (
     <div data-testid="chart-trading" className="relative w-full h-full flex flex-col">
