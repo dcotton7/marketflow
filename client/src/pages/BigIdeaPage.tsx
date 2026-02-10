@@ -256,7 +256,7 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
         <Badge variant="outline" className="text-xs">
           {criteriaCount} criteria
         </Badge>
-        {data.timeframe && String(data.timeframe) !== "daily" && (
+        {!!data.timeframe && String(data.timeframe) !== "daily" && (
           <Badge variant="outline" className="text-[10px] bg-blue-500/20 text-blue-400 border-blue-500/30">
             {String(data.timeframe) === "5min" ? "5m" : String(data.timeframe) === "15min" ? "15m" : String(data.timeframe) === "30min" ? "30m" : String(data.timeframe)}
           </Badge>
@@ -448,6 +448,8 @@ export default function BigIdeaPage() {
   const [aiDescription, setAiDescription] = useState("");
   const [aiProposal, setAiProposal] = useState<any>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ thoughtId: number; name: string; nodeId?: string } | null>(null);
+  const [restateText, setRestateText] = useState("");
+  const [restateNodeId, setRestateNodeId] = useState<string | null>(null);
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -484,6 +486,48 @@ export default function BigIdeaPage() {
     },
     onError: (err: Error) => {
       toast({ title: "AI generation failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const restateMutation = useMutation({
+    mutationFn: async ({ nodeId, description }: { nodeId: string; description: string }) => {
+      const aiRes = await apiRequest("POST", "/api/bigidea/ai/create-thought", { description });
+      const aiData = await aiRes.json();
+      const node = nodes.find(n => n.id === nodeId);
+      const thoughtId = node?.data?.thoughtId as number | undefined;
+      if (thoughtId) {
+        await apiRequest("PATCH", `/api/bigidea/thoughts/${thoughtId}`, {
+          name: aiData.name,
+          category: aiData.category,
+          description: aiData.description,
+          criteria: aiData.criteria,
+          aiPrompt: description,
+        });
+      }
+      return { nodeId, aiData, thoughtId };
+    },
+    onSuccess: ({ nodeId, aiData }, variables) => {
+      setNodes(prev => prev.map(n => {
+        if (n.id !== nodeId) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            label: aiData.name,
+            category: aiData.category,
+            description: aiData.description,
+            criteria: aiData.criteria,
+            aiPrompt: variables.description,
+          },
+        };
+      }));
+      setRestateNodeId(null);
+      setRestateText("");
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
+      toast({ title: "Thought restated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Restate failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -1175,7 +1219,60 @@ export default function BigIdeaPage() {
                       <Ban className="h-3 w-3" />
                       NOT {selectedNode.data.isNot ? "ON" : "OFF"}
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const existingPrompt = (selectedNode.data as any).aiPrompt;
+                        const matchingThought = thoughts.find(t => t.id === selectedNode.data.thoughtId);
+                        setRestateText(existingPrompt || matchingThought?.aiPrompt || "");
+                        setRestateNodeId(selectedNode.id);
+                      }}
+                      className="gap-1 text-xs"
+                      data-testid="button-restate"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Restate
+                    </Button>
                   </div>
+
+                  {restateNodeId === selectedNode.id && (
+                    <div className="space-y-2 border border-border rounded p-2.5">
+                      <Label className="text-xs text-muted-foreground">Describe what you want this thought to screen for:</Label>
+                      <Textarea
+                        value={restateText}
+                        onChange={(e) => setRestateText(e.target.value)}
+                        placeholder="e.g. stocks pulling back to 50 SMA with tight consolidation"
+                        className="text-xs min-h-[60px]"
+                        data-testid="textarea-restate"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => restateMutation.mutate({ nodeId: selectedNode.id, description: restateText })}
+                          disabled={!restateText.trim() || restateMutation.isPending}
+                          className="gap-1 text-xs"
+                          data-testid="button-restate-submit"
+                        >
+                          {restateMutation.isPending ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3 w-3" />
+                          )}
+                          Regenerate
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => { setRestateNodeId(null); setRestateText(""); }}
+                          className="text-xs"
+                          data-testid="button-restate-cancel"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-3">
                     <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1435,6 +1532,7 @@ export default function BigIdeaPage() {
                       description: aiProposal.description,
                       criteria: aiProposal.criteria,
                       timeframe: aiProposal.timeframe || "daily",
+                      aiPrompt: aiDescription,
                     })
                   }
                   disabled={createThoughtMutation.isPending}

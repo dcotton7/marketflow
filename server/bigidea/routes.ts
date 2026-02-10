@@ -245,14 +245,14 @@ export function registerBigIdeaRoutes(app: Express): void {
         return res.status(500).json({ error: "Database not available" });
       }
 
-      const { name, category, description, criteria, timeframe } = req.body;
+      const { name, category, description, criteria, timeframe, aiPrompt } = req.body;
       if (!name || !category || !criteria) {
         return res.status(400).json({ error: "name, category, and criteria are required" });
       }
 
       const [thought] = await db
         .insert(scannerThoughts)
-        .values({ userId, name, category, description: description || null, criteria, timeframe: timeframe || "daily" })
+        .values({ userId, name, category, description: description || null, aiPrompt: aiPrompt || null, criteria, timeframe: timeframe || "daily" })
         .returning();
 
       res.status(201).json(thought);
@@ -289,6 +289,7 @@ export function registerBigIdeaRoutes(app: Express): void {
       if (req.body.description !== undefined) updates.description = req.body.description;
       if (req.body.criteria !== undefined) updates.criteria = req.body.criteria;
       if (req.body.timeframe !== undefined) updates.timeframe = req.body.timeframe;
+      if (req.body.aiPrompt !== undefined) updates.aiPrompt = req.body.aiPrompt;
 
       const [updated] = await db
         .update(scannerThoughts)
@@ -553,6 +554,9 @@ You must respond with valid JSON in this exact format:
     }
   ]
 }
+
+CRITICAL RULE FOR DESCRIPTIONS:
+The "description" field MUST accurately describe what the chosen indicators and parameters actually measure — NOT what the user asked for. If the user asks for "stocks bouncing off the 50 SMA" but the best available indicator only checks proximity to the SMA (not a bounce/reversal), the description must say "Screens for stocks whose price is currently within X% of the 50 SMA" rather than claiming it detects a bounce. Never oversell or exaggerate what the criteria can detect. Be precise and honest about what the screening actually does.
 
 IMPORTANT GUIDELINES for indicator selection:
 - To compare two moving averages (e.g. "50 SMA above 200 SMA", "EMA cross", "golden cross"), use MA-8 (MA Comparison) with the direction parameter. Do NOT use MA-6 for this purpose.

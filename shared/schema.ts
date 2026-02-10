@@ -1160,6 +1160,7 @@ export const scannerThoughts = pgTable("scanner_thoughts", {
   name: text("name").notNull(),
   category: text("category").notNull(),
   description: text("description"),
+  aiPrompt: text("ai_prompt"),
   criteria: jsonb("criteria").$type<ScannerCriterion[]>().notNull(),
   timeframe: text("timeframe").notNull().default("daily"),
   createdAt: timestamp("created_at").defaultNow(),
