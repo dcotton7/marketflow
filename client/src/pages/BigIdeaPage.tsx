@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TradingChart } from "@/components/TradingChart";
 import type { ChartCandle, ChartIndicators } from "@/components/TradingChart";
+import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -59,6 +60,7 @@ import {
   X,
   HelpCircle,
   Trash2,
+  Settings2,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -1530,6 +1532,7 @@ function ScanChartViewer({
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
+  const [maSettingsOpen, setMaSettingsOpen] = useState(false);
 
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
@@ -1670,7 +1673,21 @@ function ScanChartViewer({
     };
   }, [open, onOpenChange]);
 
+  const dayChange = useMemo(() => {
+    if (!dailyData || dailyData.candles.length < 2) return null;
+    const last = dailyData.candles[dailyData.candles.length - 1];
+    const prev = dailyData.candles[dailyData.candles.length - 2];
+    const change = last.close - prev.close;
+    const changePct = (change / prev.close) * 100;
+    return { price: last.close, change, changePct };
+  }, [dailyData]);
+
   if (!open) return null;
+
+  const displayPrice = dayChange?.price ?? current?.price ?? 0;
+  const priceChange = dayChange?.change ?? 0;
+  const pricePctChange = dayChange?.changePct ?? 0;
+  const isPriceUp = priceChange >= 0;
 
   return createPortal(
     <div
@@ -1695,7 +1712,31 @@ function ScanChartViewer({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-lg font-bold" data-testid="text-chart-symbol">{symbol}</span>
+          <div
+            className="flex items-center gap-0 text-xl tracking-tight"
+            style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
+            data-testid={`ticker-box-${symbol}`}
+          >
+            <span className="font-bold text-foreground" data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-muted-foreground mx-1.5">|</span>
+            <span className="font-semibold text-foreground" data-testid="text-chart-price">
+              ${displayPrice.toFixed(2)}
+            </span>
+            <span className="text-muted-foreground mx-1.5">|</span>
+            <span
+              className={`font-bold ${isPriceUp ? "text-green-500" : "text-red-500"}`}
+              data-testid="text-chart-change"
+            >
+              {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
+            </span>
+            <span className="text-muted-foreground mx-1">|</span>
+            <span
+              className={`font-bold ${isPriceUp ? "text-green-500" : "text-red-500"}`}
+              data-testid="text-chart-pct"
+            >
+              {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
+            </span>
+          </div>
           <span className="text-sm text-muted-foreground" data-testid="text-chart-position">
             {currentIndex + 1} of {results.length}
           </span>
@@ -1708,9 +1749,7 @@ function ScanChartViewer({
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-mono text-muted-foreground ml-auto">
-            ${current?.price.toFixed(2)}
-          </span>
+          <div className="ml-auto" />
           <Button
             size="icon"
             variant="ghost"
@@ -1731,7 +1770,7 @@ function ScanChartViewer({
         <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
               <span className="text-xs text-muted-foreground font-medium">Daily</span>
             </div>
             {dailyLoading ? (
@@ -1758,7 +1797,7 @@ function ScanChartViewer({
             )}
           </div>
           <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0">
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
               <span className="text-xs text-muted-foreground font-medium">Intraday</span>
               <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
                 <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-scan-chart-intraday">
@@ -1770,6 +1809,14 @@ function ScanChartViewer({
                   <SelectItem value="30min">30m</SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setMaSettingsOpen(true)}
+                data-testid="button-scan-chart-ma-settings"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </Button>
             </div>
             {intradayLoading ? (
               <Card className="flex-1">
@@ -1846,6 +1893,7 @@ function ScanChartViewer({
           </div>
         </div>
         </ChartErrorBoundary>
+        <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
       </div>
     </div>,
     document.body
