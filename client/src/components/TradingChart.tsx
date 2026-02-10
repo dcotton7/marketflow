@@ -466,24 +466,7 @@ export function TradingChart({
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
 
-  const data = useMemo(() => {
-    if (!maxBars || rawData.candles.length <= maxBars) return rawData;
-    const start = rawData.candles.length - maxBars;
-    const sl = (arr: any[] | undefined) => arr ? arr.slice(start) : [];
-    return {
-      ...rawData,
-      candles: rawData.candles.slice(start),
-      indicators: {
-        ema5: sl(rawData.indicators.ema5),
-        ema10: sl(rawData.indicators.ema10),
-        sma21: sl(rawData.indicators.sma21),
-        sma50: sl(rawData.indicators.sma50),
-        sma200: sl(rawData.indicators.sma200),
-        avwapHigh: rawData.indicators.avwapHigh ? rawData.indicators.avwapHigh.slice(start) : undefined,
-        avwapLow: rawData.indicators.avwapLow ? rawData.indicators.avwapLow.slice(start) : undefined,
-      },
-    };
-  }, [rawData, maxBars]);
+  const data = rawData;
 
   useEffect(() => {
     candlesRef.current = data.candles;
@@ -780,7 +763,13 @@ export function TradingChart({
     chart.subscribeCrosshairMove(() => {});
     chart.subscribeClick(handleChartClick);
 
-    chart.timeScale().fitContent();
+    if (maxBars && displayData.candles.length > maxBars) {
+      const from = displayData.candles.length - maxBars;
+      const to = displayData.candles.length - 1;
+      chart.timeScale().setVisibleLogicalRange({ from, to });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -811,6 +800,16 @@ export function TradingChart({
       }
     };
   }, [displayData, height, isIntraday, showDayDividers, timeframe]);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const chart = chartRef.current;
+    if (maxBars && displayData.candles.length > maxBars) {
+      const from = displayData.candles.length - maxBars;
+      const to = displayData.candles.length - 1;
+      chart.timeScale().setVisibleLogicalRange({ from, to });
+    }
+  }, [maxBars]);
 
   useEffect(() => {
     if (!chartRef.current) return;
