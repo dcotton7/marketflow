@@ -253,6 +253,11 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
         <Badge variant="outline" className="text-xs">
           {criteriaCount} criteria
         </Badge>
+        {data.timeframe && String(data.timeframe) !== "daily" && (
+          <Badge variant="outline" className="text-[10px] bg-blue-500/20 text-blue-400 border-blue-500/30">
+            {String(data.timeframe) === "5min" ? "5m" : String(data.timeframe) === "15min" ? "15m" : String(data.timeframe) === "30min" ? "30m" : String(data.timeframe)}
+          </Badge>
+        )}
         {passCount !== undefined && (
           <Badge
             variant="outline"
@@ -468,6 +473,7 @@ export default function BigIdeaPage() {
         thoughtCategory: n.data.category as string | undefined,
         thoughtDescription: n.data.description as string | undefined,
         thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
+        thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
         isNot: n.data.isNot as boolean | undefined,
         position: n.position,
         passCount: n.data.passCount as number | undefined,
@@ -524,6 +530,7 @@ export default function BigIdeaPage() {
         type: n.type,
         thoughtCriteria: n.data.criteria,
         thoughtName: n.data.label,
+        thoughtTimeframe: n.data.timeframe || "daily",
         isNot: n.data.isNot,
       }));
       const scanEdges = edges.map((e) => ({
@@ -633,6 +640,7 @@ export default function BigIdeaPage() {
           category: thought.category,
           description: thought.description,
           criteria: thought.criteria,
+          timeframe: thought.timeframe || "daily",
           thoughtId: thought.id,
           isNot: false,
           passCount: undefined,
@@ -717,6 +725,7 @@ export default function BigIdeaPage() {
                 criteria: n.thoughtCriteria,
                 thoughtId: n.thoughtId,
                 isNot: n.isNot || false,
+                timeframe: n.thoughtTimeframe || "daily",
                 passCount: undefined,
               },
         deletable: n.type !== "results",
@@ -933,6 +942,11 @@ export default function BigIdeaPage() {
                           <div className="flex items-center gap-1.5">
                             <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                             <span className="text-sm font-medium truncate">{thought.name}</span>
+                            {thought.timeframe && thought.timeframe !== "daily" && (
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 flex-shrink-0">
+                                {thought.timeframe === "5min" ? "5m" : thought.timeframe === "15min" ? "15m" : thought.timeframe === "30min" ? "30m" : thought.timeframe}
+                              </Badge>
+                            )}
                           </div>
                           {thought.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 ml-[18px]">
@@ -1266,6 +1280,23 @@ export default function BigIdeaPage() {
                 </div>
               </div>
               <div>
+                <Label className="text-xs text-muted-foreground">Timeframe</Label>
+                <Select
+                  value={aiProposal.timeframe || "daily"}
+                  onValueChange={(v) => setAiProposal({ ...aiProposal, timeframe: v })}
+                >
+                  <SelectTrigger className="h-7 text-xs mt-1 w-32" data-testid="select-ai-timeframe">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="5min">5 min</SelectItem>
+                    <SelectItem value="15min">15 min</SelectItem>
+                    <SelectItem value="30min">30 min</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <Label className="text-xs text-muted-foreground">Description</Label>
                 <p className="text-sm">{aiProposal.description}</p>
               </div>
@@ -1358,6 +1389,7 @@ export default function BigIdeaPage() {
                       category: aiProposal.category,
                       description: aiProposal.description,
                       criteria: aiProposal.criteria,
+                      timeframe: aiProposal.timeframe || "daily",
                     })
                   }
                   disabled={createThoughtMutation.isPending}

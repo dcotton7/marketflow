@@ -1153,6 +1153,7 @@ export const scannerThoughts = pgTable("scanner_thoughts", {
   category: text("category").notNull(),
   description: text("description"),
   criteria: jsonb("criteria").$type<ScannerCriterion[]>().notNull(),
+  timeframe: text("timeframe").notNull().default("daily"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1203,6 +1204,7 @@ export interface IdeaNode {
   thoughtCategory?: string;
   thoughtDescription?: string;
   thoughtCriteria?: ScannerCriterion[];
+  thoughtTimeframe?: string;
   isNot?: boolean;
   position: { x: number; y: number };
   passCount?: number;

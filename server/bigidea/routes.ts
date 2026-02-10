@@ -34,6 +34,7 @@ function getOpenAI(): OpenAI | null {
 
 const ohlcvCache = new Map<string, { data: CandleData[]; timestamp: number }>();
 const CACHE_TTL = 60 * 60 * 1000;
+const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
 
 function getUniverseTickers(universe: string): string[] {
   switch (universe) {
@@ -97,28 +98,45 @@ function getUniverseTickers(universe: string): string[] {
   }
 }
 
-async function fetchOHLCV(symbol: string): Promise<CandleData[]> {
-  const cached = ohlcvCache.get(symbol);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+function getIntervalConfig(timeframe: string): { interval: string; lookbackDays: number; cacheTTL: number } {
+  switch (timeframe) {
+    case "5min":
+      return { interval: "5m", lookbackDays: 30, cacheTTL: INTRADAY_CACHE_TTL };
+    case "15min":
+      return { interval: "15m", lookbackDays: 45, cacheTTL: INTRADAY_CACHE_TTL };
+    case "30min":
+      return { interval: "30m", lookbackDays: 60, cacheTTL: INTRADAY_CACHE_TTL };
+    default:
+      return { interval: "1d", lookbackDays: 365, cacheTTL: CACHE_TTL };
+  }
+}
+
+async function fetchOHLCV(symbol: string, timeframe: string = "daily"): Promise<CandleData[]> {
+  const cacheKey = `${symbol}:${timeframe}`;
+  const cached = ohlcvCache.get(cacheKey);
+  const { interval, lookbackDays, cacheTTL } = getIntervalConfig(timeframe);
+
+  if (cached && Date.now() - cached.timestamp < cacheTTL) {
     return cached.data;
   }
 
   try {
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setFullYear(startDate.getFullYear() - 1);
+    startDate.setDate(startDate.getDate() - lookbackDays);
 
     const yf = await getYahooFinance();
     const result = await yf.chart(symbol, {
       period1: startDate,
       period2: endDate,
-      interval: "1d",
+      interval,
     });
 
+    const isIntraday = timeframe !== "daily";
     const candles: CandleData[] = ((result as any).quotes || [])
       .filter((q: any) => q.open != null && q.high != null && q.low != null && q.close != null)
       .map((q: any) => ({
-        date: new Date(q.date).toISOString().split("T")[0],
+        date: isIntraday ? new Date(q.date).toISOString() : new Date(q.date).toISOString().split("T")[0],
         open: q.open,
         high: q.high,
         low: q.low,
@@ -127,10 +145,10 @@ async function fetchOHLCV(symbol: string): Promise<CandleData[]> {
       }))
       .reverse();
 
-    ohlcvCache.set(symbol, { data: candles, timestamp: Date.now() });
+    ohlcvCache.set(cacheKey, { data: candles, timestamp: Date.now() });
     return candles;
   } catch (err) {
-    console.error(`Failed to fetch OHLCV for ${symbol}:`, err);
+    console.error(`Failed to fetch OHLCV for ${symbol} (${timeframe}):`, err);
     return [];
   }
 }
@@ -227,14 +245,14 @@ export function registerBigIdeaRoutes(app: Express): void {
         return res.status(500).json({ error: "Database not available" });
       }
 
-      const { name, category, description, criteria } = req.body;
+      const { name, category, description, criteria, timeframe } = req.body;
       if (!name || !category || !criteria) {
         return res.status(400).json({ error: "name, category, and criteria are required" });
       }
 
       const [thought] = await db
         .insert(scannerThoughts)
-        .values({ userId, name, category, description: description || null, criteria })
+        .values({ userId, name, category, description: description || null, criteria, timeframe: timeframe || "daily" })
         .returning();
 
       res.status(201).json(thought);
@@ -270,6 +288,7 @@ export function registerBigIdeaRoutes(app: Express): void {
       if (req.body.category !== undefined) updates.category = req.body.category;
       if (req.body.description !== undefined) updates.description = req.body.description;
       if (req.body.criteria !== undefined) updates.criteria = req.body.criteria;
+      if (req.body.timeframe !== undefined) updates.timeframe = req.body.timeframe;
 
       const [updated] = await db
         .update(scannerThoughts)
@@ -594,9 +613,14 @@ Select the most appropriate indicators and set parameters that match the user's 
       }
 
       const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && n.thoughtCriteria);
-      console.log(`[BigIdea Scan] Universe: ${universe}, tickers: ${tickers.length}, thought nodes: ${thoughtNodes.length}`);
+      const timeframesNeeded = new Set<string>();
       for (const tn of thoughtNodes) {
-        console.log(`[BigIdea Scan] Thought: "${tn.thoughtName}" (${tn.id}), criteria:`, JSON.stringify(tn.thoughtCriteria?.map((c: any) => ({ id: c.indicatorId, label: c.label, params: c.params?.map((p: any) => `${p.name}=${p.value}`) }))));
+        timeframesNeeded.add(tn.thoughtTimeframe || "daily");
+      }
+      const timeframesArray = Array.from(timeframesNeeded);
+      console.log(`[BigIdea Scan] Universe: ${universe}, tickers: ${tickers.length}, thought nodes: ${thoughtNodes.length}, timeframes: [${timeframesArray.join(", ")}]`);
+      for (const tn of thoughtNodes) {
+        console.log(`[BigIdea Scan] Thought: "${tn.thoughtName}" (${tn.id}, tf=${tn.thoughtTimeframe || "daily"}), criteria:`, JSON.stringify(tn.thoughtCriteria?.map((c: any) => ({ id: c.indicatorId, label: c.label, params: c.params?.map((p: any) => `${p.name}=${p.value}`) }))));
       }
 
       let spyCandles: CandleData[] = [];
@@ -622,15 +646,27 @@ Select the most appropriate indicators and set parameters that match the user's 
         const batchResults = await Promise.all(
           batch.map(async (symbol) => {
             try {
-              const candles = await fetchOHLCV(symbol);
-              if (candles.length < 20) {
+              const candlesByTimeframe: Record<string, CandleData[]> = {};
+              for (const tf of timeframesArray) {
+                candlesByTimeframe[tf] = await fetchOHLCV(symbol, tf);
+              }
+
+              const dailyCandles = candlesByTimeframe["daily"] || [];
+              if (dailyCandles.length < 20 && timeframesNeeded.has("daily")) {
                 tooFewCandlesCount++;
-                return null;
+                if (timeframesNeeded.size === 1) return null;
               }
 
               const nodeResults: Record<string, boolean> = {};
 
               for (const node of thoughtNodes) {
+                const tf = node.thoughtTimeframe || "daily";
+                const candles = candlesByTimeframe[tf] || [];
+                const minBars = tf === "daily" ? 20 : 10;
+                if (candles.length < minBars) {
+                  nodeResults[node.id] = false;
+                  continue;
+                }
                 let passed = evaluateThoughtCriteria(
                   node.thoughtCriteria,
                   candles,
@@ -695,10 +731,11 @@ Select the most appropriate indicators and set parameters that match the user's 
               }
 
               if (passesFlow) {
+                const priceCandles = candlesByTimeframe["daily"] || candlesByTimeframe[timeframesArray[0]] || [];
                 return {
                   symbol,
                   name: symbol,
-                  price: candles[0].close,
+                  price: priceCandles.length > 0 ? priceCandles[0].close : 0,
                   passedPaths,
                 };
               }
