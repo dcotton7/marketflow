@@ -1135,6 +1135,10 @@ export const userChartPreferences = pgTable("user_chart_preferences", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().unique(),
   defaultBarsOnScreen: integer("default_bars_on_screen").notNull().default(200),
+  dataLimitDaily: integer("data_limit_daily").notNull().default(750),
+  dataLimit5min: integer("data_limit_5min").notNull().default(60),
+  dataLimit15min: integer("data_limit_15min").notNull().default(60),
+  dataLimit30min: integer("data_limit_30min").notNull().default(60),
 });
 
 export type UserChartPreference = typeof userChartPreferences.$inferSelect;

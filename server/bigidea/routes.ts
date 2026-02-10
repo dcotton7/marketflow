@@ -101,9 +101,9 @@ function getUniverseTickers(universe: string): string[] {
 function getIntervalConfig(timeframe: string): { interval: string; lookbackDays: number; cacheTTL: number } {
   switch (timeframe) {
     case "5min":
-      return { interval: "5m", lookbackDays: 30, cacheTTL: INTRADAY_CACHE_TTL };
+      return { interval: "5m", lookbackDays: 60, cacheTTL: INTRADAY_CACHE_TTL };
     case "15min":
-      return { interval: "15m", lookbackDays: 45, cacheTTL: INTRADAY_CACHE_TTL };
+      return { interval: "15m", lookbackDays: 60, cacheTTL: INTRADAY_CACHE_TTL };
     case "30min":
       return { interval: "30m", lookbackDays: 60, cacheTTL: INTRADAY_CACHE_TTL };
     default:

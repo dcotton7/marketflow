@@ -7,7 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Trash2, Plus, Loader2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Trash2, Plus, Loader2, Database } from "lucide-react";
 import { BARS_PER_DAY } from "@shared/indicatorTemplates";
 
 interface MaSettingRow {
@@ -26,6 +27,14 @@ interface MaSettingRow {
   thirtyMinOn: boolean;
   sortOrder: number;
   calcOn: "daily" | "intraday";
+}
+
+interface ChartPrefs {
+  defaultBarsOnScreen: number;
+  dataLimitDaily: number;
+  dataLimit5min: number;
+  dataLimit15min: number;
+  dataLimit30min: number;
 }
 
 const LINE_TYPE_OPTIONS = [
@@ -53,16 +62,43 @@ function isNonVwap(row: MaSettingRow): boolean {
   return row.maType !== "vwap" && row.maType !== "vwap_hi" && row.maType !== "vwap_lo";
 }
 
+function getMaxBarsForTimeframe(timeframe: string, limits: ChartPrefs): number {
+  const bpd = BARS_PER_DAY[timeframe] ?? 1;
+  switch (timeframe) {
+    case "5m": case "5min": return limits.dataLimit5min * bpd;
+    case "15m": case "15min": return limits.dataLimit15min * bpd;
+    case "30m": case "30min": return limits.dataLimit30min * bpd;
+    default: return limits.dataLimitDaily;
+  }
+}
+
+function isFeasible(row: MaSettingRow, timeframe: string, limits: ChartPrefs): boolean {
+  if (!isNonVwap(row) || row.period == null) return true;
+  const requiredBars = row.calcOn === "intraday" ? row.period : calcBars(row.period, timeframe) ?? row.period;
+  const maxBars = getMaxBarsForTimeframe(timeframe, limits);
+  return requiredBars <= maxBars;
+}
+
+const DEFAULT_LIMITS: ChartPrefs = {
+  defaultBarsOnScreen: 200,
+  dataLimitDaily: 750,
+  dataLimit5min: 60,
+  dataLimit15min: 60,
+  dataLimit30min: 60,
+};
+
 export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [rows, setRows] = useState<MaSettingRow[]>([]);
   const [defaultBars, setDefaultBars] = useState(200);
+  const [limits, setLimits] = useState<ChartPrefs>(DEFAULT_LIMITS);
+  const [showDataLimits, setShowDataLimits] = useState(false);
 
   const { data, isLoading } = useQuery<MaSettingRow[]>({
     queryKey: ["/api/sentinel/ma-settings"],
     enabled: open,
   });
 
-  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+  const { data: chartPrefs } = useQuery<ChartPrefs>({
     queryKey: ["/api/sentinel/chart-preferences"],
     enabled: open,
   });
@@ -76,6 +112,13 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   useEffect(() => {
     if (chartPrefs) {
       setDefaultBars(chartPrefs.defaultBarsOnScreen);
+      setLimits({
+        defaultBarsOnScreen: chartPrefs.defaultBarsOnScreen,
+        dataLimitDaily: chartPrefs.dataLimitDaily ?? 750,
+        dataLimit5min: chartPrefs.dataLimit5min ?? 60,
+        dataLimit15min: chartPrefs.dataLimit15min ?? 60,
+        dataLimit30min: chartPrefs.dataLimit30min ?? 60,
+      });
     }
   }, [chartPrefs]);
 
@@ -83,11 +126,19 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   rowsRef.current = rows;
   const defaultBarsRef = useRef(defaultBars);
   defaultBarsRef.current = defaultBars;
+  const limitsRef = useRef(limits);
+  limitsRef.current = limits;
 
   const saveMutation = useMutation({
     mutationFn: async (currentRows: MaSettingRow[]) => {
       await apiRequest("PUT", "/api/sentinel/ma-settings", { rows: currentRows });
-      await apiRequest("PUT", "/api/sentinel/chart-preferences", { defaultBarsOnScreen: defaultBarsRef.current });
+      await apiRequest("PUT", "/api/sentinel/chart-preferences", {
+        defaultBarsOnScreen: defaultBarsRef.current,
+        dataLimitDaily: limitsRef.current.dataLimitDaily,
+        dataLimit5min: limitsRef.current.dataLimit5min,
+        dataLimit15min: limitsRef.current.dataLimit15min,
+        dataLimit30min: limitsRef.current.dataLimit30min,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/ma-settings"] });
@@ -128,6 +179,67 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   const deleteRow = (rowId: string) => {
     setRows(prev => prev.filter(r => r.rowId !== rowId));
+  };
+
+  const renderSwitch = (
+    row: MaSettingRow,
+    index: number,
+    field: "dailyOn" | "fiveMinOn" | "fifteenMinOn" | "thirtyMinOn",
+    timeframe: string,
+    testIdPrefix: string
+  ) => {
+    const feasible = isFeasible(row, timeframe, limits);
+    const checked = row[field];
+    const requiredBars = isNonVwap(row) && row.period != null
+      ? (row.calcOn === "intraday" ? row.period : calcBars(row.period, timeframe) ?? row.period)
+      : null;
+    const maxBars = Math.round(getMaxBarsForTimeframe(timeframe, limits));
+
+    const switchEl = (
+      <div className="flex flex-col items-center gap-0.5">
+        <Switch
+          checked={checked && feasible}
+          onCheckedChange={v => updateRow(row.rowId, field, v)}
+          className={`scale-75 ${!feasible ? "opacity-30 pointer-events-none" : ""}`}
+          disabled={!feasible}
+          data-testid={`switch-${testIdPrefix}-${index}`}
+        />
+        {isNonVwap(row) && row.period != null && (
+          <span
+            className={`text-[9px] leading-none ${
+              !feasible
+                ? "text-destructive line-through"
+                : row.calcOn === "daily"
+                  ? "text-muted-foreground"
+                  : "text-muted-foreground/40"
+            }`}
+            data-testid={`bars-${testIdPrefix}-${index}`}
+          >
+            {row.calcOn === "daily" ? calcBars(row.period, timeframe) : row.period}
+          </span>
+        )}
+      </div>
+    );
+
+    if (!feasible && requiredBars != null) {
+      const tfLabel = timeframe === "5m" || timeframe === "5min" ? "5min"
+        : timeframe === "15m" || timeframe === "15min" ? "15min"
+        : timeframe === "30m" || timeframe === "30min" ? "30min" : "daily";
+      const limitDays = tfLabel === "5min" ? limits.dataLimit5min
+        : tfLabel === "15min" ? limits.dataLimit15min
+        : tfLabel === "30min" ? limits.dataLimit30min
+        : limits.dataLimitDaily;
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{switchEl}</TooltipTrigger>
+          <TooltipContent side="top" className="text-xs max-w-[220px]">
+            Needs {requiredBars.toLocaleString()} bars but only {maxBars.toLocaleString()} available ({limitDays}d lookback). Update Data Limits to enable.
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return switchEl;
   };
 
   return (
@@ -258,82 +370,16 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                         </Select>
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="flex flex-col items-center gap-0.5">
-                          <Switch
-                            checked={row.dailyOn}
-                            onCheckedChange={v => updateRow(row.rowId, "dailyOn", v)}
-                            className="scale-75"
-                            data-testid={`switch-daily-${index}`}
-                          />
-                          {isNonVwap(row) && row.period != null && (
-                            <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-daily-${index}`}>
-                              {row.period}
-                            </span>
-                          )}
-                        </div>
+                        {renderSwitch(row, index, "dailyOn", "daily", "daily")}
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="flex flex-col items-center gap-0.5">
-                          <Switch
-                            checked={row.fiveMinOn}
-                            onCheckedChange={v => updateRow(row.rowId, "fiveMinOn", v)}
-                            className="scale-75"
-                            data-testid={`switch-5m-${index}`}
-                          />
-                          {isNonVwap(row) && row.period != null && (
-                            row.calcOn === "daily" ? (
-                              <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-5m-${index}`}>
-                                {calcBars(row.period, "5m")}
-                              </span>
-                            ) : (
-                              <span className="text-[9px] text-muted-foreground/40 leading-none" data-testid={`bars-5m-${index}`}>
-                                {row.period}
-                              </span>
-                            )
-                          )}
-                        </div>
+                        {renderSwitch(row, index, "fiveMinOn", "5m", "5m")}
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="flex flex-col items-center gap-0.5">
-                          <Switch
-                            checked={row.fifteenMinOn}
-                            onCheckedChange={v => updateRow(row.rowId, "fifteenMinOn", v)}
-                            className="scale-75"
-                            data-testid={`switch-15m-${index}`}
-                          />
-                          {isNonVwap(row) && row.period != null && (
-                            row.calcOn === "daily" ? (
-                              <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-15m-${index}`}>
-                                {calcBars(row.period, "15m")}
-                              </span>
-                            ) : (
-                              <span className="text-[9px] text-muted-foreground/40 leading-none" data-testid={`bars-15m-${index}`}>
-                                {row.period}
-                              </span>
-                            )
-                          )}
-                        </div>
+                        {renderSwitch(row, index, "fifteenMinOn", "15m", "15m")}
                       </td>
                       <td className="py-1.5 px-1 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="flex flex-col items-center gap-0.5">
-                          <Switch
-                            checked={row.thirtyMinOn}
-                            onCheckedChange={v => updateRow(row.rowId, "thirtyMinOn", v)}
-                            className="scale-75"
-                            data-testid={`switch-30m-${index}`}
-                          />
-                          {isNonVwap(row) && row.period != null && (
-                            row.calcOn === "daily" ? (
-                              <span className="text-[9px] text-muted-foreground leading-none" data-testid={`bars-30m-${index}`}>
-                                {calcBars(row.period, "30m")}
-                              </span>
-                            ) : (
-                              <span className="text-[9px] text-muted-foreground/40 leading-none" data-testid={`bars-30m-${index}`}>
-                                {row.period}
-                              </span>
-                            )
-                          )}
-                        </div>
+                        {renderSwitch(row, index, "thirtyMinOn", "30m", "30m")}
                       </td>
                       <td className="py-1.5 px-1">
                         {!row.isSystem && (
@@ -353,11 +399,77 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
               </table>
             </div>
 
+            {showDataLimits && (
+              <div className="border rounded-md p-3 space-y-2 bg-muted/20" data-testid="data-limits-panel">
+                <div className="flex items-center gap-2 mb-1">
+                  <Database className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">Data Provider Limits (days of history)</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground/70 leading-tight">
+                  These limits reflect how many days of historical data your data provider can deliver per timeframe.
+                  MAs that require more bars than available will be greyed out. Update these values if you switch to a provider with more history.
+                </p>
+                <div className="grid grid-cols-4 gap-3 pt-1" onClick={e => e.stopPropagation()}>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">Daily</Label>
+                    <Input
+                      type="number"
+                      value={limits.dataLimitDaily}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimitDaily: Math.max(30, parseInt(e.target.value) || 750) }))}
+                      className="h-7 text-xs"
+                      data-testid="input-limit-daily"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">5min</Label>
+                    <Input
+                      type="number"
+                      value={limits.dataLimit5min}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimit5min: Math.max(1, parseInt(e.target.value) || 60) }))}
+                      className="h-7 text-xs"
+                      data-testid="input-limit-5m"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">15min</Label>
+                    <Input
+                      type="number"
+                      value={limits.dataLimit15min}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimit15min: Math.max(1, parseInt(e.target.value) || 60) }))}
+                      className="h-7 text-xs"
+                      data-testid="input-limit-15m"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">30min</Label>
+                    <Input
+                      type="number"
+                      value={limits.dataLimit30min}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimit30min: Math.max(1, parseInt(e.target.value) || 60) }))}
+                      className="h-7 text-xs"
+                      data-testid="input-limit-30m"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-2 flex-wrap pt-2">
               <div className="flex items-center gap-3 flex-wrap">
                 <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); addRow(); }} onPointerDown={e => e.stopPropagation()} data-testid="button-add-row">
                   <Plus className="h-3.5 w-3.5 mr-1" />
                   Add Row
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { e.stopPropagation(); setShowDataLimits(prev => !prev); }}
+                  onPointerDown={e => e.stopPropagation()}
+                  data-testid="button-data-limits"
+                  className={showDataLimits ? "toggle-elevate toggle-elevated" : ""}
+                >
+                  <Database className="h-3.5 w-3.5 mr-1" />
+                  Data Limits
                 </Button>
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                   <Label htmlFor="defaultBars" className="text-xs text-muted-foreground whitespace-nowrap">Default Bars OnScreen</Label>

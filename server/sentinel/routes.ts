@@ -6847,14 +6847,19 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const userId = req.session.userId!;
       if (!db) return res.status(500).json({ error: "Database not available" });
-      const { defaultBarsOnScreen } = req.body;
+      const { defaultBarsOnScreen, dataLimitDaily, dataLimit5min, dataLimit15min, dataLimit30min } = req.body;
       const barsVal = Math.max(50, Math.min(1000, parseInt(defaultBarsOnScreen) || 200));
+      const updateFields: Record<string, any> = { defaultBarsOnScreen: barsVal };
+      if (dataLimitDaily != null) updateFields.dataLimitDaily = Math.max(30, Math.min(3000, parseInt(dataLimitDaily) || 750));
+      if (dataLimit5min != null) updateFields.dataLimit5min = Math.max(1, Math.min(365, parseInt(dataLimit5min) || 60));
+      if (dataLimit15min != null) updateFields.dataLimit15min = Math.max(1, Math.min(365, parseInt(dataLimit15min) || 60));
+      if (dataLimit30min != null) updateFields.dataLimit30min = Math.max(1, Math.min(365, parseInt(dataLimit30min) || 60));
       const existing = await db.select().from(userChartPreferences).where(eq(userChartPreferences.userId, userId));
       let pref;
       if (existing.length === 0) {
-        [pref] = await db.insert(userChartPreferences).values({ userId, defaultBarsOnScreen: barsVal }).returning();
+        [pref] = await db.insert(userChartPreferences).values({ userId, ...updateFields }).returning();
       } else {
-        [pref] = await db.update(userChartPreferences).set({ defaultBarsOnScreen: barsVal }).where(eq(userChartPreferences.userId, userId)).returning();
+        [pref] = await db.update(userChartPreferences).set(updateFields).where(eq(userChartPreferences.userId, userId)).returning();
       }
       res.json(pref);
     } catch (error) {
