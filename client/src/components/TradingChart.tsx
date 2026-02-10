@@ -390,7 +390,7 @@ class MeasurePrimitive {
       const sign = priceDiff >= 0 ? "+" : "";
       const label = `${sign}${priceDiff.toFixed(2)}  (${sign}${pctChange.toFixed(2)}%)`;
 
-      const fontSize = Math.round(11 * ratio);
+      const fontSize = Math.round(22 * ratio);
       ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
 
       const textMetrics = ctx.measureText(label);
