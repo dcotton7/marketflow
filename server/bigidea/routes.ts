@@ -135,6 +135,47 @@ async function fetchOHLCV(symbol: string): Promise<CandleData[]> {
   }
 }
 
+function repairCriterion(criterion: any): { indicatorId: string; params: Record<string, any> } {
+  const paramValues: Record<string, any> = {};
+  for (const p of criterion.params || []) {
+    paramValues[p.name] = p.value;
+  }
+
+  if (criterion.indicatorId === "MA-6" && (paramValues.maxDistance === 0 || paramValues.maxDistance === undefined)) {
+    return {
+      indicatorId: "MA-8",
+      params: {
+        fastPeriod: paramValues.fastPeriod ?? 50,
+        slowPeriod: paramValues.slowPeriod ?? 200,
+        maType: paramValues.maType ?? "sma",
+        direction: "fast_above_slow",
+      },
+    };
+  }
+
+  if (criterion.indicatorId === "PA-11" && paramValues.maxDistance === 0) {
+    paramValues.maxDistance = 3;
+  }
+
+  for (const ind of INDICATOR_LIBRARY) {
+    if (ind.id === criterion.indicatorId) {
+      for (const paramDef of ind.params) {
+        if (
+          paramDef.type === "number" &&
+          paramDef.name.toLowerCase().includes("max") &&
+          paramValues[paramDef.name] === 0 &&
+          paramDef.defaultValue !== 0
+        ) {
+          paramValues[paramDef.name] = paramDef.defaultValue;
+        }
+      }
+      break;
+    }
+  }
+
+  return { indicatorId: criterion.indicatorId, params: paramValues };
+}
+
 function evaluateThoughtCriteria(
   criteria: any[],
   candles: CandleData[],
@@ -143,15 +184,11 @@ function evaluateThoughtCriteria(
   if (!criteria || criteria.length === 0) return false;
 
   for (const criterion of criteria) {
-    const indicator = INDICATOR_LIBRARY.find((ind) => ind.id === criterion.indicatorId);
+    const repaired = repairCriterion(criterion);
+    const indicator = INDICATOR_LIBRARY.find((ind) => ind.id === repaired.indicatorId);
     if (!indicator) continue;
 
-    const paramValues: Record<string, any> = {};
-    for (const p of criterion.params || []) {
-      paramValues[p.name] = p.value;
-    }
-
-    let result = indicator.evaluate(candles, paramValues, benchmarkCandles);
+    let result = indicator.evaluate(candles, repaired.params, benchmarkCandles);
     if (criterion.inverted) result = !result;
     if (!result) return false;
   }
