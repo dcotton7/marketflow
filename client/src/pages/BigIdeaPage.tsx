@@ -22,6 +22,7 @@ import "@xyflow/react/dist/style.css";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -52,6 +53,7 @@ import {
   Target,
   X,
   HelpCircle,
+  Trash2,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -173,6 +175,8 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
   const passCount = data.passCount as number | undefined;
   const category = data.category as string;
   const criteriaCount = (data.criteria as ScannerCriterion[])?.length || 0;
+  const onClear = data.onClear as (() => void) | undefined;
+  const onDelete = data.onDelete as (() => void) | undefined;
 
   return (
     <div
@@ -188,7 +192,33 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} className="!bg-muted-foreground !w-2 !h-2" />
       <div className="flex items-center gap-2 mb-1">
         {getCategoryIcon(category)}
-        <span className="text-sm font-medium truncate">{data.label as string}</span>
+        <span className="text-sm font-medium truncate flex-1">{data.label as string}</span>
+        <div className="flex items-center gap-0.5 shrink-0">
+          {onClear && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={(e) => { e.stopPropagation(); onClear(); }}
+              title="Remove from canvas"
+              data-testid={`button-clear-node-${data.nodeId}`}
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-red-500"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              title="Delete from library"
+              data-testid={`button-delete-node-${data.nodeId}`}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <Badge variant="outline" className="text-xs">
@@ -340,6 +370,7 @@ export default function BigIdeaPage() {
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
   const [aiProposal, setAiProposal] = useState<any>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ thoughtId: number; name: string; nodeId?: string } | null>(null);
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -414,6 +445,27 @@ export default function BigIdeaPage() {
     },
     onError: (err: Error) => {
       toast({ title: "Failed to save idea", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteThoughtMutation = useMutation({
+    mutationFn: async ({ thoughtId, nodeId }: { thoughtId: number; nodeId?: string }) => {
+      await apiRequest("DELETE", `/api/bigidea/thoughts/${thoughtId}`);
+      return { nodeId };
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
+      if (variables.nodeId) {
+        setNodes((nds) => nds.filter((n) => n.id !== variables.nodeId));
+        setEdges((eds) => eds.filter((e) => e.source !== variables.nodeId && e.target !== variables.nodeId));
+        setSelectedNodeId((prev) => (prev === variables.nodeId ? null : prev));
+      }
+      setDeleteConfirm(null);
+      toast({ title: "Thought deleted" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to delete thought", description: err.message, variant: "destructive" });
+      setDeleteConfirm(null);
     },
   });
 
@@ -658,7 +710,39 @@ export default function BigIdeaPage() {
     return grouped;
   }, [thoughts]);
 
-  const selectedNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) : null;
+  const clearNodeFromCanvas = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+      if (selectedNodeId === nodeId) setSelectedNodeId(null);
+    },
+    [setNodes, setEdges, selectedNodeId]
+  );
+
+  const requestDeleteThought = useCallback(
+    (nodeId: string, thoughtId: number, name: string) => {
+      setDeleteConfirm({ thoughtId, name, nodeId });
+    },
+    []
+  );
+
+  const nodesWithCallbacks = useMemo(
+    () =>
+      nodes.map((n) => {
+        if (n.type !== "thought") return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            onClear: () => clearNodeFromCanvas(n.id),
+            onDelete: () => requestDeleteThought(n.id, n.data.thoughtId as number, n.data.label as string),
+          },
+        };
+      }),
+    [nodes, clearNodeFromCanvas, requestDeleteThought]
+  );
+
+  const selectedNode = selectedNodeId ? nodesWithCallbacks.find((n) => n.id === selectedNodeId) : null;
 
   const sortedResults = useMemo(() => {
     if (!scanResults) return [];
@@ -812,7 +896,7 @@ export default function BigIdeaPage() {
 
         <div className="flex-1 relative" ref={reactFlowWrapper}>
           <ReactFlow
-            nodes={nodes}
+            nodes={nodesWithCallbacks}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -942,7 +1026,27 @@ export default function BigIdeaPage() {
                     ) : null}
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => clearNodeFromCanvas(selectedNode.id)}
+                      className="gap-1 text-xs"
+                      data-testid="button-clear-selected"
+                    >
+                      <X className="h-3 w-3" />
+                      Clear
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => requestDeleteThought(selectedNode.id, selectedNode.data.thoughtId as number, selectedNode.data.label as string)}
+                      className="gap-1 text-xs"
+                      data-testid="button-delete-selected"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      Delete
+                    </Button>
                     <Button
                       variant={selectedNode.data.isNot ? "destructive" : "outline"}
                       size="sm"
@@ -1213,6 +1317,29 @@ export default function BigIdeaPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Thought</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete "{deleteConfirm?.name}"? This will remove it from your library and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground"
+              onClick={() => {
+                if (deleteConfirm) deleteThoughtMutation.mutate({ thoughtId: deleteConfirm.thoughtId, nodeId: deleteConfirm.nodeId });
+              }}
+              data-testid="button-confirm-delete"
+            >
+              {deleteThoughtMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
