@@ -61,6 +61,7 @@ import {
   HelpCircle,
   Trash2,
   Settings2,
+  Ruler,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -1631,6 +1632,8 @@ function ScanChartViewer({
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
+  const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
+  const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
 
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
@@ -1870,6 +1873,15 @@ function ScanChartViewer({
           <div className="flex flex-col min-h-0">
             <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
               <span className="text-xs text-muted-foreground font-medium">Daily</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`toggle-elevate ${dailyMeasureMode ? "toggle-elevated" : ""}`}
+                onClick={() => setDailyMeasureMode(m => !m)}
+                data-testid="button-daily-measure-mode"
+              >
+                <Ruler className="h-3.5 w-3.5" />
+              </Button>
             </div>
             {dailyLoading ? (
               <Card className="flex-1">
@@ -1885,6 +1897,7 @@ function ScanChartViewer({
                 showLegend={true}
                 maSettings={maSettingsData}
                 maxBars={maxBars}
+                measureMode={dailyMeasureMode}
               />
             ) : (
               <Card className="flex-1">
@@ -1915,6 +1928,15 @@ function ScanChartViewer({
               >
                 <Settings2 className="h-3.5 w-3.5" />
               </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`toggle-elevate ${intradayMeasureMode ? "toggle-elevated" : ""}`}
+                onClick={() => setIntradayMeasureMode(m => !m)}
+                data-testid="button-intraday-measure-mode"
+              >
+                <Ruler className="h-3.5 w-3.5" />
+              </Button>
             </div>
             {intradayLoading ? (
               <Card className="flex-1">
@@ -1931,6 +1953,7 @@ function ScanChartViewer({
                 showDayDividers={true}
                 maSettings={maSettingsData}
                 maxBars={maxBars}
+                measureMode={intradayMeasureMode}
               />
             ) : (
               <Card className="flex-1">

@@ -142,6 +142,7 @@ export interface TradingChartProps {
   showDayDividers?: boolean;
   maSettings?: MaSettingForChart[];
   maxBars?: number;
+  measureMode?: boolean;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -434,6 +435,7 @@ export function TradingChart({
   showDayDividers = false,
   maSettings,
   maxBars,
+  measureMode = false,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -446,6 +448,10 @@ export function TradingChart({
   const measurePrimitiveRef = useRef<MeasurePrimitive | null>(null);
   const measureStartRef = useRef<MeasurePoint | null>(null);
   const shiftKeyRef = useRef(false);
+  const measureModeRef = useRef(measureMode);
+  useEffect(() => {
+    measureModeRef.current = measureMode;
+  }, [measureMode]);
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
@@ -528,7 +534,7 @@ export function TradingChart({
         }
       }
 
-      if (shiftKeyRef.current && clickedPrice !== null) {
+      if ((shiftKeyRef.current || measureModeRef.current) && clickedPrice !== null) {
         if (!measureStartRef.current) {
           measureStartRef.current = { time: timestamp, price: clickedPrice };
           if (measurePrimitiveRef.current) {
