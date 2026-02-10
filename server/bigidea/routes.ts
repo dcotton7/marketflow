@@ -562,7 +562,9 @@ CRITICAL RULE FOR DESCRIPTIONS:
 The "description" field MUST accurately describe what the chosen indicators and parameters actually measure — NOT what the user asked for. If the user asks for "stocks bouncing off the 50 SMA" but the best available indicator only checks proximity to the SMA (not a bounce/reversal), the description must say "Screens for stocks whose price is currently within X% of the 50 SMA" rather than claiming it detects a bounce. Never oversell or exaggerate what the criteria can detect. Be precise and honest about what the screening actually does.
 
 IMPORTANT GUIDELINES for indicator selection:
+- For "price crossed above/below a moving average" (e.g. "price crossed above the 50 SMA", "price broke below the 20 EMA"), ALWAYS use MA-9 (Price Crosses MA). Set crossType to "above" or "below". Do NOT use MA-7 for this — MA-7 is only for two MAs crossing each other.
 - To compare two moving averages (e.g. "50 SMA above 200 SMA", "EMA cross", "golden cross"), use MA-8 (MA Comparison) with the direction parameter. Do NOT use MA-6 for this purpose.
+- MA-7 (MA Crossover) is ONLY for detecting when two MAs cross each other (golden cross / death cross). It does NOT detect price crossing a single MA.
 - MA-6 (MA Distance/Convergence) is ONLY for measuring how close two MAs are to each other in percentage terms. It does NOT check which one is above the other.
 - MA-1/MA-2 compare PRICE vs a single MA, not two MAs against each other.
 - When the user says "MA above/below another MA", always use MA-8 with direction "fast_above_slow" or "fast_below_slow".
@@ -574,6 +576,8 @@ Generate exactly as many criteria as the user's idea requires — no more, no le
 Examples:
 - "Price within 1% of 50 SMA" → 1 criterion: MA-3 Price vs MA Distance: period=50, minPct=0, maxPct=1
 - "Price above 50 SMA" → 1 criterion: MA-1 SMA Value: period=50, direction=above
+- "Price crossed below 50 SMA recently" → 1 criterion: MA-9 Price Crosses MA: maPeriod=50, maType=sma, lookback=5, crossType=below
+- "Price broke above 20 EMA" → 1 criterion: MA-9 Price Crosses MA: maPeriod=20, maType=ema, lookback=3, crossType=above
 - "Pullback to 50 SMA with volume dry-up in uptrend" → 3 criteria: (1) MA-3 proximity, (2) VOL-4 volume dry-up, (3) MA-1 above 200 SMA for uptrend context
 - "Breakout with volume" → 2 criteria: (1) PA-7 Breakout Detection: basePeriod=20, lookback=3, (2) VOL-5 Volume Surge: period=50, surgeMultiple=2.0, priceUp=true
 - "Strong uptrend" → 3 criteria: (1) MA-1 SMA Value: period=50, direction=above, (2) MA-8 MA Comparison: fastPeriod=50, slowPeriod=200, direction=fast_above_slow, (3) MA-4 MA Slope: period=50, slopeDays=10, minSlope=0.5

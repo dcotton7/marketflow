@@ -404,6 +404,35 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       return fastMA < slowMA;
     },
   },
+  {
+    id: "MA-9",
+    name: "Price Crosses MA",
+    category: "Moving Averages",
+    description: "Detects if the close price crossed above or below a single moving average within the last N bars. Use this for 'price crossed above/below the 50 SMA' style scans.",
+    params: [
+      { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
+      { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
+      { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
+      { name: "crossType", label: "Cross Direction", type: "select", defaultValue: "above", options: ["above", "below"] },
+    ],
+    evaluate: (candles, params) => {
+      const maPeriod = params.maPeriod ?? 50;
+      const maType = params.maType ?? "sma";
+      const lookback = params.lookback ?? 5;
+      const crossType = params.crossType ?? "above";
+      if (candles.length < maPeriod + lookback + 1) return false;
+      for (let i = 0; i < lookback; i++) {
+        const maNow = getMAAt(candles, maPeriod, maType, i);
+        const maPrev = getMAAt(candles, maPeriod, maType, i + 1);
+        if (maNow === 0 || maPrev === 0) continue;
+        const priceNow = candles[i].close;
+        const pricePrev = candles[i + 1].close;
+        if (crossType === "above" && pricePrev <= maPrev && priceNow > maNow) return true;
+        if (crossType === "below" && pricePrev >= maPrev && priceNow < maNow) return true;
+      }
+      return false;
+    },
+  },
 ];
 
 const VOLUME: IndicatorDefinition[] = [
