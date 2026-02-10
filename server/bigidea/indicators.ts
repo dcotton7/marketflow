@@ -280,11 +280,11 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-4",
     name: "MA Slope",
     category: "Moving Averages",
-    description: "Moving average slope (% change over N days). Positive slope = uptrend.",
+    description: "Moving average slope (% change over N bars). Positive slope = uptrend.",
     params: [
       { name: "period", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
-      { name: "slopeDays", label: "Slope Lookback (days)", type: "number", defaultValue: 10, min: 1, max: 60, step: 1 },
+      { name: "slopeDays", label: "Slope Lookback (bars)", type: "number", defaultValue: 10, min: 1, max: 60, step: 1 },
       { name: "minSlope", label: "Min Slope %", type: "number", defaultValue: 0, min: -50, max: 50, step: 0.1 },
     ],
     evaluate: (candles, params) => {
@@ -354,12 +354,12 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-7",
     name: "MA Crossover",
     category: "Moving Averages",
-    description: "Detects a moving average crossover (golden cross or death cross) within the last N days",
+    description: "Detects a moving average crossover (golden cross or death cross) within the last N bars",
     params: [
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
-      { name: "lookback", label: "Lookback Days", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
+      { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
       { name: "crossType", label: "Cross Type", type: "select", defaultValue: "bullish", options: ["bullish", "bearish"] },
     ],
     evaluate: (candles, params) => {
@@ -453,7 +453,7 @@ const VOLUME: IndicatorDefinition[] = [
     id: "VOL-3",
     name: "Up/Down Volume Ratio",
     category: "Volume",
-    description: "Ratio of volume on up days vs down days over a period. > 1 means more volume on up days.",
+    description: "Ratio of volume on up bars vs down bars over a period. > 1 means more volume on up bars.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minRatio", label: "Min Ratio", type: "number", defaultValue: 1.2, min: 0.1, max: 10, step: 0.1 },
@@ -479,7 +479,7 @@ const VOLUME: IndicatorDefinition[] = [
     description: "Detects a period of unusually low volume relative to average, often preceding breakouts",
     params: [
       { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 10, max: 200, step: 1 },
-      { name: "dryUpDays", label: "Dry-Up Window (days)", type: "number", defaultValue: 5, min: 1, max: 20, step: 1 },
+      { name: "dryUpDays", label: "Dry-Up Window (bars)", type: "number", defaultValue: 5, min: 1, max: 20, step: 1 },
       { name: "maxMultiple", label: "Max Volume Multiple", type: "number", defaultValue: 0.5, min: 0.1, max: 1, step: 0.05 },
     ],
     evaluate: (candles, params) => {
@@ -611,7 +611,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     params: [
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 120, min: 30, max: 500, step: 10 },
       { name: "consolidationRange", label: "Base Range %", type: "number", defaultValue: 15, min: 5, max: 30, step: 1 },
-      { name: "minBaseDays", label: "Min Base Width (days)", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
+      { name: "minBaseDays", label: "Min Base Width (bars)", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
       { name: "maxBases", label: "Max Bases", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
     ],
     evaluate: (candles, params) => {
@@ -661,10 +661,10 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-7",
     name: "Breakout Detection",
     category: "Price Action",
-    description: "Detects if price broke above the highest high of a prior consolidation period within the last N days",
+    description: "Detects if price broke above the highest high of a prior consolidation period within the last N bars",
     params: [
       { name: "basePeriod", label: "Base Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
-      { name: "lookback", label: "Breakout Window (days)", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
+      { name: "lookback", label: "Breakout Window (bars)", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
       { name: "volumeConfirm", label: "Require Volume Surge", type: "boolean", defaultValue: true },
       { name: "volumeMultiple", label: "Volume Multiple", type: "number", defaultValue: 1.5, min: 1, max: 10, step: 0.1 },
     ],
@@ -739,9 +739,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-10",
     name: "Price Gap Detection",
     category: "Price Action",
-    description: "Detects a gap up or gap down within the last N days",
+    description: "Detects a gap up or gap down within the last N bars",
     params: [
-      { name: "lookback", label: "Lookback Days", type: "number", defaultValue: 3, min: 1, max: 20, step: 1 },
+      { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 3, min: 1, max: 20, step: 1 },
       { name: "minGapPct", label: "Min Gap %", type: "number", defaultValue: 2, min: 0.5, max: 20, step: 0.5 },
       { name: "gapDirection", label: "Gap Direction", type: "select", defaultValue: "up", options: ["up", "down", "either"] },
     ],
@@ -1005,8 +1005,8 @@ const VOLATILITY: IndicatorDefinition[] = [
     description: "Compares recent ATR to historical ATR. Contraction often precedes big moves.",
     params: [
       { name: "atrPeriod", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
-      { name: "recentDays", label: "Recent Days", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
-      { name: "baselineDays", label: "Baseline Offset", type: "number", defaultValue: 20, min: 5, max: 100, step: 5 },
+      { name: "recentDays", label: "Recent Bars", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
+      { name: "baselineDays", label: "Baseline Offset (bars)", type: "number", defaultValue: 20, min: 5, max: 100, step: 5 },
       { name: "condition", label: "Condition", type: "select", defaultValue: "contracting", options: ["contracting", "expanding"] },
       { name: "threshold", label: "Change Threshold %", type: "number", defaultValue: 25, min: 5, max: 80, step: 5 },
     ],
@@ -1032,7 +1032,7 @@ const VOLATILITY: IndicatorDefinition[] = [
     id: "VLT-3",
     name: "Daily Range vs Average",
     category: "Volatility",
-    description: "Today's range (high-low) compared to the average daily range. Useful for detecting expansion or contraction days.",
+    description: "Latest bar's range (high-low) compared to the average range. Useful for detecting expansion or contraction.",
     params: [
       { name: "period", label: "Avg Range Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minMultiple", label: "Min Range Multiple", type: "number", defaultValue: 0, min: 0, max: 10, step: 0.1 },
