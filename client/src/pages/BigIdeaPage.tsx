@@ -332,24 +332,40 @@ function LogicEdge({
       />
       <EdgeLabelRenderer>
         <div
-          className={`absolute text-xs font-bold px-2 py-0.5 rounded-md border cursor-pointer select-none ${
-            isAnd
-              ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-              : "bg-amber-500/20 text-amber-400 border-amber-500/30"
-          }`}
+          className="absolute flex items-center gap-1"
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
             pointerEvents: "all",
           }}
-          data-testid={`edge-label-${id}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (data?.onToggle) {
-              (data.onToggle as () => void)();
-            }
-          }}
         >
-          {logicType}
+          <div
+            className={`text-xs font-bold px-2 py-0.5 rounded-md border cursor-pointer select-none ${
+              isAnd
+                ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                : "bg-amber-500/20 text-amber-400 border-amber-500/30"
+            }`}
+            data-testid={`edge-label-${id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (data?.onToggle) {
+                (data.onToggle as () => void)();
+              }
+            }}
+          >
+            {logicType}
+          </div>
+          <button
+            className="flex items-center justify-center w-5 h-5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 cursor-pointer hover:bg-red-500/40 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (data?.onDelete) {
+                (data.onDelete as () => void)();
+              }
+            }}
+            data-testid={`edge-delete-${id}`}
+          >
+            <X className="h-3 w-3" />
+          </button>
         </div>
       </EdgeLabelRenderer>
     </>
@@ -544,22 +560,26 @@ export default function BigIdeaPage() {
 
   const onConnect = useCallback(
     (params: Connection) => {
+      const edgeId = `e-${params.source}-${params.target}`;
       const newEdge: Edge = {
         ...params,
-        id: `e-${params.source}-${params.target}`,
+        id: edgeId,
         type: "logic",
         data: {
           logicType: "AND",
           onToggle: () => {
             setEdges((eds) =>
               eds.map((e) => {
-                if (e.id === `e-${params.source}-${params.target}`) {
+                if (e.id === edgeId) {
                   const current = e.data?.logicType === "AND" ? "OR" : "AND";
-                  return { ...e, data: { ...e.data, logicType: current, onToggle: e.data?.onToggle } };
+                  return { ...e, data: { ...e.data, logicType: current, onToggle: e.data?.onToggle, onDelete: e.data?.onDelete } };
                 }
                 return e;
               })
             );
+          },
+          onDelete: () => {
+            setEdges((eds) => eds.filter((e) => e.id !== edgeId));
           },
         },
       } as Edge;
@@ -709,11 +729,14 @@ export default function BigIdeaPage() {
               eds.map((ed) => {
                 if (ed.id === e.id) {
                   const current = ed.data?.logicType === "AND" ? "OR" : "AND";
-                  return { ...ed, data: { ...ed.data, logicType: current, onToggle: ed.data?.onToggle } };
+                  return { ...ed, data: { ...ed.data, logicType: current, onToggle: ed.data?.onToggle, onDelete: ed.data?.onDelete } };
                 }
                 return ed;
               })
             );
+          },
+          onDelete: () => {
+            setEdges((eds) => eds.filter((ed) => ed.id !== e.id));
           },
         },
       }));
