@@ -694,55 +694,60 @@ Select the most appropriate indicators and set parameters that match the user's 
               const resultsNode = nodes.find((n: any) => n.type === "results");
               if (!resultsNode) return null;
 
-              const incomingEdges = edges.filter((e: any) => e.target === resultsNode.id);
-              if (incomingEdges.length === 0) return null;
+              const anyEdgeToResults = edges.some((e: any) => e.target === resultsNode.id);
+              if (!anyEdgeToResults) return null;
 
-              let passesFlow = false;
-              const passedPaths: string[] = [];
+              function computeEffectivePass(nodeId: string, visited: Set<string> = new Set()): boolean {
+                if (visited.has(nodeId)) return nodeResults[nodeId] ?? false;
+                visited.add(nodeId);
 
-              const hasAndEdges = incomingEdges.some((e: any) => e.logicType === "AND");
-              const hasOrEdges = incomingEdges.some((e: any) => e.logicType === "OR");
+                const incoming = edges.filter((e: any) => e.target === nodeId);
+                const ownResult = nodeResults[nodeId];
 
-              if (hasAndEdges && !hasOrEdges) {
-                passesFlow = incomingEdges.every((e: any) => nodeResults[e.source] === true);
-                if (passesFlow) {
-                  for (const e of incomingEdges) {
-                    const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
-                    if (srcNode) passedPaths.push(srcNode.thoughtName || srcNode.id);
-                  }
-                }
-              } else if (hasOrEdges && !hasAndEdges) {
-                for (const e of incomingEdges) {
-                  if (nodeResults[e.source] === true) {
-                    passesFlow = true;
-                    const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
-                    if (srcNode) passedPaths.push(srcNode.thoughtName || srcNode.id);
-                  }
-                }
-              } else {
-                const andEdges = incomingEdges.filter((e: any) => e.logicType === "AND");
-                const orEdges = incomingEdges.filter((e: any) => e.logicType === "OR");
-
-                const andPass = andEdges.length === 0 || andEdges.every((e: any) => nodeResults[e.source] === true);
-                let orPass = orEdges.length === 0;
-
-                for (const e of orEdges) {
-                  if (nodeResults[e.source] === true) {
-                    orPass = true;
-                    const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
-                    if (srcNode) passedPaths.push(srcNode.thoughtName || srcNode.id);
-                  }
+                if (incoming.length === 0) {
+                  return ownResult ?? false;
                 }
 
-                if (andPass) {
-                  for (const e of andEdges) {
-                    const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
-                    if (srcNode) passedPaths.push(srcNode.thoughtName || srcNode.id);
-                  }
+                const andEdges = incoming.filter((e: any) => (e.logicType || "AND") === "AND");
+                const orEdges = incoming.filter((e: any) => e.logicType === "OR");
+
+                const andPass = andEdges.length === 0 || andEdges.every((e: any) =>
+                  computeEffectivePass(e.source, new Set(visited))
+                );
+
+                const orPass = orEdges.length === 0 || orEdges.some((e: any) =>
+                  computeEffectivePass(e.source, new Set(visited))
+                );
+
+                if (ownResult === undefined) {
+                  return andPass && orPass;
                 }
 
-                passesFlow = andPass && orPass;
+                if (orEdges.length > 0) {
+                  return (ownResult || orPass) && andPass;
+                } else {
+                  return ownResult && andPass;
+                }
               }
+
+              function collectPassedPaths(nodeId: string, visited: Set<string> = new Set()): string[] {
+                if (visited.has(nodeId)) return [];
+                visited.add(nodeId);
+                const paths: string[] = [];
+                const incoming = edges.filter((e: any) => e.target === nodeId);
+                for (const e of incoming) {
+                  const srcEffective = computeEffectivePass(e.source, new Set());
+                  if (srcEffective) {
+                    const srcNode = thoughtNodes.find((n: any) => n.id === e.source);
+                    if (srcNode) paths.push(srcNode.thoughtName || srcNode.id);
+                  }
+                  paths.push(...collectPassedPaths(e.source, new Set(visited)));
+                }
+                return [...new Set(paths)];
+              }
+
+              const passesFlow = computeEffectivePass(resultsNode.id);
+              const passedPaths = passesFlow ? collectPassedPaths(resultsNode.id) : [];
 
               if (passesFlow) {
                 const priceCandles = candlesByTimeframe["daily"] || candlesByTimeframe[timeframesArray[0]] || [];
