@@ -617,19 +617,21 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-3",
     name: "Consolidation / Base Detection",
     category: "Price Action",
-    description: "Detects a flat consolidation base up to 'period' bars long. Scans backward from recent bars to find the actual flat zone, trimming any prior advance ramp-in. Returns the detected base length for downstream indicators. Min Period sets the shortest acceptable base.",
+    description: "Detects a flat consolidation base up to 'period' bars long. Scans backward from recent bars to find the actual flat zone, trimming any prior advance ramp-in. Returns the detected base length for downstream indicators. Min Period sets the shortest acceptable base. Rejects bases that formed after a significant price decline (controlled by Max Pre-Base Drop %).",
     provides: [{ linkType: "basePeriod", paramName: "period" }],
     params: [
       { name: "period", label: "Max Base Length", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
-      { name: "minPeriod", label: "Min Base Length", type: "number", defaultValue: 5, min: 3, max: 50, step: 1 },
+      { name: "minPeriod", label: "Min Base Length", type: "number", defaultValue: 5, min: 5, max: 50, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
       { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 5, min: 0.5, max: 15, step: 0.5 },
+      { name: "maxPreBaseDrop", label: "Max Pre-Base Drop %", type: "number", defaultValue: 10, min: 1, max: 30, step: 1 },
     ],
     evaluate: (candles, params) => {
       const maxPeriod = params.period ?? 20;
-      const minPeriod = params.minPeriod ?? 5;
+      const minPeriod = Math.max(5, params.minPeriod ?? 5);
       const maxRange = params.maxRange ?? 15;
       const maxSlope = params.maxSlope ?? 5;
+      const maxPreBaseDrop = params.maxPreBaseDrop ?? 10;
       if (candles.length < minPeriod) return false;
 
       const maxLen = Math.min(maxPeriod, candles.length);
@@ -682,6 +684,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         if (pos >= 0.4) upperCount++;
       }
       if (upperCount / n < 0.5) return false;
+
+      const preBaseLookback = Math.min(detectedLen, 10);
+      const preBaseStart = detectedLen + preBaseLookback;
+      if (candles.length >= preBaseStart) {
+        const preBaseSlice = candles.slice(detectedLen, preBaseStart);
+        const preBaseHigh = Math.max(...preBaseSlice.map(c => c.high));
+        if (preBaseHigh > 0) {
+          const dropIntoBase = ((preBaseHigh - baseHigh) / preBaseHigh) * 100;
+          if (dropIntoBase > maxPreBaseDrop) return false;
+        }
+      }
 
       return { pass: true, data: { detectedPeriod: detectedLen } };
     },
