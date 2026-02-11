@@ -65,6 +65,7 @@ import {
   Ruler,
   Link2,
   Unlink,
+  CornerDownRight,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -190,11 +191,29 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   lookbackBars: "Window (in bars) to measure the prior advance. 120 bars ≈ 6 months of trading days. Larger = longer run-up required.",
 };
 
+interface DynamicDataConsumer {
+  thoughtId: string;
+  thoughtName: string;
+  indicatorName: string;
+  params: Array<{ label: string; dataKey: string; value: any }>;
+}
+
+interface DynamicDataProvider {
+  providerId: string;
+  providerName: string;
+  providerIndicator: string;
+  detectedValues: Record<string, any>;
+  lookbackSetting?: number;
+  lookbackLabel?: string;
+  consumers: DynamicDataConsumer[];
+}
+
 interface ScanResultItem {
   symbol: string;
   name: string;
   price: number;
   passedPaths: string[];
+  dynamicData?: DynamicDataProvider[];
 }
 
 interface ScanResponse {
@@ -2466,6 +2485,45 @@ function ScanChartViewer({
             </Badge>
           ))}
         </div>
+
+        {current?.dynamicData && current.dynamicData.length > 0 && (
+          <div className="flex flex-col gap-0.5 mb-2 flex-shrink-0 px-2 py-1.5 rounded-md border border-emerald-800/40 bg-emerald-950/20" data-testid="dynamic-data-strip">
+            {current.dynamicData.map((provider) => (
+              <div key={provider.providerId} className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2 text-[11px]">
+                  <Zap className="h-3 w-3 text-emerald-400 flex-shrink-0" />
+                  <span className="font-medium text-emerald-300">{provider.providerName}</span>
+                  <span className="text-muted-foreground">|</span>
+                  {Object.entries(provider.detectedValues).map(([key, val]) => (
+                    <span key={key} className="text-emerald-200/80">
+                      Detected {key.replace(/([A-Z])/g, " $1").toLowerCase().trim()}: <span className="font-semibold text-emerald-300">{val}</span>
+                    </span>
+                  ))}
+                  {provider.lookbackSetting != null && (
+                    <>
+                      <span className="text-muted-foreground">|</span>
+                      <span className="text-muted-foreground">
+                        {provider.lookbackLabel || "Lookback setting"}: {provider.lookbackSetting}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {provider.consumers.map((consumer) => (
+                  <div key={consumer.thoughtId + consumer.indicatorName} className="flex items-center gap-2 text-[11px] pl-4">
+                    <CornerDownRight className="h-3 w-3 text-emerald-600 flex-shrink-0" />
+                    <span className="font-medium text-emerald-400/80">{consumer.thoughtName}</span>
+                    {consumer.params.map((p) => (
+                      <span key={p.dataKey} className="text-emerald-200/70">
+                        {p.label}: <span className="font-semibold text-emerald-300">{p.value}</span>
+                        <span className="text-muted-foreground ml-1">(from {provider.providerName})</span>
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">

@@ -853,11 +853,92 @@ Select the most appropriate indicators and set parameters that match the user's 
 
               if (passesFlow) {
                 const priceCandles = candlesByTimeframe["daily"] || candlesByTimeframe[timeframesArray[0]] || [];
+
+                const dynamicData: Array<{
+                  providerId: string;
+                  providerName: string;
+                  providerIndicator: string;
+                  detectedValues: Record<string, any>;
+                  lookbackSetting?: number;
+                  lookbackLabel?: string;
+                  consumers: Array<{
+                    thoughtId: string;
+                    thoughtName: string;
+                    indicatorName: string;
+                    params: Array<{ label: string; dataKey: string; value: any }>;
+                  }>;
+                }> = [];
+
+                for (const tn of thoughtNodes) {
+                  const outData = nodeOutputData[tn.id];
+                  if (!outData || Object.keys(outData).length === 0) continue;
+
+                  let providerIndicatorName = "";
+                  let lookbackSetting: number | undefined;
+                  let lookbackLabel: string | undefined;
+                  for (const c of (tn.thoughtCriteria || [])) {
+                    const indDef = INDICATOR_LIBRARY.find((ind) => ind.id === c.indicatorId);
+                    if (indDef?.provides && indDef.provides.length > 0) {
+                      providerIndicatorName = c.label || indDef.name;
+                      const provMeta = indDef.provides[0];
+                      const lookbackParam = (c.params || []).find((p: any) => p.name === provMeta.paramName);
+                      const paramMeta = indDef.params.find((p) => p.name === provMeta.paramName);
+                      lookbackSetting = lookbackParam?.value;
+                      lookbackLabel = paramMeta?.label;
+                      break;
+                    }
+                  }
+
+                  const consumers: typeof dynamicData[number]["consumers"] = [];
+                  const downstreamIds = edges
+                    .filter((e: any) => e.source === tn.id)
+                    .map((e: any) => e.target);
+                  for (const downId of downstreamIds) {
+                    const downNode = thoughtNodes.find((n: any) => n.id === downId);
+                    if (!downNode) continue;
+                    for (const c of (downNode.thoughtCriteria || [])) {
+                      if (c.muted) continue;
+                      const indDef = INDICATOR_LIBRARY.find((ind) => ind.id === c.indicatorId);
+                      if (!indDef?.consumes) continue;
+                      const consumedParams: Array<{ label: string; dataKey: string; value: any }> = [];
+                      for (const cons of indDef.consumes) {
+                        if (outData[cons.dataKey] !== undefined) {
+                          const paramMeta = indDef.params.find((p) => p.name === cons.paramName);
+                          consumedParams.push({
+                            label: paramMeta?.label || cons.paramName,
+                            dataKey: cons.dataKey,
+                            value: outData[cons.dataKey],
+                          });
+                        }
+                      }
+                      if (consumedParams.length > 0) {
+                        consumers.push({
+                          thoughtId: downNode.id,
+                          thoughtName: downNode.thoughtName || "Unnamed",
+                          indicatorName: c.label || indDef.name,
+                          params: consumedParams,
+                        });
+                      }
+                    }
+                  }
+
+                  dynamicData.push({
+                    providerId: tn.id,
+                    providerName: tn.thoughtName || "Unnamed",
+                    providerIndicator: providerIndicatorName,
+                    detectedValues: outData,
+                    lookbackSetting,
+                    lookbackLabel,
+                    consumers,
+                  });
+                }
+
                 return {
                   symbol,
                   name: symbol,
                   price: priceCandles.length > 0 ? priceCandles[0].close : 0,
                   passedPaths,
+                  dynamicData: dynamicData.length > 0 ? dynamicData : undefined,
                 };
               }
 
