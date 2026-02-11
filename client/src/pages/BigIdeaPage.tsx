@@ -2887,6 +2887,26 @@ function ScanChartViewer({
             <ChevronRight className="h-4 w-4" />
           </Button>
           <div className="ml-auto" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => {
+                  const price = dayChange?.price ?? current?.price ?? 0;
+                  window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(symbol)}&price=${price.toFixed(2)}&from=bigidea`;
+                }}
+                data-testid="button-chart-evaluate"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Ivy AI</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
+            </TooltipContent>
+          </Tooltip>
           <Button
             size="icon"
             variant="ghost"

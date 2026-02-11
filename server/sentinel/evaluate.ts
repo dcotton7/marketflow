@@ -453,7 +453,19 @@ export async function evaluateTrade(
         : null,
     },
     
-    // Structured feedback
+    tradeSnapshot: parsed.tradeSnapshot && typeof parsed.tradeSnapshot === 'object' ? {
+      good: Array.isArray(parsed.tradeSnapshot.good) ? parsed.tradeSnapshot.good : [],
+      bad: Array.isArray(parsed.tradeSnapshot.bad) ? parsed.tradeSnapshot.bad : [],
+    } : undefined,
+    logicalStops: parsed.logicalStops && typeof parsed.logicalStops === 'object' ? {
+      userStopEval: parsed.logicalStops.userStopEval || '',
+      suggestions: Array.isArray(parsed.logicalStops.suggestions) ? parsed.logicalStops.suggestions : [],
+    } : undefined,
+    logicalTargets: parsed.logicalTargets && typeof parsed.logicalTargets === 'object' ? {
+      userTargetEval: parsed.logicalTargets.userTargetEval || '',
+      suggestions: Array.isArray(parsed.logicalTargets.suggestions) ? parsed.logicalTargets.suggestions : [],
+      partialProfitIdea: parsed.logicalTargets.partialProfitIdea || null,
+    } : undefined,
     whyBullets: Array.isArray(parsed.whyBullets) ? parsed.whyBullets : [],
     riskFlags: normalizedRiskFlags,
     improvements: Array.isArray(parsed.improvements) ? parsed.improvements : [],

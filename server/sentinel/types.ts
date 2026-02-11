@@ -87,11 +87,35 @@ export interface EvaluationResult {
   // User's plan summary
   planSummary: PlanSummary;
   
-  // Structured feedback
+  tradeSnapshot?: {
+    good: string[];
+    bad: string[];
+  };
+  logicalStops?: {
+    userStopEval: string;
+    suggestions: Array<{
+      price: number;
+      label: string;
+      distancePercent: number;
+      reasoning: string;
+      rank: number;
+    }>;
+  };
+  logicalTargets?: {
+    userTargetEval: string;
+    suggestions: Array<{
+      price: number;
+      label: string;
+      distancePercent: number;
+      rrRatio?: string;
+      reasoning: string;
+    }>;
+    partialProfitIdea: string | null;
+  };
   whyBullets: string[];
   riskFlags: RiskFlagDetail[];
   improvements: string[];
-  fixesToPass?: string[]; // Minimum changes needed to reach GREEN
+  fixesToPass?: string[];
   ruleChecklist: RuleCheckItem[];
   
   // Process analysis for historical trades

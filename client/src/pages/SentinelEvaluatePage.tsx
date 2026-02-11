@@ -14,7 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp, Crosshair, Scissors, HelpCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface SectorTrend {
@@ -74,6 +75,38 @@ interface ProcessAnalysis {
   rulesViolated: number;
 }
 
+interface LogicalStopSuggestion {
+  price: number;
+  label: string;
+  distancePercent: number;
+  reasoning: string;
+  rank: number;
+}
+
+interface LogicalStops {
+  userStopEval: string;
+  suggestions: LogicalStopSuggestion[];
+}
+
+interface LogicalTargetSuggestion {
+  price: number;
+  label: string;
+  distancePercent: number;
+  rrRatio?: string;
+  reasoning: string;
+}
+
+interface LogicalTargets {
+  userTargetEval: string;
+  suggestions: LogicalTargetSuggestion[];
+  partialProfitIdea: string | null;
+}
+
+interface TradeSnapshot {
+  good: string[];
+  bad: string[];
+}
+
 interface EvaluationResult {
   tradeId: number;
   evaluation: {
@@ -99,6 +132,10 @@ interface EvaluationResult {
     improvements?: string[];
     fixesToPass?: string[];
     ruleChecklist?: RuleCheckItem[];
+    
+    tradeSnapshot?: TradeSnapshot;
+    logicalStops?: LogicalStops;
+    logicalTargets?: LogicalTargets;
     
     // Process analysis for historical trades
     processAnalysis?: ProcessAnalysis;
@@ -155,14 +192,12 @@ interface SuggestResponse {
 
 const STOP_PRICE_CHOICES = [
   { value: "LOD_TODAY", label: "LOD Today" },
-  { value: "LOD_YESTERDAY", label: "LOD Yesterday" },
-  { value: "LOD_WEEKLY", label: "LOD Weekly" },
-  { value: "5_DMA", label: "5 DMA" },
-  { value: "10_DMA", label: "10 DMA" },
-  { value: "21_DMA", label: "21 DMA" },
-  { value: "50_DMA", label: "50 DMA" },
-  { value: "6_20_DOWN_CROSS", label: "6/20 (5 min) Down Cross" },
-  { value: "MACD_DOWN_CROSS", label: "MACD Cross Down" },
+  { value: "LOD_YESTERDAY", label: "Low of Yesterday" },
+  { value: "ATR_1_5X", label: "1.5x ATR Stop" },
+  { value: "5_DMA", label: "5d SMA" },
+  { value: "10_DMA", label: "10d SMA" },
+  { value: "20_DMA", label: "20d SMA" },
+  { value: "50_DMA", label: "50d SMA" },
 ];
 
 const TARGET_PRICE_CHOICES = [
@@ -189,14 +224,16 @@ export default function SentinelEvaluatePage() {
   const queryClient = useQueryClient();
   const { settings: systemSettings, cssVariables } = useSystemSettings();
 
-  // Get tradeId from URL query params for pre-loading trade data
   const urlParams = new URLSearchParams(window.location.search);
   const preloadTradeId = urlParams.get('tradeId');
+  const fromParam = urlParams.get('from');
+  const preloadSymbol = urlParams.get('symbol') || '';
+  const preloadPrice = urlParams.get('price') || '';
 
-  const [symbol, setSymbol] = useState("");
-  const [debouncedSymbol, setDebouncedSymbol] = useState("");
+  const [symbol, setSymbol] = useState(preloadSymbol);
+  const [debouncedSymbol, setDebouncedSymbol] = useState(preloadSymbol ? preloadSymbol.toUpperCase() : "");
   const [direction, setDirection] = useState<"long" | "short">("long");
-  const [entryPrice, setEntryPrice] = useState("");
+  const [entryPrice, setEntryPrice] = useState(preloadPrice);
   
   // Stop price
   const [stopPriceMode, setStopPriceMode] = useState<"amount" | "choice">("amount");
@@ -227,6 +264,9 @@ export default function SentinelEvaluatePage() {
   const [historicalTags, setHistoricalTags] = useState<string[]>(["Historical"]);
   const [newTagInput, setNewTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+
+  const [firstTrimExpanded, setFirstTrimExpanded] = useState(false);
+  const [targetProfitExpanded, setTargetProfitExpanded] = useState(false);
 
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [isPreloaded, setIsPreloaded] = useState(false);
@@ -513,7 +553,12 @@ export default function SentinelEvaluatePage() {
       <header className="border-b" style={{ backgroundColor: `${systemSettings.overlayColor}d9` }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel/dashboard")} data-testid="button-back">
+            <Button variant="ghost" size="icon" onClick={() => {
+              if (fromParam === 'bigidea') setLocation("/sentinel/bigidea");
+              else if (fromParam === 'training') setLocation("/sentinel/pattern-training");
+              else if (fromParam?.startsWith('trade:')) setLocation(`/sentinel/trade/${fromParam.split(':')[1]}`);
+              else setLocation("/sentinel/dashboard");
+            }} data-testid="button-back">
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <SentinelHeader showSentiment={true} />
@@ -562,31 +607,6 @@ export default function SentinelEvaluatePage() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="setupType">Setup Type</Label>
-                  <Select value={setupType} onValueChange={setSetupType}>
-                    <SelectTrigger data-testid="select-setup-type">
-                      <SelectValue placeholder="Select setup pattern..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="breakout">Breakout</SelectItem>
-                      <SelectItem value="pullback">Pullback</SelectItem>
-                      <SelectItem value="cup_and_handle">Cup and Handle</SelectItem>
-                      <SelectItem value="vcp">VCP (Volatility Contraction Pattern)</SelectItem>
-                      <SelectItem value="episodic_pivot">Episodic Pivot</SelectItem>
-                      <SelectItem value="reclaim">Reclaim</SelectItem>
-                      <SelectItem value="high_tight_flag">High Tight Flag</SelectItem>
-                      <SelectItem value="low_cheat">Low Cheat Setup</SelectItem>
-                      <SelectItem value="undercut_rally">Undercut and Rally</SelectItem>
-                      <SelectItem value="orb">Opening Range Breakout (ORB)</SelectItem>
-                      <SelectItem value="short_lost_50">SHORT: Lost 50 SMA</SelectItem>
-                      <SelectItem value="short_lost_200">SHORT: Lost 200 SMA</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Ticker Info Display */}
                 {debouncedSymbol && (
                   <div className="p-3 bg-muted/50 rounded-md border">
                     {tickerQuery.isLoading ? (
@@ -605,9 +625,21 @@ export default function SentinelEvaluatePage() {
                             <span className="font-semibold text-lg" data-testid="text-ticker-name">{tickerQuery.data.name}</span>
                             <Badge variant="outline" className="text-xs" data-testid="badge-ticker-symbol">{tickerQuery.data.symbol}</Badge>
                           </div>
-                          <span className="text-xl font-bold text-primary" data-testid="text-current-price">
-                            ${tickerQuery.data.currentPrice?.toFixed(2)}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl font-bold text-primary" data-testid="text-current-price">
+                              ${tickerQuery.data.currentPrice?.toFixed(2)}
+                            </span>
+                            {tickerQuery.data.previousClose > 0 && (() => {
+                              const change = tickerQuery.data.currentPrice - tickerQuery.data.previousClose;
+                              const changePct = (change / tickerQuery.data.previousClose) * 100;
+                              const isPositive = change >= 0;
+                              return (
+                                <span className={`text-sm font-semibold ${isPositive ? 'text-green-500' : 'text-red-500'}`} data-testid="text-price-change">
+                                  {isPositive ? '+' : ''}{change.toFixed(2)} ({isPositive ? '+' : ''}{changePct.toFixed(2)}%)
+                                </span>
+                              );
+                            })()}
+                          </div>
                         </div>
                         <div className="flex gap-2 flex-wrap items-center">
                           <Badge variant="secondary" className="text-xs" data-testid="badge-sector">{tickerQuery.data.sector}</Badge>
@@ -641,6 +673,40 @@ export default function SentinelEvaluatePage() {
                 )}
 
                 <div className="space-y-2">
+                  <Label htmlFor="setupType">Setup Type</Label>
+                  <Select value={setupType} onValueChange={setSetupType}>
+                    <SelectTrigger data-testid="select-setup-type">
+                      <SelectValue placeholder="Select setup pattern..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="breakout">Breakout</SelectItem>
+                      <SelectItem value="pullback">Pullback</SelectItem>
+                      <SelectItem value="cup_and_handle">Cup and Handle</SelectItem>
+                      <SelectItem value="vcp">VCP (Volatility Contraction Pattern)</SelectItem>
+                      <SelectItem value="episodic_pivot">Episodic Pivot</SelectItem>
+                      <SelectItem value="reclaim">Reclaim</SelectItem>
+                      <SelectItem value="high_tight_flag">High Tight Flag</SelectItem>
+                      <SelectItem value="low_cheat">Low Cheat Setup</SelectItem>
+                      <SelectItem value="undercut_rally">Undercut and Rally</SelectItem>
+                      <SelectItem value="orb">Opening Range Breakout (ORB)</SelectItem>
+                      <SelectItem value="short_lost_50">SHORT: Lost 50 SMA</SelectItem>
+                      <SelectItem value="short_lost_200">SHORT: Lost 200 SMA</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {suggestions?.technicalContext && (
+                  <div className="p-2 bg-blue-500/10 border border-blue-500/30 rounded text-xs text-muted-foreground" data-testid="technical-context">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Info className="w-3 h-3 text-blue-400" />
+                      <span className="text-blue-400 font-medium">Technical Context</span>
+                    </div>
+                    {suggestions.technicalContext}
+                  </div>
+                )}
+
+                <div className="space-y-2">
                   <Label htmlFor="entryPrice">Entry Price</Label>
                   <Input
                     id="entryPrice"
@@ -654,10 +720,85 @@ export default function SentinelEvaluatePage() {
                   />
                 </div>
 
-                {/* Stop Price with mode toggle */}
                 <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
                   <div className="flex items-center justify-between">
-                    <Label className="font-medium">Stop Price</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="font-medium">Position Size</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">How many shares or how much dollar value you're putting into this trade. Used to calculate total risk in real dollars.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={positionSizeUnit === "shares" ? "default" : "ghost"}
+                        className="h-7 px-2 gap-1"
+                        onClick={() => setPositionSizeUnit("shares")}
+                        data-testid="button-unit-shares"
+                      >
+                        <Hash className="w-3 h-3" />
+                        <span className="text-xs">Shares</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={positionSizeUnit === "dollars" ? "default" : "ghost"}
+                        className="h-7 px-2 gap-1"
+                        onClick={() => setPositionSizeUnit("dollars")}
+                        data-testid="button-unit-dollars"
+                      >
+                        <DollarSign className="w-3 h-3" />
+                        <span className="text-xs">Dollars</span>
+                      </Button>
+                    </div>
+                  </div>
+                  <Input
+                    type="number"
+                    step={positionSizeUnit === "shares" ? "1" : "0.01"}
+                    data-testid="input-position-size"
+                    value={positionSize}
+                    onChange={(e) => setPositionSize(e.target.value)}
+                    placeholder={positionSizeUnit === "shares" ? "100" : "10000"}
+                  />
+                  
+                  {suggestions?.positionSizeSuggestion && stopPrice && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <Zap className="w-3 h-3 text-amber-500" />
+                      <Badge
+                        variant="outline"
+                        className="cursor-pointer text-xs hover:bg-amber-500/20 border-amber-500/30"
+                        onClick={() => {
+                          setPositionSize(suggestions.positionSizeSuggestion!.shares.toString());
+                          setPositionSizeUnit("shares");
+                        }}
+                        data-testid="badge-position-suggestion"
+                      >
+                        <span className="font-medium">1% Risk:</span>
+                        <span className="ml-1">{suggestions.positionSizeSuggestion.shares} shares</span>
+                        <span className="text-muted-foreground ml-1">(${suggestions.positionSizeSuggestion.dollarRisk})</span>
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Label className="font-medium">Stop Price</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">Where you'll exit if the trade goes against you. Choose a preset level or enter a specific price. Your stop should be at a logical support level.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                     <RadioGroup
                       value={stopPriceMode}
                       onValueChange={(v) => setStopPriceMode(v as "amount" | "choice")}
@@ -759,291 +900,267 @@ export default function SentinelEvaluatePage() {
                   )}
                 </div>
 
-                {/* Target Price with mode toggle */}
-                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
-                  <div className="flex items-center justify-between">
-                    <Label className="font-medium">First Profit Trim</Label>
-                    <RadioGroup
-                      value={targetPriceMode}
-                      onValueChange={(v) => setTargetPriceMode(v as "amount" | "choice")}
-                      className="flex gap-4"
-                    >
-                      <div className="flex items-center space-x-1">
-                        <RadioGroupItem value="amount" id="target-amount" />
-                        <Label htmlFor="target-amount" className="text-xs cursor-pointer">Amount</Label>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <RadioGroupItem value="choice" id="target-choice" />
-                        <Label htmlFor="target-choice" className="text-xs cursor-pointer">Level</Label>
-                      </div>
-                    </RadioGroup>
-                  </div>
-                  {targetPriceMode === "amount" ? (
-                    <Input
-                      type="number"
-                      step="0.01"
-                      data-testid="input-target-price"
-                      value={targetPrice}
-                      onChange={(e) => setTargetPrice(e.target.value)}
-                      placeholder="165.00"
-                    />
-                  ) : (
-                    <Select value={targetPriceChoice} onValueChange={setTargetPriceChoice}>
-                      <SelectTrigger data-testid="select-target-level">
-                        <SelectValue placeholder="Select target level..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TARGET_PRICE_CHOICES.map((choice) => (
-                          <SelectItem key={choice.value} value={choice.value}>
-                            {choice.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  
-                  {/* Per-share gain calculation for First Profit Trim */}
-                  {targetPriceMode === "amount" && targetPrice && entryPrice && (
-                    <div className="mt-2 p-2 bg-green-500/10 border border-green-500/30 rounded text-sm" data-testid="first-trim-calculation">
-                      {(() => {
-                        const entry = parseFloat(entryPrice);
-                        const target = parseFloat(targetPrice);
-                        const shares = positionSize 
-                          ? (positionSizeUnit === "shares" 
-                            ? parseFloat(positionSize) 
-                            : Math.round(parseFloat(positionSize) / entry)) 
-                          : 0;
-                        const gainPerShare = direction === "long" ? target - entry : entry - target;
-                        const trimShares = Math.round(shares * 0.3);
-                        const totalGain = trimShares > 0 ? gainPerShare * trimShares : 0;
-                        
-                        if (isNaN(entry) || isNaN(target)) return null;
-                        
-                        return (
-                          <div className="flex flex-col gap-1">
-                            <span className="text-green-400 font-medium">
-                              Gain: ${gainPerShare.toFixed(2)} / share
-                            </span>
-                            {shares > 0 && (
-                              <span className="text-green-400 font-medium">
-                                First Trim (30%): ${totalGain.toFixed(2)} ({trimShares} shares)
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })()}
+                <div className="p-3 bg-muted/30 rounded-md border">
+                  <div
+                    className="flex items-center justify-between cursor-pointer"
+                    onClick={() => setFirstTrimExpanded(!firstTrimExpanded)}
+                    data-testid="toggle-first-trim"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Label className="font-medium cursor-pointer">First Profit Trim (optional)</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">Optional: Set a level to take partial profits (typically 30% of position). This locks in gains and reduces risk on the remaining position.</p>
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
-                  )}
-                  
-                  {/* AI Target Suggestions */}
-                  {targetPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Target className="w-3 h-3 text-green-500" />
-                        <span className="text-xs text-muted-foreground">AI Suggestions</span>
-                        {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {firstTrimExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
+                  {firstTrimExpanded && (
+                    <div className="space-y-3 mt-3">
+                      <div className="flex items-center justify-end">
+                        <RadioGroup
+                          value={targetPriceMode}
+                          onValueChange={(v) => setTargetPriceMode(v as "amount" | "choice")}
+                          className="flex gap-4"
+                        >
+                          <div className="flex items-center space-x-1">
+                            <RadioGroupItem value="amount" id="target-amount" />
+                            <Label htmlFor="target-amount" className="text-xs cursor-pointer">Amount</Label>
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <RadioGroupItem value="choice" id="target-choice" />
+                            <Label htmlFor="target-choice" className="text-xs cursor-pointer">Level</Label>
+                          </div>
+                        </RadioGroup>
                       </div>
-                      <div className="flex flex-wrap gap-1.5" data-testid="target-suggestions">
-                        {suggestions?.targetSuggestions.slice(0, 5).map((t, i) => (
-                          <Badge
-                            key={i}
-                            variant="outline"
-                            className="cursor-pointer text-xs hover:bg-green-500/20 border-green-500/30"
-                            onClick={() => {
-                              setTargetPrice(t.price.toString());
-                              setTargetPriceMode("amount");
-                            }}
-                            data-testid={`badge-target-suggestion-${i}`}
-                          >
-                            <span className="font-medium">{t.label}</span>
-                            <span className="text-muted-foreground ml-1">${t.price}</span>
-                            <span className="text-green-400 ml-1">({t.rrRatio}:1)</span>
-                          </Badge>
-                        ))}
-                      </div>
+                      {targetPriceMode === "amount" ? (
+                        <Input
+                          type="number"
+                          step="0.01"
+                          data-testid="input-target-price"
+                          value={targetPrice}
+                          onChange={(e) => setTargetPrice(e.target.value)}
+                          placeholder="165.00"
+                        />
+                      ) : (
+                        <Select value={targetPriceChoice} onValueChange={setTargetPriceChoice}>
+                          <SelectTrigger data-testid="select-target-level">
+                            <SelectValue placeholder="Select target level..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TARGET_PRICE_CHOICES.map((choice) => (
+                              <SelectItem key={choice.value} value={choice.value}>
+                                {choice.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      
+                      {targetPriceMode === "amount" && targetPrice && entryPrice && (
+                        <div className="mt-2 p-2 bg-green-500/10 border border-green-500/30 rounded text-sm" data-testid="first-trim-calculation">
+                          {(() => {
+                            const entry = parseFloat(entryPrice);
+                            const target = parseFloat(targetPrice);
+                            const shares = positionSize 
+                              ? (positionSizeUnit === "shares" 
+                                ? parseFloat(positionSize) 
+                                : Math.round(parseFloat(positionSize) / entry)) 
+                              : 0;
+                            const gainPerShare = direction === "long" ? target - entry : entry - target;
+                            const trimShares = Math.round(shares * 0.3);
+                            const totalGain = trimShares > 0 ? gainPerShare * trimShares : 0;
+                            
+                            if (isNaN(entry) || isNaN(target)) return null;
+                            
+                            return (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-green-400 font-medium">
+                                  Gain: ${gainPerShare.toFixed(2)} / share
+                                </span>
+                                {shares > 0 && (
+                                  <span className="text-green-400 font-medium">
+                                    First Trim (30%): ${totalGain.toFixed(2)} ({trimShares} shares)
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      
+                      {targetPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Target className="w-3 h-3 text-green-500" />
+                            <span className="text-xs text-muted-foreground">AI Suggestions</span>
+                            {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5" data-testid="target-suggestions">
+                            {suggestions?.targetSuggestions.slice(0, 5).map((t, i) => (
+                              <Badge
+                                key={i}
+                                variant="outline"
+                                className="cursor-pointer text-xs hover:bg-green-500/20 border-green-500/30"
+                                onClick={() => {
+                                  setTargetPrice(t.price.toString());
+                                  setTargetPriceMode("amount");
+                                }}
+                                data-testid={`badge-target-suggestion-${i}`}
+                              >
+                                <span className="font-medium">{t.label}</span>
+                                <span className="text-muted-foreground ml-1">${t.price}</span>
+                                <span className="text-green-400 ml-1">({t.rrRatio}:1)</span>
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
 
-                {/* Target Profit - Full position exit target */}
-                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
-                  <div className="flex items-center justify-between">
-                    <Label className="font-medium">Target Profit</Label>
-                    <RadioGroup
-                      value={targetProfitMode}
-                      onValueChange={(v) => setTargetProfitMode(v as "amount" | "choice")}
-                      className="flex gap-4"
-                    >
-                      <div className="flex items-center space-x-1">
-                        <RadioGroupItem value="amount" id="profit-amount" />
-                        <Label htmlFor="profit-amount" className="text-xs cursor-pointer">Amount</Label>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <RadioGroupItem value="choice" id="profit-choice" />
-                        <Label htmlFor="profit-choice" className="text-xs cursor-pointer">Level</Label>
-                      </div>
-                    </RadioGroup>
+                <div className="p-3 bg-muted/30 rounded-md border">
+                  <div
+                    className="flex items-center justify-between cursor-pointer"
+                    onClick={() => setTargetProfitExpanded(!targetProfitExpanded)}
+                    data-testid="toggle-target-profit"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Label className="font-medium cursor-pointer">Profit Target (optional)</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">Optional: Set your full exit target for the remaining position. If you set a first trim, this applies to the remaining 70% of shares.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    {targetProfitExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </div>
-                  <p className="text-xs text-muted-foreground">Full exit target (5x-8x R:R ideal)</p>
-                  {targetProfitMode === "amount" ? (
-                    <Input
-                      type="number"
-                      step="0.01"
-                      data-testid="input-target-profit"
-                      value={targetProfitPrice}
-                      onChange={(e) => setTargetProfitPrice(e.target.value)}
-                      placeholder="180.00"
-                    />
-                  ) : (
-                    <Select value={targetProfitChoice} onValueChange={setTargetProfitChoice}>
-                      <SelectTrigger data-testid="select-target-profit-level">
-                        <SelectValue placeholder="Select target profit level..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TARGET_PROFIT_CHOICES.map((choice) => (
-                          <SelectItem key={choice.value} value={choice.value}>
-                            {choice.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  
-                  {/* Per-share gain calculation for Target Profit */}
-                  {targetProfitMode === "amount" && targetProfitPrice && entryPrice && (
-                    <div className="mt-2 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-sm" data-testid="target-profit-calculation">
-                      {(() => {
-                        const entry = parseFloat(entryPrice);
-                        const target = parseFloat(targetProfitPrice);
-                        const shares = positionSize 
-                          ? (positionSizeUnit === "shares" 
-                            ? parseFloat(positionSize) 
-                            : Math.round(parseFloat(positionSize) / entry)) 
-                          : 0;
-                        const gainPerShare = direction === "long" ? target - entry : entry - target;
-                        const remainingShares = Math.round(shares * 0.7);
-                        const totalGain = remainingShares > 0 ? gainPerShare * remainingShares : 0;
-                        
-                        if (isNaN(entry) || isNaN(target)) return null;
-                        
-                        return (
-                          <div className="flex flex-col gap-1">
-                            <span className="text-emerald-400 font-medium">
-                              Gain: ${gainPerShare.toFixed(2)} / share
-                            </span>
-                            {shares > 0 && (
-                              <span className="text-emerald-400 font-medium">
-                                Target (70%): ${totalGain.toFixed(2)} ({remainingShares} shares)
-                              </span>
-                            )}
+                  {targetProfitExpanded && (
+                    <div className="space-y-3 mt-3">
+                      <div className="flex items-center justify-end">
+                        <RadioGroup
+                          value={targetProfitMode}
+                          onValueChange={(v) => setTargetProfitMode(v as "amount" | "choice")}
+                          className="flex gap-4"
+                        >
+                          <div className="flex items-center space-x-1">
+                            <RadioGroupItem value="amount" id="profit-amount" />
+                            <Label htmlFor="profit-amount" className="text-xs cursor-pointer">Amount</Label>
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                  
-                  {/* AI Target Profit Suggestions */}
-                  {targetProfitMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Target className="w-3 h-3 text-emerald-500" />
-                        <span className="text-xs text-muted-foreground">AI Suggestions (Full Exit)</span>
-                        {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                          <div className="flex items-center space-x-1">
+                            <RadioGroupItem value="choice" id="profit-choice" />
+                            <Label htmlFor="profit-choice" className="text-xs cursor-pointer">Level</Label>
+                          </div>
+                        </RadioGroup>
                       </div>
-                      <div className="flex flex-wrap gap-1.5" data-testid="target-profit-suggestions">
-                        {suggestions?.targetSuggestions.slice(0, 5).map((t, i) => (
-                          <Badge
-                            key={i}
-                            variant="outline"
-                            className="cursor-pointer text-xs hover:bg-emerald-500/20 border-emerald-500/30"
-                            onClick={() => {
-                              setTargetProfitPrice(t.price.toString());
-                              setTargetProfitMode("amount");
-                            }}
-                            data-testid={`badge-target-profit-suggestion-${i}`}
-                          >
-                            <span className="font-medium">{t.label}</span>
-                            <span className="text-muted-foreground ml-1">${t.price}</span>
-                            <span className="text-emerald-400 ml-1">({t.rrRatio}:1)</span>
-                          </Badge>
-                        ))}
-                      </div>
+                      <p className="text-xs text-muted-foreground">Full exit target (5x-8x R:R ideal)</p>
+                      {targetProfitMode === "amount" ? (
+                        <Input
+                          type="number"
+                          step="0.01"
+                          data-testid="input-target-profit"
+                          value={targetProfitPrice}
+                          onChange={(e) => setTargetProfitPrice(e.target.value)}
+                          placeholder="180.00"
+                        />
+                      ) : (
+                        <Select value={targetProfitChoice} onValueChange={setTargetProfitChoice}>
+                          <SelectTrigger data-testid="select-target-profit-level">
+                            <SelectValue placeholder="Select target profit level..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TARGET_PROFIT_CHOICES.map((choice) => (
+                              <SelectItem key={choice.value} value={choice.value}>
+                                {choice.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      
+                      {targetProfitMode === "amount" && targetProfitPrice && entryPrice && (
+                        <div className="mt-2 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-sm" data-testid="target-profit-calculation">
+                          {(() => {
+                            const entry = parseFloat(entryPrice);
+                            const target = parseFloat(targetProfitPrice);
+                            const shares = positionSize 
+                              ? (positionSizeUnit === "shares" 
+                                ? parseFloat(positionSize) 
+                                : Math.round(parseFloat(positionSize) / entry)) 
+                              : 0;
+                            const gainPerShare = direction === "long" ? target - entry : entry - target;
+                            const remainingShares = Math.round(shares * 0.7);
+                            const totalGain = remainingShares > 0 ? gainPerShare * remainingShares : 0;
+                            
+                            if (isNaN(entry) || isNaN(target)) return null;
+                            
+                            return (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-emerald-400 font-medium">
+                                  Gain: ${gainPerShare.toFixed(2)} / share
+                                </span>
+                                {shares > 0 && (
+                                  <span className="text-emerald-400 font-medium">
+                                    Target (70%): ${totalGain.toFixed(2)} ({remainingShares} shares)
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      
+                      {targetProfitMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Target className="w-3 h-3 text-emerald-500" />
+                            <span className="text-xs text-muted-foreground">AI Suggestions (Full Exit)</span>
+                            {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5" data-testid="target-profit-suggestions">
+                            {suggestions?.targetSuggestions.slice(0, 5).map((t, i) => (
+                              <Badge
+                                key={i}
+                                variant="outline"
+                                className="cursor-pointer text-xs hover:bg-emerald-500/20 border-emerald-500/30"
+                                onClick={() => {
+                                  setTargetProfitPrice(t.price.toString());
+                                  setTargetProfitMode("amount");
+                                }}
+                                data-testid={`badge-target-profit-suggestion-${i}`}
+                              >
+                                <span className="font-medium">{t.label}</span>
+                                <span className="text-muted-foreground ml-1">${t.price}</span>
+                                <span className="text-emerald-400 ml-1">({t.rrRatio}:1)</span>
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-
-                {/* Position Size with unit toggle */}
-                <div className="space-y-3 p-3 bg-muted/30 rounded-md border">
-                  <div className="flex items-center justify-between">
-                    <Label className="font-medium">Position Size</Label>
-                    <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={positionSizeUnit === "shares" ? "default" : "ghost"}
-                        className="h-7 px-2 gap-1"
-                        onClick={() => setPositionSizeUnit("shares")}
-                        data-testid="button-unit-shares"
-                      >
-                        <Hash className="w-3 h-3" />
-                        <span className="text-xs">Shares</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={positionSizeUnit === "dollars" ? "default" : "ghost"}
-                        className="h-7 px-2 gap-1"
-                        onClick={() => setPositionSizeUnit("dollars")}
-                        data-testid="button-unit-dollars"
-                      >
-                        <DollarSign className="w-3 h-3" />
-                        <span className="text-xs">Dollars</span>
-                      </Button>
-                    </div>
-                  </div>
-                  <Input
-                    type="number"
-                    step={positionSizeUnit === "shares" ? "1" : "0.01"}
-                    data-testid="input-position-size"
-                    value={positionSize}
-                    onChange={(e) => setPositionSize(e.target.value)}
-                    placeholder={positionSizeUnit === "shares" ? "100" : "10000"}
-                  />
-                  
-                  {/* AI Position Size Suggestion */}
-                  {suggestions?.positionSizeSuggestion && stopPrice && (
-                    <div className="flex items-center gap-2 mt-2">
-                      <Zap className="w-3 h-3 text-amber-500" />
-                      <Badge
-                        variant="outline"
-                        className="cursor-pointer text-xs hover:bg-amber-500/20 border-amber-500/30"
-                        onClick={() => {
-                          setPositionSize(suggestions.positionSizeSuggestion!.shares.toString());
-                          setPositionSizeUnit("shares");
-                        }}
-                        data-testid="badge-position-suggestion"
-                      >
-                        <span className="font-medium">1% Risk:</span>
-                        <span className="ml-1">{suggestions.positionSizeSuggestion.shares} shares</span>
-                        <span className="text-muted-foreground ml-1">(${suggestions.positionSizeSuggestion.dollarRisk})</span>
-                      </Badge>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Technical Context from AI */}
-                {suggestions?.technicalContext && (
-                  <div className="p-2 bg-blue-500/10 border border-blue-500/30 rounded text-xs text-muted-foreground" data-testid="technical-context">
-                    <div className="flex items-center gap-1 mb-1">
-                      <Info className="w-3 h-3 text-blue-400" />
-                      <span className="text-blue-400 font-medium">Technical Context</span>
-                    </div>
-                    {suggestions.technicalContext}
-                  </div>
-                )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="thesis">Trade Thesis (optional)</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="thesis">Trade Thesis (optional)</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="text-xs">What's your edge? Why are you taking this trade? Be specific about the catalyst, pattern, or setup you see.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                   <Textarea
                     id="thesis"
                     data-testid="input-thesis"
@@ -1093,7 +1210,17 @@ export default function SentinelEvaluatePage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between p-3 bg-muted rounded-md">
                     <div>
-                      <Label htmlFor="deepEval" className="font-medium">Deep Evaluation</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Label htmlFor="deepEval" className="font-medium">Deep Evaluation</Label>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <HelpCircle className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs">
+                            <p className="text-xs">Deep uses a more advanced AI model for nuanced pattern recognition, deeper contextual reasoning, and more thorough stop/target analysis. Standard is good for most trades.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
                       <p className="text-xs text-muted-foreground">Use advanced AI model (gpt-5.2)</p>
                     </div>
                     <Switch
@@ -1467,9 +1594,49 @@ export default function SentinelEvaluatePage() {
                   </CardContent>
                 </Card>
 
-                {/* Why Section */}
-                {result.evaluation.whyBullets && result.evaluation.whyBullets.length > 0 && (
-                  <Card>
+                {result.evaluation.tradeSnapshot ? (
+                  <Card data-testid="trade-snapshot">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-green-500" />
+                        Trade Snapshot
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <CheckCircle2 className="w-4 h-4 text-green-500" />
+                            <span className="text-sm font-medium text-green-500">What Works</span>
+                          </div>
+                          <ul className="space-y-1.5">
+                            {result.evaluation.tradeSnapshot.good.map((item, i) => (
+                              <li key={i} className="text-sm flex items-start gap-2">
+                                <ArrowUpCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                            <span className="text-sm font-medium text-yellow-500">Watch Out For</span>
+                          </div>
+                          <ul className="space-y-1.5">
+                            {result.evaluation.tradeSnapshot.bad.map((item, i) => (
+                              <li key={i} className="text-sm flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : result.evaluation.whyBullets && result.evaluation.whyBullets.length > 0 ? (
+                  <Card data-testid="trade-snapshot">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2">
                         <Target className="w-4 h-4 text-green-500" />
@@ -1485,6 +1652,82 @@ export default function SentinelEvaluatePage() {
                           </li>
                         ))}
                       </ul>
+                    </CardContent>
+                  </Card>
+                ) : null}
+
+                {result.evaluation.logicalStops && (
+                  <Card data-testid="logical-stops">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Crosshair className="w-4 h-4 text-red-400" />
+                        Stop Level Analysis
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
+                        {result.evaluation.logicalStops.userStopEval}
+                      </div>
+                      <div className="space-y-2">
+                        {result.evaluation.logicalStops.suggestions.map((s, i) => {
+                          const rankColor = s.rank === 1 ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
+                            s.rank === 2 ? "bg-gray-400/20 text-gray-300 border-gray-400/30" :
+                            "bg-amber-700/20 text-amber-600 border-amber-700/30";
+                          return (
+                            <div key={i} className="p-3 rounded-md border bg-muted/30">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <Badge variant="outline" className={`text-xs ${rankColor}`}>#{s.rank}</Badge>
+                                <span className="font-medium text-sm">{s.label}</span>
+                                <span className="text-sm font-bold text-red-400">${s.price.toFixed(2)}</span>
+                                <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">{s.reasoning}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {result.evaluation.logicalTargets && (
+                  <Card data-testid="logical-targets">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Target className="w-4 h-4 text-green-500" />
+                        Take Profit Targets
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
+                        {result.evaluation.logicalTargets.userTargetEval}
+                      </div>
+                      <div className="space-y-2">
+                        {result.evaluation.logicalTargets.suggestions.map((s, i) => (
+                          <div key={i} className="p-3 rounded-md border bg-muted/30">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="font-medium text-sm">{s.label}</span>
+                              <span className="text-sm font-bold text-green-400">${s.price.toFixed(2)}</span>
+                              <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
+                              {s.rrRatio && (
+                                <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                  R:R {s.rrRatio}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{s.reasoning}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {result.evaluation.logicalTargets.partialProfitIdea && (
+                        <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Scissors className="w-4 h-4 text-amber-500" />
+                            <span className="text-sm font-medium text-amber-500">Partial Profit Idea</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground">{result.evaluation.logicalTargets.partialProfitIdea}</p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}
@@ -1571,29 +1814,6 @@ export default function SentinelEvaluatePage() {
                     </Card>
                   );
                 })()}
-
-                {/* Fixes to Pass Section - Minimum changes to reach GREEN */}
-                {result.evaluation.fixesToPass && result.evaluation.fixesToPass.length > 0 && (
-                  <Card className="border-green-500/30">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Target className="w-4 h-4 text-green-500" />
-                        Minimum Fixes to Pass
-                      </CardTitle>
-                      <p className="text-xs text-muted-foreground">Make these changes to reach GREEN</p>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-1.5" data-testid="fixes-to-pass">
-                        {result.evaluation.fixesToPass.map((fix, i) => (
-                          <li key={i} className="text-sm flex items-start gap-2">
-                            <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                            <span>{fix}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {/* Improvements Section */}
                 {result.evaluation.improvements && result.evaluation.improvements.length > 0 && (
