@@ -202,6 +202,7 @@ interface ScanResponse {
   thoughtCounts: Record<string, number>;
   totalScanned: number;
   linkOverrides?: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }>;
+  dynamicDataFlows?: Array<{ provider: string; consumer: string; dataKey: string; description: string }>;
 }
 
 function getCategoryIcon(category: string) {
@@ -496,6 +497,7 @@ export default function BigIdeaPage() {
     name: string;
     params: Array<{ name: string; autoLink?: { linkType: string; sourceParam?: string } }>;
     provides?: Array<{ linkType: string; paramName: string }>;
+    consumes?: Array<{ paramName: string; dataKey: string }>;
   };
   const { data: indicatorLibrary = [] } = useQuery<IndicatorMeta[]>({
     queryKey: ["/api/bigidea/indicators"],
@@ -750,6 +752,7 @@ export default function BigIdeaPage() {
         matchCount: data.results.length,
         thoughtCounts: data.thoughtCounts || {},
         linkOverrides: data.linkOverrides || [],
+        dynamicDataFlows: data.dynamicDataFlows || [],
       });
       setDebugOpen(true);
 
@@ -1442,6 +1445,22 @@ export default function BigIdeaPage() {
                       </div>
                     )}
 
+                    {debugInfo.dynamicDataFlows?.length > 0 && (
+                      <div className="border-t border-dashed pt-1">
+                        <span className="font-semibold text-emerald-400">Dynamic Per-Stock Data:</span>
+                        {debugInfo.dynamicDataFlows.map((d: any, i: number) => (
+                          <div key={i} className="ml-2">
+                            <span className="text-emerald-300">{d.dataKey}</span>
+                            <span className="text-muted-foreground/60">: </span>
+                            <span className="text-foreground/80">{d.provider}</span>
+                            <span className="text-muted-foreground/60"> → </span>
+                            <span className="text-foreground/80">{d.consumer}</span>
+                            <div className="ml-3 text-muted-foreground/50">{d.description}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {debugInfo.thoughts.map((t: any) => {
                       const passCount = debugInfo.thoughtCounts[t.nodeId];
                       return (
@@ -1852,6 +1871,17 @@ export default function BigIdeaPage() {
                                   <span className="truncate">{linkedVal.sourceName} = {String(linkedVal.value)}</span>
                                 </div>
                               )}
+                              {(() => {
+                                const meta = indicatorLibrary.find((m) => m.id === criterion.indicatorId);
+                                const consumeEntry = meta?.consumes?.find((c) => c.paramName === param.name);
+                                if (!consumeEntry) return null;
+                                return (
+                                  <div className="mt-1 flex items-center gap-1.5 text-[10px] text-emerald-400">
+                                    <Zap className="h-3 w-3 shrink-0" />
+                                    <span>Per-stock dynamic: uses <span className="font-medium">{consumeEntry.dataKey}</span> from upstream at scan time</span>
+                                  </div>
+                                );
+                              })()}
                               {isLinked && !linkedVal && linkSources.length === 0 && (
                                 <div className="mt-1 text-[10px] text-yellow-500">
                                   No compatible source found on canvas. Add a base/consolidation thought.

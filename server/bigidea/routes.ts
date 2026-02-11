@@ -2,7 +2,7 @@ import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
 import { scannerThoughts, scannerIdeas, scannerFavorites } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
-import { INDICATOR_LIBRARY, CandleData } from "./indicators";
+import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
 import OpenAI from "openai";
 import * as tiingo from "../tiingo";
 
@@ -168,16 +168,24 @@ function repairCriterion(criterion: any): { indicatorId: string; params: Record<
   return { indicatorId: criterion.indicatorId, params: paramValues };
 }
 
+type ThoughtEvalResult = {
+  pass: boolean;
+  outputData: Record<string, any>;
+};
+
 function evaluateThoughtCriteria(
   criteria: any[],
   candles: CandleData[],
   benchmarkCandles?: CandleData[],
-  candlesByTimeframe?: Record<string, CandleData[]>
-): boolean {
-  if (!criteria || criteria.length === 0) return false;
+  candlesByTimeframe?: Record<string, CandleData[]>,
+  upstreamData?: Record<string, any>
+): ThoughtEvalResult {
+  if (!criteria || criteria.length === 0) return { pass: false, outputData: {} };
 
   const activeCriteria = criteria.filter((c: any) => !c.muted);
-  if (activeCriteria.length === 0) return false;
+  if (activeCriteria.length === 0) return { pass: false, outputData: {} };
+
+  const outputData: Record<string, any> = {};
 
   for (const criterion of activeCriteria) {
     const repaired = repairCriterion(criterion);
@@ -189,12 +197,19 @@ function evaluateThoughtCriteria(
       ? candlesByTimeframe[overrideTf]
       : candles;
 
-    let result = indicator.evaluate(useCandles, repaired.params, benchmarkCandles);
-    if (criterion.inverted) result = !result;
-    if (!result) return false;
+    const rawResult = indicator.evaluate(useCandles, repaired.params, benchmarkCandles, upstreamData);
+    const normalized = normalizeResult(rawResult);
+
+    if (normalized.data) {
+      Object.assign(outputData, normalized.data);
+    }
+
+    let pass = normalized.pass;
+    if (criterion.inverted) pass = !pass;
+    if (!pass) return { pass: false, outputData };
   }
 
-  return true;
+  return { pass: true, outputData };
 }
 
 export function registerBigIdeaRoutes(app: Express): void {
@@ -471,6 +486,7 @@ export function registerBigIdeaRoutes(app: Express): void {
         description: ind.description,
         params: ind.params,
         provides: ind.provides || [],
+        consumes: ind.consumes || [],
       }));
       res.json(indicators);
     } catch (error) {
@@ -733,6 +749,7 @@ Select the most appropriate indicators and set parameters that match the user's 
               }
 
               const nodeResults: Record<string, boolean> = {};
+              const nodeOutputData: Record<string, Record<string, any>> = {};
 
               for (const node of thoughtNodes) {
                 const tf = node.thoughtTimeframe || "daily";
@@ -742,15 +759,33 @@ Select the most appropriate indicators and set parameters that match the user's 
                   nodeResults[node.id] = false;
                   continue;
                 }
-                let passed = evaluateThoughtCriteria(
+
+                const upstreamNodes = edges
+                  .filter((e: any) => e.target === node.id)
+                  .map((e: any) => e.source);
+                const mergedUpstream: Record<string, any> = {};
+                for (const srcId of upstreamNodes) {
+                  const srcData = nodeOutputData[srcId];
+                  if (srcData) Object.assign(mergedUpstream, srcData);
+                }
+
+                const evalResult = evaluateThoughtCriteria(
                   node.thoughtCriteria,
                   candles,
                   spyCandles.length > 0 ? spyCandles : undefined,
-                  candlesByTimeframe
+                  candlesByTimeframe,
+                  Object.keys(mergedUpstream).length > 0 ? mergedUpstream : undefined
                 );
+
+                let passed = evalResult.pass;
                 if (node.isNot) passed = !passed;
                 nodeResults[node.id] = passed;
-                if (passed) thoughtCounts[node.id]++;
+                if (passed) {
+                  thoughtCounts[node.id]++;
+                  if (evalResult.outputData && Object.keys(evalResult.outputData).length > 0) {
+                    nodeOutputData[node.id] = evalResult.outputData;
+                  }
+                }
               }
 
               const resultsNode = nodes.find((n: any) => n.type === "results");
@@ -840,9 +875,41 @@ Select the most appropriate indicators and set parameters that match the user's 
         }
       }
 
+      const dynamicDataFlows: Array<{ provider: string; consumer: string; dataKey: string; description: string }> = [];
+      for (const tn of thoughtNodes) {
+        for (const c of (tn.thoughtCriteria || [])) {
+          if (c.muted) continue;
+          const indDef = INDICATOR_LIBRARY.find((ind) => ind.id === c.indicatorId);
+          if (!indDef?.consumes) continue;
+          for (const cons of indDef.consumes) {
+            const upstreamIds = edges.filter((e: any) => e.target === tn.id).map((e: any) => e.source);
+            for (const srcId of upstreamIds) {
+              const srcNode = thoughtNodes.find((n: any) => n.id === srcId);
+              if (!srcNode) continue;
+              for (const sc of (srcNode.thoughtCriteria || [])) {
+                const srcInd = INDICATOR_LIBRARY.find((ind) => ind.id === sc.indicatorId);
+                if (!srcInd?.provides) continue;
+                const prov = srcInd.provides.find((p) => p.linkType === "basePeriod");
+                if (prov) {
+                  dynamicDataFlows.push({
+                    provider: `${srcNode.thoughtName || "Unnamed"} (${srcInd.name})`,
+                    consumer: `${tn.thoughtName || "Unnamed"} (${indDef.name})`,
+                    dataKey: cons.dataKey,
+                    description: `${cons.paramName} uses per-stock ${cons.dataKey} from upstream`,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
       console.log(`[BigIdea Scan] Complete: ${results.length} results from ${tickers.length} tickers (fetchFails=${fetchFailCount}, tooFewCandles=${tooFewCandlesCount})`);
       console.log(`[BigIdea Scan] ThoughtCounts:`, JSON.stringify(thoughtCounts));
-      res.json({ results, thoughtCounts, linkOverrides });
+      if (dynamicDataFlows.length > 0) {
+        console.log(`[BigIdea Scan] Dynamic data flows:`, dynamicDataFlows.map(d => `${d.provider} → ${d.consumer}: ${d.dataKey}`));
+      }
+      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows });
     } catch (error) {
       console.error("Error executing scan:", error);
       res.status(500).json({ error: "Failed to execute scan" });

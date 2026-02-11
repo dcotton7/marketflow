@@ -29,6 +29,13 @@ export type IndicatorProvides = {
   paramName: string;
 };
 
+export type IndicatorConsumes = {
+  paramName: string;
+  dataKey: string;
+};
+
+export type IndicatorResult = boolean | { pass: boolean; data?: Record<string, any> };
+
 export type IndicatorDefinition = {
   id: string;
   name: string;
@@ -36,8 +43,14 @@ export type IndicatorDefinition = {
   description: string;
   params: IndicatorParam[];
   provides?: IndicatorProvides[];
-  evaluate: (candles: CandleData[], params: Record<string, any>, benchmarkCandles?: CandleData[]) => boolean;
+  consumes?: IndicatorConsumes[];
+  evaluate: (candles: CandleData[], params: Record<string, any>, benchmarkCandles?: CandleData[], upstreamData?: Record<string, any>) => IndicatorResult;
 };
+
+export function normalizeResult(result: IndicatorResult): { pass: boolean; data?: Record<string, any> } {
+  if (typeof result === "boolean") return { pass: result };
+  return result;
+}
 
 function calcSMA(candles: CandleData[], period: number): number {
   if (candles.length < period) return candles.length > 0 ? candles.slice(0, candles.length).reduce((s, c) => s + c.close, 0) / candles.length : 0;
@@ -604,26 +617,45 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-3",
     name: "Consolidation / Base Detection",
     category: "Price Action",
-    description: "Detects a flat consolidation base: tight price range, minimal trend slope, and price near the top of the range. Max Slope controls how much directional drift is allowed (lower = flatter). Filters out trending stocks.",
+    description: "Detects a flat consolidation base up to 'period' bars long. Scans backward from recent bars to find the actual flat zone, trimming any prior advance ramp-in. Returns the detected base length for downstream indicators. Min Period sets the shortest acceptable base.",
     provides: [{ linkType: "basePeriod", paramName: "period" }],
     params: [
-      { name: "period", label: "Lookback Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
+      { name: "period", label: "Max Base Length", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
+      { name: "minPeriod", label: "Min Base Length", type: "number", defaultValue: 5, min: 3, max: 50, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
       { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 5, min: 0.5, max: 15, step: 0.5 },
     ],
     evaluate: (candles, params) => {
-      const period = params.period ?? 20;
+      const maxPeriod = params.period ?? 20;
+      const minPeriod = params.minPeriod ?? 5;
       const maxRange = params.maxRange ?? 15;
       const maxSlope = params.maxSlope ?? 5;
-      if (candles.length < period) return false;
-      const slice = candles.slice(0, period);
-      const high = Math.max(...slice.map(c => c.high));
-      const low = Math.min(...slice.map(c => c.low));
-      if (high === 0) return false;
-      const range = ((high - low) / high) * 100;
-      if (range > maxRange) return false;
+      if (candles.length < minPeriod) return false;
 
-      const closes = slice.map(c => c.close);
+      const maxLen = Math.min(maxPeriod, candles.length);
+
+      const recentSlice = candles.slice(0, minPeriod);
+      let baseHigh = Math.max(...recentSlice.map(c => c.high));
+      let baseLow = Math.min(...recentSlice.map(c => c.low));
+
+      let detectedLen = minPeriod;
+
+      for (let i = minPeriod; i < maxLen; i++) {
+        const bar = candles[i];
+        const testHigh = Math.max(baseHigh, bar.high);
+        const testLow = Math.min(baseLow, bar.low);
+        if (testHigh === 0) break;
+        const range = ((testHigh - testLow) / testHigh) * 100;
+        if (range > maxRange) break;
+        baseHigh = testHigh;
+        baseLow = testLow;
+        detectedLen = i + 1;
+      }
+
+      if (detectedLen < minPeriod) return false;
+
+      const baseSlice = candles.slice(0, detectedLen);
+      const closes = baseSlice.map(c => c.close);
       const n = closes.length;
       const sumX = (n * (n - 1)) / 2;
       const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
@@ -632,24 +664,26 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         sumY += closes[i];
         sumXY += i * closes[i];
       }
-      const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      const denom = n * sumX2 - sumX * sumX;
+      if (denom === 0) return false;
+      const slope = (n * sumXY - sumX * sumY) / denom;
       const avgPrice = sumY / n;
       if (avgPrice === 0) return false;
       const totalDrift = Math.abs((slope / avgPrice) * 100 * n);
       if (totalDrift > maxSlope) return false;
 
       const currentClose = closes[0];
-      const posInRange = high === low ? 1 : (currentClose - low) / (high - low);
+      const posInRange = baseHigh === baseLow ? 1 : (currentClose - baseLow) / (baseHigh - baseLow);
       if (posInRange < 0.5) return false;
 
       let upperCount = 0;
       for (let i = 0; i < n; i++) {
-        const pos = (closes[i] - low) / (high - low);
+        const pos = baseHigh === baseLow ? 1 : (closes[i] - baseLow) / (baseHigh - baseLow);
         if (pos >= 0.4) upperCount++;
       }
       if (upperCount / n < 0.5) return false;
 
-      return true;
+      return { pass: true, data: { detectedPeriod: detectedLen } };
     },
   },
   {
@@ -874,14 +908,16 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-12",
     name: "Prior Price Advance",
     category: "Price Action",
-    description: "Measures the price advance that occurred BEFORE the current base. Skips the most recent N bars (the base period) and measures the gain over a lookback window ending at that offset. Use with a flat base indicator to find stocks that ran up and then consolidated.",
+    description: "Measures the price advance that occurred BEFORE the current base. Skips the most recent N bars (the base period) and measures the gain over a lookback window ending at that offset. When connected to a Base Detection thought, automatically uses the per-stock detected base length instead of the static skipBars value.",
+    consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }],
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
       { name: "minGain", label: "Min Gain %", type: "number", defaultValue: 30, min: 5, max: 500, step: 5 },
     ],
-    evaluate: (candles, params) => {
-      const skip = params.skipBars ?? 20;
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const dynamicSkip = upstreamData?.detectedPeriod;
+      const skip = dynamicSkip ?? params.skipBars ?? 20;
       const lookback = params.lookbackBars ?? 120;
       const minGain = params.minGain ?? 30;
       const totalNeeded = skip + lookback;
@@ -891,6 +927,64 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       if (!priceAtBaseStart || !priceAtAdvanceStart || priceAtAdvanceStart === 0) return false;
       const gain = ((priceAtBaseStart - priceAtAdvanceStart) / priceAtAdvanceStart) * 100;
       return gain >= minGain;
+    },
+  },
+  {
+    id: "PA-13",
+    name: "Smooth Trending Advance",
+    category: "Price Action",
+    description: "Minervini-style advance quality check. Verifies the price advance before the base was smooth and sustained: net gain meets threshold, max drawdown from rolling high stays within limits, and price stayed above a key moving average for most of the window. Uses per-stock detected base length when connected to a Base Detection thought.",
+    consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }],
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars (base)", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
+      { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
+      { name: "minGain", label: "Min Net Gain %", type: "number", defaultValue: 30, min: 5, max: 500, step: 5 },
+      { name: "maxDrawdown", label: "Max Drawdown %", type: "number", defaultValue: 25, min: 5, max: 50, step: 1 },
+      { name: "smaPeriod", label: "SMA Period", type: "number", defaultValue: 50, min: 10, max: 200, step: 5 },
+      { name: "minBarsAboveSMA", label: "Min % Bars Above SMA", type: "number", defaultValue: 70, min: 30, max: 100, step: 5 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const dynamicSkip = upstreamData?.detectedPeriod;
+      const skip = dynamicSkip ?? params.skipBars ?? 20;
+      const lookback = params.lookbackBars ?? 120;
+      const minGain = params.minGain ?? 30;
+      const maxDD = params.maxDrawdown ?? 25;
+      const smaPeriod = params.smaPeriod ?? 50;
+      const minAbovePct = params.minBarsAboveSMA ?? 70;
+
+      const totalNeeded = skip + lookback + smaPeriod;
+      if (candles.length < totalNeeded) return false;
+
+      const advanceSlice = candles.slice(skip, skip + lookback);
+      const priceEnd = advanceSlice[0]?.close;
+      const priceStart = advanceSlice[advanceSlice.length - 1]?.close;
+      if (!priceEnd || !priceStart || priceStart === 0) return false;
+      const netGain = ((priceEnd - priceStart) / priceStart) * 100;
+      if (netGain < minGain) return false;
+
+      let rollingHigh = 0;
+      let maxDrawdown = 0;
+      for (let i = advanceSlice.length - 1; i >= 0; i--) {
+        if (advanceSlice[i].high > rollingHigh) rollingHigh = advanceSlice[i].high;
+        if (rollingHigh > 0) {
+          const dd = ((rollingHigh - advanceSlice[i].low) / rollingHigh) * 100;
+          if (dd > maxDrawdown) maxDrawdown = dd;
+        }
+      }
+      if (maxDrawdown > maxDD) return false;
+
+      let barsAbove = 0;
+      for (let i = 0; i < lookback; i++) {
+        const offset = skip + i;
+        const smaSlice = candles.slice(offset, offset + smaPeriod);
+        if (smaSlice.length < smaPeriod) continue;
+        const sma = smaSlice.reduce((s, c) => s + c.close, 0) / smaPeriod;
+        if (candles[offset].close > sma) barsAbove++;
+      }
+      const abovePct = (barsAbove / lookback) * 100;
+      if (abovePct < minAbovePct) return false;
+
+      return true;
     },
   },
 ];
