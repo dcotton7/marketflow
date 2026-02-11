@@ -32,16 +32,7 @@ function setCachedHistory(key: string, data: any): void {
   stockHistoryCache.set(key, { data, timestamp: Date.now() });
 }
 
-// Reverse lookup: find sector/industry for a symbol from pre-computed data
-function lookupSectorIndustry(symbol: string): { sector: string; industry: string } {
-  for (const [sector, stocks] of Object.entries(STOCKS_BY_SECTOR)) {
-    const match = stocks.find(s => s.symbol === symbol);
-    if (match) {
-      return { sector, industry: match.industry };
-    }
-  }
-  return { sector: 'Unknown', industry: 'Unknown' };
-}
+import { getSectorAndIndustry } from "./fundamentals";
 
 // Stock index lists
 const DOW_30 = [
@@ -1117,7 +1108,7 @@ export async function registerRoutes(
       const change = prevClose ? price - prevClose : 0;
       const changePercent = prevClose ? (change / prevClose) * 100 : 0;
 
-      const { sector, industry } = lookupSectorIndustry(symbol.toUpperCase());
+      const { sector, industry } = await getSectorAndIndustry(symbol.toUpperCase());
       let description = meta?.description || '';
       if (description) {
         const sentences = description.match(/[^.!?]+[.!?]+/g) || [];

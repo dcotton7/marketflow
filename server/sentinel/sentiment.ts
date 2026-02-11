@@ -1,10 +1,5 @@
 import * as tiingo from "../tiingo";
-import { STOCKS_BY_SECTOR, findSectorForSymbol as _findSectorShared } from "@shared/stocksBySector";
-
-function findSectorForSymbol(symbol: string): string | null {
-  const result = _findSectorShared(symbol);
-  return result ? result.sector : null;
-}
+import { getSectorForSymbol } from "../fundamentals";
 
 export interface InstrumentTrend {
   symbol: string;
@@ -444,8 +439,7 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
 
 export async function fetchSectorSentiment(symbol: string): Promise<SectorTrend | null> {
   try {
-    // Use local STOCKS_BY_SECTOR to find sector
-    const sector = findSectorForSymbol(symbol);
+    const sector = await getSectorForSymbol(symbol);
 
     if (!sector || !SECTOR_ETF_MAP[sector]) {
       console.log(`No sector mapping for ${symbol} (sector: ${sector})`);
@@ -640,8 +634,7 @@ export async function fetchHistoricalMarketSentiment(targetDate: Date): Promise<
 // Fetch sector sentiment as of a historical date
 export async function fetchHistoricalSectorSentiment(symbol: string, targetDate: Date): Promise<SectorTrend | null> {
   try {
-    // Use local STOCKS_BY_SECTOR to find sector
-    const sector = findSectorForSymbol(symbol);
+    const sector = await getSectorForSymbol(symbol);
 
     if (!sector || !SECTOR_ETF_MAP[sector]) {
       console.log(`No sector mapping for ${symbol} (sector: ${sector})`);

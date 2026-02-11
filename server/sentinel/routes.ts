@@ -19,12 +19,8 @@ import { fetchChartData, calculatePointTechnicals, calculateFullSetupMetrics, fi
 import { patternTrainingSetups, patternTrainingPoints, patternTrainingEvaluations } from "@shared/schema";
 import { evaluateSetup, getExistingEvaluation } from "./patternEvaluationEngine";
 import * as tiingo from "../tiingo";
-import { STOCKS_BY_SECTOR, findSectorForSymbol as _findSectorShared } from "@shared/stocksBySector";
-
-function findSectorForSymbol(symbol: string): { sector: string; industry: string } {
-  const result = _findSectorShared(symbol);
-  return result || { sector: 'Unknown', industry: 'Unknown' };
-}
+import { STOCKS_BY_SECTOR } from "@shared/stocksBySector";
+import { getSectorAndIndustry } from "../fundamentals";
 
 declare module "express-session" {
   interface SessionData {
@@ -2797,7 +2793,7 @@ Only group trades with 2+ members. Ungrouped trades can be suggested individuall
         return res.status(404).json({ error: `Symbol ${symbol} not found` });
       }
 
-      const sectorInfo = findSectorForSymbol(symbol);
+      const sectorInfo = await getSectorAndIndustry(symbol);
 
       let description = '';
       if (meta?.description) {
@@ -6673,7 +6669,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       let sectorEtf = "";
       let sectorEtfChange = 0;
       try {
-        const sectorInfo = findSectorForSymbol(ticker);
+        const sectorInfo = await getSectorAndIndustry(ticker);
         const sector = sectorInfo.sector;
         sectorEtf = SECTOR_ETF_MAP[sector] || "";
         if (sectorEtf) {
