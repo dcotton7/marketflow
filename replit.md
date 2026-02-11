@@ -7,6 +7,7 @@ This project consists of two core applications: **AI Swing Scanner** and **Senti
 Preferred communication style: Simple, everyday language.
 Preferred test username: Foreboding
 Debugging rule: ALWAYS query the PRODUCTION database when investigating user-reported issues. Never use the development database for troubleshooting live app problems.
+UI rule: ALWAYS add clear ? tooltip help text to every new UI element (sliders, inputs, toggles, buttons). Use the existing PARAM_DESCRIPTIONS pattern in BigIdeaPage.tsx for indicator params. Never skip this step.
 
 ## System Architecture
 

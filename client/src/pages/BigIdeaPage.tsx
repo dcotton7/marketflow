@@ -122,7 +122,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   maxRatio: "Max up/down volume ratio. Higher = looser; lower = tighter cap on buy-side dominance.",
   ratioPeriod: "Bars for volume ratio calculation. More = smoother; fewer = more recent snapshot.",
   consolidationDays: "Min bars in the consolidation range. Fewer = looser; more = tighter (needs longer consolidation).",
-  maxRange: "Max price range during consolidation (%). Higher = looser (allows wider base); lower = tighter.",
+  maxRange: "Max price range during consolidation (%). This is the ceiling for long bases (20+ bars). For shorter bases, the allowed range tightens automatically — a 5-bar base allows only ~30% of this value.",
   breakoutDir: "Direction of breakout: Up = bullish breakout; Down = bearish breakdown.",
   nearHighPct: "How close price must be to the high (%). Higher = looser (further from high OK); lower = tighter.",
   highLookback: "Bars to look back for the high. More = finds higher peaks (tighter); fewer = more recent (looser).",
@@ -189,6 +189,9 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   gapDirection: "Gap direction: Up = opened above prior close; Down = opened below.",
   skipBars: "Bars to skip (the base period). Match this to your flat base lookback so the advance window starts right before the base begins.",
   lookbackBars: "Window (in bars) to measure the prior advance. 120 bars ≈ 6 months of trading days. Larger = longer run-up required.",
+  minPeriod: "Shortest acceptable base length in bars. Bases shorter than this are rejected. 5 = one trading week, 10 = two weeks, 20 = one month.",
+  maxSlope: "Max allowed slope across the base (%). Measures how much the base drifts up or down. Lower = flatter bases only; higher = allows some tilt.",
+  maxPreBaseDrop: "Max % the price can have dropped coming into the base. Rejects bases that formed right after a selloff. Lower = stricter (only bases after flat or rising price); higher = allows bases after moderate pullbacks.",
 };
 
 interface DynamicDataConsumer {
@@ -1926,7 +1929,21 @@ export default function BigIdeaPage() {
                                   </SelectContent>
                                 </Select>
                               )}
-                              {param.type === "number" && (
+                              {param.type === "number" && (() => {
+                                let scaledHint = "";
+                                if (criterion.indicatorId === "PA-3" && param.name === "maxRange") {
+                                  const minPeriodParam = criterion.params.find((p: any) => p.name === "minPeriod");
+                                  const minP = Number(minPeriodParam?.value ?? 5);
+                                  const curMaxRange = Number(displayValue);
+                                  const fullRangeAt = 20;
+                                  if (minP < fullRangeAt && curMaxRange > 0) {
+                                    const tightFloor = Math.min(curMaxRange * 0.3, 5);
+                                    const t = Math.max(0, (minP - 5) / (fullRangeAt - 5));
+                                    const effective = Math.round((tightFloor + t * (curMaxRange - tightFloor)) * 10) / 10;
+                                    scaledHint = `≈${effective}% at ${minP} bars`;
+                                  }
+                                }
+                                return (
                                 <div className="flex items-center gap-2 mt-1">
                                   <Slider
                                     value={[Number(displayValue)]}
@@ -1961,8 +1978,12 @@ export default function BigIdeaPage() {
                                     className={`w-14 h-6 text-xs font-mono text-right px-1 ${isLinked && linkedVal ? "text-blue-400" : ""}`}
                                     data-testid={`input-${param.name}-${idx}`}
                                   />
+                                  {scaledHint && (
+                                    <span className="text-[10px] text-amber-400 whitespace-nowrap">{scaledHint}</span>
+                                  )}
                                 </div>
-                              )}
+                                );
+                              })()}
                               {param.type === "select" && param.options && (
                                 <Select
                                   value={String(param.value)}
