@@ -1224,6 +1224,7 @@ export interface IdeaNode {
   thoughtCriteria?: ScannerCriterion[];
   thoughtTimeframe?: string;
   isNot?: boolean;
+  userRenamed?: boolean;
   position: { x: number; y: number };
   passCount?: number;
 }

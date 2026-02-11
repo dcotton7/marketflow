@@ -513,6 +513,8 @@ export function registerBigIdeaRoutes(app: Express): void {
         name: ind.name,
         category: ind.category,
         description: ind.description,
+        provides: ind.provides,
+        consumes: ind.consumes,
         params: ind.params.map((p) => ({
           name: p.name,
           label: p.label,
@@ -524,30 +526,77 @@ export function registerBigIdeaRoutes(app: Express): void {
         })),
       }));
 
-      const systemPrompt = `You are a stock screening assistant. The user will describe a trading idea or screening concept in plain English. Your job is to translate it into a structured "Thought" definition using the available indicator library.
+      const systemPrompt = `You are a stock screening assistant. The user will describe a trading idea or screening concept in plain English. Your job is to translate it into one or more structured "Thought" definitions using the available indicator library.
 
 Available indicators:
 ${JSON.stringify(indicatorSummary, null, 2)}
 
-You must respond with valid JSON in this exact format:
+CRITICAL: DATA-LINKING AND MULTI-THOUGHT SPLITTING
+Some indicators "provide" dynamic data (e.g. PA-3 outputs detectedPeriod — the detected base length) and others "consume" that data (e.g. PA-12, PA-13, PA-14, PA-15, PA-16 consume detectedPeriod). Data can ONLY flow between SEPARATE thoughts connected by an edge — it does NOT work within the same thought.
+
+Therefore: if the user's idea uses BOTH a provider indicator AND one or more consumer indicators, you MUST split them into separate thoughts:
+- Put the provider (e.g. PA-3 Base Detection) in its own upstream thought.
+- Put the consumers (e.g. PA-14 Tightness Ratio, PA-15 Close Clustering, PA-16 Volume Fade, PA-12 Prior Advance, PA-13 Smooth Advance) in a separate downstream thought.
+- Non-linked indicators (those that neither provide nor consume) can go in either thought — place them wherever makes logical sense.
+
+The current data-linking relationships are:
+- PA-3 (Consolidation / Base Detection) PROVIDES detectedPeriod
+- PA-7 (Breakout Detection) PROVIDES detectedPeriod
+- PA-12 (Prior Price Advance) CONSUMES detectedPeriod → skipBars
+- PA-13 (Smooth Trending Advance) CONSUMES detectedPeriod → skipBars
+- PA-14 (Tightness Ratio) CONSUMES detectedPeriod → baselineBars
+- PA-15 (Close Clustering) CONSUMES detectedPeriod → period
+- PA-16 (Volume Fade) CONSUMES detectedPeriod → baselineBars
+
+You must respond with valid JSON. When the idea needs multiple thoughts, use this format:
 {
-  "name": "Short descriptive name for this thought",
-  "category": "One of: Momentum, Value, Trend, Volatility, Volume, Custom",
-  "description": "Plain English summary of what this thought screens for",
-  "criteria": [
+  "thoughts": [
     {
-      "indicatorId": "The indicator ID from the library",
-      "label": "Human readable label for this criterion",
-      "inverted": false,
-      "timeframeOverride": "daily or omit",
-      "params": [
-        {
-          "name": "param name matching the indicator",
-          "label": "param label",
-          "type": "number|select|boolean",
-          "value": "the value to use"
-        }
-      ]
+      "thoughtKey": "A",
+      "name": "Short descriptive name",
+      "category": "One of: Momentum, Value, Trend, Volatility, Volume, Custom",
+      "description": "What this thought screens for",
+      "criteria": [...]
+    },
+    {
+      "thoughtKey": "B",
+      "name": "Short descriptive name",
+      "category": "...",
+      "description": "...",
+      "criteria": [...]
+    }
+  ],
+  "edges": [
+    { "from": "A", "to": "B" }
+  ]
+}
+
+When only a single thought is needed (no data-linking), use this simpler format:
+{
+  "thoughts": [
+    {
+      "thoughtKey": "A",
+      "name": "Short descriptive name",
+      "category": "...",
+      "description": "...",
+      "criteria": [...]
+    }
+  ],
+  "edges": []
+}
+
+Each criterion in a thought follows this structure:
+{
+  "indicatorId": "The indicator ID from the library",
+  "label": "Human readable label for this criterion",
+  "inverted": false,
+  "timeframeOverride": "daily or omit",
+  "params": [
+    {
+      "name": "param name matching the indicator",
+      "label": "param label",
+      "type": "number|select|boolean",
+      "value": "the value to use"
     }
   ]
 }
@@ -570,16 +619,22 @@ IMPORTANT GUIDELINES for indicator selection:
 CRITICAL RULE FOR CRITERIA COUNT:
 Generate exactly as many criteria as the user's idea requires — no more, no less. If the user asks for something specific and narrow like "price within 1% of the 50 SMA", that is ONE criterion. Do NOT pad with extra filters the user didn't ask for. If the user describes something compound like "breakout with volume above rising 50 SMA", that naturally decomposes into multiple criteria. Only use indicatorId values from the indicator library provided above — never invent indicator IDs.
 
-Examples:
-- "Price within 1% of 50 SMA" → 1 criterion: MA-3 Price vs MA Distance: period=50, minPct=0, maxPct=1
-- "Price above 50 SMA" → 1 criterion: MA-1 SMA Value: period=50, direction=above
-- "Price crossed below the daily 50 SMA recently" → 1 criterion: MA-9 Price Crosses MA: maPeriod=50, maType=sma, lookback=5, crossType=below, timeframeOverride="daily"
-- "Price broke above 20 EMA" → 1 criterion: MA-9 Price Crosses MA: maPeriod=20, maType=ema, lookback=3, crossType=above (no timeframeOverride since it uses the thought's timeframe)
-- "Pullback to 50 SMA with volume dry-up in uptrend" → 3 criteria: (1) MA-3 proximity, (2) VOL-4 volume dry-up, (3) MA-1 above 200 SMA for uptrend context
-- "Breakout with volume" → 2 criteria: (1) PA-7 Breakout Detection: basePeriod=20, lookback=3, (2) VOL-5 Volume Surge: period=50, surgeMultiple=2.0, priceUp=true
-- "Strong uptrend" → 3 criteria: (1) MA-1 SMA Value: period=50, direction=above, (2) MA-8 MA Comparison: fastPeriod=50, slowPeriod=200, direction=fast_above_slow, (3) MA-4 MA Slope: period=50, slopeDays=10, minSlope=0.5
+MULTI-THOUGHT SPLITTING EXAMPLES:
+- "Flat base with shrinking ranges and volume dry-up" → 2 thoughts:
+  Thought A: PA-3 (Base Detection) — the provider
+  Thought B: PA-14 (Tightness Ratio) + PA-16 (Volume Fade) — the consumers
+  Edge: A → B
+- "Tight base above 50 SMA with a strong prior advance" → 2 thoughts:
+  Thought A: PA-3 (Base Detection) + MA-1 (above 50 SMA) — base detection provides data, MA-1 is independent so can go here
+  Thought B: PA-12 (Prior Advance) — consumes base length
+  Edge: A → B
 
-The number of criteria should match the complexity of the idea. Simple ideas get 1 criterion. Complex multi-condition ideas get as many as needed.
+SINGLE-THOUGHT EXAMPLES (no data links needed):
+- "Price within 1% of 50 SMA" → 1 thought, 1 criterion: MA-3
+- "Strong uptrend" → 1 thought, 3 criteria: MA-1 + MA-8 + MA-4
+- "Breakout with volume" → 1 thought, 2 criteria: PA-7 + VOL-5
+
+The number of criteria and thoughts should match the complexity of the idea. Simple ideas get 1 thought with 1 criterion. Complex ideas with data-linking get multiple thoughts with edges.
 
 Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
 
@@ -603,8 +658,15 @@ Select the most appropriate indicators and set parameters that match the user's 
         return res.status(500).json({ error: "AI returned empty response" });
       }
 
-      const thought = JSON.parse(content);
-      res.json(thought);
+      const parsed = JSON.parse(content);
+      if (parsed.thoughts && Array.isArray(parsed.thoughts)) {
+        res.json(parsed);
+      } else {
+        res.json({
+          thoughts: [{ thoughtKey: "A", ...parsed }],
+          edges: [],
+        });
+      }
     } catch (error: any) {
       console.error("[BigIdea AI] Error creating thought:", error?.message || error);
       if (error?.status === 401 || error?.code === 'invalid_api_key') {

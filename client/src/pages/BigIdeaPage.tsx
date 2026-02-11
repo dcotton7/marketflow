@@ -574,6 +574,88 @@ export default function BigIdeaPage() {
     },
   });
 
+  const saveAndPlaceMultiThoughts = useMutation({
+    mutationFn: async (proposal: { thoughts: any[]; edges: any[] }) => {
+      const savedThoughts: any[] = [];
+      for (const t of proposal.thoughts) {
+        const res = await apiRequest("POST", "/api/bigidea/thoughts", {
+          name: t.name,
+          category: t.category,
+          description: t.description,
+          criteria: t.criteria,
+          timeframe: t.timeframe || "daily",
+          aiPrompt: aiDescription,
+        });
+        const saved = await res.json();
+        savedThoughts.push({ ...saved, thoughtKey: t.thoughtKey });
+      }
+      return { savedThoughts, edges: proposal.edges };
+    },
+    onSuccess: ({ savedThoughts, edges }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
+
+      const viewport = reactFlowInstance?.getViewport();
+      const centerX = viewport ? (-viewport.x + 300) / (viewport.zoom || 1) : 300;
+      const centerY = viewport ? (-viewport.y + 200) / (viewport.zoom || 1) : 200;
+
+      const keyToNodeId: Record<string, string> = {};
+      const newNodes: Node[] = savedThoughts.map((t, idx) => {
+        const nodeId = `thought-${t.id}-${Date.now()}-${idx}`;
+        keyToNodeId[t.thoughtKey] = nodeId;
+
+        const enrichedCriteria = (t.criteria || []).map((c: ScannerCriterion) => {
+          const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+          if (!indMeta) return c;
+          return {
+            ...c,
+            params: c.params.map((p: any) => {
+              const metaParam = indMeta.params.find((mp) => mp.name === p.name);
+              if (metaParam?.autoLink) {
+                return { ...p, autoLink: metaParam.autoLink, autoLinked: p.autoLinked !== false };
+              }
+              return p;
+            }),
+          };
+        });
+
+        return {
+          id: nodeId,
+          type: "thought",
+          position: { x: centerX + idx * 320, y: centerY },
+          data: {
+            nodeId: t.id,
+            label: t.name,
+            category: t.category,
+            description: t.description,
+            criteria: enrichedCriteria,
+            timeframe: t.timeframe || "daily",
+            thoughtId: t.id,
+            isNot: false,
+            passCount: undefined,
+          },
+        };
+      });
+
+      const newEdges: Edge[] = (edges || []).map((e: any) => ({
+        id: `e-${keyToNodeId[e.from]}-${keyToNodeId[e.to]}`,
+        source: keyToNodeId[e.from],
+        target: keyToNodeId[e.to],
+        type: "default",
+      })).filter((e: Edge) => e.source && e.target);
+
+      setNodes((nds) => [...nds, ...newNodes]);
+      setEdges((eds) => [...eds, ...newEdges]);
+
+      setAiDialogOpen(false);
+      setAiProposal(null);
+      setAiDescription("");
+      toast({ title: `${savedThoughts.length} thought${savedThoughts.length > 1 ? "s" : ""} saved and placed on canvas` });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to save thoughts", description: err.message, variant: "destructive" });
+    },
+  });
+
   const aiCreateMutation = useMutation({
     mutationFn: async (description: string) => {
       const res = await apiRequest("POST", "/api/bigidea/ai/create-thought", { description });
@@ -641,6 +723,7 @@ export default function BigIdeaPage() {
         thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
         thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
         isNot: n.data.isNot as boolean | undefined,
+        userRenamed: n.data.userRenamed as boolean | undefined,
         position: n.position,
         passCount: n.data.passCount as number | undefined,
       }));
@@ -1072,6 +1155,9 @@ export default function BigIdeaPage() {
             const criterion = { ...criteria[criterionIdx] };
             criterion.muted = !criterion.muted;
             criteria[criterionIdx] = criterion;
+            if (n.data.userRenamed) {
+              return { ...n, data: { ...n.data, criteria } };
+            }
             const active = criteria.filter(c => !c.muted);
             const newLabel = active.length === 0 ? "Empty Thought" : active.length === 1 ? active[0].label : active.length === 2 ? `${active[0].label} + ${active[1].label}` : `${active[0].label} + ${active.length - 1} more`;
             return { ...n, data: { ...n.data, criteria, label: newLabel } };
@@ -1090,6 +1176,9 @@ export default function BigIdeaPage() {
           if (n.id === nodeId) {
             const criteria = [...(n.data.criteria as ScannerCriterion[])];
             criteria.splice(criterionIdx, 1);
+            if (n.data.userRenamed) {
+              return { ...n, data: { ...n.data, criteria } };
+            }
             const active = criteria.filter(c => !c.muted);
             const newLabel = active.length === 0 ? "Empty Thought" : active.length === 1 ? active[0].label : active.length === 2 ? `${active[0].label} + ${active[1].label}` : `${active[0].label} + ${active.length - 1} more`;
             return { ...n, data: { ...n.data, criteria, label: newLabel } };
@@ -1164,6 +1253,7 @@ export default function BigIdeaPage() {
                 criteria: enrichCriteria(n.thoughtCriteria),
                 thoughtId: n.thoughtId,
                 isNot: n.isNot || false,
+                userRenamed: n.userRenamed || false,
                 timeframe: n.thoughtTimeframe || "daily",
                 passCount: undefined,
               },
@@ -1666,17 +1756,38 @@ export default function BigIdeaPage() {
                 <div className="p-3 pr-5 space-y-4">
                   <div>
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold flex-1">{selectedNode.data.label as string}</h3>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[10px] px-1.5 shrink-0"
-                        onClick={() => updateNodeTitle(selectedNode.id)}
-                        data-testid="button-auto-rename"
-                        title="Auto-rename from criteria"
-                      >
-                        Rename
-                      </Button>
+                      <Input
+                        value={selectedNode.data.label as string}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNodes((nds) => nds.map((n) =>
+                            n.id === selectedNode.id ? { ...n, data: { ...n.data, label: val, userRenamed: true } } : n
+                          ));
+                        }}
+                        className="text-sm font-semibold flex-1 border-transparent hover:border-border focus:border-border bg-transparent"
+                        data-testid="input-thought-name"
+                      />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-[10px] shrink-0"
+                            onClick={() => {
+                              updateNodeTitle(selectedNode.id);
+                              setNodes((nds) => nds.map((n) =>
+                                n.id === selectedNode.id ? { ...n, data: { ...n.data, userRenamed: false } } : n
+                              ));
+                            }}
+                            data-testid="button-auto-rename"
+                          >
+                            Auto-name
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[200px] text-xs">
+                          Generate a name from the active criteria. Clears any custom name you set.
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                     {selectedNode.data.description ? (
                       <p className="text-xs text-muted-foreground mt-1">
@@ -2057,135 +2168,195 @@ export default function BigIdeaPage() {
               </DialogFooter>
             </div>
           ) : (
-            <div className="space-y-4">
-              <div>
-                <Label className="text-xs text-muted-foreground">Name</Label>
-                <p className="text-sm font-medium">{aiProposal.name}</p>
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Category</Label>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  {getCategoryIcon(aiProposal.category)}
-                  <span className="text-sm">{aiProposal.category}</span>
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+              {(aiProposal.thoughts || []).length > 1 && (
+                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-accent/30 border border-accent/20">
+                  <Zap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                  <span className="text-xs text-muted-foreground">
+                    AI split this into {aiProposal.thoughts.length} linked thoughts so dynamic data flows between them.
+                  </span>
                 </div>
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Timeframe</Label>
-                <Select
-                  value={aiProposal.timeframe || "daily"}
-                  onValueChange={(v) => setAiProposal({ ...aiProposal, timeframe: v })}
-                >
-                  <SelectTrigger className="h-7 text-xs mt-1 w-32" data-testid="select-ai-timeframe">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="5min">5 min</SelectItem>
-                    <SelectItem value="15min">15 min</SelectItem>
-                    <SelectItem value="30min">30 min</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Description</Label>
-                <p className="text-sm">{aiProposal.description}</p>
-              </div>
+              )}
 
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Criteria ({aiProposal.criteria?.length || 0})
-                </Label>
-                {aiProposal.criteria?.map((criterion: any, idx: number) => (
-                  <Card key={idx} className="overflow-visible">
-                    <CardContent className="p-2.5 space-y-2">
-                      <span className="text-xs font-medium">{criterion.label}</span>
-                      {criterion.params?.map((param: ScannerCriterionParam) => (
-                        <div key={param.name}>
-                          <div className="flex items-center gap-1">
-                            <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
-                            {PARAM_DESCRIPTIONS[param.name] && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`ai-help-${param.name}`} />
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-[260px] text-xs">
-                                  {PARAM_DESCRIPTIONS[param.name]}
-                                </TooltipContent>
-                              </Tooltip>
-                            )}
-                          </div>
-                          {param.type === "number" && (
-                            <div className="flex items-center gap-2 mt-1">
-                              <Slider
-                                value={[Number(param.value)]}
-                                min={param.min ?? 0}
-                                max={param.max ?? 100}
-                                step={param.step ?? 1}
-                                onValueChange={([v]) => {
-                                  const updated = { ...aiProposal };
-                                  updated.criteria[idx].params = updated.criteria[idx].params.map(
-                                    (p: any) => (p.name === param.name ? { ...p, value: v } : p)
-                                  );
-                                  setAiProposal({ ...updated });
-                                }}
-                                className="flex-1"
-                                data-testid={`ai-slider-${param.name}-${idx}`}
-                              />
-                              <Input
-                                type="number"
-                                value={Number(param.value)}
-                                min={param.min ?? 0}
-                                max={param.max ?? 100}
-                                step={param.step ?? 1}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  if (raw === "" || raw === "-") return;
-                                  let v = Number(raw);
-                                  if (isNaN(v)) return;
-                                  const mn = param.min ?? 0;
-                                  const mx = param.max ?? 100;
-                                  if (v < mn) v = mn;
-                                  if (v > mx) v = mx;
-                                  const updated = { ...aiProposal };
-                                  updated.criteria[idx].params = updated.criteria[idx].params.map(
-                                    (p: any) => (p.name === param.name ? { ...p, value: v } : p)
-                                  );
-                                  setAiProposal({ ...updated });
-                                }}
-                                className="w-14 h-6 text-xs font-mono text-right px-1"
-                                data-testid={`ai-input-${param.name}-${idx}`}
-                              />
+              {(aiProposal.thoughts || []).map((thought: any, tIdx: number) => (
+                <div key={thought.thoughtKey || tIdx} className="space-y-3">
+                  {(aiProposal.thoughts || []).length > 1 && (
+                    <div className="flex items-center gap-2 border-b border-border/60 pb-1">
+                      <Badge variant="outline" className="text-[10px]">{thought.thoughtKey}</Badge>
+                      <span className="text-xs font-semibold">{thought.name}</span>
+                    </div>
+                  )}
+
+                  {(aiProposal.thoughts || []).length === 1 && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Name</Label>
+                      <p className="text-sm font-medium">{thought.name}</p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Category</Label>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {getCategoryIcon(thought.category)}
+                        <span className="text-sm">{thought.category}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Timeframe</Label>
+                      <Select
+                        value={thought.timeframe || "daily"}
+                        onValueChange={(v) => {
+                          const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, i: number) =>
+                            i === tIdx ? { ...t, timeframe: v } : t
+                          )};
+                          setAiProposal(updated);
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs mt-1 w-32" data-testid={`select-ai-timeframe-${tIdx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="daily">Daily</SelectItem>
+                          <SelectItem value="5min">5 min</SelectItem>
+                          <SelectItem value="15min">15 min</SelectItem>
+                          <SelectItem value="30min">30 min</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Description</Label>
+                    <p className="text-sm">{thought.description}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Criteria ({thought.criteria?.length || 0})
+                    </Label>
+                    {thought.criteria?.map((criterion: any, idx: number) => (
+                      <Card key={idx} className="overflow-visible">
+                        <CardContent className="p-2.5 space-y-2">
+                          <span className="text-xs font-medium">{criterion.label}</span>
+                          {criterion.params?.map((param: ScannerCriterionParam) => (
+                            <div key={param.name}>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
+                                {PARAM_DESCRIPTIONS[param.name] && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`ai-help-${param.name}-${tIdx}-${idx}`} />
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[260px] text-xs">
+                                      {PARAM_DESCRIPTIONS[param.name]}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                              </div>
+                              {param.type === "number" && (
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Slider
+                                    value={[Number(param.value)]}
+                                    min={param.min ?? 0}
+                                    max={param.max ?? 100}
+                                    step={param.step ?? 1}
+                                    onValueChange={([v]) => {
+                                      const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
+                                        if (ti !== tIdx) return t;
+                                        return { ...t, criteria: t.criteria.map((c: any, ci: number) => {
+                                          if (ci !== idx) return c;
+                                          return { ...c, params: c.params.map((p: any) => p.name === param.name ? { ...p, value: v } : p) };
+                                        })};
+                                      })};
+                                      setAiProposal(updated);
+                                    }}
+                                    className="flex-1"
+                                    data-testid={`ai-slider-${param.name}-${tIdx}-${idx}`}
+                                  />
+                                  <Input
+                                    type="number"
+                                    value={Number(param.value)}
+                                    min={param.min ?? 0}
+                                    max={param.max ?? 100}
+                                    step={param.step ?? 1}
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      if (raw === "" || raw === "-") return;
+                                      let v = Number(raw);
+                                      if (isNaN(v)) return;
+                                      const mn = param.min ?? 0;
+                                      const mx = param.max ?? 100;
+                                      if (v < mn) v = mn;
+                                      if (v > mx) v = mx;
+                                      const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
+                                        if (ti !== tIdx) return t;
+                                        return { ...t, criteria: t.criteria.map((c: any, ci: number) => {
+                                          if (ci !== idx) return c;
+                                          return { ...c, params: c.params.map((p: any) => p.name === param.name ? { ...p, value: v } : p) };
+                                        })};
+                                      })};
+                                      setAiProposal(updated);
+                                    }}
+                                    className="w-14 h-6 text-xs font-mono text-right px-1"
+                                    data-testid={`ai-input-${param.name}-${tIdx}-${idx}`}
+                                  />
+                                </div>
+                              )}
+                              {param.type === "select" && param.options && (
+                                <Select
+                                  value={String(param.value)}
+                                  onValueChange={(v) => {
+                                    const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
+                                      if (ti !== tIdx) return t;
+                                      return { ...t, criteria: t.criteria.map((c: any, ci: number) => {
+                                        if (ci !== idx) return c;
+                                        return { ...c, params: c.params.map((p: any) => p.name === param.name ? { ...p, value: v } : p) };
+                                      })};
+                                    })};
+                                    setAiProposal(updated);
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 text-xs mt-1" data-testid={`ai-select-${param.name}-${tIdx}-${idx}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {param.options.map((opt) => (
+                                      <SelectItem key={opt} value={opt}>
+                                        {opt}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
                             </div>
-                          )}
-                          {param.type === "select" && param.options && (
-                            <Select
-                              value={String(param.value)}
-                              onValueChange={(v) => {
-                                const updated = { ...aiProposal };
-                                updated.criteria[idx].params = updated.criteria[idx].params.map(
-                                  (p: any) => (p.name === param.name ? { ...p, value: v } : p)
-                                );
-                                setAiProposal({ ...updated });
-                              }}
-                            >
-                              <SelectTrigger className="h-7 text-xs mt-1" data-testid={`ai-select-${param.name}-${idx}`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {param.options.map((opt) => (
-                                  <SelectItem key={opt} value={opt}>
-                                    {opt}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {(aiProposal.edges || []).length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Data Links
+                  </Label>
+                  {aiProposal.edges.map((edge: any, eIdx: number) => {
+                    const fromT = aiProposal.thoughts.find((t: any) => t.thoughtKey === edge.from);
+                    const toT = aiProposal.thoughts.find((t: any) => t.thoughtKey === edge.to);
+                    return (
+                      <div key={eIdx} className="flex items-center gap-2 text-xs text-emerald-400">
+                        <Zap className="h-3 w-3 shrink-0" />
+                        <span>{fromT?.name || edge.from}</span>
+                        <span className="text-muted-foreground">&rarr;</span>
+                        <span>{toT?.name || edge.to}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <DialogFooter className="gap-2">
                 <Button
@@ -2196,26 +2367,17 @@ export default function BigIdeaPage() {
                   Back
                 </Button>
                 <Button
-                  onClick={() =>
-                    createThoughtMutation.mutate({
-                      name: aiProposal.name,
-                      category: aiProposal.category,
-                      description: aiProposal.description,
-                      criteria: aiProposal.criteria,
-                      timeframe: aiProposal.timeframe || "daily",
-                      aiPrompt: aiDescription,
-                    })
-                  }
-                  disabled={createThoughtMutation.isPending}
+                  onClick={() => saveAndPlaceMultiThoughts.mutate(aiProposal)}
+                  disabled={saveAndPlaceMultiThoughts.isPending}
                   className="gap-2"
                   data-testid="button-save-thought"
                 >
-                  {createThoughtMutation.isPending ? (
+                  {saveAndPlaceMultiThoughts.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  Save Thought
+                  Save & Place on Canvas
                 </Button>
               </DialogFooter>
             </div>
