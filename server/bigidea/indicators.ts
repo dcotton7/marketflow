@@ -596,12 +596,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     params: [
       { name: "period", label: "Lookback Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
-      { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 3, min: 0.5, max: 15, step: 0.5 },
+      { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 5, min: 0.5, max: 15, step: 0.5 },
     ],
     evaluate: (candles, params) => {
       const period = params.period ?? 20;
       const maxRange = params.maxRange ?? 15;
-      const maxSlope = params.maxSlope ?? 3;
+      const maxSlope = params.maxSlope ?? 5;
       if (candles.length < period) return false;
       const slice = candles.slice(0, period);
       const high = Math.max(...slice.map(c => c.high));
@@ -627,14 +627,14 @@ const PRICE_ACTION: IndicatorDefinition[] = [
 
       const currentClose = closes[0];
       const posInRange = high === low ? 1 : (currentClose - low) / (high - low);
-      if (posInRange < 0.65) return false;
+      if (posInRange < 0.5) return false;
 
       let upperCount = 0;
       for (let i = 0; i < n; i++) {
         const pos = (closes[i] - low) / (high - low);
-        if (pos >= 0.5) upperCount++;
+        if (pos >= 0.4) upperCount++;
       }
-      if (upperCount / n < 0.6) return false;
+      if (upperCount / n < 0.5) return false;
 
       return true;
     },
