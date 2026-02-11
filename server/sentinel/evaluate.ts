@@ -180,19 +180,26 @@ export async function evaluateTrade(
 
   const systemPrompt = isHistorical ? HISTORICAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
-  const maxTokens = request.deepEval ? 6000 : 6000;
+  const maxTokens = 6000;
   
-  console.log(`[Sentinel Eval] Calling ${model} with max_tokens=${maxTokens}`);
+  console.log(`[Sentinel Eval] Calling ${model} with maxTokens=${maxTokens}`);
   
-  const response = await openai.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ],
-    response_format: { type: "json_object" },
-    max_tokens: maxTokens,
-  });
+  let response;
+  try {
+    response = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: maxTokens,
+    } as any);
+  } catch (apiError: any) {
+    console.error(`[Sentinel Eval] OpenAI API error: ${apiError?.message}`);
+    console.error(`[Sentinel Eval] Status: ${apiError?.status}, Code: ${apiError?.code}`);
+    throw apiError;
+  }
 
   const content = response.choices[0]?.message?.content || "{}";
   const finishReason = response.choices[0]?.finish_reason;

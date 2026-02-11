@@ -376,12 +376,14 @@ export function registerSentinelRoutes(app: Express): void {
       const result = await evaluateTrade(request, req.session.userId!);
       console.log("[Sentinel] Evaluate complete - score:", result.evaluation.score);
       res.json(result);
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
       }
-      console.error("Evaluate error:", error);
-      res.status(500).json({ error: "Evaluation failed" });
+      const errorMessage = error?.message || String(error);
+      console.error("Evaluate error:", errorMessage);
+      console.error("Evaluate error stack:", error?.stack);
+      res.status(500).json({ error: `Evaluation failed: ${errorMessage}` });
     }
   });
 
