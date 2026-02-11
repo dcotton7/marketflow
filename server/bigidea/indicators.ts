@@ -676,40 +676,42 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       if (detectedLen < minPeriod) return false;
 
       const minRequired = Math.ceil(maxPeriod * minBasePct / 100);
-      if (detectedLen < minRequired) return false;
 
-      const baseSlice = candles.slice(0, detectedLen);
-      const closes = baseSlice.map(c => c.close);
-      const baseHigh = Math.max(...baseSlice.map(c => c.high));
-      const baseLow = Math.min(...baseSlice.map(c => c.low));
-      const n = closes.length;
-      const sumX = (n * (n - 1)) / 2;
-      const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
-      let sumY = 0, sumXY = 0;
-      for (let i = 0; i < n; i++) {
-        sumY += closes[i];
-        sumXY += i * closes[i];
+      for (let tryLen = detectedLen; tryLen >= Math.max(minPeriod, minRequired); tryLen--) {
+        const baseSlice = candles.slice(0, tryLen);
+        const closes = baseSlice.map(c => c.close);
+        const baseHigh = Math.max(...baseSlice.map(c => c.high));
+        const baseLow = Math.min(...baseSlice.map(c => c.low));
+        const n = closes.length;
+        const sumX = (n * (n - 1)) / 2;
+        const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
+        let sumY = 0, sumXY = 0;
+        for (let i = 0; i < n; i++) {
+          sumY += closes[i];
+          sumXY += i * closes[i];
+        }
+        const denom = n * sumX2 - sumX * sumX;
+        if (denom === 0) continue;
+        const slope = (n * sumXY - sumX * sumY) / denom;
+        const avgPrice = sumY / n;
+        if (avgPrice === 0) continue;
+        const totalDrift = Math.abs((slope / avgPrice) * 100 * n);
+        if (totalDrift > maxSlope) continue;
+
+        const currentClose = closes[0];
+        const posInRange = baseHigh === baseLow ? 1 : (currentClose - baseLow) / (baseHigh - baseLow);
+        if (posInRange < 0.5) continue;
+
+        let upperCount = 0;
+        for (let i = 0; i < n; i++) {
+          const pos = baseHigh === baseLow ? 1 : (closes[i] - baseLow) / (baseHigh - baseLow);
+          if (pos >= 0.4) upperCount++;
+        }
+        if (upperCount / n < 0.5) continue;
+
+        return { pass: true, data: { detectedPeriod: tryLen } };
       }
-      const denom = n * sumX2 - sumX * sumX;
-      if (denom === 0) return false;
-      const slope = (n * sumXY - sumX * sumY) / denom;
-      const avgPrice = sumY / n;
-      if (avgPrice === 0) return false;
-      const totalDrift = Math.abs((slope / avgPrice) * 100 * n);
-      if (totalDrift > maxSlope) return false;
-
-      const currentClose = closes[0];
-      const posInRange = baseHigh === baseLow ? 1 : (currentClose - baseLow) / (baseHigh - baseLow);
-      if (posInRange < 0.5) return false;
-
-      let upperCount = 0;
-      for (let i = 0; i < n; i++) {
-        const pos = baseHigh === baseLow ? 1 : (closes[i] - baseLow) / (baseHigh - baseLow);
-        if (pos >= 0.4) upperCount++;
-      }
-      if (upperCount / n < 0.5) return false;
-
-      return { pass: true, data: { detectedPeriod: detectedLen } };
+      return false;
     },
   },
   {
