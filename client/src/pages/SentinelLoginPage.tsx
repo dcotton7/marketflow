@@ -147,15 +147,6 @@ export default function SentinelLoginPage() {
           </CardContent>
         </Card>
 
-        <div className="mt-6 text-center">
-          <a
-            href="/"
-            className="text-sm text-muted-foreground hover:text-foreground"
-            data-testid="link-scanner"
-          >
-            Go to AI Swing Scanner
-          </a>
-        </div>
       </div>
     </div>
   );

@@ -3937,15 +3937,6 @@ export default function SentinelDashboardPage() {
           </TabsContent>
         </Tabs>
 
-        <div className="mt-8 text-center">
-          <a
-            href="/"
-            className="text-sm text-muted-foreground hover:text-foreground"
-            data-testid="link-scanner"
-          >
-            Go to AI Swing Scanner
-          </a>
-        </div>
       </main>
 
       {/* Add to Watchlist Dialog */}

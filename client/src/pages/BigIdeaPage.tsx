@@ -453,6 +453,27 @@ export default function BigIdeaPage() {
     document.addEventListener("pointerup", onUp);
   }, [thoughtsPanelWidth]);
 
+  const [detailPanelWidth, setDetailPanelWidth] = useState(340);
+  const detailResizing = useRef(false);
+
+  const handleDetailResizeStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    detailResizing.current = true;
+    const startX = e.clientX;
+    const startW = detailPanelWidth;
+    const onMove = (ev: PointerEvent) => {
+      const delta = startX - ev.clientX;
+      setDetailPanelWidth(Math.max(280, Math.min(600, startW + delta)));
+    };
+    const onUp = () => {
+      detailResizing.current = false;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  }, [detailPanelWidth]);
+
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
   const [aiProposal, setAiProposal] = useState<any>(null);
@@ -1478,7 +1499,12 @@ export default function BigIdeaPage() {
         </div>
 
         {(showResults || selectedNode) && (
-          <div className="w-[320px] border-l flex flex-col bg-card/50">
+          <div className="border-l flex flex-col bg-card/50 relative" style={{ width: detailPanelWidth }}>
+            <div
+              className="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
+              onPointerDown={handleDetailResizeStart}
+              data-testid="detail-resize-handle"
+            />
             <div className="p-3 border-b flex items-center justify-between gap-2">
               <span className="text-sm font-semibold">
                 {showResults ? "Scan Results" : "Thought Details"}
@@ -1498,7 +1524,7 @@ export default function BigIdeaPage() {
 
             <ScrollArea className="flex-1">
               {showResults && scanResults && (
-                <div className="p-3 space-y-3">
+                <div className="p-3 pr-5 space-y-3">
                   <div className="text-center">
                     <span
                       className={`text-3xl font-bold ${
@@ -1573,7 +1599,7 @@ export default function BigIdeaPage() {
               )}
 
               {!showResults && selectedNode && selectedNode.type === "thought" && (
-                <div className="p-3 space-y-4">
+                <div className="p-3 pr-5 space-y-4">
                   <div>
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-sm font-semibold flex-1">{selectedNode.data.label as string}</h3>
