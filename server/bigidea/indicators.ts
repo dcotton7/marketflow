@@ -856,6 +856,29 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       return dist <= maxDist;
     },
   },
+  {
+    id: "PA-12",
+    name: "Prior Price Advance",
+    category: "Price Action",
+    description: "Measures the price advance that occurred BEFORE the current base. Skips the most recent N bars (the base period) and measures the gain over a lookback window ending at that offset. Use with a flat base indicator to find stocks that ran up and then consolidated.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1 },
+      { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
+      { name: "minGain", label: "Min Gain %", type: "number", defaultValue: 30, min: 5, max: 500, step: 5 },
+    ],
+    evaluate: (candles, params) => {
+      const skip = params.skipBars ?? 20;
+      const lookback = params.lookbackBars ?? 120;
+      const minGain = params.minGain ?? 30;
+      const totalNeeded = skip + lookback;
+      if (candles.length < totalNeeded) return false;
+      const priceAtBaseStart = candles[skip]?.close;
+      const priceAtAdvanceStart = candles[skip + lookback - 1]?.close;
+      if (!priceAtBaseStart || !priceAtAdvanceStart || priceAtAdvanceStart === 0) return false;
+      const gain = ((priceAtBaseStart - priceAtAdvanceStart) / priceAtAdvanceStart) * 100;
+      return gain >= minGain;
+    },
+  },
 ];
 
 const RELATIVE_STRENGTH: IndicatorDefinition[] = [
