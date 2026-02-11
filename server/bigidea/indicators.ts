@@ -636,11 +636,22 @@ const PRICE_ACTION: IndicatorDefinition[] = [
 
       const maxLen = Math.min(maxPeriod, candles.length);
 
+      const tightFloor = Math.min(maxRange * 0.3, 5);
+      const fullRangeAt = 20;
+      const scaledRange = (len: number) => {
+        if (len >= fullRangeAt) return maxRange;
+        const t = Math.max(0, (len - 5) / (fullRangeAt - 5));
+        return tightFloor + t * (maxRange - tightFloor);
+      };
+
       const recentSlice = candles.slice(0, minPeriod);
       let baseHigh = Math.max(...recentSlice.map(c => c.high));
       let baseLow = Math.min(...recentSlice.map(c => c.low));
 
       let detectedLen = minPeriod;
+
+      const initRange = baseHigh === 0 ? 0 : ((baseHigh - baseLow) / baseHigh) * 100;
+      if (initRange > scaledRange(minPeriod)) return false;
 
       for (let i = minPeriod; i < maxLen; i++) {
         const bar = candles[i];
@@ -648,7 +659,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         const testLow = Math.min(baseLow, bar.low);
         if (testHigh === 0) break;
         const range = ((testHigh - testLow) / testHigh) * 100;
-        if (range > maxRange) break;
+        if (range > scaledRange(i + 1)) break;
         baseHigh = testHigh;
         baseLow = testLow;
         detectedLen = i + 1;
