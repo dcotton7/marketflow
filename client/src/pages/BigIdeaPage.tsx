@@ -1940,7 +1940,27 @@ export default function BigIdeaPage() {
                                     disabled={isLinked && !!linkedVal}
                                     data-testid={`slider-${param.name}-${idx}`}
                                   />
-                                  <span className={`text-xs font-mono w-10 text-right ${isLinked && linkedVal ? "text-blue-400" : ""}`}>{displayValue}</span>
+                                  <Input
+                                    type="number"
+                                    value={Number(displayValue)}
+                                    min={param.min ?? 0}
+                                    max={param.max ?? 100}
+                                    step={param.step ?? 1}
+                                    disabled={isLinked && !!linkedVal}
+                                    onChange={(e) => {
+                                      const raw = e.target.value;
+                                      if (raw === "" || raw === "-") return;
+                                      let v = Number(raw);
+                                      if (isNaN(v)) return;
+                                      const mn = param.min ?? 0;
+                                      const mx = param.max ?? 100;
+                                      if (v < mn) v = mn;
+                                      if (v > mx) v = mx;
+                                      updateNodeCriterionParam(selectedNode.id, idx, param.name, v);
+                                    }}
+                                    className={`w-14 h-6 text-xs font-mono text-right px-1 ${isLinked && linkedVal ? "text-blue-400" : ""}`}
+                                    data-testid={`input-${param.name}-${idx}`}
+                                  />
                                 </div>
                               )}
                               {param.type === "select" && param.options && (
@@ -2101,7 +2121,30 @@ export default function BigIdeaPage() {
                                 className="flex-1"
                                 data-testid={`ai-slider-${param.name}-${idx}`}
                               />
-                              <span className="text-xs font-mono w-10 text-right">{param.value}</span>
+                              <Input
+                                type="number"
+                                value={param.value}
+                                min={param.min ?? 0}
+                                max={param.max ?? 100}
+                                step={param.step ?? 1}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  if (raw === "" || raw === "-") return;
+                                  let v = Number(raw);
+                                  if (isNaN(v)) return;
+                                  const mn = param.min ?? 0;
+                                  const mx = param.max ?? 100;
+                                  if (v < mn) v = mn;
+                                  if (v > mx) v = mx;
+                                  const updated = { ...aiProposal };
+                                  updated.criteria[idx].params = updated.criteria[idx].params.map(
+                                    (p: any) => (p.name === param.name ? { ...p, value: v } : p)
+                                  );
+                                  setAiProposal({ ...updated });
+                                }}
+                                className="w-14 h-6 text-xs font-mono text-right px-1"
+                                data-testid={`ai-input-${param.name}-${idx}`}
+                              />
                             </div>
                           )}
                           {param.type === "select" && param.options && (
