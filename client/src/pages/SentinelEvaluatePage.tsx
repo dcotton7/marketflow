@@ -562,6 +562,7 @@ export default function SentinelEvaluatePage() {
             <Button variant="ghost" size="icon" onClick={() => {
               if (fromParam === 'bigidea') setLocation("/sentinel/bigidea");
               else if (fromParam === 'training') setLocation("/sentinel/pattern-training");
+              else if (fromParam === 'watchlist') setLocation("/watchlist");
               else if (fromParam?.startsWith('trade:')) setLocation(`/sentinel/trade/${fromParam.split(':')[1]}`);
               else setLocation("/sentinel/dashboard");
             }} data-testid="button-back">
@@ -1575,20 +1576,21 @@ export default function SentinelEvaluatePage() {
                           </div>
                         </div>
                         
-                        {/* Debug Info Section - Collapsed by default */}
-                        {(stopPriceMode === "amount" && targetPriceMode === "amount" && targetProfitMode === "amount") && (
-                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
-                            <button
-                              type="button"
-                              className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1 cursor-pointer"
-                              onClick={() => setDebugInfoExpanded(!debugInfoExpanded)}
-                              data-testid="button-toggle-debug"
-                            >
-                              <ChevronDown className={`w-3 h-3 transition-transform ${debugInfoExpanded ? 'rotate-0' : '-rotate-90'}`} />
-                              Debug Info
-                            </button>
-                            {debugInfoExpanded && (
-                              <div className="text-xs text-white/50 font-mono space-y-0.5 mt-1">
+                        {/* More Info Section - How the numbers are calculated */}
+                        <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="more-info">
+                          <button
+                            type="button"
+                            className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1 cursor-pointer"
+                            onClick={() => setDebugInfoExpanded(!debugInfoExpanded)}
+                            data-testid="button-toggle-more-info"
+                          >
+                            <ChevronDown className={`w-3 h-3 transition-transform ${debugInfoExpanded ? 'rotate-0' : '-rotate-90'}`} />
+                            More Info
+                          </button>
+                          {debugInfoExpanded && (
+                            <div className="text-xs text-white/70 space-y-2 mt-2">
+                              <div className="space-y-1">
+                                <p className="text-white/50 font-medium">How these numbers are calculated:</p>
                                 {(() => {
                                   const entry = parseFloat(entryPrice) || 0;
                                   const stop = parseFloat(stopPrice) || 0;
@@ -1611,55 +1613,32 @@ export default function SentinelEvaluatePage() {
                                   
                                   return (
                                     <>
-                                      <p>Entry: ${entry.toFixed(2)} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
-                                      <p>Stop: ${stop.toFixed(2)} (user entered amount)</p>
-                                      <p>Shares: {shares} {positionSizeUnit === "dollars" ? `(rounded from $${positionSize} / $${entry.toFixed(2)})` : "(user entered)"}</p>
-                                      <p>Risk/Share: ${Math.abs(riskPerShare).toFixed(2)} = |${entry.toFixed(2)} - ${stop.toFixed(2)}|</p>
-                                      <p>Total Risk: ${Math.abs(totalRisk).toFixed(2)} = ${Math.abs(riskPerShare).toFixed(2)} × {shares} shares</p>
+                                      <p>Risk per share = |Entry ${entry.toFixed(2)} - Stop ${stop.toFixed(2)}| = <span className="text-red-400 font-medium">${Math.abs(riskPerShare).toFixed(2)}</span></p>
+                                      <p>Total risk = ${Math.abs(riskPerShare).toFixed(2)} x {shares} shares = <span className="text-red-400 font-medium">${Math.abs(totalRisk).toFixed(2)}</span></p>
                                       {target1 > 0 && (
-                                        <p>First Trim (30%): ${target1.toFixed(2)} → Gain = (${target1.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.3)} shares = ${firstTrimGain.toFixed(2)}</p>
+                                        <p>First trim (30% of shares): sell {Math.round(shares * 0.3)} shares at ${target1.toFixed(2)} = <span className="text-green-400">+${firstTrimGain.toFixed(2)}</span></p>
                                       )}
                                       {target2 > 0 && (
-                                        <p>Target (70%): ${target2.toFixed(2)} → Gain = (${target2.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.7)} shares = ${targetGain.toFixed(2)}</p>
+                                        <p>Remaining (70% of shares): sell {Math.round(shares * 0.7)} shares at ${target2.toFixed(2)} = <span className="text-green-400">+${targetGain.toFixed(2)}</span></p>
                                       )}
-                                      <p>Total Gain (calculated): ${totalGain.toFixed(2)} = ${firstTrimGain.toFixed(2)} + ${targetGain.toFixed(2)}</p>
-                                      <p className="text-white/40 italic">Note: Server values above may differ if AI resolves prices differently</p>
+                                      <p>Total potential gain = <span className="text-green-400 font-medium">+${totalGain.toFixed(2)}</span></p>
+                                      {riskPerShare > 0 && totalGain > 0 && (
+                                        <p>Overall R:R = {(totalGain / totalRisk).toFixed(1)}:1</p>
+                                      )}
                                     </>
                                   );
                                 })()}
                               </div>
-                            )}
-                          </div>
-                        )}
-                        {(stopPriceMode === "choice" || targetPriceMode === "choice" || targetProfitMode === "choice") && (
-                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
-                            <button
-                              type="button"
-                              className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1 cursor-pointer"
-                              onClick={() => setDebugInfoExpanded(!debugInfoExpanded)}
-                              data-testid="button-toggle-debug-choice"
-                            >
-                              <ChevronDown className={`w-3 h-3 transition-transform ${debugInfoExpanded ? 'rotate-0' : '-rotate-90'}`} />
-                              Debug Info
-                            </button>
-                            {debugInfoExpanded && (
-                              <div className="text-xs text-white/50 font-mono space-y-0.5 mt-1">
-                                <p>Entry: ${parseFloat(entryPrice).toFixed(2) || "—"} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
-                                <p>Stop: {stopPriceMode === "amount" 
-                                  ? `$${parseFloat(stopPrice).toFixed(2)}` 
-                                  : `[${stopPriceChoice || "none"}] → ${result.evaluation.planSummary?.stop || "pending"}`}</p>
-                                <p>Shares: {positionSize || "—"} {positionSizeUnit}</p>
-                                <p>First Trim: {targetPriceMode === "amount" 
-                                  ? `$${parseFloat(targetPrice).toFixed(2) || "—"}` 
-                                  : `[${targetPriceChoice || "none"}] → ${result.evaluation.planSummary?.firstTrim || "pending"}`}</p>
-                                <p>Target: {targetProfitMode === "amount" 
-                                  ? `$${parseFloat(targetProfitPrice).toFixed(2) || "—"}` 
-                                  : `[${targetProfitChoice || "none"}] → ${result.evaluation.planSummary?.target || "pending"}`}</p>
-                                <p className="text-white/40 italic">Technical levels resolved by AI from your selections</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                              {(stopPriceMode === "choice" || targetPriceMode === "choice" || targetProfitMode === "choice") && (
+                                <div className="pt-1 border-t border-blue-500/10 text-white/40 italic">
+                                  <p>Stop: {stopPriceMode !== "amount" ? `[${stopPriceChoice || "none"}] resolved to ${result.evaluation.planSummary?.stop || "pending"}` : "user entered"}</p>
+                                  {targetPriceMode !== "amount" && <p>First Trim: [{targetPriceChoice || "none"}] resolved to {result.evaluation.planSummary?.firstTrim || "pending"}</p>}
+                                  {targetProfitMode !== "amount" && <p>Target: [{targetProfitChoice || "none"}] resolved to {result.evaluation.planSummary?.target || "pending"}</p>}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </CardContent>
@@ -1736,8 +1715,25 @@ export default function SentinelEvaluatePage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
+                      <div className="p-3 bg-muted/50 rounded-md text-sm text-foreground">
                         {result.evaluation.logicalStops.userStopEval}
+                        {(() => {
+                          const ep = parseFloat(entryPrice) || 0;
+                          const sp = parseFloat(stopPrice) || 0;
+                          const riskPS = ep > 0 && sp > 0 ? Math.abs(ep - sp) : 0;
+                          const shares = positionSize && ep > 0
+                            ? (positionSizeUnit === "shares" ? parseFloat(positionSize) || 0 : Math.round((parseFloat(positionSize) || 0) / ep))
+                            : 0;
+                          const totalRisk = riskPS * shares;
+                          if (riskPS > 0) {
+                            return (
+                              <span className="block mt-2 text-red-400 font-medium">
+                                Risk: ${riskPS.toFixed(2)}/share{shares > 0 ? ` | Total: $${totalRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk` : ''}
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                       <p className="text-sm font-medium text-muted-foreground mt-1">Alternate Stop Options:</p>
                       <div className="space-y-2">
@@ -1745,6 +1741,8 @@ export default function SentinelEvaluatePage() {
                           const rankColor = s.rank === 1 ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
                             s.rank === 2 ? "bg-gray-400/20 text-gray-300 border-gray-400/30" :
                             "bg-amber-700/20 text-amber-600 border-amber-700/30";
+                          const userStop = parseFloat(stopPrice) || 0;
+                          const matchesUserStop = userStop > 0 && Math.abs(s.price - userStop) < 0.02;
                           return (
                             <div key={i} className="p-3 rounded-md border bg-muted/30">
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -1752,6 +1750,11 @@ export default function SentinelEvaluatePage() {
                                 <span className="font-medium text-sm">{s.label}</span>
                                 <span className="text-sm font-bold text-red-400">${s.price.toFixed(2)}</span>
                                 <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
+                                {matchesUserStop && (
+                                  <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                    Confirms your stop
+                                  </Badge>
+                                )}
                               </div>
                               <p className="text-xs text-muted-foreground">{s.reasoning}</p>
                             </div>
@@ -1771,7 +1774,7 @@ export default function SentinelEvaluatePage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
+                      <div className="p-3 bg-muted/50 rounded-md text-sm text-foreground">
                         {result.evaluation.logicalTargets.userTargetEval}
                       </div>
                       {result.evaluation.logicalTargets.ruleCompliance && 
@@ -1805,11 +1808,11 @@ export default function SentinelEvaluatePage() {
                         const minTotalProfit = minProfitPerShare * shares;
 
                         const userEnteredTP = parseFloat(targetProfitPrice) || 0;
-                        const userTP = userEnteredTP || (result.evaluation.planSummary?.target ? parseFloat(String(result.evaluation.planSummary.target).replace(/[^0-9.-]/g, '')) : 0);
+                        const userTP = userEnteredTP;
                         const userProfitPS = userTP > 0 && ep > 0 ? Math.abs(userTP - ep) : 0;
                         const userProfitPct = ep > 0 && userProfitPS > 0 ? (userProfitPS / ep * 100) : 0;
                         const userTotalProfit = userProfitPS * shares;
-                        const userTargetLabel = userEnteredTP > 0 ? "Your Target" : (riskPS > 0 && userTP > 0 ? `R:R Target (${(userProfitPS / riskPS).toFixed(0)}:1)` : "Calculated Target");
+                        const userTargetLabel = "Your Target";
 
                         const aiSugg = result.evaluation.logicalTargets.suggestions?.[0];
                         const aiTP = aiSugg?.price || 0;
@@ -2008,16 +2011,16 @@ export default function SentinelEvaluatePage() {
                 {result.evaluation.improvements && result.evaluation.improvements.length > 0 && (
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Lightbulb className="w-4 h-4 text-blue-500" />
+                      <CardTitle className="text-base flex items-center gap-2 text-green-400">
+                        <Lightbulb className="w-4 h-4 text-green-400" />
                         What Would Make This Better
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <ul className="space-y-1.5" data-testid="improvements">
                         {result.evaluation.improvements.map((improvement, i) => (
-                          <li key={i} className="text-sm flex items-start gap-2">
-                            <Zap className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                          <li key={i} className="text-sm flex items-start gap-2 text-foreground">
+                            <Zap className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
                             <span>{improvement}</span>
                           </li>
                         ))}

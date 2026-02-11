@@ -2,10 +2,12 @@ import { Layout } from "@/components/Layout";
 import { useWatchlist, useRemoveFromWatchlist } from "@/hooks/use-watchlist";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useLocation } from "wouter";
-import { Loader2, TrendingUp, TrendingDown, Trash2, Star } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Trash2, Star, BarChart3, MessageSquare, DollarSign, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { MiniChart } from "@/components/MiniChart";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function WatchlistItem({ item, onRemove }: { 
   item: { id: number; symbol: string }; 
@@ -17,48 +19,95 @@ function WatchlistItem({ item, onRemove }: {
 
   return (
     <Card 
-      className="cursor-pointer hover-elevate transition-all"
-      onClick={() => setLocation(`/symbol/${item.symbol}`)}
+      className="hover-elevate transition-all"
       data-testid={`card-watchlist-${item.symbol}`}
     >
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="font-bold font-mono text-xl text-primary">
+            <span className="font-bold font-mono text-xl text-primary" data-testid={`link-symbol-${item.symbol}`}>
               {item.symbol}
             </span>
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : quote && (
               <>
-                <span className="font-mono text-lg">
+                <span className="font-mono text-lg font-bold" data-testid={`text-price-${item.symbol}`}>
                   ${quote.price.toFixed(2)}
                 </span>
-                <span className={`flex items-center gap-1 text-sm font-mono ${isPositive ? "text-green-500" : "text-red-500"}`}>
+                <span className={`flex items-center gap-1 text-sm font-mono font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-change-${item.symbol}`}>
                   {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  {quote.changePercent.toFixed(2)}%
+                  {isPositive ? "+" : ""}{quote.change.toFixed(2)} ({quote.changePercent.toFixed(2)}%)
                 </span>
               </>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove(item.id);
-            }}
-            data-testid={`button-remove-${item.symbol}`}
-          >
-            <Trash2 className="w-4 h-4 text-muted-foreground" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(item.id);
+                  }}
+                  data-testid={`button-remove-${item.symbol}`}
+                >
+                  <Trash2 className="w-4 h-4 text-muted-foreground" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Remove from watchlist</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
         {quote?.companyName && (
-          <span className="text-sm text-muted-foreground">{quote.companyName}</span>
+          <span className="text-sm text-muted-foreground" data-testid={`text-company-${item.symbol}`}>{quote.companyName}</span>
+        )}
+        {quote && (
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Activity className="w-3 h-3" />
+              <span data-testid={`text-volume-${item.symbol}`}>Vol: {(quote.volume / 1000000).toFixed(1)}M</span>
+            </div>
+          </div>
         )}
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="pt-0 space-y-3">
         <MiniChart symbol={item.symbol} timeframe="60D" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const priceParam = quote ? `&price=${quote.price.toFixed(2)}` : '';
+                  setLocation(`/sentinel/evaluate?symbol=${item.symbol}${priceParam}&from=watchlist`);
+                }}
+                data-testid={`button-ask-ivy-${item.symbol}`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
+                Ask Ivy
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Get an AI trade evaluation with current pricing</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLocation(`/symbol/${item.symbol}`)}
+                data-testid={`button-open-chart-${item.symbol}`}
+              >
+                <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
+                Open in Charts
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open full chart view with technical tools</TooltipContent>
+          </Tooltip>
+        </div>
       </CardContent>
     </Card>
   );
@@ -84,7 +133,7 @@ export default function WatchlistPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <Star className="w-8 h-8 text-primary" />
-            <h1 className="text-3xl font-bold tracking-tight">Watchlist</h1>
+            <h1 className="text-3xl font-bold tracking-tight" data-testid="text-watchlist-heading">Watchlist</h1>
           </div>
           {watchlist && (
             <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
@@ -94,7 +143,7 @@ export default function WatchlistPage() {
         </div>
 
         {(!watchlist || watchlist.length === 0) ? (
-          <div className="border-2 border-dashed border-border rounded-xl p-12 text-center bg-card/30">
+          <div className="border-2 border-dashed border-border rounded-xl p-12 text-center bg-card/30" data-testid="text-watchlist-empty">
             <Star className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
             <h3 className="text-lg font-medium text-foreground">No Stocks in Watchlist</h3>
             <p className="text-muted-foreground">
