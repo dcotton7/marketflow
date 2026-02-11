@@ -274,3 +274,33 @@ function getPeriodStartDate(period: string): Date {
       return new Date(new Date().setFullYear(now.getFullYear() - 3));
   }
 }
+
+export interface TiingoNewsArticle {
+  id: number;
+  title: string;
+  url: string;
+  source: string;
+  publishedDate: string;
+  description: string;
+  tickers: string[];
+}
+
+export async function fetchNews(ticker: string, limit = 15): Promise<TiingoNewsArticle[]> {
+  try {
+    const url = `${TIINGO_BASE}/tiingo/news?tickers=${encodeURIComponent(ticker)}&limit=${limit}&token=${getToken()}`;
+    const data = await tiingoFetchWithRetry(url);
+    if (!Array.isArray(data)) return [];
+    return data.map((article: any) => ({
+      id: article.id || 0,
+      title: article.title || '',
+      url: article.url || '',
+      source: article.source || '',
+      publishedDate: article.publishedDate || '',
+      description: article.description || '',
+      tickers: article.tickers || [],
+    }));
+  } catch (error) {
+    console.error(`[Tiingo] Failed to fetch news for ${ticker}:`, error);
+    return [];
+  }
+}

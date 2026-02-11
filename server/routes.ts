@@ -1172,6 +1172,71 @@ export async function registerRoutes(
     }
   });
 
+  // --- Industry Comps (for evaluator) ---
+  app.get('/api/industry-comps/:symbol', async (req, res) => {
+    const symbol = String(req.params.symbol).toUpperCase();
+    try {
+      const { sector, industry } = await getSectorAndIndustry(symbol);
+      const sectorETFsList = SECTOR_ETFS[sector] || [];
+      const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
+      const sameIndustry = sectorStocks
+        .filter(s => s.symbol !== symbol && s.industry === industry)
+        .sort((a, b) => b.marketCap - a.marketCap);
+      const otherSector = sectorStocks
+        .filter(s => s.symbol !== symbol && s.industry !== industry)
+        .sort((a, b) => b.marketCap - a.marketCap);
+      const peers = [...sameIndustry, ...otherSector].slice(0, 20);
+
+      const allSymbols = [...sectorETFsList, ...peers.map(p => p.symbol)];
+      const quotes = await Promise.all(
+        allSymbols.map(async (sym) => {
+          try {
+            const q = await tiingo.fetchCurrentQuote(sym);
+            if (!q) return null;
+            const price = q.tngoLast || 0;
+            const prevClose = q.prevClose || 0;
+            const change = prevClose ? price - prevClose : 0;
+            const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+            return { symbol: sym, price, change: Math.round(change * 100) / 100, changePercent: Math.round(changePercent * 100) / 100, volume: q.volume || 0 };
+          } catch { return null; }
+        })
+      );
+      const quoteMap: Record<string, any> = {};
+      quotes.filter(Boolean).forEach(q => { if (q) quoteMap[q.symbol] = q; });
+
+      res.json({
+        sector,
+        industry,
+        etfs: sectorETFsList.map(etf => ({
+          symbol: etf,
+          name: etf,
+          ...(quoteMap[etf] || { price: 0, change: 0, changePercent: 0, volume: 0 }),
+        })),
+        peers: peers.map(p => ({
+          symbol: p.symbol,
+          name: p.name,
+          industry: p.industry,
+          ...(quoteMap[p.symbol] || { price: 0, change: 0, changePercent: 0, volume: 0 }),
+        })),
+      });
+    } catch (error) {
+      console.error(`Error fetching industry comps for ${symbol}:`, error);
+      res.status(500).json({ message: 'Failed to fetch industry comps' });
+    }
+  });
+
+  // --- News (for evaluator) ---
+  app.get('/api/news/:symbol', async (req, res) => {
+    const symbol = String(req.params.symbol).toUpperCase();
+    try {
+      const articles = await tiingo.fetchNews(symbol, 15);
+      res.json(articles);
+    } catch (error) {
+      console.error(`Error fetching news for ${symbol}:`, error);
+      res.json([]);
+    }
+  });
+
   // --- Scanner ---
   app.post(api.scanner.run.path, async (req, res) => {
     try {

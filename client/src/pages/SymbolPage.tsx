@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useParams, useLocation, useSearch } from "wouter";
 import { Layout } from "@/components/Layout";
 import { StockChart } from "@/components/StockChart";
@@ -5,7 +6,7 @@ import { TradeRiskRating } from "@/components/TradeRiskRating";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useAddToWatchlist } from "@/hooks/use-watchlist";
 import { useScannerContext } from "@/context/ScannerContext";
-import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -84,6 +85,16 @@ export default function SymbolPage() {
   };
   
   const criteriaList = getCriteriaList();
+
+  const [evalReturn, setEvalReturn] = useState<{ returnTo: string } | null>(null);
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('ivy_eval_return');
+      if (saved) {
+        setEvalReturn(JSON.parse(saved));
+      }
+    } catch {}
+  }, []);
   
   const handleBackToResults = () => {
     setLocation("/");
@@ -115,7 +126,7 @@ export default function SymbolPage() {
   return (
     <Layout>
       {/* Back Button */}
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Button 
           variant="ghost" 
           onClick={handleBackToResults}
@@ -125,6 +136,20 @@ export default function SymbolPage() {
           <ArrowLeft className="w-4 h-4" />
           Return to Results
         </Button>
+        {evalReturn && (
+          <Button
+            variant="outline"
+            className="gap-2 border-primary/50 text-primary"
+            onClick={() => {
+              sessionStorage.removeItem('ivy_eval_return');
+              setLocation(`/sentinel/evaluate?from=eval-return`);
+            }}
+            data-testid="button-return-evaluation"
+          >
+            <ArrowRight className="w-4 h-4" />
+            Return to {evalReturn.returnTo} Evaluation
+          </Button>
+        )}
       </div>
 
       {/* Header Section */}

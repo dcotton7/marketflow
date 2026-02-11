@@ -14,8 +14,9 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp, Crosshair, Scissors, HelpCircle } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp, Crosshair, Scissors, HelpCircle, Newspaper, Building2, ExternalLink, BarChart3, Activity } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SentinelHeader } from "@/components/SentinelHeader";
 
 interface SectorTrend {
@@ -219,6 +220,218 @@ const TARGET_PROFIT_CHOICES = [
   { value: "RR_10X", label: "10x Risk/Reward" },
 ];
 
+function getTimeAgo(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
+function IndustryCompsTab({ symbol, onNavigateAway }: { symbol: string; onNavigateAway?: () => void }) {
+  const [, setLocation] = useLocation();
+  const { data: comps, isLoading } = useQuery<{
+    sector: string;
+    industry: string;
+    etfs: { symbol: string; name: string; price: number; change: number; changePercent: number; volume: number }[];
+    peers: { symbol: string; name: string; industry: string; price: number; change: number; changePercent: number; volume: number }[];
+  }>({
+    queryKey: ['/api/industry-comps', symbol],
+    queryFn: async () => {
+      const res = await fetch(`/api/industry-comps/${encodeURIComponent(symbol)}`);
+      if (!res.ok) throw new Error('Failed to fetch comps');
+      return res.json();
+    },
+    enabled: !!symbol,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!comps) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          <Building2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <p>No industry data available for {symbol.toUpperCase()}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const CompRow = ({ item, showIndustry }: { item: { symbol: string; name: string; industry?: string; price: number; change: number; changePercent: number; volume: number }; showIndustry?: boolean }) => {
+    const isPos = item.changePercent >= 0;
+    return (
+      <div 
+        className="flex items-center justify-between gap-2 p-2.5 rounded-md border bg-muted/30 hover-elevate cursor-pointer flex-wrap"
+        onClick={() => {
+          if (onNavigateAway) onNavigateAway();
+          sessionStorage.setItem('ivy_eval_return', JSON.stringify({
+            returnTo: symbol,
+            url: window.location.href,
+          }));
+          setLocation(`/symbol/${item.symbol}`);
+        }}
+        data-testid={`comp-row-${item.symbol}`}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-bold font-mono text-sm text-primary">{item.symbol}</span>
+          <span className="text-sm text-muted-foreground truncate">{item.name}</span>
+          {showIndustry && item.industry && (
+            <Badge variant="outline" className="text-xs shrink-0">{item.industry}</Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-sm shrink-0">
+          <span className="font-mono font-bold">${item.price.toFixed(2)}</span>
+          <span className={`flex items-center gap-1 font-mono font-medium ${isPos ? "text-green-500" : "text-red-500"}`}>
+            {isPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+            {isPos ? "+" : ""}{item.change.toFixed(2)} ({item.changePercent.toFixed(2)}%)
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {item.volume > 1000000 ? `${(item.volume / 1000000).toFixed(1)}M` : `${(item.volume / 1000).toFixed(0)}K`}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Building2 className="w-4 h-4" />
+        <span>{comps.sector}</span>
+        <span className="text-muted-foreground/50">|</span>
+        <span>{comps.industry}</span>
+      </div>
+
+      {comps.etfs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-blue-400" />
+              Sector ETFs
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {comps.etfs.map(etf => (
+              <CompRow key={etf.symbol} item={etf} />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {comps.peers.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-amber-400" />
+              Industry & Sector Peers
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {comps.peers.map(peer => (
+              <CompRow key={peer.symbol} item={peer} showIndustry />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function NewsTab({ symbol }: { symbol: string }) {
+  const { data: articles, isLoading } = useQuery<{
+    id: number;
+    title: string;
+    url: string;
+    source: string;
+    publishedDate: string;
+    description: string;
+    tickers: string[];
+  }[]>({
+    queryKey: ['/api/news', symbol],
+    queryFn: async () => {
+      const res = await fetch(`/api/news/${encodeURIComponent(symbol)}`);
+      if (!res.ok) throw new Error('Failed to fetch news');
+      return res.json();
+    },
+    enabled: !!symbol,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!articles || articles.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground">
+          <Newspaper className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <p>No recent news found for {symbol.toUpperCase()}</p>
+          <p className="text-sm mt-2">News may not be available for all tickers.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {articles.map((article) => {
+        const date = new Date(article.publishedDate);
+        const timeAgo = getTimeAgo(date);
+        return (
+          <a
+            key={article.id}
+            href={article.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block p-3 rounded-md border bg-muted/30 hover-elevate"
+            data-testid={`news-article-${article.id}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-medium text-foreground line-clamp-2">{article.title}</h4>
+                {article.description && (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{article.description}</p>
+                )}
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground">{article.source}</span>
+                  <span className="text-xs text-muted-foreground/50">|</span>
+                  <span className="text-xs text-muted-foreground">{timeAgo}</span>
+                  {article.tickers.length > 1 && (
+                    <div className="flex items-center gap-1">
+                      {article.tickers.slice(0, 5).map(t => (
+                        <Badge key={t} variant="outline" className="text-xs px-1 py-0">{t}</Badge>
+                      ))}
+                      {article.tickers.length > 5 && (
+                        <span className="text-xs text-muted-foreground">+{article.tickers.length - 5}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <ExternalLink className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SentinelEvaluatePage() {
   const [, setLocation] = useLocation();
   const { user } = useSentinelAuth();
@@ -274,8 +487,59 @@ export default function SentinelEvaluatePage() {
   const [isPreloaded, setIsPreloaded] = useState(false);
   const [ruleChecklistExpanded, setRuleChecklistExpanded] = useState(false);
   const [debugInfoExpanded, setDebugInfoExpanded] = useState(false);
+  const [evalTab, setEvalTab] = useState("analysis");
   const [suggestions, setSuggestions] = useState<SuggestResponse | null>(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+
+  // Restore saved evaluation state (when returning from chart/comp)
+  useEffect(() => {
+    if (fromParam === 'eval-return') {
+      try {
+        const saved = sessionStorage.getItem('ivy_eval_state');
+        if (saved) {
+          const state = JSON.parse(saved);
+          if (state.symbol) setSymbol(state.symbol);
+          if (state.debouncedSymbol) setDebouncedSymbol(state.debouncedSymbol);
+          if (state.direction) setDirection(state.direction);
+          if (state.entryPrice) setEntryPrice(state.entryPrice);
+          if (state.stopPrice) setStopPrice(state.stopPrice);
+          if (state.stopPriceMode) setStopPriceMode(state.stopPriceMode);
+          if (state.stopPriceChoice) setStopPriceChoice(state.stopPriceChoice);
+          if (state.targetProfitPrice) setTargetProfitPrice(state.targetProfitPrice);
+          if (state.targetProfitMode) setTargetProfitMode(state.targetProfitMode);
+          if (state.targetProfitChoice) setTargetProfitChoice(state.targetProfitChoice);
+          if (state.targetPrice) setTargetPrice(state.targetPrice);
+          if (state.targetPriceMode) setTargetPriceMode(state.targetPriceMode);
+          if (state.targetPriceChoice) setTargetPriceChoice(state.targetPriceChoice);
+          if (state.positionSize) setPositionSize(state.positionSize);
+          if (state.positionSizeUnit) setPositionSizeUnit(state.positionSizeUnit);
+          if (state.thesis) setThesis(state.thesis);
+          if (state.setupType) setSetupType(state.setupType);
+          if (state.deepEval != null) setDeepEval(state.deepEval);
+          if (state.result) setResult(state.result);
+          sessionStorage.removeItem('ivy_eval_state');
+        }
+      } catch (e) {
+        console.error('Failed to restore eval state:', e);
+      }
+    }
+  }, []);
+
+  // Save evaluation state for returning later
+  const saveEvalState = () => {
+    try {
+      const state = {
+        symbol, debouncedSymbol, direction, entryPrice,
+        stopPrice, stopPriceMode, stopPriceChoice,
+        targetProfitPrice, targetProfitMode, targetProfitChoice,
+        targetPrice, targetPriceMode, targetPriceChoice,
+        positionSize, positionSizeUnit, thesis, setupType, deepEval, result,
+      };
+      sessionStorage.setItem('ivy_eval_state', JSON.stringify(state));
+    } catch (e) {
+      console.error('Failed to save eval state:', e);
+    }
+  };
 
   // Fetch suggestions when symbol, direction, and entry are filled
   useEffect(() => {
@@ -1644,6 +1908,14 @@ export default function SentinelEvaluatePage() {
                   </CardContent>
                 </Card>
 
+                <Tabs value={evalTab} onValueChange={setEvalTab} className="w-full">
+                  <TabsList className="w-full grid grid-cols-3">
+                    <TabsTrigger value="analysis" data-testid="tab-analysis">Trade Analysis</TabsTrigger>
+                    <TabsTrigger value="comps" data-testid="tab-comps">Industry Comps</TabsTrigger>
+                    <TabsTrigger value="news" data-testid="tab-news">News</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="analysis" className="space-y-4 mt-4">
                 {result.evaluation.tradeSnapshot ? (
                   <Card data-testid="trade-snapshot">
                     <CardHeader className="pb-2">
@@ -2213,6 +2485,16 @@ export default function SentinelEvaluatePage() {
                     </div>
                   </CardContent>
                 </Card>
+                  </TabsContent>
+
+                  <TabsContent value="comps" className="mt-4">
+                    <IndustryCompsTab symbol={symbol} onNavigateAway={saveEvalState} />
+                  </TabsContent>
+
+                  <TabsContent value="news" className="mt-4">
+                    <NewsTab symbol={symbol} />
+                  </TabsContent>
+                </Tabs>
               </>
             ) : (
               <Card>
