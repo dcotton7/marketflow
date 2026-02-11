@@ -53,6 +53,7 @@ import {
   Ban,
   ArrowDown,
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   SlidersHorizontal,
@@ -183,6 +184,8 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   kcPeriod: "Keltner Channel period.",
   kcMult: "Keltner Channel ATR multiplier.",
   gapDirection: "Gap direction: Up = opened above prior close; Down = opened below.",
+  skipBars: "Bars to skip (the base period). Match this to your flat base lookback so the advance window starts right before the base begins.",
+  lookbackBars: "Window (in bars) to measure the prior advance. 120 bars ≈ 6 months of trading days. Larger = longer run-up required.",
 };
 
 interface ScanResultItem {
@@ -453,6 +456,8 @@ export default function BigIdeaPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ thoughtId: number; name: string; nodeId?: string } | null>(null);
   const [restateText, setRestateText] = useState("");
   const [restateNodeId, setRestateNodeId] = useState<string | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -617,12 +622,78 @@ export default function BigIdeaPage() {
         target: e.target,
         logicType: e.data?.logicType || "AND",
       }));
+
+      const thoughtNodes = nodes.filter((n) => n.type === "thought");
+      const resultsNode = nodes.find((n) => n.type === "results");
+      const debugThoughts = thoughtNodes.map((n) => {
+        const criteria = (n.data.criteria as ScannerCriterion[]) || [];
+        const incomingEdge = edges.find((e) => e.source === n.id);
+        return {
+          nodeId: n.id,
+          name: n.data.label as string,
+          timeframe: (n.data.timeframe as string) || "daily",
+          isNot: !!n.data.isNot,
+          connectionTo: incomingEdge ? { target: incomingEdge.target, logicType: (incomingEdge.data as any)?.logicType || "AND" } : null,
+          criteria: criteria.map((c) => ({
+            indicator: c.indicatorId,
+            label: c.label,
+            muted: !!c.muted,
+            inverted: !!c.inverted,
+            tfOverride: c.timeframeOverride || null,
+            params: Object.fromEntries((c.params || []).map((p) => [p.name, p.value])),
+          })),
+        };
+      });
+
+      const allConnections = edges.map((e) => {
+        const srcNode = nodes.find((n) => n.id === e.source);
+        const tgtNode = nodes.find((n) => n.id === e.target);
+        return {
+          from: (srcNode?.data.label as string) || e.source,
+          to: tgtNode?.type === "results" ? "Results" : (tgtNode?.data.label as string) || e.target,
+          logic: (e.data as any)?.logicType || "AND",
+        };
+      });
+
+      const evalOrder: string[] = [];
+      const visited = new Set<string>();
+      const adj = new Map<string, string[]>();
+      for (const e of edges) {
+        if (!adj.has(e.target)) adj.set(e.target, []);
+        adj.get(e.target)!.push(e.source);
+      }
+      const topoVisit = (id: string) => {
+        if (visited.has(id)) return;
+        visited.add(id);
+        for (const dep of adj.get(id) || []) topoVisit(dep);
+        const n = nodes.find((nd) => nd.id === id);
+        if (n?.type === "thought") evalOrder.push(n.data.label as string);
+      };
+      if (resultsNode) topoVisit(resultsNode.id);
+
+      const scanStartTime = Date.now();
+
       const res = await apiRequest("POST", "/api/bigidea/scan", {
         nodes: scanNodes,
         edges: scanEdges,
         universe,
       });
-      return res.json() as Promise<ScanResponse>;
+      const data = await res.json() as ScanResponse;
+
+      setDebugInfo({
+        timestamp: new Date().toLocaleTimeString(),
+        durationMs: Date.now() - scanStartTime,
+        universe,
+        thoughts: debugThoughts,
+        connections: allConnections,
+        evalOrder,
+        totalScanned: data.totalScanned,
+        matchCount: data.results.length,
+        thoughtCounts: data.thoughtCounts || {},
+      });
+      setDebugOpen(true);
+
+      return data;
     },
     onSuccess: (data) => {
       setScanResults(data.results);
@@ -1133,6 +1204,83 @@ export default function BigIdeaPage() {
               )}
             </div>
           </ScrollArea>
+          {debugInfo && (
+            <div className="border-t" data-testid="scan-debug-panel">
+              <button
+                onClick={() => setDebugOpen(!debugOpen)}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover-elevate"
+                data-testid="button-toggle-debug"
+              >
+                <span>Scan Debug</span>
+                {debugOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+              </button>
+              {debugOpen && (
+                <ScrollArea className="max-h-[280px]">
+                  <div className="px-3 pb-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span>{debugInfo.timestamp}</span>
+                      <span>{debugInfo.durationMs}ms</span>
+                      <span>universe: {debugInfo.universe}</span>
+                    </div>
+                    <div className="border-t border-dashed pt-1">
+                      <span className="font-semibold text-foreground">Result: {debugInfo.matchCount} / {debugInfo.totalScanned}</span>
+                    </div>
+
+                    {debugInfo.evalOrder?.length > 0 && (
+                      <div className="border-t border-dashed pt-1">
+                        <span className="font-semibold text-foreground">Eval Order:</span>
+                        <div className="ml-2">
+                          {debugInfo.evalOrder.map((name: string, i: number) => (
+                            <span key={i}>{i > 0 ? " → " : ""}{name}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {debugInfo.connections.length > 0 && (
+                      <div className="border-t border-dashed pt-1">
+                        <span className="font-semibold text-foreground">Connections:</span>
+                        {debugInfo.connections.map((c: any, i: number) => (
+                          <div key={i} className="ml-2">
+                            {c.from} <span className={c.logic === "OR" ? "text-yellow-400" : "text-blue-400"}>{c.logic}</span> {c.to}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {debugInfo.thoughts.map((t: any) => {
+                      const passCount = debugInfo.thoughtCounts[t.nodeId];
+                      return (
+                        <div key={t.nodeId} className="border-t border-dashed pt-1">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="font-semibold text-foreground">{t.name}</span>
+                            {t.isNot && <span className="text-red-400">[NOT]</span>}
+                            <span className="text-muted-foreground/60">({t.timeframe})</span>
+                            {passCount !== undefined && (
+                              <span className="text-green-400">{passCount} pass</span>
+                            )}
+                          </div>
+                          {t.criteria.map((c: any, ci: number) => (
+                            <div key={ci} className={`ml-2 ${c.muted ? "line-through opacity-50" : ""}`}>
+                              <span className="text-foreground/80">{c.indicator}</span>
+                              {c.inverted && <span className="text-yellow-400"> INV</span>}
+                              {c.tfOverride && <span className="text-cyan-400"> @{c.tfOverride}</span>}
+                              <span className="text-muted-foreground/70"> {c.label}</span>
+                              <div className="ml-3 text-muted-foreground/50">
+                                {Object.entries(c.params).map(([k, v]) => (
+                                  <span key={k} className="mr-2">{k}={String(v)}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
+          )}
           <div
             className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
             onPointerDown={handleThoughtsResizeStart}
