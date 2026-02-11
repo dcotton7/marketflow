@@ -2170,11 +2170,13 @@ export default function BigIdeaPage() {
           ) : (
             <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               {(aiProposal.thoughts || []).length > 1 && (
-                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-accent/30 border border-accent/20">
-                  <Zap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                  <span className="text-xs text-muted-foreground">
-                    AI split this into {aiProposal.thoughts.length} linked thoughts so dynamic data flows between them.
-                  </span>
+                <div className="px-3 py-2.5 rounded-md bg-accent/30 border border-accent/20 space-y-1.5">
+                  <p className="text-sm font-medium">
+                    Your screen idea will be {aiProposal.thoughts.length} separate thoughts.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    If, after we create these thoughts, you would like to mute any part of this idea, click on the thought and select "mute." You can toggle this on and off.
+                  </p>
                 </div>
               )}
 
