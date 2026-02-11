@@ -1015,12 +1015,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     params: [
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 5, min: 3, max: 20, step: 1 },
       { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
-      { name: "maxRatio", label: "Max Tightness Ratio", type: "number", defaultValue: 0.6, min: 0.1, max: 1.5, step: 0.05 },
+      { name: "maxRatio", label: "Max Tightness Ratio", type: "number", defaultValue: 0.8, min: 0.1, max: 1.5, step: 0.05 },
     ],
     evaluate: (candles, params) => {
       const recentN = params.recentBars ?? 5;
       const baselineN = params.baselineBars ?? 50;
-      const maxRatio = params.maxRatio ?? 0.6;
+      const maxRatio = params.maxRatio ?? 0.8;
       if (candles.length < baselineN) return false;
 
       const dailyRangePct = (c: { high: number; low: number; close: number }) =>
@@ -1046,11 +1046,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     description: "Measures how tightly closing prices cluster together over a recent window. Calculates the standard deviation of closes as a percentage of the average close. Lower values mean closes are converging to a tight level — the stock is barely moving day-to-day.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 10, min: 5, max: 50, step: 1 },
-      { name: "maxClusterPct", label: "Max Cluster %", type: "number", defaultValue: 1.5, min: 0.1, max: 5, step: 0.1 },
+      { name: "maxClusterPct", label: "Max Cluster %", type: "number", defaultValue: 3.0, min: 0.1, max: 5, step: 0.1 },
     ],
     evaluate: (candles, params) => {
       const period = params.period ?? 10;
-      const maxPct = params.maxClusterPct ?? 1.5;
+      const maxPct = params.maxClusterPct ?? 3.0;
       if (candles.length < period) return false;
 
       const closes = candles.slice(0, period).map(c => c.close);
@@ -1072,12 +1072,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     params: [
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
       { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
-      { name: "maxRatio", label: "Max Volume Ratio", type: "number", defaultValue: 0.75, min: 0.1, max: 1.5, step: 0.05 },
+      { name: "maxRatio", label: "Max Volume Ratio", type: "number", defaultValue: 0.9, min: 0.1, max: 1.5, step: 0.05 },
     ],
     evaluate: (candles, params) => {
       const recentN = params.recentBars ?? 10;
       const baselineN = params.baselineBars ?? 50;
-      const maxRatio = params.maxRatio ?? 0.75;
+      const maxRatio = params.maxRatio ?? 0.9;
       if (candles.length < baselineN) return false;
 
       let recentVol = 0;
