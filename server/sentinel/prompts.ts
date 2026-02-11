@@ -50,10 +50,16 @@ Evaluate the user's chosen stop level:
 
 ### 3. Logical Take Profit Targets
 Evaluate targets whether or not the user provided them:
-- Identify logical resistance areas: prior highs, round numbers, Fibonacci extensions
-- If user entered targets, evaluate them vs the logical levels
-- If user did NOT enter targets, suggest logical target levels anyway
-- For each target: price, distance from entry (%), what level it corresponds to
+- Check the trader's PERSONAL RULES for any profit target requirements (e.g., "minimum 2:1 R:R", "always have a target")
+- If user entered targets:
+  - Evaluate them vs logical resistance/support levels
+  - Check if the target MEETS their rules: e.g., "Meets your 2:1 R:R rule" or "25% short of your 3:1 R:R rule"
+  - Show a clear compliance indicator for each relevant rule
+- If user did NOT enter targets:
+  - Suggest 2-3 logical target levels with specific prices
+  - For each suggestion, note if it would satisfy their rules: "This would give you 2.5:1 R:R — meets your minimum 2:1 rule"
+  - Mark the overall status: "No target entered — your rules require a profit target"
+- For each target: price, distance from entry (%), what level it corresponds to, R:R ratio
 - If market conditions are choppy (from sentiment data), suggest a partial profit idea:
   - "In current choppy conditions, consider trimming 30% at $X.XX (prior resistance)"
 
@@ -122,13 +128,15 @@ Respond with a JSON object:
     ]
   },
   "logicalTargets": {
-    "userTargetEval": "<Brief evaluation of user's targets if provided, or 'No targets entered' if not>",
+    "userTargetEval": "<Brief evaluation of user's targets if provided, or 'No targets entered — your rules require a profit target' if not>",
+    "ruleCompliance": "<'Meets Rules' or 'X% below rule requirement' or 'No target rule found' — check trader's rules for profit target/R:R requirements>",
     "suggestions": [
       {
         "price": <number>,
         "label": "<What this level is, e.g. 'Prior High', '2x R:R', 'Resistance at $XX'>",
         "distancePercent": <number>,
         "rrRatio": "<R:R if stop is known>",
+        "meetsRules": "<true/false — does this target satisfy the trader's profit rules?>",
         "reasoning": "<Why this is a logical target>"
       }
     ],

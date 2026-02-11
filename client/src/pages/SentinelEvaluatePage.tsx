@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -93,11 +93,13 @@ interface LogicalTargetSuggestion {
   label: string;
   distancePercent: number;
   rrRatio?: string;
+  meetsRules?: string;
   reasoning: string;
 }
 
 interface LogicalTargets {
   userTargetEval: string;
+  ruleCompliance?: string;
   suggestions: LogicalTargetSuggestion[];
   partialProfitIdea: string | null;
 }
@@ -382,12 +384,15 @@ export default function SentinelEvaluatePage() {
     retry: false,
   });
 
-  // Auto-fill entry price when ticker loads
+  const prevSymbolRef = useRef<string | null>(null);
   useEffect(() => {
-    if (tickerQuery.data?.currentPrice && !entryPrice) {
-      setEntryPrice(tickerQuery.data.currentPrice.toFixed(2));
+    if (tickerQuery.data?.currentPrice && selectedTicker) {
+      if (prevSymbolRef.current !== selectedTicker) {
+        setEntryPrice(tickerQuery.data.currentPrice.toFixed(2));
+        prevSymbolRef.current = selectedTicker;
+      }
     }
-  }, [tickerQuery.data?.currentPrice]);
+  }, [tickerQuery.data?.currentPrice, selectedTicker]);
 
   const evaluateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -766,6 +771,18 @@ export default function SentinelEvaluatePage() {
                     onChange={(e) => setPositionSize(e.target.value)}
                     placeholder={positionSizeUnit === "shares" ? "100" : "10000"}
                   />
+                  {positionSize && entryPrice && (() => {
+                    const entry = parseFloat(entryPrice);
+                    const size = parseFloat(positionSize);
+                    if (!entry || !size || entry <= 0 || size <= 0) return null;
+                    const shares = positionSizeUnit === "shares" ? size : Math.round(size / entry);
+                    const total = positionSizeUnit === "shares" ? size * entry : size;
+                    return (
+                      <p className="text-xs text-muted-foreground" data-testid="text-position-total">
+                        {shares.toLocaleString()} shares x ${entry.toFixed(2)} = <span className="font-medium text-foreground">${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </p>
+                    );
+                  })()}
                   
                   {suggestions?.positionSizeSuggestion && stopPrice && (
                     <div className="flex items-center gap-2 mt-2">
@@ -1702,6 +1719,19 @@ export default function SentinelEvaluatePage() {
                       <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
                         {result.evaluation.logicalTargets.userTargetEval}
                       </div>
+                      {result.evaluation.logicalTargets.ruleCompliance && (
+                        <div className={`p-2 rounded-md text-sm font-medium flex items-center gap-2 ${
+                          result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('meets') 
+                            ? 'bg-green-500/10 text-green-400 border border-green-500/30' 
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                        }`} data-testid="text-rule-compliance">
+                          {result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('meets') 
+                            ? <CheckCircle2 className="w-4 h-4" />
+                            : <AlertTriangle className="w-4 h-4" />
+                          }
+                          {result.evaluation.logicalTargets.ruleCompliance}
+                        </div>
+                      )}
                       <div className="space-y-2">
                         {result.evaluation.logicalTargets.suggestions.map((s, i) => (
                           <div key={i} className="p-3 rounded-md border bg-muted/30">
@@ -1713,6 +1743,21 @@ export default function SentinelEvaluatePage() {
                                 <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
                                   R:R {s.rrRatio}
                                 </Badge>
+                              )}
+                              {s.meetsRules != null && String(s.meetsRules).trim() && (
+                                (() => {
+                                  const val = String(s.meetsRules).toLowerCase();
+                                  const isPass = val === 'true' || val.includes('yes') || val.includes('meets');
+                                  return (
+                                    <Badge variant="outline" className={`text-xs ${
+                                      isPass
+                                        ? 'bg-green-500/10 text-green-400 border-green-500/30'
+                                        : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                    }`}>
+                                      {isPass ? 'Meets Rules' : String(s.meetsRules)}
+                                    </Badge>
+                                  );
+                                })()
                               )}
                             </div>
                             <p className="text-xs text-muted-foreground">{s.reasoning}</p>

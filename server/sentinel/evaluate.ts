@@ -180,9 +180,7 @@ export async function evaluateTrade(
 
   const systemPrompt = isHistorical ? HISTORICAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
-  // Use higher token limit for base eval since gpt-5.1 may need more space
-  // Deep eval (gpt-5.2) is more efficient and can work with 2500
-  const maxTokens = request.deepEval ? 2500 : 4000;
+  const maxTokens = request.deepEval ? 6000 : 6000;
   
   console.log(`[Sentinel Eval] Calling ${model} with max_tokens=${maxTokens}`);
   
@@ -214,17 +212,19 @@ export async function evaluateTrade(
     // Log presence of key fields for debugging
     const hasVerdictSummary = !!parsed.verdictSummary;
     const hasMoneyBreakdown = !!parsed.moneyBreakdown;
+    const hasTradeSnapshot = parsed.tradeSnapshot && typeof parsed.tradeSnapshot === 'object' && (Array.isArray(parsed.tradeSnapshot.good) || Array.isArray(parsed.tradeSnapshot.bad));
     const hasWhyBullets = Array.isArray(parsed.whyBullets) && parsed.whyBullets.length > 0;
     const hasRiskFlags = Array.isArray(parsed.riskFlags) && parsed.riskFlags.length > 0;
-    console.log(`[Sentinel Eval] Key fields: verdictSummary=${hasVerdictSummary}, moneyBreakdown=${hasMoneyBreakdown}, whyBullets=${hasWhyBullets}, riskFlags=${hasRiskFlags}`);
+    const hasLogicalStops = parsed.logicalStops && typeof parsed.logicalStops === 'object';
+    const hasLogicalTargets = parsed.logicalTargets && typeof parsed.logicalTargets === 'object';
+    const hasContent = hasTradeSnapshot || hasWhyBullets;
+    console.log(`[Sentinel Eval] Key fields: verdictSummary=${hasVerdictSummary}, moneyBreakdown=${hasMoneyBreakdown}, tradeSnapshot=${hasTradeSnapshot}, whyBullets=${hasWhyBullets}, riskFlags=${hasRiskFlags}, logicalStops=${hasLogicalStops}, logicalTargets=${hasLogicalTargets}`);
     
-    // Generate conservative fallbacks for missing key fields - never fabricate data
     const missingFields: string[] = [];
     
-    // Only use explicitly provided values - don't fabricate or assume
     const resolvedStop = request.stopPrice || null;
     const resolvedTarget = request.targetPrice || null;
-    const isIncomplete = !hasVerdictSummary || !hasMoneyBreakdown || !hasWhyBullets || !hasRiskFlags;
+    const isIncomplete = !hasVerdictSummary || !hasMoneyBreakdown || !hasContent || !hasRiskFlags;
     
     // Generate fallback verdictSummary if missing - always provide this for UX
     if (!hasVerdictSummary) {
@@ -285,19 +285,27 @@ export async function evaluateTrade(
     }
     
     // Generate minimal whyBullets from actual data only
-    if (!hasWhyBullets) {
-      missingFields.push('whyBullets');
-      const bullets: string[] = [];
+    if (!hasTradeSnapshot && !hasWhyBullets) {
+      missingFields.push('tradeSnapshot');
+      const good: string[] = [];
+      const bad: string[] = [];
       if (request.thesis && request.thesis.trim().length > 0) {
-        bullets.push(request.thesis.substring(0, 150));
+        good.push(request.thesis.substring(0, 150));
       }
       if (technicalData?.sma21 && technicalData?.sma50 && request.entryPrice > technicalData.sma21 && request.entryPrice > technicalData.sma50) {
-        bullets.push("Price above key moving averages (21/50 DMA)");
+        good.push("Price above key moving averages (21/50 DMA)");
       }
-      if (bullets.length === 0) {
-        bullets.push("AI analysis incomplete - review plan manually");
+      if (!request.stopPrice && !request.stopPriceLevel) {
+        bad.push("No stop level defined — risk is undefined");
       }
-      parsed.whyBullets = bullets;
+      if (good.length === 0) {
+        good.push("Trade submitted for evaluation");
+      }
+      if (bad.length === 0) {
+        bad.push("AI analysis returned limited data — review plan manually");
+      }
+      parsed.tradeSnapshot = { good, bad };
+      parsed.whyBullets = good;
     }
     
     // Generate riskFlags only from actual issues we can detect
@@ -463,6 +471,7 @@ export async function evaluateTrade(
     } : undefined,
     logicalTargets: parsed.logicalTargets && typeof parsed.logicalTargets === 'object' ? {
       userTargetEval: parsed.logicalTargets.userTargetEval || '',
+      ruleCompliance: parsed.logicalTargets.ruleCompliance || undefined,
       suggestions: Array.isArray(parsed.logicalTargets.suggestions) ? parsed.logicalTargets.suggestions : [],
       partialProfitIdea: parsed.logicalTargets.partialProfitIdea || null,
     } : undefined,

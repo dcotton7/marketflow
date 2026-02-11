@@ -103,11 +103,13 @@ export interface EvaluationResult {
   };
   logicalTargets?: {
     userTargetEval: string;
+    ruleCompliance?: string;
     suggestions: Array<{
       price: number;
       label: string;
       distancePercent: number;
       rrRatio?: string;
+      meetsRules?: string;
       reasoning: string;
     }>;
     partialProfitIdea: string | null;
