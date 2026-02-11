@@ -143,14 +143,14 @@ Respond with a JSON object:
   },
   "logicalTargets": {
     "userTargetEval": "<Brief evaluation of user's targets if provided, or 'No targets entered — your rules require a profit target' if not>",
-    "ruleCompliance": "<'Meets Rules' or 'X% below rule requirement' or 'No target rule found' — check trader's rules for profit target/R:R requirements>",
+    "ruleCompliance": "<'Meets Rules' or 'X% below rule requirement' — check trader's rules for profit target/R:R requirements. If no specific profit target rule exists, evaluate based on standard R:R best practices>",
     "suggestions": [
       {
         "price": <number>,
         "label": "<What this level is, e.g. 'Prior High', '2x R:R', 'Resistance at $XX'>",
         "distancePercent": <number>,
         "rrRatio": "<R:R if stop is known>",
-        "meetsRules": "<true/false — does this target satisfy the trader's profit rules?>",
+        "meetsRules": "<'Yes' or 'No' — does this target satisfy the trader's profit rules? Use readable words, not boolean values>",
         "reasoning": "<Why this is a logical target>"
       }
     ],
@@ -520,7 +520,11 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
     
     prompt += `\n\nMoving Averages:`;
     prompt += `\n  21 DMA: $${technicalData.sma21.toFixed(2)} (${technicalData.distanceFromSma21 > 0 ? '+' : ''}${technicalData.distanceFromSma21.toFixed(1)}% from price)`;
-    prompt += `\n  50 DMA: $${technicalData.sma50.toFixed(2)} (${technicalData.distanceFromSma50 > 0 ? '+' : ''}${technicalData.distanceFromSma50.toFixed(1)}% from price)`;
+    const adrExt50 = technicalData.extensionFrom50dAdr;
+    const adrZoneLabel = adrExt50 !== null && adrExt50 >= 8 ? ' [PROFIT-TAKING ZONE — NOT a buy zone]'
+      : adrExt50 !== null && adrExt50 >= 5 ? ' [CAUTION — approaching profit-taking zone]'
+      : '';
+    prompt += `\n  50 DMA: $${technicalData.sma50.toFixed(2)} (${adrExt50 !== null ? adrExt50.toFixed(1) + 'x ADR from price' : technicalData.distanceFromSma50.toFixed(1) + '% from price'}${adrZoneLabel})`;
     prompt += `\n  200 DMA: $${technicalData.sma200.toFixed(2)} (${technicalData.distanceFromSma200 > 0 ? '+' : ''}${technicalData.distanceFromSma200.toFixed(1)}% from price)`;
     
     prompt += `\n\nVolatility:`;

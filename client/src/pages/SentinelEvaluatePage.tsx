@@ -1774,7 +1774,8 @@ export default function SentinelEvaluatePage() {
                       <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
                         {result.evaluation.logicalTargets.userTargetEval}
                       </div>
-                      {result.evaluation.logicalTargets.ruleCompliance && (
+                      {result.evaluation.logicalTargets.ruleCompliance && 
+                       !result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('no target rule') && (
                         <div className={`p-2 rounded-md text-sm font-medium flex items-center gap-2 ${
                           result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('meets') 
                             ? 'bg-green-500/10 text-green-400 border border-green-500/30' 
@@ -1803,10 +1804,12 @@ export default function SentinelEvaluatePage() {
                         const minProfitPct = ep > 0 && minProfitPerShare > 0 ? (minProfitPerShare / ep * 100) : 0;
                         const minTotalProfit = minProfitPerShare * shares;
 
-                        const userTP = parseFloat(targetProfitPrice) || (result.evaluation.planSummary?.target ? parseFloat(String(result.evaluation.planSummary.target).replace(/[^0-9.-]/g, '')) : 0);
+                        const userEnteredTP = parseFloat(targetProfitPrice) || 0;
+                        const userTP = userEnteredTP || (result.evaluation.planSummary?.target ? parseFloat(String(result.evaluation.planSummary.target).replace(/[^0-9.-]/g, '')) : 0);
                         const userProfitPS = userTP > 0 && ep > 0 ? Math.abs(userTP - ep) : 0;
                         const userProfitPct = ep > 0 && userProfitPS > 0 ? (userProfitPS / ep * 100) : 0;
                         const userTotalProfit = userProfitPS * shares;
+                        const userTargetLabel = userEnteredTP > 0 ? "Your Target" : (riskPS > 0 && userTP > 0 ? `R:R Target (${(userProfitPS / riskPS).toFixed(0)}:1)` : "Calculated Target");
 
                         const aiSugg = result.evaluation.logicalTargets.suggestions?.[0];
                         const aiTP = aiSugg?.price || 0;
@@ -1833,7 +1836,7 @@ export default function SentinelEvaluatePage() {
                               <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="user-target">
                                 <div className="flex items-center gap-2">
                                   <Target className="w-4 h-4 text-green-400 shrink-0" />
-                                  <span className="text-sm font-medium">Your Target</span>
+                                  <span className="text-sm font-medium">{userTargetLabel}</span>
                                 </div>
                                 <div className="flex items-center gap-3 text-sm">
                                   <span className="font-bold text-green-400">${userTP.toFixed(2)}</span>
@@ -1851,7 +1854,7 @@ export default function SentinelEvaluatePage() {
                               <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="ai-target">
                                 <div className="flex items-center gap-2">
                                   <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-                                  <span className="text-sm font-medium">AI Target{aiSugg?.label ? ` (${aiSugg.label})` : ''}</span>
+                                  <span className="text-sm font-medium">Key Resistance{aiSugg?.label ? `: ${aiSugg.label}` : ''}</span>
                                 </div>
                                 <div className="flex items-center gap-3 text-sm">
                                   <span className="font-bold text-amber-400">${aiTP.toFixed(2)}</span>
@@ -1887,13 +1890,14 @@ export default function SentinelEvaluatePage() {
                                   (() => {
                                     const val = String(s.meetsRules).toLowerCase();
                                     const isPass = val === 'true' || val.includes('yes') || val.includes('meets');
+                                    const isFail = val === 'false' || val.includes('no');
                                     return (
                                       <Badge variant="outline" className={`text-xs ${
                                         isPass
                                           ? 'bg-green-500/10 text-green-400 border-green-500/30'
                                           : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                                       }`}>
-                                        {isPass ? 'Meets Rules' : String(s.meetsRules)}
+                                        {isPass ? 'Meets Rules' : isFail ? 'Below Target' : String(s.meetsRules)}
                                       </Badge>
                                     );
                                   })()

@@ -1656,15 +1656,9 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   <span className="text-sm font-medium text-foreground">{chartMetrics.adr20}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">50d ext (adr)</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">50d ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dPct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {chartMetrics.extensionFrom50dPct >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dPct}%
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
