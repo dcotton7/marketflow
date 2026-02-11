@@ -192,6 +192,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   minPeriod: "Shortest acceptable base length in bars (hard floor: 5). Note: the detected base must also be at least 75% of the Max Base Length — so a 20-bar max requires a 15-bar minimum regardless of this setting.",
   maxSlope: "Max allowed slope across the base (%). Measures how much the base drifts up or down. Lower = flatter bases only; higher = allows some tilt.",
   maxPreBaseDrop: "Max % the price can have dropped coming into the base. Rejects bases that formed right after a selloff. Lower = stricter (only bases after flat or rising price); higher = allows bases after moderate pullbacks.",
+  drifterPct: "Percentage of bars in the detected base allowed to poke outside the range without breaking detection. Drifter bars (e.g. wicks, gap bars) are counted but don't expand the base high/low. 10% on a 20-bar base = 2 drifter bars allowed. 0% = strict, no outliers tolerated.",
 };
 
 interface DynamicDataConsumer {

@@ -625,6 +625,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
       { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 5, min: 0.5, max: 15, step: 0.5 },
       { name: "maxPreBaseDrop", label: "Max Pre-Base Drop %", type: "number", defaultValue: 10, min: 1, max: 30, step: 1 },
+      { name: "drifterPct", label: "Drifter Tolerance %", type: "number", defaultValue: 10, min: 0, max: 25, step: 1 },
     ],
     evaluate: (candles, params) => {
       const maxPeriod = params.period ?? 20;
@@ -632,6 +633,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const maxRange = params.maxRange ?? 15;
       const maxSlope = params.maxSlope ?? 5;
       const maxPreBaseDrop = params.maxPreBaseDrop ?? 10;
+      const drifterPct = params.drifterPct ?? 10;
       if (candles.length < minPeriod) return false;
 
       const maxLen = Math.min(maxPeriod, candles.length);
@@ -649,6 +651,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       let baseLow = Math.min(...recentSlice.map(c => c.low));
 
       let detectedLen = minPeriod;
+      let drifterCount = 0;
 
       const initRange = baseHigh === 0 ? 0 : ((baseHigh - baseLow) / baseHigh) * 100;
       if (initRange > scaledRange(minPeriod)) return false;
@@ -659,10 +662,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         const testLow = Math.min(baseLow, bar.low);
         if (testHigh === 0) break;
         const range = ((testHigh - testLow) / testHigh) * 100;
-        if (range > scaledRange(i + 1)) break;
+        const currentLen = i + 1;
+        if (range > scaledRange(currentLen)) {
+          drifterCount++;
+          const allowedDrifters = Math.floor(currentLen * drifterPct / 100);
+          if (drifterCount > allowedDrifters) break;
+          detectedLen = currentLen;
+          continue;
+        }
         baseHigh = testHigh;
         baseLow = testLow;
-        detectedLen = i + 1;
+        detectedLen = currentLen;
       }
 
       if (detectedLen < minPeriod) return false;
