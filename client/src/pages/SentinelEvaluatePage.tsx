@@ -1743,6 +1743,12 @@ export default function SentinelEvaluatePage() {
                             "bg-amber-700/20 text-amber-600 border-amber-700/30";
                           const userStop = parseFloat(stopPrice) || 0;
                           const matchesUserStop = userStop > 0 && Math.abs(s.price - userStop) < 0.02;
+                          const ep = parseFloat(entryPrice) || 0;
+                          const stopRiskPS = ep > 0 && s.price > 0 ? Math.abs(ep - s.price) : 0;
+                          const stopShares = positionSize && ep > 0
+                            ? (positionSizeUnit === "shares" ? parseFloat(positionSize) || 0 : Math.round((parseFloat(positionSize) || 0) / ep))
+                            : 0;
+                          const stopTotalRisk = stopRiskPS * stopShares;
                           return (
                             <div key={i} className="p-3 rounded-md border bg-muted/30">
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -1757,6 +1763,11 @@ export default function SentinelEvaluatePage() {
                                 )}
                               </div>
                               <p className="text-xs text-muted-foreground">{s.reasoning}</p>
+                              {stopRiskPS > 0 && (
+                                <span className="block mt-1 text-xs text-red-400 font-medium">
+                                  Risk: ${stopRiskPS.toFixed(2)}/share{stopShares > 0 ? ` | Total: $${stopTotalRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk` : ''}
+                                </span>
+                              )}
                             </div>
                           );
                         })}
@@ -1854,21 +1865,26 @@ export default function SentinelEvaluatePage() {
                               </div>
                             )}
                             {aiTP > 0 && aiTP !== userTP && (
-                              <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="ai-target">
-                                <div className="flex items-center gap-2">
-                                  <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-                                  <span className="text-sm font-medium">Key Resistance{aiSugg?.label ? `: ${aiSugg.label}` : ''}</span>
+                              <div className="p-2.5 rounded-md border-2 border-green-500/50 bg-green-500/5 flex flex-col gap-1.5" data-testid="ai-target">
+                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <Zap className="w-4 h-4 text-green-400 shrink-0" />
+                                    <span className="text-sm font-bold text-green-400">Key Resistance{aiSugg?.label ? `: ${aiSugg.label}` : ''}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-sm">
+                                    <span className="font-bold text-green-400">${aiTP.toFixed(2)}</span>
+                                    <span className="text-muted-foreground">+${aiProfitPS.toFixed(2)}/sh (+{aiProfitPct.toFixed(1)}%)</span>
+                                    {shares > 0 && <span className="text-green-400 font-medium">+${aiTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                    {aiSugg?.rrRatio && (
+                                      <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                        R:R {aiSugg.rrRatio}
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-3 text-sm">
-                                  <span className="font-bold text-amber-400">${aiTP.toFixed(2)}</span>
-                                  <span className="text-muted-foreground">+${aiProfitPS.toFixed(2)}/sh (+{aiProfitPct.toFixed(1)}%)</span>
-                                  {shares > 0 && <span className="text-green-400 font-medium">+${aiTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
-                                  {aiSugg?.rrRatio && (
-                                    <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-400 border-amber-500/30">
-                                      R:R {aiSugg.rrRatio}
-                                    </Badge>
-                                  )}
-                                </div>
+                                {aiSugg?.reasoning && (
+                                  <p className="text-xs text-foreground/80">{aiSugg.reasoning}</p>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1917,7 +1933,7 @@ export default function SentinelEvaluatePage() {
                             <Scissors className="w-4 h-4 text-amber-500" />
                             <span className="text-sm font-medium text-amber-500">Partial Profit Idea</span>
                           </div>
-                          <p className="text-sm text-muted-foreground">{result.evaluation.logicalTargets.partialProfitIdea}</p>
+                          <p className="text-sm text-foreground">{result.evaluation.logicalTargets.partialProfitIdea}</p>
                         </div>
                       )}
                     </CardContent>
