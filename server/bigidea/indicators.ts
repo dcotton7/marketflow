@@ -626,7 +626,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 5, min: 0.5, max: 15, step: 0.5 },
       { name: "maxPreBaseDrop", label: "Max Pre-Base Drop %", type: "number", defaultValue: 10, min: 1, max: 30, step: 1 },
       { name: "drifterPct", label: "Drifter Tolerance %", type: "number", defaultValue: 10, min: 0, max: 25, step: 1 },
-      { name: "minBasePct", label: "Min Base % of Lookback", type: "number", defaultValue: 75, min: 0, max: 100, step: 5 },
+      { name: "minBasePct", label: "Min Base % of Lookback", type: "number", defaultValue: 0, min: 0, max: 100, step: 5 },
     ],
     evaluate: (candles, params) => {
       const maxPeriod = params.period ?? 20;
@@ -635,7 +635,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const maxSlope = params.maxSlope ?? 5;
       const maxPreBaseDrop = params.maxPreBaseDrop ?? 10;
       const drifterPct = params.drifterPct ?? 10;
-      const minBasePct = params.minBasePct ?? 75;
+      const minBasePct = params.minBasePct ?? 0;
       if (candles.length < minPeriod) return false;
 
       const maxLen = Math.min(maxPeriod, candles.length);
