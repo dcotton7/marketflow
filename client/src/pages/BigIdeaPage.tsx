@@ -63,6 +63,8 @@ import {
   Trash2,
   Settings2,
   Ruler,
+  Link2,
+  Unlink,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -199,6 +201,7 @@ interface ScanResponse {
   results: ScanResultItem[];
   thoughtCounts: Record<string, number>;
   totalScanned: number;
+  linkOverrides?: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }>;
 }
 
 function getCategoryIcon(category: string) {
@@ -467,6 +470,41 @@ export default function BigIdeaPage() {
     queryKey: ["/api/bigidea/ideas"],
   });
 
+  type IndicatorMeta = {
+    id: string;
+    name: string;
+    params: Array<{ name: string; autoLink?: { linkType: string; sourceParam?: string } }>;
+    provides?: Array<{ linkType: string; paramName: string }>;
+  };
+  const { data: indicatorLibrary = [] } = useQuery<IndicatorMeta[]>({
+    queryKey: ["/api/bigidea/indicators"],
+  });
+
+  useEffect(() => {
+    if (indicatorLibrary.length === 0) return;
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "thought" || !n.data.criteria) return n;
+        const criteria = (n.data.criteria as ScannerCriterion[]).map((c) => {
+          const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+          if (!indMeta) return c;
+          let changed = false;
+          const newParams = c.params.map((p) => {
+            if (p.autoLink) return p;
+            const metaParam = indMeta.params.find((mp) => mp.name === p.name);
+            if (metaParam?.autoLink) {
+              changed = true;
+              return { ...p, autoLink: metaParam.autoLink, autoLinked: p.autoLinked !== false };
+            }
+            return p;
+          });
+          return changed ? { ...c, params: newParams } : c;
+        });
+        return { ...n, data: { ...n.data, criteria } };
+      })
+    );
+  }, [indicatorLibrary, setNodes]);
+
   const createThoughtMutation = useMutation({
     mutationFn: async (body: any) => {
       const res = await apiRequest("POST", "/api/bigidea/thoughts", body);
@@ -690,6 +728,7 @@ export default function BigIdeaPage() {
         totalScanned: data.totalScanned,
         matchCount: data.results.length,
         thoughtCounts: data.thoughtCounts || {},
+        linkOverrides: data.linkOverrides || [],
       });
       setDebugOpen(true);
 
@@ -779,6 +818,21 @@ export default function BigIdeaPage() {
         y: event.clientY,
       });
 
+      const enrichedCriteria = (thought.criteria || []).map((c: ScannerCriterion) => {
+        const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+        if (!indMeta) return c;
+        return {
+          ...c,
+          params: c.params.map((p) => {
+            const metaParam = indMeta.params.find((mp) => mp.name === p.name);
+            if (metaParam?.autoLink) {
+              return { ...p, autoLink: metaParam.autoLink, autoLinked: p.autoLinked !== false };
+            }
+            return p;
+          }),
+        };
+      });
+
       const newNode: Node = {
         id: `thought-${thought.id}-${Date.now()}`,
         type: "thought",
@@ -788,7 +842,7 @@ export default function BigIdeaPage() {
           label: thought.name,
           category: thought.category,
           description: thought.description,
-          criteria: thought.criteria,
+          criteria: enrichedCriteria,
           timeframe: thought.timeframe || "daily",
           thoughtId: thought.id,
           isNot: false,
@@ -798,7 +852,7 @@ export default function BigIdeaPage() {
 
       setNodes((nds) => [...nds, newNode]);
     },
-    [reactFlowInstance, setNodes]
+    [reactFlowInstance, setNodes, indicatorLibrary]
   );
 
   const toggleNotOnNode = useCallback(
@@ -833,6 +887,75 @@ export default function BigIdeaPage() {
       );
     },
     [setNodes]
+  );
+
+  const findLinkSources = useCallback(
+    (currentNodeId: string, linkType: string): Array<{ nodeId: string; nodeName: string; indicatorId: string; indicatorName: string; paramName: string; paramValue: number | string | boolean }> => {
+      const sources: Array<{ nodeId: string; nodeName: string; indicatorId: string; indicatorName: string; paramName: string; paramValue: number | string | boolean }> = [];
+      for (const node of nodes) {
+        if (node.id === currentNodeId || node.type !== "thought") continue;
+        const criteria = (node.data.criteria as ScannerCriterion[]) || [];
+        for (const c of criteria) {
+          if (c.muted) continue;
+          const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+          if (!indMeta?.provides) continue;
+          for (const prov of indMeta.provides) {
+            if (prov.linkType === linkType) {
+              const paramVal = c.params.find((p) => p.name === prov.paramName);
+              if (paramVal !== undefined) {
+                sources.push({
+                  nodeId: node.id,
+                  nodeName: String(node.data.label || "Unnamed"),
+                  indicatorId: c.indicatorId,
+                  indicatorName: c.label,
+                  paramName: prov.paramName,
+                  paramValue: paramVal.value,
+                });
+              }
+            }
+          }
+        }
+      }
+      return sources;
+    },
+    [nodes, indicatorLibrary]
+  );
+
+  const updateParamLinkState = useCallback(
+    (nodeId: string, criterionIdx: number, paramName: string, autoLinked: boolean, linkedThoughtId?: string) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            const criteria = [...(n.data.criteria as ScannerCriterion[])];
+            const criterion = { ...criteria[criterionIdx] };
+            criterion.params = criterion.params.map((p) =>
+              p.name === paramName ? { ...p, autoLinked, linkedThoughtId: linkedThoughtId || undefined } : p
+            );
+            criteria[criterionIdx] = criterion;
+            return { ...n, data: { ...n.data, criteria } };
+          }
+          return n;
+        })
+      );
+    },
+    [setNodes]
+  );
+
+  const getLinkedValue = useCallback(
+    (param: ScannerCriterionParam, currentNodeId: string): { value: number | string | boolean; sourceName: string } | null => {
+      if (!param.autoLinked || !param.autoLink) return null;
+      const sources = findLinkSources(currentNodeId, param.autoLink.linkType);
+      if (param.linkedThoughtId) {
+        const specific = sources.find((s) => s.nodeId === param.linkedThoughtId);
+        if (specific) return { value: specific.paramValue, sourceName: `${specific.nodeName} → ${specific.indicatorName}` };
+      }
+      if (sources.length > 0) {
+        const best = sources.reduce((a, b) => (Number(a.paramValue) > Number(b.paramValue) ? a : b));
+        return { value: best.paramValue, sourceName: `${best.nodeName} → ${best.indicatorName}` };
+      }
+      return null;
+    },
+    [findLinkSources]
   );
 
   const toggleCriterionInvert = useCallback(
@@ -939,6 +1062,24 @@ export default function BigIdeaPage() {
       setIdeaName(idea.name);
       setUniverse(idea.universe);
 
+      const enrichCriteria = (criteria: ScannerCriterion[] | undefined) => {
+        if (!criteria) return criteria;
+        return criteria.map((c) => {
+          const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+          if (!indMeta) return c;
+          return {
+            ...c,
+            params: c.params.map((p) => {
+              const metaParam = indMeta.params.find((mp) => mp.name === p.name);
+              if (metaParam?.autoLink) {
+                return { ...p, autoLink: metaParam.autoLink, autoLinked: p.autoLinked !== false };
+              }
+              return p;
+            }),
+          };
+        });
+      };
+
       const loadedNodes: Node[] = (idea.nodes as IdeaNode[]).map((n) => ({
         id: n.id,
         type: n.type,
@@ -951,7 +1092,7 @@ export default function BigIdeaPage() {
                 label: n.thoughtName,
                 category: n.thoughtCategory,
                 description: n.thoughtDescription,
-                criteria: n.thoughtCriteria,
+                criteria: enrichCriteria(n.thoughtCriteria),
                 thoughtId: n.thoughtId,
                 isNot: n.isNot || false,
                 timeframe: n.thoughtTimeframe || "daily",
@@ -991,7 +1132,7 @@ export default function BigIdeaPage() {
       setShowResults(false);
       setSelectedNodeId(null);
     },
-    [setNodes, setEdges]
+    [setNodes, setEdges, indicatorLibrary]
   );
 
   const thoughtsByCategory = useMemo(() => {
@@ -1243,6 +1384,22 @@ export default function BigIdeaPage() {
                         {debugInfo.connections.map((c: any, i: number) => (
                           <div key={i} className="ml-2">
                             {c.from} <span className={c.logic === "OR" ? "text-yellow-400" : "text-blue-400"}>{c.logic}</span> {c.to}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {debugInfo.linkOverrides?.length > 0 && (
+                      <div className="border-t border-dashed pt-1">
+                        <span className="font-semibold text-blue-400">Auto-Linked Params:</span>
+                        {debugInfo.linkOverrides.map((o: any, i: number) => (
+                          <div key={i} className="ml-2">
+                            <span className="text-foreground/80">{o.thoughtName}</span>
+                            <span className="text-muted-foreground/60"> / {o.paramName}:</span>
+                            <span className="text-yellow-400"> {String(o.originalValue)}</span>
+                            <span className="text-muted-foreground/60"> → </span>
+                            <span className="text-blue-400">{String(o.linkedValue)}</span>
+                            <div className="ml-3 text-muted-foreground/50">from: {o.sourceName}</div>
                           </div>
                         ))}
                       </div>
@@ -1595,7 +1752,14 @@ export default function BigIdeaPage() {
                               </SelectContent>
                             </Select>
                           </div>
-                          {criterion.params.map((param) => (
+                          {criterion.params.map((param) => {
+                            const isLinkable = !!param.autoLink;
+                            const isLinked = isLinkable && param.autoLinked !== false;
+                            const linkedVal = isLinked ? getLinkedValue(param, selectedNode.id) : null;
+                            const displayValue = linkedVal ? linkedVal.value : param.value;
+                            const linkSources = isLinkable ? findLinkSources(selectedNode.id, param.autoLink!.linkType) : [];
+
+                            return (
                             <div key={param.name}>
                               <div className="flex items-center gap-1">
                                 <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
@@ -1609,11 +1773,72 @@ export default function BigIdeaPage() {
                                     </TooltipContent>
                                   </Tooltip>
                                 )}
+                                {isLinkable && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        className={`ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                          isLinked
+                                            ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                                            : "bg-muted text-muted-foreground border border-transparent"
+                                        }`}
+                                        onClick={() => {
+                                          if (isLinked) {
+                                            updateParamLinkState(selectedNode.id, idx, param.name, false);
+                                          } else {
+                                            const autoTarget = linkSources.length === 1 ? linkSources[0].nodeId : undefined;
+                                            updateParamLinkState(selectedNode.id, idx, param.name, true, autoTarget);
+                                          }
+                                        }}
+                                        data-testid={`button-link-${param.name}-${idx}`}
+                                      >
+                                        {isLinked ? <Link2 className="h-3 w-3" /> : <Unlink className="h-3 w-3" />}
+                                        {isLinked ? "Linked" : "Manual"}
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[280px] text-xs">
+                                      {isLinked
+                                        ? "This value is auto-synced from a companion base indicator on the canvas. Click to switch to manual entry."
+                                        : "Click to auto-link this value to a base indicator on the canvas."}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
                               </div>
+                              {isLinked && linkedVal && (
+                                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-blue-400">
+                                  <Link2 className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">{linkedVal.sourceName} = {String(linkedVal.value)}</span>
+                                </div>
+                              )}
+                              {isLinked && !linkedVal && linkSources.length === 0 && (
+                                <div className="mt-1 text-[10px] text-yellow-500">
+                                  No compatible source found on canvas. Add a base/consolidation thought.
+                                </div>
+                              )}
+                              {isLinked && linkSources.length > 1 && (
+                                <Select
+                                  value={param.linkedThoughtId || "__auto__"}
+                                  onValueChange={(v) =>
+                                    updateParamLinkState(selectedNode.id, idx, param.name, true, v === "__auto__" ? undefined : v)
+                                  }
+                                >
+                                  <SelectTrigger className="h-6 text-[10px] mt-1" data-testid={`select-link-source-${param.name}-${idx}`}>
+                                    <SelectValue placeholder="Select source..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__auto__">Auto (largest period)</SelectItem>
+                                    {linkSources.map((src) => (
+                                      <SelectItem key={src.nodeId} value={src.nodeId}>
+                                        {src.nodeName} → {src.indicatorName} ({String(src.paramValue)})
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
                               {param.type === "number" && (
                                 <div className="flex items-center gap-2 mt-1">
                                   <Slider
-                                    value={[Number(param.value)]}
+                                    value={[Number(displayValue)]}
                                     min={param.min ?? 0}
                                     max={param.max ?? 100}
                                     step={param.step ?? 1}
@@ -1621,9 +1846,10 @@ export default function BigIdeaPage() {
                                       updateNodeCriterionParam(selectedNode.id, idx, param.name, v)
                                     }
                                     className="flex-1"
+                                    disabled={isLinked && !!linkedVal}
                                     data-testid={`slider-${param.name}-${idx}`}
                                   />
-                                  <span className="text-xs font-mono w-10 text-right">{param.value}</span>
+                                  <span className={`text-xs font-mono w-10 text-right ${isLinked && linkedVal ? "text-blue-400" : ""}`}>{displayValue}</span>
                                 </div>
                               )}
                               {param.type === "select" && param.options && (
@@ -1659,7 +1885,8 @@ export default function BigIdeaPage() {
                                 </Button>
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </CardContent>
                       </Card>
                     ))}

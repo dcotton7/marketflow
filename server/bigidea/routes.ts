@@ -470,6 +470,7 @@ export function registerBigIdeaRoutes(app: Express): void {
         category: ind.category,
         description: ind.description,
         params: ind.params,
+        provides: ind.provides || [],
       }));
       res.json(indicators);
     } catch (error) {
@@ -616,6 +617,74 @@ Select the most appropriate indicators and set parameters that match the user's 
       }
 
       const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && n.thoughtCriteria);
+
+      const linkOverrides: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }> = [];
+
+      const providerMap: Map<string, Array<{ nodeId: string; nodeName: string; indicatorId: string; indicatorName: string; paramName: string; paramValue: any }>> = new Map();
+      for (const tn of thoughtNodes) {
+        for (const c of (tn.thoughtCriteria || [])) {
+          if (c.muted) continue;
+          const indDef = INDICATOR_LIBRARY.find((ind) => ind.id === c.indicatorId);
+          if (!indDef?.provides) continue;
+          for (const prov of indDef.provides) {
+            const paramVal = (c.params || []).find((p: any) => p.name === prov.paramName);
+            if (paramVal) {
+              if (!providerMap.has(prov.linkType)) providerMap.set(prov.linkType, []);
+              providerMap.get(prov.linkType)!.push({
+                nodeId: tn.id,
+                nodeName: tn.thoughtName || "Unnamed",
+                indicatorId: c.indicatorId,
+                indicatorName: c.label || indDef.name,
+                paramName: prov.paramName,
+                paramValue: paramVal.value,
+              });
+            }
+          }
+        }
+      }
+
+      for (const tn of thoughtNodes) {
+        for (const c of (tn.thoughtCriteria || [])) {
+          const indDef = INDICATOR_LIBRARY.find((ind) => ind.id === c.indicatorId);
+          for (const p of (c.params || [])) {
+            if (!p.autoLink && indDef) {
+              const metaParam = indDef.params.find((mp) => mp.name === p.name);
+              if (metaParam?.autoLink) {
+                p.autoLink = metaParam.autoLink;
+                if (p.autoLinked === undefined) p.autoLinked = true;
+              }
+            }
+            if (!p.autoLink || p.autoLinked === false) continue;
+            const sources = (providerMap.get(p.autoLink.linkType) || []).filter((s: any) => s.nodeId !== tn.id);
+            if (sources.length === 0) continue;
+            let chosen: any;
+            if (p.linkedThoughtId) {
+              chosen = sources.find((s: any) => s.nodeId === p.linkedThoughtId);
+            }
+            if (!chosen) {
+              chosen = sources.reduce((a: any, b: any) => (Number(a.paramValue) > Number(b.paramValue) ? a : b));
+            }
+            if (chosen) {
+              const originalValue = p.value;
+              p.value = chosen.paramValue;
+              linkOverrides.push({
+                thoughtId: tn.id,
+                thoughtName: tn.thoughtName || "Unnamed",
+                paramName: p.name,
+                indicatorId: c.indicatorId,
+                originalValue,
+                linkedValue: chosen.paramValue,
+                sourceName: `${chosen.nodeName} → ${chosen.indicatorName} (${chosen.paramName}=${chosen.paramValue})`,
+              });
+            }
+          }
+        }
+      }
+
+      if (linkOverrides.length > 0) {
+        console.log(`[BigIdea Scan] Auto-link overrides:`, linkOverrides.map(o => `${o.thoughtName}/${o.paramName}: ${o.originalValue} → ${o.linkedValue} (from ${o.sourceName})`));
+      }
+
       const timeframesNeeded = new Set<string>();
       for (const tn of thoughtNodes) {
         timeframesNeeded.add(tn.thoughtTimeframe || "daily");
@@ -773,7 +842,7 @@ Select the most appropriate indicators and set parameters that match the user's 
 
       console.log(`[BigIdea Scan] Complete: ${results.length} results from ${tickers.length} tickers (fetchFails=${fetchFailCount}, tooFewCandles=${tooFewCandlesCount})`);
       console.log(`[BigIdea Scan] ThoughtCounts:`, JSON.stringify(thoughtCounts));
-      res.json({ results, thoughtCounts });
+      res.json({ results, thoughtCounts, linkOverrides });
     } catch (error) {
       console.error("Error executing scan:", error);
       res.status(500).json({ error: "Failed to execute scan" });

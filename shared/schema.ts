@@ -1200,6 +1200,9 @@ export interface ScannerCriterionParam {
   min?: number;
   max?: number;
   step?: number;
+  autoLink?: { linkType: string; sourceParam?: string };
+  autoLinked?: boolean;
+  linkedThoughtId?: string;
 }
 
 export interface ScannerCriterion {

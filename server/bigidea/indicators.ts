@@ -7,6 +7,11 @@ export type CandleData = {
   volume: number;
 };
 
+export type ParamAutoLink = {
+  linkType: string;
+  sourceParam?: string;
+};
+
 export type IndicatorParam = {
   name: string;
   label: string;
@@ -16,6 +21,12 @@ export type IndicatorParam = {
   min?: number;
   max?: number;
   step?: number;
+  autoLink?: ParamAutoLink;
+};
+
+export type IndicatorProvides = {
+  linkType: string;
+  paramName: string;
 };
 
 export type IndicatorDefinition = {
@@ -24,6 +35,7 @@ export type IndicatorDefinition = {
   category: "Moving Averages" | "Volume" | "Price Action" | "Relative Strength" | "Volatility";
   description: string;
   params: IndicatorParam[];
+  provides?: IndicatorProvides[];
   evaluate: (candles: CandleData[], params: Record<string, any>, benchmarkCandles?: CandleData[]) => boolean;
 };
 
@@ -593,6 +605,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     name: "Consolidation / Base Detection",
     category: "Price Action",
     description: "Detects a flat consolidation base: tight price range, minimal trend slope, and price near the top of the range. Max Slope controls how much directional drift is allowed (lower = flatter). Filters out trending stocks.",
+    provides: [{ linkType: "basePeriod", paramName: "period" }],
     params: [
       { name: "period", label: "Lookback Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
@@ -721,6 +734,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     name: "Breakout Detection",
     category: "Price Action",
     description: "Detects if price broke above the highest high of a prior consolidation period within the last N bars",
+    provides: [{ linkType: "basePeriod", paramName: "basePeriod" }],
     params: [
       { name: "basePeriod", label: "Base Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "lookback", label: "Breakout Window (bars)", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
@@ -862,7 +876,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Measures the price advance that occurred BEFORE the current base. Skips the most recent N bars (the base period) and measures the gain over a lookback window ending at that offset. Use with a flat base indicator to find stocks that ran up and then consolidated.",
     params: [
-      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1 },
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
       { name: "minGain", label: "Min Gain %", type: "number", defaultValue: 30, min: 5, max: 500, step: 5 },
     ],
