@@ -592,7 +592,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-3",
     name: "Consolidation / Base Detection",
     category: "Price Action",
-    description: "Detects a tight price range (consolidation base) over a period. Range is (high-low)/high as %.",
+    description: "Detects a flat consolidation base: tight price range, minimal trend slope, and price near the top of the range. Filters out trending stocks.",
     params: [
       { name: "period", label: "Lookback Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
@@ -606,7 +606,29 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const low = Math.min(...slice.map(c => c.low));
       if (high === 0) return false;
       const range = ((high - low) / high) * 100;
-      return range <= maxRange;
+      if (range > maxRange) return false;
+
+      const closes = slice.map(c => c.close);
+      const n = closes.length;
+      const sumX = (n * (n - 1)) / 2;
+      const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
+      let sumY = 0, sumXY = 0;
+      for (let i = 0; i < n; i++) {
+        sumY += closes[i];
+        sumXY += i * closes[i];
+      }
+      const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      const avgPrice = sumY / n;
+      if (avgPrice === 0) return false;
+      const slopePerBar = (slope / avgPrice) * 100;
+      const totalDrift = Math.abs(slopePerBar * n);
+      if (totalDrift > maxRange * 0.4) return false;
+
+      const currentClose = closes[0];
+      const posInRange = high === low ? 1 : (currentClose - low) / (high - low);
+      if (posInRange < 0.5) return false;
+
+      return true;
     },
   },
   {

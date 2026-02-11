@@ -304,11 +304,7 @@ export function registerBigIdeaRoutes(app: Express): void {
         .where(and(eq(scannerThoughts.id, id), eq(scannerThoughts.userId, userId)))
         .returning();
 
-      if (deleted.length === 0) {
-        return res.status(404).json({ error: "Thought not found" });
-      }
-
-      res.json({ success: true });
+      res.json({ success: true, alreadyDeleted: deleted.length === 0 });
     } catch (error) {
       console.error("Error deleting thought:", error);
       res.status(500).json({ error: "Failed to delete thought" });

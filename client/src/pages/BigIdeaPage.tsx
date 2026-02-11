@@ -575,8 +575,15 @@ export default function BigIdeaPage() {
 
   const deleteThoughtMutation = useMutation({
     mutationFn: async ({ thoughtId, nodeId }: { thoughtId: number; nodeId?: string }) => {
-      await apiRequest("DELETE", `/api/bigidea/thoughts/${thoughtId}`);
-      return { nodeId };
+      try {
+        await apiRequest("DELETE", `/api/bigidea/thoughts/${thoughtId}`);
+      } catch (err: any) {
+        if (err?.message?.includes("404")) {
+          return { nodeId, alreadyDeleted: true };
+        }
+        throw err;
+      }
+      return { nodeId, alreadyDeleted: false };
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
