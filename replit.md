@@ -41,7 +41,7 @@ Admin features include **User Management**, allowing administrators to list user
 - **PostgreSQL**: Primary database, managed with Drizzle ORM.
 
 ### Market Data API
-- **Tiingo API** (Business tier): Centralized data provider via `server/tiingo.ts`. Provides EOD daily/weekly/monthly prices (5+ years history), IEX intraday data (back to 2017), real-time quotes, and ticker metadata. All market data flows through this single module. Note: Tiingo does not provide sector, industry, market cap, PE ratio, or earnings data — sector/industry uses pre-computed local lookups via `STOCKS_BY_SECTOR`.
+- **Tiingo API** (Business tier): Centralized data provider via `server/tiingo.ts`. Provides EOD daily/weekly/monthly prices (5+ years history), IEX intraday data (back to 2017), real-time quotes, and ticker metadata. All market data flows through this single module. Note: Tiingo does not provide sector, industry, market cap, PE ratio, or earnings data — sector/industry uses pre-computed local lookups via `STOCKS_BY_SECTOR`. Intraday lookback: 5m=3mo (~63 trading days), 15m/30m/60m=6mo (~126 trading days). Default indicators include 50-day SMA on all intraday timeframes.
 
 ### Fundamentals Data
 - **Financial Modeling Prep (FMP) API** (free tier, 250 req/day): Fallback fundamentals provider via `server/fundamentals.ts` using stable endpoint (`https://financialmodelingprep.com/stable/profile?symbol=X`). Two-tier lookup: local `STOCKS_BY_SECTOR` table first (~120 stocks, instant), FMP API fallback for unknown tickers. 24-hour in-memory cache + deduplication of concurrent requests to conserve API quota. Provides sector, industry, and market cap for tickers not in the local table.

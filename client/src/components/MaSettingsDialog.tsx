@@ -82,9 +82,9 @@ function isFeasible(row: MaSettingRow, timeframe: string, limits: ChartPrefs): b
 const DEFAULT_LIMITS: ChartPrefs = {
   defaultBarsOnScreen: 200,
   dataLimitDaily: 750,
-  dataLimit5min: 60,
-  dataLimit15min: 60,
-  dataLimit30min: 60,
+  dataLimit5min: 63,
+  dataLimit15min: 126,
+  dataLimit30min: 126,
 };
 
 export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -115,9 +115,9 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
       setLimits({
         defaultBarsOnScreen: chartPrefs.defaultBarsOnScreen,
         dataLimitDaily: chartPrefs.dataLimitDaily ?? 750,
-        dataLimit5min: chartPrefs.dataLimit5min ?? 60,
-        dataLimit15min: chartPrefs.dataLimit15min ?? 60,
-        dataLimit30min: chartPrefs.dataLimit30min ?? 60,
+        dataLimit5min: chartPrefs.dataLimit5min ?? 63,
+        dataLimit15min: chartPrefs.dataLimit15min ?? 126,
+        dataLimit30min: chartPrefs.dataLimit30min ?? 126,
       });
     }
   }, [chartPrefs]);
@@ -425,7 +425,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     <Input
                       type="number"
                       value={limits.dataLimit5min}
-                      onChange={e => setLimits(prev => ({ ...prev, dataLimit5min: Math.max(1, parseInt(e.target.value) || 60) }))}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimit5min: Math.max(1, parseInt(e.target.value) || 63) }))}
                       className="h-7 text-xs"
                       data-testid="input-limit-5m"
                     />
@@ -435,7 +435,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     <Input
                       type="number"
                       value={limits.dataLimit15min}
-                      onChange={e => setLimits(prev => ({ ...prev, dataLimit15min: Math.max(1, parseInt(e.target.value) || 60) }))}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimit15min: Math.max(1, parseInt(e.target.value) || 126) }))}
                       className="h-7 text-xs"
                       data-testid="input-limit-15m"
                     />
@@ -445,7 +445,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     <Input
                       type="number"
                       value={limits.dataLimit30min}
-                      onChange={e => setLimits(prev => ({ ...prev, dataLimit30min: Math.max(1, parseInt(e.target.value) || 60) }))}
+                      onChange={e => setLimits(prev => ({ ...prev, dataLimit30min: Math.max(1, parseInt(e.target.value) || 126) }))}
                       className="h-7 text-xs"
                       data-testid="input-limit-30m"
                     />

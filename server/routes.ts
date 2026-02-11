@@ -1051,11 +1051,14 @@ export async function registerRoutes(
     const interval = String(req.query.interval || '1d');
     let period = String(req.query.period || '3y'); // Default to 3 years for scrollback history
     
-    // For intraday, use shorter periods (Yahoo API limits)
-    if (['5m', '15m', '30m'].includes(interval)) {
-      period = '59d'; // Yahoo caps intraday at 60 days; request 59 to stay within limit
-    } else if (interval === '60m') {
+    if (interval === '5m') {
       period = '3mo';
+    } else if (interval === '15m') {
+      period = '6mo';
+    } else if (interval === '30m') {
+      period = '6mo';
+    } else if (interval === '60m') {
+      period = '6mo';
     } else if (interval === '1wk' || interval === '1mo') {
       period = '5y'; // Weekly/monthly can have longer history
     }

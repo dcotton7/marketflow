@@ -458,9 +458,9 @@ function getAvailableIndicatorsFromConfig(
     }
     switch (timeframe) {
       case '5m':
-        return ['sma6', 'sma20', 'autoVwap'];
+        return ['sma6', 'sma20', 'sma50', 'autoVwap'];
       case '15m':
-        return ['sma5', 'sma21', 'autoVwap'];
+        return ['sma5', 'sma21', 'sma50', 'autoVwap'];
       case '30m':
         return ['sma5', 'sma21', 'sma50', 'autoVwap'];
       case '60m':
@@ -514,9 +514,9 @@ function getDefaultIndicatorsFallback(timeframe?: string, isDailyFixed: boolean 
   }
   switch (timeframe) {
     case '5m':
-      return new Set(['sma6', 'sma20'] as IndicatorKey[]);
+      return new Set(['sma6', 'sma20', 'sma50'] as IndicatorKey[]);
     case '15m':
-      return new Set(['sma5', 'sma21', 'autoVwap'] as IndicatorKey[]);
+      return new Set(['sma5', 'sma21', 'sma50', 'autoVwap'] as IndicatorKey[]);
     case '30m':
       return new Set(['sma5', 'sma21', 'sma50', 'autoVwap'] as IndicatorKey[]);
     case '60m':
