@@ -636,15 +636,28 @@ export default function BigIdeaPage() {
         };
       });
 
-      const newEdges: Edge[] = (edges || []).map((e: any) => ({
+      const dataEdges: Edge[] = (edges || []).map((e: any) => ({
         id: `e-${keyToNodeId[e.from]}-${keyToNodeId[e.to]}`,
         source: keyToNodeId[e.from],
         target: keyToNodeId[e.to],
         type: "default",
       })).filter((e: Edge) => e.source && e.target);
 
+      const resultsNodeId = "results-node";
+      const hasOutgoingDataEdge = new Set<string>();
+      dataEdges.forEach((e) => hasOutgoingDataEdge.add(e.source));
+
+      const scanFlowEdges: Edge[] = newNodes
+        .filter((n) => !hasOutgoingDataEdge.has(n.id))
+        .map((n) => ({
+          id: `e-${n.id}-${resultsNodeId}`,
+          source: n.id,
+          target: resultsNodeId,
+          type: "default",
+        }));
+
       setNodes((nds) => [...nds, ...newNodes]);
-      setEdges((eds) => [...eds, ...newEdges]);
+      setEdges((eds) => [...eds, ...dataEdges, ...scanFlowEdges]);
 
       setAiDialogOpen(false);
       setAiProposal(null);
@@ -1539,7 +1552,7 @@ export default function BigIdeaPage() {
 
                     {debugInfo.connections.length > 0 && (
                       <div className="border-t border-dashed pt-1">
-                        <span className="font-semibold text-foreground">Connections:</span>
+                        <span className="font-semibold text-foreground">Thought Stems:</span>
                         {debugInfo.connections.map((c: any, i: number) => (
                           <div key={i} className="ml-2">
                             {c.from} <span className={c.logic === "OR" ? "text-yellow-400" : "text-blue-400"}>{c.logic}</span> {c.to}
