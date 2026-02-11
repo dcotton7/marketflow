@@ -37,6 +37,13 @@ export interface TechnicalData {
   baseBottom: number | null; // Lowest low in the last 30 days (for base quality)
   baseTop: number | null; // Highest high in consolidation area
   
+  // Key price levels for profit targets
+  high52Week: number; // 52-week (1 year) high
+  low52Week: number; // 52-week (1 year) low
+  swingHighs: { price: number; daysAgo: number }[]; // Recent swing highs (resistance levels)
+  adr20: number; // 20-day average daily range in dollar terms
+  extensionFrom50dAdr: number | null; // How many ADRs price is above the 50 DMA
+  
   // Relative to MAs
   distanceFromSma21: number; // % above/below
   distanceFromSma50: number;
@@ -137,6 +144,44 @@ function findBaseStructure(candles: HistoricalQuote[]): { bottom: number | null;
   return { bottom, top };
 }
 
+function findSwingHighs(candles: HistoricalQuote[], maxResults: number = 5): { price: number; daysAgo: number }[] {
+  if (candles.length < 10) return [];
+  const candidates: { price: number; index: number }[] = [];
+  const minSeparation = 5;
+  
+  for (let i = 2; i < candles.length - 2; i++) {
+    const c = candles[i];
+    if (
+      c.high > candles[i - 1].high &&
+      c.high > candles[i - 2].high &&
+      c.high > candles[i + 1].high &&
+      c.high > candles[i + 2].high
+    ) {
+      candidates.push({ price: c.high, index: i });
+    }
+  }
+  
+  candidates.sort((a, b) => b.price - a.price);
+  
+  const selected: { price: number; daysAgo: number }[] = [];
+  for (const c of candidates) {
+    if (selected.length >= maxResults) break;
+    const tooClose = selected.some(s => Math.abs(s.daysAgo - c.index) < minSeparation);
+    if (!tooClose) {
+      selected.push({ price: c.price, daysAgo: c.index });
+    }
+  }
+  
+  selected.sort((a, b) => a.daysAgo - b.daysAgo);
+  return selected;
+}
+
+function calculateADR(candles: HistoricalQuote[], period: number): number {
+  if (candles.length < period) return 0;
+  const slice = candles.slice(0, period);
+  return slice.reduce((sum, c) => sum + (c.high - c.low), 0) / period;
+}
+
 function getWeeklyRange(candles: HistoricalQuote[]): { low: number; high: number } {
   const now = new Date();
   const dayOfWeek = now.getDay();
@@ -199,6 +244,23 @@ export async function fetchTechnicalData(symbol: string): Promise<TechnicalData 
     // Base structure
     const base = findBaseStructure(historical);
     
+    // 52-week high/low
+    const allHighs = historical.map(c => c.high);
+    const allLows = historical.map(c => c.low);
+    const high52Week = Math.max(...allHighs);
+    const low52Week = Math.min(...allLows);
+    
+    // Swing highs (resistance levels)
+    const swingHighs = findSwingHighs(historical);
+    
+    // ADR (20-day average daily range)
+    const adr20 = calculateADR(historical, 20);
+    
+    // Extension from 50 DMA in ADR multiples
+    const extensionFrom50dAdr = sma50 > 0 && adr20 > 0 
+      ? (quote.price - sma50) / adr20 
+      : null;
+    
     // Distance from MAs
     const distanceFromSma21 = ((quote.price - sma21) / sma21) * 100;
     const distanceFromSma50 = ((quote.price - sma50) / sma50) * 100;
@@ -233,6 +295,12 @@ export async function fetchTechnicalData(symbol: string): Promise<TechnicalData 
       
       baseBottom: base.bottom,
       baseTop: base.top,
+      
+      high52Week,
+      low52Week,
+      swingHighs,
+      adr20,
+      extensionFrom50dAdr,
       
       distanceFromSma21,
       distanceFromSma50,
@@ -319,6 +387,21 @@ export async function fetchHistoricalTechnicalData(
     // Use close price as the "current" price for that historical date
     const priceOnDate = targetDay.close;
     
+    // 52-week high/low as of that date
+    const allHighs = historical.map(c => c.high);
+    const allLows = historical.map(c => c.low);
+    const high52Week = Math.max(...allHighs);
+    const low52Week = Math.min(...allLows);
+    
+    // Swing highs
+    const swingHighs = findSwingHighs(historical);
+    
+    // ADR
+    const adr20 = calculateADR(historical, 20);
+    const extensionFrom50dAdr = sma50 > 0 && adr20 > 0 
+      ? (priceOnDate - sma50) / adr20 
+      : null;
+    
     // Distance from MAs
     const distanceFromSma21 = ((priceOnDate - sma21) / sma21) * 100;
     const distanceFromSma50 = ((priceOnDate - sma50) / sma50) * 100;
@@ -354,11 +437,17 @@ export async function fetchHistoricalTechnicalData(
       baseBottom: base.bottom,
       baseTop: base.top,
       
+      high52Week,
+      low52Week,
+      swingHighs,
+      adr20,
+      extensionFrom50dAdr,
+      
       distanceFromSma21,
       distanceFromSma50,
       distanceFromSma200,
       
-      fetchedAt: targetDate, // Mark as the historical date
+      fetchedAt: targetDate,
     };
   } catch (error) {
     console.error(`Failed to fetch historical technical data for ${symbol} on ${targetDate}:`, error);
@@ -392,6 +481,13 @@ export function resolveLevelPrice(
       return { price: technicals.yesterdayHigh, description: `Previous Day High ($${technicals.yesterdayHigh.toFixed(2)})` };
     case "5_DAY_HIGH":
       return { price: technicals.fiveDayHigh, description: `5 Day High ($${technicals.fiveDayHigh.toFixed(2)})` };
+    case "EXTENDED_8X_50DMA": {
+      if (technicals.sma50 > 0 && technicals.adr20 > 0) {
+        const targetPrice = technicals.sma50 + (technicals.adr20 * 8);
+        return { price: targetPrice, description: `8x ADR above 50 DMA ($${targetPrice.toFixed(2)})` };
+      }
+      return null;
+    }
     default:
       // Check for RR multipliers
       if (level.startsWith("RR_")) {

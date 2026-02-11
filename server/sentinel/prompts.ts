@@ -49,31 +49,33 @@ Evaluate the user's chosen stop level:
 - Always calculate % loss potential for the selected stop
 
 ### 3. Logical Take Profit Targets
+CRITICAL: Always use REAL CHART LEVELS for profit targets, not just R:R math.
 Evaluate targets whether or not the user provided them:
 - Check the trader's PERSONAL RULES for any profit target requirements (e.g., "minimum 2:1 R:R", "always have a target")
 - If user entered targets:
-  - Evaluate them vs logical resistance/support levels
+  - Evaluate them vs logical resistance/support levels from the chart data
   - Check if the target MEETS their rules: e.g., "Meets your 2:1 R:R rule" or "25% short of your 3:1 R:R rule"
   - Show a clear compliance indicator for each relevant rule
 - If user did NOT enter targets:
-  - Suggest 2-3 logical target levels with specific prices based on:
-    1. Prior swing highs / resistance levels from chart data
-    2. All-time high (ATH) if nearby — note how close the stock is to ATH
-    3. Round-number resistance levels
-    4. R:R multiples (2:1, 3:1) from the stop level
-  - For each suggestion, note if it would satisfy their rules: "This would give you 2.5:1 R:R — meets your minimum 2:1 rule"
+  - PRIORITY ORDER for suggesting targets (use real levels first, R:R as supplementary context):
+    1. **Prior swing highs from the chart data** — these are the most actionable resistance levels. Label them with the price and how many days ago they occurred (e.g., "Prior swing high $310.50, 23 days ago")
+    2. **52-week high** — if above current price, this is a major resistance level. Note distance from entry
+    3. **Round-number resistance** (e.g., $300, $350) — psychological resistance levels
+    4. For EACH suggested level, also note the R:R it provides (e.g., "Prior swing high at $310.50 — gives you 3.2:1 R:R")
+  - Do NOT suggest targets that are purely R:R multiples with no chart basis (e.g., "2:1 R:R from current stop" with no chart justification). Every target should reference a real price level
   - Mark the overall status: "No target entered — your rules require a profit target"
-- If the stock is near or at all-time highs:
+- If the stock is near or at all-time highs (within 3% of 52-week high):
   - Explicitly note "Stock is at/near ATH — upside ceiling is undetermined"
   - Suggest using trailing stops or partial profit strategy since no clear resistance exists above
-  - Still provide R:R-based targets (e.g., 2:1, 3:1 from stop) as minimum expectations
+  - Use prior swing highs as intermediate targets even if they are below the ATH
 - If R:R is undefined or cannot be calculated (e.g., no stop provided):
   - Flag this as a risk: "R:R cannot be calculated without a stop level"
-  - Suggest logical target levels anyway using chart resistance/ATH
+  - Suggest logical target levels anyway using chart swing highs and 52-week high
   - Explain extension risk if price is well above moving averages
-- For each target: price, distance from entry (%), what level it corresponds to, R:R ratio
+- For each target: price, distance from entry (%), what chart level it corresponds to, R:R ratio
+- Extension check: If price is extended ≥8x ADR above the 50 DMA, note this is a profit-taking zone — the trader should be selling here, not buying
 - If market conditions are choppy (from sentiment data), suggest a partial profit idea:
-  - "In current choppy conditions, consider trimming 30% at $X.XX (prior resistance)"
+  - "In current choppy conditions, consider trimming 30% at $X.XX (prior swing high resistance)"
 
 ### 4. Risk Assessment
 Classify and present risk flags:
@@ -523,6 +525,27 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
     
     prompt += `\n\nVolatility:`;
     prompt += `\n  ATR(14): $${technicalData.atr14.toFixed(2)} (${((technicalData.atr14 / technicalData.currentPrice) * 100).toFixed(1)}% of price)`;
+    prompt += `\n  ADR(20): $${technicalData.adr20.toFixed(2)} (20-day avg daily range)`;
+    if (technicalData.extensionFrom50dAdr !== null) {
+      prompt += `\n  Extension from 50 DMA: ${technicalData.extensionFrom50dAdr.toFixed(1)}x ADR${technicalData.extensionFrom50dAdr >= 8 ? ' [WARNING: ≥8x ADR — in profit-taking zone, NOT a buy zone]' : ''}`;
+    }
+    
+    if (technicalData.high52Week > 0 && technicalData.low52Week > 0 && isFinite(technicalData.high52Week)) {
+      prompt += `\n\n52-Week Range:`;
+      prompt += `\n  52-Week High: $${technicalData.high52Week.toFixed(2)}${technicalData.currentPrice >= technicalData.high52Week * 0.97 ? ' [NEAR ATH — upside ceiling undetermined]' : ''}`;
+      prompt += `\n  52-Week Low: $${technicalData.low52Week.toFixed(2)}`;
+      const pctFrom52High = ((technicalData.currentPrice - technicalData.high52Week) / technicalData.high52Week * 100);
+      prompt += `\n  Distance from 52w High: ${pctFrom52High > 0 ? '+' : ''}${pctFrom52High.toFixed(1)}%`;
+    }
+    
+    if (technicalData.swingHighs && technicalData.swingHighs.length > 0) {
+      prompt += `\n\nRecent Swing Highs (Resistance Levels — USE THESE FOR PROFIT TARGETS):`;
+      technicalData.swingHighs.forEach((sh, i) => {
+        const aboveBelow = sh.price > technicalData.currentPrice ? 'above' : 'below';
+        const dist = ((sh.price - technicalData.currentPrice) / technicalData.currentPrice * 100).toFixed(1);
+        prompt += `\n  ${i + 1}. $${sh.price.toFixed(2)} (${sh.daysAgo} trading days ago, ${dist}% ${aboveBelow} current price)`;
+      });
+    }
     
     // MA structure analysis
     const aboveAll = technicalData.currentPrice > technicalData.sma21 && 
