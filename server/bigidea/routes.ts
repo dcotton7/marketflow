@@ -531,15 +531,20 @@ export function registerBigIdeaRoutes(app: Express): void {
 Available indicators:
 ${JSON.stringify(indicatorSummary, null, 2)}
 
-CRITICAL: DATA-LINKING AND MULTI-THOUGHT SPLITTING
+CRITICAL: DATA-LINKING AND MULTI-THOUGHT SPLITTING — HARD RULES
 Some indicators "provide" dynamic data (e.g. PA-3 outputs detectedPeriod — the detected base length) and others "consume" that data (e.g. PA-12, PA-13, PA-14, PA-15, PA-16 consume detectedPeriod). Data can ONLY flow between SEPARATE thoughts connected by an edge — it does NOT work within the same thought.
 
-Therefore: if the user's idea uses BOTH a provider indicator AND one or more consumer indicators, you MUST split them into separate thoughts:
-- Put the provider (e.g. PA-3 Base Detection) in its own upstream thought.
-- Put the consumers (e.g. PA-14 Tightness Ratio, PA-15 Close Clustering, PA-16 Volume Fade, PA-12 Prior Advance, PA-13 Smooth Advance) in a separate downstream thought.
-- Non-linked indicators (those that neither provide nor consume) can go in either thought — place them wherever makes logical sense.
+PROVIDER indicators: PA-3, PA-7
+CONSUMER indicators: PA-12, PA-13, PA-14, PA-15, PA-16
 
-The current data-linking relationships are:
+HARD RULE: A consumer indicator must NEVER be in the same thought as its provider. If the user's idea includes ANY provider AND ANY consumer from the lists above, you MUST split them:
+- Thought A (upstream): Contains the PROVIDER indicator (PA-3 or PA-7) and any non-linked indicators (MA-*, VOL-* etc.)
+- Thought B (downstream): Contains ALL consumer indicators (PA-12, PA-13, PA-14, PA-15, PA-16) — every single one goes here, no exceptions
+- Edge: A → B
+
+This is mandatory even if there is only ONE consumer. For example, if the idea uses PA-3 + PA-16, that is TWO thoughts with an edge, never one thought.
+
+The data-linking relationships:
 - PA-3 (Consolidation / Base Detection) PROVIDES detectedPeriod
 - PA-7 (Breakout Detection) PROVIDES detectedPeriod
 - PA-12 (Prior Price Advance) CONSUMES detectedPeriod → skipBars
@@ -621,12 +626,16 @@ Generate exactly as many criteria as the user's idea requires — no more, no le
 
 MULTI-THOUGHT SPLITTING EXAMPLES:
 - "Flat base with shrinking ranges and volume dry-up" → 2 thoughts:
-  Thought A: PA-3 (Base Detection) — the provider
-  Thought B: PA-14 (Tightness Ratio) + PA-16 (Volume Fade) — the consumers
+  Thought A: PA-3 (Base Detection) — the provider ONLY
+  Thought B: PA-14 (Tightness Ratio) + PA-16 (Volume Fade) — ALL consumers go here
   Edge: A → B
-- "Tight base above 50 SMA with a strong prior advance" → 2 thoughts:
-  Thought A: PA-3 (Base Detection) + MA-1 (above 50 SMA) — base detection provides data, MA-1 is independent so can go here
-  Thought B: PA-12 (Prior Advance) — consumes base length
+- "Tight base above 50 SMA with volume dry-up and a strong prior advance" → 2 thoughts:
+  Thought A: PA-3 (Base Detection) + MA-1 (above 50 SMA) — provider + independent indicator
+  Thought B: PA-16 (Volume Fade) + PA-13 (Smooth Advance) — ALL consumers go here, NEVER with the provider
+  Edge: A → B
+- "Base with a strong prior advance" → 2 thoughts:
+  Thought A: PA-3 (Base Detection) — provider
+  Thought B: PA-12 (Prior Advance) — consumer, even though it's just one consumer it MUST be separate
   Edge: A → B
 
 SINGLE-THOUGHT EXAMPLES (no data links needed):
@@ -659,14 +668,77 @@ Select the most appropriate indicators and set parameters that match the user's 
       }
 
       const parsed = JSON.parse(content);
+      let result: any;
       if (parsed.thoughts && Array.isArray(parsed.thoughts)) {
-        res.json(parsed);
+        result = parsed;
       } else {
-        res.json({
+        result = {
           thoughts: [{ thoughtKey: "A", ...parsed }],
           edges: [],
-        });
+        };
       }
+
+      const PROVIDER_IDS = new Set(["PA-3", "PA-7"]);
+      const CONSUMER_IDS = new Set(["PA-12", "PA-13", "PA-14", "PA-15", "PA-16"]);
+      const fixedThoughts: any[] = [];
+      const fixedEdges: any[] = [...(result.edges || [])];
+      const usedKeys = new Set(result.thoughts.map((t: any) => t.thoughtKey));
+
+      function nextUnusedKey(): string {
+        for (let i = 0; i < 26; i++) {
+          const key = String.fromCharCode(65 + i);
+          if (!usedKeys.has(key)) {
+            usedKeys.add(key);
+            return key;
+          }
+        }
+        const fallback = `X${usedKeys.size}`;
+        usedKeys.add(fallback);
+        return fallback;
+      }
+
+      for (const thought of result.thoughts) {
+        const criteria = thought.criteria || [];
+        const hasProvider = criteria.some((c: any) => PROVIDER_IDS.has(c.indicatorId));
+        const hasConsumer = criteria.some((c: any) => CONSUMER_IDS.has(c.indicatorId));
+
+        if (hasProvider && hasConsumer) {
+          const providerCriteria = criteria.filter((c: any) => PROVIDER_IDS.has(c.indicatorId) || !CONSUMER_IDS.has(c.indicatorId));
+          const consumerCriteria = criteria.filter((c: any) => CONSUMER_IDS.has(c.indicatorId));
+          const providerKey = thought.thoughtKey || nextUnusedKey();
+          const consumerKey = nextUnusedKey();
+
+          const consumerNames = consumerCriteria.map((c: any) => {
+            const ind = INDICATOR_LIBRARY.find(i => i.id === c.indicatorId);
+            return ind?.name || c.indicatorId;
+          });
+
+          fixedThoughts.push({
+            ...thought,
+            thoughtKey: providerKey,
+            criteria: providerCriteria,
+          });
+          fixedThoughts.push({
+            thoughtKey: consumerKey,
+            name: consumerNames.join(" + "),
+            category: thought.category || "Custom",
+            description: `Data-linked filters: ${consumerNames.join(", ")}`,
+            criteria: consumerCriteria,
+          });
+
+          for (const edge of fixedEdges) {
+            if (edge.from === thought.thoughtKey) {
+              edge.from = consumerKey;
+            }
+          }
+          fixedEdges.push({ from: providerKey, to: consumerKey });
+          console.log(`[BigIdea AI] Auto-split thought "${thought.name}" — provider/consumer violation fixed`);
+        } else {
+          fixedThoughts.push(thought);
+        }
+      }
+
+      res.json({ thoughts: fixedThoughts, edges: fixedEdges });
     } catch (error: any) {
       console.error("[BigIdea AI] Error creating thought:", error?.message || error);
       if (error?.status === 401 || error?.code === 'invalid_api_key') {
