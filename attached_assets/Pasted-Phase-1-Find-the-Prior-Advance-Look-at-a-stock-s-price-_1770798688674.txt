@@ -1,0 +1,75 @@
+Phase 1: Find the Prior Advance
+Look at a stock's price history going back at least 12 months. Identify every significant swing high and swing low. A swing high is a daily high that is higher than the highs of the 10 trading days before it and the 10 trading days after it. Same logic in reverse for swing lows.
+Now connect the dots. Look for any swing low followed by a swing high where the price advanced at least 30% from that low to that high. This advance is what makes the base meaningful. Without a proper advance, a consolidation is just a stock going sideways for no reason. Mark that swing high as a "base ceiling candidate."
+If the advance was 100% or more in under 8 weeks, flag this as a potential High Tight Flag situation and apply different depth rules later.
+Phase 2: Detect the Consolidation
+Starting from the base ceiling candidate, walk forward through each trading day and ask these questions:
+Has price closed above the ceiling by more than 2%? If yes, this isn't a base anymore — it's a breakout. The base is complete. Record it as a historical base with a confirmed right wall.
+Has price closed below a maximum allowed depth? For a standard base, the maximum depth is 35% below the ceiling. For a High Tight Flag candidate, maximum depth is 25%. If price violates this, the base is failed — this stock broke down. Discard it.
+Has the consolidation lasted at least 3 weeks? Bases need time to form. Anything shorter is just a pullback, not a base. Don't count it until it has at least 15 trading days from the ceiling to the current bar.
+If none of those conditions are met, the stock is still in the base. Record the lowest low seen so far as the floor. The box is now defined as ceiling at top, floor at bottom, left wall at the ceiling date, right wall at today.
+Phase 3: Identify the Pivot Point
+The pivot is the price level where a breakout would be confirmed. This is not always the ceiling of the base. Walk backward from the current bar and find the most recent minor swing high within the base. This is usually the high of a handle, a right-side contraction, or the last resistance touch before the current tightening. The pivot is that minor swing high plus a small buffer, roughly 0.10 or the average true range divided by 4, whichever is greater.
+If there is no handle or right-side contraction (price just moved straight back up to the ceiling), the pivot is the ceiling itself plus the buffer.
+Phase 4: Classify the Base Type
+Measure the shape of the price action inside the box.
+Flat Base: The depth from ceiling to floor is less than 15%. Price has been moving sideways in a tight range. These typically occur after a breakout from a prior base, making them second-stage or later bases.
+Cup with Handle: The floor occurs roughly in the middle third of the base's time span. Price declined to the floor, then gradually recovered back toward the ceiling, forming a U shape. If there is a final contraction in the last 20% of the base's timespan that dips 5-15% from the ceiling, that's the handle. The handle should drift slightly downward on declining volume.
+VCP (Volatility Contraction Pattern): Count the number of distinct contractions within the base. A contraction is a swing from a minor high to a minor low and back. Measure the depth of each contraction. If each successive contraction is shallower than the previous one (for example 25%, then 15%, then 8%), this is a VCP. There should be at least 2 contractions, ideally 3 or more.
+High Tight Flag: The prior advance was at least 100% in 8 weeks or less. The base depth is less than 25%. The base duration is 1 to 5 weeks. These are rare and powerful.
+Ascending Base: The floor of the base is rising over time. Draw a trendline across the swing lows within the base. If that trendline has a positive slope and price has made at least 3 touches on it, this is an ascending base.
+If none of these patterns match cleanly, classify it as "Unstructured Consolidation" and apply a scoring penalty.
+Phase 5: Score the Base Quality
+For each detected base, calculate a score across these dimensions. Each dimension contributes points to a total of 100.
+Depth Score (0-15 points): Shallower is better. A base with depth under 15% gets full points. Depth of 15-25% gets 10. Depth of 25-35% gets 5. Deeper than 35% was already discarded in Phase 2.
+Time Score (0-10 points): Bases that are 5-15 weeks long get full points. Under 5 weeks gets 5 (too short to reset properly). Over 15 weeks gets 7 (not bad, just extended). Over 30 weeks gets 3 (too long, momentum is dead).
+Volume Pattern Score (0-20 points): Calculate the average volume for the first half of the base and the second half. If the second half average is lower, that's good — selling is drying up. If the volume on up days in the right side of the base is higher than volume on down days, even better. Score the magnitude of this difference. Also check if there are any high-volume accumulation days (price up on volume 50%+ above average) in the right side — each one adds points.
+Moving Average Structure Score (0-20 points): Is price above the 50-day SMA? Above the 200-day? Is the 50-day above the 200-day? Is the 50-day trending upward (current value higher than its value 20 days ago)? Is price finding support at the 10-week or 50-day line? Each of these conditions adds points.
+Relative Strength Score (0-15 points): Compare the stock's performance over the last 3 months and 6 months to the S&P 500. If it's outperforming on both timeframes, full points. Outperforming on one, partial points. Underperforming on both, minimal points. Also check: is the RS line (stock price divided by SPY price) making a new high while the stock is still in the base? That's an extremely bullish sign and gets bonus points.
+Prior Advance Score (0-10 points): The advance into the base matters. An advance of 30-50% gets 5 points. An advance of 50-100% gets 8. Over 100% gets full points. However, if this is a third-stage or later base (meaning there were already 2 bases and breakouts before this one), subtract 5 points. Late-stage bases have much higher failure rates.
+Tightness Score (0-10 points): Measure the daily price range (high minus low as a percentage of close) averaged over the last 2 weeks of the base versus the first 2 weeks. If the recent ranges are narrower, the base is tightening. The more contraction, the more points. Also measure the close-to-close changes — if the stock is closing in a very tight range recently, it's coiling for a move.
+Phase 6: Output
+For every stock in the universe, the algorithm outputs:
+Whether the stock is currently in a base or not. If yes: the box coordinates (ceiling price, floor price, start date, current date), the base type classification, the pivot point price, and the quality score out of 100. Optionally, rank all active bases by score to surface the best setups first.
+This feeds directly into the scanner. A user creates a Thought that says "find stocks in a base scoring above 75" and the scanner returns a ranked list of candidates ready for human review against the full rubric.
+
+That's the whole system. The pieces that are hardest to get right are the swing detection sensitivity (too sensitive and you get noise, too loose and you miss handles) and the base type classification (real bases are messy and don't always fit clean templates). But the core logic — find advance, define box, classify shape, score quality — is sound.
+Want me to turn this into code, or do you want to adjust any of the thresholds or logic first?I am not looking for breakout logic more tight areas, lets start there2:27 AMRight — strip away all the breakout and pivot stuff. You just want to find stocks that are in a tight consolidation right now. That's the starting point. Here's the revised algorithm focused purely on detecting tightness.
+
+Tightness Detection Algorithm
+What We're Looking For
+A stock that has been trading in an increasingly narrow price range. The daily candles are getting smaller. The closes are clustering together. Volume is fading. The stock looks like it's coiling — compressing into a spring. We don't care yet if it's going to break up or down. We just want to find the stocks that are the tightest right now.
+Step 1: Measure Daily Tightness
+For each stock, for each trading day, calculate the daily range as a percentage:
+Daily Range Percent = (High minus Low) divided by Close, times 100
+This normalizes across price levels so a $10 stock and a $500 stock can be compared. A stock with a daily range of 1% is tighter than one with a daily range of 4%.
+Step 2: Measure Tightness Over Time
+Calculate the average Daily Range Percent over the last 5 trading days. Call this "Recent Tightness."
+Calculate the average Daily Range Percent over the last 50 trading days. Call this "Normal Tightness."
+Calculate the ratio: Tightness Ratio = Recent Tightness divided by Normal Tightness.
+A Tightness Ratio of 0.5 means the stock is trading at half its normal daily range. That's very tight. A ratio of 1.0 means it's normal. A ratio above 1.0 means it's volatile and expanding.
+We want stocks with a Tightness Ratio below a threshold. Start with 0.5 and adjust from there.
+Step 3: Measure Close-to-Close Clustering
+Daily range captures intraday movement, but we also want to know if the closing prices themselves are converging. A stock can have normal-sized daily candles but still close at nearly the same price every day if it's oscillating around a tight level.
+Calculate the standard deviation of the closing prices over the last 10 trading days. Divide that by the average closing price over the same period. Call this "Close Cluster Percent."
+A Close Cluster Percent of 0.5% means the closes over the last two weeks barely moved. That's extremely tight. A value of 3% is loose — the stock is wandering around.
+We want stocks with a Close Cluster Percent below a threshold. Start with 1.5%.
+Step 4: Confirm Volume Is Fading
+Tightness with heavy volume is not what we want — that could mean aggressive distribution or accumulation battling each other. We want tightness with drying volume, which means nobody is interested anymore and the weak hands have been shaken out.
+Calculate average volume over the last 10 days. Calculate average volume over the last 50 days. Calculate Volume Ratio = Recent Volume divided by Normal Volume.
+We want the Volume Ratio below 0.75, meaning volume has dropped to at least 25% below its normal level.
+Step 5: Make Sure the Stock Is Worth Looking At
+Filter out junk. The stock must meet minimum criteria before we even measure tightness:
+Price above $10. This eliminates penny stocks where tightness is meaningless.
+Average daily volume over the last 50 days above 200,000 shares. We need liquidity.
+Price is above the 150-day simple moving average. We only want stocks in long-term uptrends. A tight stock below its major moving averages is just a dying stock going quiet.
+Price is within 25% of its 52-week high. Stocks consolidating near highs are building bases. Stocks consolidating near lows are going nowhere.
+Step 6: Calculate a Composite Tightness Score
+Combine the three core measurements into a single score so stocks can be ranked against each other.
+Tightness Score = (Tightness Ratio weight times 40) plus (Close Cluster Percent weight times 35) plus (Volume Ratio weight times 25)
+For each component, convert to a 0-100 scale where lower raw values produce higher scores. A Tightness Ratio of 0.3 scores near 100. A Tightness Ratio of 1.0 scores near 0. Interpolate linearly between them.
+Same for Close Cluster Percent. A value of 0.3% scores near 100. A value of 3.0% scores near 0.
+Same for Volume Ratio. A value of 0.4 scores near 100. A value of 1.2 scores near 0.
+The final Tightness Score ranges from 0 to 100. Higher is tighter.
+Step 7: Rank and Output
+Run this across the entire universe every day. Sort by Tightness Score descending. The top of the list shows you the stocks that are the most compressed right now — the ones coiling the tightest, closing in the narrowest range, on the lowest volume, while still being in an uptrend near their highs.
