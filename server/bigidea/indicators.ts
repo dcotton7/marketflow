@@ -658,8 +658,10 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         const testHigh = Math.max(runHigh, bar.high);
         const testLow = Math.min(runLow, bar.low);
         const testRangePct = ((testHigh - testLow) / testHigh) * 100;
-        const barOutside = testRangePct > maxRange;
         const currentLen = i + 1;
+        const lengthRatio = currentLen / minPeriod;
+        const scaledMaxRange = maxRange / Math.sqrt(lengthRatio);
+        const barOutside = testRangePct > scaledMaxRange;
         if (barOutside) {
           drifterCount++;
           const allowedDrifters = Math.floor(currentLen * drifterPct / 100);
