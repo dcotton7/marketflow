@@ -1024,15 +1024,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-14",
     name: "Tightness Ratio",
     category: "Price Action",
-    description: "Compares the size of recent daily candles to the historical average. A ratio of 0.5 means candles are half their normal size — the stock is coiling with shrinking daily ranges. This tightness often precedes explosive moves. Works best combined with Volume Fade and Close Clustering to confirm a full 'quiet before the storm' setup.",
+    description: "Compares the size of recent daily candles to the historical average. A ratio of 0.5 means candles are half their normal size — the stock is coiling with shrinking daily ranges. This tightness often precedes explosive moves. Works best combined with Volume Fade and Close Clustering to confirm a full 'quiet before the storm' setup. When connected to Base Detection, automatically uses each stock's detected base length as the baseline window.",
+    consumes: [{ paramName: "baselineBars", dataKey: "detectedPeriod" }],
     params: [
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 5, min: 3, max: 20, step: 1 },
-      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
+      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5, autoLink: { linkType: "basePeriod" } },
       { name: "maxRatio", label: "Max Tightness Ratio", type: "number", defaultValue: 0.8, min: 0.1, max: 1.5, step: 0.05 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const dynamicBaseline = upstreamData?.detectedPeriod;
       const recentN = params.recentBars ?? 5;
-      const baselineN = params.baselineBars ?? 50;
+      const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.8;
       if (candles.length < baselineN) return false;
 
@@ -1056,13 +1058,15 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-15",
     name: "Close Clustering",
     category: "Price Action",
-    description: "Measures how tightly closing prices bunch together over recent bars. A 1% cluster means closes barely move day-to-day — the stock has settled into a narrow equilibrium. Think of it as a 'coil' indicator: the tighter the clustering, the more energy is stored for the next directional move. Use with Tightness Ratio for stronger confirmation.",
+    description: "Measures how tightly closing prices bunch together over recent bars. A 1% cluster means closes barely move day-to-day — the stock has settled into a narrow equilibrium. Think of it as a 'coil' indicator: the tighter the clustering, the more energy is stored for the next directional move. Use with Tightness Ratio for stronger confirmation. When connected to Base Detection, automatically uses each stock's detected base length as the period.",
+    consumes: [{ paramName: "period", dataKey: "detectedPeriod" }],
     params: [
-      { name: "period", label: "Period", type: "number", defaultValue: 10, min: 5, max: 50, step: 1 },
+      { name: "period", label: "Period", type: "number", defaultValue: 10, min: 5, max: 50, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "maxClusterPct", label: "Max Cluster %", type: "number", defaultValue: 3.0, min: 0.1, max: 5, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
-      const period = params.period ?? 10;
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const dynamicPeriod = upstreamData?.detectedPeriod;
+      const period = dynamicPeriod ?? params.period ?? 10;
       const maxPct = params.maxClusterPct ?? 3.0;
       if (candles.length < period) return false;
 
@@ -1081,15 +1085,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-16",
     name: "Volume Fade",
     category: "Price Action",
-    description: "Checks if recent volume has dried up compared to the historical average. A ratio of 0.5 means volume is half of normal — weak hands have been shaken out and the remaining holders aren't selling. Volume fade during a tight base is a classic sign that supply has been absorbed. Combine with Tightness Ratio and Close Clustering for the strongest coiling signals.",
+    description: "Checks if recent volume has dried up compared to the historical average. A ratio of 0.5 means volume is half of normal — weak hands have been shaken out and the remaining holders aren't selling. Volume fade during a tight base is a classic sign that supply has been absorbed. Combine with Tightness Ratio and Close Clustering for the strongest coiling signals. When connected to Base Detection, automatically uses each stock's detected base length as the baseline window.",
+    consumes: [{ paramName: "baselineBars", dataKey: "detectedPeriod" }],
     params: [
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
-      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
+      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5, autoLink: { linkType: "basePeriod" } },
       { name: "maxRatio", label: "Max Volume Ratio", type: "number", defaultValue: 0.9, min: 0.1, max: 1.5, step: 0.05 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const dynamicBaseline = upstreamData?.detectedPeriod;
       const recentN = params.recentBars ?? 10;
-      const baselineN = params.baselineBars ?? 50;
+      const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.9;
       if (candles.length < baselineN) return false;
 
