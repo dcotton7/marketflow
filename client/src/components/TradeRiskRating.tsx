@@ -121,9 +121,18 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
   // Calculate average trade ranges
   const avgRange5 = calculateAvgRange(history, 5);
   const avgRange20 = calculateAvgRange(history, 20);
+  
+  // Calculate 20-day ADR (Average Daily Range) in dollar terms
+  const adr20Dollar = history.length >= 20 
+    ? history.slice(-20).reduce((sum, d) => sum + (d.high - d.low), 0) / 20 
+    : null;
+  
+  // Extension from 50 DSMA in ADR multiples
+  const extensionFrom50dAdr = (sma50 !== null && adr20Dollar !== null && adr20Dollar > 0) 
+    ? (currentPrice - sma50) / adr20Dollar 
+    : null;
 
   // 10 criteria for 10 bar sections
-  // Note: priceAbove6PctOf50 is a WARNING (not ideal), so it counts as NOT passed
   const checks = {
     aboveAutoVWAP: autoVwap !== null && currentPrice > autoVwap,
     aboveAnchoredVWAP: anchoredVwap !== null && currentPrice > anchoredVwap,
@@ -132,13 +141,13 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
     sma50Rising: isSMAFlatOrRising(history, 50),
     sma200Rising: isSMAFlatOrRising(history, 200),
     within4PctOf50: sma50 !== null && currentPrice <= sma50 * 1.04 && currentPrice >= sma50,
-    priceBelow6PctOf50: sma50 !== null && currentPrice <= sma50 * 1.06, // Inverted: check passes if NOT above 6%
+    notExtended8xAdr: extensionFrom50dAdr !== null ? extensionFrom50dAdr < 8 : false,
     spy5Rising: spyHistory ? isSMAFlatOrRising(spyHistory, 5) : false,
     vixBelow3: vixHistory && vixHistory.length > 0 ? vixHistory[vixHistory.length - 1].close < 3 : false,
   };
   
-  // Check if price is extended more than 6% (warning condition)
-  const isExtendedWarning = sma50 !== null && currentPrice > sma50 * 1.06;
+  // Check if price is extended 8x ADR or more above 50 DSMA (warning condition)
+  const isExtendedWarning = extensionFrom50dAdr !== null && extensionFrom50dAdr >= 8;
 
   const checkCount = Object.values(checks).filter(Boolean).length;
   const totalChecks = 10;
@@ -249,10 +258,13 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
             {isExtendedWarning ? (
               <AlertTriangle className="w-4 h-4 text-yellow-500" />
             ) : (
-              <CheckIcon passed={checks.priceBelow6PctOf50} />
+              <CheckIcon passed={checks.notExtended8xAdr} />
             )}
             <span className={isExtendedWarning ? "text-yellow-500" : ""}>
-              {isExtendedWarning ? "Not ideal: Price Distance above 50-day > 6%" : "Price Distance above 50-day ≤ 6%"}
+              {isExtendedWarning 
+                ? `Extended: ${extensionFrom50dAdr !== null ? extensionFrom50dAdr.toFixed(1) : '?'}x ADR above 50 DSMA (≥8x)`
+                : `Price < 8x ADR above 50 DSMA${extensionFrom50dAdr !== null ? ` (${extensionFrom50dAdr.toFixed(1)}x)` : ''}`
+              }
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -267,6 +279,16 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
         
         {/* Additional Metrics below risk box */}
         <div className="pt-3 border-t border-border space-y-3 text-sm">
+          {extensionFrom50dAdr !== null && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground leading-tight">
+                50d Extension<br />(ADR multiples):
+              </span>
+              <span className={`font-mono font-medium ${extensionFrom50dAdr >= 8 ? 'text-yellow-500' : extensionFrom50dAdr >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {extensionFrom50dAdr >= 0 ? '+' : ''}{extensionFrom50dAdr.toFixed(1)}x
+              </span>
+            </div>
+          )}
           {priceExtension50 !== null && (
             <div className="flex items-center justify-between gap-2">
               <span className="text-muted-foreground leading-tight">

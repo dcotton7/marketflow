@@ -211,7 +211,7 @@ const TARGET_PRICE_CHOICES = [
 ];
 
 const TARGET_PROFIT_CHOICES = [
-  { value: "EXTENDED_8X_50DMA", label: "Extended 8% over 50 DMA" },
+  { value: "EXTENDED_8X_50DMA", label: "Extended 8x ADR over 50 DMA" },
   { value: "PREV_DAY_HIGH", label: "Previous Day High" },
   { value: "5_DAY_HIGH", label: "Past 5 Day High" },
   { value: "RR_5X", label: "5x Risk/Reward" },
@@ -273,6 +273,7 @@ export default function SentinelEvaluatePage() {
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [isPreloaded, setIsPreloaded] = useState(false);
   const [ruleChecklistExpanded, setRuleChecklistExpanded] = useState(false);
+  const [debugInfoExpanded, setDebugInfoExpanded] = useState(false);
   const [suggestions, setSuggestions] = useState<SuggestResponse | null>(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
@@ -1452,130 +1453,8 @@ export default function SentinelEvaluatePage() {
                       </div>
                     )}
 
-                    {/* Money Breakdown - Real Dollars */}
-                    {result.evaluation.moneyBreakdown && (
-                      <div className="p-3 rounded-md mb-3 bg-blue-500/10 border border-blue-500/30" data-testid="money-breakdown">
-                        <p className="text-sm font-medium mb-2 flex items-center gap-2">
-                          <DollarSign className="w-4 h-4 text-blue-400" />
-                          Your Risk/Reward Breakdown
-                        </p>
-                        <div className="space-y-2 text-sm">
-                          {/* Risk Line */}
-                          <div className="flex flex-wrap gap-x-6 gap-y-1">
-                            <span>
-                              <span className="text-muted-foreground">Risking: </span>
-                              <span className="font-bold text-red-400">{result.evaluation.planSummary?.riskPerShare || "—"} / Share</span>
-                            </span>
-                            <span>
-                              <span className="text-muted-foreground">Total Risk: </span>
-                              <span className="font-bold text-red-400">{result.evaluation.moneyBreakdown.totalRisk}</span>
-                            </span>
-                          </div>
-                          
-                          {/* Profit Lines - Per Share */}
-                          <div className="flex flex-wrap gap-x-6 gap-y-1">
-                            {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
-                              <span>
-                                <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
-                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.firstTrimProfitPerShare}/share</span>
-                              </span>
-                            )}
-                            {result.evaluation.moneyBreakdown.targetProfitPerShare && (
-                              <span>
-                                <span className="text-muted-foreground">Target @ 70%: </span>
-                                <span className="font-bold text-green-400">+{result.evaluation.moneyBreakdown.targetProfitPerShare}/share</span>
-                              </span>
-                            )}
-                          </div>
-                          
-                          {/* Total Gain Line */}
-                          <div className="pt-1 border-t border-blue-500/30">
-                            <span className="text-muted-foreground">Total Gain: </span>
-                            <span className="font-bold text-green-500">+{result.evaluation.moneyBreakdown.totalPotentialProfit}</span>
-                          </div>
-                        </div>
-                        
-                        {/* Debug Info Section - Only show when all values are amounts (not technical levels) */}
-                        {stopPriceMode === "amount" && targetPriceMode === "amount" && targetProfitMode === "amount" && (
-                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
-                            <p className="text-xs text-white/60 mb-1">Debug Info - Input Values & Math:</p>
-                            <div className="text-xs text-white/50 font-mono space-y-0.5">
-                              {(() => {
-                                const entry = parseFloat(entryPrice) || 0;
-                                const stop = parseFloat(stopPrice) || 0;
-                                const target1 = parseFloat(targetPrice) || 0;
-                                const target2 = parseFloat(targetProfitPrice) || 0;
-                                const shares = positionSize 
-                                  ? (positionSizeUnit === "shares" 
-                                    ? parseFloat(positionSize) 
-                                    : Math.round(parseFloat(positionSize) / entry)) 
-                                  : 0;
-                                const riskPerShare = direction === "long" ? entry - stop : stop - entry;
-                                const totalRisk = riskPerShare * shares;
-                                const firstTrimGain = target1 > 0 
-                                  ? (direction === "long" ? (target1 - entry) * (shares * 0.3) : (entry - target1) * (shares * 0.3))
-                                  : 0;
-                                const targetGain = target2 > 0 
-                                  ? (direction === "long" ? (target2 - entry) * (shares * 0.7) : (entry - target2) * (shares * 0.7))
-                                  : 0;
-                                const totalGain = firstTrimGain + targetGain;
-                                
-                                return (
-                                  <>
-                                    <p>Entry: ${entry.toFixed(2)} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
-                                    <p>Stop: ${stop.toFixed(2)} (user entered amount)</p>
-                                    <p>Shares: {shares} {positionSizeUnit === "dollars" ? `(rounded from $${positionSize} / $${entry.toFixed(2)})` : "(user entered)"}</p>
-                                    <p>Risk/Share: ${Math.abs(riskPerShare).toFixed(2)} = |${entry.toFixed(2)} - ${stop.toFixed(2)}|</p>
-                                    <p>Total Risk: ${Math.abs(totalRisk).toFixed(2)} = ${Math.abs(riskPerShare).toFixed(2)} × {shares} shares</p>
-                                    {target1 > 0 && (
-                                      <p>First Trim (30%): ${target1.toFixed(2)} → Gain = (${target1.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.3)} shares = ${firstTrimGain.toFixed(2)}</p>
-                                    )}
-                                    {target2 > 0 && (
-                                      <p>Target (70%): ${target2.toFixed(2)} → Gain = (${target2.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.7)} shares = ${targetGain.toFixed(2)}</p>
-                                    )}
-                                    <p>Total Gain (calculated): ${totalGain.toFixed(2)} = ${firstTrimGain.toFixed(2)} + ${targetGain.toFixed(2)}</p>
-                                    <p className="text-white/40 italic">Note: Server values above may differ if AI resolves prices differently</p>
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        )}
-                        {(stopPriceMode === "choice" || targetPriceMode === "choice" || targetProfitMode === "choice") && (
-                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
-                            <p className="text-xs text-white/60 mb-1">Debug Info - Input Values:</p>
-                            <div className="text-xs text-white/50 font-mono space-y-0.5">
-                              <p>Entry: ${parseFloat(entryPrice).toFixed(2) || "—"} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
-                              <p>Stop: {stopPriceMode === "amount" 
-                                ? `$${parseFloat(stopPrice).toFixed(2)}` 
-                                : `[${stopPriceChoice || "none"}] → ${result.evaluation.planSummary?.stop || "pending"}`}</p>
-                              <p>Shares: {positionSize || "—"} {positionSizeUnit}</p>
-                              <p>First Trim: {targetPriceMode === "amount" 
-                                ? `$${parseFloat(targetPrice).toFixed(2) || "—"}` 
-                                : `[${targetPriceChoice || "none"}] → ${result.evaluation.planSummary?.firstTrim || "pending"}`}</p>
-                              <p>Target: {targetProfitMode === "amount" 
-                                ? `$${parseFloat(targetProfitPrice).toFixed(2) || "—"}` 
-                                : `[${targetProfitChoice || "none"}] → ${result.evaluation.planSummary?.target || "pending"}`}</p>
-                              <p className="text-white/40 italic">Technical levels resolved by AI from your selections</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Plan Summary */}
-                    {result.evaluation.planSummary && (
-                      <div className="text-sm text-muted-foreground mb-3 p-2 bg-muted/30 rounded" data-testid="plan-summary">
-                        <span className="font-medium">Your Plan:</span>{' '}
-                        Entry {result.evaluation.planSummary.entry} | Stop {result.evaluation.planSummary.stop} | Risk/share {result.evaluation.planSummary.riskPerShare}
-                        {result.evaluation.planSummary.firstTrim && ` | First Trim ${result.evaluation.planSummary.firstTrim}`}
-                        {result.evaluation.planSummary.target && ` | Target ${result.evaluation.planSummary.target}`}
-                        {result.evaluation.planSummary.rrRatio && ` | R:R ${result.evaluation.planSummary.rrRatio}`}
-                      </div>
-                    )}
-
-                    {/* Decision Gate */}
-                    <div className={`p-4 rounded-md ${
+                    {/* Decision Gate - Top of results */}
+                    <div className={`p-4 rounded-md mb-3 ${
                       result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
                       result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
                     }`} data-testid="decision-gate">
@@ -1608,6 +1487,181 @@ export default function SentinelEvaluatePage() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Plan Summary */}
+                    {result.evaluation.planSummary && (
+                      <div className="text-sm text-muted-foreground mb-3 p-2 bg-muted/30 rounded" data-testid="plan-summary">
+                        <span className="font-medium">Your Plan:</span>{' '}
+                        Entry {result.evaluation.planSummary.entry} | Stop {result.evaluation.planSummary.stop} | Risk/share {result.evaluation.planSummary.riskPerShare}
+                        {result.evaluation.planSummary.firstTrim && ` | First Trim ${result.evaluation.planSummary.firstTrim}`}
+                        {result.evaluation.planSummary.target && ` | Target ${result.evaluation.planSummary.target}`}
+                        {result.evaluation.planSummary.rrRatio && ` | R:R ${result.evaluation.planSummary.rrRatio}`}
+                      </div>
+                    )}
+
+                    {/* Money Breakdown - Real Dollars */}
+                    {result.evaluation.moneyBreakdown && (
+                      <div className="p-3 rounded-md mb-3 bg-blue-500/10 border border-blue-500/30" data-testid="money-breakdown">
+                        <p className="text-sm font-medium mb-2 flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-blue-400" />
+                          Your Risk/Reward Breakdown
+                        </p>
+                        <div className="space-y-2 text-sm">
+                          {/* Risk Line */}
+                          <div className="flex flex-wrap gap-x-6 gap-y-1">
+                            <span>
+                              <span className="text-muted-foreground">Risking: </span>
+                              <span className="font-bold text-red-400">
+                                {(() => {
+                                  const rps = result.evaluation.planSummary?.riskPerShare;
+                                  if (!rps) return "—";
+                                  const num = parseFloat(String(rps).replace(/[^0-9.-]/g, ''));
+                                  return isNaN(num) ? rps : `$${Math.abs(num).toFixed(2)}`;
+                                })()} / Share
+                              </span>
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">Total Risk: </span>
+                              <span className="font-bold text-red-400">
+                                {(() => {
+                                  const tr = result.evaluation.moneyBreakdown.totalRisk;
+                                  if (!tr) return "—";
+                                  const num = parseFloat(String(tr).replace(/[^0-9.-]/g, ''));
+                                  return isNaN(num) ? tr : `$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                })()}
+                              </span>
+                            </span>
+                          </div>
+                          
+                          {/* Profit Lines - Per Share */}
+                          <div className="flex flex-wrap gap-x-6 gap-y-1">
+                            {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
+                              <span>
+                                <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
+                                <span className="font-bold text-green-400">
+                                  {(() => {
+                                    const val = result.evaluation.moneyBreakdown.firstTrimProfitPerShare;
+                                    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+                                    return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toFixed(2)}`;
+                                  })()}/share
+                                </span>
+                              </span>
+                            )}
+                            {result.evaluation.moneyBreakdown.targetProfitPerShare && (
+                              <span>
+                                <span className="text-muted-foreground">Target @ 70%: </span>
+                                <span className="font-bold text-green-400">
+                                  {(() => {
+                                    const val = result.evaluation.moneyBreakdown.targetProfitPerShare;
+                                    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+                                    return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toFixed(2)}`;
+                                  })()}/share
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Total Gain Line */}
+                          <div className="pt-1 border-t border-blue-500/30">
+                            <span className="text-muted-foreground">Total Gain: </span>
+                            <span className="font-bold text-green-500">
+                              {(() => {
+                                const val = result.evaluation.moneyBreakdown.totalPotentialProfit;
+                                if (!val) return "—";
+                                const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+                                return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                              })()}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* Debug Info Section - Collapsed by default */}
+                        {(stopPriceMode === "amount" && targetPriceMode === "amount" && targetProfitMode === "amount") && (
+                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
+                            <button
+                              type="button"
+                              className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1 cursor-pointer"
+                              onClick={() => setDebugInfoExpanded(!debugInfoExpanded)}
+                              data-testid="button-toggle-debug"
+                            >
+                              <ChevronDown className={`w-3 h-3 transition-transform ${debugInfoExpanded ? 'rotate-0' : '-rotate-90'}`} />
+                              Debug Info
+                            </button>
+                            {debugInfoExpanded && (
+                              <div className="text-xs text-white/50 font-mono space-y-0.5 mt-1">
+                                {(() => {
+                                  const entry = parseFloat(entryPrice) || 0;
+                                  const stop = parseFloat(stopPrice) || 0;
+                                  const target1 = parseFloat(targetPrice) || 0;
+                                  const target2 = parseFloat(targetProfitPrice) || 0;
+                                  const shares = positionSize 
+                                    ? (positionSizeUnit === "shares" 
+                                      ? parseFloat(positionSize) 
+                                      : Math.round(parseFloat(positionSize) / entry)) 
+                                    : 0;
+                                  const riskPerShare = direction === "long" ? entry - stop : stop - entry;
+                                  const totalRisk = riskPerShare * shares;
+                                  const firstTrimGain = target1 > 0 
+                                    ? (direction === "long" ? (target1 - entry) * (shares * 0.3) : (entry - target1) * (shares * 0.3))
+                                    : 0;
+                                  const targetGain = target2 > 0 
+                                    ? (direction === "long" ? (target2 - entry) * (shares * 0.7) : (entry - target2) * (shares * 0.7))
+                                    : 0;
+                                  const totalGain = firstTrimGain + targetGain;
+                                  
+                                  return (
+                                    <>
+                                      <p>Entry: ${entry.toFixed(2)} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
+                                      <p>Stop: ${stop.toFixed(2)} (user entered amount)</p>
+                                      <p>Shares: {shares} {positionSizeUnit === "dollars" ? `(rounded from $${positionSize} / $${entry.toFixed(2)})` : "(user entered)"}</p>
+                                      <p>Risk/Share: ${Math.abs(riskPerShare).toFixed(2)} = |${entry.toFixed(2)} - ${stop.toFixed(2)}|</p>
+                                      <p>Total Risk: ${Math.abs(totalRisk).toFixed(2)} = ${Math.abs(riskPerShare).toFixed(2)} × {shares} shares</p>
+                                      {target1 > 0 && (
+                                        <p>First Trim (30%): ${target1.toFixed(2)} → Gain = (${target1.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.3)} shares = ${firstTrimGain.toFixed(2)}</p>
+                                      )}
+                                      {target2 > 0 && (
+                                        <p>Target (70%): ${target2.toFixed(2)} → Gain = (${target2.toFixed(2)} - ${entry.toFixed(2)}) × {Math.round(shares * 0.7)} shares = ${targetGain.toFixed(2)}</p>
+                                      )}
+                                      <p>Total Gain (calculated): ${totalGain.toFixed(2)} = ${firstTrimGain.toFixed(2)} + ${targetGain.toFixed(2)}</p>
+                                      <p className="text-white/40 italic">Note: Server values above may differ if AI resolves prices differently</p>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {(stopPriceMode === "choice" || targetPriceMode === "choice" || targetProfitMode === "choice") && (
+                          <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="debug-info">
+                            <button
+                              type="button"
+                              className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1 cursor-pointer"
+                              onClick={() => setDebugInfoExpanded(!debugInfoExpanded)}
+                              data-testid="button-toggle-debug-choice"
+                            >
+                              <ChevronDown className={`w-3 h-3 transition-transform ${debugInfoExpanded ? 'rotate-0' : '-rotate-90'}`} />
+                              Debug Info
+                            </button>
+                            {debugInfoExpanded && (
+                              <div className="text-xs text-white/50 font-mono space-y-0.5 mt-1">
+                                <p>Entry: ${parseFloat(entryPrice).toFixed(2) || "—"} {direction === "long" ? "(LONG)" : "(SHORT)"}</p>
+                                <p>Stop: {stopPriceMode === "amount" 
+                                  ? `$${parseFloat(stopPrice).toFixed(2)}` 
+                                  : `[${stopPriceChoice || "none"}] → ${result.evaluation.planSummary?.stop || "pending"}`}</p>
+                                <p>Shares: {positionSize || "—"} {positionSizeUnit}</p>
+                                <p>First Trim: {targetPriceMode === "amount" 
+                                  ? `$${parseFloat(targetPrice).toFixed(2) || "—"}` 
+                                  : `[${targetPriceChoice || "none"}] → ${result.evaluation.planSummary?.firstTrim || "pending"}`}</p>
+                                <p>Target: {targetProfitMode === "amount" 
+                                  ? `$${parseFloat(targetProfitPrice).toFixed(2) || "—"}` 
+                                  : `[${targetProfitChoice || "none"}] → ${result.evaluation.planSummary?.target || "pending"}`}</p>
+                                <p className="text-white/40 italic">Technical levels resolved by AI from your selections</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -1685,6 +1739,7 @@ export default function SentinelEvaluatePage() {
                       <div className="p-3 bg-muted/50 rounded-md text-sm text-muted-foreground">
                         {result.evaluation.logicalStops.userStopEval}
                       </div>
+                      <p className="text-sm font-medium text-muted-foreground mt-1">Alternate Stop Options:</p>
                       <div className="space-y-2">
                         {result.evaluation.logicalStops.suggestions.map((s, i) => {
                           const rankColor = s.rank === 1 ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
@@ -1732,38 +1787,123 @@ export default function SentinelEvaluatePage() {
                           {result.evaluation.logicalTargets.ruleCompliance}
                         </div>
                       )}
-                      <div className="space-y-2">
-                        {result.evaluation.logicalTargets.suggestions.map((s, i) => (
-                          <div key={i} className="p-3 rounded-md border bg-muted/30">
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <span className="font-medium text-sm">{s.label}</span>
-                              <span className="text-sm font-bold text-green-400">${s.price.toFixed(2)}</span>
-                              <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
-                              {s.rrRatio && (
-                                <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
-                                  R:R {s.rrRatio}
-                                </Badge>
-                              )}
-                              {s.meetsRules != null && String(s.meetsRules).trim() && (
-                                (() => {
-                                  const val = String(s.meetsRules).toLowerCase();
-                                  const isPass = val === 'true' || val.includes('yes') || val.includes('meets');
-                                  return (
-                                    <Badge variant="outline" className={`text-xs ${
-                                      isPass
-                                        ? 'bg-green-500/10 text-green-400 border-green-500/30'
-                                        : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                    }`}>
-                                      {isPass ? 'Meets Rules' : String(s.meetsRules)}
+
+                      {/* Target Price Summary Table */}
+                      {(() => {
+                        const ep = parseFloat(entryPrice) || 0;
+                        const sp = parseFloat(stopPrice) || 0;
+                        const isLong = direction === "long";
+                        const riskPS = ep > 0 && sp > 0 ? Math.abs(ep - sp) : 0;
+                        const shares = positionSize && ep > 0
+                          ? (positionSizeUnit === "shares" ? parseFloat(positionSize) || 0 : Math.round((parseFloat(positionSize) || 0) / ep))
+                          : 0;
+                        const minRR = 2;
+                        const minTargetPrice = riskPS > 0 && ep > 0 ? (isLong ? ep + (riskPS * minRR) : ep - (riskPS * minRR)) : 0;
+                        const minProfitPerShare = minTargetPrice > 0 ? Math.abs(minTargetPrice - ep) : 0;
+                        const minProfitPct = ep > 0 && minProfitPerShare > 0 ? (minProfitPerShare / ep * 100) : 0;
+                        const minTotalProfit = minProfitPerShare * shares;
+
+                        const userTP = parseFloat(targetProfitPrice) || (result.evaluation.planSummary?.target ? parseFloat(String(result.evaluation.planSummary.target).replace(/[^0-9.-]/g, '')) : 0);
+                        const userProfitPS = userTP > 0 && ep > 0 ? Math.abs(userTP - ep) : 0;
+                        const userProfitPct = ep > 0 && userProfitPS > 0 ? (userProfitPS / ep * 100) : 0;
+                        const userTotalProfit = userProfitPS * shares;
+
+                        const aiSugg = result.evaluation.logicalTargets.suggestions?.[0];
+                        const aiTP = aiSugg?.price || 0;
+                        const aiProfitPS = aiTP > 0 && ep > 0 ? Math.abs(aiTP - ep) : 0;
+                        const aiProfitPct = ep > 0 && aiProfitPS > 0 ? (aiProfitPS / ep * 100) : 0;
+                        const aiTotalProfit = aiProfitPS * shares;
+
+                        return (
+                          <div className="space-y-1.5">
+                            {minTargetPrice > 0 && (
+                              <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="min-target-rule">
+                                <div className="flex items-center gap-2">
+                                  <Shield className="w-4 h-4 text-blue-400 shrink-0" />
+                                  <span className="text-sm font-medium">Min {minRR}:1 R:R Target</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                  <span className="font-bold text-blue-400">${minTargetPrice.toFixed(2)}</span>
+                                  <span className="text-muted-foreground">+${minProfitPerShare.toFixed(2)}/sh (+{minProfitPct.toFixed(1)}%)</span>
+                                  {shares > 0 && <span className="text-green-400 font-medium">+${minTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                </div>
+                              </div>
+                            )}
+                            {userTP > 0 && (
+                              <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="user-target">
+                                <div className="flex items-center gap-2">
+                                  <Target className="w-4 h-4 text-green-400 shrink-0" />
+                                  <span className="text-sm font-medium">Your Target</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                  <span className="font-bold text-green-400">${userTP.toFixed(2)}</span>
+                                  <span className="text-muted-foreground">+${userProfitPS.toFixed(2)}/sh (+{userProfitPct.toFixed(1)}%)</span>
+                                  {shares > 0 && <span className="text-green-400 font-medium">+${userTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                  {riskPS > 0 && (
+                                    <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                      R:R {(userProfitPS / riskPS).toFixed(1)}:1
                                     </Badge>
-                                  );
-                                })()
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground">{s.reasoning}</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {aiTP > 0 && aiTP !== userTP && (
+                              <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="ai-target">
+                                <div className="flex items-center gap-2">
+                                  <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                                  <span className="text-sm font-medium">AI Target{aiSugg?.label ? ` (${aiSugg.label})` : ''}</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                  <span className="font-bold text-amber-400">${aiTP.toFixed(2)}</span>
+                                  <span className="text-muted-foreground">+${aiProfitPS.toFixed(2)}/sh (+{aiProfitPct.toFixed(1)}%)</span>
+                                  {shares > 0 && <span className="text-green-400 font-medium">+${aiTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                  {aiSugg?.rrRatio && (
+                                    <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-400 border-amber-500/30">
+                                      R:R {aiSugg.rrRatio}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        ))}
-                      </div>
+                        );
+                      })()}
+
+                      {result.evaluation.logicalTargets.suggestions.length > 1 && (
+                        <div className="space-y-2 mt-2">
+                          <p className="text-sm font-medium text-muted-foreground">Other Levels:</p>
+                          {result.evaluation.logicalTargets.suggestions.slice(1).map((s, i) => (
+                            <div key={i} className="p-3 rounded-md border bg-muted/30">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <span className="font-medium text-sm">{s.label}</span>
+                                <span className="text-sm font-bold text-green-400">${s.price.toFixed(2)}</span>
+                                <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
+                                {s.rrRatio && (
+                                  <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                    R:R {s.rrRatio}
+                                  </Badge>
+                                )}
+                                {s.meetsRules != null && String(s.meetsRules).trim() && (
+                                  (() => {
+                                    const val = String(s.meetsRules).toLowerCase();
+                                    const isPass = val === 'true' || val.includes('yes') || val.includes('meets');
+                                    return (
+                                      <Badge variant="outline" className={`text-xs ${
+                                        isPass
+                                          ? 'bg-green-500/10 text-green-400 border-green-500/30'
+                                          : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                      }`}>
+                                        {isPass ? 'Meets Rules' : String(s.meetsRules)}
+                                      </Badge>
+                                    );
+                                  })()
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">{s.reasoning}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {result.evaluation.logicalTargets.partialProfitIdea && (
                         <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
                           <div className="flex items-center gap-2 mb-1">
@@ -2018,9 +2158,17 @@ export default function SentinelEvaluatePage() {
                       <Button
                         variant="outline"
                         className="gap-2"
-                        onClick={() => {
-                          toast({ title: "Added to Watchlist", description: `${symbol.toUpperCase()} added for monitoring` });
-                          setLocation("/sentinel/dashboard?tab=watchlist");
+                        onClick={async () => {
+                          try {
+                            await apiRequest("POST", "/api/sentinel/watchlist", {
+                              symbol: symbol.toUpperCase(),
+                              thesis: thesis || `Evaluated via Ivy AI - Score: ${result?.evaluation?.score || '?'}/100`,
+                            });
+                            toast({ title: "Added to Watchlist", description: `${symbol.toUpperCase()} added for monitoring` });
+                            setLocation("/sentinel/dashboard?tab=watchlist");
+                          } catch (err: any) {
+                            toast({ title: "Could not add to watchlist", description: err?.message || "Something went wrong", variant: "destructive" });
+                          }
                         }}
                         data-testid="button-watchlist"
                       >

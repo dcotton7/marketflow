@@ -56,9 +56,21 @@ Evaluate targets whether or not the user provided them:
   - Check if the target MEETS their rules: e.g., "Meets your 2:1 R:R rule" or "25% short of your 3:1 R:R rule"
   - Show a clear compliance indicator for each relevant rule
 - If user did NOT enter targets:
-  - Suggest 2-3 logical target levels with specific prices
+  - Suggest 2-3 logical target levels with specific prices based on:
+    1. Prior swing highs / resistance levels from chart data
+    2. All-time high (ATH) if nearby — note how close the stock is to ATH
+    3. Round-number resistance levels
+    4. R:R multiples (2:1, 3:1) from the stop level
   - For each suggestion, note if it would satisfy their rules: "This would give you 2.5:1 R:R — meets your minimum 2:1 rule"
   - Mark the overall status: "No target entered — your rules require a profit target"
+- If the stock is near or at all-time highs:
+  - Explicitly note "Stock is at/near ATH — upside ceiling is undetermined"
+  - Suggest using trailing stops or partial profit strategy since no clear resistance exists above
+  - Still provide R:R-based targets (e.g., 2:1, 3:1 from stop) as minimum expectations
+- If R:R is undefined or cannot be calculated (e.g., no stop provided):
+  - Flag this as a risk: "R:R cannot be calculated without a stop level"
+  - Suggest logical target levels anyway using chart resistance/ATH
+  - Explain extension risk if price is well above moving averages
 - For each target: price, distance from entry (%), what level it corresponds to, R:R ratio
 - If market conditions are choppy (from sentiment data), suggest a partial profit idea:
   - "In current choppy conditions, consider trimming 30% at $X.XX (prior resistance)"
