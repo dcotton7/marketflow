@@ -667,6 +667,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
 
       if (detectedLen < minPeriod) return false;
 
+      const minRequired = Math.ceil(maxPeriod * 0.75);
+      if (detectedLen < minRequired) return false;
+
       const baseSlice = candles.slice(0, detectedLen);
       const closes = baseSlice.map(c => c.close);
       const n = closes.length;

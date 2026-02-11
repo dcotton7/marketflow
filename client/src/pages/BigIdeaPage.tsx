@@ -98,7 +98,7 @@ const UNIVERSE_OPTIONS = [
 ];
 
 const PARAM_DESCRIPTIONS: Record<string, string> = {
-  period: "Bars for the average. Larger = smoother & slower to react (looser); smaller = more responsive (tighter).",
+  period: "Bars for the average (or max base length for PA-3). For base detection, the detected base must be at least 75% of this value — e.g. a 20-bar lookback requires at least a 15-bar base.",
   direction: "Above = price must be higher than indicator; Below = must be lower.",
   maType: "SMA weights all bars equally; EMA gives more weight to recent bars, reacting faster to changes.",
   minPct: "Minimum % distance from indicator. Lower = looser (accepts stocks closer); higher = tighter (requires further away).",
@@ -189,7 +189,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   gapDirection: "Gap direction: Up = opened above prior close; Down = opened below.",
   skipBars: "Bars to skip (the base period). Match this to your flat base lookback so the advance window starts right before the base begins.",
   lookbackBars: "Window (in bars) to measure the prior advance. 120 bars ≈ 6 months of trading days. Larger = longer run-up required.",
-  minPeriod: "Shortest acceptable base length in bars. Bases shorter than this are rejected. 5 = one trading week, 10 = two weeks, 20 = one month.",
+  minPeriod: "Shortest acceptable base length in bars (hard floor: 5). Note: the detected base must also be at least 75% of the Max Base Length — so a 20-bar max requires a 15-bar minimum regardless of this setting.",
   maxSlope: "Max allowed slope across the base (%). Measures how much the base drifts up or down. Lower = flatter bases only; higher = allows some tilt.",
   maxPreBaseDrop: "Max % the price can have dropped coming into the base. Rejects bases that formed right after a selloff. Lower = stricter (only bases after flat or rising price); higher = allows bases after moderate pullbacks.",
 };
