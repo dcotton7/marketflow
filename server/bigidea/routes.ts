@@ -3,6 +3,7 @@ import { db, isDatabaseAvailable } from "../db";
 import { scannerThoughts, scannerIdeas, scannerFavorites } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
+import { evaluateScanQuality } from "./quality";
 import OpenAI from "openai";
 import * as tiingo from "../tiingo";
 
@@ -497,6 +498,20 @@ export function registerBigIdeaRoutes(app: Express): void {
     } catch (error) {
       console.error("Error deleting idea:", error);
       res.status(500).json({ error: "Failed to delete idea" });
+    }
+  });
+
+  app.post("/api/bigidea/quality", (req: Request, res: Response) => {
+    try {
+      const { nodes, edges } = req.body;
+      if (!nodes || !Array.isArray(nodes)) {
+        return res.status(400).json({ error: "nodes array is required" });
+      }
+      const result = evaluateScanQuality(nodes, edges || []);
+      res.json(result);
+    } catch (error) {
+      console.error("Error evaluating scan quality:", error);
+      res.status(500).json({ error: "Failed to evaluate scan quality" });
     }
   });
 

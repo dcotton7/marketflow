@@ -252,6 +252,38 @@ interface ScanResponse {
   dynamicDataFlows?: Array<{ provider: string; consumer: string; dataKey: string; description: string }>;
 }
 
+interface QualityDimension {
+  name: string;
+  score: number;
+  maxScore: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  details: string[];
+  suggestions: string[];
+}
+
+interface ScanQualityResult {
+  overallScore: number;
+  maxScore: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  dimensions: QualityDimension[];
+}
+
+const GRADE_COLORS: Record<string, string> = {
+  A: "text-green-400",
+  B: "text-blue-400",
+  C: "text-yellow-400",
+  D: "text-orange-400",
+  F: "text-red-400",
+};
+
+const GRADE_BG_COLORS: Record<string, string> = {
+  A: "bg-green-500/20 border-green-500/40",
+  B: "bg-blue-500/20 border-blue-500/40",
+  C: "bg-yellow-500/20 border-yellow-500/40",
+  D: "bg-orange-500/20 border-orange-500/40",
+  F: "bg-red-500/20 border-red-500/40",
+};
+
 function getCategoryIcon(category: string) {
   const Icon = CATEGORY_ICONS[category] || SlidersHorizontal;
   return <Icon className="h-4 w-4" />;
@@ -530,6 +562,8 @@ export default function BigIdeaPage() {
   const [restateNodeId, setRestateNodeId] = useState<string | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [qualityResult, setQualityResult] = useState<ScanQualityResult | null>(null);
+  const [qualityOpen, setQualityOpen] = useState(false);
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -805,6 +839,37 @@ export default function BigIdeaPage() {
     },
     onError: (err: Error) => {
       toast({ title: "Failed to save idea", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const qualityMutation = useMutation({
+    mutationFn: async () => {
+      const ideaNodes = nodes.map((n) => ({
+        id: n.id,
+        type: n.type as "thought" | "results",
+        thoughtId: n.data.thoughtId as number | undefined,
+        thoughtName: n.data.label as string | undefined,
+        thoughtCategory: n.data.category as string | undefined,
+        thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
+        isNot: n.data.isNot as boolean | undefined,
+        passCount: n.data.passCount as number | undefined,
+        position: n.position,
+      }));
+      const ideaEdges = edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        logicType: (e.data?.logicType as "AND" | "OR") || "AND",
+      }));
+      const res = await apiRequest("POST", "/api/bigidea/quality", { nodes: ideaNodes, edges: ideaEdges });
+      return res.json();
+    },
+    onSuccess: (data: ScanQualityResult) => {
+      setQualityResult(data);
+      setQualityOpen(true);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Quality check failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -1347,6 +1412,7 @@ export default function BigIdeaPage() {
       setScanResults(null);
       setShowResults(false);
       setSelectedNodeId(null);
+      setQualityResult(null);
     },
     [setNodes, setEdges, indicatorLibrary]
   );
@@ -1459,6 +1525,29 @@ export default function BigIdeaPage() {
           {saveIdeaMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Save Idea
         </Button>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={() => qualityMutation.mutate()}
+              disabled={qualityMutation.isPending || nodes.filter(n => n.type === "thought").length === 0}
+              className="gap-2"
+              data-testid="button-rate-quality"
+            >
+              {qualityMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+              Rate
+              {qualityResult && (
+                <span className={`font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
+                  {qualityResult.grade}
+                </span>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <p>Analyzes your scan across 5 dimensions: criteria diversity, filter funnel effectiveness, data-link usage, parameter quality, and signal coverage. Helps identify gaps and improvements.</p>
+          </TooltipContent>
+        </Tooltip>
 
         {ideas.length > 0 && (
           <Select
@@ -1665,6 +1754,55 @@ export default function BigIdeaPage() {
                         </div>
                       );
                     })}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
+          )}
+          {qualityResult && (
+            <div className="border-t" data-testid="scan-quality-panel">
+              <button
+                onClick={() => setQualityOpen(!qualityOpen)}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover-elevate"
+                data-testid="button-toggle-quality"
+              >
+                <span className="flex items-center gap-2">
+                  Scan Quality
+                  <span className={`text-sm font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
+                    {qualityResult.grade}
+                  </span>
+                  <span className="text-muted-foreground/60 normal-case">
+                    {qualityResult.overallScore}/{qualityResult.maxScore}
+                  </span>
+                </span>
+                {qualityOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+              </button>
+              {qualityOpen && (
+                <ScrollArea className="max-h-[300px]">
+                  <div className="px-3 pb-2 space-y-2 text-[10px] leading-relaxed">
+                    {qualityResult.dimensions.map((dim) => (
+                      <div key={dim.name} className="border-t border-dashed pt-1.5" data-testid={`quality-dim-${dim.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-foreground">{dim.name}</span>
+                          <span className={`font-bold text-xs px-1.5 py-0.5 rounded border ${GRADE_BG_COLORS[dim.grade]}`}>
+                            {dim.grade}
+                          </span>
+                          <span className="text-muted-foreground/60">{dim.score}/{dim.maxScore}</span>
+                        </div>
+                        {dim.details.map((d, i) => (
+                          <div key={i} className="ml-2 text-muted-foreground/80 flex items-start gap-1">
+                            <span className="text-foreground/40 flex-shrink-0">·</span>
+                            <span>{d}</span>
+                          </div>
+                        ))}
+                        {dim.suggestions.length > 0 && dim.suggestions.map((s, i) => (
+                          <div key={`s-${i}`} className="ml-2 flex items-start gap-1 text-amber-400/80">
+                            <Sparkles className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />
+                            <span>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
                 </ScrollArea>
               )}
