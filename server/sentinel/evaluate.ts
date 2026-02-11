@@ -191,7 +191,7 @@ export async function evaluateTrade(
       { role: "user", content: userPrompt }
     ],
     response_format: { type: "json_object" },
-    max_completion_tokens: maxTokens,
+    max_tokens: maxTokens,
   });
 
   const content = response.choices[0]?.message?.content || "{}";
