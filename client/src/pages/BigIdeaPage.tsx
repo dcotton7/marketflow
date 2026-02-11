@@ -98,7 +98,7 @@ const UNIVERSE_OPTIONS = [
 ];
 
 const PARAM_DESCRIPTIONS: Record<string, string> = {
-  period: "Bars for the average (or max base length for PA-3). For base detection, the detected base must be at least 75% of this value — e.g. a 20-bar lookback requires at least a 15-bar base.",
+  period: "Bars for the average. For PA-3, this is the max base length — how far back to look for consolidation.",
   direction: "Above = price must be higher than indicator; Below = must be lower.",
   maType: "SMA weights all bars equally; EMA gives more weight to recent bars, reacting faster to changes.",
   minPct: "Minimum % distance from indicator. Lower = looser (accepts stocks closer); higher = tighter (requires further away).",
@@ -189,10 +189,11 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   gapDirection: "Gap direction: Up = opened above prior close; Down = opened below.",
   skipBars: "Bars to skip (the base period). Match this to your flat base lookback so the advance window starts right before the base begins.",
   lookbackBars: "Window (in bars) to measure the prior advance. 120 bars ≈ 6 months of trading days. Larger = longer run-up required.",
-  minPeriod: "Shortest acceptable base length in bars (hard floor: 5). Note: the detected base must also be at least 75% of the Max Base Length — so a 20-bar max requires a 15-bar minimum regardless of this setting.",
+  minPeriod: "Shortest acceptable base length in bars (hard floor: 5). Works alongside Min Base % of Lookback to set the effective minimum.",
   maxSlope: "Max allowed slope across the base (%). Measures how much the base drifts up or down. Lower = flatter bases only; higher = allows some tilt.",
   maxPreBaseDrop: "Max % the price can have dropped coming into the base. Rejects bases that formed right after a selloff. Lower = stricter (only bases after flat or rising price); higher = allows bases after moderate pullbacks.",
   drifterPct: "Percentage of bars in the detected base allowed to poke outside the range without breaking detection. Drifter bars (e.g. wicks, gap bars) are counted but don't expand the base high/low. 10% on a 20-bar base = 2 drifter bars allowed. 0% = strict, no outliers tolerated.",
+  minBasePct: "Detected base must be at least this % of the Max Base Length. At 75%, a 20-bar lookback requires at least a 15-bar base. Lower = accepts shorter bases relative to your lookback; 0% = no minimum ratio enforced.",
 };
 
 interface DynamicDataConsumer {
