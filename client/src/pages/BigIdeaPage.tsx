@@ -765,11 +765,27 @@ export default function BigIdeaPage() {
           if (n.type === "results") {
             return { ...n, data: { ...n.data, totalCount: data.results.length } };
           }
-          if (n.type === "thought" && data.thoughtCounts) {
-            return {
-              ...n,
-              data: { ...n.data, passCount: data.thoughtCounts[n.id] ?? 0 },
-            };
+          if (n.type === "thought") {
+            let updatedData: any = { ...n.data };
+            if (data.thoughtCounts) {
+              updatedData.passCount = data.thoughtCounts[n.id] ?? 0;
+            }
+            const nodeOverrides = (data.linkOverrides || []).filter((o) => o.thoughtId === n.id);
+            if (nodeOverrides.length > 0 && updatedData.criteria) {
+              updatedData.criteria = (updatedData.criteria as ScannerCriterion[]).map((c) => {
+                const relevantOverrides = nodeOverrides.filter((o) => o.indicatorId === c.indicatorId);
+                if (relevantOverrides.length === 0) return c;
+                return {
+                  ...c,
+                  params: c.params.map((p) => {
+                    const ov = relevantOverrides.find((o) => o.paramName === p.name);
+                    if (ov) return { ...p, value: ov.linkedValue };
+                    return p;
+                  }),
+                };
+              });
+            }
+            return { ...n, data: updatedData };
           }
           return n;
         })
