@@ -386,13 +386,13 @@ export default function SentinelEvaluatePage() {
 
   const prevSymbolRef = useRef<string | null>(null);
   useEffect(() => {
-    if (tickerQuery.data?.currentPrice && selectedTicker) {
-      if (prevSymbolRef.current !== selectedTicker) {
+    if (tickerQuery.data?.currentPrice && debouncedSymbol) {
+      if (prevSymbolRef.current !== debouncedSymbol) {
         setEntryPrice(tickerQuery.data.currentPrice.toFixed(2));
-        prevSymbolRef.current = selectedTicker;
+        prevSymbolRef.current = debouncedSymbol;
       }
     }
-  }, [tickerQuery.data?.currentPrice, selectedTicker]);
+  }, [tickerQuery.data?.currentPrice, debouncedSymbol]);
 
   const evaluateMutation = useMutation({
     mutationFn: async (data: any) => {
