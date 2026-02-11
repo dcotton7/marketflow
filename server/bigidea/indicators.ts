@@ -646,18 +646,16 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       let drifterCount = 0;
 
       if (refHigh === 0) return false;
-      const refRange = refHigh - refLow;
-      const refMid = (refHigh + refLow) / 2;
-      const allowedDeviation = refMid * (maxRange / 100);
-
-      const initRangePct = (refRange / refHigh) * 100;
+      const initRangePct = ((refHigh - refLow) / refHigh) * 100;
       if (initRangePct > maxRange) return false;
 
       for (let i = minPeriod; i < maxLen; i++) {
         const bar = candles[i];
         if (bar.high === 0) break;
-        const barOutside = bar.high > refHigh + allowedDeviation * 0.5 ||
-                           bar.low < refLow - allowedDeviation * 0.5;
+        const testHigh = Math.max(refHigh, bar.high);
+        const testLow = Math.min(refLow, bar.low);
+        const testRangePct = ((testHigh - testLow) / testHigh) * 100;
+        const barOutside = testRangePct > maxRange;
         const currentLen = i + 1;
         if (barOutside) {
           drifterCount++;
