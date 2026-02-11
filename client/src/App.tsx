@@ -18,6 +18,7 @@ import SentinelImportPage from "@/pages/SentinelImportPage";
 import PatternLearningPage from "@/pages/PatternLearningPage";
 import PatternTrainingPage from "@/pages/PatternTrainingPage";
 import BigIdeaPage from "@/pages/BigIdeaPage";
+import SymbolPage from "@/pages/SymbolPage";
 
 function Router() {
   return (
@@ -79,6 +80,15 @@ function Router() {
         <SentinelProtectedRoute>
           <SentinelDashboardPage />
         </SentinelProtectedRoute>
+      </Route>
+
+      {/* Symbol/Chart page (accessible from Industry Comps, BigIdea, etc.) */}
+      <Route path="/symbol/:symbol">
+        {() => (
+          <SentinelProtectedRoute>
+            <SymbolPage />
+          </SentinelProtectedRoute>
+        )}
       </Route>
       
       {/* Catch-all 404 */}
