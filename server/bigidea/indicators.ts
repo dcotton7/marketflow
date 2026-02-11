@@ -246,7 +246,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-1",
     name: "SMA Value",
     category: "Moving Averages",
-    description: "Price is above or below the Simple Moving Average of a given period",
+    description: "Finds stocks trading above or below their Simple Moving Average. Use 'above 50 SMA' to find stocks in an uptrend, or 'below 200 SMA' to find stocks that have broken down. The SMA smooths out price noise by averaging the last N closing prices equally.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "direction", label: "Direction", type: "select", defaultValue: "above", options: ["above", "below"] },
@@ -264,7 +264,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-2",
     name: "EMA Value",
     category: "Moving Averages",
-    description: "Price is above or below the Exponential Moving Average of a given period",
+    description: "Finds stocks trading above or below their Exponential Moving Average. The EMA reacts faster than SMA by weighting recent bars more heavily. Use 'above 21 EMA' for short-term momentum stocks, or 'below 50 EMA' for stocks losing their trend.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 21, min: 5, max: 500, step: 1 },
       { name: "direction", label: "Direction", type: "select", defaultValue: "above", options: ["above", "below"] },
@@ -282,7 +282,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-3",
     name: "Price vs MA Distance",
     category: "Moving Averages",
-    description: "Price distance from a moving average as a percentage. Positive = above, negative = below.",
+    description: "Finds stocks within a specific percentage band around a moving average. Example: 0-5% above the 50 SMA catches stocks hugging the MA from above (a buy zone in an uptrend). Negative values find stocks below the MA. Great for pullback scans and 'near support' setups.",
     params: [
       { name: "period", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
@@ -305,7 +305,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-4",
     name: "MA Slope",
     category: "Moving Averages",
-    description: "Moving average slope (% change over N bars). Positive slope = uptrend.",
+    description: "Checks whether a moving average is trending up or down by measuring its slope over recent bars. A rising 50 SMA means the trend is healthy and price has been climbing. Use Min Slope > 0 to find uptrends only; use negative values to find declining MAs.",
     params: [
       { name: "period", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
@@ -329,7 +329,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-5",
     name: "MA Stacking Order",
     category: "Moving Averages",
-    description: "Checks if moving averages are stacked in bullish or bearish order (e.g. Price > 50 SMA > 150 SMA > 200 SMA)",
+    description: "Finds stocks where three moving averages are lined up in order. Bullish stacking (Price > Short MA > Medium MA > Long MA) confirms a strong, organized uptrend — the kind institutions like to buy. This is a Minervini trend template staple. Bearish stacking finds downtrends.",
     params: [
       { name: "order", label: "Stack Order", type: "select", defaultValue: "bullish", options: ["bullish", "bearish"] },
       { name: "ma1", label: "Short MA", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
@@ -355,7 +355,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-6",
     name: "MA Distance / Convergence",
     category: "Moving Averages",
-    description: "Measures the percentage distance between two moving averages. Useful for detecting convergence or divergence.",
+    description: "Finds stocks where two moving averages are close together. When the 50 and 200 SMA are within 5% of each other, the stock is at a decision point — a crossover may be near. Use this to catch stocks where moving averages are converging, which often precedes a trend change.",
     params: [
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
@@ -379,7 +379,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-7",
     name: "MA Crossover",
     category: "Moving Averages",
-    description: "Detects a moving average crossover (golden cross or death cross) within the last N bars",
+    description: "Finds stocks where a fast MA recently crossed above or below a slow MA. A bullish cross (50 above 200 = golden cross) signals a new uptrend starting. Set a short lookback (3-5 bars) to catch fresh crosses, or longer (10-20) to find crosses that happened recently.",
     params: [
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
@@ -410,7 +410,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-8",
     name: "MA Comparison",
     category: "Moving Averages",
-    description: "Checks if one moving average is above or below another (e.g. 50 SMA above 200 SMA for bullish trend)",
+    description: "Checks if one MA is currently above or below another — without requiring a recent cross. Use '50 SMA above 200 SMA' to confirm a stock is in a confirmed uptrend. Unlike MA Crossover, this doesn't care when the cross happened — just the current relationship.",
     params: [
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
@@ -433,7 +433,7 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     id: "MA-9",
     name: "Price Crosses MA",
     category: "Moving Averages",
-    description: "Detects if the close price crossed above or below a single moving average within the last N bars. Use this for 'price crossed above/below the 50 SMA' style scans.",
+    description: "Finds stocks where the price itself recently crossed above or below a single MA. Unlike MA Crossover (which compares two MAs), this checks price vs one MA. Use 'price crossed above 50 SMA' to find stocks reclaiming a key trend line, or 'crossed below 21 EMA' for breakdowns.",
     params: [
       { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
@@ -465,7 +465,7 @@ const VOLUME: IndicatorDefinition[] = [
     id: "VOL-1",
     name: "Volume vs Average",
     category: "Volume",
-    description: "Current volume as a multiple of the N-day average volume",
+    description: "Finds stocks where today's volume is unusually high compared to the average. A 1.5x multiple means volume is 50% above normal — something is happening. Great for confirming breakouts, institutional activity, or news-driven moves. Higher multiples catch bigger spikes.",
     params: [
       { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 5, max: 200, step: 1 },
       { name: "minMultiple", label: "Min Multiple", type: "number", defaultValue: 1.5, min: 0.1, max: 20, step: 0.1 },
@@ -483,7 +483,7 @@ const VOLUME: IndicatorDefinition[] = [
     id: "VOL-2",
     name: "Volume Trend",
     category: "Volume",
-    description: "Compares recent average volume to a longer baseline average to detect increasing or decreasing volume trends",
+    description: "Detects whether volume is ramping up or fading over time. Compares the average volume over recent bars to a longer baseline. 'Increasing' finds stocks gaining trading interest (accumulation); 'Decreasing' finds stocks where volume is drying up (potential base forming).",
     params: [
       { name: "recentPeriod", label: "Recent Period", type: "number", defaultValue: 10, min: 3, max: 50, step: 1 },
       { name: "baselinePeriod", label: "Baseline Period", type: "number", defaultValue: 50, min: 10, max: 200, step: 1 },
@@ -507,7 +507,7 @@ const VOLUME: IndicatorDefinition[] = [
     id: "VOL-3",
     name: "Up/Down Volume Ratio",
     category: "Volume",
-    description: "Ratio of volume on up bars vs down bars over a period. > 1 means more volume on up bars.",
+    description: "Measures buying pressure vs selling pressure by comparing volume on up-days to volume on down-days. A ratio above 1.0 means more volume flows in on green bars — a sign of accumulation. Ratios of 1.5+ suggest strong institutional buying interest. Below 1.0 means distribution.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minRatio", label: "Min Ratio", type: "number", defaultValue: 1.2, min: 0.1, max: 10, step: 0.1 },
@@ -530,7 +530,7 @@ const VOLUME: IndicatorDefinition[] = [
     id: "VOL-4",
     name: "Volume Dry-Up",
     category: "Volume",
-    description: "Detects a period of unusually low volume relative to average, often preceding breakouts",
+    description: "Finds stocks where volume has been consistently quiet for several bars in a row — all recent bars below a fraction of the average. This 'dry-up' pattern often appears right before breakouts as sellers dry up and supply evaporates. Combine with tightness indicators for coiling setups.",
     params: [
       { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 10, max: 200, step: 1 },
       { name: "dryUpDays", label: "Dry-Up Window (bars)", type: "number", defaultValue: 5, min: 1, max: 20, step: 1 },
@@ -553,7 +553,7 @@ const VOLUME: IndicatorDefinition[] = [
     id: "VOL-5",
     name: "Volume Surge",
     category: "Volume",
-    description: "Detects a sudden spike in volume, typically on a breakout or reversal day",
+    description: "Finds stocks that had a sudden massive spike in volume on a single bar. A 2x surge means double the normal volume — often a breakout day or big institutional entry. 'Require Price Up' filters out panic selling spikes, keeping only bullish volume surges.",
     params: [
       { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 5, max: 200, step: 1 },
       { name: "surgeMultiple", label: "Surge Multiple", type: "number", defaultValue: 2.0, min: 1.5, max: 20, step: 0.5 },
@@ -579,7 +579,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-1",
     name: "ATR",
     category: "Price Action",
-    description: "Average True Range over N periods. Filters by a minimum or maximum ATR value.",
+    description: "Filters stocks by their Average True Range — a measure of daily price movement in dollar terms. Stocks with very low ATR are too quiet to trade; stocks with very high ATR may be too volatile. Use Min/Max ATR to find your sweet spot for risk management.",
     params: [
       { name: "period", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minATR", label: "Min ATR", type: "number", defaultValue: 0, min: 0, max: 100, step: 0.1 },
@@ -597,7 +597,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-2",
     name: "ATR Percent",
     category: "Price Action",
-    description: "ATR as a percentage of price. Measures volatility relative to share price.",
+    description: "Filters stocks by ATR as a percentage of the stock price — normalizing volatility across all price levels. A $200 stock with $4 ATR = 2% (calm); a $20 stock with $3 ATR = 15% (wild). Use this instead of raw ATR when scanning across different-priced stocks.",
     params: [
       { name: "period", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minPct", label: "Min ATR %", type: "number", defaultValue: 2, min: 0, max: 50, step: 0.1 },
@@ -617,7 +617,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-3",
     name: "Consolidation / Base Detection",
     category: "Price Action",
-    description: "Detects a flat consolidation base up to 'period' bars long. Scans backward from recent bars to find the actual flat zone, trimming any prior advance ramp-in. Returns the detected base length for downstream indicators. Min Period sets the shortest acceptable base. Rejects bases that formed after a significant price decline (controlled by Max Pre-Base Drop %).",
+    description: "The core base-building indicator. Scans recent bars to find a flat sideways zone where price traded within a tight range. The allowed range tightens as the base gets longer, so short bases can be wider and long bases must be tighter — producing natural variation in detected lengths. Rejects bases where price is sitting in the lower half (weak), where the base drifts/slopes too much, or where most closes aren't in the upper portion. Passes the detected base length downstream to Prior Advance and Smooth Advance.",
     provides: [{ linkType: "basePeriod", paramName: "period" }],
     params: [
       { name: "period", label: "Max Base Length", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
@@ -716,7 +716,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-4",
     name: "Base Depth",
     category: "Price Action",
-    description: "Pullback depth from the highest high over a lookback period. Shallow bases (< 20%) are preferred.",
+    description: "Measures how deep the current pullback is from the highest price over a lookback window. Shallow bases (10-20% correction) suggest institutions are holding — strong demand. Deep corrections (30%+) may signal damaged charts. Use Min Depth to exclude stocks that haven't pulled back at all.",
     params: [
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "maxDepth", label: "Max Depth %", type: "number", defaultValue: 25, min: 1, max: 60, step: 1 },
@@ -739,7 +739,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-5",
     name: "Base Count",
     category: "Price Action",
-    description: "Counts the number of consolidation bases during an advance. Earlier bases (1st, 2nd) are higher probability.",
+    description: "Counts how many separate consolidation pauses a stock has made during its advance. 1st and 2nd bases are highest probability for breakouts — later bases (3rd, 4th+) increasingly fail as the move gets extended. Set Max Bases to 2-3 to focus on early-stage leaders.",
     params: [
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 120, min: 30, max: 500, step: 10 },
       { name: "consolidationRange", label: "Base Range %", type: "number", defaultValue: 15, min: 5, max: 30, step: 1 },
@@ -773,7 +773,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-6",
     name: "Distance from 52-Week High",
     category: "Price Action",
-    description: "How far the current price is from the 52-week (260-day) high, as a percentage",
+    description: "Finds stocks near or far from their 52-week high. Stocks within 5-15% of highs are in 'buy zone' territory — strong enough to be near the top but pulled back enough to offer entry. Stocks 50%+ away may be damaged or in downtrends. Adjust Min/Max Distance to target your range.",
     params: [
       { name: "maxDistance", label: "Max Distance %", type: "number", defaultValue: 25, min: 0, max: 100, step: 1 },
       { name: "minDistance", label: "Min Distance %", type: "number", defaultValue: 0, min: 0, max: 100, step: 1 },
@@ -793,7 +793,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-7",
     name: "Breakout Detection",
     category: "Price Action",
-    description: "Detects if price broke above the highest high of a prior consolidation period within the last N bars",
+    description: "Finds stocks that recently broke out above the highest price of a prior base/consolidation zone. The breakout window controls how recently it must have happened (1-3 bars = just broke out; 10 = within last 2 weeks). Enable Volume Confirm to filter out weak, low-conviction breakouts.",
     provides: [{ linkType: "basePeriod", paramName: "basePeriod" }],
     params: [
       { name: "basePeriod", label: "Base Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
@@ -822,7 +822,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-8",
     name: "Pullback to Level",
     category: "Price Action",
-    description: "Detects a pullback to a moving average or support level within a tolerance band",
+    description: "Finds stocks that have pulled back to test a moving average as support. The low of the current bar must be within a tolerance band of the MA. A stock touching its rising 21 EMA after an advance is a classic buy-the-dip entry point in strong uptrends.",
     params: [
       { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 21, min: 5, max: 200, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "ema", options: ["sma", "ema"] },
@@ -843,7 +843,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-9",
     name: "VCP Tightness",
     category: "Price Action",
-    description: "Volatility Contraction Pattern: checks if successive price contractions are getting tighter over a period",
+    description: "Detects the Volatility Contraction Pattern (VCP) — a series of price swings where each one is smaller than the last, forming a staircase of tightening contractions. This pattern shows sellers are drying up and supply is shrinking. More segments = more defined pattern but fewer matches.",
     params: [
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 40, min: 15, max: 120, step: 5 },
       { name: "segments", label: "Number of Segments", type: "number", defaultValue: 3, min: 2, max: 5, step: 1 },
@@ -872,7 +872,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-10",
     name: "Price Gap Detection",
     category: "Price Action",
-    description: "Detects a gap up or gap down within the last N bars",
+    description: "Finds stocks that gapped up or down recently — meaning the open was significantly above/below the prior close, leaving a visible gap on the chart. Gaps often signal news, earnings surprises, or institutional moves. Set min gap to 2%+ for meaningful gaps only.",
     params: [
       { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 3, min: 1, max: 20, step: 1 },
       { name: "minGapPct", label: "Min Gap %", type: "number", defaultValue: 2, min: 0.5, max: 20, step: 0.5 },
@@ -899,7 +899,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-11",
     name: "Distance from Key Level",
     category: "Price Action",
-    description: "Measures distance from VWAP or a pivot level. VWAP is computed over the lookback period.",
+    description: "Finds stocks trading near a key price level — either VWAP (volume-weighted average price) or a pivot point. Stocks hugging VWAP are at their 'fair value' — a tight distance means the price is respecting this institutional reference. Good for finding stocks at decision points.",
     params: [
       { name: "level", label: "Level Type", type: "select", defaultValue: "vwap", options: ["vwap", "pivot"] },
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
@@ -934,7 +934,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-12",
     name: "Prior Price Advance",
     category: "Price Action",
-    description: "Measures the price advance that occurred BEFORE the current base. Skips the most recent N bars (the base period) and measures the gain over a lookback window ending at that offset. When connected to a Base Detection thought, automatically uses the per-stock detected base length instead of the static skipBars value.",
+    description: "Verifies that the stock had a meaningful price advance BEFORE it built the current base. Skips over the base, then checks how much the stock gained in the window before that. Stocks that consolidate after a strong run-up (30%+) are building a classic base-on-advance pattern. When connected to Base Detection, automatically uses each stock's actual base length.",
     consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }],
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
@@ -959,7 +959,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-13",
     name: "Smooth Trending Advance",
     category: "Price Action",
-    description: "Minervini-style advance quality check. Verifies the price advance before the base was smooth and sustained: net gain meets threshold, max drawdown from rolling high stays within limits, and price stayed above a key moving average for most of the window. Uses per-stock detected base length when connected to a Base Detection thought.",
+    description: "Checks the QUALITY of the advance before the base — not just that it gained, but that it did so cleanly. Requires: (1) minimum net gain, (2) no single pullback deeper than Max Drawdown (rolling high to low), and (3) price stayed above a key SMA for most of the advance. This separates clean institutional staircase advances from volatile, choppy run-ups. Uses per-stock base length when connected to Base Detection.",
     consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }],
     params: [
       { name: "skipBars", label: "Skip Recent Bars (base)", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
@@ -1017,7 +1017,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-14",
     name: "Tightness Ratio",
     category: "Price Action",
-    description: "Compares recent average daily range (high-low as % of close) to a longer baseline period. A low ratio means the stock's daily candles are shrinking — it's coiling. Useful for finding stocks compressing into tight ranges before a move.",
+    description: "Compares the size of recent daily candles to the historical average. A ratio of 0.5 means candles are half their normal size — the stock is coiling with shrinking daily ranges. This tightness often precedes explosive moves. Works best combined with Volume Fade and Close Clustering to confirm a full 'quiet before the storm' setup.",
     params: [
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 5, min: 3, max: 20, step: 1 },
       { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
@@ -1049,7 +1049,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-15",
     name: "Close Clustering",
     category: "Price Action",
-    description: "Measures how tightly closing prices cluster together over a recent window. Calculates the standard deviation of closes as a percentage of the average close. Lower values mean closes are converging to a tight level — the stock is barely moving day-to-day.",
+    description: "Measures how tightly closing prices bunch together over recent bars. A 1% cluster means closes barely move day-to-day — the stock has settled into a narrow equilibrium. Think of it as a 'coil' indicator: the tighter the clustering, the more energy is stored for the next directional move. Use with Tightness Ratio for stronger confirmation.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 10, min: 5, max: 50, step: 1 },
       { name: "maxClusterPct", label: "Max Cluster %", type: "number", defaultValue: 3.0, min: 0.1, max: 5, step: 0.1 },
@@ -1074,7 +1074,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-16",
     name: "Volume Fade",
     category: "Price Action",
-    description: "Checks if recent volume has dried up compared to a longer baseline. A low ratio means trading interest is fading — weak hands have been shaken out and the stock is quiet. Useful in combination with tightness indicators to find coiling setups.",
+    description: "Checks if recent volume has dried up compared to the historical average. A ratio of 0.5 means volume is half of normal — weak hands have been shaken out and the remaining holders aren't selling. Volume fade during a tight base is a classic sign that supply has been absorbed. Combine with Tightness Ratio and Close Clustering for the strongest coiling signals.",
     params: [
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
       { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
@@ -1106,7 +1106,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-1",
     name: "RS vs Index",
     category: "Relative Strength",
-    description: "Relative strength vs a benchmark index. Measures outperformance over a period as a percentage.",
+    description: "Finds stocks outperforming the benchmark index (S&P 500) over a time period. A stock that gained 15% while the index gained 5% has 10% outperformance. Leaders in a bull market consistently outperform the index — this filters for those winners and rejects laggards.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "minOutperformance", label: "Min Outperformance %", type: "number", defaultValue: 5, min: -50, max: 100, step: 1 },
@@ -1124,7 +1124,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-2",
     name: "RS Score",
     category: "Relative Strength",
-    description: "Raw relative strength score (stock return / benchmark return). Values > 1 indicate outperformance.",
+    description: "Calculates a raw strength ratio: stock return divided by benchmark return. A score of 1.5 means the stock gained 50% more than the index. Scores above 1.0 = outperforming; below 1.0 = underperforming. Use Min RS Score of 1.2+ to find meaningful leaders, not just marginal outperformers.",
     params: [
       { name: "period", label: "Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "minScore", label: "Min RS Score", type: "number", defaultValue: 1.2, min: 0, max: 5, step: 0.1 },
@@ -1143,7 +1143,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-3",
     name: "RS Line New High",
     category: "Relative Strength",
-    description: "Checks if the relative strength line (stock/benchmark ratio) is at or near a new high over a lookback period",
+    description: "Checks if the stock's relative strength line vs the benchmark is making or near a new high. When the RS line hits new highs, the stock is outperforming the market more than it has in months — a hallmark of true market leaders. Tolerance allows stocks within a few percent of the high to pass.",
     params: [
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "tolerance", label: "Tolerance %", type: "number", defaultValue: 2, min: 0, max: 10, step: 0.5 },
@@ -1168,7 +1168,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-4",
     name: "RSI",
     category: "Relative Strength",
-    description: "Relative Strength Index. Classic momentum oscillator (0-100).",
+    description: "The classic RSI momentum oscillator, ranging 0-100. Values above 50 show bullish momentum; above 70 is overbought (strong but potentially extended). Values below 30 are oversold (weak but potentially bouncing). Use a 50-80 range to find stocks with healthy upward momentum that aren't overheated.",
     params: [
       { name: "period", label: "RSI Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minRSI", label: "Min RSI", type: "number", defaultValue: 50, min: 0, max: 100, step: 1 },
@@ -1186,7 +1186,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-5",
     name: "MACD",
     category: "Relative Strength",
-    description: "MACD crossover or histogram direction for momentum confirmation",
+    description: "The MACD momentum indicator with multiple signal conditions. 'Bullish cross' catches the moment the MACD line crosses above the signal line — a buy signal. 'Histogram positive' confirms upward momentum. 'Above zero' means the fast EMA is above the slow EMA. Use for momentum confirmation alongside trend filters.",
     params: [
       { name: "fastPeriod", label: "Fast Period", type: "number", defaultValue: 12, min: 5, max: 50, step: 1 },
       { name: "slowPeriod", label: "Slow Period", type: "number", defaultValue: 26, min: 10, max: 100, step: 1 },
@@ -1216,7 +1216,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-6",
     name: "ADX",
     category: "Relative Strength",
-    description: "Average Directional Index. Measures trend strength (not direction). ADX > 25 = strong trend.",
+    description: "Measures how STRONG the current trend is, regardless of direction. ADX above 25 = well-defined trend; above 40 = very strong trend; below 20 = no trend (choppy, range-bound). Enable 'Require Bullish' to filter for uptrends only (where buying pressure exceeds selling pressure).",
     params: [
       { name: "period", label: "ADX Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minADX", label: "Min ADX", type: "number", defaultValue: 25, min: 0, max: 100, step: 1 },
@@ -1236,7 +1236,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     id: "RS-7",
     name: "Bull/Bear Power (Elder)",
     category: "Relative Strength",
-    description: "Elder's Bull Power (High - EMA) and Bear Power (Low - EMA). Bull Power > 0 in uptrend is bullish.",
+    description: "Elder's momentum indicator comparing price extremes to the EMA. Bull Power (High minus EMA) > 0 means buyers pushed price above the trend — bullish. 'Bull rising' catches improving momentum across multiple bars. 'Bear rising' (negative bear power getting less negative) signals selling pressure is fading.",
     params: [
       { name: "period", label: "EMA Period", type: "number", defaultValue: 13, min: 5, max: 50, step: 1 },
       { name: "condition", label: "Condition", type: "select", defaultValue: "bull_positive", options: ["bull_positive", "bear_negative", "bull_rising", "bear_rising"] },
@@ -1284,7 +1284,7 @@ const VOLATILITY: IndicatorDefinition[] = [
     id: "VLT-1",
     name: "Bollinger Band Width",
     category: "Volatility",
-    description: "Bollinger Band width as a percentage of the middle band. Narrow bands suggest low volatility / potential breakout.",
+    description: "Measures how wide the Bollinger Bands are. Narrow bands (low width %) mean the stock is in a low-volatility squeeze — historically, these often precede big breakout moves. A width under 10% is compressed; under 5% is an extreme squeeze. Use Max Width to find stocks that are coiled tight.",
     params: [
       { name: "period", label: "BB Period", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
       { name: "stdDev", label: "Std Dev Multiplier", type: "number", defaultValue: 2, min: 1, max: 4, step: 0.5 },
@@ -1304,7 +1304,7 @@ const VOLATILITY: IndicatorDefinition[] = [
     id: "VLT-2",
     name: "ATR Contraction/Expansion",
     category: "Volatility",
-    description: "Compares recent ATR to historical ATR. Contraction often precedes big moves.",
+    description: "Compares the stock's recent volatility (ATR) to its historical volatility. 'Contracting' finds stocks where recent ATR has dropped significantly — the calm before the storm. 'Expanding' catches stocks where volatility is exploding — breakout or breakdown in progress. The threshold sets how much change (%) is needed to pass.",
     params: [
       { name: "atrPeriod", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "recentDays", label: "Recent Bars", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
@@ -1334,7 +1334,7 @@ const VOLATILITY: IndicatorDefinition[] = [
     id: "VLT-3",
     name: "Daily Range vs Average",
     category: "Volatility",
-    description: "Latest bar's range (high-low) compared to the average range. Useful for detecting expansion or contraction.",
+    description: "Compares today's bar range (high minus low) to the average daily range. A multiple under 0.5 means today's bar is half the normal size — tight, quiet action. A multiple above 2.0 means today was twice as wide as normal — an expansion day. Use for spotting narrow-range days inside bases or breakout expansion bars.",
     params: [
       { name: "period", label: "Avg Range Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minMultiple", label: "Min Range Multiple", type: "number", defaultValue: 0, min: 0, max: 10, step: 0.1 },
@@ -1358,7 +1358,7 @@ const VOLATILITY: IndicatorDefinition[] = [
     id: "VLT-4",
     name: "Squeeze Detection",
     category: "Volatility",
-    description: "Bollinger Bands inside Keltner Channels. A squeeze indicates very low volatility and an impending expansion.",
+    description: "Detects the TTM Squeeze — when Bollinger Bands contract inside the Keltner Channels. This extreme low-volatility state is like a compressed spring. When the squeeze fires (bands expand back outside Keltner), the stock often makes a sharp directional move. One of the most reliable volatility-based setups.",
     params: [
       { name: "bbPeriod", label: "BB Period", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
       { name: "bbStdDev", label: "BB Std Dev", type: "number", defaultValue: 2, min: 1, max: 4, step: 0.5 },
