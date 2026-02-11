@@ -624,7 +624,6 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "minPeriod", label: "Min Base Length", type: "number", defaultValue: 5, min: 5, max: 50, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
       { name: "maxSlope", label: "Max Slope %", type: "number", defaultValue: 5, min: 0.5, max: 15, step: 0.5 },
-      { name: "maxPreBaseDrop", label: "Max Pre-Base Drop %", type: "number", defaultValue: 10, min: 1, max: 30, step: 1 },
       { name: "drifterPct", label: "Drifter Tolerance %", type: "number", defaultValue: 10, min: 0, max: 25, step: 1 },
       { name: "minBasePct", label: "Min Base % of Lookback", type: "number", defaultValue: 0, min: 0, max: 100, step: 5 },
     ],
@@ -633,20 +632,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const minPeriod = Math.max(5, params.minPeriod ?? 5);
       const maxRange = params.maxRange ?? 15;
       const maxSlope = params.maxSlope ?? 5;
-      const maxPreBaseDrop = params.maxPreBaseDrop ?? 10;
       const drifterPct = params.drifterPct ?? 10;
       const minBasePct = params.minBasePct ?? 0;
       if (candles.length < minPeriod) return false;
 
       const maxLen = Math.min(maxPeriod, candles.length);
-
-      const tightFloor = Math.min(maxRange * 0.3, 5);
-      const fullRangeAt = 20;
-      const scaledRange = (len: number) => {
-        if (len >= fullRangeAt) return maxRange;
-        const t = Math.max(0, (len - 5) / (fullRangeAt - 5));
-        return tightFloor + t * (maxRange - tightFloor);
-      };
 
       const recentSlice = candles.slice(0, minPeriod);
       let baseHigh = Math.max(...recentSlice.map(c => c.high));
@@ -656,7 +646,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       let drifterCount = 0;
 
       const initRange = baseHigh === 0 ? 0 : ((baseHigh - baseLow) / baseHigh) * 100;
-      if (initRange > scaledRange(minPeriod)) return false;
+      if (initRange > maxRange) return false;
 
       for (let i = minPeriod; i < maxLen; i++) {
         const bar = candles[i];
@@ -665,7 +655,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         if (testHigh === 0) break;
         const range = ((testHigh - testLow) / testHigh) * 100;
         const currentLen = i + 1;
-        if (range > scaledRange(currentLen)) {
+        if (range > maxRange) {
           drifterCount++;
           const allowedDrifters = Math.floor(currentLen * drifterPct / 100);
           if (drifterCount > allowedDrifters) break;
@@ -710,17 +700,6 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         if (pos >= 0.4) upperCount++;
       }
       if (upperCount / n < 0.5) return false;
-
-      const preBaseLookback = Math.min(detectedLen, 10);
-      const preBaseStart = detectedLen + preBaseLookback;
-      if (candles.length >= preBaseStart) {
-        const preBaseSlice = candles.slice(detectedLen, preBaseStart);
-        const preBaseHigh = Math.max(...preBaseSlice.map(c => c.high));
-        if (preBaseHigh > 0) {
-          const dropIntoBase = ((preBaseHigh - baseHigh) / preBaseHigh) * 100;
-          if (dropIntoBase > maxPreBaseDrop) return false;
-        }
-      }
 
       return { pass: true, data: { detectedPeriod: detectedLen } };
     },

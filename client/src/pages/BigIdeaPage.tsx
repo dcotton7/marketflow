@@ -191,7 +191,6 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   lookbackBars: "Window (in bars) to measure the prior advance. 120 bars ≈ 6 months of trading days. Larger = longer run-up required.",
   minPeriod: "Shortest acceptable base length in bars (hard floor: 5). Works alongside Min Base % of Lookback to set the effective minimum.",
   maxSlope: "Max allowed slope across the base (%). Measures how much the base drifts up or down. Lower = flatter bases only; higher = allows some tilt.",
-  maxPreBaseDrop: "Max % the price can have dropped coming into the base. Rejects bases that formed right after a selloff. Lower = stricter (only bases after flat or rising price); higher = allows bases after moderate pullbacks.",
   drifterPct: "Percentage of bars in the detected base allowed to poke outside the range without breaking detection. Drifter bars (e.g. wicks, gap bars) are counted but don't expand the base high/low. 10% on a 20-bar base = 2 drifter bars allowed. 0% = strict, no outliers tolerated.",
   minBasePct: "Detected base must be at least this % of the Max Base Length. Example: 50% on a 100-bar lookback requires at least a 50-bar base. At 0% (default), only the Min Base Length setting controls the minimum. Raise this to filter out bases that are too short relative to your lookback window.",
 };
@@ -1931,21 +1930,7 @@ export default function BigIdeaPage() {
                                   </SelectContent>
                                 </Select>
                               )}
-                              {param.type === "number" && (() => {
-                                let scaledHint = "";
-                                if (criterion.indicatorId === "PA-3" && param.name === "maxRange") {
-                                  const minPeriodParam = criterion.params.find((p: any) => p.name === "minPeriod");
-                                  const minP = Number(minPeriodParam?.value ?? 5);
-                                  const curMaxRange = Number(displayValue);
-                                  const fullRangeAt = 20;
-                                  if (minP < fullRangeAt && curMaxRange > 0) {
-                                    const tightFloor = Math.min(curMaxRange * 0.3, 5);
-                                    const t = Math.max(0, (minP - 5) / (fullRangeAt - 5));
-                                    const effective = Math.round((tightFloor + t * (curMaxRange - tightFloor)) * 10) / 10;
-                                    scaledHint = `≈${effective}% at ${minP} bars`;
-                                  }
-                                }
-                                return (
+                              {param.type === "number" && (
                                 <div className="flex items-center gap-2 mt-1">
                                   <Slider
                                     value={[Number(displayValue)]}
@@ -1980,12 +1965,8 @@ export default function BigIdeaPage() {
                                     className={`w-14 h-6 text-xs font-mono text-right px-1 ${isLinked && linkedVal ? "text-blue-400" : ""}`}
                                     data-testid={`input-${param.name}-${idx}`}
                                   />
-                                  {scaledHint && (
-                                    <span className="text-[10px] text-amber-400 whitespace-nowrap">{scaledHint}</span>
-                                  )}
                                 </div>
-                                );
-                              })()}
+                              )}
                               {param.type === "select" && param.options && (
                                 <Select
                                   value={String(param.value)}
