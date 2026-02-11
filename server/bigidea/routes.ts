@@ -679,6 +679,111 @@ Select the most appropriate indicators and set parameters that match the user's 
     }
   });
 
+  app.post("/api/bigidea/ai/restate-thought", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not logged in. Please refresh the page and try again." });
+      }
+
+      const { instruction, currentCriteria, currentName, currentDescription } = req.body;
+      if (!instruction) {
+        return res.status(400).json({ error: "instruction is required" });
+      }
+
+      const indicatorSummary = INDICATOR_LIBRARY.map((ind) => ({
+        id: ind.id,
+        name: ind.name,
+        category: ind.category,
+        description: ind.description,
+        params: ind.params.map((p) => ({
+          name: p.name,
+          label: p.label,
+          type: p.type,
+          defaultValue: p.defaultValue,
+          options: p.options,
+          min: p.min,
+          max: p.max,
+        })),
+      }));
+
+      const systemPrompt = `You are a stock screening assistant. The user has an EXISTING thought (screening filter) on their canvas and wants to MODIFY it. Your job is to adjust the existing criteria based on their instruction.
+
+Available indicators:
+${JSON.stringify(indicatorSummary, null, 2)}
+
+The user's CURRENT thought is:
+Name: ${currentName || "Unnamed"}
+Description: ${currentDescription || "No description"}
+Current criteria: ${JSON.stringify(currentCriteria || [], null, 2)}
+
+The user will give you an instruction like "make it looser", "tighten the filters", "add volume check", "remove the RSI criterion", etc.
+
+You must respond with valid JSON in this exact format:
+{
+  "name": "Updated short descriptive name",
+  "category": "One of: Momentum, Value, Trend, Volatility, Volume, Custom",
+  "description": "Updated description of what this thought screens for",
+  "criteria": [... updated criteria array ...]
+}
+
+RULES:
+- This modifies a SINGLE existing thought. Never return multiple thoughts or edges.
+- When the user says "make it looser" or "relax filters": widen thresholds, lower minimums, increase tolerances, increase max ranges.
+- When the user says "make it tighter" or "stricter": narrow thresholds, raise minimums, decrease tolerances.
+- When the user says "add X": keep existing criteria and add new ones.
+- When the user says "remove X": remove matching criteria.
+- Preserve all existing criteria that the user didn't ask to change — only modify the relevant parameters.
+- The "description" field MUST accurately describe what the criteria actually measure.
+- Only use indicatorId values from the indicator library provided above.
+
+Each criterion follows this structure:
+{
+  "indicatorId": "The indicator ID from the library",
+  "label": "Human readable label",
+  "inverted": false,
+  "timeframeOverride": "daily or omit",
+  "params": [
+    {
+      "name": "param name matching the indicator",
+      "label": "param label",
+      "type": "number|select|boolean",
+      "value": "the value to use"
+    }
+  ]
+}`;
+
+      const openai = getOpenAI();
+      if (!openai) {
+        return res.status(500).json({ error: "AI service not configured." });
+      }
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: instruction },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+      });
+
+      const content = completion.choices[0]?.message?.content;
+      if (!content) {
+        return res.status(500).json({ error: "AI returned empty response" });
+      }
+
+      const parsed = JSON.parse(content);
+      res.json(parsed);
+    } catch (error: any) {
+      console.error("[BigIdea AI] Error restating thought:", error?.message || error);
+      if (error?.status === 429) {
+        return res.status(429).json({ error: "AI rate limit reached. Please wait a moment and try again." });
+      }
+      res.status(500).json({ error: "Failed to restate thought. " + (error?.message || "") });
+    }
+  });
+
   app.post("/api/bigidea/scan", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;

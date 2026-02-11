@@ -685,20 +685,45 @@ export default function BigIdeaPage() {
 
   const restateMutation = useMutation({
     mutationFn: async ({ nodeId, description }: { nodeId: string; description: string }) => {
-      const aiRes = await apiRequest("POST", "/api/bigidea/ai/create-thought", { description });
-      const aiData = await aiRes.json();
       const node = nodes.find(n => n.id === nodeId);
+      const currentCriteria = node?.data?.criteria as ScannerCriterion[] | undefined;
+      const currentName = node?.data?.label as string | undefined;
+      const currentDescription = node?.data?.description as string | undefined;
+
+      const aiRes = await apiRequest("POST", "/api/bigidea/ai/restate-thought", {
+        instruction: description,
+        currentCriteria: currentCriteria || [],
+        currentName: currentName || "",
+        currentDescription: currentDescription || "",
+      });
+      const aiData = await aiRes.json();
+
+      const enrichedCriteria = (aiData.criteria || []).map((c: ScannerCriterion) => {
+        const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+        if (!indMeta) return c;
+        return {
+          ...c,
+          params: c.params.map((p: any) => {
+            const metaParam = indMeta.params.find((mp) => mp.name === p.name);
+            if (metaParam?.autoLink) {
+              return { ...p, autoLink: metaParam.autoLink, autoLinked: p.autoLinked !== false };
+            }
+            return p;
+          }),
+        };
+      });
+
       const thoughtId = node?.data?.thoughtId as number | undefined;
       if (thoughtId) {
         await apiRequest("PATCH", `/api/bigidea/thoughts/${thoughtId}`, {
           name: aiData.name,
           category: aiData.category,
           description: aiData.description,
-          criteria: aiData.criteria,
+          criteria: enrichedCriteria,
           aiPrompt: description,
         });
       }
-      return { nodeId, aiData, thoughtId };
+      return { nodeId, aiData: { ...aiData, criteria: enrichedCriteria }, thoughtId };
     },
     onSuccess: ({ nodeId, aiData }, variables) => {
       setNodes(prev => prev.map(n => {
@@ -707,7 +732,7 @@ export default function BigIdeaPage() {
           ...n,
           data: {
             ...n.data,
-            label: aiData.name,
+            label: n.data.userRenamed ? n.data.label : aiData.name,
             category: aiData.category,
             description: aiData.description,
             criteria: aiData.criteria,
@@ -718,7 +743,7 @@ export default function BigIdeaPage() {
       setRestateNodeId(null);
       setRestateText("");
       queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
-      toast({ title: "Thought restated" });
+      toast({ title: "Thought updated" });
     },
     onError: (err: Error) => {
       toast({ title: "Restate failed", description: err.message, variant: "destructive" });
