@@ -17,6 +17,18 @@ export const stockDataCache = pgTable("stock_data_cache", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Cache FMP fundamentals data to minimize API calls (250/day free tier limit)
+export const fundamentalsCache = pgTable("fundamentals_cache", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull().unique(),
+  sector: text("sector").notNull(),
+  industry: text("industry").notNull(),
+  marketCap: doublePrecision("market_cap"),
+  companyName: text("company_name"),
+  exchange: text("exchange"),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+});
+
 // Saved scans/screens (supports multi-user via userId for future expansion)
 export const savedScans = pgTable("saved_scans", {
   id: serial("id").primaryKey(),

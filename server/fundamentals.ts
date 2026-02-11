@@ -1,4 +1,7 @@
 import { findSectorForSymbol as localLookup, STOCKS_BY_SECTOR } from "@shared/stocksBySector";
+import { db } from "./db";
+import { fundamentalsCache } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const FMP_API_KEY = process.env.FMP_API_KEY;
 const FMP_BASE = "https://financialmodelingprep.com/stable";
@@ -7,9 +10,10 @@ export interface FundamentalData {
   sector: string;
   industry: string;
   marketCap: number;
+  companyName?: string;
+  exchange?: string;
 }
 
-const cache = new Map<string, { data: FundamentalData; expires: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 const pendingRequests = new Map<string, Promise<FundamentalData | null>>();
 
@@ -31,10 +35,64 @@ async function fetchFromFMP(symbol: string): Promise<FundamentalData | null> {
       sector: profile.sector || 'Unknown',
       industry: profile.industry || 'Unknown',
       marketCap: profile.marketCap || 0,
+      companyName: profile.companyName || undefined,
+      exchange: profile.exchangeShortName || undefined,
     };
   } catch (err) {
     console.error(`[FMP] Failed to fetch fundamentals for ${symbol}:`, err);
     return null;
+  }
+}
+
+async function getFromDbCache(symbol: string): Promise<FundamentalData | null> {
+  if (!db) return null;
+  try {
+    const rows = await db.select().from(fundamentalsCache).where(eq(fundamentalsCache.symbol, symbol)).limit(1);
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
+    const age = Date.now() - new Date(row.fetchedAt).getTime();
+    if (age > CACHE_TTL) return null;
+
+    return {
+      sector: row.sector,
+      industry: row.industry,
+      marketCap: row.marketCap || 0,
+      companyName: row.companyName || undefined,
+      exchange: row.exchange || undefined,
+    };
+  } catch (err) {
+    console.error(`[Fundamentals] DB cache read error for ${symbol}:`, err);
+    return null;
+  }
+}
+
+async function saveToDbCache(symbol: string, data: FundamentalData): Promise<void> {
+  if (!db) return;
+  try {
+    await db.insert(fundamentalsCache)
+      .values({
+        symbol,
+        sector: data.sector,
+        industry: data.industry,
+        marketCap: data.marketCap || null,
+        companyName: data.companyName || null,
+        exchange: data.exchange || null,
+        fetchedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: fundamentalsCache.symbol,
+        set: {
+          sector: data.sector,
+          industry: data.industry,
+          marketCap: data.marketCap || null,
+          companyName: data.companyName || null,
+          exchange: data.exchange || null,
+          fetchedAt: new Date(),
+        },
+      });
+  } catch (err) {
+    console.error(`[Fundamentals] DB cache write error for ${symbol}:`, err);
   }
 }
 
@@ -51,9 +109,9 @@ export async function getFundamentals(symbol: string): Promise<FundamentalData> 
     };
   }
 
-  const cached = cache.get(upper);
-  if (cached && cached.expires > Date.now()) {
-    return cached.data;
+  const dbCached = await getFromDbCache(upper);
+  if (dbCached) {
+    return dbCached;
   }
 
   let pending = pendingRequests.get(upper);
@@ -65,7 +123,11 @@ export async function getFundamentals(symbol: string): Promise<FundamentalData> 
   try {
     const result = await pending;
     const data = result || { sector: 'Unknown', industry: 'Unknown', marketCap: 0 };
-    cache.set(upper, { data, expires: Date.now() + CACHE_TTL });
+
+    if (result) {
+      saveToDbCache(upper, data);
+    }
+
     return data;
   } finally {
     pendingRequests.delete(upper);
