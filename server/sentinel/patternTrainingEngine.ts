@@ -379,9 +379,9 @@ export async function fetchChartData(
   lookbackDays?: number
 ): Promise<ChartDataWithIndicators | null> {
   try {
-    const intradayLookback: Record<string, number> = { "5min": 60, "15min": 60, "30min": 60 };
+    const intradayLookback: Record<string, number> = { "5min": 90, "15min": 180, "30min": 180 };
     const isIntraday = timeframe !== "daily";
-    const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 60) : 750);
+    const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 90) : 750);
     const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
     const interval = intervalMap[timeframe] || "1d";
     
@@ -450,9 +450,9 @@ export async function calculatePointTechnicals(
   timeframe: string = "daily"
 ): Promise<{ technicals: PointTechnicalData; ohlcv: { open: number; high: number; low: number; close: number; volume: number } } | null> {
   try {
-    const intradayLookback: Record<string, number> = { "5min": 60, "15min": 60, "30min": 60 };
+    const intradayLookback: Record<string, number> = { "5min": 90, "15min": 180, "30min": 180 };
     const isIntraday = timeframe !== "daily";
-    const days = isIntraday ? (intradayLookback[timeframe] || 60) : 400;
+    const days = isIntraday ? (intradayLookback[timeframe] || 90) : 400;
     const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
     const interval = intervalMap[timeframe] || "1d";
     const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval);
