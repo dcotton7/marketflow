@@ -4,26 +4,7 @@ import { scannerThoughts, scannerIdeas, scannerFavorites } from "@shared/schema"
 import { eq, and } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData } from "./indicators";
 import OpenAI from "openai";
-
-let yahooFinance: any = null;
-async function getYahooFinance() {
-  if (yahooFinance) return yahooFinance;
-  try {
-    const YahooFinanceModule = await import("yahoo-finance2") as any;
-    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-    if (typeof YahooFinance === "function") {
-      yahooFinance = new YahooFinance({ suppressNotices: ["yahooSurvey", "ripHistorical"] });
-    } else if (YahooFinance.default && typeof YahooFinance.default === "function") {
-      yahooFinance = new YahooFinance.default({ suppressNotices: ["yahooSurvey", "ripHistorical"] });
-    } else {
-      yahooFinance = YahooFinance;
-    }
-    return yahooFinance;
-  } catch (error) {
-    console.error("Failed to initialize YahooFinance:", error);
-    throw error;
-  }
-}
+import * as tiingo from "../tiingo";
 
 function getOpenAI(): OpenAI | null {
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
@@ -125,23 +106,16 @@ async function fetchOHLCV(symbol: string, timeframe: string = "daily"): Promise<
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - lookbackDays);
 
-    const yf = await getYahooFinance();
-    const result = await yf.chart(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval,
-    });
+    const bars = await tiingo.getHistoricalBars(symbol, startDate, endDate, interval);
 
-    const isIntraday = timeframe !== "daily";
-    const candles: CandleData[] = ((result as any).quotes || [])
-      .filter((q: any) => q.open != null && q.high != null && q.low != null && q.close != null)
-      .map((q: any) => ({
-        date: isIntraday ? new Date(q.date).toISOString() : new Date(q.date).toISOString().split("T")[0],
-        open: q.open,
-        high: q.high,
-        low: q.low,
-        close: q.close,
-        volume: q.volume || 0,
+    const candles: CandleData[] = bars
+      .map((b) => ({
+        date: b.date,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume || 0,
       }))
       .reverse();
 

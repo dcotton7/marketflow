@@ -1,23 +1,9 @@
-let yahooFinance: any = null;
+import * as tiingo from "../tiingo";
+import { STOCKS_BY_SECTOR, findSectorForSymbol as _findSectorShared } from "@shared/stocksBySector";
 
-async function getYahooFinance() {
-  if (yahooFinance) return yahooFinance;
-  
-  try {
-    const YahooFinanceModule = await import('yahoo-finance2') as any;
-    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-    if (typeof YahooFinance === 'function') {
-      yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-    } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-      yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-    } else {
-      yahooFinance = YahooFinance;
-    }
-    return yahooFinance;
-  } catch (error) {
-    console.error("Failed to initialize YahooFinance:", error);
-    throw error;
-  }
+function findSectorForSymbol(symbol: string): string | null {
+  const result = _findSectorShared(symbol);
+  return result ? result.sector : null;
 }
 
 export interface InstrumentTrend {
@@ -75,7 +61,7 @@ export interface MarketSentiment {
   updatedAt: Date;
 }
 
-const RISK_BASKET = ["QQQ", "IWO", "SLY", "ARKK", "^VIX"];
+const RISK_BASKET = ["QQQ", "IWO", "SLY", "ARKK", "VIXY"];
 
 const SECTOR_ETF_MAP: Record<string, { etf: string; name: string }> = {
   "Technology": { etf: "XLK", name: "Technology" },
@@ -116,18 +102,14 @@ function calculateSlope(prices: number[], period: number): "rising" | "falling" 
 
 async function fetchHistoricalPrices(symbol: string, days: number): Promise<number[]> {
   try {
-    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10);
 
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    }) as Array<{ close: number }>;
-
-    return result.map((d: { close: number }) => d.close).reverse();
+    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate);
+    
+    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    return result.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch ${symbol}:`, error);
     return [];
@@ -136,18 +118,14 @@ async function fetchHistoricalPrices(symbol: string, days: number): Promise<numb
 
 async function fetchWeeklyPrices(symbol: string, weeks: number): Promise<number[]> {
   try {
-    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - weeks * 7 - 30);
 
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1wk",
-    }) as Array<{ close: number }>;
-
-    return result.map((d: { close: number }) => d.close).reverse();
+    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate, "weekly");
+    
+    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    return result.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch weekly ${symbol}:`, error);
     return [];
@@ -162,17 +140,13 @@ interface OHLCCandle {
 
 async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[]> {
   try {
-    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10);
 
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    }) as Array<{ high: number; low: number; close: number }>;
-
+    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate);
+    
+    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
     return result.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
   } catch (error) {
     console.error(`Failed to fetch OHLC for ${symbol}:`, error);
@@ -182,17 +156,13 @@ async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[
 
 async function fetchWeeklyOHLC(symbol: string, weeks: number): Promise<OHLCCandle[]> {
   try {
-    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - weeks * 7 - 30);
 
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1wk",
-    }) as Array<{ high: number; low: number; close: number }>;
-
+    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate, "weekly");
+    
+    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
     return result.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
   } catch (error) {
     console.error(`Failed to fetch weekly OHLC for ${symbol}:`, error);
@@ -289,7 +259,7 @@ function classifyInstrument(
   ma20: number,
   ma20Slope: "rising" | "falling" | "flat"
 ): InstrumentTrend {
-  const isVix = symbol === "^VIX";
+  const isVix = symbol === "VIXY";
   let trend: 1 | 0 | -1;
 
   if (isVix) {
@@ -316,7 +286,7 @@ function classifyInstrument(
 function classifyDailyBasket(instruments: Record<string, InstrumentTrend>): DailyBasket {
   const equityETFs = ["QQQ", "IWO", "SLY", "ARKK"];
   const qqq = instruments["QQQ"];
-  const vix = instruments["^VIX"];
+  const vix = instruments["VIXY"];
 
   const riskOnCount = equityETFs.filter((s) => instruments[s]?.trend === 1).length;
   const riskOffCount = equityETFs.filter((s) => instruments[s]?.trend === -1).length;
@@ -474,21 +444,15 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
 
 export async function fetchSectorSentiment(symbol: string): Promise<SectorTrend | null> {
   try {
-    const yf = await getYahooFinance();
-    const quote = await yf.quoteSummary(symbol, { modules: ["assetProfile"] }) as { assetProfile?: { sector?: string } };
-    const sector = quote.assetProfile?.sector;
+    // Use local STOCKS_BY_SECTOR to find sector
+    const sector = findSectorForSymbol(symbol);
 
     if (!sector || !SECTOR_ETF_MAP[sector]) {
-      const fallbackSector = Object.keys(SECTOR_ETF_MAP).find((s) =>
-        sector?.toLowerCase().includes(s.toLowerCase())
-      );
-      if (!fallbackSector) {
-        console.log(`No sector mapping for ${symbol} (sector: ${sector})`);
-        return null;
-      }
+      console.log(`No sector mapping for ${symbol} (sector: ${sector})`);
+      return null;
     }
 
-    const sectorInfo = SECTOR_ETF_MAP[sector!] || SECTOR_ETF_MAP["Technology"];
+    const sectorInfo = SECTOR_ETF_MAP[sector] || SECTOR_ETF_MAP["Technology"];
     const etfSymbol = sectorInfo.etf;
 
     const prices = await fetchHistoricalPrices(etfSymbol, 250);
@@ -549,21 +513,15 @@ export function getSentimentCacheAge(): number {
 // Fetch historical prices ending on a specific date
 async function fetchHistoricalPricesAsOf(symbol: string, endDate: Date, days: number): Promise<number[]> {
   try {
-    const yf = await getYahooFinance();
     const end = new Date(endDate);
     end.setDate(end.getDate() + 1); // Include the target date
     const start = new Date(endDate);
     start.setDate(start.getDate() - days - 10);
 
-    const result = await yf.historical(symbol, {
-      period1: start,
-      period2: end,
-      interval: "1d",
-    }) as Array<{ date: Date; close: number }>;
-
-    // Sort by date descending (most recent first relative to endDate)
-    const sorted = result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return sorted.map((d) => d.close);
+    const result = await tiingo.fetchEODPrices(symbol, start, end);
+    
+    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    return result.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch historical ${symbol} as of ${endDate}:`, error);
     return [];
@@ -573,23 +531,15 @@ async function fetchHistoricalPricesAsOf(symbol: string, endDate: Date, days: nu
 // Fetch weekly prices ending on a specific date
 async function fetchWeeklyPricesAsOf(symbol: string, endDate: Date, weeks: number): Promise<number[]> {
   try {
-    const yf = await getYahooFinance();
     const end = new Date(endDate);
     end.setDate(end.getDate() + 7); // Buffer to include the week
     const start = new Date(endDate);
     start.setDate(start.getDate() - weeks * 7 - 30);
 
-    const result = await yf.historical(symbol, {
-      period1: start,
-      period2: end,
-      interval: "1wk",
-    }) as Array<{ date: Date; close: number }>;
-
-    // Filter to only weeks before or on the target date, then sort descending
-    const targetTime = endDate.getTime();
-    const filtered = result.filter(d => new Date(d.date).getTime() <= targetTime);
-    const sorted = filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return sorted.map((d) => d.close);
+    const result = await tiingo.fetchEODPrices(symbol, start, end, "weekly");
+    
+    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    return result.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch weekly historical ${symbol}:`, error);
     return [];
@@ -690,21 +640,15 @@ export async function fetchHistoricalMarketSentiment(targetDate: Date): Promise<
 // Fetch sector sentiment as of a historical date
 export async function fetchHistoricalSectorSentiment(symbol: string, targetDate: Date): Promise<SectorTrend | null> {
   try {
-    const yf = await getYahooFinance();
-    const quote = await yf.quoteSummary(symbol, { modules: ["assetProfile"] }) as { assetProfile?: { sector?: string } };
-    const sector = quote.assetProfile?.sector;
+    // Use local STOCKS_BY_SECTOR to find sector
+    const sector = findSectorForSymbol(symbol);
 
     if (!sector || !SECTOR_ETF_MAP[sector]) {
-      const fallbackSector = Object.keys(SECTOR_ETF_MAP).find((s) =>
-        sector?.toLowerCase().includes(s.toLowerCase())
-      );
-      if (!fallbackSector) {
-        console.log(`No sector mapping for ${symbol} (sector: ${sector})`);
-        return null;
-      }
+      console.log(`No sector mapping for ${symbol} (sector: ${sector})`);
+      return null;
     }
 
-    const sectorInfo = SECTOR_ETF_MAP[sector!] || SECTOR_ETF_MAP["Technology"];
+    const sectorInfo = SECTOR_ETF_MAP[sector] || SECTOR_ETF_MAP["Technology"];
     const etfSymbol = sectorInfo.etf;
 
     const prices = await fetchHistoricalPricesAsOf(etfSymbol, targetDate, 250);

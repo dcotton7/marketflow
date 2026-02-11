@@ -9,8 +9,7 @@ import { registerSentinelRoutes } from "./sentinel/routes";
 import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 import { registerBigIdeaRoutes } from "./bigidea/routes";
 
-// Dynamic import to handle ESM/CJS compatibility
-let yahooFinance: any = null;
+import * as tiingo from "./tiingo";
 
 // In-memory cache for stock history data (5 min TTL)
 interface CacheEntry {
@@ -33,116 +32,15 @@ function setCachedHistory(key: string, data: any): void {
   stockHistoryCache.set(key, { data, timestamp: Date.now() });
 }
 
-// Retry helper for Yahoo Finance calls
-async function fetchWithRetry<T>(
-  fn: () => Promise<T>,
-  retries = 3,
-  delay = 1000
-): Promise<T> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      return await fn();
-    } catch (error: any) {
-      const msg = error.message?.toLowerCase() || '';
-      const code = error.code || error.status || 0;
-      const isRetryable = 
-        msg.includes('too many requests') ||
-        msg.includes('429') ||
-        msg.includes('timeout') ||
-        msg.includes('econnreset') ||
-        msg.includes('socket hang up') ||
-        msg.includes('fetch failed') ||
-        code === 429 ||
-        code >= 500;
-      
-      if (attempt < retries - 1 && isRetryable) {
-        console.log(`[YahooFinance] Retry ${attempt + 1}/${retries} after ${delay * (attempt + 1)}ms`);
-        await new Promise(r => setTimeout(r, delay * (attempt + 1)));
-      } else {
-        throw error;
-      }
+// Reverse lookup: find sector/industry for a symbol from pre-computed data
+function lookupSectorIndustry(symbol: string): { sector: string; industry: string } {
+  for (const [sector, stocks] of Object.entries(STOCKS_BY_SECTOR)) {
+    const match = stocks.find(s => s.symbol === symbol);
+    if (match) {
+      return { sector, industry: match.industry };
     }
   }
-  throw new Error('Max retries exceeded');
-}
-
-async function getYahooFinance() {
-  if (!yahooFinance) {
-    try {
-      const YahooFinanceModule = await import('yahoo-finance2');
-      const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-      if (typeof YahooFinance === 'function') {
-        yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-      } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-        yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-      } else {
-        yahooFinance = YahooFinance;
-      }
-      console.log("Yahoo Finance initialized successfully");
-    } catch (error) {
-      console.error("Failed to initialize Yahoo Finance:", error);
-      throw error;
-    }
-  }
-  return yahooFinance;
-}
-
-// Helper to calculate date for period
-function getPeriodStartDate(period: string): Date {
-  const now = new Date();
-  switch (period) {
-    case '59d':
-      return new Date(now.setDate(now.getDate() - 59));
-    case '1mo':
-      return new Date(now.setMonth(now.getMonth() - 1));
-    case '2mo':
-      return new Date(now.setMonth(now.getMonth() - 2));
-    case '3mo':
-      return new Date(now.setMonth(now.getMonth() - 3));
-    case '6mo':
-      return new Date(now.setMonth(now.getMonth() - 6));
-    case '1y':
-      return new Date(now.setFullYear(now.getFullYear() - 1));
-    case '2y':
-      return new Date(now.setFullYear(now.getFullYear() - 2));
-    case '3y':
-      return new Date(now.setFullYear(now.getFullYear() - 3));
-    case '5y':
-      return new Date(now.setFullYear(now.getFullYear() - 5));
-    default:
-      // Default to 3 years for SMA 200 to have continuous line
-      return new Date(now.setFullYear(now.getFullYear() - 3));
-  }
-}
-
-// Helper to get chart data (historical data)
-async function getChartData(yf: any, symbol: string, period: string = '1y', interval: string = '1d'): Promise<Candle[]> {
-  const startDate = getPeriodStartDate(period);
-  const result = await yf.chart(symbol, { period1: startDate, period2: new Date(), interval });
-  if (!result.quotes || result.quotes.length === 0) {
-    return [];
-  }
-  const isIntraday = interval.includes('m');
-  return result.quotes
-    .filter((item: any) => {
-      if (item.open == null || item.close == null) return false;
-      if (isIntraday) {
-        const d = new Date(item.date);
-        const etStr = d.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" });
-        const [etH, etM] = etStr.split(":").map(Number);
-        const totalMin = etH * 60 + etM;
-        if (totalMin < 570 || totalMin >= 960) return false;
-      }
-      return true;
-    })
-    .map((item: any) => ({
-      date: isIntraday ? new Date(item.date).toISOString() : new Date(item.date).toISOString().split('T')[0],
-      open: item.open,
-      high: item.high,
-      low: item.low,
-      close: item.close,
-      volume: item.volume || 0,
-    }));
+  return { sector: 'Unknown', industry: 'Unknown' };
 }
 
 // Stock index lists
@@ -291,127 +189,7 @@ const SECTOR_ETFS: Record<string, string[]> = {
 };
 
 // Pre-computed stocks by sector with market caps (in billions, approximate)
-const STOCKS_BY_SECTOR: Record<string, { symbol: string; name: string; industry: string; marketCap: number }[]> = {
-  'Technology': [
-    { symbol: 'AAPL', name: 'Apple Inc.', industry: 'Consumer Electronics', marketCap: 3000e9 },
-    { symbol: 'MSFT', name: 'Microsoft Corporation', industry: 'Software', marketCap: 2800e9 },
-    { symbol: 'NVDA', name: 'NVIDIA Corporation', industry: 'Semiconductors', marketCap: 1200e9 },
-    { symbol: 'GOOGL', name: 'Alphabet Inc.', industry: 'Internet Services', marketCap: 1800e9 },
-    { symbol: 'META', name: 'Meta Platforms', industry: 'Internet Services', marketCap: 900e9 },
-    { symbol: 'AVGO', name: 'Broadcom Inc.', industry: 'Semiconductors', marketCap: 350e9 },
-    { symbol: 'ORCL', name: 'Oracle Corporation', industry: 'Software', marketCap: 320e9 },
-    { symbol: 'CRM', name: 'Salesforce Inc.', industry: 'Software', marketCap: 250e9 },
-    { symbol: 'AMD', name: 'Advanced Micro Devices', industry: 'Semiconductors', marketCap: 200e9 },
-    { symbol: 'CSCO', name: 'Cisco Systems', industry: 'Networking', marketCap: 200e9 },
-    { symbol: 'ADBE', name: 'Adobe Inc.', industry: 'Software', marketCap: 240e9 },
-    { symbol: 'INTC', name: 'Intel Corporation', industry: 'Semiconductors', marketCap: 150e9 },
-    { symbol: 'IBM', name: 'IBM', industry: 'IT Services', marketCap: 150e9 },
-    { symbol: 'TXN', name: 'Texas Instruments', industry: 'Semiconductors', marketCap: 160e9 },
-    { symbol: 'QCOM', name: 'Qualcomm Inc.', industry: 'Semiconductors', marketCap: 170e9 },
-    { symbol: 'MU', name: 'Micron Technology', industry: 'Semiconductors', marketCap: 90e9 },
-    { symbol: 'LRCX', name: 'Lam Research', industry: 'Semiconductor Equipment', marketCap: 100e9 },
-  ],
-  'Healthcare': [
-    { symbol: 'UNH', name: 'UnitedHealth Group', industry: 'Health Insurance', marketCap: 500e9 },
-    { symbol: 'JNJ', name: 'Johnson & Johnson', industry: 'Pharmaceuticals', marketCap: 400e9 },
-    { symbol: 'LLY', name: 'Eli Lilly', industry: 'Pharmaceuticals', marketCap: 550e9 },
-    { symbol: 'PFE', name: 'Pfizer Inc.', industry: 'Pharmaceuticals', marketCap: 160e9 },
-    { symbol: 'ABBV', name: 'AbbVie Inc.', industry: 'Pharmaceuticals', marketCap: 280e9 },
-    { symbol: 'MRK', name: 'Merck & Co.', industry: 'Pharmaceuticals', marketCap: 280e9 },
-    { symbol: 'TMO', name: 'Thermo Fisher Scientific', industry: 'Life Sciences', marketCap: 210e9 },
-    { symbol: 'ABT', name: 'Abbott Laboratories', industry: 'Medical Devices', marketCap: 190e9 },
-    { symbol: 'DHR', name: 'Danaher Corporation', industry: 'Life Sciences', marketCap: 180e9 },
-    { symbol: 'BMY', name: 'Bristol-Myers Squibb', industry: 'Pharmaceuticals', marketCap: 120e9 },
-    { symbol: 'AMGN', name: 'Amgen Inc.', industry: 'Biotechnology', marketCap: 150e9 },
-    { symbol: 'GILD', name: 'Gilead Sciences', industry: 'Biotechnology', marketCap: 100e9 },
-    { symbol: 'MDT', name: 'Medtronic', industry: 'Medical Devices', marketCap: 110e9 },
-    { symbol: 'BSX', name: 'Boston Scientific', industry: 'Medical Devices', marketCap: 90e9 },
-    { symbol: 'BDX', name: 'Becton Dickinson', industry: 'Medical Devices', marketCap: 70e9 },
-  ],
-  'Financial Services': [
-    { symbol: 'BRK.B', name: 'Berkshire Hathaway', industry: 'Diversified', marketCap: 800e9 },
-    { symbol: 'JPM', name: 'JPMorgan Chase', industry: 'Banking', marketCap: 500e9 },
-    { symbol: 'V', name: 'Visa Inc.', industry: 'Payment Processing', marketCap: 500e9 },
-    { symbol: 'MA', name: 'Mastercard', industry: 'Payment Processing', marketCap: 400e9 },
-    { symbol: 'BAC', name: 'Bank of America', industry: 'Banking', marketCap: 280e9 },
-    { symbol: 'WFC', name: 'Wells Fargo', industry: 'Banking', marketCap: 180e9 },
-    { symbol: 'GS', name: 'Goldman Sachs', industry: 'Investment Banking', marketCap: 140e9 },
-    { symbol: 'MS', name: 'Morgan Stanley', industry: 'Investment Banking', marketCap: 150e9 },
-    { symbol: 'SPGI', name: 'S&P Global', industry: 'Financial Data', marketCap: 130e9 },
-    { symbol: 'BLK', name: 'BlackRock', industry: 'Asset Management', marketCap: 120e9 },
-    { symbol: 'AXP', name: 'American Express', industry: 'Credit Services', marketCap: 170e9 },
-    { symbol: 'C', name: 'Citigroup', industry: 'Banking', marketCap: 100e9 },
-    { symbol: 'CME', name: 'CME Group', industry: 'Exchanges', marketCap: 80e9 },
-    { symbol: 'ICE', name: 'Intercontinental Exchange', industry: 'Exchanges', marketCap: 70e9 },
-    { symbol: 'PNC', name: 'PNC Financial', industry: 'Banking', marketCap: 65e9 },
-    { symbol: 'USB', name: 'US Bancorp', industry: 'Banking', marketCap: 60e9 },
-  ],
-  'Consumer Cyclical': [
-    { symbol: 'AMZN', name: 'Amazon.com', industry: 'E-Commerce', marketCap: 1500e9 },
-    { symbol: 'TSLA', name: 'Tesla Inc.', industry: 'Auto Manufacturers', marketCap: 700e9 },
-    { symbol: 'HD', name: 'Home Depot', industry: 'Home Improvement', marketCap: 350e9 },
-    { symbol: 'MCD', name: "McDonald's", industry: 'Restaurants', marketCap: 210e9 },
-    { symbol: 'NKE', name: 'Nike Inc.', industry: 'Footwear', marketCap: 140e9 },
-    { symbol: 'SBUX', name: 'Starbucks', industry: 'Restaurants', marketCap: 110e9 },
-    { symbol: 'LOW', name: "Lowe's", industry: 'Home Improvement', marketCap: 140e9 },
-    { symbol: 'TJX', name: 'TJX Companies', industry: 'Retail', marketCap: 110e9 },
-    { symbol: 'BKNG', name: 'Booking Holdings', industry: 'Travel', marketCap: 130e9 },
-  ],
-  'Consumer Defensive': [
-    { symbol: 'WMT', name: 'Walmart Inc.', industry: 'Discount Stores', marketCap: 420e9 },
-    { symbol: 'PG', name: 'Procter & Gamble', industry: 'Consumer Products', marketCap: 380e9 },
-    { symbol: 'COST', name: 'Costco Wholesale', industry: 'Warehouse Clubs', marketCap: 300e9 },
-    { symbol: 'KO', name: 'Coca-Cola', industry: 'Beverages', marketCap: 270e9 },
-    { symbol: 'PEP', name: 'PepsiCo', industry: 'Beverages', marketCap: 240e9 },
-    { symbol: 'PM', name: 'Philip Morris', industry: 'Tobacco', marketCap: 150e9 },
-    { symbol: 'MO', name: 'Altria Group', industry: 'Tobacco', marketCap: 80e9 },
-    { symbol: 'CL', name: 'Colgate-Palmolive', industry: 'Consumer Products', marketCap: 75e9 },
-  ],
-  'Energy': [
-    { symbol: 'XOM', name: 'Exxon Mobil', industry: 'Oil & Gas', marketCap: 450e9 },
-    { symbol: 'CVX', name: 'Chevron', industry: 'Oil & Gas', marketCap: 280e9 },
-    { symbol: 'COP', name: 'ConocoPhillips', industry: 'Oil & Gas', marketCap: 130e9 },
-    { symbol: 'EOG', name: 'EOG Resources', industry: 'Oil & Gas', marketCap: 70e9 },
-  ],
-  'Industrials': [
-    { symbol: 'CAT', name: 'Caterpillar', industry: 'Heavy Machinery', marketCap: 170e9 },
-    { symbol: 'RTX', name: 'RTX Corporation', industry: 'Aerospace & Defense', marketCap: 150e9 },
-    { symbol: 'HON', name: 'Honeywell', industry: 'Aerospace & Defense', marketCap: 140e9 },
-    { symbol: 'UNP', name: 'Union Pacific', industry: 'Railroads', marketCap: 150e9 },
-    { symbol: 'BA', name: 'Boeing', industry: 'Aerospace & Defense', marketCap: 130e9 },
-    { symbol: 'UPS', name: 'United Parcel Service', industry: 'Shipping', marketCap: 120e9 },
-    { symbol: 'DE', name: 'Deere & Company', industry: 'Farm Machinery', marketCap: 120e9 },
-    { symbol: 'LMT', name: 'Lockheed Martin', industry: 'Aerospace & Defense', marketCap: 120e9 },
-    { symbol: 'GE', name: 'General Electric', industry: 'Aerospace & Defense', marketCap: 170e9 },
-    { symbol: 'MMM', name: '3M Company', industry: 'Conglomerate', marketCap: 60e9 },
-    { symbol: 'NSC', name: 'Norfolk Southern', industry: 'Railroads', marketCap: 55e9 },
-    { symbol: 'NOC', name: 'Northrop Grumman', industry: 'Aerospace & Defense', marketCap: 75e9 },
-    { symbol: 'GD', name: 'General Dynamics', industry: 'Aerospace & Defense', marketCap: 80e9 },
-    { symbol: 'TDG', name: 'TransDigm Group', industry: 'Aerospace & Defense', marketCap: 65e9 },
-    { symbol: 'HII', name: 'Huntington Ingalls', industry: 'Aerospace & Defense', marketCap: 12e9 },
-    { symbol: 'LHX', name: 'L3Harris Technologies', industry: 'Aerospace & Defense', marketCap: 45e9 },
-    { symbol: 'TXT', name: 'Textron Inc.', industry: 'Aerospace & Defense', marketCap: 18e9 },
-  ],
-  'Communication Services': [
-    { symbol: 'GOOG', name: 'Alphabet Inc.', industry: 'Internet Services', marketCap: 1800e9 },
-    { symbol: 'DIS', name: 'Walt Disney', industry: 'Entertainment', marketCap: 200e9 },
-    { symbol: 'NFLX', name: 'Netflix', industry: 'Streaming', marketCap: 250e9 },
-    { symbol: 'CMCSA', name: 'Comcast', industry: 'Cable', marketCap: 160e9 },
-    { symbol: 'VZ', name: 'Verizon', industry: 'Telecom', marketCap: 170e9 },
-    { symbol: 'T', name: 'AT&T', industry: 'Telecom', marketCap: 140e9 },
-    { symbol: 'TMUS', name: 'T-Mobile', industry: 'Telecom', marketCap: 200e9 },
-  ],
-  'Utilities': [
-    { symbol: 'NEE', name: 'NextEra Energy', industry: 'Utilities', marketCap: 150e9 },
-    { symbol: 'DUK', name: 'Duke Energy', industry: 'Utilities', marketCap: 80e9 },
-    { symbol: 'SO', name: 'Southern Company', industry: 'Utilities', marketCap: 85e9 },
-  ],
-  'Real Estate': [
-    { symbol: 'AMT', name: 'American Tower', industry: 'REITs', marketCap: 100e9 },
-    { symbol: 'PLD', name: 'Prologis', industry: 'REITs', marketCap: 110e9 },
-    { symbol: 'EQIX', name: 'Equinix', industry: 'Data Centers', marketCap: 75e9 },
-  ],
-};
+import { STOCKS_BY_SECTOR, findSectorForSymbol } from "@shared/stocksBySector";
 
 // Pre-computed ETF holdings (top stocks by weight)
 const ETF_HOLDINGS: Record<string, { symbol: string; name: string; weight: number; marketCap: number }[]> = {
@@ -1300,27 +1078,17 @@ export async function registerRoutes(
     }
     
     try {
-      const yf = await getYahooFinance();
-      
-      // Use retry logic for Yahoo Finance calls
-      const history = await fetchWithRetry(
-        () => getChartData(yf, symbol, period, interval),
-        3,
-        1500
-      );
+      const history = await tiingo.getChartData(symbol, period, interval);
       
       if (history.length === 0) {
         res.status(404).json({ message: `No data available for ${symbol}` });
         return;
       }
       
-      // Cache successful response
       setCachedHistory(cacheKey, history);
       res.json(history);
     } catch (error: any) {
-      const isRateLimit = error.message?.includes('Too Many Requests') || 
-                          error.message?.includes('429') ||
-                          error.code === 429;
+      const isRateLimit = error.message?.includes('429');
       console.error(`Error fetching history for ${symbol}:`, error.message || error);
       
       if (isRateLimit) {
@@ -1335,83 +1103,38 @@ export async function registerRoutes(
   app.get(api.stocks.quote.path, async (req, res) => {
     const symbol = String(req.params.symbol);
     try {
-      const yf = await getYahooFinance();
-      const quote = await yf.quote(symbol);
-      
-      // Try to get more detailed info from quoteSummary for sector/industry
-      let sector = quote.sector || 'Unknown';
-      let industry = quote.industry || 'Unknown';
-      let description = quote.longBusinessSummary || '';
-      let earningsData: { quarterlyGrowthPct?: number; surprisePct?: number } | undefined;
-      
-      try {
-        const summary = await yf.quoteSummary(symbol, { modules: ['assetProfile', 'earnings', 'defaultKeyStatistics'] });
-        
-        if (summary.assetProfile) {
-          sector = summary.assetProfile.sector || sector;
-          industry = summary.assetProfile.industry || industry;
-          description = summary.assetProfile.longBusinessSummary || description;
-        }
-        
-        // Get earnings data from earnings module
-        if (summary.earnings?.earningsChart?.quarterly?.length > 0) {
-          const quarters = summary.earnings.earningsChart.quarterly;
-          const latestQ = quarters[quarters.length - 1];
-          if (latestQ) {
-            const actual = latestQ.actual?.raw ?? latestQ.actual;
-            const estimate = latestQ.estimate?.raw ?? latestQ.estimate;
-            if (actual !== undefined && estimate !== undefined && estimate !== 0) {
-              earningsData = {
-                quarterlyGrowthPct: undefined,
-                surprisePct: ((actual - estimate) / Math.abs(estimate)) * 100
-              };
-            }
-          }
-        }
-        
-        // Also check earningsQuarterlyGrowth
-        if (summary.defaultKeyStatistics?.earningsQuarterlyGrowth) {
-          const growth = summary.defaultKeyStatistics.earningsQuarterlyGrowth;
-          const growthValue = typeof growth === 'object' ? (growth as { raw?: number }).raw : growth;
-          if (growthValue !== undefined) {
-            earningsData = {
-              ...earningsData,
-              quarterlyGrowthPct: (growthValue as number) * 100
-            };
-          }
-        }
-      } catch (e) {
-        // quoteSummary failed, use basic quote data
-        console.log(`quoteSummary failed for ${symbol}, using basic quote`);
+      const [quote, meta] = await Promise.all([
+        tiingo.fetchCurrentQuote(symbol),
+        tiingo.fetchTickerMeta(symbol),
+      ]);
+
+      if (!quote) {
+        return res.status(404).json({ message: `Symbol ${symbol} not found` });
       }
-      
-      // Fallback earnings from basic quote
-      if (!earningsData && quote.earningsQuarterlyGrowth !== undefined) {
-        earningsData = {
-          quarterlyGrowthPct: quote.earningsQuarterlyGrowth * 100,
-          surprisePct: undefined
-        };
+
+      const price = quote.tngoLast || 0;
+      const prevClose = quote.prevClose || 0;
+      const change = prevClose ? price - prevClose : 0;
+      const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+
+      const { sector, industry } = lookupSectorIndustry(symbol.toUpperCase());
+      let description = meta?.description || '';
+      if (description) {
+        const sentences = description.match(/[^.!?]+[.!?]+/g) || [];
+        description = sentences.slice(0, 2).join(' ').trim();
       }
-      
-      // Get sector ETFs
+      if (!description) {
+        description = `${meta?.name || symbol} is a publicly traded company.`;
+      }
+
       const sectorETFs = SECTOR_ETFS[sector] || [];
-      
-      // Get related stocks - prioritize same industry (sub-sector) over sector
-      // First get all stocks from the sector
       const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
-      
-      // Filter for same industry first (e.g., Aerospace & Defense, not just Industrials)
       const sameIndustryStocks = sectorStocks
         .filter(s => s.symbol !== symbol && s.industry === industry)
         .sort((a, b) => b.marketCap - a.marketCap);
-      
-      // Get other sector stocks (different industry) as backup
       const otherSectorStocks = sectorStocks
         .filter(s => s.symbol !== symbol && s.industry !== industry)
         .sort((a, b) => b.marketCap - a.marketCap);
-      
-      // Combine: same industry first, then fill with other sector stocks
-      // Minimum 5, more if same industry is large
       const minCount = 5;
       const combined = [...sameIndustryStocks, ...otherSectorStocks];
       const relatedStocks = combined
@@ -1422,41 +1145,32 @@ export async function registerRoutes(
           description: s.industry,
           marketCap: s.marketCap,
         }));
-      
-      if (!description) {
-        description = `${quote.longName || quote.shortName || symbol} is a publicly traded company.`;
-      }
-      
-      // Check if this symbol is an ETF
-      const isETF = ETF_SYMBOLS.has(symbol.toUpperCase()) || 
-                    quote.quoteType === 'ETF' ||
-                    (quote.longName && quote.longName.toLowerCase().includes('etf'));
-      
-      // Get ETF holdings if this is an ETF
+
+      const isETF = ETF_SYMBOLS.has(symbol.toUpperCase());
       const etfHoldings = isETF ? (ETF_HOLDINGS[symbol.toUpperCase()] || []).map(h => ({
         symbol: h.symbol,
         name: h.name,
         weight: h.weight,
         marketCap: h.marketCap,
       })) : undefined;
-      
+
       res.json({
-        symbol: quote.symbol,
-        price: quote.regularMarketPrice,
-        change: quote.regularMarketChange,
-        changePercent: quote.regularMarketChangePercent,
-        volume: quote.regularMarketVolume,
-        companyName: quote.longName || quote.shortName,
-        marketCap: quote.marketCap,
-        peRatio: quote.trailingPE || quote.forwardPE,
-        sector: sector,
-        industry: industry,
-        description: description,
+        symbol: symbol.toUpperCase(),
+        price,
+        change: Math.round(change * 100) / 100,
+        changePercent: Math.round(changePercent * 100) / 100,
+        volume: quote.volume,
+        companyName: meta?.name || symbol,
+        marketCap: undefined,
+        peRatio: undefined,
+        sector,
+        industry,
+        description,
         sectorETFs,
         relatedStocks,
         isETF,
         etfHoldings,
-        earnings: earningsData,
+        earnings: undefined,
       });
     } catch (error) {
       console.error(`Error fetching quote for ${symbol}:`, error);
@@ -1467,11 +1181,9 @@ export async function registerRoutes(
   // --- Scanner ---
   app.post(api.scanner.run.path, async (req, res) => {
     try {
-      const yf = await getYahooFinance();
       const input = api.scanner.run.input.parse(req.body);
       const results = [];
 
-      // Get stock universe based on selected index
       let watchlistSymbols: string[] = [];
       if (input.scannerIndex === 'watchlist') {
         const watchlistItems = await storage.getWatchlist();
@@ -1479,7 +1191,6 @@ export async function registerRoutes(
       }
       const universe = getStocksByIndex(input.scannerIndex, watchlistSymbols);
       
-      // Debug log scan filters
       console.log('[Scanner] Running scan with filters:', {
         index: input.scannerIndex,
         chartPattern: input.chartPattern,
@@ -1494,22 +1205,22 @@ export async function registerRoutes(
 
       for (const symbol of universe) {
         try {
-          // Get quote for price/volume filter
-          const quote = await yf.quote(symbol);
+          const quote = await tiingo.fetchCurrentQuote(symbol);
+          if (!quote) continue;
           
-          // Filter by Price
-          if (input.minPrice && quote.regularMarketPrice < input.minPrice) {
-            console.log(`[Scanner] ${symbol} filtered: price ${quote.regularMarketPrice} < minPrice ${input.minPrice}`);
+          const price = quote.tngoLast || 0;
+          const volume = quote.volume || 0;
+          const prevClose = quote.prevClose || 0;
+          const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+          
+          if (input.minPrice && price < input.minPrice) {
             continue;
           }
-          if (input.maxPrice && quote.regularMarketPrice > input.maxPrice) {
-            console.log(`[Scanner] ${symbol} filtered: price ${quote.regularMarketPrice} > maxPrice ${input.maxPrice}`);
+          if (input.maxPrice && price > input.maxPrice) {
             continue;
           }
           
-          // Filter by Volume
-          if (input.minVolume && quote.regularMarketVolume < input.minVolume) {
-            console.log(`[Scanner] ${symbol} filtered: volume ${quote.regularMarketVolume} < minVolume ${input.minVolume}`);
+          if (input.minVolume && volume < input.minVolume) {
             continue;
           }
 
@@ -1528,22 +1239,19 @@ export async function registerRoutes(
           const needsHistory = hasChartFilter || hasTechnicalSignal || hasSMAFilter || hasProximityFilter;
           
           if (needsHistory) {
-            // Get history for pattern detection (1y for SMA 200)
             const period = (hasSMAFilter || hasProximityFilter) ? '1y' : '3mo';
-            const candles = await getChartData(yf, symbol, period);
+            const candles = await tiingo.getChartData(symbol, period);
             
             if (candles.length < 5) continue;
             
-            // Check SMA filter
             if (hasSMAFilter) {
-              if (!checkSMAFilter(candles, input.smaFilter!, quote.regularMarketPrice)) {
+              if (!checkSMAFilter(candles, input.smaFilter!, price)) {
                 continue;
               }
             }
             
-            // Check price proximity to 50d SMA
             if (hasProximityFilter) {
-              if (!checkPriceProximity(candles, quote.regularMarketPrice, input.priceWithin50dPct)) {
+              if (!checkPriceProximity(candles, price, input.priceWithin50dPct)) {
                 continue;
               }
             }
@@ -1617,10 +1325,10 @@ export async function registerRoutes(
           }
 
           results.push({
-            symbol: quote.symbol,
-            price: quote.regularMarketPrice,
-            changePercent: quote.regularMarketChangePercent,
-            volume: quote.regularMarketVolume,
+            symbol: symbol,
+            price,
+            changePercent: Math.round(changePercent * 100) / 100,
+            volume,
             matchedPattern,
             sector: 'Technology',
             channelHeightPct,
@@ -1643,14 +1351,13 @@ export async function registerRoutes(
   // --- Market Indicators ---
   app.get('/api/market/indicators', async (req, res) => {
     try {
-      const yf = await getYahooFinance();
       const symbols = [
         { symbol: 'SPY', label: 'S&P 500' },
         { symbol: 'QQQ', label: 'NASDAQ' },
         { symbol: 'DIA', label: 'Dow' },
         { symbol: 'IWM', label: 'Russell 2K' },
         { symbol: 'GLD', label: 'Gold' },
-        { symbol: '^VIX', label: 'VIX' },
+        { symbol: 'VIXY', label: 'VIX' },
         { symbol: 'RSP', label: 'S&P EW' },
         { symbol: 'QQQE', label: 'NDX EW' },
       ];
@@ -1658,21 +1365,20 @@ export async function registerRoutes(
       const results = await Promise.all(
         symbols.map(async ({ symbol, label }) => {
           try {
-            const quote = await yf.quote(symbol);
+            const quote = await tiingo.fetchCurrentQuote(symbol);
+            if (!quote) return { symbol, label, price: 0, changePercent: 0 };
+            const price = quote.tngoLast || 0;
+            const prevClose = quote.prevClose || 0;
+            const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
             return {
               symbol,
               label,
-              price: quote.regularMarketPrice || 0,
-              changePercent: quote.regularMarketChangePercent || 0,
+              price,
+              changePercent: Math.round(changePercent * 100) / 100,
             };
           } catch (error) {
             console.error(`Failed to fetch quote for ${symbol}:`, error);
-            return {
-              symbol,
-              label,
-              price: 0,
-              changePercent: 0,
-            };
+            return { symbol, label, price: 0, changePercent: 0 };
           }
         })
       );
@@ -1693,11 +1399,9 @@ export async function registerRoutes(
   // Watchlist quotes - get change percent for all watchlist symbols
   app.get('/api/watchlist/quotes', async (req, res) => {
     try {
-      const yf = await getYahooFinance();
       const symbols = (req.query.symbols as string || '').split(',').filter(Boolean);
       
       if (symbols.length === 0) {
-        // If no symbols provided, get from watchlist
         const watchlistItems = await storage.getWatchlist();
         symbols.push(...watchlistItems.map(item => item.symbol));
       }
@@ -1709,10 +1413,14 @@ export async function registerRoutes(
       const quotes = await Promise.all(
         symbols.map(async (symbol) => {
           try {
-            const quote = await yf.quote(symbol);
+            const quote = await tiingo.fetchCurrentQuote(symbol);
+            if (!quote) return { symbol, changePercent: 0 };
+            const prevClose = quote.prevClose || 0;
+            const price = quote.tngoLast || 0;
+            const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
             return {
               symbol,
-              changePercent: quote.regularMarketChangePercent || 0,
+              changePercent: Math.round(changePercent * 100) / 100,
             };
           } catch (err) {
             return { symbol, changePercent: 0 };

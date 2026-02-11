@@ -1,25 +1,5 @@
 import { getPeriodsForTimeframe } from "../../shared/indicatorTemplates";
-
-let yahooFinance: any = null;
-
-async function getYahooFinance() {
-  if (yahooFinance) return yahooFinance;
-  try {
-    const YahooFinanceModule = await import('yahoo-finance2') as any;
-    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-    if (typeof YahooFinance === 'function') {
-      yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-    } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-      yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-    } else {
-      yahooFinance = YahooFinance;
-    }
-    return yahooFinance;
-  } catch (error) {
-    console.error("Failed to initialize YahooFinance:", error);
-    throw error;
-  }
-}
+import * as tiingo from "../tiingo";
 
 export interface ChartCandle {
   date: string;
@@ -371,50 +351,22 @@ interface HistoricalBar {
 
 async function fetchHistoricalBars(symbol: string, days: number, interval: string = "1d"): Promise<HistoricalBar[]> {
   try {
-    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const isIntraday = ["1m", "2m", "5m", "15m", "30m", "60m", "90m"].includes(interval);
-
-    if (isIntraday) {
-      const chartResult = await yf.chart(symbol, {
-        period1: startDate,
-        period2: endDate,
-        interval,
-      });
-      const quotes = chartResult?.quotes || [];
-      return quotes
-        .filter((q: any) => {
-          if (q.open == null || q.high == null || q.low == null || q.close == null) return false;
-          const d = q.date instanceof Date ? q.date : new Date(q.date);
-          const etParts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" }).formatToParts(d);
-          let etH = parseInt(etParts.find((p: any) => p.type === "hour")?.value || "0", 10);
-          if (etH === 24) etH = 0;
-          const etM = parseInt(etParts.find((p: any) => p.type === "minute")?.value || "0", 10);
-          const totalMin = etH * 60 + etM;
-          if (totalMin < 570 || totalMin >= 960) return false;
-          return true;
-        })
-        .map((q: any) => ({
-          date: q.date instanceof Date ? q.date : new Date(q.date),
-          open: q.open,
-          high: q.high,
-          low: q.low,
-          close: q.close,
-          volume: q.volume || 0,
-        }))
-        .sort((a: HistoricalBar, b: HistoricalBar) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }
-
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval,
-    }) as HistoricalBar[];
-
-    return result.sort((a: HistoricalBar, b: HistoricalBar) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const candles = await tiingo.getHistoricalBars(symbol, startDate, endDate, interval);
+    
+    return candles
+      .map((c: tiingo.TiingoCandle) => ({
+        date: new Date(c.date),
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+      }))
+      .sort((a: HistoricalBar, b: HistoricalBar) => new Date(b.date).getTime() - new Date(a.date).getTime());
   } catch (error) {
     console.error(`Failed to fetch historical bars for ${symbol}:`, error);
     return [];

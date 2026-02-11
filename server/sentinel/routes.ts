@@ -18,6 +18,13 @@ import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./trade
 import { fetchChartData, calculatePointTechnicals, calculateFullSetupMetrics, findNearestMA, calculateRSvsSPY, calculateAnchoredVWAPValues, countResistanceTouches } from "./patternTrainingEngine";
 import { patternTrainingSetups, patternTrainingPoints, patternTrainingEvaluations } from "@shared/schema";
 import { evaluateSetup, getExistingEvaluation } from "./patternEvaluationEngine";
+import * as tiingo from "../tiingo";
+import { STOCKS_BY_SECTOR, findSectorForSymbol as _findSectorShared } from "@shared/stocksBySector";
+
+function findSectorForSymbol(symbol: string): { sector: string; industry: string } {
+  const result = _findSectorShared(symbol);
+  return result || { sector: 'Unknown', industry: 'Unknown' };
+}
 
 declare module "express-session" {
   interface SessionData {
@@ -2781,48 +2788,30 @@ Only group trades with 2+ members. Ungrouped trades can be suggested individuall
     }
 
     try {
-      // Dynamic import Yahoo Finance
-      const YahooFinanceModule = await import('yahoo-finance2') as any;
-      const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-      let yf: any;
-      if (typeof YahooFinance === 'function') {
-        yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-      } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-        yf = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-      } else {
-        yf = YahooFinance;
+      const [quote, meta] = await Promise.all([
+        tiingo.fetchCurrentQuote(symbol),
+        tiingo.fetchTickerMeta(symbol),
+      ]);
+
+      if (!quote) {
+        return res.status(404).json({ error: `Symbol ${symbol} not found` });
       }
 
-      const quote = await yf.quote(symbol);
-      
-      let sector = quote.sector || 'Unknown';
-      let industry = quote.industry || 'Unknown';
+      const sectorInfo = findSectorForSymbol(symbol);
+
       let description = '';
-      
-      // Try to get detailed info
-      try {
-        const summary = await yf.quoteSummary(symbol, { modules: ['assetProfile'] });
-        if (summary.assetProfile) {
-          sector = summary.assetProfile.sector || sector;
-          industry = summary.assetProfile.industry || industry;
-          description = summary.assetProfile.longBusinessSummary || '';
-          // Truncate description to first 2 sentences
-          if (description) {
-            const sentences = description.match(/[^.!?]+[.!?]+/g) || [];
-            description = sentences.slice(0, 2).join(' ').trim();
-          }
-        }
-      } catch (e) {
-        // Use basic quote data
+      if (meta?.description) {
+        const sentences = meta.description.match(/[^.!?]+[.!?]+/g) || [];
+        description = sentences.slice(0, 2).join(' ').trim();
       }
 
       res.json({
         symbol,
-        name: quote.shortName || quote.longName || symbol,
-        currentPrice: quote.regularMarketPrice,
-        previousClose: quote.regularMarketPreviousClose,
-        sector,
-        industry,
+        name: meta?.name || symbol,
+        currentPrice: quote.tngoLast,
+        previousClose: quote.prevClose,
+        sector: sectorInfo.sector,
+        industry: sectorInfo.industry,
         description
       });
     } catch (error) {
@@ -6602,17 +6591,6 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const timeframe = String(req.query.timeframe || "daily");
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
 
-      const YahooFinanceModule = await import('yahoo-finance2') as any;
-      const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-      let yf: any;
-      if (typeof YahooFinance === 'function') {
-        yf = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-      } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-        yf = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-      } else {
-        yf = YahooFinance;
-      }
-
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 400);
@@ -6627,7 +6605,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       };
 
       const isIntraday = timeframe === "5min" || timeframe === "15min" || timeframe === "30min";
-      const yfInterval = isIntraday
+      const tiingoInterval = isIntraday
         ? (timeframe === "5min" ? "5m" : timeframe === "15min" ? "15m" : "30m")
         : "1d";
       const intradayStart = new Date();
@@ -6636,18 +6614,18 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
 
       const [dailyQuotes, intradayQuotes, quoteData] = await Promise.all([
-        yf.chart(ticker, { period1: startDate, period2: endDate, interval: "1d" }).then((r: any) => r.quotes || []).catch(() => []),
+        tiingo.fetchEODPrices(ticker, startDate, endDate).catch(() => []),
         isIntraday
-          ? yf.chart(ticker, { period1: intradayStart, period2: endDate, interval: yfInterval }).then((r: any) => r.quotes || []).catch(() => [])
-          : Promise.resolve([]),
-        yf.quote(ticker).catch(() => null),
+          ? tiingo.getHistoricalBars(ticker, intradayStart, endDate, tiingoInterval).catch(() => [])
+          : Promise.resolve([] as tiingo.TiingoCandle[]),
+        tiingo.fetchCurrentQuote(ticker),
       ]);
 
       if (!dailyQuotes.length) {
         return res.status(404).json({ error: `No data found for ${ticker}` });
       }
 
-      const validDaily = dailyQuotes.filter((q: any) => q.open != null && q.close != null && q.high != null && q.low != null);
+      const validDaily = dailyQuotes.filter((q) => q.open != null && q.close != null && q.high != null && q.low != null);
       const currentPrice = validDaily[validDaily.length - 1]?.close || 0;
 
       let adr20 = 0;
@@ -6695,18 +6673,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       let sectorEtf = "";
       let sectorEtfChange = 0;
       try {
-        let sector = quoteData?.sector || "";
-        if (!sector) {
-          try {
-            const summary = await yf.quoteSummary(ticker, { modules: ["assetProfile"] });
-            sector = summary?.assetProfile?.sector || "";
-          } catch {}
-        }
+        const sectorInfo = findSectorForSymbol(ticker);
+        const sector = sectorInfo.sector;
         sectorEtf = SECTOR_ETF_MAP[sector] || "";
         if (sectorEtf) {
-          const etfQuote = await yf.quote(sectorEtf).catch(() => null);
-          if (etfQuote) {
-            sectorEtfChange = Math.round((etfQuote.regularMarketChangePercent || 0) * 100) / 100;
+          const etfQuote = await tiingo.fetchCurrentQuote(sectorEtf);
+          if (etfQuote && etfQuote.prevClose > 0) {
+            sectorEtfChange = Math.round(((etfQuote.tngoLast - etfQuote.prevClose) / etfQuote.prevClose * 100) * 100) / 100;
           }
         } else {
           sectorEtf = "N/A";
@@ -6715,21 +6688,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf = "N/A";
       }
 
-      let nextEarningsDate = "";
-      let nextEarningsDays = -1;
-      try {
-        const earningsDate = quoteData?.earningsTimestamp || quoteData?.earningsTimestampStart;
-        if (earningsDate) {
-          const ed = new Date(earningsDate instanceof Date ? earningsDate : earningsDate * 1000);
-          const now = new Date();
-          const diffMs = ed.getTime() - now.getTime();
-          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-          if (diffDays >= 0) {
-            nextEarningsDate = ed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-            nextEarningsDays = diffDays;
-          }
-        }
-      } catch {}
+      const nextEarningsDate = "N/A";
+      const nextEarningsDays = -1;
 
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,

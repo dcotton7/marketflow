@@ -1,24 +1,4 @@
-let yahooFinance: any = null;
-
-async function getYahooFinance() {
-  if (yahooFinance) return yahooFinance;
-  
-  try {
-    const YahooFinanceModule = await import('yahoo-finance2') as any;
-    const YahooFinance = YahooFinanceModule.default || YahooFinanceModule;
-    if (typeof YahooFinance === 'function') {
-      yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-    } else if (YahooFinance.default && typeof YahooFinance.default === 'function') {
-      yahooFinance = new YahooFinance.default({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-    } else {
-      yahooFinance = YahooFinance;
-    }
-    return yahooFinance;
-  } catch (error) {
-    console.error("Failed to initialize YahooFinance:", error);
-    throw error;
-  }
-}
+import * as tiingo from "../tiingo";
 
 export interface TechnicalData {
   symbol: string;
@@ -76,13 +56,18 @@ interface HistoricalQuote {
 
 async function fetchQuote(symbol: string): Promise<{ price: number; open: number; high: number; low: number } | null> {
   try {
-    const yf = await getYahooFinance();
-    const quote = await yf.quote(symbol) as any;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 5);
+    const bars = await tiingo.fetchEODPrices(symbol, startDate, endDate);
+    const quote = await tiingo.fetchCurrentQuote(symbol);
+    const latestBar = bars.length > 0 ? bars[bars.length - 1] : null;
+    const price = quote?.tngoLast || latestBar?.close || 0;
     return {
-      price: quote.regularMarketPrice || 0,
-      open: quote.regularMarketOpen || 0,
-      high: quote.regularMarketDayHigh || 0,
-      low: quote.regularMarketDayLow || 0,
+      price,
+      open: latestBar?.open || 0,
+      high: latestBar?.high || 0,
+      low: latestBar?.low || 0,
     };
   } catch (error) {
     console.error(`Failed to fetch quote for ${symbol}:`, error);
@@ -92,19 +77,20 @@ async function fetchQuote(symbol: string): Promise<{ price: number; open: number
 
 async function fetchHistorical(symbol: string, days: number): Promise<HistoricalQuote[]> {
   try {
-    const yf = await getYahooFinance();
     const endDate = new Date();
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days - 10); // Extra buffer
+    startDate.setDate(startDate.getDate() - days - 10);
 
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    }) as HistoricalQuote[];
+    const bars = await tiingo.fetchEODPrices(symbol, startDate, endDate);
 
-    // Sort by date descending (most recent first)
-    return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return bars.map(b => ({
+      date: new Date(b.date),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    })).reverse();
   } catch (error) {
     console.error(`Failed to fetch historical for ${symbol}:`, error);
     return [];
@@ -266,21 +252,21 @@ export async function fetchHistoricalTechnicalData(
   targetDate: Date
 ): Promise<TechnicalData | null> {
   try {
-    const yf = await getYahooFinance();
-    // Fetch historical data going back far enough for 200 SMA calculation
     const endDate = new Date(targetDate);
-    endDate.setDate(endDate.getDate() + 1); // Include the target date
+    endDate.setDate(endDate.getDate() + 1);
     const startDate = new Date(targetDate);
-    startDate.setDate(startDate.getDate() - 300); // Extra buffer for 200 SMA
+    startDate.setDate(startDate.getDate() - 300);
     
-    const result = await yf.historical(symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    }) as HistoricalQuote[];
+    const bars = await tiingo.fetchEODPrices(symbol, startDate, endDate);
     
-    // Sort by date descending
-    const allData = result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const allData: HistoricalQuote[] = bars.map(b => ({
+      date: new Date(b.date),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    })).reverse();
     
     // Find the target date index (or closest prior trading day)
     const targetTime = targetDate.getTime();

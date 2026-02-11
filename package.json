@@ -81,7 +81,6 @@
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
-    "yahoo-finance2": "^3.13.0",
     "zod": "^3.25.76",
     "zod-validation-error": "^3.5.4"
   },
