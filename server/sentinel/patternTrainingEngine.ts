@@ -19,6 +19,7 @@ export interface ChartDataWithIndicators {
     sma21: (number | null)[];
     sma50: (number | null)[];
     sma200: (number | null)[];
+    vwap?: (number | null)[];
     avwapHigh?: (number | null)[];
     avwapLow?: (number | null)[];
   };
@@ -211,6 +212,33 @@ function calculateAVWAPSeries(
       cumulativeVolume += c.volume;
       result.push(cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null);
     }
+  }
+  return result;
+}
+
+function calculateSessionVWAP(
+  candles: { date: string; high: number; low: number; close: number; volume: number }[]
+): (number | null)[] {
+  const result: (number | null)[] = [];
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  let currentDay = '';
+
+  for (let i = 0; i < candles.length; i++) {
+    const itemDate = new Date(candles[i].date);
+    const dayKey = itemDate.toDateString();
+
+    if (dayKey !== currentDay) {
+      cumulativeTPV = 0;
+      cumulativeVolume = 0;
+      currentDay = dayKey;
+    }
+
+    const tp = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    cumulativeTPV += tp * candles[i].volume;
+    cumulativeVolume += candles[i].volume;
+
+    result.push(cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : null);
   }
   return result;
 }
@@ -427,6 +455,7 @@ export async function fetchChartData(
     const ma50 = ma50Def ? (ma50Def.type === "ema" ? calculateEMASeriesForward(closes, ma50Def.period) : calculateSMASeriesForward(closes, ma50Def.period)) : calculateSMASeriesForward(closes, 50);
     const ma200 = ma200Def ? (ma200Def.type === "ema" ? calculateEMASeriesForward(closes, ma200Def.period) : calculateSMASeriesForward(closes, ma200Def.period)) : calculateSMASeriesForward(closes, 200);
 
+    const vwap = calculateSessionVWAP(finalCandles);
     const avwapHighIdx = findRecentHighIndex(finalCandles, 120);
     const avwapLowIdx = findRecentLowIndex(finalCandles, 120);
     const avwapHigh = calculateAVWAPSeries(finalCandles, avwapHighIdx);
@@ -434,7 +463,7 @@ export async function fetchChartData(
 
     return {
       candles: finalCandles,
-      indicators: { ema5: ma5, ema10: ma10, sma21: ma20, sma50: ma50, sma200: ma200, avwapHigh, avwapLow },
+      indicators: { ema5: ma5, ema10: ma10, sma21: ma20, sma50: ma50, sma200: ma200, vwap, avwapHigh, avwapLow },
       ticker: ticker.toUpperCase(),
       timeframe,
     };

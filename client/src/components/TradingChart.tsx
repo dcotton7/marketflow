@@ -92,6 +92,7 @@ export interface ChartIndicators {
   sma21: (number | null)[];
   sma50: (number | null)[];
   sma200: (number | null)[];
+  vwap?: (number | null)[];
   avwapHigh?: (number | null)[];
   avwapLow?: (number | null)[];
 }
@@ -151,6 +152,7 @@ const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
   sys_sma20: "sma21",
   sys_sma50: "sma50",
   sys_sma200: "sma200",
+  sys_vwap: "vwap",
   sys_vwap_hi: "avwapHigh",
   sys_vwap_lo: "avwapLow",
 };
@@ -266,9 +268,32 @@ function renderMaLinesToChart(
       }
     }
 
+    const vwapVals = chartData.indicators.vwap;
+    if (vwapVals && vwapVals.length > 0) {
+      const lineData: LineData[] = [];
+      for (let i = 0; i < vwapVals.length; i++) {
+        const val = vwapVals[i];
+        if (val !== null && i < chartData.candles.length) {
+          lineData.push({ time: chartData.candles[i].timestamp as any, value: val });
+        }
+      }
+      if (lineData.length > 0) {
+        const series = chart.addSeries(LineSeries, {
+          color: "#fbbf24",
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        series.setData(lineData);
+        addedSeries.push(series);
+      }
+    }
+
     const avwapConfigs = [
-      { key: "avwapHigh" as const, label: "VWAP", color: "#f97316", style: LineStyle.Dotted },
-      { key: "avwapLow" as const, label: "Daily VWAP", color: "#38bdf8", style: LineStyle.Dotted },
+      { key: "avwapHigh" as const, label: "VWAP Hi", color: "#f97316", style: LineStyle.Dotted },
+      { key: "avwapLow" as const, label: "VWAP Lo", color: "#38bdf8", style: LineStyle.Dotted },
     ];
 
     for (const avwap of avwapConfigs) {
@@ -946,11 +971,14 @@ export function TradingChart({
       isDotted: false,
       isDashed: false,
     }));
+    if (data.indicators.vwap?.some(v => v !== null)) {
+      items.push({ key: "vwap", label: "VWAP", color: "#fbbf24", isDotted: false, isDashed: true });
+    }
     if (data.indicators.avwapHigh?.some(v => v !== null)) {
-      items.push({ key: "avwapHigh", label: "VWAP", color: "#f97316", isDotted: true, isDashed: false });
+      items.push({ key: "avwapHigh", label: "VWAP Hi", color: "#f97316", isDotted: true, isDashed: false });
     }
     if (data.indicators.avwapLow?.some(v => v !== null)) {
-      items.push({ key: "avwapLow", label: "Daily VWAP", color: "#38bdf8", isDotted: true, isDashed: false });
+      items.push({ key: "avwapLow", label: "VWAP Lo", color: "#38bdf8", isDotted: true, isDashed: false });
     }
     return items;
   }, [maSettings, timeframe, data.indicators]);
