@@ -890,11 +890,19 @@ Select the most appropriate indicators and set parameters that match the user's 
                   }
 
                   const consumers: typeof dynamicData[number]["consumers"] = [];
-                  const downstreamIds = edges
-                    .filter((e: any) => e.source === tn.id)
-                    .map((e: any) => e.target);
-                  for (const downId of downstreamIds) {
-                    const downNode = thoughtNodes.find((n: any) => n.id === downId);
+                  const connectedThoughtIds = new Set<string>();
+                  for (const e of edges) {
+                    if (e.source === tn.id) {
+                      const targetNode = thoughtNodes.find((n: any) => n.id === e.target);
+                      if (targetNode) connectedThoughtIds.add(targetNode.id);
+                    }
+                    if (e.target === tn.id) {
+                      const sourceNode = thoughtNodes.find((n: any) => n.id === e.source);
+                      if (sourceNode) connectedThoughtIds.add(sourceNode.id);
+                    }
+                  }
+                  for (const connId of Array.from(connectedThoughtIds)) {
+                    const downNode = thoughtNodes.find((n: any) => n.id === connId);
                     if (!downNode) continue;
                     for (const c of (downNode.thoughtCriteria || [])) {
                       if (c.muted) continue;

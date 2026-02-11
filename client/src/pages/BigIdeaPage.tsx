@@ -2123,7 +2123,7 @@ export default function BigIdeaPage() {
                               />
                               <Input
                                 type="number"
-                                value={param.value}
+                                value={Number(param.value)}
                                 min={param.min ?? 0}
                                 max={param.max ?? 100}
                                 step={param.step ?? 1}
