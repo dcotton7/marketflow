@@ -119,7 +119,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   baselinePeriod: "Earlier bars used as baseline. More bars = broader comparison; fewer = more recent baseline.",
   threshold: "Min change % to trigger. Lower = looser (catches smaller moves); higher = tighter (needs bigger moves).",
   minRatio: "Min up/down volume ratio. Lower = looser (accepts mixed volume); higher = tighter (needs strong buy pressure).",
-  maxRatio: "Max up/down volume ratio. Higher = looser; lower = tighter cap on buy-side dominance.",
+  maxRatio: "Maximum allowed ratio. For volume ratio indicators: up/down volume cap. For tightness/volume-fade indicators: recent vs baseline ratio (lower = stricter contraction required).",
   ratioPeriod: "Bars for volume ratio calculation. More = smoother; fewer = more recent snapshot.",
   consolidationDays: "Min bars in the consolidation range. Fewer = looser; more = tighter (needs longer consolidation).",
   maxRange: "Max price range during consolidation (%). This is the ceiling for long bases (20+ bars). For shorter bases, the allowed range tightens automatically — a 5-bar base allows only ~30% of this value.",
@@ -193,6 +193,9 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   maxSlope: "Max allowed slope across the base (%). Measures how much the base drifts up or down. Lower = flatter bases only; higher = allows some tilt.",
   drifterPct: "Percentage of bars in the detected base allowed to poke outside the range without breaking detection. Drifter bars (e.g. wicks, gap bars) are counted but don't expand the base high/low. 10% on a 20-bar base = 2 drifter bars allowed. 0% = strict, no outliers tolerated.",
   minBasePct: "Detected base must be at least this % of the Max Base Length. Example: 50% on a 100-bar lookback requires at least a 50-bar base. At 0% (default), only the Min Base Length setting controls the minimum. Raise this to filter out bases that are too short relative to your lookback window.",
+  recentBars: "Number of recent trading days to measure. Smaller = more sensitive to very recent changes; larger = smoother average.",
+  baselineBars: "Number of trading days for the 'normal' baseline comparison. 50 bars ≈ 10 weeks of trading history.",
+  maxClusterPct: "Maximum allowed cluster % (std deviation of closes as % of average close). Lower = tighter clustering. 0.5% = closes barely move; 3% = loose and wandering.",
 };
 
 interface DynamicDataConsumer {

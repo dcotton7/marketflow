@@ -639,31 +639,31 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const maxLen = Math.min(maxPeriod, candles.length);
 
       const recentSlice = candles.slice(0, minPeriod);
-      let baseHigh = Math.max(...recentSlice.map(c => c.high));
-      let baseLow = Math.min(...recentSlice.map(c => c.low));
+      const refHigh = Math.max(...recentSlice.map(c => c.high));
+      const refLow = Math.min(...recentSlice.map(c => c.low));
 
       let detectedLen = minPeriod;
       let drifterCount = 0;
 
-      const initRange = baseHigh === 0 ? 0 : ((baseHigh - baseLow) / baseHigh) * 100;
-      if (initRange > maxRange) return false;
+      if (refHigh === 0) return false;
+      const refRange = refHigh - refLow;
+      const refMid = (refHigh + refLow) / 2;
+      const allowedDeviation = refMid * (maxRange / 100);
+
+      const initRangePct = (refRange / refHigh) * 100;
+      if (initRangePct > maxRange) return false;
 
       for (let i = minPeriod; i < maxLen; i++) {
         const bar = candles[i];
-        const testHigh = Math.max(baseHigh, bar.high);
-        const testLow = Math.min(baseLow, bar.low);
-        if (testHigh === 0) break;
-        const range = ((testHigh - testLow) / testHigh) * 100;
+        if (bar.high === 0) break;
+        const barOutside = bar.high > refHigh + allowedDeviation * 0.5 ||
+                           bar.low < refLow - allowedDeviation * 0.5;
         const currentLen = i + 1;
-        if (range > maxRange) {
+        if (barOutside) {
           drifterCount++;
           const allowedDrifters = Math.floor(currentLen * drifterPct / 100);
           if (drifterCount > allowedDrifters) break;
-          detectedLen = currentLen;
-          continue;
         }
-        baseHigh = testHigh;
-        baseLow = testLow;
         detectedLen = currentLen;
       }
 
@@ -674,6 +674,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
 
       const baseSlice = candles.slice(0, detectedLen);
       const closes = baseSlice.map(c => c.close);
+      const baseHigh = Math.max(...baseSlice.map(c => c.high));
+      const baseLow = Math.min(...baseSlice.map(c => c.low));
       const n = closes.length;
       const sumX = (n * (n - 1)) / 2;
       const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
@@ -1003,6 +1005,92 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       if (abovePct < minAbovePct) return false;
 
       return true;
+    },
+  },
+  {
+    id: "PA-14",
+    name: "Tightness Ratio",
+    category: "Price Action",
+    description: "Compares recent average daily range (high-low as % of close) to a longer baseline period. A low ratio means the stock's daily candles are shrinking — it's coiling. Useful for finding stocks compressing into tight ranges before a move.",
+    params: [
+      { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 5, min: 3, max: 20, step: 1 },
+      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
+      { name: "maxRatio", label: "Max Tightness Ratio", type: "number", defaultValue: 0.6, min: 0.1, max: 1.5, step: 0.05 },
+    ],
+    evaluate: (candles, params) => {
+      const recentN = params.recentBars ?? 5;
+      const baselineN = params.baselineBars ?? 50;
+      const maxRatio = params.maxRatio ?? 0.6;
+      if (candles.length < baselineN) return false;
+
+      const dailyRangePct = (c: { high: number; low: number; close: number }) =>
+        c.close === 0 ? 0 : ((c.high - c.low) / c.close) * 100;
+
+      let recentSum = 0;
+      for (let i = 0; i < recentN; i++) recentSum += dailyRangePct(candles[i]);
+      const recentAvg = recentSum / recentN;
+
+      let baselineSum = 0;
+      for (let i = 0; i < baselineN; i++) baselineSum += dailyRangePct(candles[i]);
+      const baselineAvg = baselineSum / baselineN;
+
+      if (baselineAvg === 0) return false;
+      const ratio = recentAvg / baselineAvg;
+      return ratio <= maxRatio;
+    },
+  },
+  {
+    id: "PA-15",
+    name: "Close Clustering",
+    category: "Price Action",
+    description: "Measures how tightly closing prices cluster together over a recent window. Calculates the standard deviation of closes as a percentage of the average close. Lower values mean closes are converging to a tight level — the stock is barely moving day-to-day.",
+    params: [
+      { name: "period", label: "Period", type: "number", defaultValue: 10, min: 5, max: 50, step: 1 },
+      { name: "maxClusterPct", label: "Max Cluster %", type: "number", defaultValue: 1.5, min: 0.1, max: 5, step: 0.1 },
+    ],
+    evaluate: (candles, params) => {
+      const period = params.period ?? 10;
+      const maxPct = params.maxClusterPct ?? 1.5;
+      if (candles.length < period) return false;
+
+      const closes = candles.slice(0, period).map(c => c.close);
+      const avg = closes.reduce((s, v) => s + v, 0) / period;
+      if (avg === 0) return false;
+
+      const variance = closes.reduce((s, v) => s + (v - avg) * (v - avg), 0) / period;
+      const stdDev = Math.sqrt(variance);
+      const clusterPct = (stdDev / avg) * 100;
+
+      return clusterPct <= maxPct;
+    },
+  },
+  {
+    id: "PA-16",
+    name: "Volume Fade",
+    category: "Price Action",
+    description: "Checks if recent volume has dried up compared to a longer baseline. A low ratio means trading interest is fading — weak hands have been shaken out and the stock is quiet. Useful in combination with tightness indicators to find coiling setups.",
+    params: [
+      { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
+      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5 },
+      { name: "maxRatio", label: "Max Volume Ratio", type: "number", defaultValue: 0.75, min: 0.1, max: 1.5, step: 0.05 },
+    ],
+    evaluate: (candles, params) => {
+      const recentN = params.recentBars ?? 10;
+      const baselineN = params.baselineBars ?? 50;
+      const maxRatio = params.maxRatio ?? 0.75;
+      if (candles.length < baselineN) return false;
+
+      let recentVol = 0;
+      for (let i = 0; i < recentN; i++) recentVol += candles[i].volume;
+      const recentAvg = recentVol / recentN;
+
+      let baselineVol = 0;
+      for (let i = 0; i < baselineN; i++) baselineVol += candles[i].volume;
+      const baselineAvg = baselineVol / baselineN;
+
+      if (baselineAvg === 0) return false;
+      const ratio = recentAvg / baselineAvg;
+      return ratio <= maxRatio;
     },
   },
 ];
