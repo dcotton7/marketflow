@@ -254,10 +254,11 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     evaluate: (candles, params) => {
       const period = params.period ?? 50;
       const direction = params.direction ?? "above";
-      if (candles.length < period) return false;
+      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ${period} SMA` } } };
       const sma = calcSMA(candles, period);
       const price = candles[0].close;
-      return direction === "above" ? price > sma : price < sma;
+      const pass = direction === "above" ? price > sma : price < sma;
+      return { pass, data: { _diagnostics: { value: `$${price.toFixed(2)}`, threshold: `${direction === "above" ? ">" : "<"} SMA $${sma.toFixed(2)}`, detail: `${((price / sma - 1) * 100).toFixed(1)}% ${price >= sma ? "above" : "below"}` } } };
     },
   },
   {
@@ -272,10 +273,11 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     evaluate: (candles, params) => {
       const period = params.period ?? 21;
       const direction = params.direction ?? "above";
-      if (candles.length < period) return false;
+      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ${period} EMA` } } };
       const ema = calcEMA(candles, period);
       const price = candles[0].close;
-      return direction === "above" ? price > ema : price < ema;
+      const pass = direction === "above" ? price > ema : price < ema;
+      return { pass, data: { _diagnostics: { value: `$${price.toFixed(2)}`, threshold: `${direction === "above" ? ">" : "<"} EMA $${ema.toFixed(2)}`, detail: `${((price / ema - 1) * 100).toFixed(1)}% ${price >= ema ? "above" : "below"}` } } };
     },
   },
   {
@@ -294,11 +296,11 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const maType = params.maType ?? "sma";
       const minPct = params.minPct ?? 0;
       const maxPct = params.maxPct ?? 10;
-      if (candles.length < period) return false;
+      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minPct}% to ${maxPct}%` } } };
       const ma = getMA(candles, period, maType);
-      if (ma === 0) return false;
+      if (ma === 0) return { pass: false, data: { _diagnostics: { value: 'MA=0', threshold: `${minPct}% to ${maxPct}%` } } };
       const pct = ((candles[0].close - ma) / ma) * 100;
-      return pct >= minPct && pct <= maxPct;
+      return { pass: pct >= minPct && pct <= maxPct, data: { _diagnostics: { value: `${pct.toFixed(1)}%`, threshold: `${minPct}% to ${maxPct}%` } } };
     },
   },
   {
@@ -317,12 +319,12 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const maType = params.maType ?? "sma";
       const slopeDays = params.slopeDays ?? 10;
       const minSlope = params.minSlope ?? 0;
-      if (candles.length < period + slopeDays) return false;
+      if (candles.length < period + slopeDays) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minSlope}%` } } };
       const maNow = getMA(candles, period, maType);
       const maThen = getMAAt(candles, period, maType, slopeDays);
-      if (maThen === 0) return false;
+      if (maThen === 0) return { pass: false, data: { _diagnostics: { value: 'MA=0', threshold: `≥${minSlope}%` } } };
       const slope = ((maNow - maThen) / maThen) * 100;
-      return slope >= minSlope;
+      return { pass: slope >= minSlope, data: { _diagnostics: { value: `${slope.toFixed(2)}%`, threshold: `≥${minSlope}%`, detail: `over ${slopeDays} bars` } } };
     },
   },
   {
@@ -342,13 +344,13 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const ma2p = params.ma2 ?? 150;
       const ma3p = params.ma3 ?? 200;
       const needed = Math.max(ma1p, ma2p, ma3p);
-      if (candles.length < needed) return false;
+      if (candles.length < needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${order} stack` } } };
       const price = candles[0].close;
       const v1 = calcSMA(candles, ma1p);
       const v2 = calcSMA(candles, ma2p);
       const v3 = calcSMA(candles, ma3p);
-      if (order === "bullish") return price > v1 && v1 > v2 && v2 > v3;
-      return price < v1 && v1 < v2 && v2 < v3;
+      const pass = order === "bullish" ? (price > v1 && v1 > v2 && v2 > v3) : (price < v1 && v1 < v2 && v2 < v3);
+      return { pass, data: { _diagnostics: { value: `P$${price.toFixed(0)} ${ma1p}:$${v1.toFixed(0)} ${ma2p}:$${v2.toFixed(0)} ${ma3p}:$${v3.toFixed(0)}`, threshold: `${order} stack` } } };
     },
   },
   {
@@ -367,12 +369,12 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const slowP = params.slowPeriod ?? 200;
       const maType = params.maType ?? "sma";
       const maxDist = params.maxDistance ?? 5;
-      if (candles.length < Math.max(fastP, slowP)) return false;
+      if (candles.length < Math.max(fastP, slowP)) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxDist}%` } } };
       const fastMA = getMA(candles, fastP, maType);
       const slowMA = getMA(candles, slowP, maType);
-      if (slowMA === 0) return false;
+      if (slowMA === 0) return { pass: false, data: { _diagnostics: { value: 'slow MA=0', threshold: `≤${maxDist}%` } } };
       const dist = Math.abs((fastMA - slowMA) / slowMA) * 100;
-      return dist <= maxDist;
+      return { pass: dist <= maxDist, data: { _diagnostics: { value: `${dist.toFixed(1)}%`, threshold: `≤${maxDist}%`, detail: `fast $${fastMA.toFixed(2)} vs slow $${slowMA.toFixed(2)}` } } };
     },
   },
   {
@@ -394,16 +396,18 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const lookback = params.lookback ?? 5;
       const crossType = params.crossType ?? "bullish";
       const needed = Math.max(fastP, slowP) + lookback;
-      if (candles.length < needed) return false;
+      if (candles.length < needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${crossType} within ${lookback} bars` } } };
+      const fastNowVal = getMAAt(candles, fastP, maType, 0);
+      const slowNowVal = getMAAt(candles, slowP, maType, 0);
       for (let i = 0; i < lookback; i++) {
         const fastNow = getMAAt(candles, fastP, maType, i);
         const slowNow = getMAAt(candles, slowP, maType, i);
         const fastPrev = getMAAt(candles, fastP, maType, i + 1);
         const slowPrev = getMAAt(candles, slowP, maType, i + 1);
-        if (crossType === "bullish" && fastPrev <= slowPrev && fastNow > slowNow) return true;
-        if (crossType === "bearish" && fastPrev >= slowPrev && fastNow < slowNow) return true;
+        if (crossType === "bullish" && fastPrev <= slowPrev && fastNow > slowNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
+        if (crossType === "bearish" && fastPrev >= slowPrev && fastNow < slowNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
       }
-      return false;
+      return { pass: false, data: { _diagnostics: { value: 'no cross', threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
     },
   },
   {
@@ -422,11 +426,12 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const slowP = params.slowPeriod ?? 200;
       const maType = params.maType ?? "sma";
       const direction = params.direction ?? "fast_above_slow";
-      if (candles.length < Math.max(fastP, slowP)) return false;
+      if (candles.length < Math.max(fastP, slowP)) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: direction } } };
       const fastMA = getMA(candles, fastP, maType);
       const slowMA = getMA(candles, slowP, maType);
-      if (direction === "fast_above_slow") return fastMA > slowMA;
-      return fastMA < slowMA;
+      const pass = direction === "fast_above_slow" ? fastMA > slowMA : fastMA < slowMA;
+      const gap = slowMA > 0 ? ((fastMA - slowMA) / slowMA * 100).toFixed(1) : '0';
+      return { pass, data: { _diagnostics: { value: `fast $${fastMA.toFixed(2)} vs slow $${slowMA.toFixed(2)}`, threshold: direction, detail: `gap ${gap}%` } } };
     },
   },
   {
@@ -445,17 +450,19 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
       const maType = params.maType ?? "sma";
       const lookback = params.lookback ?? 5;
       const crossType = params.crossType ?? "above";
-      if (candles.length < maPeriod + lookback + 1) return false;
+      if (candles.length < maPeriod + lookback + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `price ${crossType} ${maPeriod} ${maType} within ${lookback} bars` } } };
+      const currentMA = getMAAt(candles, maPeriod, maType, 0);
+      const currentPrice = candles[0].close;
       for (let i = 0; i < lookback; i++) {
         const maNow = getMAAt(candles, maPeriod, maType, i);
         const maPrev = getMAAt(candles, maPeriod, maType, i + 1);
         if (maNow === 0 || maPrev === 0) continue;
         const priceNow = candles[i].close;
         const pricePrev = candles[i + 1].close;
-        if (crossType === "above" && pricePrev <= maPrev && priceNow > maNow) return true;
-        if (crossType === "below" && pricePrev >= maPrev && priceNow < maNow) return true;
+        if (crossType === "above" && pricePrev <= maPrev && priceNow > maNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+        if (crossType === "below" && pricePrev >= maPrev && priceNow < maNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
       }
-      return false;
+      return { pass: false, data: { _diagnostics: { value: 'no cross', threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
     },
   },
 ];
@@ -473,10 +480,11 @@ const VOLUME: IndicatorDefinition[] = [
     evaluate: (candles, params) => {
       const period = params.period ?? 50;
       const minMult = params.minMultiple ?? 1.5;
-      if (candles.length < period + 1) return false;
+      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minMult}x` } } };
       const avgVol = candles.slice(1, period + 1).reduce((s, c) => s + c.volume, 0) / period;
-      if (avgVol === 0) return false;
-      return candles[0].volume / avgVol >= minMult;
+      if (avgVol === 0) return { pass: false, data: { _diagnostics: { value: 'avg vol=0', threshold: `≥${minMult}x` } } };
+      const ratio = candles[0].volume / avgVol;
+      return { pass: ratio >= minMult, data: { _diagnostics: { value: `${ratio.toFixed(1)}x avg`, threshold: `≥${minMult}x` } } };
     },
   },
   {
@@ -495,12 +503,15 @@ const VOLUME: IndicatorDefinition[] = [
       const baseP = params.baselinePeriod ?? 50;
       const direction = params.direction ?? "increasing";
       const threshold = params.threshold ?? 20;
-      if (candles.length < baseP) return false;
+      if (candles.length < baseP) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ≥${threshold}%` } } };
       const recentAvg = candles.slice(0, recentP).reduce((s, c) => s + c.volume, 0) / recentP;
       const baseAvg = candles.slice(0, baseP).reduce((s, c) => s + c.volume, 0) / baseP;
-      if (baseAvg === 0) return false;
+      if (baseAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `${direction} ≥${threshold}%` } } };
       const changePct = ((recentAvg - baseAvg) / baseAvg) * 100;
-      return direction === "increasing" ? changePct >= threshold : changePct <= -threshold;
+      const pass = direction === "increasing" ? changePct >= threshold : changePct <= -threshold;
+      const fmtRecent = recentAvg >= 1e6 ? `${(recentAvg/1e6).toFixed(1)}M` : `${(recentAvg/1e3).toFixed(0)}K`;
+      const fmtBase = baseAvg >= 1e6 ? `${(baseAvg/1e6).toFixed(1)}M` : `${(baseAvg/1e3).toFixed(0)}K`;
+      return { pass, data: { _diagnostics: { value: `${changePct.toFixed(1)}%`, threshold: `${direction === "increasing" ? "≥" : "≤-"}${threshold}%`, detail: `recent avg: ${fmtRecent} vs baseline avg: ${fmtBase}` } } };
     },
   },
   {
@@ -515,15 +526,19 @@ const VOLUME: IndicatorDefinition[] = [
     evaluate: (candles, params) => {
       const period = params.period ?? 20;
       const minRatio = params.minRatio ?? 1.2;
-      if (candles.length < period + 1) return false;
+      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minRatio}x` } } };
       let upVol = 0;
       let downVol = 0;
       for (let i = 0; i < period; i++) {
         if (candles[i].close >= candles[i + 1].close) upVol += candles[i].volume;
         else downVol += candles[i].volume;
       }
-      if (downVol === 0) return upVol > 0;
-      return upVol / downVol >= minRatio;
+      if (downVol === 0) {
+        const pass = upVol > 0;
+        return { pass, data: { _diagnostics: { value: `∞ (no down vol)`, threshold: `≥${minRatio}x` } } };
+      }
+      const ratio = upVol / downVol;
+      return { pass: ratio >= minRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≥${minRatio}x` } } };
     },
   },
   {
@@ -540,13 +555,17 @@ const VOLUME: IndicatorDefinition[] = [
       const period = params.period ?? 50;
       const dryUpDays = params.dryUpDays ?? 5;
       const maxMult = params.maxMultiple ?? 0.5;
-      if (candles.length < period) return false;
+      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
       const avgVol = candles.slice(dryUpDays, dryUpDays + period).reduce((s, c) => s + c.volume, 0) / period;
-      if (avgVol === 0) return false;
+      if (avgVol === 0) return { pass: false, data: { _diagnostics: { value: 'avg vol=0', threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
+      let maxSeen = 0;
+      let allBelow = true;
       for (let i = 0; i < dryUpDays; i++) {
-        if (candles[i].volume / avgVol > maxMult) return false;
+        const r = candles[i].volume / avgVol;
+        if (r > maxSeen) maxSeen = r;
+        if (r > maxMult) allBelow = false;
       }
-      return true;
+      return { pass: allBelow, data: { _diagnostics: { value: `max ${maxSeen.toFixed(2)}x avg`, threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
     },
   },
   {
@@ -563,13 +582,14 @@ const VOLUME: IndicatorDefinition[] = [
       const period = params.period ?? 50;
       const surgeMult = params.surgeMultiple ?? 2.0;
       const priceUp = params.priceUp ?? true;
-      if (candles.length < period + 1) return false;
+      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${surgeMult}x` } } };
       const avgVol = candles.slice(1, period + 1).reduce((s, c) => s + c.volume, 0) / period;
-      if (avgVol === 0) return false;
+      if (avgVol === 0) return { pass: false, data: { _diagnostics: { value: 'avg vol=0', threshold: `≥${surgeMult}x` } } };
       const volRatio = candles[0].volume / avgVol;
-      if (volRatio < surgeMult) return false;
-      if (priceUp && candles[0].close <= candles[1].close) return false;
-      return true;
+      const volPass = volRatio >= surgeMult;
+      const pricePass = !priceUp || candles[0].close > candles[1].close;
+      const pass = volPass && pricePass;
+      return { pass, data: { _diagnostics: { value: `${volRatio.toFixed(1)}x avg`, threshold: `≥${surgeMult}x`, detail: priceUp ? `price ${candles[0].close > candles[1].close ? "up" : "down"}` : undefined } } };
     },
   },
 ];
@@ -590,7 +610,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const minATR = params.minATR ?? 0;
       const maxATR = params.maxATR ?? 999;
       const atr = calcATR(candles, period);
-      return atr >= minATR && atr <= maxATR;
+      return { pass: atr >= minATR && atr <= maxATR, data: { _diagnostics: { value: `$${atr.toFixed(2)}`, threshold: `$${minATR}-$${maxATR}` } } };
     },
   },
   {
@@ -607,10 +627,10 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const period = params.period ?? 14;
       const minPct = params.minPct ?? 2;
       const maxPct = params.maxPct ?? 8;
-      if (candles.length < period + 1 || candles[0].close === 0) return false;
+      if (candles.length < period + 1 || candles[0].close === 0) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minPct}%-${maxPct}%` } } };
       const atr = calcATR(candles, period);
       const pct = (atr / candles[0].close) * 100;
-      return pct >= minPct && pct <= maxPct;
+      return { pass: pct >= minPct && pct <= maxPct, data: { _diagnostics: { value: `${pct.toFixed(1)}%`, threshold: `${minPct}%-${maxPct}%`, detail: `ATR $${atr.toFixed(2)} / price $${candles[0].close.toFixed(2)}` } } };
     },
   },
   {
@@ -634,7 +654,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const maxSlope = params.maxSlope ?? 5;
       const drifterPct = params.drifterPct ?? 10;
       const minBasePct = params.minBasePct ?? 0;
-      if (candles.length < minPeriod) return false;
+      if (candles.length < minPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minPeriod} bars, ≤${maxRange}% range` } } };
 
       const maxLen = Math.min(maxPeriod, candles.length);
 
@@ -642,9 +662,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const refHigh = Math.max(...recentSlice.map(c => c.high));
       const refLow = Math.min(...recentSlice.map(c => c.low));
 
-      if (refHigh === 0) return false;
+      if (refHigh === 0) return { pass: false, data: { _diagnostics: { value: 'no base found', threshold: `≥${minPeriod} bars, ≤${maxRange}% range` } } };
       const initRangePct = ((refHigh - refLow) / refHigh) * 100;
-      if (initRangePct > maxRange) return false;
+      if (initRangePct > maxRange) return { pass: false, data: { _diagnostics: { value: `range ${initRangePct.toFixed(1)}%`, threshold: `≤${maxRange}% range` } } };
 
       const minRequired = Math.max(minPeriod, Math.ceil(maxPeriod * minBasePct / 100));
 
@@ -715,8 +735,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         }
       }
 
-      if (bestPass === 0) return false;
-      return { pass: true, data: { detectedPeriod: bestPass } };
+      if (bestPass === 0) return { pass: false, data: { _diagnostics: { value: 'no base found', threshold: `≥${minRequired} bars, ≤${maxRange}% range` } } };
+      const finalSlice = candles.slice(0, bestPass);
+      const finalHigh = Math.max(...finalSlice.map(c => c.high));
+      const finalLow = Math.min(...finalSlice.map(c => c.low));
+      const rangePct = finalHigh > 0 ? ((finalHigh - finalLow) / finalHigh) * 100 : 0;
+      return { pass: true, data: { detectedPeriod: bestPass, _diagnostics: { value: `${bestPass} bars`, threshold: `≥${minRequired} bars`, detail: `range ${rangePct.toFixed(1)}% (max ${maxRange}%)` } } };
     },
   },
   {
@@ -733,13 +757,13 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const lookback = params.lookback ?? 60;
       const maxDepth = params.maxDepth ?? 25;
       const minDepth = params.minDepth ?? 5;
-      if (candles.length < lookback) return false;
+      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minDepth}%-${maxDepth}%` } } };
       const slice = candles.slice(0, lookback);
       const highVal = Math.max(...slice.map(c => c.high));
-      if (highVal === 0) return false;
+      if (highVal === 0) return { pass: false, data: { _diagnostics: { value: 'high=0', threshold: `${minDepth}%-${maxDepth}%` } } };
       const currentLow = Math.min(...slice.map(c => c.low));
       const depth = ((highVal - currentLow) / highVal) * 100;
-      return depth >= minDepth && depth <= maxDepth;
+      return { pass: depth >= minDepth && depth <= maxDepth, data: { _diagnostics: { value: `${depth.toFixed(1)}%`, threshold: `${minDepth}%-${maxDepth}%` } } };
     },
   },
   {
@@ -758,7 +782,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const consolRange = params.consolidationRange ?? 15;
       const minBaseDays = params.minBaseDays ?? 10;
       const maxBases = params.maxBases ?? 3;
-      if (candles.length < lookback) return false;
+      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `1-${maxBases} bases` } } };
       const slice = candles.slice(0, lookback).reverse();
       let baseCount = 0;
       let i = 0;
@@ -773,7 +797,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
           i++;
         }
       }
-      return baseCount >= 1 && baseCount <= maxBases;
+      return { pass: baseCount >= 1 && baseCount <= maxBases, data: { _diagnostics: { value: `${baseCount} bases`, threshold: `1-${maxBases} bases` } } };
     },
   },
   {
@@ -789,11 +813,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const maxDist = params.maxDistance ?? 25;
       const minDist = params.minDistance ?? 0;
       const period = Math.min(260, candles.length);
-      if (period < 20) return false;
+      if (period < 20) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minDist}%-${maxDist}%` } } };
       const high52 = Math.max(...candles.slice(0, period).map(c => c.high));
-      if (high52 === 0) return false;
+      if (high52 === 0) return { pass: false, data: { _diagnostics: { value: 'high=0', threshold: `${minDist}%-${maxDist}%` } } };
       const dist = ((high52 - candles[0].close) / high52) * 100;
-      return dist >= minDist && dist <= maxDist;
+      return { pass: dist >= minDist && dist <= maxDist, data: { _diagnostics: { value: `${dist.toFixed(1)}%`, threshold: `${minDist}%-${maxDist}%`, detail: `52wk high $${high52.toFixed(2)}, price $${candles[0].close.toFixed(2)}` } } };
     },
   },
   {
@@ -813,16 +837,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const lookback = params.lookback ?? 3;
       const volumeConfirm = params.volumeConfirm ?? true;
       const volumeMult = params.volumeMultiple ?? 1.5;
-      if (candles.length < basePeriod + lookback) return false;
+      if (candles.length < basePeriod + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `breakout within ${lookback} bars` } } };
       const baseHigh = Math.max(...candles.slice(lookback, lookback + basePeriod).map(c => c.high));
       for (let i = 0; i < lookback; i++) {
         if (candles[i].close > baseHigh) {
-          if (!volumeConfirm) return true;
+          if (!volumeConfirm) return { pass: true, data: { _diagnostics: { value: `$${candles[i].close.toFixed(2)} > base $${baseHigh.toFixed(2)}`, threshold: `breakout within ${lookback} bars`, detail: `bar ${i}` } } };
           const avgVol = candles.slice(lookback, lookback + 50).reduce((s, c) => s + c.volume, 0) / Math.min(50, candles.length - lookback);
-          if (avgVol > 0 && candles[i].volume / avgVol >= volumeMult) return true;
+          const volRatio = avgVol > 0 ? candles[i].volume / avgVol : 0;
+          if (avgVol > 0 && volRatio >= volumeMult) return { pass: true, data: { _diagnostics: { value: `$${candles[i].close.toFixed(2)} > base $${baseHigh.toFixed(2)}`, threshold: `breakout within ${lookback} bars`, detail: `bar ${i}, vol ${volRatio.toFixed(1)}x (≥${volumeMult}x)` } } };
         }
       }
-      return false;
+      return { pass: false, data: { _diagnostics: { value: `price $${candles[0].close.toFixed(2)}`, threshold: `> base high $${baseHigh.toFixed(2)}` } } };
     },
   },
   {
@@ -839,11 +864,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const maPeriod = params.maPeriod ?? 21;
       const maType = params.maType ?? "ema";
       const tolerance = params.tolerance ?? 2;
-      if (candles.length < maPeriod) return false;
+      if (candles.length < maPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${tolerance}% from ${maPeriod} ${maType}` } } };
       const ma = getMA(candles, maPeriod, maType);
-      if (ma === 0) return false;
+      if (ma === 0) return { pass: false, data: { _diagnostics: { value: 'MA=0', threshold: `≤${tolerance}%` } } };
       const dist = Math.abs((candles[0].low - ma) / ma) * 100;
-      return dist <= tolerance;
+      return { pass: dist <= tolerance, data: { _diagnostics: { value: `${dist.toFixed(1)}% away`, threshold: `≤${tolerance}%`, detail: `low $${candles[0].low.toFixed(2)} vs MA $${ma.toFixed(2)}` } } };
     },
   },
   {
@@ -858,10 +883,10 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     evaluate: (candles, params) => {
       const lookback = params.lookback ?? 40;
       const segments = params.segments ?? 3;
-      if (candles.length < lookback) return false;
+      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${segments} contracting segments` } } };
       const slice = candles.slice(0, lookback).reverse();
       const segLen = Math.floor(slice.length / segments);
-      if (segLen < 3) return false;
+      if (segLen < 3) return { pass: false, data: { _diagnostics: { value: 'segments too short', threshold: `${segments} contracting segments` } } };
       const ranges: number[] = [];
       for (let s = 0; s < segments; s++) {
         const seg = slice.slice(s * segLen, (s + 1) * segLen);
@@ -869,10 +894,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         const low = Math.min(...seg.map(c => c.low));
         ranges.push(high > 0 ? ((high - low) / high) * 100 : 0);
       }
+      let contracting = true;
       for (let i = 1; i < ranges.length; i++) {
-        if (ranges[i] >= ranges[i - 1]) return false;
+        if (ranges[i] >= ranges[i - 1]) { contracting = false; break; }
       }
-      return true;
+      return { pass: contracting, data: { _diagnostics: { value: ranges.map(r => `${r.toFixed(1)}%`).join(' → '), threshold: `${segments} contracting segments` } } };
     },
   },
   {
@@ -889,17 +915,24 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const lookback = params.lookback ?? 3;
       const minGap = params.minGapPct ?? 2;
       const dir = params.gapDirection ?? "up";
-      if (candles.length < lookback + 1) return false;
+      if (candles.length < lookback + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minGap}% gap ${dir}` } } };
+      let bestGap = 0;
+      let bestBar = -1;
       for (let i = 0; i < lookback; i++) {
         const prev = candles[i + 1];
         const curr = candles[i];
         const gapUp = ((curr.low - prev.high) / prev.high) * 100;
         const gapDown = ((prev.low - curr.high) / prev.low) * 100;
-        if (dir === "up" && gapUp >= minGap) return true;
-        if (dir === "down" && gapDown >= minGap) return true;
-        if (dir === "either" && (gapUp >= minGap || gapDown >= minGap)) return true;
+        if (dir === "up" && gapUp >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
+        if (dir === "down" && gapDown >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
+        if (dir === "either") {
+          if (gapUp >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
+          if (gapDown >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
+        }
+        const maxGapHere = Math.max(gapUp, gapDown);
+        if (maxGapHere > bestGap) { bestGap = maxGapHere; bestBar = i; }
       }
-      return false;
+      return { pass: false, data: { _diagnostics: { value: bestGap > 0 ? `best ${bestGap.toFixed(1)}%` : 'no gap', threshold: `≥${minGap}% ${dir}` } } };
     },
   },
   {
@@ -916,7 +949,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const level = params.level ?? "vwap";
       const lookback = params.lookback ?? 20;
       const maxDist = params.maxDistance ?? 3;
-      if (candles.length < lookback) return false;
+      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxDist}% from ${level}` } } };
       let keyLevel: number;
       if (level === "vwap") {
         const slice = candles.slice(0, lookback);
@@ -932,9 +965,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         const prev = candles[1] || candles[0];
         keyLevel = (prev.high + prev.low + prev.close) / 3;
       }
-      if (keyLevel === 0) return false;
+      if (keyLevel === 0) return { pass: false, data: { _diagnostics: { value: `${level}=0`, threshold: `≤${maxDist}%` } } };
       const dist = Math.abs((candles[0].close - keyLevel) / keyLevel) * 100;
-      return dist <= maxDist;
+      return { pass: dist <= maxDist, data: { _diagnostics: { value: `${dist.toFixed(1)}% from ${level}`, threshold: `≤${maxDist}%`, detail: `${level} $${keyLevel.toFixed(2)}, price $${candles[0].close.toFixed(2)}` } } };
     },
   },
   {
@@ -954,12 +987,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const lookback = params.lookbackBars ?? 120;
       const minGain = params.minGain ?? 30;
       const totalNeeded = skip + lookback;
-      if (candles.length < totalNeeded) return false;
+      if (candles.length < totalNeeded) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minGain}% gain` } } };
       const priceAtBaseStart = candles[skip]?.close;
       const priceAtAdvanceStart = candles[skip + lookback - 1]?.close;
-      if (!priceAtBaseStart || !priceAtAdvanceStart || priceAtAdvanceStart === 0) return false;
+      if (!priceAtBaseStart || !priceAtAdvanceStart || priceAtAdvanceStart === 0) return { pass: false, data: { _diagnostics: { value: 'missing price data', threshold: `≥${minGain}% gain` } } };
       const gain = ((priceAtBaseStart - priceAtAdvanceStart) / priceAtAdvanceStart) * 100;
-      return gain >= minGain;
+      return { pass: gain >= minGain, data: { _diagnostics: { value: `${gain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceAtAdvanceStart.toFixed(2)} → $${priceAtBaseStart.toFixed(2)} over ${lookback} bars` } } };
     },
   },
   {
@@ -986,14 +1019,14 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const minAbovePct = params.minBarsAboveSMA ?? 70;
 
       const totalNeeded = skip + lookback + smaPeriod;
-      if (candles.length < totalNeeded) return false;
+      if (candles.length < totalNeeded) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minGain}% gain, ≤${maxDD}% dd` } } };
 
       const advanceSlice = candles.slice(skip, skip + lookback);
       const priceEnd = advanceSlice[0]?.close;
       const priceStart = advanceSlice[advanceSlice.length - 1]?.close;
-      if (!priceEnd || !priceStart || priceStart === 0) return false;
+      if (!priceEnd || !priceStart || priceStart === 0) return { pass: false, data: { _diagnostics: { value: 'missing price data', threshold: `≥${minGain}% gain` } } };
       const netGain = ((priceEnd - priceStart) / priceStart) * 100;
-      if (netGain < minGain) return false;
+      if (netGain < minGain) return { pass: false, data: { _diagnostics: { value: `gain ${netGain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceStart.toFixed(2)} → $${priceEnd.toFixed(2)}` } } };
 
       let rollingHigh = 0;
       let maxDrawdown = 0;
@@ -1004,7 +1037,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
           if (dd > maxDrawdown) maxDrawdown = dd;
         }
       }
-      if (maxDrawdown > maxDD) return false;
+      if (maxDrawdown > maxDD) return { pass: false, data: { _diagnostics: { value: `dd ${maxDrawdown.toFixed(1)}%`, threshold: `≤${maxDD}%`, detail: `gain ${netGain.toFixed(1)}%` } } };
 
       let barsAbove = 0;
       for (let i = 0; i < lookback; i++) {
@@ -1015,9 +1048,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         if (candles[offset].close > sma) barsAbove++;
       }
       const abovePct = (barsAbove / lookback) * 100;
-      if (abovePct < minAbovePct) return false;
+      if (abovePct < minAbovePct) return { pass: false, data: { _diagnostics: { value: `${abovePct.toFixed(0)}% above SMA`, threshold: `≥${minAbovePct}%`, detail: `gain ${netGain.toFixed(1)}%, dd ${maxDrawdown.toFixed(1)}%` } } };
 
-      return true;
+      return { pass: true, data: { _diagnostics: { value: `gain ${netGain.toFixed(1)}%`, threshold: `≥${minGain}%, ≤${maxDD}% dd`, detail: `dd ${maxDrawdown.toFixed(1)}%, ${abovePct.toFixed(0)}% above SMA` } } };
     },
   },
   {
@@ -1036,7 +1069,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const recentN = params.recentBars ?? 5;
       const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.8;
-      if (candles.length < baselineN) return false;
+      if (candles.length < baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
 
       const dailyRangePct = (c: { high: number; low: number; close: number }) =>
         c.close === 0 ? 0 : ((c.high - c.low) / c.close) * 100;
@@ -1049,9 +1082,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       for (let i = 0; i < baselineN; i++) baselineSum += dailyRangePct(candles[i]);
       const baselineAvg = baselineSum / baselineN;
 
-      if (baselineAvg === 0) return false;
+      if (baselineAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `≤${maxRatio}x` } } };
       const ratio = recentAvg / baselineAvg;
-      return ratio <= maxRatio;
+      return { pass: ratio <= maxRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${recentAvg.toFixed(2)}% vs baseline ${baselineAvg.toFixed(2)}%` } } };
     },
   },
   {
@@ -1068,17 +1101,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const dynamicPeriod = upstreamData?.detectedPeriod;
       const period = dynamicPeriod ?? params.period ?? 10;
       const maxPct = params.maxClusterPct ?? 3.0;
-      if (candles.length < period) return false;
+      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxPct}%` } } };
 
       const closes = candles.slice(0, period).map(c => c.close);
       const avg = closes.reduce((s, v) => s + v, 0) / period;
-      if (avg === 0) return false;
+      if (avg === 0) return { pass: false, data: { _diagnostics: { value: 'avg=0', threshold: `≤${maxPct}%` } } };
 
       const variance = closes.reduce((s, v) => s + (v - avg) * (v - avg), 0) / period;
       const stdDev = Math.sqrt(variance);
       const clusterPct = (stdDev / avg) * 100;
 
-      return clusterPct <= maxPct;
+      return { pass: clusterPct <= maxPct, data: { _diagnostics: { value: `${clusterPct.toFixed(2)}%`, threshold: `≤${maxPct}%` } } };
     },
   },
   {
@@ -1097,7 +1130,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const recentN = params.recentBars ?? 10;
       const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.9;
-      if (candles.length < baselineN) return false;
+      if (candles.length < baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
 
       let recentVol = 0;
       for (let i = 0; i < recentN; i++) recentVol += candles[i].volume;
@@ -1107,9 +1140,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       for (let i = 0; i < baselineN; i++) baselineVol += candles[i].volume;
       const baselineAvg = baselineVol / baselineN;
 
-      if (baselineAvg === 0) return false;
+      if (baselineAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `≤${maxRatio}x` } } };
       const ratio = recentAvg / baselineAvg;
-      return ratio <= maxRatio;
+      const fmtRecent = recentAvg >= 1e6 ? `${(recentAvg/1e6).toFixed(1)}M` : `${(recentAvg/1e3).toFixed(0)}K`;
+      const fmtBase = baselineAvg >= 1e6 ? `${(baselineAvg/1e6).toFixed(1)}M` : `${(baselineAvg/1e3).toFixed(0)}K`;
+      return { pass: ratio <= maxRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${fmtRecent} vs baseline ${fmtBase}` } } };
     },
   },
 ];
@@ -1127,10 +1162,11 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     evaluate: (candles, params, benchmarkCandles) => {
       const period = params.period ?? 60;
       const minOut = params.minOutperformance ?? 5;
-      if (candles.length < period || !benchmarkCandles || benchmarkCandles.length < period) return false;
+      if (candles.length < period || !benchmarkCandles || benchmarkCandles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minOut}%` } } };
       const stockReturn = ((candles[0].close - candles[period - 1].close) / candles[period - 1].close) * 100;
       const benchReturn = ((benchmarkCandles[0].close - benchmarkCandles[period - 1].close) / benchmarkCandles[period - 1].close) * 100;
-      return (stockReturn - benchReturn) >= minOut;
+      const outperf = stockReturn - benchReturn;
+      return { pass: outperf >= minOut, data: { _diagnostics: { value: `${outperf.toFixed(1)}%`, threshold: `≥${minOut}%`, detail: `stock ${stockReturn.toFixed(1)}% vs bench ${benchReturn.toFixed(1)}%` } } };
     },
   },
   {
@@ -1145,11 +1181,12 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     evaluate: (candles, params, benchmarkCandles) => {
       const period = params.period ?? 60;
       const minScore = params.minScore ?? 1.2;
-      if (candles.length < period || !benchmarkCandles || benchmarkCandles.length < period) return false;
+      if (candles.length < period || !benchmarkCandles || benchmarkCandles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minScore}x` } } };
       const stockReturn = candles[0].close / candles[period - 1].close;
       const benchReturn = benchmarkCandles[0].close / benchmarkCandles[period - 1].close;
-      if (benchReturn === 0) return false;
-      return stockReturn / benchReturn >= minScore;
+      if (benchReturn === 0) return { pass: false, data: { _diagnostics: { value: 'bench=0', threshold: `≥${minScore}x` } } };
+      const score = stockReturn / benchReturn;
+      return { pass: score >= minScore, data: { _diagnostics: { value: `${score.toFixed(2)}x`, threshold: `≥${minScore}x` } } };
     },
   },
   {
@@ -1164,17 +1201,19 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     evaluate: (candles, params, benchmarkCandles) => {
       const lookback = params.lookback ?? 60;
       const tolerance = params.tolerance ?? 2;
-      if (candles.length < lookback || !benchmarkCandles || benchmarkCandles.length < lookback) return false;
+      if (candles.length < lookback || !benchmarkCandles || benchmarkCandles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `within ${tolerance}% of high` } } };
       const rsRatios: number[] = [];
       for (let i = 0; i < lookback; i++) {
         if (benchmarkCandles[i].close > 0) {
           rsRatios.push(candles[i].close / benchmarkCandles[i].close);
         }
       }
-      if (rsRatios.length < 2) return false;
+      if (rsRatios.length < 2) return { pass: false, data: { _diagnostics: { value: 'insufficient RS data', threshold: `within ${tolerance}% of high` } } };
       const currentRS = rsRatios[0];
       const maxRS = Math.max(...rsRatios);
-      return currentRS >= maxRS * (1 - tolerance / 100);
+      const pass = currentRS >= maxRS * (1 - tolerance / 100);
+      const pctFromHigh = maxRS > 0 ? ((maxRS - currentRS) / maxRS * 100).toFixed(1) : '0';
+      return { pass, data: { _diagnostics: { value: `${pctFromHigh}% from high`, threshold: `within ${tolerance}%`, detail: `RS ${currentRS.toFixed(3)}, max ${maxRS.toFixed(3)}` } } };
     },
   },
   {
@@ -1192,7 +1231,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
       const minRSI = params.minRSI ?? 50;
       const maxRSI = params.maxRSI ?? 80;
       const rsi = calcRSI(candles, period);
-      return rsi >= minRSI && rsi <= maxRSI;
+      return { pass: rsi >= minRSI && rsi <= maxRSI, data: { _diagnostics: { value: `${rsi.toFixed(1)}`, threshold: `${minRSI}-${maxRSI}` } } };
     },
   },
   {
@@ -1211,18 +1250,20 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
       const slow = params.slowPeriod ?? 26;
       const sig = params.signalPeriod ?? 9;
       const condition = params.condition ?? "bullish_cross";
-      if (candles.length < slow + sig) return false;
+      if (candles.length < slow + sig) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
       const macd = calcMACD(candles, fast, slow, sig);
       const prevMACD = calcMACD(candles.slice(1), fast, slow, sig);
+      let pass = false;
       switch (condition) {
-        case "bullish_cross": return prevMACD.macd <= prevMACD.signal && macd.macd > macd.signal;
-        case "bearish_cross": return prevMACD.macd >= prevMACD.signal && macd.macd < macd.signal;
-        case "histogram_positive": return macd.histogram > 0;
-        case "histogram_negative": return macd.histogram < 0;
-        case "above_zero": return macd.macd > 0;
-        case "below_zero": return macd.macd < 0;
-        default: return false;
+        case "bullish_cross": pass = prevMACD.macd <= prevMACD.signal && macd.macd > macd.signal; break;
+        case "bearish_cross": pass = prevMACD.macd >= prevMACD.signal && macd.macd < macd.signal; break;
+        case "histogram_positive": pass = macd.histogram > 0; break;
+        case "histogram_negative": pass = macd.histogram < 0; break;
+        case "above_zero": pass = macd.macd > 0; break;
+        case "below_zero": pass = macd.macd < 0; break;
+        default: pass = false;
       }
+      return { pass, data: { _diagnostics: { value: `MACD ${macd.macd.toFixed(2)}, sig ${macd.signal.toFixed(2)}`, threshold: condition, detail: `hist ${macd.histogram.toFixed(2)}` } } };
     },
   },
   {
@@ -1240,9 +1281,8 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
       const minADX = params.minADX ?? 25;
       const requireBullish = params.requireBullish ?? true;
       const { adx, plusDI, minusDI } = calcADX(candles, period);
-      if (adx < minADX) return false;
-      if (requireBullish && plusDI <= minusDI) return false;
-      return true;
+      const pass = adx >= minADX && (!requireBullish || plusDI > minusDI);
+      return { pass, data: { _diagnostics: { value: `ADX ${adx.toFixed(1)}`, threshold: `≥${minADX}`, detail: `+DI ${plusDI.toFixed(1)} / -DI ${minusDI.toFixed(1)}` } } };
     },
   },
   {
@@ -1259,35 +1299,39 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
       const period = params.period ?? 13;
       const condition = params.condition ?? "bull_positive";
       const lookback = params.lookback ?? 3;
-      if (candles.length < period + lookback) return false;
+      if (candles.length < period + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
       const ema = calcEMA(candles, period);
       const bullPower = candles[0].high - ema;
       const bearPower = candles[0].low - ema;
+      let pass = false;
       switch (condition) {
-        case "bull_positive": return bullPower > 0;
-        case "bear_negative": return bearPower < 0;
+        case "bull_positive": pass = bullPower > 0; break;
+        case "bear_negative": pass = bearPower < 0; break;
         case "bull_rising": {
+          pass = true;
           for (let i = 0; i < lookback - 1; i++) {
             const e1 = calcEMA(candles.slice(i), period);
             const e2 = calcEMA(candles.slice(i + 1), period);
             const bp1 = candles[i].high - e1;
             const bp2 = candles[i + 1].high - e2;
-            if (bp1 <= bp2) return false;
+            if (bp1 <= bp2) { pass = false; break; }
           }
-          return true;
+          break;
         }
         case "bear_rising": {
+          pass = true;
           for (let i = 0; i < lookback - 1; i++) {
             const e1 = calcEMA(candles.slice(i), period);
             const e2 = calcEMA(candles.slice(i + 1), period);
             const bp1 = candles[i].low - e1;
             const bp2 = candles[i + 1].low - e2;
-            if (bp1 <= bp2) return false;
+            if (bp1 <= bp2) { pass = false; break; }
           }
-          return true;
+          break;
         }
-        default: return false;
+        default: pass = false;
       }
+      return { pass, data: { _diagnostics: { value: `bull ${bullPower.toFixed(2)}, bear ${bearPower.toFixed(2)}`, threshold: condition } } };
     },
   },
 ];
@@ -1310,7 +1354,7 @@ const VOLATILITY: IndicatorDefinition[] = [
       const maxWidth = params.maxWidth ?? 10;
       const minWidth = params.minWidth ?? 0;
       const bb = calcBollingerBands(candles, period, stdDev);
-      return bb.width >= minWidth && bb.width <= maxWidth;
+      return { pass: bb.width >= minWidth && bb.width <= maxWidth, data: { _diagnostics: { value: `${bb.width.toFixed(1)}%`, threshold: `${minWidth}%-${maxWidth}%` } } };
     },
   },
   {
@@ -1331,16 +1375,17 @@ const VOLATILITY: IndicatorDefinition[] = [
       const baselineDays = params.baselineDays ?? 20;
       const condition = params.condition ?? "contracting";
       const threshold = params.threshold ?? 25;
-      if (candles.length < atrPeriod + baselineDays + 1) return false;
+      if (candles.length < atrPeriod + baselineDays + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${condition} ≥${threshold}%` } } };
       let recentATRSum = 0;
       for (let i = 0; i < recentDays; i++) {
         recentATRSum += calcATR(candles.slice(i), atrPeriod);
       }
       const recentATR = recentATRSum / recentDays;
       const baselineATR = calcATR(candles.slice(baselineDays), atrPeriod);
-      if (baselineATR === 0) return false;
+      if (baselineATR === 0) return { pass: false, data: { _diagnostics: { value: 'baseline ATR=0', threshold: `${condition} ≥${threshold}%` } } };
       const changePct = ((recentATR - baselineATR) / baselineATR) * 100;
-      return condition === "contracting" ? changePct <= -threshold : changePct >= threshold;
+      const pass = condition === "contracting" ? changePct <= -threshold : changePct >= threshold;
+      return { pass, data: { _diagnostics: { value: `${changePct.toFixed(1)}%`, threshold: `${condition === "contracting" ? "≤-" : "≥"}${threshold}%`, detail: `recent ATR $${recentATR.toFixed(2)} vs baseline $${baselineATR.toFixed(2)}` } } };
     },
   },
   {
@@ -1357,14 +1402,14 @@ const VOLATILITY: IndicatorDefinition[] = [
       const period = params.period ?? 20;
       const minMult = params.minMultiple ?? 0;
       const maxMult = params.maxMultiple ?? 1.5;
-      if (candles.length < period + 1) return false;
+      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minMult}x-${maxMult}x` } } };
       const todayRange = candles[0].high - candles[0].low;
       let avgRange = 0;
       for (let i = 1; i <= period; i++) avgRange += candles[i].high - candles[i].low;
       avgRange /= period;
-      if (avgRange === 0) return false;
+      if (avgRange === 0) return { pass: false, data: { _diagnostics: { value: 'avg range=0', threshold: `${minMult}x-${maxMult}x` } } };
       const multiple = todayRange / avgRange;
-      return multiple >= minMult && multiple <= maxMult;
+      return { pass: multiple >= minMult && multiple <= maxMult, data: { _diagnostics: { value: `${multiple.toFixed(2)}x avg`, threshold: `${minMult}x-${maxMult}x`, detail: `today $${todayRange.toFixed(2)} vs avg $${avgRange.toFixed(2)}` } } };
     },
   },
   {
@@ -1383,13 +1428,14 @@ const VOLATILITY: IndicatorDefinition[] = [
       const bbStdDev = params.bbStdDev ?? 2;
       const kcPeriod = params.kcPeriod ?? 20;
       const kcMult = params.kcMult ?? 1.5;
-      if (candles.length < Math.max(bbPeriod, kcPeriod) + 1) return false;
+      if (candles.length < Math.max(bbPeriod, kcPeriod) + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: 'BB inside KC' } } };
       const bb = calcBollingerBands(candles, bbPeriod, bbStdDev);
       const ema = calcEMA(candles, kcPeriod);
       const atr = calcATR(candles, kcPeriod);
       const kcUpper = ema + kcMult * atr;
       const kcLower = ema - kcMult * atr;
-      return bb.lower > kcLower && bb.upper < kcUpper;
+      const pass = bb.lower > kcLower && bb.upper < kcUpper;
+      return { pass, data: { _diagnostics: { value: `BB ${bb.width.toFixed(1)}%`, threshold: 'BB inside KC', detail: `BB [${bb.lower.toFixed(2)}-${bb.upper.toFixed(2)}] KC [${kcLower.toFixed(2)}-${kcUpper.toFixed(2)}]` } } };
     },
   },
 ];

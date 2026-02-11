@@ -66,6 +66,8 @@ import {
   Link2,
   Unlink,
   CornerDownRight,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -218,12 +220,28 @@ interface DynamicDataProvider {
   consumers: DynamicDataConsumer[];
 }
 
+interface CriterionResultItem {
+  indicatorId: string;
+  indicatorName: string;
+  pass: boolean;
+  inverted: boolean;
+  diagnostics?: { value: string; threshold: string; detail?: string };
+}
+
+interface ThoughtBreakdownItem {
+  thoughtId: string;
+  thoughtName: string;
+  pass: boolean;
+  criteriaResults: CriterionResultItem[];
+}
+
 interface ScanResultItem {
   symbol: string;
   name: string;
   price: number;
   passedPaths: string[];
   dynamicData?: DynamicDataProvider[];
+  thoughtBreakdown?: ThoughtBreakdownItem[];
 }
 
 interface ScanResponse {
@@ -2748,42 +2766,77 @@ function ScanChartViewer({
           ))}
         </div>
 
-        {current?.dynamicData && current.dynamicData.length > 0 && (
-          <div className="flex flex-col gap-0.5 mb-2 flex-shrink-0 px-2 py-1.5 rounded-md border border-emerald-800/40 bg-emerald-950/20" data-testid="dynamic-data-strip">
-            {current.dynamicData.map((provider) => (
-              <div key={provider.providerId} className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-2 text-[11px]">
-                  <Zap className="h-3 w-3 text-emerald-400 flex-shrink-0" />
-                  <span className="font-medium text-emerald-300">{provider.providerName}</span>
-                  <span className="text-muted-foreground">|</span>
-                  {Object.entries(provider.detectedValues).map(([key, val]) => (
-                    <span key={key} className="text-emerald-200/80">
-                      Detected {key.replace(/([A-Z])/g, " $1").toLowerCase().trim()}: <span className="font-semibold text-emerald-300">{val}</span>
+        {current?.thoughtBreakdown && current.thoughtBreakdown.length > 0 && (
+          <div className="flex flex-col gap-1 mb-2 flex-shrink-0 px-2 py-1.5 rounded-md border border-blue-800/40 bg-blue-950/15" data-testid="thought-breakdown-strip">
+            {current.thoughtBreakdown.map((thought) => {
+              const passCount = thought.criteriaResults.filter(c => c.pass).length;
+              const totalCount = thought.criteriaResults.length;
+              return (
+                <div key={thought.thoughtId} className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2 text-[11px] flex-wrap">
+                    {thought.pass ? (
+                      <CheckCircle2 className="h-3 w-3 text-green-400 flex-shrink-0" />
+                    ) : (
+                      <XCircle className="h-3 w-3 text-red-400 flex-shrink-0" />
+                    )}
+                    <span className="font-medium text-foreground/90">{thought.thoughtName}</span>
+                    <span className={`font-semibold ${passCount === totalCount ? "text-green-400" : "text-amber-400"}`}>
+                      {passCount}/{totalCount} pass
                     </span>
+                  </div>
+                  {thought.criteriaResults.map((cr, ci) => (
+                    <div key={ci} className="flex items-center gap-1.5 text-[10px] pl-5 flex-wrap" data-testid={`criterion-result-${cr.indicatorId}`}>
+                      {cr.pass ? (
+                        <CheckCircle2 className="h-2.5 w-2.5 text-green-500 flex-shrink-0" />
+                      ) : (
+                        <XCircle className="h-2.5 w-2.5 text-red-500 flex-shrink-0" />
+                      )}
+                      <span className="text-foreground/70 font-medium">{cr.indicatorName}</span>
+                      {cr.inverted && <span className="text-yellow-400">[INV]</span>}
+                      {cr.diagnostics && (
+                        <>
+                          <span className={`font-semibold ${cr.pass ? "text-green-300" : "text-red-300"}`}>
+                            {cr.diagnostics.value}
+                          </span>
+                          <span className="text-muted-foreground/60">{cr.diagnostics.threshold}</span>
+                          {cr.diagnostics.detail && (
+                            <span className="text-muted-foreground/50">({cr.diagnostics.detail})</span>
+                          )}
+                        </>
+                      )}
+                    </div>
                   ))}
-                  {provider.lookbackSetting != null && (
-                    <>
-                      <span className="text-muted-foreground">|</span>
-                      <span className="text-muted-foreground">
-                        {provider.lookbackLabel || "Lookback setting"}: {provider.lookbackSetting}
-                      </span>
-                    </>
-                  )}
                 </div>
-                {provider.consumers.map((consumer) => (
-                  <div key={consumer.thoughtId + consumer.indicatorName} className="flex items-center gap-2 text-[11px] pl-4">
-                    <CornerDownRight className="h-3 w-3 text-emerald-600 flex-shrink-0" />
-                    <span className="font-medium text-emerald-400/80">{consumer.thoughtName}</span>
-                    {consumer.params.map((p) => (
-                      <span key={p.dataKey} className="text-emerald-200/70">
-                        {p.label}: <span className="font-semibold text-emerald-300">{p.value}</span>
-                        <span className="text-muted-foreground ml-1">(from {provider.providerName})</span>
-                      </span>
+              );
+            })}
+            {current?.dynamicData && current.dynamicData.length > 0 && (
+              <div className="border-t border-emerald-800/30 pt-1 mt-0.5">
+                {current.dynamicData.map((provider) => (
+                  <div key={provider.providerId} className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2 text-[10px] flex-wrap">
+                      <Zap className="h-2.5 w-2.5 text-emerald-400 flex-shrink-0" />
+                      <span className="text-emerald-300 font-medium">Data Link</span>
+                      {Object.entries(provider.detectedValues).map(([key, val]) => (
+                        <span key={key} className="text-emerald-200/80">
+                          {key.replace(/([A-Z])/g, " $1").toLowerCase().trim()}: <span className="font-semibold text-emerald-300">{val}</span>
+                        </span>
+                      ))}
+                    </div>
+                    {provider.consumers.map((consumer) => (
+                      <div key={consumer.thoughtId + consumer.indicatorName} className="flex items-center gap-1.5 text-[10px] pl-5 flex-wrap">
+                        <CornerDownRight className="h-2.5 w-2.5 text-emerald-600 flex-shrink-0" />
+                        <span className="text-emerald-400/80 font-medium">{consumer.indicatorName}</span>
+                        {consumer.params.map((p) => (
+                          <span key={p.dataKey} className="text-emerald-200/70">
+                            {p.label}: <span className="font-semibold text-emerald-300">{p.value}</span>
+                          </span>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 ))}
               </div>
-            ))}
+            )}
           </div>
         )}
 

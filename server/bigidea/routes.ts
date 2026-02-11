@@ -168,9 +168,18 @@ function repairCriterion(criterion: any): { indicatorId: string; params: Record<
   return { indicatorId: criterion.indicatorId, params: paramValues };
 }
 
+type CriterionResult = {
+  indicatorId: string;
+  indicatorName: string;
+  pass: boolean;
+  inverted: boolean;
+  diagnostics?: { value: string; threshold: string; detail?: string };
+};
+
 type ThoughtEvalResult = {
   pass: boolean;
   outputData: Record<string, any>;
+  criteriaResults: CriterionResult[];
 };
 
 function evaluateThoughtCriteria(
@@ -180,12 +189,14 @@ function evaluateThoughtCriteria(
   candlesByTimeframe?: Record<string, CandleData[]>,
   upstreamData?: Record<string, any>
 ): ThoughtEvalResult {
-  if (!criteria || criteria.length === 0) return { pass: false, outputData: {} };
+  if (!criteria || criteria.length === 0) return { pass: false, outputData: {}, criteriaResults: [] };
 
   const activeCriteria = criteria.filter((c: any) => !c.muted);
-  if (activeCriteria.length === 0) return { pass: false, outputData: {} };
+  if (activeCriteria.length === 0) return { pass: false, outputData: {}, criteriaResults: [] };
 
   const outputData: Record<string, any> = {};
+  const criteriaResults: CriterionResult[] = [];
+  let allPass = true;
 
   for (const criterion of activeCriteria) {
     const repaired = repairCriterion(criterion);
@@ -200,16 +211,28 @@ function evaluateThoughtCriteria(
     const rawResult = indicator.evaluate(useCandles, repaired.params, benchmarkCandles, upstreamData);
     const normalized = normalizeResult(rawResult);
 
+    const diagnostics = normalized.data?._diagnostics as { value: string; threshold: string; detail?: string } | undefined;
+
     if (normalized.data) {
-      Object.assign(outputData, normalized.data);
+      const { _diagnostics, ...rest } = normalized.data;
+      Object.assign(outputData, rest);
     }
 
     let pass = normalized.pass;
     if (criterion.inverted) pass = !pass;
-    if (!pass) return { pass: false, outputData };
+
+    criteriaResults.push({
+      indicatorId: indicator.id,
+      indicatorName: criterion.label || indicator.name,
+      pass,
+      inverted: !!criterion.inverted,
+      diagnostics,
+    });
+
+    if (!pass) allPass = false;
   }
 
-  return { pass: true, outputData };
+  return { pass: allPass, outputData, criteriaResults };
 }
 
 export function registerBigIdeaRoutes(app: Express): void {
@@ -684,7 +707,7 @@ Select the most appropriate indicators and set parameters that match the user's 
       const fixedEdges: any[] = [...(result.edges || [])];
       const usedKeys = new Set(result.thoughts.map((t: any) => t.thoughtKey));
 
-      function nextUnusedKey(): string {
+      const nextUnusedKey = (): string => {
         for (let i = 0; i < 26; i++) {
           const key = String.fromCharCode(65 + i);
           if (!usedKeys.has(key)) {
@@ -989,6 +1012,7 @@ Each criterion follows this structure:
 
               const nodeResults: Record<string, boolean> = {};
               const nodeOutputData: Record<string, Record<string, any>> = {};
+              const nodeCriteriaResults: Record<string, CriterionResult[]> = {};
 
               for (const node of thoughtNodes) {
                 const tf = node.thoughtTimeframe || "daily";
@@ -1019,11 +1043,12 @@ Each criterion follows this structure:
                 let passed = evalResult.pass;
                 if (node.isNot) passed = !passed;
                 nodeResults[node.id] = passed;
+                nodeCriteriaResults[node.id] = evalResult.criteriaResults;
                 if (passed) {
                   thoughtCounts[node.id]++;
-                  if (evalResult.outputData && Object.keys(evalResult.outputData).length > 0) {
-                    nodeOutputData[node.id] = evalResult.outputData;
-                  }
+                }
+                if (evalResult.outputData && Object.keys(evalResult.outputData).length > 0) {
+                  nodeOutputData[node.id] = evalResult.outputData;
                 }
               }
 
@@ -1180,12 +1205,28 @@ Each criterion follows this structure:
                   });
                 }
 
+                const thoughtBreakdown: Array<{
+                  thoughtId: string;
+                  thoughtName: string;
+                  pass: boolean;
+                  criteriaResults: CriterionResult[];
+                }> = [];
+                for (const tn of thoughtNodes) {
+                  thoughtBreakdown.push({
+                    thoughtId: tn.id,
+                    thoughtName: tn.thoughtName || "Unnamed",
+                    pass: nodeResults[tn.id] ?? false,
+                    criteriaResults: nodeCriteriaResults[tn.id] || [],
+                  });
+                }
+
                 return {
                   symbol,
                   name: symbol,
                   price: priceCandles.length > 0 ? priceCandles[0].close : 0,
                   passedPaths,
                   dynamicData: dynamicData.length > 0 ? dynamicData : undefined,
+                  thoughtBreakdown,
                 };
               }
 
