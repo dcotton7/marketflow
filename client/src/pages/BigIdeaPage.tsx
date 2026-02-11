@@ -524,6 +524,7 @@ export default function BigIdeaPage() {
   type IndicatorMeta = {
     id: string;
     name: string;
+    description?: string;
     params: Array<{ name: string; autoLink?: { linkType: string; sourceParam?: string } }>;
     provides?: Array<{ linkType: string; paramName: string }>;
     consumes?: Array<{ paramName: string; dataKey: string }>;
@@ -1936,6 +1937,12 @@ export default function BigIdeaPage() {
                           </div>
                         </CardHeader>
                         <CardContent className="p-2.5 pt-0 space-y-2">
+                          {(() => {
+                            const indMeta = indicatorLibrary.find((i) => i.id === criterion.indicatorId);
+                            return indMeta?.description ? (
+                              <p className="text-[11px] text-muted-foreground/80 leading-relaxed pb-1 border-b border-border/40 mb-1">{indMeta.description}</p>
+                            ) : null;
+                          })()}
                           <div>
                             <div className="flex items-center gap-1">
                               <Label className="text-[11px] text-muted-foreground">Data Timeframe</Label>
