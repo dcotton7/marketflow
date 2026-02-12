@@ -1935,7 +1935,7 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground"
-                  onClick={() => setLocation(`/symbol/${item.symbol}`)}
+                  onClick={() => setLocation(`/sentinel/evaluate?symbol=${item.symbol}&from=watchlist`)}
                   data-testid={`button-chart-watch-${item.id}`}
                 >
                   <BarChart3 className="w-3.5 h-3.5" />
