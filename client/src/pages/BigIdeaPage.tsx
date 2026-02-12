@@ -520,9 +520,11 @@ export default function BigIdeaPage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const [ideaName, setIdeaName] = useState("Untitled Idea");
+  const [loadedIdeaName, setLoadedIdeaName] = useState<string | null>(null);
   const [universe, setUniverse] = useState("sp500");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [currentIdeaId, setCurrentIdeaId] = useState<number | null>(null);
+  const [renameForkOpen, setRenameForkOpen] = useState(false);
 
   const [scanResults, setScanResults] = useState<ScanResultItem[] | null>(null);
   const [scanTotalScanned, setScanTotalScanned] = useState(0);
@@ -838,29 +840,37 @@ export default function BigIdeaPage() {
     },
   });
 
+  const buildIdeaBody = useCallback(() => {
+    const ideaNodes: IdeaNode[] = nodes.map((n) => ({
+      id: n.id,
+      type: n.type as "thought" | "results",
+      thoughtId: n.data.thoughtId as number | undefined,
+      thoughtName: n.data.label as string | undefined,
+      thoughtCategory: n.data.category as string | undefined,
+      thoughtDescription: n.data.description as string | undefined,
+      thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
+      thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
+      isNot: n.data.isNot as boolean | undefined,
+      userRenamed: n.data.userRenamed as boolean | undefined,
+      position: n.position,
+      passCount: n.data.passCount as number | undefined,
+    }));
+    const ideaEdges: IdeaEdge[] = edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      logicType: (e.data?.logicType as "AND" | "OR") || "AND",
+    }));
+    return { name: ideaName, universe, nodes: ideaNodes, edges: ideaEdges };
+  }, [nodes, edges, ideaName, universe]);
+
   const saveIdeaMutation = useMutation({
-    mutationFn: async () => {
-      const ideaNodes: IdeaNode[] = nodes.map((n) => ({
-        id: n.id,
-        type: n.type as "thought" | "results",
-        thoughtId: n.data.thoughtId as number | undefined,
-        thoughtName: n.data.label as string | undefined,
-        thoughtCategory: n.data.category as string | undefined,
-        thoughtDescription: n.data.description as string | undefined,
-        thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
-        thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
-        isNot: n.data.isNot as boolean | undefined,
-        userRenamed: n.data.userRenamed as boolean | undefined,
-        position: n.position,
-        passCount: n.data.passCount as number | undefined,
-      }));
-      const ideaEdges: IdeaEdge[] = edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        logicType: (e.data?.logicType as "AND" | "OR") || "AND",
-      }));
-      const body = { name: ideaName, universe, nodes: ideaNodes, edges: ideaEdges };
+    mutationFn: async (mode?: "rename" | "fork") => {
+      const body = buildIdeaBody();
+      if (mode === "fork") {
+        const res = await apiRequest("POST", "/api/bigidea/ideas", body);
+        return res.json();
+      }
       if (currentIdeaId) {
         const res = await apiRequest("PATCH", `/api/bigidea/ideas/${currentIdeaId}`, body);
         return res.json();
@@ -868,15 +878,26 @@ export default function BigIdeaPage() {
       const res = await apiRequest("POST", "/api/bigidea/ideas", body);
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data, mode) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bigidea/ideas"] });
-      if (!currentIdeaId && data.id) setCurrentIdeaId(data.id);
-      toast({ title: "Idea saved" });
+      if (mode === "fork" || (!currentIdeaId && data.id)) {
+        setCurrentIdeaId(data.id);
+      }
+      setLoadedIdeaName(ideaName);
+      toast({ title: mode === "fork" ? "Saved as new idea" : "Idea saved" });
     },
     onError: (err: Error) => {
       toast({ title: "Failed to save idea", description: err.message, variant: "destructive" });
     },
   });
+
+  const handleSaveClick = useCallback(() => {
+    if (currentIdeaId && loadedIdeaName && ideaName !== loadedIdeaName) {
+      setRenameForkOpen(true);
+    } else {
+      saveIdeaMutation.mutate(undefined);
+    }
+  }, [currentIdeaId, loadedIdeaName, ideaName, saveIdeaMutation]);
 
   const commitTuningMutation = useMutation({
     mutationFn: async () => {
@@ -1054,6 +1075,7 @@ export default function BigIdeaPage() {
     setNodes([{ ...INITIAL_RESULTS_NODE }]);
     setEdges([]);
     setIdeaName("Untitled Idea");
+    setLoadedIdeaName(null);
     setCurrentIdeaId(null);
     setScanResults(null);
     setShowResults(false);
@@ -1662,6 +1684,7 @@ export default function BigIdeaPage() {
     (idea: ScannerIdea) => {
       setCurrentIdeaId(idea.id);
       setIdeaName(idea.name);
+      setLoadedIdeaName(idea.name);
       setUniverse(idea.universe);
 
       const enrichCriteria = (criteria: ScannerCriterion[] | undefined) => {
@@ -1821,12 +1844,15 @@ export default function BigIdeaPage() {
       <SentinelHeader showSentiment={false} />
 
       <div className="flex items-center gap-3 px-4 py-2 border-b bg-card flex-wrap">
-        <Input
-          value={ideaName}
-          onChange={(e) => setIdeaName(e.target.value)}
-          className="w-48 text-sm font-medium"
-          data-testid="input-idea-name"
-        />
+        <div className="flex flex-col">
+          <span className="text-rs-tiny text-muted-foreground mb-0.5">Idea Title</span>
+          <Input
+            value={ideaName}
+            onChange={(e) => setIdeaName(e.target.value)}
+            className="w-48 text-sm font-medium"
+            data-testid="input-idea-name"
+          />
+        </div>
         <Select value={universe} onValueChange={setUniverse}>
           <SelectTrigger className="w-40" data-testid="select-universe">
             <SelectValue />
@@ -1852,7 +1878,7 @@ export default function BigIdeaPage() {
 
         <Button
           variant="outline"
-          onClick={() => saveIdeaMutation.mutate()}
+          onClick={handleSaveClick}
           disabled={saveIdeaMutation.isPending}
           className="gap-2"
           data-testid="button-save-idea"
@@ -3057,6 +3083,33 @@ export default function BigIdeaPage() {
               data-testid="button-confirm-clear"
             >
               Clear Canvas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={renameForkOpen} onOpenChange={setRenameForkOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Title Changed</AlertDialogTitle>
+            <AlertDialogDescription>
+              You changed the title from "{loadedIdeaName}" to "{ideaName}". Would you like to rename the existing idea or save this as a new copy?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel data-testid="button-cancel-rename-fork">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { setRenameForkOpen(false); saveIdeaMutation.mutate("rename"); }}
+              data-testid="button-rename-idea"
+            >
+              Rename
+            </AlertDialogAction>
+            <AlertDialogAction
+              className="bg-secondary text-secondary-foreground"
+              onClick={() => { setRenameForkOpen(false); saveIdeaMutation.mutate("fork"); }}
+              data-testid="button-fork-idea"
+            >
+              Save as New
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

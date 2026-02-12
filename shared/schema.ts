@@ -1298,6 +1298,11 @@ export const scanTuningHistory = pgTable("scan_tuning_history", {
   adminApproved: boolean("admin_approved"),
   userFeedback: text("user_feedback"),
   userFeedbackNote: text("user_feedback_note"),
+  marketRegime: jsonb("market_regime"),
+  universe: text("universe"),
+  archetypeTags: text("archetype_tags").array(),
+  tuningDirections: jsonb("tuning_directions"),
+  acceptanceRatio: doublePrecision("acceptance_ratio"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1314,6 +1319,22 @@ export const scanChartRatings = pgTable("scan_chart_ratings", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const indicatorLearningSummary = pgTable("indicator_learning_summary", {
+  indicatorId: text("indicator_id").primaryKey(),
+  indicatorName: text("indicator_name").notNull(),
+  totalAccepted: integer("total_accepted").notNull().default(0),
+  totalDiscarded: integer("total_discarded").notNull().default(0),
+  paramStats: jsonb("param_stats"),
+  avgRetentionRate: doublePrecision("avg_retention_rate"),
+  avgResultDelta: doublePrecision("avg_result_delta"),
+  regimePerformance: jsonb("regime_performance"),
+  universePerformance: jsonb("universe_performance"),
+  archetypePerformance: jsonb("archetype_performance"),
+  avoidParams: jsonb("avoid_params"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export type ScanSession = typeof scanSessions.$inferSelect;
 export type ScanTuningHistory = typeof scanTuningHistory.$inferSelect;
 export type ScanChartRating = typeof scanChartRatings.$inferSelect;
+export type IndicatorLearningSummary = typeof indicatorLearningSummary.$inferSelect;

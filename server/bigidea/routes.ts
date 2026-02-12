@@ -1,6 +1,7 @@
 import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
-import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers } from "@shared/schema";
+import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary } from "@shared/schema";
+import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
 import { evaluateScanQuality } from "./quality";
@@ -17,6 +18,46 @@ function getOpenAI(): OpenAI | null {
 const ohlcvCache = new Map<string, { data: CandleData[]; timestamp: number }>();
 const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
+
+const ARCHETYPE_KEYWORDS: [RegExp, string][] = [
+  [/vcp|volatility\s*contraction/i, "vcp"],
+  [/flat\s*(base|consolidat)/i, "flat-base"],
+  [/cup\s*(and|&)\s*handle/i, "cup-handle"],
+  [/high\s*tight\s*flag/i, "high-tight-flag"],
+  [/breakout/i, "breakout"],
+  [/coil/i, "coiling-base"],
+  [/volume\s*dry/i, "volume-dryup"],
+  [/volume\s*surg|volume\s*spike/i, "volume-surge"],
+  [/tight\s*(price|range)/i, "tight-action"],
+  [/relative\s*strength|rs\s*lead/i, "rs-leader"],
+  [/sma\s*above|above\s*sma|moving\s*average|trend/i, "trend-filter"],
+  [/earnings|eps|revenue/i, "fundamental-filter"],
+  [/gap\s*up|opening\s*gap/i, "gap-up"],
+  [/pullback|retrace/i, "pullback"],
+  [/momentum|rate\s*of\s*change|roc/i, "momentum"],
+  [/adr|average\s*daily\s*range/i, "adr-filter"],
+  [/range\s*contract|narrow/i, "range-contraction"],
+  [/price\s*above|above.*price/i, "price-filter"],
+];
+
+function extractArchetypeTags(thoughtNames: string[]): string[] {
+  const tags = new Set<string>();
+  for (const name of thoughtNames) {
+    for (const [pattern, tag] of ARCHETYPE_KEYWORDS) {
+      if (pattern.test(name)) tags.add(tag);
+    }
+  }
+  return Array.from(tags).sort();
+}
+
+function buildMarketRegimeSnapshot(sentiment: any): any {
+  return {
+    weeklyTrend: sentiment.weekly?.stateName || "Neutral",
+    dailyBasket: sentiment.daily?.state || "MIXED",
+    choppiness: sentiment.choppiness?.daily?.state || "MIXED",
+    spyPrice: sentiment.weekly?.price || 0,
+  };
+}
 
 function getUniverseTickers(universe: string): string[] {
   switch (universe) {
@@ -234,6 +275,138 @@ function evaluateThoughtCriteria(
   }
 
   return { pass: allPass, outputData, criteriaResults };
+}
+
+async function upsertIndicatorLearningSummary(record: any) {
+  if (!db) return;
+  const accepted = (record.acceptedSuggestions || []) as any[];
+  if (accepted.length === 0) return;
+
+  const indicatorIds = new Set(accepted.map((s: any) => s.indicatorId));
+  const retainedUp = (record.retainedUpSymbols || []).length;
+  const droppedUp = (record.droppedUpSymbols || []).length;
+  const retentionRate = retainedUp + droppedUp > 0 ? retainedUp / (retainedUp + droppedUp) : null;
+  const resultDelta = record.resultCountAfter != null && record.resultCountBefore != null
+    ? record.resultCountAfter - record.resultCountBefore : null;
+
+  const regime = record.marketRegime as any;
+  const regimeKey = regime ? `${regime.weeklyTrend}/${regime.dailyBasket}` : "Unknown";
+  const universeKey = record.universe || "unknown";
+  const archetypes = (record.archetypeTags || []) as string[];
+
+  for (const indId of Array.from(indicatorIds)) {
+    const indSuggestions = accepted.filter((s: any) => s.indicatorId === indId);
+    const indName = indSuggestions[0]?.indicatorName || indId;
+
+    const existing = await db.select().from(indicatorLearningSummary)
+      .where(eq(indicatorLearningSummary.indicatorId, indId)).limit(1);
+
+    if (existing.length === 0) {
+      const paramStats: Record<string, any> = {};
+      for (const s of indSuggestions) {
+        const dir = Number(s.suggestedValue) < Number(s.currentValue) ? "tightened" : "loosened";
+        paramStats[s.paramName] = {
+          tightened: dir === "tightened" ? 1 : 0,
+          loosened: dir === "loosened" ? 1 : 0,
+          avgAccepted: Number(s.suggestedValue),
+          lastAccepted: Number(s.suggestedValue),
+          count: 1,
+        };
+      }
+
+      const regimePerf: Record<string, any> = {};
+      regimePerf[regimeKey] = { accepted: 1, retention: retentionRate, count: 1 };
+
+      const universePerf: Record<string, any> = {};
+      universePerf[universeKey] = { accepted: 1, avgRetention: retentionRate, count: 1 };
+
+      const archetypePerf: Record<string, any> = {};
+      for (const tag of archetypes) {
+        archetypePerf[tag] = { accepted: 1, retention: retentionRate, count: 1 };
+      }
+
+      await db.insert(indicatorLearningSummary).values({
+        indicatorId: indId,
+        indicatorName: indName,
+        totalAccepted: 1,
+        totalDiscarded: 0,
+        paramStats,
+        avgRetentionRate: retentionRate,
+        avgResultDelta: resultDelta,
+        regimePerformance: regimePerf,
+        universePerformance: universePerf,
+        archetypePerformance: archetypePerf,
+        avoidParams: null,
+      });
+    } else {
+      const ex = existing[0];
+      const ps = (ex.paramStats as Record<string, any>) || {};
+      for (const s of indSuggestions) {
+        const dir = Number(s.suggestedValue) < Number(s.currentValue) ? "tightened" : "loosened";
+        if (!ps[s.paramName]) {
+          ps[s.paramName] = { tightened: 0, loosened: 0, avgAccepted: 0, lastAccepted: 0, count: 0 };
+        }
+        const p = ps[s.paramName];
+        if (dir === "tightened") p.tightened++;
+        else p.loosened++;
+        p.lastAccepted = Number(s.suggestedValue);
+        p.avgAccepted = ((p.avgAccepted * p.count) + Number(s.suggestedValue)) / (p.count + 1);
+        p.count++;
+      }
+
+      const newTotal = (ex.totalAccepted || 0) + 1;
+      const newRetention = retentionRate != null
+        ? (((ex.avgRetentionRate || 0) * (ex.totalAccepted || 0)) + retentionRate) / newTotal
+        : ex.avgRetentionRate;
+      const newResultDelta = resultDelta != null
+        ? (((ex.avgResultDelta || 0) * (ex.totalAccepted || 0)) + resultDelta) / newTotal
+        : ex.avgResultDelta;
+
+      const rp = (ex.regimePerformance as Record<string, any>) || {};
+      if (!rp[regimeKey]) rp[regimeKey] = { accepted: 0, retention: null, count: 0 };
+      rp[regimeKey].accepted++;
+      rp[regimeKey].count++;
+      if (retentionRate != null) {
+        rp[regimeKey].retention = rp[regimeKey].retention != null
+          ? ((rp[regimeKey].retention * (rp[regimeKey].count - 1)) + retentionRate) / rp[regimeKey].count
+          : retentionRate;
+      }
+
+      const up = (ex.universePerformance as Record<string, any>) || {};
+      if (!up[universeKey]) up[universeKey] = { accepted: 0, avgRetention: null, count: 0 };
+      up[universeKey].accepted++;
+      up[universeKey].count++;
+      if (retentionRate != null) {
+        up[universeKey].avgRetention = up[universeKey].avgRetention != null
+          ? ((up[universeKey].avgRetention * (up[universeKey].count - 1)) + retentionRate) / up[universeKey].count
+          : retentionRate;
+      }
+
+      const ap = (ex.archetypePerformance as Record<string, any>) || {};
+      for (const tag of archetypes) {
+        if (!ap[tag]) ap[tag] = { accepted: 0, retention: null, count: 0 };
+        ap[tag].accepted++;
+        ap[tag].count++;
+        if (retentionRate != null) {
+          ap[tag].retention = ap[tag].retention != null
+            ? ((ap[tag].retention * (ap[tag].count - 1)) + retentionRate) / ap[tag].count
+            : retentionRate;
+        }
+      }
+
+      await db.update(indicatorLearningSummary).set({
+        indicatorName: indName,
+        totalAccepted: newTotal,
+        paramStats: ps,
+        avgRetentionRate: newRetention,
+        avgResultDelta: newResultDelta,
+        regimePerformance: rp,
+        universePerformance: up,
+        archetypePerformance: ap,
+        updatedAt: new Date(),
+      }).where(eq(indicatorLearningSummary.indicatorId, indId));
+    }
+  }
 }
 
 export function registerBigIdeaRoutes(app: Express): void {
@@ -1595,7 +1768,63 @@ Each criterion follows this structure:
       try {
         const indIds = indicatorMeta.map((m: any) => m.id);
         if (indIds.length > 0) {
-          const pastHistory = await db
+          const summaries = await db.select().from(indicatorLearningSummary)
+            .where(sql`${indicatorLearningSummary.indicatorId} = ANY(${indIds})`);
+
+          let currentRegime: any = null;
+          try {
+            const sentiment = await fetchMarketSentiment();
+            currentRegime = buildMarketRegimeSnapshot(sentiment);
+          } catch (_) {}
+
+          const currentRegimeKey = currentRegime
+            ? `${currentRegime.weeklyTrend}/${currentRegime.dailyBasket}` : null;
+
+          const lines: string[] = [];
+          for (const summary of summaries) {
+            const indName = summary.indicatorName || summary.indicatorId;
+            lines.push(`\n--- ${indName} (${summary.indicatorId}) [ALL-TIME SUMMARY] ---`);
+            lines.push(`Total: ${summary.totalAccepted} accepted, ${summary.totalDiscarded} discarded`);
+
+            const ps = (summary.paramStats as Record<string, any>) || {};
+            for (const [param, st] of Object.entries(ps)) {
+              lines.push(`  ${param}: tightened ${st.tightened}x, loosened ${st.loosened}x, avg accepted: ${Number(st.avgAccepted).toFixed(3)}, last: ${Number(st.lastAccepted).toFixed(3)}`);
+            }
+
+            if (summary.avgRetentionRate != null) {
+              lines.push(`  Overall thumbs-up retention: ${(summary.avgRetentionRate * 100).toFixed(0)}%`);
+            }
+
+            if (currentRegimeKey && summary.regimePerformance) {
+              const rp = (summary.regimePerformance as Record<string, any>)[currentRegimeKey];
+              if (rp) {
+                lines.push(`  CURRENT REGIME (${currentRegimeKey}): ${rp.accepted} accepted sessions, retention: ${rp.retention != null ? (rp.retention * 100).toFixed(0) + "%" : "N/A"}`);
+              }
+            }
+
+            if (universe && summary.universePerformance) {
+              const up = (summary.universePerformance as Record<string, any>)[universe];
+              if (up) {
+                lines.push(`  CURRENT UNIVERSE (${universe}): ${up.accepted} accepted, retention: ${up.avgRetention != null ? (up.avgRetention * 100).toFixed(0) + "%" : "N/A"}`);
+              }
+            }
+
+            const archetypes = extractArchetypeTags(thoughtNodes.map((tn: any) => tn.thoughtName || tn.id));
+            if (archetypes.length > 0 && summary.archetypePerformance) {
+              const ap = summary.archetypePerformance as Record<string, any>;
+              for (const tag of archetypes) {
+                if (ap[tag]) {
+                  lines.push(`  ARCHETYPE (${tag}): ${ap[tag].accepted} accepted, retention: ${ap[tag].retention != null ? (ap[tag].retention * 100).toFixed(0) + "%" : "N/A"}`);
+                }
+              }
+            }
+
+            if (summary.avoidParams) {
+              lines.push(`  AVOID PARAMS: ${JSON.stringify(summary.avoidParams)}`);
+            }
+          }
+
+          const recentHistory = await db
             .select()
             .from(scanTuningHistory)
             .where(
@@ -1607,62 +1836,21 @@ Each criterion follows this structure:
             .orderBy(sql`${scanTuningHistory.createdAt} DESC`)
             .limit(30);
 
-          const lines: string[] = [];
-          for (const indId of indIds) {
-            const relevant = pastHistory.filter((h) => {
-              const accepted = (h.acceptedSuggestions as any[]) || [];
-              return accepted.some((s: any) => s.indicatorId === indId);
-            });
-            if (relevant.length === 0) continue;
-
-            const acceptedSessions = relevant.filter((h) => h.outcome === "accepted");
-            const discardedSessions = relevant.filter((h) => h.outcome === "discarded");
-            const indName = indicatorMeta.find((m: any) => m.id === indId)?.name || indId;
-
-            const paramStats: Record<string, { tightened: number; loosened: number; acceptedValues: number[] }> = {};
-            for (const h of acceptedSessions) {
-              for (const s of (h.acceptedSuggestions as any[]) || []) {
-                if (s.indicatorId !== indId) continue;
-                if (!paramStats[s.paramName]) paramStats[s.paramName] = { tightened: 0, loosened: 0, acceptedValues: [] };
-                const st = paramStats[s.paramName];
-                st.acceptedValues.push(Number(s.suggestedValue));
-                if (Number(s.suggestedValue) < Number(s.currentValue)) st.tightened++;
-                else if (Number(s.suggestedValue) > Number(s.currentValue)) st.loosened++;
-              }
-            }
-
-            const discardedParams: string[] = [];
-            for (const h of discardedSessions) {
-              for (const s of (h.acceptedSuggestions as any[]) || []) {
-                if (s.indicatorId !== indId) continue;
-                discardedParams.push(`${s.paramName}: ${s.currentValue} → ${s.suggestedValue}`);
-              }
-            }
-
-            let retainRate = 0;
-            let retainCount = 0;
-            for (const h of acceptedSessions) {
-              const up = (h.retainedUpSymbols || []).length;
-              const dropped = (h.droppedUpSymbols || []).length;
-              if (up + dropped > 0) { retainRate += up / (up + dropped); retainCount++; }
-            }
-
-            lines.push(`\n--- ${indName} (${indId}) ---`);
-            lines.push(`Sessions: ${acceptedSessions.length} accepted, ${discardedSessions.length} discarded`);
-            for (const [param, st] of Object.entries(paramStats)) {
-              const avg = st.acceptedValues.reduce((a, b) => a + b, 0) / st.acceptedValues.length;
-              lines.push(`  ${param}: tightened ${st.tightened}x, loosened ${st.loosened}x, avg accepted value: ${avg.toFixed(3)}`);
-            }
-            if (retainCount > 0) {
-              lines.push(`  Thumbs-up retention rate across accepted sessions: ${(retainRate / retainCount * 100).toFixed(0)}%`);
-            }
-            if (discardedParams.length > 0) {
-              lines.push(`  AVOID (from discarded sessions): ${discardedParams.slice(0, 3).join("; ")}`);
+          for (const h of recentHistory) {
+            const appliedSuggs = (h.acceptedSuggestions as any[]) || [];
+            const relevantSuggs = appliedSuggs.filter((s: any) => indIds.includes(s.indicatorId));
+            if (relevantSuggs.length === 0) continue;
+            const retained = (h.retainedUpSymbols || []).length;
+            const dropped = (h.droppedUpSymbols || []).length;
+            const ret = retained + dropped > 0 ? `${(retained / (retained + dropped) * 100).toFixed(0)}%` : "N/A";
+            lines.push(`\n[RECENT ${h.outcome?.toUpperCase()}] regime=${JSON.stringify(h.marketRegime)}, universe=${h.universe}, retention=${ret}`);
+            for (const s of relevantSuggs) {
+              lines.push(`  ${s.indicatorId}.${s.paramName}: ${s.currentValue} → ${s.suggestedValue}`);
             }
           }
 
           if (lines.length > 0) {
-            learningContext = `\n\nHISTORICAL LEARNING DATA (from past tuning sessions across all users and ideas):\n${lines.join("\n")}`;
+            learningContext = `\n\nHISTORICAL LEARNING DATA (all-time summaries + recent sessions, bucketed by market regime, universe, archetype):\n${lines.join("\n")}`;
           }
         }
       } catch (histErr) {
@@ -1681,7 +1869,9 @@ RULES:
 - If too many results, suggest tightening the weakest filters
 - Consider the user's chart ratings when available
 - When historical learning data is available, use it to inform your suggestions — prefer parameter directions and values that led to accepted sessions and good thumbs-up retention
-- AVOID suggesting parameter changes that were previously discarded by users
+- Pay special attention to CURRENT REGIME, CURRENT UNIVERSE, and ARCHETYPE sections — these show how parameters performed in conditions similar to right now
+- If a regime or archetype shows low retention, consider adjusting parameters differently than all-time averages suggest
+- AVOID suggesting parameter changes that were previously discarded by users or listed in AVOID PARAMS
 
 Return a JSON object with this exact structure:
 {
@@ -1762,6 +1952,16 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       }
 
       const thoughtNodeNames = thoughtNodes.map((tn: any) => tn.thoughtName || tn.id);
+      const archetypeTags = extractArchetypeTags(thoughtNodeNames);
+
+      let marketRegime = null;
+      try {
+        const sentiment = await fetchMarketSentiment();
+        marketRegime = buildMarketRegimeSnapshot(sentiment);
+      } catch (e) {
+        console.warn("[Tuning] Failed to fetch market regime:", e);
+      }
+
       const [historyRecord] = await db
         .insert(scanTuningHistory)
         .values({
@@ -1772,6 +1972,9 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           aiSuggestions: aiResult,
           resultCountBefore: resultCount || 0,
           thoughtsInvolved: thoughtNodeNames,
+          universe: universe || null,
+          archetypeTags: archetypeTags.length > 0 ? archetypeTags : null,
+          marketRegime,
         })
         .returning();
 
@@ -1845,6 +2048,19 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       const isAdmin = userTier === "admin" || !!user[0]?.isAdmin;
       const adminApproved = isAdmin ? true : null;
 
+      const accepted = (acceptedSuggestions || []) as any[];
+      const totalSuggested = accepted.length + ((skippedSuggestions || []) as any[]).length;
+      const acceptanceRatio = totalSuggested > 0 ? accepted.length / totalSuggested : 0;
+
+      const tuningDirections: Record<string, { direction: string; params: string[] }> = {};
+      for (const s of accepted) {
+        if (!tuningDirections[s.indicatorId]) tuningDirections[s.indicatorId] = { direction: "unchanged", params: [] };
+        const td = tuningDirections[s.indicatorId];
+        td.params.push(s.paramName);
+        if (Number(s.suggestedValue) < Number(s.currentValue)) td.direction = "tightened";
+        else if (Number(s.suggestedValue) > Number(s.currentValue)) td.direction = td.direction === "tightened" ? "mixed" : "loosened";
+      }
+
       const updated = await db
         .update(scanTuningHistory)
         .set({
@@ -1861,11 +2077,22 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           newSymbols: newSymbols || null,
           ratingsCount: ratingsCount ?? null,
           adminApproved,
+          tuningDirections: Object.keys(tuningDirections).length > 0 ? tuningDirections : null,
+          acceptanceRatio,
         })
         .where(and(eq(scanTuningHistory.id, id), eq(scanTuningHistory.userId, userId)))
         .returning();
 
       if (updated.length === 0) return res.status(404).json({ error: "Tuning record not found" });
+
+      if (outcome === "accepted" && adminApproved) {
+        try {
+          await upsertIndicatorLearningSummary(updated[0]);
+        } catch (e) {
+          console.warn("[Tuning] Failed to update learning summary:", e);
+        }
+      }
+
       res.json(updated[0]);
     } catch (error) {
       console.error("Error committing tuning:", error);
@@ -1873,17 +2100,38 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     }
   });
 
-  // === TUNING HISTORY FOR AI CONTEXT (Phase 3) ===
+  // === TUNING HISTORY FOR AI CONTEXT (Phase 3 - Hybrid) ===
   app.get("/api/bigidea/scan-tune/history/:indicatorIds", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
 
-      const indicatorIds = req.params.indicatorIds.split(",").filter(Boolean);
-      if (indicatorIds.length === 0) return res.json({ history: [] });
+      const rawIds = req.params.indicatorIds;
+      const indicatorIds = (Array.isArray(rawIds) ? rawIds.join(",") : rawIds).split(",").filter(Boolean);
+      if (indicatorIds.length === 0) return res.json({ history: {}, summaries: {} });
 
-      const allHistory = await db
+      const summaries = await db.select().from(indicatorLearningSummary)
+        .where(sql`${indicatorLearningSummary.indicatorId} = ANY(${indicatorIds})`);
+
+      const summaryMap: Record<string, any> = {};
+      for (const s of summaries) {
+        summaryMap[s.indicatorId] = {
+          indicatorId: s.indicatorId,
+          indicatorName: s.indicatorName,
+          totalAccepted: s.totalAccepted,
+          totalDiscarded: s.totalDiscarded,
+          paramStats: s.paramStats,
+          avgRetentionRate: s.avgRetentionRate,
+          avgResultDelta: s.avgResultDelta,
+          regimePerformance: s.regimePerformance,
+          universePerformance: s.universePerformance,
+          archetypePerformance: s.archetypePerformance,
+          avoidParams: s.avoidParams,
+        };
+      }
+
+      const recentHistory = await db
         .select()
         .from(scanTuningHistory)
         .where(
@@ -1893,78 +2141,39 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           )
         )
         .orderBy(sql`${scanTuningHistory.createdAt} DESC`)
-        .limit(50);
+        .limit(30);
 
-      const perIndicator: Record<string, {
-        indicatorId: string;
-        totalSessions: number;
-        acceptedSessions: number;
-        discardedSessions: number;
-        paramTrends: Record<string, { tightened: number; loosened: number; avgAcceptedValue: number; values: number[] }>;
-        avgResultDelta: number;
-        thumbsUpRetentionRate: number;
-      }> = {};
-
+      const perIndicator: Record<string, any> = {};
       for (const indId of indicatorIds) {
-        const relevant = allHistory.filter((h) => {
+        const relevant = recentHistory.filter((h) => {
           const suggestions = (h.aiSuggestions as any)?.suggestions || [];
           const accepted = (h.acceptedSuggestions as any) || [];
           return [...suggestions, ...accepted].some((s: any) => s.indicatorId === indId);
         });
-
         if (relevant.length === 0) continue;
-
-        const accepted = relevant.filter((h) => h.outcome === "accepted");
-        const discarded = relevant.filter((h) => h.outcome === "discarded");
-
-        const paramTrends: Record<string, { tightened: number; loosened: number; avgAcceptedValue: number; values: number[] }> = {};
-        let totalResultDelta = 0;
-        let deltaCount = 0;
-        let totalRetained = 0;
-        let totalUp = 0;
-
-        for (const h of accepted) {
-          const appliedSuggs = (h.acceptedSuggestions as any[]) || [];
-          for (const s of appliedSuggs) {
-            if (s.indicatorId !== indId) continue;
-            if (!paramTrends[s.paramName]) {
-              paramTrends[s.paramName] = { tightened: 0, loosened: 0, avgAcceptedValue: 0, values: [] };
-            }
-            const trend = paramTrends[s.paramName];
-            trend.values.push(Number(s.suggestedValue));
-            if (Number(s.suggestedValue) < Number(s.currentValue)) trend.tightened++;
-            else if (Number(s.suggestedValue) > Number(s.currentValue)) trend.loosened++;
-          }
-          if (h.resultCountAfter !== null && h.resultCountBefore !== null) {
-            totalResultDelta += (h.resultCountAfter - h.resultCountBefore);
-            deltaCount++;
-          }
-          const retained = (h.retainedUpSymbols || []).length;
-          const dropped = (h.droppedUpSymbols || []).length;
-          if (retained + dropped > 0) {
-            totalRetained += retained;
-            totalUp += retained + dropped;
-          }
-        }
-
-        for (const [paramName, trend] of Object.entries(paramTrends)) {
-          if (trend.values.length > 0) {
-            trend.avgAcceptedValue = trend.values.reduce((a, b) => a + b, 0) / trend.values.length;
-          }
-        }
 
         perIndicator[indId] = {
           indicatorId: indId,
-          totalSessions: relevant.length,
-          acceptedSessions: accepted.length,
-          discardedSessions: discarded.length,
-          paramTrends,
-          avgResultDelta: deltaCount > 0 ? totalResultDelta / deltaCount : 0,
-          thumbsUpRetentionRate: totalUp > 0 ? totalRetained / totalUp : 0,
+          recentSessions: relevant.length,
+          recentAccepted: relevant.filter((h) => h.outcome === "accepted").length,
+          recentDiscarded: relevant.filter((h) => h.outcome === "discarded").length,
+          recentSuggestions: relevant.map(h => ({
+            outcome: h.outcome,
+            accepted: h.acceptedSuggestions,
+            skipped: h.skippedSuggestions,
+            regime: h.marketRegime,
+            universe: h.universe,
+            archetypes: h.archetypeTags,
+            retainedUp: (h.retainedUpSymbols || []).length,
+            droppedUp: (h.droppedUpSymbols || []).length,
+            resultDelta: h.resultCountAfter != null && h.resultCountBefore != null
+              ? h.resultCountAfter - h.resultCountBefore : null,
+            date: h.createdAt,
+          })),
         };
       }
 
-      res.json({ history: perIndicator });
+      res.json({ history: perIndicator, summaries: summaryMap });
     } catch (error) {
       console.error("Error fetching tuning history:", error);
       res.status(500).json({ error: "Failed to fetch tuning history" });
@@ -1996,7 +2205,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         .limit(50);
 
       const enriched = await Promise.all(pending.map(async (p) => {
-        const submitter = await db.select({ username: sentinelUsers.username }).from(sentinelUsers).where(eq(sentinelUsers.id, p.userId)).limit(1);
+        const submitter = await db!.select({ username: sentinelUsers.username }).from(sentinelUsers).where(eq(sentinelUsers.id, p.userId)).limit(1);
         return { ...p, submitterUsername: submitter[0]?.username || "Unknown" };
       }));
 
@@ -2031,6 +2240,15 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         .returning();
 
       if (updated.length === 0) return res.status(404).json({ error: "Tuning record not found" });
+
+      if (approved && updated[0].outcome === "accepted") {
+        try {
+          await upsertIndicatorLearningSummary(updated[0]);
+        } catch (e) {
+          console.warn("[Admin Review] Failed to update learning summary:", e);
+        }
+      }
+
       res.json(updated[0]);
     } catch (error) {
       console.error("Error in admin review:", error);
