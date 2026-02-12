@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { SentinelHeader } from "@/components/SentinelHeader";
-import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database } from "lucide-react";
+import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -433,6 +433,141 @@ function SystemSettingsTab() {
   );
 }
 
+function TuningReviewPanel() {
+  const { toast } = useToast();
+  
+  const { data: pendingReviews = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/bigidea/scan-tune/pending-reviews"],
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: async ({ id, approved }: { id: number; approved: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/bigidea/scan-tune/${id}/admin-review`, { approved });
+      return res.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/scan-tune/pending-reviews"] });
+      toast({ title: variables.approved ? "Tuning approved" : "Tuning rejected", description: variables.approved ? "This tuning data will now improve AI suggestions." : "This tuning data has been rejected." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Review failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (pendingReviews.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <CheckCircle2 className="w-12 h-12 text-rs-green mb-4" />
+          <h3 className="text-lg font-semibold mb-2" data-testid="text-no-reviews">All Clear</h3>
+          <p className="text-muted-foreground text-center" data-testid="text-no-reviews-desc">
+            No pending tuning reviews. Pro user submissions will appear here for approval.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{pendingReviews.length} pending review{pendingReviews.length !== 1 ? "s" : ""}</p>
+        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-reviews">
+          <RefreshCw className="w-4 h-4" />
+        </Button>
+      </div>
+      {pendingReviews.map((review: any) => {
+        const accepted = (review.acceptedSuggestions as any[]) || [];
+        const skipped = (review.skippedSuggestions as any[]) || [];
+        const retainedUp = (review.retainedUpSymbols || []).length;
+        const droppedUp = (review.droppedUpSymbols || []).length;
+        const resultDelta = review.resultCountAfter !== null ? (review.resultCountAfter - review.resultCountBefore) : null;
+        
+        return (
+          <Card key={review.id} data-testid={`card-tuning-review-${review.id}`}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs">{review.submitterUsername}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(review.createdAt).toLocaleDateString()} {new Date(review.createdAt).toLocaleTimeString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {review.ratingsCount !== null && (
+                    <Badge variant="secondary" className="text-xs">{review.ratingsCount} charts rated</Badge>
+                  )}
+                  {resultDelta !== null && (
+                    <Badge variant="secondary" className={`text-xs ${resultDelta >= 0 ? "text-rs-green" : "text-rs-red"}`}>
+                      {resultDelta >= 0 ? "+" : ""}{resultDelta} results
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Applied Changes ({accepted.length})</p>
+                {accepted.map((s: any, i: number) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    <Badge variant="outline" className="text-[10px]">{s.indicatorName || s.indicatorId}</Badge>
+                    <span className="font-medium">{s.paramName}</span>
+                    <span className="text-muted-foreground line-through">{s.currentValue}</span>
+                    <span>→</span>
+                    <span className="font-bold">{s.suggestedValue}</span>
+                  </div>
+                ))}
+                {skipped.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">{skipped.length} suggestion{skipped.length !== 1 ? "s" : ""} skipped</p>
+                )}
+              </div>
+
+              {(retainedUp > 0 || droppedUp > 0) && (
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-rs-green">Liked kept: {retainedUp}</span>
+                  <span className="text-rs-red">Liked lost: {droppedUp}</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 justify-end">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => reviewMutation.mutate({ id: review.id, approved: false })}
+                  disabled={reviewMutation.isPending}
+                  data-testid={`button-reject-review-${review.id}`}
+                >
+                  <XCircle className="w-3.5 h-3.5 mr-1" />
+                  Reject
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => reviewMutation.mutate({ id: review.id, approved: true })}
+                  disabled={reviewMutation.isPending}
+                  data-testid={`button-approve-review-${review.id}`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                  Approve
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SentinelAdminPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
@@ -710,6 +845,10 @@ export default function SentinelAdminPage() {
             <TabsTrigger value="settings" className="gap-2" data-testid="tab-settings">
               <Settings className="w-4 h-4" />
               System Settings
+            </TabsTrigger>
+            <TabsTrigger value="tuning-reviews" className="gap-2" data-testid="tab-tuning-reviews">
+              <Sparkles className="w-4 h-4" />
+              Tuning Reviews
             </TabsTrigger>
           </TabsList>
 
@@ -1299,6 +1438,10 @@ export default function SentinelAdminPage() {
 
           <TabsContent value="settings" data-testid="content-settings">
             <SystemSettingsTab />
+          </TabsContent>
+
+          <TabsContent value="tuning-reviews" data-testid="content-tuning-reviews">
+            <TuningReviewPanel />
           </TabsContent>
         </Tabs>
       </div>

@@ -592,6 +592,14 @@ export default function BigIdeaPage() {
   const [tuneInstruction, setTuneInstruction] = useState("");
   const [tuneResult, setTuneResult] = useState<TuningResult | null>(null);
   const [acceptedTuneIndices, setAcceptedTuneIndices] = useState<Set<number>>(new Set());
+  const [tuningDirty, setTuningDirty] = useState(false);
+  const [tuningPreSnapshot, setTuningPreSnapshot] = useState<any>(null);
+  const [tuningId, setTuningId] = useState<number | null>(null);
+  const [preTuneResultCount, setPreTuneResultCount] = useState<number>(0);
+  const [preTuneSymbols, setPreTuneSymbols] = useState<string[]>([]);
+  const [tuneRescanDone, setTuneRescanDone] = useState(false);
+  const [unsavedTuningDialog, setUnsavedTuningDialog] = useState(false);
+  const [pendingNavAction, setPendingNavAction] = useState<(() => void) | null>(null);
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -870,6 +878,100 @@ export default function BigIdeaPage() {
     },
   });
 
+  const commitTuningMutation = useMutation({
+    mutationFn: async () => {
+      const ideaNodes: IdeaNode[] = nodes.map((n) => ({
+        id: n.id,
+        type: n.type as "thought" | "results",
+        thoughtId: n.data.thoughtId as number | undefined,
+        thoughtName: n.data.label as string | undefined,
+        thoughtCategory: n.data.category as string | undefined,
+        thoughtDescription: n.data.description as string | undefined,
+        thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
+        thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
+        isNot: n.data.isNot as boolean | undefined,
+        userRenamed: n.data.userRenamed as boolean | undefined,
+        position: n.position,
+        passCount: n.data.passCount as number | undefined,
+      }));
+      const ideaEdges: IdeaEdge[] = edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        logicType: (e.data?.logicType as "AND" | "OR") || "AND",
+      }));
+      const body = { name: ideaName, universe, nodes: ideaNodes, edges: ideaEdges };
+      if (currentIdeaId) {
+        await apiRequest("PATCH", `/api/bigidea/ideas/${currentIdeaId}`, body);
+      } else {
+        const res = await apiRequest("POST", "/api/bigidea/ideas", body);
+        const data = await res.json();
+        if (data.id) setCurrentIdeaId(data.id);
+      }
+
+      if (!tuningId) throw new Error("No tuning session to commit");
+
+      const currentSymbols = (scanResults || []).map(r => r.symbol);
+      const chartRatingsData = await fetch("/api/bigidea/chart-ratings-for-session?sessionId=" + (scanSessionId || ""), { credentials: "include" }).then(r => r.json()).catch(() => []);
+
+      const upRated = (chartRatingsData || []).filter((r: any) => r.rating === "up").map((r: any) => r.symbol);
+      const downRated = (chartRatingsData || []).filter((r: any) => r.rating === "down").map((r: any) => r.symbol);
+
+      const retainedUpSymbols = upRated.filter((s: string) => currentSymbols.includes(s));
+      const droppedUpSymbols = upRated.filter((s: string) => !currentSymbols.includes(s));
+      const droppedDownSymbols = downRated.filter((s: string) => !currentSymbols.includes(s));
+      const retainedDownSymbols = downRated.filter((s: string) => currentSymbols.includes(s));
+      const newSymbols = currentSymbols.filter(s => !preTuneSymbols.includes(s));
+
+      const acceptedSuggs = tuneResult?.suggestions.filter((_, i) => acceptedTuneIndices.has(i)).map(s => ({
+        indicatorId: s.indicatorId,
+        indicatorName: s.indicatorName,
+        paramName: s.paramName,
+        currentValue: s.currentValue,
+        suggestedValue: s.suggestedValue,
+      })) || [];
+      const skippedSuggs = tuneResult?.suggestions.filter((_, i) => !acceptedTuneIndices.has(i)).map(s => ({
+        indicatorId: s.indicatorId,
+        indicatorName: s.indicatorName,
+        paramName: s.paramName,
+        currentValue: s.currentValue,
+        suggestedValue: s.suggestedValue,
+      })) || [];
+
+      const ratingsCount = (chartRatingsData || []).length;
+
+      const res = await apiRequest("PATCH", `/api/bigidea/scan-tune/${tuningId}/commit`, {
+        outcome: "accepted",
+        acceptedSuggestions: acceptedSuggs,
+        skippedSuggestions: skippedSuggs,
+        configBefore: tuningPreSnapshot,
+        configAfter: nodes.filter(n => n.type === "thought").flatMap(n => {
+          const criteria = (n.data.criteria as ScannerCriterion[]) || [];
+          return criteria.flatMap(c => c.params.map(p => ({ indicatorId: c.indicatorId, paramName: p.name, value: p.value })));
+        }),
+        resultCountAfter: scanResults?.length || 0,
+        retainedUpSymbols,
+        droppedUpSymbols,
+        droppedDownSymbols,
+        retainedDownSymbols,
+        newSymbols,
+        ratingsCount,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      setTuningDirty(false);
+      setTuningId(null);
+      setTuningPreSnapshot(null);
+      setTuneRescanDone(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/ideas"] });
+      toast({ title: "Tuning committed", description: "Your changes have been saved and will improve future AI suggestions." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Commit failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const qualityMutation = useMutation({
     mutationFn: async () => {
       const ideaNodes = nodes.map((n) => ({
@@ -933,6 +1035,7 @@ export default function BigIdeaPage() {
     onSuccess: (data: TuningResult) => {
       setTuneResult(data);
       setAcceptedTuneIndices(new Set());
+      setTuningId(data.tuningId);
     },
     onError: (err: Error) => {
       if (err.message.includes("403")) {
@@ -944,6 +1047,10 @@ export default function BigIdeaPage() {
   });
 
   const handleClearIdea = useCallback(() => {
+    setTuningDirty(false);
+    setTuningId(null);
+    setTuningPreSnapshot(null);
+    setTuneRescanDone(false);
     setNodes([{ ...INITIAL_RESULTS_NODE }]);
     setEdges([]);
     setIdeaName("Untitled Idea");
@@ -992,11 +1099,99 @@ export default function BigIdeaPage() {
     );
     if (applied) {
       setAcceptedTuneIndices((prev) => { const next = new Set(Array.from(prev)); next.add(index); return next; });
+      setTuningDirty(true);
       toast({ title: `Applied: ${suggestion.indicatorName} → ${suggestion.paramName} = ${suggestion.suggestedValue}` });
     } else {
       toast({ title: "Could not apply", description: `Parameter ${suggestion.paramName} for ${suggestion.indicatorName} not found on canvas.`, variant: "destructive" });
     }
   }, [setNodes, toast]);
+
+  const handleUndoSuggestion = useCallback((suggestion: TuningSuggestion, index: number) => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "thought" || !n.data.criteria) return n;
+        const criteria = n.data.criteria as ScannerCriterion[];
+        const matchCriterion = criteria.find((c) =>
+          c.indicatorId === suggestion.indicatorId &&
+          c.params.some((p) => p.name === suggestion.paramName)
+        );
+        if (!matchCriterion) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            criteria: criteria.map((c) => {
+              if (c.indicatorId !== suggestion.indicatorId) return c;
+              return {
+                ...c,
+                params: c.params.map((p) =>
+                  p.name === suggestion.paramName ? { ...p, value: suggestion.currentValue } : p
+                ),
+              };
+            }),
+          },
+        };
+      })
+    );
+    setAcceptedTuneIndices((prev) => {
+      const next = new Set(Array.from(prev));
+      next.delete(index);
+      if (next.size === 0) setTuningDirty(false);
+      return next;
+    });
+    toast({ title: `Undone: ${suggestion.indicatorName} → ${suggestion.paramName} reverted to ${suggestion.currentValue}` });
+  }, [setNodes, toast]);
+
+  const handleApplyAll = useCallback(() => {
+    if (!tuneResult) return;
+    tuneResult.suggestions.forEach((s, i) => {
+      if (!acceptedTuneIndices.has(i)) {
+        handleAcceptSuggestion(s, i);
+      }
+    });
+  }, [tuneResult, acceptedTuneIndices, handleAcceptSuggestion]);
+
+  const handleCommitTuning = useCallback(() => {
+    commitTuningMutation.mutate();
+  }, [commitTuningMutation]);
+
+  const handleDiscardTuning = useCallback(() => {
+    if (tuningPreSnapshot && Array.isArray(tuningPreSnapshot)) {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.type !== "thought" || !n.data.criteria) return n;
+          const criteria = n.data.criteria as ScannerCriterion[];
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              criteria: criteria.map((c) => {
+                const origParams = tuningPreSnapshot.filter((sp: any) => sp.indicatorId === c.indicatorId);
+                if (origParams.length === 0) return c;
+                return {
+                  ...c,
+                  params: c.params.map((p) => {
+                    const orig = origParams.find((op: any) => op.paramName === p.name);
+                    return orig ? { ...p, value: orig.value } : p;
+                  }),
+                };
+              }),
+            },
+          };
+        })
+      );
+    }
+    if (tuningId) {
+      apiRequest("PATCH", `/api/bigidea/scan-tune/${tuningId}/commit`, { outcome: "discarded" }).catch(() => {});
+    }
+    setTuningDirty(false);
+    setTuningId(null);
+    setTuningPreSnapshot(null);
+    setTuneRescanDone(false);
+    setAcceptedTuneIndices(new Set());
+    setTuneResult(null);
+    toast({ title: "Tuning changes discarded", description: "Parameters reverted to their original values." });
+  }, [tuningPreSnapshot, tuningId, setNodes, toast]);
 
   const deleteThoughtMutation = useMutation({
     mutationFn: async ({ thoughtId, nodeId }: { thoughtId: number; nodeId?: string }) => {
@@ -1463,7 +1658,7 @@ export default function BigIdeaPage() {
     [setNodes, generateTitleFromCriteria]
   );
 
-  const loadIdea = useCallback(
+  const loadIdeaInner = useCallback(
     (idea: ScannerIdea) => {
       setCurrentIdeaId(idea.id);
       setIdeaName(idea.name);
@@ -1543,6 +1738,18 @@ export default function BigIdeaPage() {
       setScanSessionId(undefined);
     },
     [setNodes, setEdges, indicatorLibrary]
+  );
+
+  const loadIdea = useCallback(
+    (idea: ScannerIdea) => {
+      if (tuningDirty) {
+        setPendingNavAction(() => () => loadIdeaInner(idea));
+        setUnsavedTuningDialog(true);
+        return;
+      }
+      loadIdeaInner(idea);
+    },
+    [tuningDirty, loadIdeaInner]
   );
 
   const thoughtsByCategory = useMemo(() => {
@@ -1654,6 +1861,25 @@ export default function BigIdeaPage() {
           Save Idea
         </Button>
 
+        {tuningDirty && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={handleCommitTuning}
+                disabled={commitTuningMutation.isPending || !tuneRescanDone}
+                className="gap-2"
+                data-testid="button-commit-tuning"
+              >
+                {commitTuningMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Save & Commit Tuning
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              <p>{!tuneRescanDone ? "Rescan and review charts first before committing tuning changes to the AI learning system." : "Saves your idea and commits the tuning changes to improve AI suggestions for everyone."}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -1686,9 +1912,22 @@ export default function BigIdeaPage() {
                   toast({ title: "Run a scan first", description: "AI Tune needs scan results and failure data to analyze. Run a scan, then try again.", variant: "destructive" });
                   return;
                 }
+                const snapshot: any[] = [];
+                nodes.filter(n => n.type === "thought").forEach(n => {
+                  const criteria = (n.data.criteria as ScannerCriterion[]) || [];
+                  criteria.forEach(c => {
+                    c.params.forEach(p => {
+                      snapshot.push({ indicatorId: c.indicatorId, paramName: p.name, value: p.value });
+                    });
+                  });
+                });
+                setTuningPreSnapshot(snapshot);
+                setPreTuneResultCount(scanResults?.length || 0);
+                setPreTuneSymbols((scanResults || []).map(r => r.symbol));
                 setTuneResult(null);
                 setTuneInstruction("");
                 setAcceptedTuneIndices(new Set());
+                setTuneRescanDone(false);
                 setTuneDialogOpen(true);
               }}
               disabled={tuneMutation.isPending || nodes.filter(n => n.type === "thought").length === 0 || !lastFunnelData}
@@ -1708,7 +1947,14 @@ export default function BigIdeaPage() {
           <TooltipTrigger asChild>
             <Button
               variant="outline"
-              onClick={() => setClearConfirmOpen(true)}
+              onClick={() => {
+                if (tuningDirty) {
+                  setPendingNavAction(() => () => setClearConfirmOpen(true));
+                  setUnsavedTuningDialog(true);
+                  return;
+                }
+                setClearConfirmOpen(true);
+              }}
               disabled={nodes.filter(n => n.type === "thought").length === 0}
               className="gap-2"
               data-testid="button-clear-idea"
@@ -2915,9 +3161,21 @@ export default function BigIdeaPage() {
                             Apply
                           </Button>
                         ) : (
-                          <div className="flex items-center gap-1.5 text-xs text-rs-green">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Applied
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 text-xs text-rs-green">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Applied
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleUndoSuggestion(s, i)}
+                              className="gap-1 text-xs text-muted-foreground"
+                              data-testid={`button-undo-suggestion-${i}`}
+                            >
+                              <X className="h-3 w-3" />
+                              Undo
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -2926,25 +3184,107 @@ export default function BigIdeaPage() {
                 </div>
               )}
 
-              <DialogFooter className="gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => { setTuneResult(null); setTuneInstruction(""); }}
-                  data-testid="button-tune-again"
-                >
-                  Try Again
-                </Button>
-                <Button
-                  onClick={() => setTuneDialogOpen(false)}
-                  data-testid="button-tune-done"
-                >
-                  Done
-                </Button>
+              <DialogFooter className="flex-col gap-2 sm:flex-col">
+                {tuneResult.suggestions.length > 0 && (
+                  <div className="flex items-center justify-between w-full text-xs text-muted-foreground">
+                    <span>{acceptedTuneIndices.size} of {tuneResult.suggestions.length} applied</span>
+                    {acceptedTuneIndices.size < tuneResult.suggestions.length && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleApplyAll}
+                        className="gap-1.5"
+                        data-testid="button-apply-all"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Apply All
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <div className="flex gap-2 w-full justify-end flex-wrap">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        onClick={() => { setTuneResult(null); setTuneInstruction(""); setAcceptedTuneIndices(new Set()); }}
+                        data-testid="button-more-suggestions"
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        More Suggestions
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <p>Ask the AI for a fresh round of suggestions based on your current parameters.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => {
+                          setTuneDialogOpen(false);
+                          scanMutation.mutate();
+                          setTuneRescanDone(true);
+                          setTimeout(() => {
+                            setChartViewerOpen(true);
+                            setChartViewerIndex(0);
+                          }, 500);
+                        }}
+                        disabled={acceptedTuneIndices.size === 0}
+                        className="gap-2"
+                        data-testid="button-review-on-chart"
+                      >
+                        <BarChart3 className="h-4 w-4" />
+                        Review on Chart
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <p>{acceptedTuneIndices.size === 0 ? "Apply at least one suggestion first." : "Closes this dialog, rescans with your changes, and opens the chart viewer so you can rate the results."}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               </DialogFooter>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={unsavedTuningDialog} onOpenChange={setUnsavedTuningDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Tuning Changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have uncommitted tuning changes. Would you like to save your idea and commit the tuning, or discard all changes?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel onClick={() => { setUnsavedTuningDialog(false); setPendingNavAction(null); }} data-testid="button-cancel-nav">
+              Stay Here
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                handleDiscardTuning();
+                setUnsavedTuningDialog(false);
+                if (pendingNavAction) { pendingNavAction(); setPendingNavAction(null); }
+              }}
+              data-testid="button-discard-nav"
+            >
+              Cancel Changes
+            </Button>
+            <Button
+              onClick={() => {
+                commitTuningMutation.mutate();
+                setUnsavedTuningDialog(false);
+                if (pendingNavAction) { setTimeout(() => { pendingNavAction(); setPendingNavAction(null); }, 1000); }
+              }}
+              data-testid="button-commit-nav"
+            >
+              Save & Commit
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -899,7 +899,7 @@ Each criterion follows this structure:
       const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-      const { nodes, edges, universe } = req.body;
+      const { nodes, edges, universe, ideaId } = req.body;
       if (!nodes || !edges || !universe) {
         return res.status(400).json({ error: "nodes, edges, and universe are required" });
       }
@@ -1507,6 +1507,33 @@ Each criterion follows this structure:
     }
   });
 
+  // === CHART RATINGS FOR SESSION ===
+  app.get("/api/bigidea/chart-ratings-for-session", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const sessionId = req.query.sessionId ? parseInt(String(req.query.sessionId)) : undefined;
+      if (!sessionId || isNaN(sessionId)) return res.json([]);
+
+      const ratings = await db
+        .select()
+        .from(scanChartRatings)
+        .where(
+          and(
+            eq(scanChartRatings.userId, userId),
+            eq(scanChartRatings.sessionId, sessionId)
+          )
+        );
+
+      res.json(ratings);
+    } catch (error) {
+      console.error("Error fetching session ratings:", error);
+      res.status(500).json({ error: "Failed to fetch session ratings" });
+    }
+  });
+
   // === AI SCAN TUNING ENDPOINT ===
 
   app.post("/api/bigidea/scan-tune", async (req: Request, res: Response) => {
@@ -1564,6 +1591,84 @@ Each criterion follows this structure:
         ? `User has rated ${ratings.up || 0} charts thumbs-up and ${ratings.down || 0} charts thumbs-down from this scan.`
         : "No chart ratings available yet.";
 
+      let learningContext = "";
+      try {
+        const indIds = indicatorMeta.map((m: any) => m.id);
+        if (indIds.length > 0) {
+          const pastHistory = await db
+            .select()
+            .from(scanTuningHistory)
+            .where(
+              and(
+                sql`${scanTuningHistory.outcome} IS NOT NULL`,
+                sql`${scanTuningHistory.adminApproved} IS NOT FALSE`
+              )
+            )
+            .orderBy(sql`${scanTuningHistory.createdAt} DESC`)
+            .limit(30);
+
+          const lines: string[] = [];
+          for (const indId of indIds) {
+            const relevant = pastHistory.filter((h) => {
+              const accepted = (h.acceptedSuggestions as any[]) || [];
+              return accepted.some((s: any) => s.indicatorId === indId);
+            });
+            if (relevant.length === 0) continue;
+
+            const acceptedSessions = relevant.filter((h) => h.outcome === "accepted");
+            const discardedSessions = relevant.filter((h) => h.outcome === "discarded");
+            const indName = indicatorMeta.find((m: any) => m.id === indId)?.name || indId;
+
+            const paramStats: Record<string, { tightened: number; loosened: number; acceptedValues: number[] }> = {};
+            for (const h of acceptedSessions) {
+              for (const s of (h.acceptedSuggestions as any[]) || []) {
+                if (s.indicatorId !== indId) continue;
+                if (!paramStats[s.paramName]) paramStats[s.paramName] = { tightened: 0, loosened: 0, acceptedValues: [] };
+                const st = paramStats[s.paramName];
+                st.acceptedValues.push(Number(s.suggestedValue));
+                if (Number(s.suggestedValue) < Number(s.currentValue)) st.tightened++;
+                else if (Number(s.suggestedValue) > Number(s.currentValue)) st.loosened++;
+              }
+            }
+
+            const discardedParams: string[] = [];
+            for (const h of discardedSessions) {
+              for (const s of (h.acceptedSuggestions as any[]) || []) {
+                if (s.indicatorId !== indId) continue;
+                discardedParams.push(`${s.paramName}: ${s.currentValue} → ${s.suggestedValue}`);
+              }
+            }
+
+            let retainRate = 0;
+            let retainCount = 0;
+            for (const h of acceptedSessions) {
+              const up = (h.retainedUpSymbols || []).length;
+              const dropped = (h.droppedUpSymbols || []).length;
+              if (up + dropped > 0) { retainRate += up / (up + dropped); retainCount++; }
+            }
+
+            lines.push(`\n--- ${indName} (${indId}) ---`);
+            lines.push(`Sessions: ${acceptedSessions.length} accepted, ${discardedSessions.length} discarded`);
+            for (const [param, st] of Object.entries(paramStats)) {
+              const avg = st.acceptedValues.reduce((a, b) => a + b, 0) / st.acceptedValues.length;
+              lines.push(`  ${param}: tightened ${st.tightened}x, loosened ${st.loosened}x, avg accepted value: ${avg.toFixed(3)}`);
+            }
+            if (retainCount > 0) {
+              lines.push(`  Thumbs-up retention rate across accepted sessions: ${(retainRate / retainCount * 100).toFixed(0)}%`);
+            }
+            if (discardedParams.length > 0) {
+              lines.push(`  AVOID (from discarded sessions): ${discardedParams.slice(0, 3).join("; ")}`);
+            }
+          }
+
+          if (lines.length > 0) {
+            learningContext = `\n\nHISTORICAL LEARNING DATA (from past tuning sessions across all users and ideas):\n${lines.join("\n")}`;
+          }
+        }
+      } catch (histErr) {
+        console.warn("[Tuning] Failed to fetch learning context:", histErr);
+      }
+
       const systemPrompt = `You are a stock scanner tuning assistant. Analyze the scan configuration and failure funnel data to suggest parameter adjustments that will improve scan results quality.
 
 RULES:
@@ -1575,6 +1680,8 @@ RULES:
 - If the scan produces too few results, suggest loosening the tightest filters
 - If too many results, suggest tightening the weakest filters
 - Consider the user's chart ratings when available
+- When historical learning data is available, use it to inform your suggestions — prefer parameter directions and values that led to accepted sessions and good thumbs-up retention
+- AVOID suggesting parameter changes that were previously discarded by users
 
 Return a JSON object with this exact structure:
 {
@@ -1604,7 +1711,7 @@ ${JSON.stringify(funnelData.perIndicator, null, 2)}
 Failure funnel per thought:
 ${JSON.stringify(funnelData.perThought, null, 2)}
 
-${ratingSummary}
+${ratingSummary}${learningContext}
 
 ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No specific instruction — analyze the funnel data and suggest the most impactful improvements."}`;
 
@@ -1701,6 +1808,233 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     } catch (error) {
       console.error("Error updating tuning feedback:", error);
       res.status(500).json({ error: "Failed to update feedback" });
+    }
+  });
+
+  // === TUNING COMMIT ENDPOINT ===
+  app.patch("/api/bigidea/scan-tune/:id/commit", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const id = parseInt(String(req.params.id));
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const {
+        outcome,
+        acceptedSuggestions,
+        skippedSuggestions,
+        configBefore,
+        configAfter,
+        resultCountAfter,
+        retainedUpSymbols,
+        droppedUpSymbols,
+        droppedDownSymbols,
+        retainedDownSymbols,
+        newSymbols,
+        ratingsCount,
+      } = req.body;
+
+      if (!outcome || !["accepted", "discarded"].includes(outcome)) {
+        return res.status(400).json({ error: "outcome must be 'accepted' or 'discarded'" });
+      }
+
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      const userTier = user[0]?.tier || "standard";
+      const isAdmin = userTier === "admin" || !!user[0]?.isAdmin;
+      const adminApproved = isAdmin ? true : null;
+
+      const updated = await db
+        .update(scanTuningHistory)
+        .set({
+          outcome,
+          acceptedSuggestions: acceptedSuggestions || null,
+          skippedSuggestions: skippedSuggestions || null,
+          configBefore: configBefore || null,
+          configAfter: configAfter || null,
+          resultCountAfter: resultCountAfter ?? null,
+          retainedUpSymbols: retainedUpSymbols || null,
+          droppedUpSymbols: droppedUpSymbols || null,
+          droppedDownSymbols: droppedDownSymbols || null,
+          retainedDownSymbols: retainedDownSymbols || null,
+          newSymbols: newSymbols || null,
+          ratingsCount: ratingsCount ?? null,
+          adminApproved,
+        })
+        .where(and(eq(scanTuningHistory.id, id), eq(scanTuningHistory.userId, userId)))
+        .returning();
+
+      if (updated.length === 0) return res.status(404).json({ error: "Tuning record not found" });
+      res.json(updated[0]);
+    } catch (error) {
+      console.error("Error committing tuning:", error);
+      res.status(500).json({ error: "Failed to commit tuning" });
+    }
+  });
+
+  // === TUNING HISTORY FOR AI CONTEXT (Phase 3) ===
+  app.get("/api/bigidea/scan-tune/history/:indicatorIds", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const indicatorIds = req.params.indicatorIds.split(",").filter(Boolean);
+      if (indicatorIds.length === 0) return res.json({ history: [] });
+
+      const allHistory = await db
+        .select()
+        .from(scanTuningHistory)
+        .where(
+          and(
+            sql`${scanTuningHistory.outcome} IS NOT NULL`,
+            sql`${scanTuningHistory.adminApproved} IS NOT FALSE`
+          )
+        )
+        .orderBy(sql`${scanTuningHistory.createdAt} DESC`)
+        .limit(50);
+
+      const perIndicator: Record<string, {
+        indicatorId: string;
+        totalSessions: number;
+        acceptedSessions: number;
+        discardedSessions: number;
+        paramTrends: Record<string, { tightened: number; loosened: number; avgAcceptedValue: number; values: number[] }>;
+        avgResultDelta: number;
+        thumbsUpRetentionRate: number;
+      }> = {};
+
+      for (const indId of indicatorIds) {
+        const relevant = allHistory.filter((h) => {
+          const suggestions = (h.aiSuggestions as any)?.suggestions || [];
+          const accepted = (h.acceptedSuggestions as any) || [];
+          return [...suggestions, ...accepted].some((s: any) => s.indicatorId === indId);
+        });
+
+        if (relevant.length === 0) continue;
+
+        const accepted = relevant.filter((h) => h.outcome === "accepted");
+        const discarded = relevant.filter((h) => h.outcome === "discarded");
+
+        const paramTrends: Record<string, { tightened: number; loosened: number; avgAcceptedValue: number; values: number[] }> = {};
+        let totalResultDelta = 0;
+        let deltaCount = 0;
+        let totalRetained = 0;
+        let totalUp = 0;
+
+        for (const h of accepted) {
+          const appliedSuggs = (h.acceptedSuggestions as any[]) || [];
+          for (const s of appliedSuggs) {
+            if (s.indicatorId !== indId) continue;
+            if (!paramTrends[s.paramName]) {
+              paramTrends[s.paramName] = { tightened: 0, loosened: 0, avgAcceptedValue: 0, values: [] };
+            }
+            const trend = paramTrends[s.paramName];
+            trend.values.push(Number(s.suggestedValue));
+            if (Number(s.suggestedValue) < Number(s.currentValue)) trend.tightened++;
+            else if (Number(s.suggestedValue) > Number(s.currentValue)) trend.loosened++;
+          }
+          if (h.resultCountAfter !== null && h.resultCountBefore !== null) {
+            totalResultDelta += (h.resultCountAfter - h.resultCountBefore);
+            deltaCount++;
+          }
+          const retained = (h.retainedUpSymbols || []).length;
+          const dropped = (h.droppedUpSymbols || []).length;
+          if (retained + dropped > 0) {
+            totalRetained += retained;
+            totalUp += retained + dropped;
+          }
+        }
+
+        for (const [paramName, trend] of Object.entries(paramTrends)) {
+          if (trend.values.length > 0) {
+            trend.avgAcceptedValue = trend.values.reduce((a, b) => a + b, 0) / trend.values.length;
+          }
+        }
+
+        perIndicator[indId] = {
+          indicatorId: indId,
+          totalSessions: relevant.length,
+          acceptedSessions: accepted.length,
+          discardedSessions: discarded.length,
+          paramTrends,
+          avgResultDelta: deltaCount > 0 ? totalResultDelta / deltaCount : 0,
+          thumbsUpRetentionRate: totalUp > 0 ? totalRetained / totalUp : 0,
+        };
+      }
+
+      res.json({ history: perIndicator });
+    } catch (error) {
+      console.error("Error fetching tuning history:", error);
+      res.status(500).json({ error: "Failed to fetch tuning history" });
+    }
+  });
+
+  // === ADMIN TUNING REVIEW QUEUE ===
+  app.get("/api/bigidea/scan-tune/pending-reviews", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      if (!user[0]?.isAdmin && user[0]?.tier !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const pending = await db
+        .select()
+        .from(scanTuningHistory)
+        .where(
+          and(
+            eq(scanTuningHistory.outcome, "accepted"),
+            sql`${scanTuningHistory.adminApproved} IS NULL`
+          )
+        )
+        .orderBy(sql`${scanTuningHistory.createdAt} DESC`)
+        .limit(50);
+
+      const enriched = await Promise.all(pending.map(async (p) => {
+        const submitter = await db.select({ username: sentinelUsers.username }).from(sentinelUsers).where(eq(sentinelUsers.id, p.userId)).limit(1);
+        return { ...p, submitterUsername: submitter[0]?.username || "Unknown" };
+      }));
+
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching pending reviews:", error);
+      res.status(500).json({ error: "Failed to fetch pending reviews" });
+    }
+  });
+
+  app.patch("/api/bigidea/scan-tune/:id/admin-review", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      if (!user[0]?.isAdmin && user[0]?.tier !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const id = parseInt(String(req.params.id));
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const { approved } = req.body;
+      if (typeof approved !== "boolean") return res.status(400).json({ error: "approved must be boolean" });
+
+      const updated = await db
+        .update(scanTuningHistory)
+        .set({ adminApproved: approved })
+        .where(eq(scanTuningHistory.id, id))
+        .returning();
+
+      if (updated.length === 0) return res.status(404).json({ error: "Tuning record not found" });
+      res.json(updated[0]);
+    } catch (error) {
+      console.error("Error in admin review:", error);
+      res.status(500).json({ error: "Failed to update review" });
     }
   });
 
