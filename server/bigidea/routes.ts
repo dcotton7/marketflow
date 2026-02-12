@@ -1500,7 +1500,7 @@ Each criterion follows this structure:
       const openai = getOpenAI();
       if (!openai) return res.status(500).json({ error: "AI service not available" });
 
-      const { nodes, edges, funnelData, resultCount, universe, ratings } = req.body;
+      const { nodes, edges, funnelData, resultCount, universe, ratings, userInstruction } = req.body;
       if (!nodes || !funnelData) {
         return res.status(400).json({ error: "nodes and funnelData are required" });
       }
@@ -1580,7 +1580,9 @@ ${JSON.stringify(funnelData.perIndicator, null, 2)}
 Failure funnel per thought:
 ${JSON.stringify(funnelData.perThought, null, 2)}
 
-${ratingSummary}`;
+${ratingSummary}
+
+${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No specific instruction — analyze the funnel data and suggest the most impactful improvements."}`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-5.1",

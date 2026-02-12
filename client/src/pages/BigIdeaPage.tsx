@@ -253,6 +253,22 @@ interface ScanResponse {
   totalScanned: number;
   linkOverrides?: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }>;
   dynamicDataFlows?: Array<{ provider: string; consumer: string; dataKey: string; description: string }>;
+  funnelData?: any;
+}
+
+interface TuningSuggestion {
+  indicatorId: string;
+  indicatorName: string;
+  paramName: string;
+  currentValue: number;
+  suggestedValue: number;
+  reason: string;
+}
+
+interface TuningResult {
+  suggestions: TuningSuggestion[];
+  overallAnalysis: string;
+  tuningId: number;
 }
 
 interface QualityDimension {
@@ -568,6 +584,12 @@ export default function BigIdeaPage() {
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [qualityResult, setQualityResult] = useState<ScanQualityResult | null>(null);
   const [qualityOpen, setQualityOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [lastFunnelData, setLastFunnelData] = useState<any>(null);
+  const [tuneDialogOpen, setTuneDialogOpen] = useState(false);
+  const [tuneInstruction, setTuneInstruction] = useState("");
+  const [tuneResult, setTuneResult] = useState<TuningResult | null>(null);
+  const [acceptedTuneIndices, setAcceptedTuneIndices] = useState<Set<number>>(new Set());
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -877,6 +899,101 @@ export default function BigIdeaPage() {
     },
   });
 
+  const tuneMutation = useMutation({
+    mutationFn: async () => {
+      const ideaNodes = nodes.map((n) => ({
+        id: n.id,
+        type: n.type as "thought" | "results",
+        thoughtId: n.data.thoughtId as number | undefined,
+        thoughtName: n.data.label as string | undefined,
+        thoughtCategory: n.data.category as string | undefined,
+        thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
+        isNot: n.data.isNot as boolean | undefined,
+        passCount: n.data.passCount as number | undefined,
+      }));
+      const ideaEdges = edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        logicType: (e.data?.logicType as "AND" | "OR") || "AND",
+      }));
+      const res = await apiRequest("POST", "/api/bigidea/scan-tune", {
+        nodes: ideaNodes,
+        edges: ideaEdges,
+        funnelData: lastFunnelData,
+        resultCount: scanResults?.length || 0,
+        universe,
+        userInstruction: tuneInstruction || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: (data: TuningResult) => {
+      setTuneResult(data);
+      setAcceptedTuneIndices(new Set());
+    },
+    onError: (err: Error) => {
+      if (err.message.includes("403")) {
+        toast({ title: "Pro feature", description: "AI Scan Tuning requires a Pro or Admin account.", variant: "destructive" });
+      } else {
+        toast({ title: "Tuning failed", description: err.message, variant: "destructive" });
+      }
+    },
+  });
+
+  const handleClearIdea = useCallback(() => {
+    setNodes([{ ...INITIAL_RESULTS_NODE }]);
+    setEdges([]);
+    setIdeaName("Untitled Idea");
+    setCurrentIdeaId(null);
+    setScanResults(null);
+    setShowResults(false);
+    setDebugInfo(null);
+    setQualityResult(null);
+    setLastFunnelData(null);
+    setSelectedNodeId(null);
+    setDebugOpen(false);
+    setQualityOpen(false);
+    setClearConfirmOpen(false);
+    toast({ title: "Canvas cleared" });
+  }, [setNodes, setEdges, toast]);
+
+  const handleAcceptSuggestion = useCallback((suggestion: TuningSuggestion, index: number) => {
+    let applied = false;
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type !== "thought" || !n.data.criteria) return n;
+        const criteria = n.data.criteria as ScannerCriterion[];
+        const matchCriterion = criteria.find((c) =>
+          c.indicatorId === suggestion.indicatorId &&
+          c.params.some((p) => p.name === suggestion.paramName)
+        );
+        if (!matchCriterion) return n;
+        applied = true;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            criteria: criteria.map((c) => {
+              if (c.indicatorId !== suggestion.indicatorId) return c;
+              return {
+                ...c,
+                params: c.params.map((p) =>
+                  p.name === suggestion.paramName ? { ...p, value: suggestion.suggestedValue } : p
+                ),
+              };
+            }),
+          },
+        };
+      })
+    );
+    if (applied) {
+      setAcceptedTuneIndices((prev) => { const next = new Set(Array.from(prev)); next.add(index); return next; });
+      toast({ title: `Applied: ${suggestion.indicatorName} → ${suggestion.paramName} = ${suggestion.suggestedValue}` });
+    } else {
+      toast({ title: "Could not apply", description: `Parameter ${suggestion.paramName} for ${suggestion.indicatorName} not found on canvas.`, variant: "destructive" });
+    }
+  }, [setNodes, toast]);
+
   const deleteThoughtMutation = useMutation({
     mutationFn: async ({ thoughtId, nodeId }: { thoughtId: number; nodeId?: string }) => {
       try {
@@ -1001,6 +1118,7 @@ export default function BigIdeaPage() {
       setScanTotalScanned(data.totalScanned);
       setShowResults(true);
       setSelectedNodeId(null);
+      if (data.funnelData) setLastFunnelData(data.funnelData);
       setNodes((nds) =>
         nds.map((n) => {
           if (n.type === "results") {
@@ -1550,6 +1668,51 @@ export default function BigIdeaPage() {
           </TooltipTrigger>
           <TooltipContent side="bottom" className="max-w-xs">
             <p>Analyzes your scan across 5 dimensions: criteria diversity, filter funnel effectiveness, data-link usage, parameter quality, and signal coverage. Helps identify gaps and improvements.</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!lastFunnelData) {
+                  toast({ title: "Run a scan first", description: "AI Tune needs scan results and failure data to analyze. Run a scan, then try again.", variant: "destructive" });
+                  return;
+                }
+                setTuneResult(null);
+                setTuneInstruction("");
+                setAcceptedTuneIndices(new Set());
+                setTuneDialogOpen(true);
+              }}
+              disabled={tuneMutation.isPending || nodes.filter(n => n.type === "thought").length === 0 || !lastFunnelData}
+              className="gap-2"
+              data-testid="button-tune-scan"
+            >
+              {tuneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Tune
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <p>Uses AI to suggest parameter changes based on your scan's failure funnel data. Tell it to loosen, tighten, or adjust specific criteria. Requires Pro or Admin tier.</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={() => setClearConfirmOpen(true)}
+              disabled={nodes.filter(n => n.type === "thought").length === 0}
+              className="gap-2"
+              data-testid="button-clear-idea"
+            >
+              <Trash2 className="h-4 w-4" />
+              Clear
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <p>Removes all thoughts, connections, and results from the canvas. Starts fresh with an empty scan.</p>
           </TooltipContent>
         </Tooltip>
 
@@ -2622,6 +2785,158 @@ export default function BigIdeaPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear Canvas</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove all thoughts, connections, and scan results from the canvas. Your saved thoughts in the library are not affected. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-clear">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground"
+              onClick={handleClearIdea}
+              data-testid="button-confirm-clear"
+            >
+              Clear Canvas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={tuneDialogOpen} onOpenChange={setTuneDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              AI Scan Tuning
+            </DialogTitle>
+            <DialogDescription>
+              Tell the AI how to adjust your scan. It analyzes your failure funnel data to suggest specific parameter changes.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!tuneResult ? (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-sm font-medium">What do you want?</Label>
+                <Textarea
+                  value={tuneInstruction}
+                  onChange={(e) => setTuneInstruction(e.target.value)}
+                  placeholder="e.g. 'Loosen the scan to get more results', 'Tighten volume criteria', 'Find tighter bases with less noise'..."
+                  className="mt-1.5 resize-none text-sm"
+                  rows={3}
+                  data-testid="input-tune-instruction"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Leave blank for automatic analysis based on your funnel data.
+                </p>
+              </div>
+
+              {lastFunnelData && (
+                <div className="rounded-md border p-2 text-[11px] text-muted-foreground space-y-0.5">
+                  <p className="font-medium text-foreground text-xs">Scan Summary</p>
+                  <p>Scanned: {lastFunnelData.totalTickers} tickers | Results: {scanResults?.length || 0}</p>
+                  {lastFunnelData.perIndicator && Object.entries(lastFunnelData.perIndicator).slice(0, 5).map(([id, data]: [string, any]) => (
+                    <p key={id}>
+                      {data.name}: <span className="text-green-400">{data.passed} pass</span> / <span className="text-red-400">{data.failed} fail</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button
+                  onClick={() => tuneMutation.mutate()}
+                  disabled={tuneMutation.isPending}
+                  className="gap-2"
+                  data-testid="button-run-tune"
+                >
+                  {tuneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {tuneMutation.isPending ? "Analyzing..." : "Get Suggestions"}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-3">
+              {tuneResult.overallAnalysis && (
+                <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                  {tuneResult.overallAnalysis}
+                </div>
+              )}
+
+              {tuneResult.suggestions.length === 0 ? (
+                <div className="text-center py-4 text-sm text-muted-foreground">
+                  No parameter adjustments suggested. Your scan configuration looks well-tuned.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Suggested Changes</p>
+                  {tuneResult.suggestions.map((s, i) => {
+                    const isAccepted = acceptedTuneIndices.has(i);
+                    return (
+                      <div
+                        key={i}
+                        className={`rounded-md border p-3 space-y-1.5 ${isAccepted ? "border-green-500/30 bg-green-500/5" : ""}`}
+                        data-testid={`tune-suggestion-${i}`}
+                      >
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-[10px]">{s.indicatorName}</Badge>
+                            <span className="text-sm font-medium">{s.paramName}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground line-through">{s.currentValue}</span>
+                            <ArrowDown className="h-3 w-3 text-muted-foreground rotate-[-90deg]" />
+                            <span className="text-sm font-bold">{s.suggestedValue}</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{s.reason}</p>
+                        {!isAccepted ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAcceptSuggestion(s, i)}
+                            className="gap-1.5"
+                            data-testid={`button-accept-suggestion-${i}`}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Apply
+                          </Button>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-xs text-green-500">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Applied
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => { setTuneResult(null); setTuneInstruction(""); }}
+                  data-testid="button-tune-again"
+                >
+                  Try Again
+                </Button>
+                <Button
+                  onClick={() => setTuneDialogOpen(false)}
+                  data-testid="button-tune-done"
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
