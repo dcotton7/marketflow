@@ -254,6 +254,7 @@ interface ScanResponse {
   linkOverrides?: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }>;
   dynamicDataFlows?: Array<{ provider: string; consumer: string; dataKey: string; description: string }>;
   funnelData?: any;
+  sessionId?: number;
 }
 
 interface TuningSuggestion {
@@ -586,6 +587,7 @@ export default function BigIdeaPage() {
   const [qualityOpen, setQualityOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [lastFunnelData, setLastFunnelData] = useState<any>(null);
+  const [scanSessionId, setScanSessionId] = useState<number | undefined>(undefined);
   const [tuneDialogOpen, setTuneDialogOpen] = useState(false);
   const [tuneInstruction, setTuneInstruction] = useState("");
   const [tuneResult, setTuneResult] = useState<TuningResult | null>(null);
@@ -924,6 +926,7 @@ export default function BigIdeaPage() {
         resultCount: scanResults?.length || 0,
         universe,
         userInstruction: tuneInstruction || undefined,
+        sessionId: scanSessionId || undefined,
       });
       return res.json();
     },
@@ -950,6 +953,7 @@ export default function BigIdeaPage() {
     setDebugInfo(null);
     setQualityResult(null);
     setLastFunnelData(null);
+    setScanSessionId(undefined);
     setSelectedNodeId(null);
     setDebugOpen(false);
     setQualityOpen(false);
@@ -1119,6 +1123,7 @@ export default function BigIdeaPage() {
       setShowResults(true);
       setSelectedNodeId(null);
       if (data.funnelData) setLastFunnelData(data.funnelData);
+      if (data.sessionId) setScanSessionId(data.sessionId);
       setNodes((nds) =>
         nds.map((n) => {
           if (n.type === "results") {
@@ -1535,6 +1540,7 @@ export default function BigIdeaPage() {
       setShowResults(false);
       setSelectedNodeId(null);
       setQualityResult(null);
+      setScanSessionId(undefined);
     },
     [setNodes, setEdges, indicatorLibrary]
   );
@@ -2762,6 +2768,7 @@ export default function BigIdeaPage() {
         open={chartViewerOpen}
         onOpenChange={setChartViewerOpen}
         onIndexChange={setChartViewerIndex}
+        sessionId={scanSessionId}
       />
 
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
@@ -2976,12 +2983,14 @@ function ScanChartViewer({
   open,
   onOpenChange,
   onIndexChange,
+  sessionId,
 }: {
   results: ScanResultItem[];
   currentIndex: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onIndexChange: (idx: number) => void;
+  sessionId?: number;
 }) {
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const chartGridRef = useRef<HTMLDivElement>(null);
@@ -2994,8 +3003,14 @@ function ScanChartViewer({
   const { toast } = useToast();
 
   const ratingMutation = useMutation({
-    mutationFn: async ({ symbol, rating, price }: { symbol: string; rating: "up" | "down"; price: number }) => {
-      const res = await apiRequest("POST", "/api/bigidea/chart-rating", { symbol, rating, price });
+    mutationFn: async ({ symbol, rating, price, indicatorSnapshot }: { symbol: string; rating: "up" | "down"; price: number; indicatorSnapshot?: any }) => {
+      const res = await apiRequest("POST", "/api/bigidea/chart-rating", {
+        symbol,
+        rating,
+        price,
+        sessionId,
+        indicatorSnapshot: indicatorSnapshot || null,
+      });
       return res.json();
     },
     onSuccess: (_data, variables) => {
@@ -3252,7 +3267,8 @@ function ScanChartViewer({
                   className={`toggle-elevate ${chartRatings[symbol] === "up" ? "toggle-elevated text-green-500" : ""}`}
                   onClick={() => {
                     const price = dayChange?.price ?? current?.price ?? 0;
-                    ratingMutation.mutate({ symbol, rating: "up", price });
+                    const indicatorSnapshot = current?.thoughtBreakdown || null;
+                    ratingMutation.mutate({ symbol, rating: "up", price, indicatorSnapshot });
                   }}
                   disabled={ratingMutation.isPending}
                   data-testid="button-chart-thumbsup"
@@ -3272,7 +3288,8 @@ function ScanChartViewer({
                   className={`toggle-elevate ${chartRatings[symbol] === "down" ? "toggle-elevated text-red-500" : ""}`}
                   onClick={() => {
                     const price = dayChange?.price ?? current?.price ?? 0;
-                    ratingMutation.mutate({ symbol, rating: "down", price });
+                    const indicatorSnapshot = current?.thoughtBreakdown || null;
+                    ratingMutation.mutate({ symbol, rating: "down", price, indicatorSnapshot });
                   }}
                   disabled={ratingMutation.isPending}
                   data-testid="button-chart-thumbsdown"

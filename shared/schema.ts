@@ -1260,19 +1260,40 @@ export type InsertScannerThought = z.infer<typeof insertScannerThoughtSchema>;
 export type InsertScannerIdea = z.infer<typeof insertScannerIdeaSchema>;
 export type InsertScannerFavorite = z.infer<typeof insertScannerFavoriteSchema>;
 
-// === SCAN TUNING & RATINGS ===
+// === SCAN SESSIONS, TUNING & RATINGS ===
+
+export const scanSessions = pgTable("scan_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ideaId: integer("idea_id"),
+  scanConfig: jsonb("scan_config").notNull(),
+  resultCount: integer("result_count").notNull(),
+  resultSymbols: text("result_symbols").array(),
+  funnelData: jsonb("funnel_data"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
 export const scanTuningHistory = pgTable("scan_tuning_history", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   ideaId: integer("idea_id"),
+  sessionId: integer("session_id"),
   scanConfig: jsonb("scan_config").notNull(),
   funnelData: jsonb("funnel_data").notNull(),
   aiSuggestions: jsonb("ai_suggestions").notNull(),
   acceptedSuggestions: jsonb("accepted_suggestions"),
+  skippedSuggestions: jsonb("skipped_suggestions"),
+  configAfter: jsonb("config_after"),
   resultCountBefore: integer("result_count_before").notNull(),
   resultCountAfter: integer("result_count_after"),
-  userFeedback: text("user_feedback"), // "thumbs_up" | "thumbs_down" | null
+  retainedUpSymbols: text("retained_up_symbols").array(),
+  droppedUpSymbols: text("dropped_up_symbols").array(),
+  droppedDownSymbols: text("dropped_down_symbols").array(),
+  retainedDownSymbols: text("retained_down_symbols").array(),
+  newSymbols: text("new_symbols").array(),
+  thoughtsInvolved: text("thoughts_involved").array(),
+  userFeedback: text("user_feedback"),
+  userFeedbackNote: text("user_feedback_note"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1280,6 +1301,7 @@ export const scanChartRatings = pgTable("scan_chart_ratings", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   ideaId: integer("idea_id"),
+  sessionId: integer("session_id"),
   symbol: text("symbol").notNull(),
   rating: text("rating").notNull(), // "up" | "down"
   scanConfig: jsonb("scan_config"),
@@ -1288,5 +1310,6 @@ export const scanChartRatings = pgTable("scan_chart_ratings", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export type ScanSession = typeof scanSessions.$inferSelect;
 export type ScanTuningHistory = typeof scanTuningHistory.$inferSelect;
 export type ScanChartRating = typeof scanChartRatings.$inferSelect;

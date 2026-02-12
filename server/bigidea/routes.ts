@@ -1,6 +1,6 @@
 import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
-import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, sentinelUsers } from "@shared/schema";
+import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
 import { evaluateScanQuality } from "./quality";
@@ -1334,7 +1334,30 @@ Each criterion follows this structure:
       if (dynamicDataFlows.length > 0) {
         console.log(`[BigIdea Scan] Dynamic data flows:`, dynamicDataFlows.map(d => `${d.provider} → ${d.consumer}: ${d.dataKey}`));
       }
-      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows, funnelData });
+
+      let sessionId: number | undefined;
+      if (userId && isDatabaseAvailable() && db) {
+        try {
+          const resultSymbols = results.map((r: any) => r.symbol);
+          const [session] = await db
+            .insert(scanSessions)
+            .values({
+              userId,
+              ideaId: ideaId ? parseInt(String(ideaId)) : undefined,
+              scanConfig: { nodes, edges, universe },
+              resultCount: results.length,
+              resultSymbols,
+              funnelData,
+            })
+            .returning();
+          sessionId = session.id;
+          console.log(`[BigIdea Scan] Session ${sessionId} created with ${results.length} results`);
+        } catch (err: any) {
+          console.error("[BigIdea Scan] Failed to create session:", err?.message);
+        }
+      }
+
+      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows, funnelData, sessionId });
     } catch (error) {
       console.error("Error executing scan:", error);
       res.status(500).json({ error: "Failed to execute scan" });
@@ -1427,7 +1450,7 @@ Each criterion follows this structure:
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
 
-      const { symbol, rating, ideaId, scanConfig, indicatorSnapshot, price } = req.body;
+      const { symbol, rating, ideaId, sessionId, scanConfig, indicatorSnapshot, price } = req.body;
       if (!symbol || !rating || !["up", "down"].includes(rating)) {
         return res.status(400).json({ error: "symbol and rating ('up'|'down') are required" });
       }
@@ -1439,6 +1462,7 @@ Each criterion follows this structure:
           symbol,
           rating,
           ideaId: ideaId || null,
+          sessionId: sessionId || null,
           scanConfig: scanConfig || null,
           indicatorSnapshot: indicatorSnapshot || null,
           price: price || null,
@@ -1500,7 +1524,7 @@ Each criterion follows this structure:
       const openai = getOpenAI();
       if (!openai) return res.status(500).json({ error: "AI service not available" });
 
-      const { nodes, edges, funnelData, resultCount, universe, ratings, userInstruction } = req.body;
+      const { nodes, edges, funnelData, resultCount, universe, ratings, userInstruction, sessionId } = req.body;
       if (!nodes || !funnelData) {
         return res.status(400).json({ error: "nodes and funnelData are required" });
       }
@@ -1630,14 +1654,17 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         aiResult.suggestions = [];
       }
 
+      const thoughtNodeNames = thoughtNodes.map((tn: any) => tn.thoughtName || tn.id);
       const [historyRecord] = await db
         .insert(scanTuningHistory)
         .values({
           userId,
+          sessionId: sessionId || null,
           scanConfig: { nodes, edges, universe },
           funnelData,
           aiSuggestions: aiResult,
           resultCountBefore: resultCount || 0,
+          thoughtsInvolved: thoughtNodeNames,
         })
         .returning();
 
