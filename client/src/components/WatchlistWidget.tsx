@@ -82,7 +82,7 @@ export function WatchlistWidget() {
                         <span className="font-mono font-bold text-sm" data-testid={`text-symbol-${item.symbol}`}>{item.symbol}</span>
                         {quote !== undefined && (
                           <span 
-                            className={`text-xs font-mono flex items-center gap-0.5 ${isPositive ? 'text-green-500' : 'text-red-500'}`}
+                            className={`text-xs font-mono flex items-center gap-0.5 ${isPositive ? 'text-rs-green' : 'text-rs-red'}`}
                             data-testid={`text-change-${item.symbol}`}
                           >
                             {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}

@@ -44,6 +44,12 @@
   /* Custom Chart Colors */
   --chart-up: 142 71% 45%;
   --chart-down: 0 84% 60%;
+
+  /* RubricShield Context Colors */
+  --rs-green: 142 71% 45%;
+  --rs-yellow: 48 96% 53%;
+  --rs-amber: 38 92% 50%;
+  --rs-red: 0 84% 60%;
 }
 
 @layer base {
@@ -131,4 +137,67 @@
   background: var(--overlay-bg, hsl(var(--card) / 0.75)) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* ========================================
+   RUBRICSHIELD DESIGN SYSTEM
+   Context Colors + Text Size Hierarchy
+   ======================================== */
+
+@layer utilities {
+  /* --- Context Colors --- */
+  .text-rs-green  { color: hsl(var(--rs-green)); }
+  .text-rs-yellow { color: hsl(var(--rs-yellow)); }
+  .text-rs-amber  { color: hsl(var(--rs-amber)); }
+  .text-rs-red    { color: hsl(var(--rs-red)); }
+
+  .bg-rs-green\/10  { background-color: hsl(var(--rs-green) / 0.1); }
+  .bg-rs-green\/20  { background-color: hsl(var(--rs-green) / 0.2); }
+  .bg-rs-yellow\/10 { background-color: hsl(var(--rs-yellow) / 0.1); }
+  .bg-rs-yellow\/20 { background-color: hsl(var(--rs-yellow) / 0.2); }
+  .bg-rs-amber\/10  { background-color: hsl(var(--rs-amber) / 0.1); }
+  .bg-rs-amber\/20  { background-color: hsl(var(--rs-amber) / 0.2); }
+  .bg-rs-red\/10    { background-color: hsl(var(--rs-red) / 0.1); }
+  .bg-rs-red\/20    { background-color: hsl(var(--rs-red) / 0.2); }
+
+  .border-rs-green\/30  { border-color: hsl(var(--rs-green) / 0.3); }
+  .border-rs-yellow\/30 { border-color: hsl(var(--rs-yellow) / 0.3); }
+  .border-rs-amber\/30  { border-color: hsl(var(--rs-amber) / 0.3); }
+  .border-rs-red\/30    { border-color: hsl(var(--rs-red) / 0.3); }
+
+  /* --- Text Size Tiers --- */
+  .text-rs-title   { font-size: 1.5rem;   line-height: 2rem;    font-weight: 700; color: hsl(var(--foreground)); }
+  .text-rs-header  { font-size: 1.125rem; line-height: 1.75rem; font-weight: 600; color: hsl(var(--foreground)); }
+  .text-rs-section { font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: hsl(var(--foreground)); }
+  .text-rs-normal  { font-size: 0.875rem; line-height: 1.25rem; font-weight: 400; color: hsl(var(--foreground)); }
+  .text-rs-small   { font-size: 0.75rem;  line-height: 1rem;    font-weight: 400; color: hsl(var(--muted-foreground)); }
+  .text-rs-tiny    { font-size: 0.625rem; line-height: 0.875rem; font-weight: 400; color: hsl(var(--muted-foreground)); }
+
+  /* --- Bloomberg Ticker --- */
+  .rs-ticker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+  }
+  .rs-ticker .rs-ticker-symbol {
+    font-weight: 700;
+    font-size: 0.875rem;
+    color: hsl(var(--foreground));
+  }
+  .rs-ticker .rs-ticker-price {
+    font-weight: 500;
+    font-size: 0.875rem;
+    color: hsl(var(--foreground));
+  }
+  .rs-ticker .rs-ticker-change-up {
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: hsl(var(--rs-green));
+  }
+  .rs-ticker .rs-ticker-change-down {
+    font-weight: 600;
+    font-size: 0.8125rem;
+    color: hsl(var(--rs-red));
+  }
 }

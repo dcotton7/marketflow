@@ -1278,7 +1278,7 @@ export default function SentinelImportPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
                     <span className="flex items-center gap-2">
-                      <Check className="h-5 w-5 text-green-500" />
+                      <Check className="h-5 w-5 text-rs-green" />
                       Preview Results
                     </span>
                     <Badge variant={previewData.batch.status === "COMPLETE" ? "default" : "destructive"}>
@@ -1298,11 +1298,11 @@ export default function SentinelImportPage() {
                   <div className="flex gap-4 flex-wrap">
                     <div className="bg-muted p-3 rounded-lg">
                       <div className="text-sm text-muted-foreground">Trades Found</div>
-                      <div className="text-2xl font-bold text-green-500">{previewData.trades.length}</div>
+                      <div className="text-2xl font-bold text-rs-green">{previewData.trades.length}</div>
                     </div>
                     <div className="bg-muted p-3 rounded-lg">
                       <div className="text-sm text-muted-foreground">Rows Skipped</div>
-                      <div className="text-2xl font-bold text-yellow-500">{previewData.batch.skippedRows.length}</div>
+                      <div className="text-2xl font-bold text-rs-yellow">{previewData.batch.skippedRows.length}</div>
                     </div>
                     <div className="bg-muted p-3 rounded-lg">
                       <div className="text-sm text-muted-foreground">Total Value</div>
@@ -1476,7 +1476,7 @@ export default function SentinelImportPage() {
                           className={step1Disabled ? "opacity-40" : ""}
                         >
                           {step1Complete ? (
-                            <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                            <CheckCircle2 className="h-4 w-4 mr-2 text-rs-green" />
                           ) : (
                             <Circle className="h-4 w-4 mr-2 text-muted-foreground" />
                           )}
@@ -1497,11 +1497,11 @@ export default function SentinelImportPage() {
                           className={step2Disabled ? "opacity-40" : step2Complete && !hasPendingDuplicates ? "opacity-60" : ""}
                         >
                           {step2Complete ? (
-                            <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                            <CheckCircle2 className="h-4 w-4 mr-2 text-rs-green" />
                           ) : step2Disabled ? (
                             <Circle className="h-4 w-4 mr-2 text-muted-foreground" />
                           ) : (
-                            <AlertCircle className="h-4 w-4 mr-2 text-orange-500" />
+                            <AlertCircle className="h-4 w-4 mr-2 text-rs-amber" />
                           )}
                           2. Resolve Duplicates
                           {hasPendingDuplicates && (
@@ -1523,11 +1523,11 @@ export default function SentinelImportPage() {
                           className={step3Disabled ? "opacity-40" : step3Complete && !hasPendingOrphans ? "opacity-60" : ""}
                         >
                           {step3Complete ? (
-                            <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                            <CheckCircle2 className="h-4 w-4 mr-2 text-rs-green" />
                           ) : step3Disabled ? (
                             <Circle className="h-4 w-4 mr-2 text-muted-foreground" />
                           ) : (
-                            <AlertTriangle className="h-4 w-4 mr-2 text-yellow-500" />
+                            <AlertTriangle className="h-4 w-4 mr-2 text-rs-yellow" />
                           )}
                           3. Resolve Orphans
                           {hasPendingOrphans && !step3Disabled && (
@@ -1610,11 +1610,11 @@ export default function SentinelImportPage() {
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       <div>
                         <span className="text-muted-foreground">Cards using real imported cost basis:</span>{' '}
-                        <span className="font-medium text-green-500">{promoteReport.cardsUsingRealCostBasis}</span>
+                        <span className="font-medium text-rs-green">{promoteReport.cardsUsingRealCostBasis}</span>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Cards using synthetic cost basis:</span>{' '}
-                        <span className="font-medium text-yellow-500">{promoteReport.cardsUsingSyntheticCostBasis}</span>
+                        <span className="font-medium text-rs-yellow">{promoteReport.cardsUsingSyntheticCostBasis}</span>
                       </div>
                     </div>
                     {promoteReport.totalSyntheticInjections > 0 && (
@@ -1626,7 +1626,7 @@ export default function SentinelImportPage() {
                         <div className="space-y-1">
                           {promoteReport.syntheticByTicker?.map((s: any, i: number) => (
                             <div key={i} className="text-xs flex items-center gap-2 flex-wrap">
-                              <Badge variant="outline" className="text-yellow-500 border-yellow-500/30">
+                              <Badge variant="outline" className="text-rs-yellow border-rs-yellow/30">
                                 {s.ticker}{s.account ? ` (${s.account})` : ''}
                               </Badge>
                               <span className="text-muted-foreground">
@@ -1638,7 +1638,7 @@ export default function SentinelImportPage() {
                       </div>
                     )}
                     {promoteReport.totalSyntheticInjections === 0 && (
-                      <p className="mt-2 text-xs text-green-500">
+                      <p className="mt-2 text-xs text-rs-green">
                         All cards used real imported cost basis from your CSV files. No synthetic data needed.
                       </p>
                     )}
@@ -1675,7 +1675,7 @@ export default function SentinelImportPage() {
                                         data-testid={`input-import-name-${batch.batchId}`}
                                       />
                                       <Button size="icon" variant="ghost" className="h-6 w-6" onClick={saveImportName} disabled={renameBatchMutation.isPending}>
-                                        <Check className="h-3 w-3 text-green-500" />
+                                        <Check className="h-3 w-3 text-rs-green" />
                                       </Button>
                                       <Button size="icon" variant="ghost" className="h-6 w-6" onClick={cancelEditingImportName}>
                                         <X className="h-3 w-3 text-muted-foreground" />
@@ -1707,12 +1707,12 @@ export default function SentinelImportPage() {
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="text-right">
-                                <div className="text-lg font-bold text-green-500">{batch.totalTradesImported}</div>
+                                <div className="text-lg font-bold text-rs-green">{batch.totalTradesImported}</div>
                                 <div className="text-xs text-muted-foreground">trades imported</div>
                               </div>
                               {/* Duplicates shown FIRST - must be resolved before orphans */}
                               {(batch.duplicatesCount || 0) > 0 ? (
-                                <Badge variant="outline" className="text-orange-500 border-orange-500 gap-1">
+                                <Badge variant="outline" className="text-rs-amber border-rs-amber gap-1">
                                   {bulkProcessingBatchId === batch.batchId ? (
                                     <Loader2 className="h-3 w-3 animate-spin" />
                                   ) : (
@@ -1724,7 +1724,7 @@ export default function SentinelImportPage() {
                                   }
                                 </Badge>
                               ) : batch.status === "NEEDS_REVIEW" && (batch.orphanSellsCount || 0) > 0 ? (
-                                <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1">
+                                <Badge variant="outline" className="text-rs-yellow border-rs-yellow gap-1">
                                   <AlertTriangle className="h-3 w-3" />
                                   {batch.orphanSellsCount} Orphans <span className="text-white">(Step 2)</span>
                                 </Badge>
@@ -1738,7 +1738,7 @@ export default function SentinelImportPage() {
                                   variant="outline" 
                                   size="sm"
                                   onClick={() => handleReviewOrphans(batch.batchId)}
-                                  className="text-yellow-500 border-yellow-500/50"
+                                  className="text-rs-yellow border-rs-yellow/50"
                                   disabled={(batch.duplicatesCount || 0) > 0}
                                   title={(batch.duplicatesCount || 0) > 0 ? "Resolve duplicates first" : "Review orphan sells"}
                                   data-testid={`button-review-orphans-${batch.batchId}`}
@@ -1752,7 +1752,7 @@ export default function SentinelImportPage() {
                                     variant="outline" 
                                     size="sm"
                                     disabled
-                                    className="text-orange-500 border-orange-500/50"
+                                    className="text-rs-amber border-rs-amber/50"
                                     data-testid={`button-review-duplicates-${batch.batchId}`}
                                   >
                                     <Loader2 className="h-4 w-4 animate-spin mr-1" />
@@ -1766,7 +1766,7 @@ export default function SentinelImportPage() {
                                       setSelectedDuplicateBatchId(batch.batchId);
                                       setShowDuplicateDialog(true);
                                     }}
-                                    className="text-orange-500 border-orange-500/50"
+                                    className="text-rs-amber border-rs-amber/50"
                                     data-testid={`button-review-duplicates-${batch.batchId}`}
                                   >
                                     Review Duplicates
@@ -2109,7 +2109,7 @@ export default function SentinelImportPage() {
                                       data-testid="input-orphan-cost-basis"
                                     />
                                   ) : orphan.manualCostBasis != null ? (
-                                    <span className="text-green-500">${orphan.manualCostBasis.toFixed(2)}</span>
+                                    <span className="text-rs-green">${orphan.manualCostBasis.toFixed(2)}</span>
                                   ) : (
                                     <span className="text-muted-foreground">-</span>
                                   )}
@@ -2225,7 +2225,7 @@ export default function SentinelImportPage() {
                                           </Button>
                                         )}
                                         {isResolved && (
-                                          <span className="text-xs text-green-500 flex items-center gap-1">
+                                          <span className="text-xs text-rs-green flex items-center gap-1">
                                             <CheckCircle2 className="h-3 w-3" /> Ready
                                           </span>
                                         )}
@@ -2327,7 +2327,7 @@ export default function SentinelImportPage() {
                     </Badge>
                   </CardTitle>
                   {!ordersPreview.hasAccountInfo && (
-                    <div className="flex items-center gap-2 text-sm text-yellow-500 mt-2" data-testid="text-orders-no-account-warning">
+                    <div className="flex items-center gap-2 text-sm text-rs-yellow mt-2" data-testid="text-orders-no-account-warning">
                       <AlertTriangle className="h-4 w-4" />
                       No account info detected in CSV. Orders matched by ticker only.
                     </div>
@@ -2354,7 +2354,7 @@ export default function SentinelImportPage() {
                             <TableCell>
                               <Badge
                                 variant="outline"
-                                className={m.order.levelType === 'STOP' ? 'border-red-500 text-red-500' : 'border-green-500 text-green-500'}
+                                className={m.order.levelType === 'STOP' ? 'border-rs-red text-rs-red' : 'border-rs-green text-rs-green'}
                               >
                                 {m.order.levelType === 'STOP' ? 'STOP' : 'TARGET'}
                               </Badge>
@@ -2380,7 +2380,7 @@ export default function SentinelImportPage() {
                             <TableCell>
                               <Badge
                                 variant="outline"
-                                className={u.levelType === 'STOP' ? 'border-red-500 text-red-500' : 'border-green-500 text-green-500'}
+                                className={u.levelType === 'STOP' ? 'border-rs-red text-rs-red' : 'border-rs-green text-rs-green'}
                               >
                                 {u.levelType === 'STOP' ? 'STOP' : 'TARGET'}
                               </Badge>
@@ -2390,7 +2390,7 @@ export default function SentinelImportPage() {
                             <TableCell className="text-xs">{u.accountName || '—'}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">No match</TableCell>
                             <TableCell>
-                              <Badge variant="outline" className="border-yellow-500 text-yellow-500" data-testid={`badge-unmatched-${i}`}>Unmatched</Badge>
+                              <Badge variant="outline" className="border-rs-yellow text-rs-yellow" data-testid={`badge-unmatched-${i}`}>Unmatched</Badge>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -2660,7 +2660,7 @@ export default function SentinelImportPage() {
       }}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-yellow-500">
+            <DialogTitle className="flex items-center gap-2 text-rs-yellow">
               <AlertTriangle className="h-5 w-5" />
               Missing Cost Basis - Orphan Sells
             </DialogTitle>
@@ -2713,7 +2713,7 @@ export default function SentinelImportPage() {
                   const isRecentlyUnmuted = recentlyUnmutedIds.has(orphan.tradeId);
                   
                   return (
-                  <Card key={orphan.tradeId} className={`transition-all duration-500 ${isMuted ? 'border-muted opacity-60' : isRecentlyUnmuted ? 'border-green-500 bg-green-500/10 ring-2 ring-green-500/30' : 'border-yellow-500/30'}`}>
+                  <Card key={orphan.tradeId} className={`transition-all duration-500 ${isMuted ? 'border-muted opacity-60' : isRecentlyUnmuted ? 'border-rs-green bg-rs-green/10 ring-2 ring-rs-green/30' : 'border-rs-yellow/30'}`}>
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
@@ -2759,7 +2759,7 @@ export default function SentinelImportPage() {
                           <Label className="flex items-center gap-2">
                             Cost Basis per Share
                             {costBasisMap && costBasisMap[orphan.ticker.toUpperCase()] !== undefined && (
-                              <Badge variant="outline" className="text-green-500 border-green-500/50 text-[10px] py-0">
+                              <Badge variant="outline" className="text-rs-green border-rs-green/50 text-[10px] py-0">
                                 <Check className="h-3 w-3 mr-0.5" />
                                 CSV
                               </Badge>
@@ -2826,7 +2826,7 @@ export default function SentinelImportPage() {
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                <Check className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <Check className="h-12 w-12 mx-auto mb-4 text-rs-green" />
                 <p>All orphan sells have been resolved!</p>
               </div>
             )}
@@ -2853,7 +2853,7 @@ export default function SentinelImportPage() {
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              <AlertTriangle className="h-5 w-5 text-rs-yellow" />
               Resolve All Orphans
             </DialogTitle>
             <div className="mt-1">
@@ -2909,7 +2909,7 @@ export default function SentinelImportPage() {
               <div className="text-sm text-muted-foreground">
                 {allOrphanSells.filter(o => o.orphanStatus === 'pending').length} pending, {allOrphanSells.filter(o => o.orphanStatus === 'muted').length} muted
                 {matchedCount > 0 && (
-                  <span className="text-green-500 ml-2 font-medium">{matchedCount} matched ready to save</span>
+                  <span className="text-rs-green ml-2 font-medium">{matchedCount} matched ready to save</span>
                 )}
               </div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -2976,7 +2976,7 @@ export default function SentinelImportPage() {
                   const isRecentlyUnmuted = recentlyUnmutedIds.has(orphan.tradeId);
                   
                   return (
-                  <Card key={orphan.tradeId} className={`transition-all duration-500 ${isMuted ? 'border-muted opacity-60' : isRecentlyUnmuted ? 'border-green-500 bg-green-500/10 ring-2 ring-green-500/30' : 'border-yellow-500/30'}`}>
+                  <Card key={orphan.tradeId} className={`transition-all duration-500 ${isMuted ? 'border-muted opacity-60' : isRecentlyUnmuted ? 'border-rs-green bg-rs-green/10 ring-2 ring-rs-green/30' : 'border-rs-yellow/30'}`}>
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3 flex-wrap">
@@ -3022,7 +3022,7 @@ export default function SentinelImportPage() {
                           <Label className="flex items-center gap-2">
                             Cost Basis per Share
                             {costBasisMap && costBasisMap[orphan.ticker.toUpperCase()] !== undefined && (
-                              <Badge variant="outline" className="text-green-500 border-green-500/50 text-[10px] py-0">
+                              <Badge variant="outline" className="text-rs-green border-rs-green/50 text-[10px] py-0">
                                 <Check className="h-3 w-3 mr-0.5" />
                                 CSV
                               </Badge>
@@ -3089,7 +3089,7 @@ export default function SentinelImportPage() {
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                <Check className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <Check className="h-12 w-12 mx-auto mb-4 text-rs-green" />
                 <p>All orphan sells have been resolved!</p>
               </div>
             )}
@@ -3121,7 +3121,7 @@ export default function SentinelImportPage() {
         <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-orange-500" />
+              <AlertCircle className="h-5 w-5 text-rs-amber" />
               Duplicate Trades Found
             </DialogTitle>
             <DialogDescription className="space-y-2">
@@ -3174,7 +3174,7 @@ export default function SentinelImportPage() {
             ) : duplicateTrades && duplicateTrades.filter(d => d.duplicateStatus === 'pending').length > 0 ? (
               <div className="space-y-4">
                 {duplicateTrades.filter(d => d.duplicateStatus === 'pending').map((dup) => (
-                  <Card key={dup.tradeId} className="border-orange-500/30">
+                  <Card key={dup.tradeId} className="border-rs-amber/30">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-3">
@@ -3236,7 +3236,7 @@ export default function SentinelImportPage() {
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
-                <Check className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <Check className="h-12 w-12 mx-auto mb-4 text-rs-green" />
                 <p>All duplicates have been resolved!</p>
               </div>
             )}

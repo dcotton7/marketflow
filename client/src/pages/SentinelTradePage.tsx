@@ -194,16 +194,16 @@ export default function SentinelTradePage() {
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 70) return "text-green-500";
-    if (score >= 50) return "text-yellow-500";
-    return "text-red-500";
+    if (score >= 70) return "text-rs-green";
+    if (score >= 50) return "text-rs-yellow";
+    return "text-rs-red";
   };
 
   const getEventIcon = (eventType: string) => {
     switch (eventType) {
       case "status_change": return <CheckCircle className="w-4 h-4 text-blue-500" />;
-      case "stop_update": return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
-      case "target_update": return <TrendingUp className="w-4 h-4 text-green-500" />;
+      case "stop_update": return <AlertTriangle className="w-4 h-4 text-rs-yellow" />;
+      case "target_update": return <TrendingUp className="w-4 h-4 text-rs-green" />;
       case "evaluation": return <Clock className="w-4 h-4 text-purple-500" />;
       default: return <Clock className="w-4 h-4 text-muted-foreground" />;
     }
@@ -404,7 +404,7 @@ export default function SentinelTradePage() {
                   {latestEval.riskFlags.length > 0 && (
                     <div>
                       <p className="font-medium mb-2 flex items-center gap-1">
-                        <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                        <AlertTriangle className="w-4 h-4 text-rs-yellow" />
                         Risk Flags
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -420,7 +420,7 @@ export default function SentinelTradePage() {
                   {latestEval.keyPoints.length > 0 && (
                     <div>
                       <p className="font-medium mb-2 flex items-center gap-1">
-                        <CheckCircle className="w-4 h-4 text-green-500" />
+                        <CheckCircle className="w-4 h-4 text-rs-green" />
                         Key Points
                       </p>
                       <ul className="text-sm space-y-1">

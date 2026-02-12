@@ -289,19 +289,19 @@ interface ScanQualityResult {
 }
 
 const GRADE_COLORS: Record<string, string> = {
-  A: "text-green-400",
-  B: "text-blue-400",
-  C: "text-yellow-400",
-  D: "text-orange-400",
-  F: "text-red-400",
+  A: "text-rs-green",
+  B: "text-rs-green",
+  C: "text-rs-yellow",
+  D: "text-rs-amber",
+  F: "text-rs-red",
 };
 
 const GRADE_BG_COLORS: Record<string, string> = {
-  A: "bg-green-500/20 border-green-500/40",
-  B: "bg-blue-500/20 border-blue-500/40",
-  C: "bg-yellow-500/20 border-yellow-500/40",
-  D: "bg-orange-500/20 border-orange-500/40",
-  F: "bg-red-500/20 border-red-500/40",
+  A: "bg-rs-green/20 border-rs-green/30",
+  B: "bg-rs-green/20 border-rs-green/30",
+  C: "bg-rs-yellow/20 border-rs-yellow/30",
+  D: "bg-rs-amber/20 border-rs-amber/30",
+  F: "bg-rs-red/20 border-rs-red/30",
 };
 
 function getCategoryIcon(category: string) {
@@ -323,7 +323,7 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
     <div
       className={`rounded-md border-2 px-3 py-2 min-w-[180px] ${
         isNot
-          ? "border-red-500 bg-red-950/20"
+          ? "border-rs-red bg-rs-red/10"
           : selected
           ? "border-primary bg-card"
           : "border-border bg-card"
@@ -351,7 +351,7 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 text-red-500"
+              className="h-5 w-5 text-rs-red"
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
               title="Delete from library"
               data-testid={`button-delete-node-${data.nodeId}`}
@@ -373,13 +373,13 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
         {passCount !== undefined && (
           <Badge
             variant="outline"
-            className={`text-xs ${passCount > 0 ? "bg-green-500/20 text-green-400 border-green-500/30" : "text-muted-foreground"}`}
+            className={`text-xs ${passCount > 0 ? "bg-rs-green/20 text-rs-green border-rs-green/30" : "text-muted-foreground"}`}
           >
             {passCount} pass
           </Badge>
         )}
         {isNot && (
-          <Badge variant="outline" className="text-xs bg-red-500/20 text-red-400 border-red-500/30">
+          <Badge variant="outline" className="text-xs bg-rs-red/20 text-rs-red border-rs-red/30">
             NOT
           </Badge>
         )}
@@ -396,10 +396,10 @@ function ResultsNodeComponent({ data }: NodeProps) {
     totalCount === undefined
       ? "text-muted-foreground"
       : totalCount === 0
-      ? "text-red-400"
+      ? "text-rs-red"
       : totalCount <= 50
-      ? "text-green-400"
-      : "text-yellow-400";
+      ? "text-rs-green"
+      : "text-rs-yellow";
 
   return (
     <div
@@ -463,7 +463,7 @@ function LogicEdge({
             className={`text-xs font-bold px-2 py-0.5 rounded-md border cursor-pointer select-none ${
               isAnd
                 ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-                : "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                : "bg-rs-amber/20 text-rs-amber border-rs-amber/30"
             }`}
             data-testid={`edge-label-${id}`}
             onClick={(e) => {
@@ -476,7 +476,7 @@ function LogicEdge({
             {logicType}
           </div>
           <button
-            className="flex items-center justify-center w-5 h-5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 cursor-pointer hover:bg-red-500/40 transition-colors"
+            className="flex items-center justify-center w-5 h-5 rounded-full bg-rs-red/20 text-rs-red border border-rs-red/30 cursor-pointer hover:bg-rs-red/20 transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               if (data?.onDelete) {
@@ -1860,7 +1860,7 @@ export default function BigIdeaPage() {
                         <span className="font-semibold text-foreground">Thought Stems:</span>
                         {debugInfo.connections.map((c: any, i: number) => (
                           <div key={i} className="ml-2">
-                            {c.from} <span className={c.logic === "OR" ? "text-yellow-400" : "text-blue-400"}>{c.logic}</span> {c.to}
+                            {c.from} <span className={c.logic === "OR" ? "text-rs-yellow" : "text-blue-400"}>{c.logic}</span> {c.to}
                           </div>
                         ))}
                       </div>
@@ -1873,7 +1873,7 @@ export default function BigIdeaPage() {
                           <div key={i} className="ml-2">
                             <span className="text-foreground/80">{o.thoughtName}</span>
                             <span className="text-muted-foreground/60"> / {o.paramName}:</span>
-                            <span className="text-yellow-400"> {String(o.originalValue)}</span>
+                            <span className="text-rs-yellow"> {String(o.originalValue)}</span>
                             <span className="text-muted-foreground/60"> → </span>
                             <span className="text-blue-400">{String(o.linkedValue)}</span>
                             <div className="ml-3 text-muted-foreground/50">from: {o.sourceName}</div>
@@ -1904,16 +1904,16 @@ export default function BigIdeaPage() {
                         <div key={t.nodeId} className="border-t border-dashed pt-1">
                           <div className="flex items-center gap-1 flex-wrap">
                             <span className="font-semibold text-foreground">{t.name}</span>
-                            {t.isNot && <span className="text-red-400">[NOT]</span>}
+                            {t.isNot && <span className="text-rs-red">[NOT]</span>}
                             <span className="text-muted-foreground/60">({t.timeframe})</span>
                             {passCount !== undefined && (
-                              <span className="text-green-400">{passCount} pass</span>
+                              <span className="text-rs-green">{passCount} pass</span>
                             )}
                           </div>
                           {t.criteria.map((c: any, ci: number) => (
                             <div key={ci} className={`ml-2 ${c.muted ? "line-through opacity-50" : ""}`}>
                               <span className="text-foreground/80">{c.indicator}</span>
-                              {c.inverted && <span className="text-yellow-400"> INV</span>}
+                              {c.inverted && <span className="text-rs-yellow"> INV</span>}
                               {c.tfOverride && <span className="text-cyan-400"> @{c.tfOverride}</span>}
                               <span className="text-muted-foreground/70"> {c.label}</span>
                               <div className="ml-3 text-muted-foreground/50">
@@ -1968,7 +1968,7 @@ export default function BigIdeaPage() {
                           </div>
                         ))}
                         {dim.suggestions.length > 0 && dim.suggestions.map((s, i) => (
-                          <div key={`s-${i}`} className="ml-2 flex items-start gap-1 text-amber-400/80">
+                          <div key={`s-${i}`} className="ml-2 flex items-start gap-1 text-rs-amber">
                             <Sparkles className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />
                             <span>{s}</span>
                           </div>
@@ -2052,10 +2052,10 @@ export default function BigIdeaPage() {
                     <span
                       className={`text-3xl font-bold ${
                         scanResults.length === 0
-                          ? "text-red-400"
+                          ? "text-rs-red"
                           : scanResults.length <= 50
-                          ? "text-green-400"
-                          : "text-yellow-400"
+                          ? "text-rs-green"
+                          : "text-rs-yellow"
                       }`}
                       data-testid="text-scan-count"
                     >
@@ -2277,7 +2277,7 @@ export default function BigIdeaPage() {
                                 className="h-6 w-6"
                                 data-testid={`button-mute-criterion-${idx}`}
                               >
-                                <Ban className={`h-3 w-3 ${criterion.muted ? "text-yellow-500" : ""}`} />
+                                <Ban className={`h-3 w-3 ${criterion.muted ? "text-rs-yellow" : ""}`} />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -2398,7 +2398,7 @@ export default function BigIdeaPage() {
                                 );
                               })()}
                               {isLinked && !linkedVal && linkSources.length === 0 && (
-                                <div className="mt-1 text-[10px] text-yellow-500">
+                                <div className="mt-1 text-[10px] text-rs-yellow">
                                   No compatible source found on canvas. Add a base/consolidation thought.
                                 </div>
                               )}
@@ -2850,7 +2850,7 @@ export default function BigIdeaPage() {
                   <p>Scanned: {lastFunnelData.totalTickers} tickers | Results: {scanResults?.length || 0}</p>
                   {lastFunnelData.perIndicator && Object.entries(lastFunnelData.perIndicator).slice(0, 5).map(([id, data]: [string, any]) => (
                     <p key={id}>
-                      {data.name}: <span className="text-green-400">{data.passed} pass</span> / <span className="text-red-400">{data.failed} fail</span>
+                      {data.name}: <span className="text-rs-green">{data.passed} pass</span> / <span className="text-rs-red">{data.failed} fail</span>
                     </p>
                   ))}
                 </div>
@@ -2888,7 +2888,7 @@ export default function BigIdeaPage() {
                     return (
                       <div
                         key={i}
-                        className={`rounded-md border p-3 space-y-1.5 ${isAccepted ? "border-green-500/30 bg-green-500/5" : ""}`}
+                        className={`rounded-md border p-3 space-y-1.5 ${isAccepted ? "border-rs-green/30 bg-rs-green/10" : ""}`}
                         data-testid={`tune-suggestion-${i}`}
                       >
                         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -2915,7 +2915,7 @@ export default function BigIdeaPage() {
                             Apply
                           </Button>
                         ) : (
-                          <div className="flex items-center gap-1.5 text-xs text-green-500">
+                          <div className="flex items-center gap-1.5 text-xs text-rs-green">
                             <CheckCircle2 className="h-3.5 w-3.5" />
                             Applied
                           </div>
@@ -3201,25 +3201,24 @@ function ScanChartViewer({
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <div
-            className="flex items-center gap-0 text-xl tracking-tight"
-            style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
+            className="rs-ticker flex items-center gap-0 text-xl tracking-tight"
             data-testid={`ticker-box-${symbol}`}
           >
-            <span className="font-bold text-foreground" data-testid="text-chart-symbol">{symbol}</span>
+            <span className="rs-ticker-symbol font-bold text-foreground" data-testid="text-chart-symbol">{symbol}</span>
             <span className="text-muted-foreground mx-1.5">|</span>
-            <span className="font-semibold text-foreground" data-testid="text-chart-price">
+            <span className="rs-ticker-price font-semibold text-foreground" data-testid="text-chart-price">
               ${displayPrice.toFixed(2)}
             </span>
             <span className="text-muted-foreground mx-1.5">|</span>
             <span
-              className={`font-bold ${isPriceUp ? "text-green-500" : "text-red-500"}`}
+              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
               data-testid="text-chart-change"
             >
               {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
             </span>
             <span className="text-muted-foreground mx-1">|</span>
             <span
-              className={`font-bold ${isPriceUp ? "text-green-500" : "text-red-500"}`}
+              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
               data-testid="text-chart-pct"
             >
               {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
@@ -3264,7 +3263,7 @@ function ScanChartViewer({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className={`toggle-elevate ${chartRatings[symbol] === "up" ? "toggle-elevated text-green-500" : ""}`}
+                  className={`toggle-elevate ${chartRatings[symbol] === "up" ? "toggle-elevated text-rs-green" : ""}`}
                   onClick={() => {
                     const price = dayChange?.price ?? current?.price ?? 0;
                     const indicatorSnapshot = current?.thoughtBreakdown || null;
@@ -3285,7 +3284,7 @@ function ScanChartViewer({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className={`toggle-elevate ${chartRatings[symbol] === "down" ? "toggle-elevated text-red-500" : ""}`}
+                  className={`toggle-elevate ${chartRatings[symbol] === "down" ? "toggle-elevated text-rs-red" : ""}`}
                   onClick={() => {
                     const price = dayChange?.price ?? current?.price ?? 0;
                     const indicatorSnapshot = current?.thoughtBreakdown || null;
@@ -3328,27 +3327,27 @@ function ScanChartViewer({
                 <div key={thought.thoughtId} className="flex flex-col gap-0.5">
                   <div className="flex items-center gap-2 text-[11px] flex-wrap">
                     {thought.pass ? (
-                      <CheckCircle2 className="h-3 w-3 text-green-400 flex-shrink-0" />
+                      <CheckCircle2 className="h-3 w-3 text-rs-green flex-shrink-0" />
                     ) : (
-                      <XCircle className="h-3 w-3 text-red-400 flex-shrink-0" />
+                      <XCircle className="h-3 w-3 text-rs-red flex-shrink-0" />
                     )}
                     <span className="font-medium text-foreground/90">{thought.thoughtName}</span>
-                    <span className={`font-semibold ${passCount === totalCount ? "text-green-400" : "text-amber-400"}`}>
+                    <span className={`font-semibold ${passCount === totalCount ? "text-rs-green" : "text-rs-amber"}`}>
                       {passCount}/{totalCount} pass
                     </span>
                   </div>
                   {thought.criteriaResults.map((cr, ci) => (
                     <div key={ci} className="flex items-center gap-1.5 text-[10px] pl-5 flex-wrap" data-testid={`criterion-result-${cr.indicatorId}`}>
                       {cr.pass ? (
-                        <CheckCircle2 className="h-2.5 w-2.5 text-green-500 flex-shrink-0" />
+                        <CheckCircle2 className="h-2.5 w-2.5 text-rs-green flex-shrink-0" />
                       ) : (
-                        <XCircle className="h-2.5 w-2.5 text-red-500 flex-shrink-0" />
+                        <XCircle className="h-2.5 w-2.5 text-rs-red flex-shrink-0" />
                       )}
                       <span className="text-foreground/70 font-medium">{cr.indicatorName}</span>
-                      {cr.inverted && <span className="text-yellow-400">[INV]</span>}
+                      {cr.inverted && <span className="text-rs-yellow">[INV]</span>}
                       {cr.diagnostics && (
                         <>
-                          <span className={`font-semibold ${cr.pass ? "text-green-300" : "text-red-300"}`}>
+                          <span className={`font-semibold ${cr.pass ? "text-rs-green" : "text-rs-red"}`}>
                             {cr.diagnostics.value}
                           </span>
                           <span className="text-muted-foreground/60">{cr.diagnostics.threshold}</span>
@@ -3499,19 +3498,19 @@ function ScanChartViewer({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">50d ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`}>
                     {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">200d Ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-rs-green" : "text-rs-red"}`}>
                     {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span>
-                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`}>
                     {chartMetrics.macd}
                   </span>
                 </div>
@@ -3520,7 +3519,7 @@ function ScanChartViewer({
                   <span className="text-sm font-medium text-foreground">
                     {chartMetrics.sectorEtf}
                     {chartMetrics.sectorEtf !== "N/A" && (
-                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>
                         {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
                       </span>
                     )}
@@ -3528,7 +3527,7 @@ function ScanChartViewer({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">Earnings</span>
-                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-yellow-400" : "text-foreground"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`}>
                     {chartMetrics.nextEarningsDate !== "N/A"
                       ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
                       : "N/A"}

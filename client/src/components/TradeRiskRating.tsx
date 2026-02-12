@@ -157,9 +157,9 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
 
   const CheckIcon = ({ passed }: { passed: boolean }) => {
     return passed ? (
-      <Check className="w-4 h-4 text-green-500" />
+      <Check className="w-4 h-4 text-rs-green" />
     ) : (
-      <X className="w-4 h-4 text-red-500" />
+      <X className="w-4 h-4 text-rs-red" />
     );
   };
 
@@ -256,11 +256,11 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
           </div>
           <div className="flex items-center gap-2">
             {isExtendedWarning ? (
-              <AlertTriangle className="w-4 h-4 text-yellow-500" />
+              <AlertTriangle className="w-4 h-4 text-rs-yellow" />
             ) : (
               <CheckIcon passed={checks.notExtended8xAdr} />
             )}
-            <span className={isExtendedWarning ? "text-yellow-500" : ""}>
+            <span className={isExtendedWarning ? "text-rs-yellow" : ""}>
               {isExtendedWarning 
                 ? `Extended: ${extensionFrom50dAdr !== null ? extensionFrom50dAdr.toFixed(1) : '?'}x ADR above 50 DSMA (≥8x)`
                 : `Price < 8x ADR above 50 DSMA${extensionFrom50dAdr !== null ? ` (${extensionFrom50dAdr.toFixed(1)}x)` : ''}`
@@ -284,7 +284,7 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
               <span className="text-muted-foreground leading-tight">
                 50d Extension<br />(ADR multiples):
               </span>
-              <span className={`font-mono font-medium ${extensionFrom50dAdr >= 8 ? 'text-yellow-500' : extensionFrom50dAdr >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              <span className={`font-mono font-medium ${extensionFrom50dAdr >= 8 ? 'text-rs-yellow' : extensionFrom50dAdr >= 0 ? 'text-rs-green' : 'text-rs-red'}`}>
                 {extensionFrom50dAdr >= 0 ? '+' : ''}{extensionFrom50dAdr.toFixed(1)}x
               </span>
             </div>
@@ -294,7 +294,7 @@ export function TradeRiskRating({ symbol, currentPrice }: TradeRiskRatingProps) 
               <span className="text-muted-foreground leading-tight">
                 Price Extended<br />from 50 DSMA:
               </span>
-              <span className={`font-mono font-medium ${priceExtension50 >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              <span className={`font-mono font-medium ${priceExtension50 >= 0 ? 'text-rs-green' : 'text-rs-red'}`}>
                 {priceExtension50 >= 0 ? '+' : ''}{priceExtension50.toFixed(1)}%
               </span>
             </div>

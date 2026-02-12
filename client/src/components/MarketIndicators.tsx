@@ -52,7 +52,7 @@ export function MarketIndicators() {
       <p className="text-sm font-bold text-foreground mb-2">Market</p>
       {quotes?.map((quote) => {
         const isPositive = quote.changePercent >= 0;
-        const colorClass = isPositive ? "text-green-500" : "text-red-500";
+        const colorClass = isPositive ? "text-rs-green" : "text-rs-red";
         return (
           <div 
             key={quote.symbol} 

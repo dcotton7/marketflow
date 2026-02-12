@@ -880,28 +880,28 @@ export default function PatternTrainingPage() {
 
                             {evaluation.strengths.length > 0 && (
                               <EvalSection
-                                icon={<ThumbsUp className="w-3.5 h-3.5 text-green-400" />}
+                                icon={<ThumbsUp className="w-3.5 h-3.5 text-rs-green" />}
                                 title="Strengths"
                                 items={evaluation.strengths}
-                                color="text-green-400"
+                                color="text-rs-green"
                               />
                             )}
 
                             {evaluation.riskFlags.length > 0 && (
                               <EvalSection
-                                icon={<ShieldAlert className="w-3.5 h-3.5 text-red-400" />}
+                                icon={<ShieldAlert className="w-3.5 h-3.5 text-rs-red" />}
                                 title="Risk Flags"
                                 items={evaluation.riskFlags}
-                                color="text-red-400"
+                                color="text-rs-red"
                               />
                             )}
 
                             {evaluation.weaknesses.length > 0 && (
                               <EvalSection
-                                icon={<ThumbsDown className="w-3.5 h-3.5 text-amber-400" />}
+                                icon={<ThumbsDown className="w-3.5 h-3.5 text-rs-amber" />}
                                 title="Weaknesses"
                                 items={evaluation.weaknesses}
-                                color="text-amber-400"
+                                color="text-rs-amber"
                               />
                             )}
 
@@ -995,7 +995,7 @@ export default function PatternTrainingPage() {
                                   data-testid={`button-star-${s}`}
                                 >
                                   <Star
-                                    className={`w-5 h-5 ${s <= rating ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`}
+                                    className={`w-5 h-5 ${s <= rating ? "fill-yellow-400 text-rs-yellow" : "text-muted-foreground"}`}
                                   />
                                 </button>
                               ))}
@@ -1186,14 +1186,14 @@ export default function PatternTrainingPage() {
                                       <>
                                         {point.percentFrom50d !== undefined && (
                                           <div className="text-[10px] text-muted-foreground">
-                                            <span className={point.percentFrom50d >= 0 ? "text-green-400" : "text-red-400"}>
+                                            <span className={point.percentFrom50d >= 0 ? "text-rs-green" : "text-rs-red"}>
                                               {point.percentFrom50d >= 0 ? "+" : ""}{point.percentFrom50d.toFixed(1)}% from 50d
                                             </span>
                                           </div>
                                         )}
                                         {point.percentFrom200d !== undefined && (
                                           <div className="text-[10px] text-muted-foreground">
-                                            <span className={point.percentFrom200d >= 0 ? "text-green-400" : "text-red-400"}>
+                                            <span className={point.percentFrom200d >= 0 ? "text-rs-green" : "text-rs-red"}>
                                               {point.percentFrom200d >= 0 ? "+" : ""}{point.percentFrom200d.toFixed(1)}% from 200d
                                             </span>
                                           </div>
@@ -1201,12 +1201,12 @@ export default function PatternTrainingPage() {
                                       </>
                                     )}
                                     {(role.value === "stop" || role.value === "sell") && point.percentFromEntry !== undefined && (
-                                      <div className="text-[10px] text-red-400">
+                                      <div className="text-[10px] text-rs-red">
                                         {point.percentFromEntry.toFixed(1)}% from entry
                                       </div>
                                     )}
                                     {role.value === "target" && point.percentFromEntry !== undefined && (
-                                      <div className="text-[10px] text-green-400">
+                                      <div className="text-[10px] text-rs-green">
                                         +{point.percentFromEntry.toFixed(1)}% from entry
                                       </div>
                                     )}
@@ -1225,12 +1225,12 @@ export default function PatternTrainingPage() {
                                       </>
                                     )}
                                     {role.value === "resistance_test" && point.percentFromEntry !== undefined && (
-                                      <div className="text-[10px] text-yellow-400">
+                                      <div className="text-[10px] text-rs-yellow">
                                         {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
                                       </div>
                                     )}
                                     {(role.value === "breakout_confirmed" || role.value === "breakdown") && point.percentFromEntry !== undefined && (
-                                      <div className={`text-[10px] ${role.value === "breakout_confirmed" ? "text-cyan-400" : "text-orange-400"}`}>
+                                      <div className={`text-[10px] ${role.value === "breakout_confirmed" ? "text-cyan-400" : "text-rs-amber"}`}>
                                         {point.percentFromEntry >= 0 ? "+" : ""}{point.percentFromEntry.toFixed(1)}% from entry
                                       </div>
                                     )}
@@ -1361,7 +1361,7 @@ export default function PatternTrainingPage() {
                           {[1, 2, 3, 4, 5].map(s => (
                             <Star
                               key={s}
-                              className={`w-3 h-3 ${s <= (setup.rating || 0) ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/30"}`}
+                              className={`w-3 h-3 ${s <= (setup.rating || 0) ? "fill-yellow-400 text-rs-yellow" : "text-muted-foreground/30"}`}
                             />
                           ))}
                         </div>
@@ -1374,8 +1374,8 @@ export default function PatternTrainingPage() {
                           <Badge
                             variant="outline"
                             className={`text-[10px] ${
-                              setup.outcome === "win" ? "text-green-400 border-green-400/30" :
-                              setup.outcome === "loss" ? "text-red-400 border-red-400/30" :
+                              setup.outcome === "win" ? "text-rs-green border-rs-green/30" :
+                              setup.outcome === "loss" ? "text-rs-red border-rs-red/30" :
                               "text-muted-foreground"
                             }`}
                           >
@@ -1441,8 +1441,8 @@ function VerdictBadge({ verdict }: { verdict: string }) {
 }
 
 function ScoreDisplay({ score }: { score: number }) {
-  const color = score >= 8 ? "text-green-400" : score >= 6 ? "text-blue-400" : score >= 4 ? "text-amber-400" : "text-red-400";
-  const bgColor = score >= 8 ? "border-green-400/30" : score >= 6 ? "border-blue-400/30" : score >= 4 ? "border-amber-400/30" : "border-red-400/30";
+  const color = score >= 8 ? "text-rs-green" : score >= 6 ? "text-blue-400" : score >= 4 ? "text-rs-amber" : "text-rs-red";
+  const bgColor = score >= 8 ? "border-rs-green/30" : score >= 6 ? "border-blue-400/30" : score >= 4 ? "border-rs-amber/30" : "border-rs-red/30";
   return (
     <div className={`flex items-center gap-1 border-2 ${bgColor} rounded-lg px-3 py-1.5`}>
       <span className={`text-2xl font-bold ${color}`}>{score}</span>
@@ -1479,7 +1479,7 @@ function MetricCard({ label, value, format }: { label: string; value: any; forma
     case "pct":
       const num = typeof value === "number" ? value : parseFloat(value);
       displayValue = `${num >= 0 ? "+" : ""}${num.toFixed(1)}%`;
-      colorClass = num >= 0 ? "text-green-400" : "text-red-400";
+      colorClass = num >= 0 ? "text-rs-green" : "text-rs-red";
       break;
     case "ratio":
       displayValue = `${Number(value).toFixed(1)} : 1`;

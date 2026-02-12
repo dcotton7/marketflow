@@ -1024,19 +1024,19 @@ export function TradingChart({
           <div className="flex items-center gap-1.5 mr-1 pointer-events-none">
             <div className="flex items-center gap-1 bg-slate-900/80 rounded px-2 py-1">
               <span className="text-[10px] text-slate-400 whitespace-nowrap">Start Price (click):</span>
-              <span className={`text-[11px] font-mono ${measureStartPrice !== null ? "text-yellow-400" : "text-slate-500"}`} data-testid="text-measure-start-price">
+              <span className={`text-[11px] font-mono ${measureStartPrice !== null ? "text-rs-yellow" : "text-slate-500"}`} data-testid="text-measure-start-price">
                 {measureStartPrice !== null ? `$${measureStartPrice.toFixed(2)}` : "$\u2014"}
               </span>
             </div>
             <div className="flex items-center gap-1 bg-slate-900/80 rounded px-2 py-1">
               <span className="text-[10px] text-slate-400 whitespace-nowrap">End Price (click):</span>
-              <span className={`text-[11px] font-mono ${measureEndPrice !== null ? "text-yellow-400" : "text-slate-500"}`} data-testid="text-measure-end-price">
+              <span className={`text-[11px] font-mono ${measureEndPrice !== null ? "text-rs-yellow" : "text-slate-500"}`} data-testid="text-measure-end-price">
                 {measureEndPrice !== null ? `$${measureEndPrice.toFixed(2)}` : "$\u2014"}
               </span>
             </div>
             {measureStartPrice !== null && measureEndPrice !== null && (
               <div className="flex items-center gap-1 bg-slate-900/80 rounded px-2 py-1">
-                <span className={`text-[11px] font-mono font-semibold ${measureEndPrice >= measureStartPrice ? "text-emerald-400" : "text-red-400"}`} data-testid="text-measure-delta">
+                <span className={`text-[11px] font-mono font-semibold ${measureEndPrice >= measureStartPrice ? "text-rs-green" : "text-rs-red"}`} data-testid="text-measure-delta">
                   {measureEndPrice >= measureStartPrice ? "+" : ""}{(measureEndPrice - measureStartPrice).toFixed(2)} ({measureEndPrice >= measureStartPrice ? "+" : ""}{(((measureEndPrice - measureStartPrice) / measureStartPrice) * 100).toFixed(2)}%)
                 </span>
               </div>

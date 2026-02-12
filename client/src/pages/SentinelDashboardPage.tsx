@@ -311,9 +311,9 @@ function calculateFifoTracking(entries: LotEntry[]): FifoResult {
 }
 
 function getScoreColor(score: number): string {
-  if (score >= 70) return "text-green-500";
-  if (score >= 50) return "text-yellow-500";
-  return "text-red-500";
+  if (score >= 70) return "text-rs-green";
+  if (score >= 50) return "text-rs-yellow";
+  return "text-rs-red";
 }
 
 // Inline editable price row component for click-to-edit
@@ -368,10 +368,10 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
     setIsEditing(false);
   };
   
-  const alertBgMap = { red: "bg-red-500/10", orange: "bg-orange-500/10", green: "bg-green-500/10", yellow: "bg-yellow-500/10" };
-  const alertTextMap = { red: "text-red-500", orange: "text-orange-500", green: "text-green-500", yellow: "text-yellow-500" };
-  const alertBg = alertBgMap[alertColor] || "bg-red-500/10";
-  const alertText = alertTextMap[alertColor] || "text-red-500";
+  const alertBgMap = { red: "bg-rs-red/10", orange: "bg-rs-amber/10", green: "bg-rs-green/10", yellow: "bg-rs-yellow/10" };
+  const alertTextMap = { red: "text-rs-red", orange: "text-rs-amber", green: "text-rs-green", yellow: "text-rs-yellow" };
+  const alertBg = alertBgMap[alertColor] || "bg-rs-red/10";
+  const alertText = alertTextMap[alertColor] || "text-rs-red";
   
   return (
     <div 
@@ -404,14 +404,14 @@ function EditablePriceRow({ label, icon: Icon, value, distance, isAlert = false,
             />
             <button 
               onClick={(e) => { e.stopPropagation(); handleSave(); }}
-              className="p-0.5 text-green-500 hover:text-green-600"
+              className="p-0.5 text-rs-green hover:text-rs-green"
               data-testid={`${testId}-save`}
             >
               <Check className="w-3 h-3" />
             </button>
             <button 
               onClick={(e) => { e.stopPropagation(); handleCancel(); }}
-              className="p-0.5 text-red-500 hover:text-red-600"
+              className="p-0.5 text-rs-red hover:text-rs-red"
               data-testid={`${testId}-cancel`}
             >
               <X className="w-3 h-3" />
@@ -500,21 +500,21 @@ function OrderLevelsDisplay({
   const WARNING = 1.0;
 
   const stopAlertColor = stopPctAway !== null ? (
-    Math.abs(stopPctAway) <= CRITICAL ? "text-red-500" :
-    Math.abs(stopPctAway) <= WARNING ? "text-orange-500" : "text-muted-foreground"
+    Math.abs(stopPctAway) <= CRITICAL ? "text-rs-red" :
+    Math.abs(stopPctAway) <= WARNING ? "text-rs-amber" : "text-muted-foreground"
   ) : "text-muted-foreground";
-  const stopBg = stopPctAway !== null && Math.abs(stopPctAway) <= WARNING ? "bg-red-500/10" : "bg-muted/30";
+  const stopBg = stopPctAway !== null && Math.abs(stopPctAway) <= WARNING ? "bg-rs-red/10" : "bg-muted/30";
 
   const partialAlertColor = partialPctAway !== null ? (
-    Math.abs(partialPctAway) <= CRITICAL ? "text-yellow-500" :
-    Math.abs(partialPctAway) <= WARNING ? "text-yellow-400" : "text-muted-foreground"
+    Math.abs(partialPctAway) <= CRITICAL ? "text-rs-yellow" :
+    Math.abs(partialPctAway) <= WARNING ? "text-rs-yellow" : "text-muted-foreground"
   ) : "text-muted-foreground";
 
   const targetAlertColor = targetPctAway !== null ? (
-    Math.abs(targetPctAway) <= CRITICAL ? "text-green-500" :
-    Math.abs(targetPctAway) <= WARNING ? "text-yellow-500" : "text-muted-foreground"
+    Math.abs(targetPctAway) <= CRITICAL ? "text-rs-green" :
+    Math.abs(targetPctAway) <= WARNING ? "text-rs-yellow" : "text-muted-foreground"
   ) : "text-muted-foreground";
-  const targetBg = targetPctAway !== null && Math.abs(targetPctAway) <= WARNING ? "bg-green-500/10" : "bg-muted/30";
+  const targetBg = targetPctAway !== null && Math.abs(targetPctAway) <= WARNING ? "bg-rs-green/10" : "bg-muted/30";
 
   const addLevelMutation = useMutation({
     mutationFn: async (data: { levelType: 'stop' | 'target'; price: number; quantity?: number }) => {
@@ -558,8 +558,8 @@ function OrderLevelsDisplay({
     const show = isStop ? showStopGrid : showTargetGrid;
     if (!show) return null;
 
-    const borderColor = isStop ? 'border-red-500/30' : 'border-green-500/30';
-    const headerBg = isStop ? 'bg-red-500/10' : 'bg-green-500/10';
+    const borderColor = isStop ? 'border-rs-red/30' : 'border-rs-green/30';
+    const headerBg = isStop ? 'bg-rs-red/10' : 'bg-rs-green/10';
     const priceVal = isStop ? newStopPrice : newTargetPrice;
     const setPrice = isStop ? setNewStopPrice : setNewTargetPrice;
     const qtyVal = isStop ? newStopQty : newTargetQty;
@@ -589,7 +589,7 @@ function OrderLevelsDisplay({
                   <td className="px-2 py-1 font-mono" data-testid={`text-level-price-${level.id}`}>${level.price.toFixed(2)}</td>
                   <td className="px-2 py-1" data-testid={`text-level-qty-${level.id}`}>{level.quantity ? level.quantity.toLocaleString() : '—'}</td>
                   <td className="px-2 py-1 font-mono" data-testid={`text-level-pct-${level.id}`}>
-                    <span className={pctAway >= 0 ? 'text-green-500' : 'text-red-500'}>
+                    <span className={pctAway >= 0 ? 'text-rs-green' : 'text-rs-red'}>
                       {pctAway >= 0 ? '+' : ''}{pctAway.toFixed(1)}%
                     </span>
                   </td>
@@ -645,7 +645,7 @@ function OrderLevelsDisplay({
                   disabled={addLevelMutation.isPending}
                   data-testid={`button-add-${levelType}-${trade.id}`}
                 >
-                  <Check className="text-green-500" />
+                  <Check className="text-rs-green" />
                 </Button>
               </td>
             </tr>
@@ -846,7 +846,7 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
         </span>
         <span className="text-muted-foreground mx-1">|</span>
         <span 
-          className={`font-bold ${hasMarketChange ? (isMarketPositive ? "text-green-500" : "text-red-500") : "text-muted-foreground"}`} 
+          className={`font-bold ${hasMarketChange ? (isMarketPositive ? "text-rs-green" : "text-rs-red") : "text-muted-foreground"}`} 
           data-testid={`text-pct-${symbol}`}
         >
           {hasMarketChange ? `${isMarketPositive ? "+" : ""}${marketPctChange!.toFixed(2)}%` : "—"}
@@ -872,7 +872,7 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
         {hasPnLData ? (
           <>
             <span 
-              className={`font-bold ${isPnLPositive ? "text-green-600" : "text-red-600"}`}
+              className={`font-bold ${isPnLPositive ? "text-rs-green" : "text-rs-red"}`}
               data-testid={`text-position-pnl-${symbol}`}
             >
               {isPnLPositive ? "+" : ""}${positionPnL.toFixed(0)}
@@ -881,7 +881,7 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
               <>
                 <span className="text-gray-400 mx-1">|</span>
                 <span 
-                  className={`font-bold ${isPnLPositive ? "text-green-600" : "text-red-600"}`}
+                  className={`font-bold ${isPnLPositive ? "text-rs-green" : "text-rs-red"}`}
                   data-testid={`text-position-pct-${symbol}`}
                 >
                   {isPnLPositive ? "+" : ""}{positionPctChange.toFixed(1)}%
@@ -1092,19 +1092,19 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
 
   return (
     <Card 
-      className={`cursor-pointer relative glass-card ${nearStop ? "ring-2 ring-red-500 ring-inset" : nearTarget ? "ring-2 ring-green-500 ring-inset" : ""}`}
+      className={`cursor-pointer relative glass-card ${nearStop ? "ring-2 ring-rs-red ring-inset" : nearTarget ? "ring-2 ring-rs-green ring-inset" : ""}`}
       data-testid={`card-trade-${trade.id}`}
       onClick={handleCardClick}
     >
       <CardContent className={`p-4 ${isExpanded ? 'pb-10' : 'pb-4'} relative overflow-hidden`}>
         {/* Alert banners */}
         {isExpanded && nearTarget && (
-          <div className="absolute top-0 left-0 right-0 bg-green-500/20 text-green-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-target-${trade.id}`}>
+          <div className="absolute top-0 left-0 right-0 bg-rs-green/20 text-rs-green text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-target-${trade.id}`}>
             <Target className="w-3 h-3" /> NEAR PROFIT TARGET!
           </div>
         )}
         {isExpanded && nearStop && (
-          <div className="absolute top-0 left-0 right-0 bg-red-500/20 text-red-500 text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-stop-${trade.id}`}>
+          <div className="absolute top-0 left-0 right-0 bg-rs-red/20 text-rs-red text-xs text-center py-1 font-medium rounded-t-md flex items-center justify-center gap-1" data-testid={`alert-stop-${trade.id}`}>
             <AlertTriangle className="w-3 h-3" /> NEAR STOP LOSS!
           </div>
         )}
@@ -1162,7 +1162,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
         {/* Realized Gain/Loss - always visible even in collapsed view */}
         {profitClosed !== undefined && (
           <div 
-            className={`text-sm font-semibold mb-2 ${profitClosed >= 0 ? "text-green-500" : "text-red-500"}`}
+            className={`text-sm font-semibold mb-2 ${profitClosed >= 0 ? "text-rs-green" : "text-rs-red"}`}
             style={{ fontFamily: "'Roboto Condensed', 'Arial Narrow', sans-serif" }}
             data-testid={`text-realized-pnl-${trade.id}`}
           >
@@ -1215,7 +1215,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                     <Tooltip key={i}>
                       <TooltipTrigger asChild>
                         <Badge variant="outline" className="text-xs cursor-help" data-testid={`badge-risk-${trade.id}-${i}`}>
-                          <AlertTriangle className="w-3 h-3 mr-1 text-yellow-500" />
+                          <AlertTriangle className="w-3 h-3 mr-1 text-rs-yellow" />
                           {short}
                         </Badge>
                       </TooltipTrigger>
@@ -1248,7 +1248,7 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="text-green-500 h-7 w-7"
+                    className="text-rs-green h-7 w-7"
                     data-testid={`button-trade-menu-${trade.id}`}
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -1687,19 +1687,19 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">50d ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`}>
                     {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">200d Ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-rs-green" : "text-rs-red"}`}>
                     {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span>
-                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-green-400" : chartMetrics.macd === "Closed" ? "text-red-400" : "text-muted-foreground"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`}>
                     {chartMetrics.macd}
                   </span>
                 </div>
@@ -1708,7 +1708,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   <span className="text-sm font-medium text-foreground">
                     {chartMetrics.sectorEtf}
                     {chartMetrics.sectorEtf !== "N/A" && (
-                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>
                         {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
                       </span>
                     )}
@@ -1716,7 +1716,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-muted-foreground">Earnings</span>
-                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-yellow-400" : "text-foreground"}`}>
+                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`}>
                     {chartMetrics.nextEarningsDate !== "N/A"
                       ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
                       : "N/A"}
@@ -1772,11 +1772,11 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
             let borderColor: string;
 
             if (!isPinned) {
-              baseColor = "text-yellow-400";
-              borderColor = "border-yellow-500/30";
+              baseColor = "text-rs-yellow";
+              borderColor = "border-rs-yellow/30";
             } else if (isBuy) {
-              baseColor = "text-green-400";
-              borderColor = "border-green-500/30";
+              baseColor = "text-rs-green";
+              borderColor = "border-rs-green/30";
             } else {
               const sellColors = getSellPnlColor(lot);
               baseColor = sellColors.text;
@@ -1797,7 +1797,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   <span className={`text-sm font-medium leading-tight ${baseColor}`}>
                     {isBuy ? "Buy" : "Sell"}: {parseFloat(lot.qty)} @ ${parseFloat(lot.price).toFixed(2)}
                   </span>
-                  <span className={`text-[11px] leading-tight ${isPinned ? baseColor : "text-yellow-500/70"}`}>
+                  <span className={`text-[11px] leading-tight ${isPinned ? baseColor : "text-rs-yellow"}`}>
                     {lotDate}{lotTime ? ` ${lotTime}` : ""}
                     {!isPinned && (
                       <span className="italic ml-1">click chart</span>
@@ -1856,8 +1856,8 @@ function EventItem({ event }: { event: TradeEvent }) {
   const getEventIcon = () => {
     switch (event.eventType) {
       case "status_change": return <CheckCircle className="w-4 h-4 text-blue-500" />;
-      case "stop_update": return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
-      case "target_update": return <TrendingUp className="w-4 h-4 text-green-500" />;
+      case "stop_update": return <AlertTriangle className="w-4 h-4 text-rs-yellow" />;
+      case "target_update": return <TrendingUp className="w-4 h-4 text-rs-green" />;
       default: return <Clock className="w-4 h-4 text-muted-foreground" />;
     }
   };
@@ -1883,9 +1883,9 @@ function EventItem({ event }: { event: TradeEvent }) {
 function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id: number) => void }) {
   const [, setLocation] = useLocation();
   const priorityColors = {
-    high: "text-red-500 bg-red-500/10",
-    medium: "text-yellow-500 bg-yellow-500/10",
-    low: "text-green-500 bg-green-500/10",
+    high: "text-rs-red bg-rs-red/10",
+    medium: "text-rs-yellow bg-rs-yellow/10",
+    low: "text-rs-green bg-rs-green/10",
   };
 
   const { data: quoteData } = useQuery<{ last: number; prevClose: number; changePercent: number }>({
@@ -1974,24 +1974,24 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
 function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (id: number, active: boolean) => void; onDelete: (id: number) => void }) {
   const categoryColors: Record<string, string> = {
     entry: "bg-blue-500/10 text-blue-500",
-    exit: "bg-green-500/10 text-green-500",
+    exit: "bg-rs-green/10 text-rs-green",
     sizing: "bg-purple-500/10 text-purple-500",
-    risk: "bg-red-500/10 text-red-500",
+    risk: "bg-rs-red/10 text-rs-red",
     general: "bg-muted text-muted-foreground",
-    auto_reject: "bg-red-600/20 text-red-600",
-    profit_taking: "bg-emerald-500/10 text-emerald-500",
-    stop_loss: "bg-orange-500/10 text-orange-500",
+    auto_reject: "bg-rs-red/20 text-rs-red",
+    profit_taking: "bg-rs-green/10 text-rs-green",
+    stop_loss: "bg-rs-amber/10 text-rs-amber",
     ma_structure: "bg-cyan-500/10 text-cyan-500",
     base_quality: "bg-indigo-500/10 text-indigo-500",
     breakout: "bg-teal-500/10 text-teal-500",
     position_sizing: "bg-violet-500/10 text-violet-500",
-    market_regime: "bg-amber-500/10 text-amber-500",
+    market_regime: "bg-rs-amber/10 text-rs-amber",
   };
 
   const severityColors: Record<string, string> = {
     auto_reject: "bg-red-600 text-white",
     critical: "bg-orange-500 text-white",
-    warning: "bg-yellow-500/20 text-yellow-600",
+    warning: "bg-rs-yellow/20 text-rs-yellow",
     info: "bg-blue-500/20 text-blue-500",
   };
 
@@ -2025,7 +2025,7 @@ function RuleItem({ rule, onToggle, onDelete }: { rule: TradingRule; onToggle: (
   };
 
   return (
-    <div className={`flex items-center justify-between p-3 border rounded-md ${!rule.isActive ? 'opacity-50' : ''} ${rule.isAutoReject ? 'border-red-500/30' : ''}`} data-testid={`rule-${rule.id}`}>
+    <div className={`flex items-center justify-between p-3 border rounded-md ${!rule.isActive ? 'opacity-50' : ''} ${rule.isAutoReject ? 'border-rs-red/30' : ''}`} data-testid={`rule-${rule.id}`}>
       <div className="flex items-center gap-3 flex-1">
         <input
           type="checkbox"
@@ -3250,7 +3250,7 @@ export default function SentinelDashboardPage() {
           <Card>
             <CardContent className="p-4">
               <div className="text-sm text-muted-foreground">Open PnL</div>
-              <div className={`text-xl font-bold ${summary.openPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              <div className={`text-xl font-bold ${summary.openPnL >= 0 ? 'text-rs-green' : 'text-rs-red'}`}>
                 {summary.openPnL >= 0 ? '+' : ''}{summary.openPnL.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
               </div>
             </CardContent>
@@ -3258,7 +3258,7 @@ export default function SentinelDashboardPage() {
           <Card>
             <CardContent className="p-4">
               <div className="text-sm text-muted-foreground">Realized Gain/Loss</div>
-              <div className={`text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              <div className={`text-xl font-bold ${summary.realizedPnL >= 0 ? 'text-rs-green' : 'text-rs-red'}`}>
                 {summary.realizedPnL >= 0 ? '+' : ''}{summary.realizedPnL.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
               </div>
             </CardContent>
@@ -3761,8 +3761,8 @@ export default function SentinelDashboardPage() {
                               {trade.entryDate ? formatTradeDate(trade.entryDate) : "N/A"}
                             </span>
                             <span className={`text-sm font-medium ${
-                              trade.actualPnL && trade.actualPnL > 0 ? "text-green-500" : 
-                              trade.actualPnL && trade.actualPnL < 0 ? "text-red-500" : ""
+                              trade.actualPnL && trade.actualPnL > 0 ? "text-rs-green" : 
+                              trade.actualPnL && trade.actualPnL < 0 ? "text-rs-red" : ""
                             }`}>
                               {trade.actualPnL ? `$${trade.actualPnL.toFixed(2)}` : ""}
                             </span>
@@ -3781,7 +3781,7 @@ export default function SentinelDashboardPage() {
                   </div>
                 ) : (
                   <div className="text-center py-6 text-muted-foreground">
-                    <CheckCircle className="w-10 h-10 mx-auto mb-2 text-green-500/50" />
+                    <CheckCircle className="w-10 h-10 mx-auto mb-2 text-rs-green" />
                     <p className="font-medium">All trades tagged!</p>
                     <p className="text-sm">Your AI learning data is up to date.</p>
                   </div>
@@ -3890,7 +3890,7 @@ export default function SentinelDashboardPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Brain className="w-5 h-5 text-amber-500" />
+                  <Brain className="w-5 h-5 text-rs-amber" />
                   Trader Neural Network (TNN) Insights
                 </CardTitle>
                 <CardDescription>
@@ -3917,24 +3917,24 @@ export default function SentinelDashboardPage() {
                     </div>
                     
                     {tnnPerformance.data?.bestSetup && (
-                      <div className="flex items-center justify-between p-3 border rounded-lg bg-green-500/5 border-green-500/20">
+                      <div className="flex items-center justify-between p-3 border rounded-lg bg-rs-green/5 border-rs-green/20">
                         <div className="flex items-center gap-2">
-                          <TrendingUp className="w-4 h-4 text-green-500" />
+                          <TrendingUp className="w-4 h-4 text-rs-green" />
                           <span className="text-sm">Best performing setup:</span>
                         </div>
-                        <Badge variant="outline" className="border-green-500/50 text-green-500">
+                        <Badge variant="outline" className="border-rs-green/50 text-rs-green">
                           {tnnPerformance.data.bestSetup.replace(/_/g, ' ')}
                         </Badge>
                       </div>
                     )}
                     
                     {tnnPerformance.data?.worstSetup && (
-                      <div className="flex items-center justify-between p-3 border rounded-lg bg-red-500/5 border-red-500/20">
+                      <div className="flex items-center justify-between p-3 border rounded-lg bg-rs-red/5 border-rs-red/20">
                         <div className="flex items-center gap-2">
-                          <TrendingDown className="w-4 h-4 text-red-500" />
+                          <TrendingDown className="w-4 h-4 text-rs-red" />
                           <span className="text-sm">Needs improvement:</span>
                         </div>
-                        <Badge variant="outline" className="border-red-500/50 text-red-500">
+                        <Badge variant="outline" className="border-rs-red/50 text-rs-red">
                           {tnnPerformance.data.worstSetup.replace(/_/g, ' ')}
                         </Badge>
                       </div>
@@ -3952,14 +3952,14 @@ export default function SentinelDashboardPage() {
                                 <span className="text-muted-foreground">({perf.totalTrades} trades)</span>
                               </div>
                               <div className="flex items-center gap-3">
-                                <span className={perf.winRate >= 0.5 ? "text-green-500" : "text-red-500"}>
+                                <span className={perf.winRate >= 0.5 ? "text-rs-green" : "text-rs-red"}>
                                   {(perf.winRate * 100).toFixed(0)}% win
                                 </span>
                                 <Badge 
                                   variant="outline" 
                                   className={
-                                    perf.recentTrend === "improving" ? "border-green-500/50 text-green-500" :
-                                    perf.recentTrend === "declining" ? "border-red-500/50 text-red-500" :
+                                    perf.recentTrend === "improving" ? "border-rs-green/50 text-rs-green" :
+                                    perf.recentTrend === "declining" ? "border-rs-red/50 text-rs-red" :
                                     "border-muted-foreground/50"
                                   }
                                 >
@@ -4085,7 +4085,7 @@ export default function SentinelDashboardPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="add-trade-symbol">Symbol <span className="text-red-500">*</span></Label>
+                <Label htmlFor="add-trade-symbol">Symbol <span className="text-rs-red">*</span></Label>
                 <Input
                   id="add-trade-symbol"
                   placeholder="AAPL"
@@ -4103,12 +4103,12 @@ export default function SentinelDashboardPage() {
                   <SelectContent>
                     <SelectItem value="long">
                       <span className="flex items-center gap-1">
-                        <TrendingUp className="w-4 h-4 text-green-500" /> Long
+                        <TrendingUp className="w-4 h-4 text-rs-green" /> Long
                       </span>
                     </SelectItem>
                     <SelectItem value="short">
                       <span className="flex items-center gap-1">
-                        <TrendingDown className="w-4 h-4 text-red-500" /> Short
+                        <TrendingDown className="w-4 h-4 text-rs-red" /> Short
                       </span>
                     </SelectItem>
                   </SelectContent>
@@ -4142,7 +4142,7 @@ export default function SentinelDashboardPage() {
             )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="add-trade-entry">Entry Price <span className="text-red-500">*</span></Label>
+                <Label htmlFor="add-trade-entry">Entry Price <span className="text-rs-red">*</span></Label>
                 <Input
                   id="add-trade-entry"
                   type="number"
@@ -4259,7 +4259,7 @@ export default function SentinelDashboardPage() {
           <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
             {/* Rule Name */}
             <div className="space-y-2">
-              <Label htmlFor="rule-name">Rule <span className="text-red-500">*</span></Label>
+              <Label htmlFor="rule-name">Rule <span className="text-rs-red">*</span></Label>
               <Input
                 id="rule-name"
                 placeholder="e.g., Wait for pullback to 21 EMA"
@@ -4271,7 +4271,7 @@ export default function SentinelDashboardPage() {
 
             {/* Rule Type */}
             <div className="space-y-2">
-              <Label>Rule Type <span className="text-red-500">*</span></Label>
+              <Label>Rule Type <span className="text-rs-red">*</span></Label>
               <Select value={ruleForm.ruleType} onValueChange={(v: "swing" | "intraday" | "long_term" | "other") => setRuleForm({ ...ruleForm, ruleType: v })}>
                 <SelectTrigger data-testid="select-rule-type">
                   <SelectValue />
@@ -4287,7 +4287,7 @@ export default function SentinelDashboardPage() {
 
             {/* Direction Tags - Required */}
             <div className="space-y-2">
-              <Label>Direction <span className="text-red-500">*</span> <span className="text-xs text-muted-foreground">(at least one required)</span></Label>
+              <Label>Direction <span className="text-rs-red">*</span> <span className="text-xs text-muted-foreground">(at least one required)</span></Label>
               <div className="flex gap-3">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -4298,7 +4298,7 @@ export default function SentinelDashboardPage() {
                     data-testid="checkbox-direction-long"
                   />
                   <span className="flex items-center gap-1">
-                    <TrendingUp className="w-4 h-4 text-green-500" />
+                    <TrendingUp className="w-4 h-4 text-rs-green" />
                     Long
                   </span>
                 </label>
@@ -4311,19 +4311,19 @@ export default function SentinelDashboardPage() {
                     data-testid="checkbox-direction-short"
                   />
                   <span className="flex items-center gap-1">
-                    <TrendingDown className="w-4 h-4 text-red-500" />
+                    <TrendingDown className="w-4 h-4 text-rs-red" />
                     Short
                   </span>
                 </label>
               </div>
               {ruleForm.directionTags.length === 0 && (
-                <p className="text-xs text-red-500">Select at least one direction</p>
+                <p className="text-xs text-rs-red">Select at least one direction</p>
               )}
             </div>
 
             {/* Category */}
             <div className="space-y-2">
-              <Label htmlFor="rule-category">Category <span className="text-red-500">*</span></Label>
+              <Label htmlFor="rule-category">Category <span className="text-rs-red">*</span></Label>
               <Select value={ruleForm.category} onValueChange={(v) => setRuleForm({ ...ruleForm, category: v })}>
                 <SelectTrigger data-testid="select-rule-category">
                   <SelectValue />
@@ -4347,7 +4347,7 @@ export default function SentinelDashboardPage() {
 
             {/* Description */}
             <div className="space-y-2">
-              <Label htmlFor="rule-description">Brief Description <span className="text-red-500">*</span></Label>
+              <Label htmlFor="rule-description">Brief Description <span className="text-rs-red">*</span></Label>
               <Textarea
                 id="rule-description"
                 placeholder="Why do you use this rule? What problem does it solve?"
@@ -4379,7 +4379,7 @@ export default function SentinelDashboardPage() {
                   {ruleForm.strategyTags.map(tag => (
                     <Badge key={tag} variant="secondary" className="flex items-center gap-1">
                       {tag}
-                      <button onClick={() => handleRemoveStrategyTag(tag)} className="hover:text-red-500">
+                      <button onClick={() => handleRemoveStrategyTag(tag)} className="hover:text-rs-red">
                         <X className="w-3 h-3" />
                       </button>
                     </Badge>
@@ -4391,7 +4391,7 @@ export default function SentinelDashboardPage() {
             {/* Admin: Global option */}
             {user?.isAdmin && (
               <div className="space-y-2 border-t pt-4">
-                <Label className="text-amber-500">Admin Options</Label>
+                <Label className="text-rs-amber">Admin Options</Label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -4507,12 +4507,12 @@ export default function SentinelDashboardPage() {
                                 {lot.buySell === 'buy' && fifoLot ? (
                                   <span className={`font-mono text-xs font-medium ${
                                     fifoLot.depleted ? 'text-gray-400 line-through' : 
-                                    fifoLot.remainingQty < fifoLot.originalQty ? 'text-orange-400' : 'text-blue-400'
+                                    fifoLot.remainingQty < fifoLot.originalQty ? 'text-rs-amber' : 'text-blue-400'
                                   }`}>
                                     {fifoLot.depleted ? 'CLOSED' : `${fifoLot.remainingQty}/${fifoLot.originalQty}`}
                                   </span>
                                 ) : lot.buySell === 'sell' && fifoSell ? (
-                                  <span className="font-mono text-xs text-red-400">
+                                  <span className="font-mono text-xs text-rs-red">
                                     -{fifoSell.qty}
                                   </span>
                                 ) : (
@@ -4534,7 +4534,7 @@ export default function SentinelDashboardPage() {
                                     });
                                     const isPositive = sellProfit >= 0;
                                     return (
-                                      <span className={`font-mono text-xs font-medium ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
+                                      <span className={`font-mono text-xs font-medium ${isPositive ? 'text-rs-green' : 'text-rs-red'}`}>
                                         {isPositive ? '+' : ''}${sellProfit.toFixed(2)}
                                       </span>
                                     );
@@ -4545,8 +4545,8 @@ export default function SentinelDashboardPage() {
                               </td>
                               <td className="px-2 py-1">
                                 <span className={`font-mono text-xs font-medium ${
-                                  runningTotalAtRow === 0 ? "text-green-500" : 
-                                  runningTotalAtRow > 0 ? "text-blue-500" : "text-orange-500"
+                                  runningTotalAtRow === 0 ? "text-rs-green" : 
+                                  runningTotalAtRow > 0 ? "text-blue-500" : "text-rs-amber"
                                 }`}>
                                   {runningTotalAtRow > 0 ? `+${runningTotalAtRow}` : 
                                    runningTotalAtRow < 0 ? `${runningTotalAtRow}` : "0"}
@@ -4556,7 +4556,7 @@ export default function SentinelDashboardPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-6 w-6 text-red-500 hover:text-red-600"
+                                  className="h-6 w-6 text-rs-red hover:text-rs-red"
                                   onClick={() => removeLotEntry(lot.id)}
                                   data-testid={`button-remove-lot-${index}`}
                                 >
@@ -4565,7 +4565,7 @@ export default function SentinelDashboardPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-6 w-6 text-green-500 hover:text-green-600"
+                                  className="h-6 w-6 text-rs-green hover:text-rs-green"
                                   onClick={addLotEntry}
                                   data-testid={`button-add-row-${index}`}
                                 >
@@ -4580,10 +4580,10 @@ export default function SentinelDashboardPage() {
                   </div>
                   
                   {/* Enhanced Final Position Display with FIFO */}
-                  <div className="border rounded-md bg-yellow-500/10 border-yellow-500/30 p-3">
+                  <div className="border rounded-md bg-rs-yellow/10 border-rs-yellow/30 p-3">
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
-                        <div className="text-sm font-medium text-yellow-500">Final Position</div>
+                        <div className="text-sm font-medium text-rs-yellow">Final Position</div>
                         <div className="flex flex-col gap-1">
                           <span className="font-mono text-lg font-bold text-foreground">
                             Total Shares: {fifoResult.totalRemaining} {fifoResult.direction}
@@ -4596,7 +4596,7 @@ export default function SentinelDashboardPage() {
                         </div>
                       </div>
                       {fifoResult.totalRemaining !== 0 && (
-                        <span className="text-xs text-yellow-500">
+                        <span className="text-xs text-rs-yellow">
                           ⚠️ Buys and sells must balance to close trade
                         </span>
                       )}
@@ -4844,8 +4844,8 @@ export default function SentinelDashboardPage() {
                     <div>
                       <span className="text-muted-foreground">P&L:</span>
                       <span className={`ml-1 font-medium ${
-                        taggingAnalysis.calculatedPnL > 0 ? "text-green-500" : 
-                        taggingAnalysis.calculatedPnL < 0 ? "text-red-500" : ""
+                        taggingAnalysis.calculatedPnL > 0 ? "text-rs-green" : 
+                        taggingAnalysis.calculatedPnL < 0 ? "text-rs-red" : ""
                       }`}>
                         ${taggingAnalysis.calculatedPnL.toFixed(2)}
                       </span>
@@ -4853,8 +4853,8 @@ export default function SentinelDashboardPage() {
                     <div>
                       <span className="text-muted-foreground">Detected:</span>
                       <span className={`ml-1 font-medium ${
-                        taggingAnalysis.outcome === "win" ? "text-green-500" : 
-                        taggingAnalysis.outcome === "loss" ? "text-red-500" : ""
+                        taggingAnalysis.outcome === "win" ? "text-rs-green" : 
+                        taggingAnalysis.outcome === "loss" ? "text-rs-red" : ""
                       }`}>
                         {taggingAnalysis.outcome}
                       </span>
@@ -5001,8 +5001,8 @@ export default function SentinelDashboardPage() {
                         )}
                         {group.confidence && (
                           <span className={`text-xs px-2 py-0.5 rounded ${
-                            group.confidence === 'high' ? 'bg-green-500/10 text-green-600' :
-                            group.confidence === 'medium' ? 'bg-yellow-500/10 text-yellow-600' :
+                            group.confidence === 'high' ? 'bg-rs-green/10 text-rs-green' :
+                            group.confidence === 'medium' ? 'bg-rs-yellow/10 text-rs-yellow' :
                             'bg-gray-500/10 text-gray-500'
                           }`}>
                             {group.confidence} confidence

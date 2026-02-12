@@ -766,7 +766,7 @@ export default function ScannerPage() {
               {/* AND Divider */}
               <div className="relative flex items-center justify-center py-2">
                 <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-border/50" />
-                <span className="relative bg-card px-3 py-1 text-sm font-bold text-green-500 border border-green-500/30 rounded-md">
+                <span className="relative bg-card px-3 py-1 text-sm font-bold text-rs-green border border-rs-green/30 rounded-md">
                   AND
                 </span>
               </div>
@@ -906,7 +906,7 @@ export default function ScannerPage() {
                 </button>
                 <button 
                   onClick={() => setShowSaveDialog(true)}
-                  className="text-sm font-bold text-green-400 hover:text-green-300 transition-colors"
+                  className="text-sm font-bold text-rs-green hover:text-rs-green transition-colors"
                   data-testid="button-save-scan"
                 >
                   [Save Scan]
@@ -985,7 +985,7 @@ export default function ScannerPage() {
                               ${stock.price.toFixed(2)}
                             </span>
                             <span 
-                              className={`flex items-center gap-1 text-sm font-mono ${isPositive ? "text-green-500" : "text-red-500"}`}
+                              className={`flex items-center gap-1 text-sm font-mono ${isPositive ? "text-rs-green" : "text-rs-red"}`}
                               data-testid={`text-change-${stock.symbol}`}
                             >
                               {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
@@ -1002,7 +1002,7 @@ export default function ScannerPage() {
                         {stock.matchedPattern && (
                           <div className="flex items-center gap-2 flex-wrap mt-1">
                             <span 
-                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-black dark:border-green-600"
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rs-green/10 dark:bg-rs-green/10 text-rs-green dark:text-rs-green border border-black dark:border-rs-green"
                               data-testid={`badge-pattern-${stock.symbol}`}
                             >
                               {stock.matchedPattern}

@@ -87,9 +87,9 @@ const RULE_CATEGORIES = [
 ];
 
 const SEVERITY_LEVELS = [
-  { value: "auto_reject", label: "Structural Issue", color: "text-red-500", bgColor: "bg-red-500/10" },
-  { value: "critical", label: "Critical", color: "text-orange-500", bgColor: "bg-orange-500/10" },
-  { value: "warning", label: "Warning", color: "text-yellow-500", bgColor: "bg-yellow-500/10" },
+  { value: "auto_reject", label: "Structural Issue", color: "text-rs-red", bgColor: "bg-rs-red/10" },
+  { value: "critical", label: "Critical", color: "text-rs-amber", bgColor: "bg-rs-amber/10" },
+  { value: "warning", label: "Warning", color: "text-rs-yellow", bgColor: "bg-rs-yellow/10" },
   { value: "info", label: "Info", color: "text-blue-500", bgColor: "bg-blue-500/10" },
 ];
 
@@ -424,9 +424,9 @@ export default function SentinelRulesPage() {
 
   const getSeverityIcon = (severity?: string) => {
     switch (severity) {
-      case "auto_reject": return <Ban className="w-4 h-4 text-red-500" />;
-      case "critical": return <AlertCircle className="w-4 h-4 text-orange-500" />;
-      case "warning": return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
+      case "auto_reject": return <Ban className="w-4 h-4 text-rs-red" />;
+      case "critical": return <AlertCircle className="w-4 h-4 text-rs-amber" />;
+      case "warning": return <AlertTriangle className="w-4 h-4 text-rs-yellow" />;
       case "info": return <Info className="w-4 h-4 text-blue-500" />;
       default: return <Info className="w-4 h-4 text-muted-foreground" />;
     }
@@ -641,7 +641,7 @@ export default function SentinelRulesPage() {
                 {displayRule.name}
               </span>
               {isDeleted && (
-                <Badge variant="secondary" className="text-xs bg-red-500/10 text-red-500">Archived</Badge>
+                <Badge variant="secondary" className="text-xs bg-rs-red/10 text-rs-red">Archived</Badge>
               )}
               {hasOverride && !isDeleted && (
                 <Badge variant="outline" className="text-xs">Customized</Badge>
@@ -734,7 +734,7 @@ export default function SentinelRulesPage() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-7 w-7 text-amber-500"
+                          className="h-7 w-7 text-rs-amber"
                           onClick={() => setConfirmPromote({ rule, action: 'demote' })}
                           disabled={demoteRuleMutation.isPending}
                           data-testid={`button-demote-rule-${rule.id}`}
@@ -783,7 +783,7 @@ export default function SentinelRulesPage() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-7 w-7 text-amber-500"
+                          className="h-7 w-7 text-rs-amber"
                           onClick={() => setConfirmPromote({ rule, action: 'promote' })}
                           disabled={promoteRuleMutation.isPending}
                           data-testid={`button-promote-rule-${rule.id}`}
@@ -1308,7 +1308,7 @@ export default function SentinelRulesPage() {
           {/* Admin: Create as system rule toggle */}
           {user?.isAdmin && (
             <div className="pt-4 border-t">
-              <Label className="text-amber-500 text-sm flex items-center gap-2">
+              <Label className="text-rs-amber text-sm flex items-center gap-2">
                 <Shield className="w-4 h-4" />
                 Admin Options
               </Label>
@@ -1352,7 +1352,7 @@ export default function SentinelRulesPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-500" />
+              <AlertTriangle className="w-5 h-5 text-rs-yellow" />
               Similar Rules Found
             </DialogTitle>
             <DialogDescription>
@@ -1370,7 +1370,7 @@ export default function SentinelRulesPage() {
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">{rule.description?.slice(0, 100)}...</p>
-                <p className="text-xs text-yellow-600">{rule.reason}</p>
+                <p className="text-xs text-rs-yellow">{rule.reason}</p>
                 <Button 
                   size="sm" 
                   variant="outline" 
@@ -1790,9 +1790,9 @@ export default function SentinelRulesPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {confirmPromote?.action === 'promote' ? (
-                <ArrowUpCircle className="w-5 h-5 text-amber-500" />
+                <ArrowUpCircle className="w-5 h-5 text-rs-amber" />
               ) : (
-                <ArrowDownCircle className="w-5 h-5 text-amber-500" />
+                <ArrowDownCircle className="w-5 h-5 text-rs-amber" />
               )}
               {confirmPromote?.action === 'promote' ? 'Promote to System Rule' : 'Demote to Personal Rule'}
             </DialogTitle>

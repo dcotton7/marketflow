@@ -28,9 +28,9 @@ interface MarketSentiment {
 }
 
 function getChopColor(state: "CHOPPY" | "MIXED" | "TRENDING"): string {
-  if (state === "TRENDING") return "bg-green-500/20 text-green-400 border-green-500/30";
-  if (state === "CHOPPY") return "bg-orange-500/20 text-orange-400 border-orange-500/30";
-  return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+  if (state === "TRENDING") return "bg-rs-green/20 text-rs-green border-rs-green/30";
+  if (state === "CHOPPY") return "bg-rs-amber/20 text-rs-amber border-rs-amber/30";
+  return "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30";
 }
 
 function TrendIcon({ state }: { state: 1 | 0 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF" }) {
@@ -45,12 +45,12 @@ function TrendIcon({ state }: { state: 1 | 0 | -1 | "RISK-ON" | "MIXED" | "RISK-
 
 function getTrendColor(state: 1 | 0 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF"): string {
   if (state === 1 || state === "RISK-ON") {
-    return "bg-green-500/20 text-green-400 border-green-500/30";
+    return "bg-rs-green/20 text-rs-green border-rs-green/30";
   }
   if (state === -1 || state === "RISK-OFF") {
-    return "bg-red-500/20 text-red-400 border-red-500/30";
+    return "bg-rs-red/20 text-rs-red border-rs-red/30";
   }
-  return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+  return "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30";
 }
 
 interface SentinelHeaderProps {
@@ -198,7 +198,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
             <>
               {/* Market Sentiment Header with Fire/Ice icons */}
               <div className="flex items-center gap-2">
-                <Flame className="h-5 w-5 text-orange-500" />
+                <Flame className="h-5 w-5 text-rs-amber" />
                 <span className="text-lg font-semibold">Market Sentiment</span>
                 <Snowflake className="h-5 w-5 text-blue-400" />
               </div>
@@ -241,7 +241,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                   <p className="text-sm">Risk Basket: QQQ, IWO, SLY, ARKK, VIX</p>
                   <p className="text-xs text-muted-foreground">Confidence: {sentiment.daily.confidence}</p>
                   {sentiment.daily.canaryTags.length > 0 && (
-                    <div className="mt-1 flex items-center gap-1 text-yellow-400 text-xs">
+                    <div className="mt-1 flex items-center gap-1 text-rs-yellow text-xs">
                       <AlertTriangle className="h-3 w-3" />
                       <span>{sentiment.daily.canaryTags.join(", ")}</span>
                     </div>

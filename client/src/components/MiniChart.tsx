@@ -406,7 +406,7 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
       </div>
       <div className="text-center pt-1">
         <span 
-          className={`text-sm font-mono font-semibold ${dailyChange >= 0 ? 'text-green-500' : 'text-red-500'}`}
+          className={`text-sm font-mono font-semibold ${dailyChange >= 0 ? 'text-rs-green' : 'text-rs-red'}`}
           data-testid={`change-${symbol}`}
         >
           {dailyChange >= 0 ? '+' : ''}{dailyChange.toFixed(2)}%

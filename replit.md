@@ -9,6 +9,36 @@ Preferred test username: Foreboding
 Debugging rule: ALWAYS query the PRODUCTION database when investigating user-reported issues. Never use the development database for troubleshooting live app problems.
 UI rule: ALWAYS add clear ? tooltip help text to every new UI element (sliders, inputs, toggles, buttons). Use the existing PARAM_DESCRIPTIONS pattern in BigIdeaPage.tsx for indicator params. Never skip this step.
 
+## UI Rubric
+
+### Context Color Key
+Non-context text is WHITE (default foreground).
+
+| Color   | CSS Class          | Meaning                                                                 |
+|---------|--------------------|-------------------------------------------------------------------------|
+| Green   | `text-rs-green`    | Go / Good / Entry Point — recommended excellent path                    |
+| Yellow  | `text-rs-yellow`   | Moderate Caution — medium-important info                                |
+| Amber   | `text-rs-amber`    | Caution — TP levels, questionable entries, worrisome resistance          |
+| Red     | `text-rs-red`      | Warning / Extreme Caution — Do Not Do, also stop prices                 |
+
+Section headers follow the context color of the section they belong to (e.g. a caution section header uses amber).
+
+### Text Size Hierarchy
+All text defaults to WHITE unless context-colored per the table above.
+
+| Tier           | CSS Class       | Usage                                                    | Default Color       |
+|----------------|-----------------|----------------------------------------------------------|---------------------|
+| Title          | `text-rs-title` | Largest size, page titles                                | White (foreground)  |
+| Header         | `text-rs-header`| Page headers, major section labels                       | White (foreground)  |
+| Section Header | `text-rs-section`| Sub-sections like "Trade Snapshot" on AI results        | White (foreground), can be context-colored |
+| Normal         | `text-rs-normal`| Standard reading text                                    | White (foreground)  |
+| Small          | `text-rs-small` | Less important but visible supplementary info            | Lighter white (muted-foreground) |
+| Tiny           | `text-rs-tiny`  | Debug info, timestamps, least important                  | Lighter white (muted-foreground) |
+
+### Bloomberg Ticker
+Standard ticker display: Symbol in mono font, price, and percentage change (green up / red down).
+CSS class: `rs-ticker` for the container, uses mono font with context-colored price change.
+
 ## System Architecture
 
 ### UI/UX Decisions

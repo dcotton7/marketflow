@@ -292,7 +292,7 @@ function IndustryCompsTab({ symbol, onNavigateAway }: { symbol: string; onNaviga
         </div>
         <div className="flex items-center gap-3 text-sm shrink-0">
           <span className="font-mono font-bold">${item.price.toFixed(2)}</span>
-          <span className={`flex items-center gap-1 font-mono font-medium ${isPos ? "text-green-500" : "text-red-500"}`}>
+          <span className={`flex items-center gap-1 font-mono font-medium ${isPos ? "text-rs-green" : "text-rs-red"}`}>
             {isPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             {isPos ? "+" : ""}{item.change.toFixed(2)} ({item.changePercent.toFixed(2)}%)
           </span>
@@ -333,7 +333,7 @@ function IndustryCompsTab({ symbol, onNavigateAway }: { symbol: string; onNaviga
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-amber-400" />
+              <Building2 className="w-4 h-4 text-rs-amber" />
               Industry & Sector Peers
             </CardTitle>
           </CardHeader>
@@ -799,15 +799,15 @@ export default function SentinelEvaluatePage() {
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 70) return "text-green-500";
-    if (score >= 50) return "text-yellow-500";
-    return "text-red-500";
+    if (score >= 70) return "text-rs-green";
+    if (score >= 50) return "text-rs-yellow";
+    return "text-rs-red";
   };
 
   const getSectorTrendColor = (state: 1 | 0 | -1) => {
-    if (state === 1) return "bg-green-500/20 text-green-400 border-green-500/30";
-    if (state === -1) return "bg-red-500/20 text-red-400 border-red-500/30";
-    return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+    if (state === 1) return "bg-rs-green/20 text-rs-green border-rs-green/30";
+    if (state === -1) return "bg-rs-red/20 text-rs-red border-rs-red/30";
+    return "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30";
   };
 
   const SectorTrendIcon = ({ state }: { state: 1 | 0 | -1 }) => {
@@ -902,8 +902,8 @@ export default function SentinelEvaluatePage() {
                             <span className="font-semibold text-lg" data-testid="text-ticker-name">{tickerQuery.data.name}</span>
                             <Badge variant="outline" className="text-xs" data-testid="badge-ticker-symbol">{tickerQuery.data.symbol}</Badge>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xl font-bold text-primary" data-testid="text-current-price">
+                          <div className="rs-ticker" data-testid="ticker-display">
+                            <span className="rs-ticker-price" data-testid="text-current-price">
                               ${tickerQuery.data.currentPrice?.toFixed(2)}
                             </span>
                             {tickerQuery.data.previousClose > 0 && (() => {
@@ -911,7 +911,7 @@ export default function SentinelEvaluatePage() {
                               const changePct = (change / tickerQuery.data.previousClose) * 100;
                               const isPositive = change >= 0;
                               return (
-                                <span className={`text-sm font-semibold ${isPositive ? 'text-green-500' : 'text-red-500'}`} data-testid="text-price-change">
+                                <span className={isPositive ? 'rs-ticker-change-up' : 'rs-ticker-change-down'} data-testid="text-price-change">
                                   {isPositive ? '+' : ''}{change.toFixed(2)} ({isPositive ? '+' : ''}{changePct.toFixed(2)}%)
                                 </span>
                               );
@@ -1058,10 +1058,10 @@ export default function SentinelEvaluatePage() {
                   
                   {suggestions?.positionSizeSuggestion && stopPrice && (
                     <div className="flex items-center gap-2 mt-2">
-                      <Zap className="w-3 h-3 text-amber-500" />
+                      <Zap className="w-3 h-3 text-rs-amber" />
                       <Badge
                         variant="outline"
-                        className="cursor-pointer text-xs hover:bg-amber-500/20 border-amber-500/30"
+                        className="cursor-pointer text-xs hover:bg-rs-amber/20 border-rs-amber/30"
                         onClick={() => {
                           setPositionSize(suggestions.positionSizeSuggestion!.shares.toString());
                           setPositionSizeUnit("shares");
@@ -1131,7 +1131,7 @@ export default function SentinelEvaluatePage() {
                   {stopPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.stopSuggestions.length > 0)) && (
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <Zap className="w-3 h-3 text-amber-500" />
+                        <Zap className="w-3 h-3 text-rs-amber" />
                         <span className="text-xs text-muted-foreground">AI Suggestions</span>
                         {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
                       </div>
@@ -1140,7 +1140,7 @@ export default function SentinelEvaluatePage() {
                           <Badge
                             key={i}
                             variant="outline"
-                            className="cursor-pointer text-xs hover:bg-red-500/20 border-red-500/30"
+                            className="cursor-pointer text-xs hover:bg-rs-red/20 border-rs-red/30"
                             onClick={() => {
                               setStopPrice(s.price.toString());
                               setStopPriceMode("amount");
@@ -1150,7 +1150,7 @@ export default function SentinelEvaluatePage() {
                           >
                             <span className="font-medium">{s.label}</span>
                             <span className="text-muted-foreground ml-1">${s.price}</span>
-                            <span className="text-red-400 ml-1">({s.riskPercent.toFixed(1)}%)</span>
+                            <span className="text-rs-red ml-1">({s.riskPercent.toFixed(1)}%)</span>
                           </Badge>
                         ))}
                       </div>
@@ -1159,7 +1159,7 @@ export default function SentinelEvaluatePage() {
                   
                   {/* Real-time risk calculation */}
                   {stopPriceMode === "amount" && stopPrice && entryPrice && (
-                    <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-sm" data-testid="risk-calculation">
+                    <div className="mt-2 p-2 bg-rs-red/10 border border-rs-red/30 rounded text-sm" data-testid="risk-calculation">
                       {(() => {
                         const entry = parseFloat(entryPrice);
                         const stop = parseFloat(stopPrice);
@@ -1175,11 +1175,11 @@ export default function SentinelEvaluatePage() {
                         
                         return (
                           <div className="flex flex-col gap-1">
-                            <span className="text-red-400 font-medium">
+                            <span className="text-rs-red font-medium">
                               Risk: ${Math.abs(riskPerShare).toFixed(2)} / share
                             </span>
                             {shares > 0 && (
-                              <span className="text-red-400 font-medium">
+                              <span className="text-rs-red font-medium">
                                 Total Risk: ${Math.abs(totalRisk).toFixed(2)} ({shares} shares)
                               </span>
                             )}
@@ -1252,7 +1252,7 @@ export default function SentinelEvaluatePage() {
                       )}
                       
                       {targetPriceMode === "amount" && targetPrice && entryPrice && (
-                        <div className="mt-2 p-2 bg-green-500/10 border border-green-500/30 rounded text-sm" data-testid="first-trim-calculation">
+                        <div className="mt-2 p-2 bg-rs-green/10 border border-rs-green/30 rounded text-sm" data-testid="first-trim-calculation">
                           {(() => {
                             const entry = parseFloat(entryPrice);
                             const target = parseFloat(targetPrice);
@@ -1269,11 +1269,11 @@ export default function SentinelEvaluatePage() {
                             
                             return (
                               <div className="flex flex-col gap-1">
-                                <span className="text-green-400 font-medium">
+                                <span className="text-rs-green font-medium">
                                   Gain: ${gainPerShare.toFixed(2)} / share
                                 </span>
                                 {shares > 0 && (
-                                  <span className="text-green-400 font-medium">
+                                  <span className="text-rs-green font-medium">
                                     First Trim (30%): ${totalGain.toFixed(2)} ({trimShares} shares)
                                   </span>
                                 )}
@@ -1286,7 +1286,7 @@ export default function SentinelEvaluatePage() {
                       {targetPriceMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
-                            <Target className="w-3 h-3 text-green-500" />
+                            <Target className="w-3 h-3 text-rs-green" />
                             <span className="text-xs text-muted-foreground">AI Suggestions</span>
                             {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
                           </div>
@@ -1295,7 +1295,7 @@ export default function SentinelEvaluatePage() {
                               <Badge
                                 key={i}
                                 variant="outline"
-                                className="cursor-pointer text-xs hover:bg-green-500/20 border-green-500/30"
+                                className="cursor-pointer text-xs hover:bg-rs-green/20 border-rs-green/30"
                                 onClick={() => {
                                   setTargetPrice(t.price.toString());
                                   setTargetPriceMode("amount");
@@ -1304,7 +1304,7 @@ export default function SentinelEvaluatePage() {
                               >
                                 <span className="font-medium">{t.label}</span>
                                 <span className="text-muted-foreground ml-1">${t.price}</span>
-                                <span className="text-green-400 ml-1">({t.rrRatio}:1)</span>
+                                <span className="text-rs-green ml-1">({t.rrRatio}:1)</span>
                               </Badge>
                             ))}
                           </div>
@@ -1377,7 +1377,7 @@ export default function SentinelEvaluatePage() {
                       )}
                       
                       {targetProfitMode === "amount" && targetProfitPrice && entryPrice && (
-                        <div className="mt-2 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-sm" data-testid="target-profit-calculation">
+                        <div className="mt-2 p-2 bg-rs-green/10 border border-rs-green/30 rounded text-sm" data-testid="target-profit-calculation">
                           {(() => {
                             const entry = parseFloat(entryPrice);
                             const target = parseFloat(targetProfitPrice);
@@ -1394,11 +1394,11 @@ export default function SentinelEvaluatePage() {
                             
                             return (
                               <div className="flex flex-col gap-1">
-                                <span className="text-emerald-400 font-medium">
+                                <span className="text-rs-green font-medium">
                                   Gain: ${gainPerShare.toFixed(2)} / share
                                 </span>
                                 {shares > 0 && (
-                                  <span className="text-emerald-400 font-medium">
+                                  <span className="text-rs-green font-medium">
                                     Target (70%): ${totalGain.toFixed(2)} ({remainingShares} shares)
                                   </span>
                                 )}
@@ -1411,7 +1411,7 @@ export default function SentinelEvaluatePage() {
                       {targetProfitMode === "amount" && (suggestionsLoading || (suggestions && suggestions.targetSuggestions.length > 0)) && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
-                            <Target className="w-3 h-3 text-emerald-500" />
+                            <Target className="w-3 h-3 text-rs-green" />
                             <span className="text-xs text-muted-foreground">AI Suggestions (Full Exit)</span>
                             {suggestionsLoading && <Loader2 className="w-3 h-3 animate-spin" />}
                           </div>
@@ -1420,7 +1420,7 @@ export default function SentinelEvaluatePage() {
                               <Badge
                                 key={i}
                                 variant="outline"
-                                className="cursor-pointer text-xs hover:bg-emerald-500/20 border-emerald-500/30"
+                                className="cursor-pointer text-xs hover:bg-rs-green/20 border-rs-green/30"
                                 onClick={() => {
                                   setTargetProfitPrice(t.price.toString());
                                   setTargetProfitMode("amount");
@@ -1429,7 +1429,7 @@ export default function SentinelEvaluatePage() {
                               >
                                 <span className="font-medium">{t.label}</span>
                                 <span className="text-muted-foreground ml-1">${t.price}</span>
-                                <span className="text-emerald-400 ml-1">({t.rrRatio}:1)</span>
+                                <span className="text-rs-green ml-1">({t.rrRatio}:1)</span>
                               </Badge>
                             ))}
                           </div>
@@ -1682,9 +1682,9 @@ export default function SentinelEvaluatePage() {
               <>
                 {/* Header Section */}
                 <Card className={`border-l-4 ${
-                  result.evaluation.status === 'GREEN' ? 'border-l-green-500' :
-                  result.evaluation.status === 'RED' ? 'border-l-red-500' :
-                  result.evaluation.status === 'NEEDS_PLAN' ? 'border-l-amber-500' : 'border-l-yellow-500'
+                  result.evaluation.status === 'GREEN' ? 'border-l-[hsl(var(--rs-green))]' :
+                  result.evaluation.status === 'RED' ? 'border-l-[hsl(var(--rs-red))]' :
+                  result.evaluation.status === 'NEEDS_PLAN' ? 'border-l-[hsl(var(--rs-amber))]' : 'border-l-[hsl(var(--rs-yellow))]'
                 }`}>
                   <CardContent className="pt-4">
                     {/* Ticker / Direction / Model Tag Header */}
@@ -1708,9 +1708,9 @@ export default function SentinelEvaluatePage() {
                     {/* Verdict Summary - Risk Summary at top */}
                     {result.evaluation.verdictSummary && (
                       <div className={`p-3 rounded-md mb-3 ${
-                        result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
-                        result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' :
-                        result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
+                        result.evaluation.status === 'GREEN' ? 'bg-rs-green/10 border border-rs-green/30' :
+                        result.evaluation.status === 'RED' ? 'bg-rs-red/10 border border-rs-red/30' :
+                        result.evaluation.status === 'NEEDS_PLAN' ? 'bg-rs-amber/10 border border-rs-amber/30' : 'bg-rs-yellow/10 border border-rs-yellow/30'
                       }`} data-testid="verdict-summary">
                         <p className="text-xs font-medium text-muted-foreground mb-1">Verdict:</p>
                         <p className="text-base font-medium">{result.evaluation.verdictSummary.verdict}</p>
@@ -1719,7 +1719,7 @@ export default function SentinelEvaluatePage() {
                             <p className="text-xs font-medium text-muted-foreground mb-1.5">Risk Summary</p>
                             <div className="flex flex-wrap gap-1.5">
                               {result.evaluation.verdictSummary.primaryBlockers.map((blocker, i) => (
-                                <Badge key={i} variant="outline" className="text-xs border-red-500/40 text-red-400 bg-red-500/10" data-testid={`badge-risk-summary-${i}`}>
+                                <Badge key={i} variant="outline" className="text-xs border-rs-red/30 text-rs-red bg-rs-red/10" data-testid={`badge-risk-summary-${i}`}>
                                   {blocker}
                                 </Badge>
                               ))}
@@ -1731,26 +1731,26 @@ export default function SentinelEvaluatePage() {
 
                     {/* Decision Gate - Top of results */}
                     <div className={`p-4 rounded-md mb-3 ${
-                      result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
-                      result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' :
-                      result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
+                      result.evaluation.status === 'GREEN' ? 'bg-rs-green/10 border border-rs-green/30' :
+                      result.evaluation.status === 'RED' ? 'bg-rs-red/10 border border-rs-red/30' :
+                      result.evaluation.status === 'NEEDS_PLAN' ? 'bg-rs-amber/10 border border-rs-amber/30' : 'bg-rs-yellow/10 border border-rs-yellow/30'
                     }`} data-testid="decision-gate">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           {result.evaluation.status === 'GREEN' ? (
-                            <CheckCircle2 className="w-8 h-8 text-green-500" />
+                            <CheckCircle2 className="w-8 h-8 text-rs-green" />
                           ) : result.evaluation.status === 'RED' ? (
-                            <XCircle className="w-8 h-8 text-red-500" />
+                            <XCircle className="w-8 h-8 text-rs-red" />
                           ) : result.evaluation.status === 'NEEDS_PLAN' ? (
-                            <AlertTriangle className="w-8 h-8 text-amber-500" />
+                            <AlertTriangle className="w-8 h-8 text-rs-amber" />
                           ) : (
-                            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+                            <AlertTriangle className="w-8 h-8 text-rs-yellow" />
                           )}
                           <div>
                             <p className={`text-lg font-bold ${
-                              result.evaluation.status === 'GREEN' ? 'text-green-500' :
-                              result.evaluation.status === 'RED' ? 'text-red-500' :
-                              result.evaluation.status === 'NEEDS_PLAN' ? 'text-amber-500' : 'text-yellow-500'
+                              result.evaluation.status === 'GREEN' ? 'text-rs-green' :
+                              result.evaluation.status === 'RED' ? 'text-rs-red' :
+                              result.evaluation.status === 'NEEDS_PLAN' ? 'text-rs-amber' : 'text-rs-yellow'
                             }`} data-testid="text-status">
                               {result.evaluation.status === 'NEEDS_PLAN' ? 'NEEDS PLAN' : result.evaluation.status}
                             </p>
@@ -1771,14 +1771,14 @@ export default function SentinelEvaluatePage() {
                     {/* Plan Summary */}
                     {result.evaluation.planSummary && (
                       <div className={`mb-3 p-3 rounded border ${
-                        result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border-green-500/30' :
-                        result.evaluation.status === 'RED' ? 'bg-red-500/10 border-red-500/30' :
-                        result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-yellow-500/10 border-yellow-500/30'
+                        result.evaluation.status === 'GREEN' ? 'bg-rs-green/10 border-rs-green/30' :
+                        result.evaluation.status === 'RED' ? 'bg-rs-red/10 border-rs-red/30' :
+                        result.evaluation.status === 'NEEDS_PLAN' ? 'bg-rs-amber/10 border-rs-amber/30' : 'bg-rs-yellow/10 border-rs-yellow/30'
                       }`} data-testid="plan-summary">
                         <p className={`text-base font-semibold ${
-                          result.evaluation.status === 'GREEN' ? 'text-green-400' :
-                          result.evaluation.status === 'RED' ? 'text-red-400' :
-                          result.evaluation.status === 'NEEDS_PLAN' ? 'text-amber-400' : 'text-yellow-400'
+                          result.evaluation.status === 'GREEN' ? 'text-rs-green' :
+                          result.evaluation.status === 'RED' ? 'text-rs-red' :
+                          result.evaluation.status === 'NEEDS_PLAN' ? 'text-rs-amber' : 'text-rs-yellow'
                         }`}>
                           Your Plan: Entry {result.evaluation.planSummary.entry}
                           {result.evaluation.planSummary.stop && <> | Stop {result.evaluation.planSummary.stop}{stopLabel ? <span className="text-muted-foreground text-sm"> ({stopLabel})</span> : null}</>}
@@ -1806,7 +1806,7 @@ export default function SentinelEvaluatePage() {
                           
                           if (!hasStop && !hasTarget) {
                             return (
-                              <div className="text-sm text-amber-400/80 italic p-2 bg-amber-500/10 rounded">
+                              <div className="text-sm text-rs-amber italic p-2 bg-rs-amber/10 rounded">
                                 Define a stop loss and profit target to see your risk/reward breakdown. Check Ivy's suggested levels below.
                               </div>
                             );
@@ -1815,12 +1815,12 @@ export default function SentinelEvaluatePage() {
                           return (
                             <div className="space-y-2 text-sm">
                               {!hasStop && (
-                                <div className="text-xs text-amber-400/80 italic mb-1">
+                                <div className="text-xs text-rs-amber italic mb-1">
                                   No stop defined — risk calculations require a stop loss level. See Ivy's suggestions below.
                                 </div>
                               )}
                               {!hasTarget && (
-                                <div className="text-xs text-amber-400/80 italic mb-1">
+                                <div className="text-xs text-rs-amber italic mb-1">
                                   No target defined — profit calculations require a target price. See Ivy's suggestions below.
                                 </div>
                               )}
@@ -1828,12 +1828,12 @@ export default function SentinelEvaluatePage() {
                                 <div className="space-y-1">
                                   <div className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
                                     <span className="text-muted-foreground text-xs">Your Stop{stopLabel ? ` (${stopLabel})` : ''}:</span>
-                                    <span className="font-bold text-red-400">{result.evaluation.planSummary?.stop || stopPrice}</span>
+                                    <span className="font-bold text-rs-red">{result.evaluation.planSummary?.stop || stopPrice}</span>
                                   </div>
                                   <div className="flex flex-wrap gap-x-6 gap-y-1">
                                     <span>
                                       <span className="text-muted-foreground">Risking: </span>
-                                      <span className="font-bold text-red-400">
+                                      <span className="font-bold text-rs-red">
                                         {(() => {
                                           const rps = result.evaluation.planSummary?.riskPerShare;
                                           if (!rps) return "—";
@@ -1844,7 +1844,7 @@ export default function SentinelEvaluatePage() {
                                     </span>
                                     <span>
                                       <span className="text-muted-foreground">Total Risk: </span>
-                                      <span className="font-bold text-red-400">
+                                      <span className="font-bold text-rs-red">
                                         {(() => {
                                           const tr = result.evaluation.moneyBreakdown.totalRisk;
                                           if (!tr) return "—";
@@ -1864,13 +1864,13 @@ export default function SentinelEvaluatePage() {
                                       {targetLabel && result.evaluation.planSummary?.firstTrim && (
                                         <span>
                                           <span className="text-muted-foreground text-xs">Your First Trim ({targetLabel}):</span>{' '}
-                                          <span className="font-bold text-green-400">{result.evaluation.planSummary.firstTrim}</span>
+                                          <span className="font-bold text-rs-green">{result.evaluation.planSummary.firstTrim}</span>
                                         </span>
                                       )}
                                       {targetProfitLabel && result.evaluation.planSummary?.target && (
                                         <span>
                                           <span className="text-muted-foreground text-xs">Your Target ({targetProfitLabel}):</span>{' '}
-                                          <span className="font-bold text-green-400">{result.evaluation.planSummary.target}</span>
+                                          <span className="font-bold text-rs-green">{result.evaluation.planSummary.target}</span>
                                         </span>
                                       )}
                                     </div>
@@ -1879,7 +1879,7 @@ export default function SentinelEvaluatePage() {
                                   {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
                                     <span>
                                       <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
-                                      <span className="font-bold text-green-400">
+                                      <span className="font-bold text-rs-green">
                                         {(() => {
                                           const val = result.evaluation.moneyBreakdown.firstTrimProfitPerShare;
                                           const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
@@ -1891,7 +1891,7 @@ export default function SentinelEvaluatePage() {
                                   {result.evaluation.moneyBreakdown.targetProfitPerShare && (
                                     <span>
                                       <span className="text-muted-foreground">Target @ 70%: </span>
-                                      <span className="font-bold text-green-400">
+                                      <span className="font-bold text-rs-green">
                                         {(() => {
                                           const val = result.evaluation.moneyBreakdown.targetProfitPerShare;
                                           const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
@@ -1907,7 +1907,7 @@ export default function SentinelEvaluatePage() {
                               {hasBoth && (
                                 <div className="pt-1 border-t border-blue-500/30">
                                   <span className="text-muted-foreground">Total Gain: </span>
-                                  <span className="font-bold text-green-500">
+                                  <span className="font-bold text-rs-green">
                                     {(() => {
                                       const val = result.evaluation.moneyBreakdown.totalPotentialProfit;
                                       if (!val) return "—";
@@ -1950,7 +1950,7 @@ export default function SentinelEvaluatePage() {
                                   const hasTargetVal = target1 > 0 || target2 > 0;
                                   
                                   if (!hasStopVal && !hasTargetVal) {
-                                    return <p className="text-amber-400/70 italic">Provide a stop loss and target price to see detailed calculations.</p>;
+                                    return <p className="text-rs-amber italic">Provide a stop loss and target price to see detailed calculations.</p>;
                                   }
                                   
                                   const riskPerShare = hasStopVal ? (direction === "long" ? entry - stop : stop - entry) : 0;
@@ -1967,19 +1967,19 @@ export default function SentinelEvaluatePage() {
                                     <>
                                       {hasStopVal ? (
                                         <>
-                                          <p>Risk per share = |Entry ${entry.toFixed(2)} - Stop ${stop.toFixed(2)}| = <span className="text-red-400 font-medium">${Math.abs(riskPerShare).toFixed(2)}</span></p>
-                                          <p>Total risk = ${Math.abs(riskPerShare).toFixed(2)} x {shares} shares = <span className="text-red-400 font-medium">${Math.abs(totalRisk).toFixed(2)}</span></p>
+                                          <p>Risk per share = |Entry ${entry.toFixed(2)} - Stop ${stop.toFixed(2)}| = <span className="text-rs-red font-medium">${Math.abs(riskPerShare).toFixed(2)}</span></p>
+                                          <p>Total risk = ${Math.abs(riskPerShare).toFixed(2)} x {shares} shares = <span className="text-rs-red font-medium">${Math.abs(totalRisk).toFixed(2)}</span></p>
                                         </>
                                       ) : (
-                                        <p className="text-amber-400/70 italic">No stop defined — risk per share not calculated</p>
+                                        <p className="text-rs-amber italic">No stop defined — risk per share not calculated</p>
                                       )}
                                       {target1 > 0 && (
-                                        <p>First trim (30% of shares): sell {Math.round(shares * 0.3)} shares at ${target1.toFixed(2)} = <span className="text-green-400">+${firstTrimGain.toFixed(2)}</span></p>
+                                        <p>First trim (30% of shares): sell {Math.round(shares * 0.3)} shares at ${target1.toFixed(2)} = <span className="text-rs-green">+${firstTrimGain.toFixed(2)}</span></p>
                                       )}
                                       {target2 > 0 && (
-                                        <p>Remaining (70% of shares): sell {Math.round(shares * 0.7)} shares at ${target2.toFixed(2)} = <span className="text-green-400">+${targetGain.toFixed(2)}</span></p>
+                                        <p>Remaining (70% of shares): sell {Math.round(shares * 0.7)} shares at ${target2.toFixed(2)} = <span className="text-rs-green">+${targetGain.toFixed(2)}</span></p>
                                       )}
-                                      {hasTargetVal && <p>Total potential gain = <span className="text-green-400 font-medium">+${totalGain.toFixed(2)}</span></p>}
+                                      {hasTargetVal && <p>Total potential gain = <span className="text-rs-green font-medium">+${totalGain.toFixed(2)}</span></p>}
                                       {riskPerShare > 0 && totalGain > 0 && (
                                         <p>Overall R:R = {(totalGain / totalRisk).toFixed(1)}:1</p>
                                       )}
@@ -2014,7 +2014,7 @@ export default function SentinelEvaluatePage() {
                   <Card data-testid="trade-snapshot">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-green-500" />
+                        <TrendingUp className="w-4 h-4 text-rs-green" />
                         Trade Snapshot
                       </CardTitle>
                     </CardHeader>
@@ -2022,13 +2022,13 @@ export default function SentinelEvaluatePage() {
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div>
                           <div className="flex items-center gap-2 mb-2">
-                            <CheckCircle2 className="w-4 h-4 text-green-500" />
-                            <span className="text-sm font-medium text-green-500">What Works</span>
+                            <CheckCircle2 className="w-4 h-4 text-rs-green" />
+                            <span className="text-sm font-medium text-rs-green">What Works</span>
                           </div>
                           <ul className="space-y-1.5">
                             {result.evaluation.tradeSnapshot.good.map((item, i) => (
                               <li key={i} className="text-sm flex items-start gap-2">
-                                <ArrowUpCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                                <ArrowUpCircle className="w-4 h-4 text-rs-green mt-0.5 shrink-0" />
                                 <span>{item}</span>
                               </li>
                             ))}
@@ -2036,13 +2036,13 @@ export default function SentinelEvaluatePage() {
                         </div>
                         <div>
                           <div className="flex items-center gap-2 mb-2">
-                            <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                            <span className="text-sm font-medium text-yellow-500">Watch Out For</span>
+                            <AlertTriangle className="w-4 h-4 text-rs-yellow" />
+                            <span className="text-sm font-medium text-rs-yellow">Watch Out For</span>
                           </div>
                           <ul className="space-y-1.5">
                             {result.evaluation.tradeSnapshot.bad.map((item, i) => (
                               <li key={i} className="text-sm flex items-start gap-2">
-                                <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
+                                <AlertTriangle className="w-4 h-4 text-rs-yellow mt-0.5 shrink-0" />
                                 <span>{item}</span>
                               </li>
                             ))}
@@ -2055,7 +2055,7 @@ export default function SentinelEvaluatePage() {
                   <Card data-testid="trade-snapshot">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Target className="w-4 h-4 text-green-500" />
+                        <Target className="w-4 h-4 text-rs-green" />
                         Why This Could Work
                       </CardTitle>
                     </CardHeader>
@@ -2063,7 +2063,7 @@ export default function SentinelEvaluatePage() {
                       <ul className="space-y-1.5" data-testid="why-bullets">
                         {result.evaluation.whyBullets.map((bullet, i) => (
                           <li key={i} className="text-sm flex items-start gap-2">
-                            <ArrowUpCircle className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                            <ArrowUpCircle className="w-4 h-4 text-rs-green mt-0.5 shrink-0" />
                             <span>{bullet}</span>
                           </li>
                         ))}
@@ -2076,7 +2076,7 @@ export default function SentinelEvaluatePage() {
                   <Card data-testid="logical-stops">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Crosshair className="w-4 h-4 text-red-400" />
+                        <Crosshair className="w-4 h-4 text-rs-red" />
                         Stop Level Analysis
                       </CardTitle>
                     </CardHeader>
@@ -2093,7 +2093,7 @@ export default function SentinelEvaluatePage() {
                           const totalRisk = riskPS * shares;
                           if (riskPS > 0) {
                             return (
-                              <span className="block mt-2 text-red-400 font-medium">
+                              <span className="block mt-2 text-rs-red font-medium">
                                 Risk: ${riskPS.toFixed(2)}/share{shares > 0 ? ` | Total: $${totalRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk` : ''}
                               </span>
                             );
@@ -2104,9 +2104,9 @@ export default function SentinelEvaluatePage() {
                       <p className="text-sm font-medium text-muted-foreground mt-1">Alternate Stop Options:</p>
                       <div className="space-y-2">
                         {result.evaluation.logicalStops.suggestions.map((s, i) => {
-                          const rankColor = s.rank === 1 ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" :
+                          const rankColor = s.rank === 1 ? "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30" :
                             s.rank === 2 ? "bg-gray-400/20 text-gray-300 border-gray-400/30" :
-                            "bg-amber-700/20 text-amber-600 border-amber-700/30";
+                            "bg-rs-amber/20 text-rs-amber border-rs-amber/30";
                           const userStop = parseFloat(stopPrice) || 0;
                           const matchesUserStop = userStop > 0 && Math.abs(s.price - userStop) < 0.02;
                           const ep = parseFloat(entryPrice) || 0;
@@ -2120,17 +2120,17 @@ export default function SentinelEvaluatePage() {
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <Badge variant="outline" className={`text-xs ${rankColor}`}>#{s.rank}</Badge>
                                 <span className="font-medium text-sm">{s.label}</span>
-                                <span className="text-sm font-bold text-red-400">${s.price.toFixed(2)}</span>
+                                <span className="text-sm font-bold text-rs-red">${s.price.toFixed(2)}</span>
                                 <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
                                 {matchesUserStop && (
-                                  <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                  <Badge variant="outline" className="text-xs bg-rs-green/10 text-rs-green border-rs-green/30">
                                     Confirms your stop
                                   </Badge>
                                 )}
                               </div>
                               <p className="text-xs text-muted-foreground">{s.reasoning}</p>
                               {stopRiskPS > 0 && (
-                                <span className="block mt-1 text-xs text-red-400 font-medium">
+                                <span className="block mt-1 text-xs text-rs-red font-medium">
                                   Risk: ${stopRiskPS.toFixed(2)}/share{stopShares > 0 ? ` | Total: $${stopTotalRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at risk` : ''}
                                 </span>
                               )}
@@ -2146,7 +2146,7 @@ export default function SentinelEvaluatePage() {
                   <Card data-testid="logical-targets">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Target className="w-4 h-4 text-green-500" />
+                        <Target className="w-4 h-4 text-rs-green" />
                         Take Profit Targets
                       </CardTitle>
                     </CardHeader>
@@ -2158,8 +2158,8 @@ export default function SentinelEvaluatePage() {
                        !result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('no target rule') && (
                         <div className={`p-2 rounded-md text-sm font-medium flex items-center gap-2 ${
                           result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('meets') 
-                            ? 'bg-green-500/10 text-green-400 border border-green-500/30' 
-                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                            ? 'bg-rs-green/10 text-rs-green border border-rs-green/30' 
+                            : 'bg-rs-amber/10 text-rs-amber border border-rs-amber/30'
                         }`} data-testid="text-rule-compliance">
                           {result.evaluation.logicalTargets.ruleCompliance.toLowerCase().includes('meets') 
                             ? <CheckCircle2 className="w-4 h-4" />
@@ -2208,22 +2208,22 @@ export default function SentinelEvaluatePage() {
                                 <div className="flex items-center gap-3 text-sm">
                                   <span className="font-bold text-blue-400">${minTargetPrice.toFixed(2)}</span>
                                   <span className="text-muted-foreground">+${minProfitPerShare.toFixed(2)}/sh (+{minProfitPct.toFixed(1)}%)</span>
-                                  {shares > 0 && <span className="text-green-400 font-medium">+${minTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                  {shares > 0 && <span className="text-rs-green font-medium">+${minTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                                 </div>
                               </div>
                             )}
                             {userTP > 0 && (
                               <div className="p-2.5 rounded-md border bg-muted/30 flex items-center justify-between flex-wrap gap-2" data-testid="user-target">
                                 <div className="flex items-center gap-2">
-                                  <Target className="w-4 h-4 text-green-400 shrink-0" />
+                                  <Target className="w-4 h-4 text-rs-green shrink-0" />
                                   <span className="text-sm font-medium">{userTargetLabel}</span>
                                 </div>
                                 <div className="flex items-center gap-3 text-sm">
-                                  <span className="font-bold text-green-400">${userTP.toFixed(2)}</span>
+                                  <span className="font-bold text-rs-green">${userTP.toFixed(2)}</span>
                                   <span className="text-muted-foreground">+${userProfitPS.toFixed(2)}/sh (+{userProfitPct.toFixed(1)}%)</span>
-                                  {shares > 0 && <span className="text-green-400 font-medium">+${userTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                  {shares > 0 && <span className="text-rs-green font-medium">+${userTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                                   {riskPS > 0 && (
-                                    <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                    <Badge variant="outline" className="text-xs bg-rs-green/10 text-rs-green border-rs-green/30">
                                       R:R {(userProfitPS / riskPS).toFixed(1)}:1
                                     </Badge>
                                   )}
@@ -2233,10 +2233,10 @@ export default function SentinelEvaluatePage() {
                             {aiTP > 0 && aiTP !== userTP && (() => {
                               const resistPct = aiSugg?.distancePercent ?? aiProfitPct;
                               const rColor = resistPct < 3
-                                ? { border: 'border-red-500/50', bg: 'bg-red-500/5', text: 'text-red-400', badgeBg: 'bg-red-500/10', badgeBorder: 'border-red-500/30' }
+                                ? { border: 'border-rs-red/30', bg: 'bg-rs-red/10', text: 'text-rs-red', badgeBg: 'bg-rs-red/10', badgeBorder: 'border-rs-red/30' }
                                 : resistPct < 6
-                                ? { border: 'border-amber-500/50', bg: 'bg-amber-500/5', text: 'text-amber-400', badgeBg: 'bg-amber-500/10', badgeBorder: 'border-amber-500/30' }
-                                : { border: 'border-green-500/50', bg: 'bg-green-500/5', text: 'text-green-400', badgeBg: 'bg-green-500/10', badgeBorder: 'border-green-500/30' };
+                                ? { border: 'border-rs-amber/30', bg: 'bg-rs-amber/10', text: 'text-rs-amber', badgeBg: 'bg-rs-amber/10', badgeBorder: 'border-rs-amber/30' }
+                                : { border: 'border-rs-green/30', bg: 'bg-rs-green/10', text: 'text-rs-green', badgeBg: 'bg-rs-green/10', badgeBorder: 'border-rs-green/30' };
                               return (
                               <div className={`p-2.5 rounded-md border-2 ${rColor.border} ${rColor.bg} flex flex-col gap-1.5`} data-testid="ai-target">
                                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -2272,10 +2272,10 @@ export default function SentinelEvaluatePage() {
                           {result.evaluation.logicalTargets.suggestions.slice(1).map((s, i) => {
                             const sPct = s.distancePercent ?? 0;
                             const sColor = sPct < 3
-                              ? { text: 'text-red-400', badgeBg: 'bg-red-500/10', badgeBorder: 'border-red-500/30', border: 'border-red-500/30' }
+                              ? { text: 'text-rs-red', badgeBg: 'bg-rs-red/10', badgeBorder: 'border-rs-red/30', border: 'border-rs-red/30' }
                               : sPct < 6
-                              ? { text: 'text-amber-400', badgeBg: 'bg-amber-500/10', badgeBorder: 'border-amber-500/30', border: 'border-amber-500/30' }
-                              : { text: 'text-green-400', badgeBg: 'bg-green-500/10', badgeBorder: 'border-green-500/30', border: 'border-green-500/30' };
+                              ? { text: 'text-rs-amber', badgeBg: 'bg-rs-amber/10', badgeBorder: 'border-rs-amber/30', border: 'border-rs-amber/30' }
+                              : { text: 'text-rs-green', badgeBg: 'bg-rs-green/10', badgeBorder: 'border-rs-green/30', border: 'border-rs-green/30' };
                             return (
                             <div key={i} className={`p-3 rounded-md border ${sColor.border} bg-muted/30`}>
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -2295,8 +2295,8 @@ export default function SentinelEvaluatePage() {
                                     return (
                                       <Badge variant="outline" className={`text-xs ${
                                         isPass
-                                          ? 'bg-green-500/10 text-green-400 border-green-500/30'
-                                          : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                          ? 'bg-rs-green/10 text-rs-green border-rs-green/30'
+                                          : 'bg-rs-amber/10 text-rs-amber border-rs-amber/30'
                                       }`}>
                                         {isPass ? 'Meets Rules' : isFail ? 'Below Target' : String(s.meetsRules)}
                                       </Badge>
@@ -2311,10 +2311,10 @@ export default function SentinelEvaluatePage() {
                         </div>
                       )}
                       {result.evaluation.logicalTargets.partialProfitIdea && (
-                        <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/30">
+                        <div className="p-3 rounded-md bg-rs-amber/10 border border-rs-amber/30">
                           <div className="flex items-center gap-2 mb-1">
-                            <Scissors className="w-4 h-4 text-amber-500" />
-                            <span className="text-sm font-medium text-amber-500">Partial Profit Idea</span>
+                            <Scissors className="w-4 h-4 text-rs-amber" />
+                            <span className="text-sm font-medium text-rs-amber">Partial Profit Idea</span>
                           </div>
                           <p className="text-sm text-foreground">{result.evaluation.logicalTargets.partialProfitIdea}</p>
                         </div>
@@ -2342,19 +2342,19 @@ export default function SentinelEvaluatePage() {
                     <Card>
                       <CardHeader className="pb-2">
                         <CardTitle className="text-base flex items-center gap-2">
-                          <Shield className="w-4 h-4 text-yellow-500" />
+                          <Shield className="w-4 h-4 text-rs-yellow" />
                           Risk Assessment
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         {fatalFlags.length > 0 && (
                           <div>
-                            <p className="text-xs font-semibold text-red-400 mb-1.5">Structural Issues (Must Fix)</p>
+                            <p className="text-xs font-semibold text-rs-red mb-1.5">Structural Issues (Must Fix)</p>
                             <div className="space-y-1.5" data-testid="risk-flags-fatal">
                               {fatalFlags.map((f, i) => (
-                                <div key={i} className="p-2 rounded border bg-red-500/10 border-red-500/30">
+                                <div key={i} className="p-2 rounded border bg-rs-red/10 border-rs-red/30">
                                   <div className="flex items-start gap-2">
-                                    <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+                                    <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-rs-red" />
                                     <div>
                                       <span className="font-medium text-sm">{String(f.flagName).replace(/_/g, ' ')}</span>
                                       <p className="text-xs text-muted-foreground mt-0.5">{f.detail}</p>
@@ -2367,12 +2367,12 @@ export default function SentinelEvaluatePage() {
                         )}
                         {contextualFlags.length > 0 && (
                           <div>
-                            <p className="text-xs font-semibold text-yellow-400 mb-1.5">Contextual Concerns</p>
+                            <p className="text-xs font-semibold text-rs-yellow mb-1.5">Contextual Concerns</p>
                             <div className="space-y-1.5" data-testid="risk-flags-contextual">
                               {contextualFlags.map((f, i) => (
-                                <div key={i} className="p-2 rounded border bg-yellow-500/10 border-yellow-500/30">
+                                <div key={i} className="p-2 rounded border bg-rs-yellow/10 border-rs-yellow/30">
                                   <div className="flex items-start gap-2">
-                                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-yellow-500" />
+                                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rs-yellow" />
                                     <div>
                                       <span className="font-medium text-sm">{String(f.flagName).replace(/_/g, ' ')}</span>
                                       <p className="text-xs text-muted-foreground mt-0.5">{f.detail}</p>
@@ -2410,8 +2410,8 @@ export default function SentinelEvaluatePage() {
                 {result.evaluation.improvements && result.evaluation.improvements.length > 0 && (
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2 text-green-400">
-                        <Lightbulb className="w-4 h-4 text-green-400" />
+                      <CardTitle className="text-base flex items-center gap-2 text-rs-green">
+                        <Lightbulb className="w-4 h-4 text-rs-green" />
                         What Would Make This Better
                       </CardTitle>
                     </CardHeader>
@@ -2419,7 +2419,7 @@ export default function SentinelEvaluatePage() {
                       <ul className="space-y-1.5" data-testid="improvements">
                         {result.evaluation.improvements.map((improvement, i) => (
                           <li key={i} className="text-sm flex items-start gap-2 text-foreground">
-                            <Zap className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                            <Zap className="w-4 h-4 text-rs-green mt-0.5 shrink-0" />
                             <span>{improvement}</span>
                           </li>
                         ))}
@@ -2442,16 +2442,16 @@ export default function SentinelEvaluatePage() {
                   let qualityColor: string;
                   if (percentage >= 95) {
                     qualityLabel = "Excellent";
-                    qualityColor = "text-green-400";
+                    qualityColor = "text-rs-green";
                   } else if (percentage >= 85) {
                     qualityLabel = "Solid";
-                    qualityColor = "text-green-500";
+                    qualityColor = "text-rs-green";
                   } else if (percentage >= 70) {
                     qualityLabel = "Acceptable";
-                    qualityColor = "text-yellow-500";
+                    qualityColor = "text-rs-yellow";
                   } else {
                     qualityLabel = "Needs Work";
-                    qualityColor = "text-red-400";
+                    qualityColor = "text-rs-red";
                   }
                   
                   return (
@@ -2477,11 +2477,11 @@ export default function SentinelEvaluatePage() {
                         </div>
                         <CardDescription className="flex items-center gap-3 mt-1">
                           <span className="flex items-center gap-1" data-testid="text-rules-summary">
-                            <CheckCircle2 className="w-3 h-3 text-green-500" />
+                            <CheckCircle2 className="w-3 h-3 text-rs-green" />
                             {followed} of {applicable} rules satisfied ({percentage}%)
                           </span>
                           {violated > 0 && (
-                            <span className="flex items-center gap-1 text-red-400" data-testid="text-rules-violated">
+                            <span className="flex items-center gap-1 text-rs-red" data-testid="text-rules-violated">
                               <XCircle className="w-3 h-3" />
                               {violated} violated
                             </span>
@@ -2499,13 +2499,13 @@ export default function SentinelEvaluatePage() {
                             {checklist.map((item, i) => (
                               <div key={i} className="flex items-center gap-2 text-sm py-1">
                                 {item.status === 'followed' ? (
-                                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                  <CheckCircle2 className="w-4 h-4 text-rs-green" />
                                 ) : item.status === 'violated' ? (
-                                  <XCircle className="w-4 h-4 text-red-500" />
+                                  <XCircle className="w-4 h-4 text-rs-red" />
                                 ) : (
                                   <Minus className="w-4 h-4 text-muted-foreground" />
                                 )}
-                                <span className={item.status === 'violated' ? 'text-red-400' : ''}>{item.rule}</span>
+                                <span className={item.status === 'violated' ? 'text-rs-red' : ''}>{item.rule}</span>
                                 {item.note && <span className="text-xs text-muted-foreground">- {item.note}</span>}
                               </div>
                             ))}
@@ -2582,7 +2582,7 @@ export default function SentinelEvaluatePage() {
                       </Button>
                       <Button
                         variant="outline"
-                        className="gap-2 text-red-400 hover:text-red-300 col-span-2"
+                        className="gap-2 text-rs-red hover:text-rs-red col-span-2"
                         onClick={() => {
                           toast({ title: "Trade Passed", description: "Decision logged" });
                           setLocation("/sentinel/dashboard");

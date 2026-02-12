@@ -1484,13 +1484,13 @@ export function StockChart({
           </span>
           <span>
             <span className="text-muted-foreground">Change$:</span>{' '}
-            <span className={measureResult.priceDiff >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
+            <span className={measureResult.priceDiff >= 0 ? "text-rs-green font-mono" : "text-rs-red font-mono"}>
               {measureResult.priceDiff >= 0 ? '+' : ''}{measureResult.priceDiff.toFixed(2)}
             </span>
           </span>
           <span>
             <span className="text-muted-foreground">Change%:</span>{' '}
-            <span className={measureResult.pctChange >= 0 ? "text-green-500 font-mono" : "text-red-500 font-mono"}>
+            <span className={measureResult.pctChange >= 0 ? "text-rs-green font-mono" : "text-rs-red font-mono"}>
               {measureResult.pctChange >= 0 ? '+' : ''}{measureResult.pctChange.toFixed(2)}%
             </span>
           </span>
@@ -1521,8 +1521,8 @@ export function StockChart({
             return (
               <span className={`inline-flex items-center gap-2 px-2 py-1 rounded border text-xs font-mono ${
                 isPositive 
-                  ? 'border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-500 font-bold' 
-                  : 'border-red-500/50 bg-red-50 dark:bg-red-900/20 text-red-500 font-bold'
+                  ? 'border-rs-green/50 bg-green-50 dark:bg-green-900/20 text-rs-green font-bold' 
+                  : 'border-rs-red/50 bg-red-50 dark:bg-red-900/20 text-rs-red font-bold'
               }`}>
                 <span>Dollar Diff: {isPositive ? '+' : ''}{dollarDiff.toFixed(2)}</span>
                 <span>•</span>

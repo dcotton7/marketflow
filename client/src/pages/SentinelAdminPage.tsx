@@ -246,7 +246,7 @@ function UsersTab() {
                 )}
                 
                 {!user.needsSeeding && (
-                  <Badge variant="secondary" className="text-xs text-green-500">
+                  <Badge variant="secondary" className="text-xs text-rs-green">
                     <CheckCircle2 className="w-3 h-3 mr-1" />
                     Has Rules
                   </Badge>
@@ -590,17 +590,17 @@ export default function SentinelAdminPage() {
 
   const getCategoryColor = (category: string | null) => {
     switch (category) {
-      case "structural": return "bg-red-500/20 text-red-400 border-red-500/30";
-      case "entry": return "bg-green-500/20 text-green-400 border-green-500/30";
+      case "structural": return "bg-rs-red/20 text-rs-red border-rs-red/30";
+      case "entry": return "bg-rs-green/20 text-rs-green border-rs-green/30";
       case "exit": return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-      case "profit_taking": return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
-      case "stop_loss": return "bg-orange-500/20 text-orange-400 border-orange-500/30";
+      case "profit_taking": return "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30";
+      case "stop_loss": return "bg-rs-amber/20 text-rs-amber border-rs-amber/30";
       case "ma_structure": return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
       case "base_quality": return "bg-purple-500/20 text-purple-400 border-purple-500/30";
       case "breakout": return "bg-pink-500/20 text-pink-400 border-pink-500/30";
       case "position_sizing": return "bg-indigo-500/20 text-indigo-400 border-indigo-500/30";
       case "market_regime": return "bg-teal-500/20 text-teal-400 border-teal-500/30";
-      case "risk": return "bg-red-600/20 text-red-300 border-red-600/30";
+      case "risk": return "bg-rs-red/20 text-rs-red border-rs-red/30";
       case "general": return "bg-gray-500/20 text-gray-400 border-gray-500/30";
       default: return "bg-muted text-muted-foreground";
     }
@@ -614,23 +614,23 @@ export default function SentinelAdminPage() {
 
   const getWeightColor = (weight: number | null) => {
     if (weight === null) return "text-muted-foreground";
-    if (weight >= 80) return "text-green-400";
-    if (weight >= 60) return "text-yellow-400";
-    return "text-red-400";
+    if (weight >= 80) return "text-rs-green";
+    if (weight >= 60) return "text-rs-yellow";
+    return "text-rs-red";
   };
 
   const getConfidenceColor = (confidence: number | null) => {
     if (confidence === null) return "text-muted-foreground";
-    if (confidence >= 80) return "text-green-400";
-    if (confidence >= 65) return "text-yellow-400";
-    return "text-orange-400";
+    if (confidence >= 80) return "text-rs-green";
+    if (confidence >= 65) return "text-rs-yellow";
+    return "text-rs-amber";
   };
 
   const getSourceBadge = (source: string) => {
     switch (source) {
       case "manual": return <Badge variant="outline" className="text-xs">Manual</Badge>;
       case "ai_suggested": return <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-400">AI Suggested</Badge>;
-      case "ai_confirmed": return <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400">AI Confirmed</Badge>;
+      case "ai_confirmed": return <Badge variant="outline" className="text-xs bg-rs-green/10 text-rs-green">AI Confirmed</Badge>;
       default: return null;
     }
   };
@@ -1030,7 +1030,7 @@ export default function SentinelAdminPage() {
                     <Card>
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2" data-testid="text-modifiers-title">
-                          <Zap className="w-5 h-5 text-yellow-400" />
+                          <Zap className="w-5 h-5 text-rs-yellow" />
                           Contextual Modifiers ({modifiers?.length || 0})
                         </CardTitle>
                         <CardDescription data-testid="text-modifiers-desc">Weight adjustments when setup types meet specific market conditions</CardDescription>
@@ -1054,7 +1054,7 @@ export default function SentinelAdminPage() {
                                   </Badge>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                  <span className={`font-bold ${mod.weightModifier > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                  <span className={`font-bold ${mod.weightModifier > 0 ? 'text-rs-green' : 'text-rs-red'}`}>
                                     {mod.weightModifier > 0 ? '+' : ''}{mod.weightModifier}
                                   </span>
                                   {mod.confidence && (
@@ -1151,10 +1151,10 @@ export default function SentinelAdminPage() {
                   </div>
 
                   <div className="space-y-4">
-                    <Card className="border-yellow-500/30">
+                    <Card className="border-rs-yellow/30">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2" data-testid="text-suggestions-title">
-                          <Lightbulb className="w-5 h-5 text-yellow-400" />
+                          <Lightbulb className="w-5 h-5 text-rs-yellow" />
                           AI Suggestions
                           <Badge className="ml-2" data-testid="badge-suggestions-count">{pendingSuggestions.length}</Badge>
                         </CardTitle>

@@ -110,11 +110,11 @@ interface RatingResult {
 }
 
 const RATING_COLORS = {
-  1: "bg-red-500/20 border-red-500 text-red-400",
-  2: "bg-orange-500/20 border-orange-500 text-orange-400",
-  3: "bg-yellow-500/20 border-yellow-500 text-yellow-400",
+  1: "bg-rs-red/20 border-rs-red text-rs-red",
+  2: "bg-rs-amber/20 border-rs-amber text-rs-amber",
+  3: "bg-rs-yellow/20 border-rs-yellow text-rs-yellow",
   4: "bg-blue-500/20 border-blue-500 text-blue-400",
-  5: "bg-green-500/20 border-green-500 text-green-400",
+  5: "bg-rs-green/20 border-rs-green text-rs-green",
 };
 
 const RATING_ICONS = {
@@ -126,9 +126,9 @@ const RATING_ICONS = {
 };
 
 const SCORE_COLORS: Record<string, string> = {
-  proceed: "text-green-400",
-  wait: "text-yellow-400",
-  avoid: "text-red-400",
+  proceed: "text-rs-green",
+  wait: "text-rs-yellow",
+  avoid: "text-rs-red",
 };
 
 export default function PatternLearningPage() {
@@ -837,7 +837,7 @@ export default function PatternLearningPage() {
                         {/* Strengths & Weaknesses */}
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <Label className="text-xs text-green-400 flex items-center gap-1">
+                            <Label className="text-xs text-rs-green flex items-center gap-1">
                               <CheckCircle2 className="h-3 w-3" /> Strengths
                             </Label>
                             <ul className="text-xs space-y-1 mt-1">
@@ -847,7 +847,7 @@ export default function PatternLearningPage() {
                             </ul>
                           </div>
                           <div>
-                            <Label className="text-xs text-red-400 flex items-center gap-1">
+                            <Label className="text-xs text-rs-red flex items-center gap-1">
                               <AlertCircle className="h-3 w-3" /> Weaknesses
                             </Label>
                             <ul className="text-xs space-y-1 mt-1">
@@ -897,7 +897,7 @@ export default function PatternLearningPage() {
                     <SelectItem key={setup.id} value={setup.id.toString()}>
                       <div className="flex items-center gap-2">
                         {setup.isActive ? (
-                          <Check className="h-3 w-3 text-green-500" />
+                          <Check className="h-3 w-3 text-rs-green" />
                         ) : (
                           <X className="h-3 w-3 text-muted-foreground" />
                         )}
@@ -1267,11 +1267,11 @@ export default function PatternLearningPage() {
                     </div>
                     <div className="grid grid-cols-4 gap-2 text-center text-xs">
                       <div>
-                        <div className="font-bold text-red-400">{confidence.rating1Count || 0}</div>
+                        <div className="font-bold text-rs-red">{confidence.rating1Count || 0}</div>
                         <div className="text-muted-foreground">Useless</div>
                       </div>
                       <div>
-                        <div className="font-bold text-yellow-400">{confidence.rating2Count || 0}</div>
+                        <div className="font-bold text-rs-yellow">{confidence.rating2Count || 0}</div>
                         <div className="text-muted-foreground">Elements</div>
                       </div>
                       <div>
@@ -1279,7 +1279,7 @@ export default function PatternLearningPage() {
                         <div className="text-muted-foreground">Past</div>
                       </div>
                       <div>
-                        <div className="font-bold text-green-400">{confidence.rating4Count || 0}</div>
+                        <div className="font-bold text-rs-green">{confidence.rating4Count || 0}</div>
                         <div className="text-muted-foreground">Good</div>
                       </div>
                     </div>

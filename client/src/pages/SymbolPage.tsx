@@ -180,7 +180,7 @@ export default function SymbolPage() {
             <div className="text-3xl md:text-4xl font-mono font-bold">
               ${quote.price.toFixed(2)}
             </div>
-            <div className={`flex items-center justify-end gap-1 font-mono font-medium ${isPositive ? "text-green-500" : "text-red-500"}`}>
+            <div className={`flex items-center justify-end gap-1 font-mono font-medium ${isPositive ? "text-rs-green" : "text-rs-red"}`}>
               {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
               {quote.change > 0 ? "+" : ""}{quote.change.toFixed(2)} ({quote.changePercent.toFixed(2)}%)
             </div>
@@ -239,7 +239,7 @@ export default function SymbolPage() {
           </div>
           <div className="text-xl font-mono font-semibold">
             {quote.earnings?.quarterlyGrowthPct !== undefined ? (
-              <span className={quote.earnings.quarterlyGrowthPct >= 0 ? "text-green-500" : "text-red-500"}>
+              <span className={quote.earnings.quarterlyGrowthPct >= 0 ? "text-rs-green" : "text-rs-red"}>
                 {quote.earnings.quarterlyGrowthPct >= 0 ? '+' : ''}{quote.earnings.quarterlyGrowthPct.toFixed(1)}%
               </span>
             ) : '---'}
@@ -247,11 +247,11 @@ export default function SymbolPage() {
           {quote.earnings?.surprisePct !== undefined && (
             <div className="text-lg font-mono mt-3">
               <span className="text-white">Surprise </span>
-              <span className="text-yellow-400">+</span>
+              <span className="text-rs-yellow">+</span>
               <span className="text-white">/</span>
-              <span className="text-red-500">-</span>
+              <span className="text-rs-red">-</span>
               <span className="text-white"> %: </span>
-              <span className={`font-bold text-xl ${quote.earnings.surprisePct >= 0 ? "text-yellow-400" : "text-red-500"}`}>
+              <span className={`font-bold text-xl ${quote.earnings.surprisePct >= 0 ? "text-rs-yellow" : "text-rs-red"}`}>
                 {quote.earnings.surprisePct >= 0 ? '+' : ''}{quote.earnings.surprisePct.toFixed(1)}%
               </span>
             </div>

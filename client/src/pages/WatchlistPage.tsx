@@ -36,7 +36,7 @@ function WatchlistItem({ item, onRemove }: {
                 <span className="font-mono text-lg font-bold" data-testid={`text-price-${item.symbol}`}>
                   ${quote.price.toFixed(2)}
                 </span>
-                <span className={`flex items-center gap-1 text-sm font-mono font-medium ${isPositive ? "text-green-500" : "text-red-500"}`} data-testid={`text-change-${item.symbol}`}>
+                <span className={`flex items-center gap-1 text-sm font-mono font-medium ${isPositive ? "text-rs-green" : "text-rs-red"}`} data-testid={`text-change-${item.symbol}`}>
                   {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                   {isPositive ? "+" : ""}{quote.change.toFixed(2)} ({quote.changePercent.toFixed(2)}%)
                 </span>
