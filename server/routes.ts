@@ -1486,12 +1486,13 @@ export async function registerRoutes(
         symbols.map(async (symbol) => {
           try {
             const quote = await tiingo.fetchCurrentQuote(symbol);
-            if (!quote) return { symbol, changePercent: 0 };
+            if (!quote) return { symbol, changePercent: 0, last: 0 };
             const prevClose = quote.prevClose || 0;
             const price = quote.tngoLast || 0;
             const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
             return {
               symbol,
+              last: price,
               changePercent: Math.round(changePercent * 100) / 100,
             };
           } catch (err) {

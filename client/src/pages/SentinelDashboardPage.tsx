@@ -1881,32 +1881,81 @@ function EventItem({ event }: { event: TradeEvent }) {
 }
 
 function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id: number) => void }) {
+  const [, setLocation] = useLocation();
   const priorityColors = {
     high: "text-red-500 bg-red-500/10",
     medium: "text-yellow-500 bg-yellow-500/10",
     low: "text-green-500 bg-green-500/10",
   };
 
+  const { data: quoteData } = useQuery<{ last: number; prevClose: number; changePercent: number }>({
+    queryKey: ['/api/watchlist/quotes', item.symbol],
+    queryFn: async () => {
+      const res = await fetch(`/api/watchlist/quotes?symbols=${item.symbol}`);
+      if (!res.ok) throw new Error('Failed');
+      const arr = await res.json();
+      return arr?.[0] || null;
+    },
+    refetchInterval: 60000,
+  });
+
+  const livePrice = quoteData?.last || 0;
+  const marketPctChange = quoteData?.changePercent;
+
   return (
     <Card className="hover-elevate" data-testid={`card-watchlist-${item.id}`}>
       <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-muted-foreground" />
-            <span className="font-bold text-lg" data-testid={`text-watchlist-symbol-${item.id}`}>{item.symbol}</span>
+        <div className="flex items-center justify-between mb-1">
+          <TickerWidget
+            symbol={item.symbol}
+            price={livePrice}
+            marketPctChange={marketPctChange}
+            direction="long"
+            status="watch"
+            hasLiveData={livePrice > 0}
+          />
+          <div className="flex items-center gap-1 ml-auto">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  onClick={() => setLocation(`/sentinel/evaluate?symbol=${item.symbol}&from=watchlist`)}
+                  data-testid={`button-evaluate-watch-${item.id}`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Evaluate</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  onClick={() => setLocation(`/symbol/${item.symbol}`)}
+                  data-testid={`button-chart-watch-${item.id}`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Open Chart</TooltipContent>
+            </Tooltip>
             <Badge className={priorityColors[item.priority as keyof typeof priorityColors] || priorityColors.medium}>
               {item.priority}
             </Badge>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onDelete(item.id)} data-testid={`button-delete-watchlist-${item.id}`}>
+              <X className="w-4 h-4" />
+            </Button>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => onDelete(item.id)} data-testid={`button-delete-watchlist-${item.id}`}>
-            <X className="w-4 h-4" />
-          </Button>
         </div>
 
         <div className="text-sm text-muted-foreground space-y-1">
           {item.targetEntry && <div>Target Entry: ${item.targetEntry.toFixed(2)}</div>}
           {item.alertPrice && <div>Alert at: ${item.alertPrice.toFixed(2)}</div>}
-          <div className="flex gap-4">
+          <div className="flex gap-4 flex-wrap">
             {item.stopPlan && <span>Stop Plan: ${item.stopPlan.toFixed(2)}</span>}
             {item.targetPlan && <span>Target Plan: ${item.targetPlan.toFixed(2)}</span>}
           </div>
