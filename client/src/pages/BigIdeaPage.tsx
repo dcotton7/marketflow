@@ -2079,7 +2079,7 @@ export default function BigIdeaPage() {
                 {debugOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
               </button>
               {debugOpen && (
-                <ScrollArea className="max-h-[280px]">
+                <ScrollArea className="max-h-[200px]">
                   <div className="px-3 pb-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span>{debugInfo.timestamp}</span>
@@ -2196,7 +2196,7 @@ export default function BigIdeaPage() {
                 {qualityOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
               </button>
               {qualityOpen && (
-                <ScrollArea className="max-h-[300px]">
+                <ScrollArea className="max-h-[200px]">
                   <div className="px-3 pb-2 space-y-2 text-[10px] leading-relaxed">
                     {qualityResult.dimensions.map((dim) => (
                       <div key={dim.name} className="border-t border-dashed pt-1.5" data-testid={`quality-dim-${dim.name.replace(/\s+/g, "-").toLowerCase()}`}>
@@ -2226,7 +2226,7 @@ export default function BigIdeaPage() {
               )}
             </div>
           )}
-          <div className="h-4 flex-shrink-0" />
+          <div className="h-12 flex-shrink-0" />
           </div>
           <div
             className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
@@ -3078,13 +3078,12 @@ export default function BigIdeaPage() {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm font-medium">What do you want?</Label>
-                <Textarea
+                <IndicatorAutocompleteTextarea
                   value={tuneInstruction}
-                  onChange={(e) => setTuneInstruction(e.target.value)}
+                  onChange={setTuneInstruction}
                   placeholder="e.g. 'Loosen the scan to get more results', 'Tighten volume criteria', 'Find tighter bases with less noise'..."
-                  className="mt-1.5 resize-none text-sm"
-                  rows={3}
-                  data-testid="input-tune-instruction"
+                  nodes={nodes}
+                  indicatorLibrary={indicatorLibrary}
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Leave blank for automatic analysis based on your funnel data.
@@ -3290,6 +3289,141 @@ export default function BigIdeaPage() {
   );
 }
 
+function IndicatorAutocompleteTextarea({
+  value,
+  onChange,
+  placeholder,
+  nodes,
+  indicatorLibrary,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  nodes: any[];
+  indicatorLibrary: any[];
+}) {
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [cursorWord, setCursorWord] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const indicatorNames = useMemo(() => {
+    const namesFromCanvas = new Set<string>();
+    nodes.forEach((n) => {
+      if (n.type !== "thought" || !n.data.criteria) return;
+      (n.data.criteria as any[]).forEach((c) => {
+        if (c.label) namesFromCanvas.add(c.label);
+        const meta = indicatorLibrary.find((m: any) => m.id === c.indicatorId);
+        if (meta?.name) namesFromCanvas.add(meta.name);
+      });
+    });
+    indicatorLibrary.forEach((m: any) => {
+      if (m.name) namesFromCanvas.add(m.name);
+    });
+    return Array.from(namesFromCanvas).sort();
+  }, [nodes, indicatorLibrary]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = e.target.value;
+    onChange(text);
+
+    const pos = e.target.selectionStart || 0;
+    const before = text.slice(0, pos);
+    const wordMatch = before.match(/[\w-]+$/);
+    const word = wordMatch ? wordMatch[0] : "";
+    setCursorWord(word);
+
+    if (word.length >= 2) {
+      const lower = word.toLowerCase();
+      const matches = indicatorNames.filter((n) => n.toLowerCase().includes(lower));
+      setSuggestions(matches.slice(0, 6));
+      setSelectedIdx(0);
+    } else {
+      setSuggestions([]);
+    }
+  }, [onChange, indicatorNames]);
+
+  const insertSuggestion = useCallback((name: string) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const pos = el.selectionStart || 0;
+    const before = value.slice(0, pos);
+    const after = value.slice(pos);
+    const wordMatch = before.match(/[\w-]+$/);
+    const wordStart = wordMatch ? pos - wordMatch[0].length : pos;
+    const newText = value.slice(0, wordStart) + name + after;
+    onChange(newText);
+    setSuggestions([]);
+    setCursorWord("");
+    setTimeout(() => {
+      const newPos = wordStart + name.length;
+      el.focus();
+      el.setSelectionRange(newPos, newPos);
+    }, 0);
+  }, [value, onChange]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (suggestions.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Tab" || e.key === "Enter") {
+      if (suggestions[selectedIdx]) {
+        e.preventDefault();
+        insertSuggestion(suggestions[selectedIdx]);
+      }
+    } else if (e.key === "Escape") {
+      setSuggestions([]);
+    }
+  }, [suggestions, selectedIdx, insertSuggestion]);
+
+  return (
+    <div className="relative mt-1.5">
+      <Textarea
+        ref={textareaRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setTimeout(() => setSuggestions([]), 150)}
+        placeholder={placeholder}
+        className="resize-none text-sm"
+        rows={3}
+        data-testid="input-tune-instruction"
+      />
+      {suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border bg-popover shadow-md" data-testid="indicator-suggestions">
+          {suggestions.map((name, i) => (
+            <button
+              key={name}
+              type="button"
+              className={`w-full text-left px-3 py-1.5 text-sm hover-elevate ${i === selectedIdx ? "bg-muted" : ""}`}
+              onMouseDown={(e) => { e.preventDefault(); insertSuggestion(name); }}
+              data-testid={`suggestion-indicator-${name.replace(/\s+/g, "-").toLowerCase()}`}
+            >
+              <span className="font-medium">{name}</span>
+              {cursorWord && (() => {
+                const lower = name.toLowerCase();
+                const idx = lower.indexOf(cursorWord.toLowerCase());
+                if (idx >= 0) {
+                  return (
+                    <span className="text-muted-foreground text-xs ml-2">
+                      match: "{name.slice(idx, idx + cursorWord.length)}"
+                    </span>
+                  );
+                }
+                return null;
+              })()}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 class ChartErrorBoundary extends Component<
   { children: ReactNode; onClose: () => void },
   { hasError: boolean; error: Error | null }
@@ -3346,6 +3480,12 @@ function ScanChartViewer({
   const { toast } = useToast();
 
   const [thresholdToastShown, setThresholdToastShown] = useState(false);
+  const [commitReadyBanner, setCommitReadyBanner] = useState<string | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current); };
+  }, []);
 
   const ratingMutation = useMutation({
     mutationFn: async ({ symbol, rating, price, indicatorSnapshot }: { symbol: string; rating: "up" | "down"; price: number; indicatorSnapshot?: any }) => {
@@ -3366,7 +3506,9 @@ function ScanChartViewer({
         const threshold = Math.max(1, Math.ceil(total * 0.3));
         if (tuningActive && ratedCount >= threshold && !thresholdToastShown) {
           setThresholdToastShown(true);
-          toast({ title: "Ready to commit", description: `You've rated ${ratedCount} of ${total} charts — enough to save & commit your tuning changes.` });
+          setCommitReadyBanner(`You've rated ${ratedCount} of ${total} charts — enough to save & commit your tuning changes.`);
+          if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+          bannerTimerRef.current = setTimeout(() => setCommitReadyBanner(null), 5000);
         }
         return updated;
       });
@@ -3543,6 +3685,17 @@ function ScanChartViewer({
       data-testid="scan-chart-overlay"
     >
       <div className="absolute inset-0 bg-black/80" />
+      {commitReadyBanner && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none" data-testid="commit-ready-banner">
+          <div className="bg-background/95 border border-rs-green/30 rounded-lg px-6 py-4 shadow-2xl max-w-md text-center animate-in fade-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <CheckCircle2 className="h-5 w-5 text-rs-green" />
+              <span className="text-sm font-semibold text-rs-green">Ready to Commit</span>
+            </div>
+            <p className="text-xs text-muted-foreground">{commitReadyBanner}</p>
+          </div>
+        </div>
+      )}
       <div className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-6">
         <div className="flex items-center gap-3 flex-shrink-0 mb-3">
           <BarChart3 className="w-5 h-5" />
