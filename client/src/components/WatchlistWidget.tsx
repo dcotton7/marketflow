@@ -1,7 +1,8 @@
 import { useWatchlist, useRemoveFromWatchlist } from "@/hooks/use-watchlist";
-import { Link } from "wouter";
-import { X, TrendingUp, TrendingDown, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { X, TrendingUp, TrendingDown, Loader2, ChevronDown, ChevronUp, MessageSquare, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -11,6 +12,7 @@ interface WatchlistQuote {
 }
 
 export function WatchlistWidget() {
+  const [, setLocation] = useLocation();
   const { data: watchlist, isLoading } = useWatchlist();
   const { mutate: remove, isPending: isRemoving } = useRemoveFromWatchlist();
   const [isExpanded, setIsExpanded] = useState(true);
@@ -89,16 +91,51 @@ export function WatchlistWidget() {
                         )}
                       </div>
                     </Link>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground h-6 w-6"
-                      onClick={() => remove(item.id)}
-                      disabled={isRemoving}
-                      data-testid={`button-remove-${item.symbol}`}
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground h-6 w-6"
+                            onClick={(e) => { e.stopPropagation(); setLocation(`/sentinel/evaluate?symbol=${item.symbol}&from=watchlist`); }}
+                            data-testid={`button-evaluate-${item.symbol}`}
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">Evaluate</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground h-6 w-6"
+                            onClick={(e) => { e.stopPropagation(); setLocation(`/symbol/${item.symbol}`); }}
+                            data-testid={`button-chart-${item.symbol}`}
+                          >
+                            <BarChart3 className="w-3 h-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">Open Chart</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground h-6 w-6"
+                            onClick={() => remove(item.id)}
+                            disabled={isRemoving}
+                            data-testid={`button-remove-${item.symbol}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">Remove</TooltipContent>
+                      </Tooltip>
+                    </div>
                   </div>
                 );
               })}

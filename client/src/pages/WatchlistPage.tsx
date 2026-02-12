@@ -89,7 +89,7 @@ function WatchlistItem({ item, onRemove }: {
                 data-testid={`button-ask-ivy-${item.symbol}`}
               >
                 <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
-                Ask Ivy
+                Evaluate
               </Button>
             </TooltipTrigger>
             <TooltipContent>Get an AI trade evaluation with current pricing</TooltipContent>
@@ -103,7 +103,7 @@ function WatchlistItem({ item, onRemove }: {
                 data-testid={`button-open-chart-${item.symbol}`}
               >
                 <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
-                Open in Charts
+                Open Chart
               </Button>
             </TooltipTrigger>
             <TooltipContent>Open full chart view with technical tools</TooltipContent>

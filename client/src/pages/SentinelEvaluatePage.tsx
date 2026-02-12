@@ -2554,7 +2554,6 @@ export default function SentinelEvaluatePage() {
                               thesis: thesis || `Evaluated via Ivy AI - Score: ${result?.evaluation?.score || '?'}/100`,
                             });
                             toast({ title: "Added to Watchlist", description: `${symbol.toUpperCase()} added for monitoring` });
-                            setLocation("/sentinel/dashboard?tab=watchlist");
                           } catch (err: any) {
                             toast({ title: "Could not add to watchlist", description: err?.message || "Something went wrong", variant: "destructive" });
                           }
