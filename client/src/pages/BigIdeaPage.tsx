@@ -69,6 +69,8 @@ import {
   CornerDownRight,
   CheckCircle2,
   XCircle,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -1590,7 +1592,7 @@ export default function BigIdeaPage() {
               New Thought
             </Button>
           </div>
-          <ScrollArea className="flex-1">
+          <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-2 space-y-3">
               {thoughtsLoading ? (
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -1651,7 +1653,6 @@ export default function BigIdeaPage() {
                 ))
               )}
             </div>
-          </ScrollArea>
           {debugInfo && (
             <div className="border-t" data-testid="scan-debug-panel">
               <button
@@ -1810,6 +1811,7 @@ export default function BigIdeaPage() {
               )}
             </div>
           )}
+          </div>
           <div
             className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
             onPointerDown={handleThoughtsResizeStart}
@@ -2671,6 +2673,22 @@ function ScanChartViewer({
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
+  const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
+
+  const { toast } = useToast();
+
+  const ratingMutation = useMutation({
+    mutationFn: async ({ symbol, rating, price }: { symbol: string; rating: "up" | "down"; price: number }) => {
+      const res = await apiRequest("POST", "/api/bigidea/chart-rating", { symbol, rating, price });
+      return res.json();
+    },
+    onSuccess: (_data, variables) => {
+      setChartRatings(prev => ({ ...prev, [variables.symbol]: variables.rating }));
+    },
+    onError: () => {
+      toast({ title: "Rating failed", description: "Could not save your chart rating. Please try again.", variant: "destructive" });
+    },
+  });
 
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
@@ -2909,6 +2927,48 @@ function ScanChartViewer({
               <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
             </TooltipContent>
           </Tooltip>
+          <div className="flex items-center gap-1 border rounded-md px-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={`toggle-elevate ${chartRatings[symbol] === "up" ? "toggle-elevated text-green-500" : ""}`}
+                  onClick={() => {
+                    const price = dayChange?.price ?? current?.price ?? 0;
+                    ratingMutation.mutate({ symbol, rating: "up", price });
+                  }}
+                  disabled={ratingMutation.isPending}
+                  data-testid="button-chart-thumbsup"
+                >
+                  <ThumbsUp className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-sm">Good scan result — this chart looks promising. Your ratings help AI tune scan parameters over time.</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={`toggle-elevate ${chartRatings[symbol] === "down" ? "toggle-elevated text-red-500" : ""}`}
+                  onClick={() => {
+                    const price = dayChange?.price ?? current?.price ?? 0;
+                    ratingMutation.mutate({ symbol, rating: "down", price });
+                  }}
+                  disabled={ratingMutation.isPending}
+                  data-testid="button-chart-thumbsdown"
+                >
+                  <ThumbsDown className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-sm">Poor scan result — this chart doesn't fit what you're looking for. Helps AI learn your preferences.</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Button
             size="icon"
             variant="ghost"
