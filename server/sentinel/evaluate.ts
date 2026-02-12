@@ -421,7 +421,7 @@ export async function evaluateTrade(
   const evaluation: EvaluationResult = {
     // Core decision gate
     score: Math.min(100, Math.max(0, parsed.score || 50)),
-    status: ['GREEN', 'YELLOW', 'RED'].includes(parsed.status) ? parsed.status : 'YELLOW',
+    status: ['GREEN', 'YELLOW', 'NEEDS_PLAN', 'RED'].includes(parsed.status) ? parsed.status : 'YELLOW',
     confidence: ['HIGH', 'MEDIUM', 'LOW'].includes(parsed.confidence) ? parsed.confidence : 'MEDIUM',
     modelTag: ['BREAKOUT', 'RECLAIM', 'CUP_AND_HANDLE', 'PULLBACK', 'EPISODIC_PIVOT', 'UNKNOWN'].includes(parsed.modelTag) 
       ? parsed.modelTag : 'UNKNOWN',

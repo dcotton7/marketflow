@@ -115,7 +115,7 @@ interface EvaluationResult {
   evaluation: {
     // Core decision gate
     score: number;
-    status: 'GREEN' | 'YELLOW' | 'RED';
+    status: 'GREEN' | 'YELLOW' | 'NEEDS_PLAN' | 'RED';
     confidence: 'HIGH' | 'MEDIUM' | 'LOW';
     modelTag: 'BREAKOUT' | 'RECLAIM' | 'CUP_AND_HANDLE' | 'PULLBACK' | 'EPISODIC_PIVOT' | 'UNKNOWN';
     instrumentType?: 'ETF' | 'STOCK' | 'INDEX';
@@ -1676,7 +1676,8 @@ export default function SentinelEvaluatePage() {
                 {/* Header Section */}
                 <Card className={`border-l-4 ${
                   result.evaluation.status === 'GREEN' ? 'border-l-green-500' :
-                  result.evaluation.status === 'RED' ? 'border-l-red-500' : 'border-l-yellow-500'
+                  result.evaluation.status === 'RED' ? 'border-l-red-500' :
+                  result.evaluation.status === 'NEEDS_PLAN' ? 'border-l-amber-500' : 'border-l-yellow-500'
                 }`}>
                   <CardContent className="pt-4">
                     {/* Ticker / Direction / Model Tag Header */}
@@ -1701,7 +1702,8 @@ export default function SentinelEvaluatePage() {
                     {result.evaluation.verdictSummary && (
                       <div className={`p-3 rounded-md mb-3 ${
                         result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
-                        result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
+                        result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' :
+                        result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
                       }`} data-testid="verdict-summary">
                         <p className="text-sm font-medium mb-1">Verdict:</p>
                         <p className="text-sm">{result.evaluation.verdictSummary.verdict}</p>
@@ -1721,7 +1723,8 @@ export default function SentinelEvaluatePage() {
                     {/* Decision Gate - Top of results */}
                     <div className={`p-4 rounded-md mb-3 ${
                       result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
-                      result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
+                      result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' :
+                      result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
                     }`} data-testid="decision-gate">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -1729,15 +1732,18 @@ export default function SentinelEvaluatePage() {
                             <CheckCircle2 className="w-8 h-8 text-green-500" />
                           ) : result.evaluation.status === 'RED' ? (
                             <XCircle className="w-8 h-8 text-red-500" />
+                          ) : result.evaluation.status === 'NEEDS_PLAN' ? (
+                            <AlertTriangle className="w-8 h-8 text-amber-500" />
                           ) : (
                             <AlertTriangle className="w-8 h-8 text-yellow-500" />
                           )}
                           <div>
                             <p className={`text-lg font-bold ${
                               result.evaluation.status === 'GREEN' ? 'text-green-500' :
-                              result.evaluation.status === 'RED' ? 'text-red-500' : 'text-yellow-500'
+                              result.evaluation.status === 'RED' ? 'text-red-500' :
+                              result.evaluation.status === 'NEEDS_PLAN' ? 'text-amber-500' : 'text-yellow-500'
                             }`} data-testid="text-status">
-                              {result.evaluation.status}
+                              {result.evaluation.status === 'NEEDS_PLAN' ? 'NEEDS PLAN' : result.evaluation.status}
                             </p>
                             <p className="text-sm text-muted-foreground">Decision Gate</p>
                           </div>
@@ -1771,74 +1777,105 @@ export default function SentinelEvaluatePage() {
                           <DollarSign className="w-4 h-4 text-blue-400" />
                           Your Risk/Reward Breakdown
                         </p>
-                        <div className="space-y-2 text-sm">
-                          {/* Risk Line */}
-                          <div className="flex flex-wrap gap-x-6 gap-y-1">
-                            <span>
-                              <span className="text-muted-foreground">Risking: </span>
-                              <span className="font-bold text-red-400">
-                                {(() => {
-                                  const rps = result.evaluation.planSummary?.riskPerShare;
-                                  if (!rps) return "—";
-                                  const num = parseFloat(String(rps).replace(/[^0-9.-]/g, ''));
-                                  return isNaN(num) ? rps : `$${Math.abs(num).toFixed(2)}`;
-                                })()} / Share
-                              </span>
-                            </span>
-                            <span>
-                              <span className="text-muted-foreground">Total Risk: </span>
-                              <span className="font-bold text-red-400">
-                                {(() => {
-                                  const tr = result.evaluation.moneyBreakdown.totalRisk;
-                                  if (!tr) return "—";
-                                  const num = parseFloat(String(tr).replace(/[^0-9.-]/g, ''));
-                                  return isNaN(num) ? tr : `$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                                })()}
-                              </span>
-                            </span>
-                          </div>
+                        {(() => {
+                          const planStop = result.evaluation.planSummary?.stop;
+                          const planStopNum = planStop ? parseFloat(String(planStop).replace(/[^0-9.-]/g, '')) : 0;
+                          const hasStop = (stopPrice && parseFloat(stopPrice) > 0) || (stopPriceChoice && stopPriceChoice !== "none") || (planStopNum > 0);
+                          const hasTarget = (targetPrice && parseFloat(targetPrice) > 0) || (targetProfitPrice && parseFloat(targetProfitPrice) > 0) || (targetPriceChoice && targetPriceChoice !== "none") || (targetProfitChoice && targetProfitChoice !== "none");
+                          const hasBoth = hasStop && hasTarget;
                           
-                          {/* Profit Lines - Per Share */}
-                          <div className="flex flex-wrap gap-x-6 gap-y-1">
-                            {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
-                              <span>
-                                <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
-                                <span className="font-bold text-green-400">
-                                  {(() => {
-                                    const val = result.evaluation.moneyBreakdown.firstTrimProfitPerShare;
-                                    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
-                                    return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toFixed(2)}`;
-                                  })()}/share
-                                </span>
-                              </span>
-                            )}
-                            {result.evaluation.moneyBreakdown.targetProfitPerShare && (
-                              <span>
-                                <span className="text-muted-foreground">Target @ 70%: </span>
-                                <span className="font-bold text-green-400">
-                                  {(() => {
-                                    const val = result.evaluation.moneyBreakdown.targetProfitPerShare;
-                                    const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
-                                    return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toFixed(2)}`;
-                                  })()}/share
-                                </span>
-                              </span>
-                            )}
-                          </div>
+                          if (!hasStop && !hasTarget) {
+                            return (
+                              <div className="text-sm text-amber-400/80 italic p-2 bg-amber-500/10 rounded">
+                                Define a stop loss and profit target to see your risk/reward breakdown. Check Ivy's suggested levels below.
+                              </div>
+                            );
+                          }
                           
-                          {/* Total Gain Line */}
-                          <div className="pt-1 border-t border-blue-500/30">
-                            <span className="text-muted-foreground">Total Gain: </span>
-                            <span className="font-bold text-green-500">
-                              {(() => {
-                                const val = result.evaluation.moneyBreakdown.totalPotentialProfit;
-                                if (!val) return "—";
-                                const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
-                                return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                              })()}
-                            </span>
-                          </div>
-                        </div>
+                          return (
+                            <div className="space-y-2 text-sm">
+                              {!hasStop && (
+                                <div className="text-xs text-amber-400/80 italic mb-1">
+                                  No stop defined — risk calculations require a stop loss level. See Ivy's suggestions below.
+                                </div>
+                              )}
+                              {!hasTarget && (
+                                <div className="text-xs text-amber-400/80 italic mb-1">
+                                  No target defined — profit calculations require a target price. See Ivy's suggestions below.
+                                </div>
+                              )}
+                              {hasStop && (
+                                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                                  <span>
+                                    <span className="text-muted-foreground">Risking: </span>
+                                    <span className="font-bold text-red-400">
+                                      {(() => {
+                                        const rps = result.evaluation.planSummary?.riskPerShare;
+                                        if (!rps) return "—";
+                                        const num = parseFloat(String(rps).replace(/[^0-9.-]/g, ''));
+                                        return isNaN(num) ? rps : `$${Math.abs(num).toFixed(2)}`;
+                                      })()} / Share
+                                    </span>
+                                  </span>
+                                  <span>
+                                    <span className="text-muted-foreground">Total Risk: </span>
+                                    <span className="font-bold text-red-400">
+                                      {(() => {
+                                        const tr = result.evaluation.moneyBreakdown.totalRisk;
+                                        if (!tr) return "—";
+                                        const num = parseFloat(String(tr).replace(/[^0-9.-]/g, ''));
+                                        return isNaN(num) ? tr : `$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                      })()}
+                                    </span>
+                                  </span>
+                                </div>
+                              )}
+                              
+                              {hasTarget && (
+                                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                                  {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
+                                    <span>
+                                      <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
+                                      <span className="font-bold text-green-400">
+                                        {(() => {
+                                          const val = result.evaluation.moneyBreakdown.firstTrimProfitPerShare;
+                                          const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toFixed(2)}`;
+                                        })()}/share
+                                      </span>
+                                    </span>
+                                  )}
+                                  {result.evaluation.moneyBreakdown.targetProfitPerShare && (
+                                    <span>
+                                      <span className="text-muted-foreground">Target @ 70%: </span>
+                                      <span className="font-bold text-green-400">
+                                        {(() => {
+                                          const val = result.evaluation.moneyBreakdown.targetProfitPerShare;
+                                          const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toFixed(2)}`;
+                                        })()}/share
+                                      </span>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {hasBoth && (
+                                <div className="pt-1 border-t border-blue-500/30">
+                                  <span className="text-muted-foreground">Total Gain: </span>
+                                  <span className="font-bold text-green-500">
+                                    {(() => {
+                                      const val = result.evaluation.moneyBreakdown.totalPotentialProfit;
+                                      if (!val) return "—";
+                                      const num = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+                                      return isNaN(num) ? `+${val}` : `+$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                    })()}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         
                         {/* More Info Section - How the numbers are calculated */}
                         <div className="mt-3 pt-2 border-t border-blue-500/20" data-testid="more-info">
@@ -1865,7 +1902,14 @@ export default function SentinelEvaluatePage() {
                                       ? parseFloat(positionSize) 
                                       : Math.round(parseFloat(positionSize) / entry)) 
                                     : 0;
-                                  const riskPerShare = direction === "long" ? entry - stop : stop - entry;
+                                  const hasStopVal = stop > 0;
+                                  const hasTargetVal = target1 > 0 || target2 > 0;
+                                  
+                                  if (!hasStopVal && !hasTargetVal) {
+                                    return <p className="text-amber-400/70 italic">Provide a stop loss and target price to see detailed calculations.</p>;
+                                  }
+                                  
+                                  const riskPerShare = hasStopVal ? (direction === "long" ? entry - stop : stop - entry) : 0;
                                   const totalRisk = riskPerShare * shares;
                                   const firstTrimGain = target1 > 0 
                                     ? (direction === "long" ? (target1 - entry) * (shares * 0.3) : (entry - target1) * (shares * 0.3))
@@ -1877,15 +1921,21 @@ export default function SentinelEvaluatePage() {
                                   
                                   return (
                                     <>
-                                      <p>Risk per share = |Entry ${entry.toFixed(2)} - Stop ${stop.toFixed(2)}| = <span className="text-red-400 font-medium">${Math.abs(riskPerShare).toFixed(2)}</span></p>
-                                      <p>Total risk = ${Math.abs(riskPerShare).toFixed(2)} x {shares} shares = <span className="text-red-400 font-medium">${Math.abs(totalRisk).toFixed(2)}</span></p>
+                                      {hasStopVal ? (
+                                        <>
+                                          <p>Risk per share = |Entry ${entry.toFixed(2)} - Stop ${stop.toFixed(2)}| = <span className="text-red-400 font-medium">${Math.abs(riskPerShare).toFixed(2)}</span></p>
+                                          <p>Total risk = ${Math.abs(riskPerShare).toFixed(2)} x {shares} shares = <span className="text-red-400 font-medium">${Math.abs(totalRisk).toFixed(2)}</span></p>
+                                        </>
+                                      ) : (
+                                        <p className="text-amber-400/70 italic">No stop defined — risk per share not calculated</p>
+                                      )}
                                       {target1 > 0 && (
                                         <p>First trim (30% of shares): sell {Math.round(shares * 0.3)} shares at ${target1.toFixed(2)} = <span className="text-green-400">+${firstTrimGain.toFixed(2)}</span></p>
                                       )}
                                       {target2 > 0 && (
                                         <p>Remaining (70% of shares): sell {Math.round(shares * 0.7)} shares at ${target2.toFixed(2)} = <span className="text-green-400">+${targetGain.toFixed(2)}</span></p>
                                       )}
-                                      <p>Total potential gain = <span className="text-green-400 font-medium">+${totalGain.toFixed(2)}</span></p>
+                                      {hasTargetVal && <p>Total potential gain = <span className="text-green-400 font-medium">+${totalGain.toFixed(2)}</span></p>}
                                       {riskPerShare > 0 && totalGain > 0 && (
                                         <p>Overall R:R = {(totalGain / totalRisk).toFixed(1)}:1</p>
                                       )}

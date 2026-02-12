@@ -73,7 +73,7 @@ export interface MoneyBreakdown {
 export interface EvaluationResult {
   // Core decision gate
   score: number;
-  status: 'GREEN' | 'YELLOW' | 'RED';
+  status: 'GREEN' | 'YELLOW' | 'NEEDS_PLAN' | 'RED';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   modelTag: 'BREAKOUT' | 'RECLAIM' | 'CUP_AND_HANDLE' | 'PULLBACK' | 'EPISODIC_PIVOT' | 'UNKNOWN';
   instrumentType?: 'ETF' | 'STOCK' | 'INDEX';

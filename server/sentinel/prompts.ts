@@ -79,11 +79,13 @@ Evaluate targets whether or not the user provided them:
 
 ### 4. Risk Assessment
 Classify and present risk flags:
-- FATAL (must fix): R:R < 1, no stop, thesis contradiction
+- FATAL (must fix): R:R < 1 (when both stop AND target are defined), thesis contradiction, stock is in a structurally broken position (below all key MAs, in confirmed downtrend)
 - CONTEXTUAL: Regime mismatch, stop sensitivity, overhead resistance
-- MISSING_INPUT: Info not provided, not necessarily wrong
+- MISSING_INPUT: Info not provided — not necessarily wrong. Includes: no stop defined, no target defined, missing position size, missing thesis. These are ADVISORY gaps, not failures.
 
-Flag codes: CHASE_RISK, OVERHEAD_RESISTANCE, WIDE_STOP, TIGHT_STOP, POOR_RR, FATAL_RR, HEADWIND_REGIME, THESIS_VAGUE, OVERSIZED, EXTENDED, BELOW_KEY_MA, RULE_VIOLATION, NO_STOP, STRUCTURAL_ISSUE
+IMPORTANT: Missing stops and targets are MISSING_INPUT, NOT FATAL. This is an advisory tool. If the stock's technical position is sound, do not fail the trade just because the user hasn't defined risk parameters yet. Instead, suggest logical levels and encourage the user to define them.
+
+Flag codes: CHASE_RISK, OVERHEAD_RESISTANCE, WIDE_STOP, TIGHT_STOP, POOR_RR, FATAL_RR, HEADWIND_REGIME, THESIS_VAGUE, OVERSIZED, EXTENDED, BELOW_KEY_MA, RULE_VIOLATION, NO_STOP, NO_TARGET, STRUCTURAL_ISSUE
 
 ### 5. What Could Make This Better
 2-3 specific, actionable changes that would improve the score. Be concrete with prices and levels.
@@ -96,11 +98,18 @@ Check the trader's personal rules against this trade. For each rule: followed, v
 - Single stock: Apply full rigor to all rules
 - Index-linked: Consider correlation to broader market
 
+## STATUS DECISION RULES
+Choose the status based on BOTH the stock's technical position AND the completeness of the trade plan:
+- **GREEN**: Stock is in a good technical position AND the trade plan is well-defined (stop, target, position size all provided with reasonable values)
+- **YELLOW**: Stock position is acceptable but has some concerns (extended, approaching resistance, mixed signals) — regardless of whether stops/targets are defined
+- **NEEDS_PLAN**: Stock is in a sound technical position but the user has NOT defined key risk parameters (stop, target, or both). The setup looks promising but needs a complete plan before execution. Use this when you would otherwise give GREEN or YELLOW but stops/targets are missing.
+- **RED**: Stock is in a genuinely poor technical position — structurally broken, in confirmed downtrend, below all key MAs, extremely extended in profit-taking zone, or has FATAL issues like contradictory thesis. Do NOT use RED solely because stops/targets are missing.
+
 ## RESPONSE FORMAT
 Respond with a JSON object:
 {
   "score": <1-100>,
-  "status": "<GREEN|YELLOW|RED>",
+  "status": "<GREEN|YELLOW|NEEDS_PLAN|RED>",
   "confidence": "<HIGH|MEDIUM|LOW>",
   "modelTag": "<BREAKOUT|RECLAIM|CUP_AND_HANDLE|PULLBACK|EPISODIC_PIVOT|UNKNOWN>",
   "instrumentType": "<ETF|STOCK|INDEX>",
@@ -109,7 +118,7 @@ Respond with a JSON object:
     "bad": ["<2-3 brief bullets: what's risky or concerning>"]
   },
   "verdictSummary": {
-    "verdict": "<One sentence: This plan [passes/needs work/fails] because [primary reason]>",
+    "verdict": "<One sentence: This plan [passes/needs a plan/needs work/fails] because [primary reason]>",
     "primaryBlockers": ["<1-3 FATAL issues only, empty array if none>"]
   },
   "moneyBreakdown": {
@@ -202,15 +211,23 @@ Key principle: A winning trade with poor process is WORSE than a losing trade wi
 
 ## FLAG CLASSIFICATION
 Classify flags into tiers for clarity:
-- FATAL: Must-fix structural issues (no stop, R:R < 1, thesis contradiction)
+- FATAL: Must-fix structural issues (R:R < 1 when both defined, thesis contradiction, structurally broken stock)
 - CONTEXTUAL: Situation-dependent concerns (regime mismatch, stop sensitivity)
-- MISSING_INPUT: Info not provided, not necessarily violated
+- MISSING_INPUT: Info not provided — advisory gaps, not failures. Includes: no stop, no target, missing position size.
+
+IMPORTANT: Missing stops and targets are MISSING_INPUT, NOT FATAL. This is an advisory tool. Evaluate the stock's technical merit independently of whether risk parameters were defined.
+
+## STATUS DECISION RULES
+- **GREEN**: Good technical position AND well-defined trade plan
+- **YELLOW**: Acceptable position with some concerns
+- **NEEDS_PLAN**: Sound technical position but missing key risk parameters (stop/target). Setup is promising but needs a complete plan.
+- **RED**: Genuinely poor technical position — NOT used solely because stops/targets are missing.
 
 ## RESPONSE FORMAT
 Respond with a JSON object:
 {
   "score": <1-100 process quality score>,
-  "status": "<GREEN|YELLOW|RED>",
+  "status": "<GREEN|YELLOW|NEEDS_PLAN|RED>",
   "confidence": "<HIGH|MEDIUM|LOW>",
   "modelTag": "<BREAKOUT|RECLAIM|CUP_AND_HANDLE|PULLBACK|EPISODIC_PIVOT|UNKNOWN>",
   "verdictSummary": {
