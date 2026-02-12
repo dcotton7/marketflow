@@ -2230,19 +2230,27 @@ export default function SentinelEvaluatePage() {
                                 </div>
                               </div>
                             )}
-                            {aiTP > 0 && aiTP !== userTP && (
-                              <div className="p-2.5 rounded-md border-2 border-green-500/50 bg-green-500/5 flex flex-col gap-1.5" data-testid="ai-target">
+                            {aiTP > 0 && aiTP !== userTP && (() => {
+                              const resistPct = aiSugg?.distancePercent ?? aiProfitPct;
+                              const rColor = resistPct < 3
+                                ? { border: 'border-red-500/50', bg: 'bg-red-500/5', text: 'text-red-400', badgeBg: 'bg-red-500/10', badgeBorder: 'border-red-500/30' }
+                                : resistPct < 6
+                                ? { border: 'border-amber-500/50', bg: 'bg-amber-500/5', text: 'text-amber-400', badgeBg: 'bg-amber-500/10', badgeBorder: 'border-amber-500/30' }
+                                : { border: 'border-green-500/50', bg: 'bg-green-500/5', text: 'text-green-400', badgeBg: 'bg-green-500/10', badgeBorder: 'border-green-500/30' };
+                              return (
+                              <div className={`p-2.5 rounded-md border-2 ${rColor.border} ${rColor.bg} flex flex-col gap-1.5`} data-testid="ai-target">
                                 <div className="flex items-center justify-between flex-wrap gap-2">
                                   <div className="flex items-center gap-2">
-                                    <Zap className="w-4 h-4 text-green-400 shrink-0" />
-                                    <span className="text-sm font-bold text-green-400">Key Resistance{aiSugg?.label ? `: ${aiSugg.label}` : ''}</span>
+                                    <Zap className={`w-4 h-4 ${rColor.text} shrink-0`} />
+                                    <span className={`text-sm font-bold ${rColor.text}`}>Key Resistance{aiSugg?.label ? `: ${aiSugg.label}` : ''}</span>
                                   </div>
                                   <div className="flex items-center gap-3 text-sm">
-                                    <span className="font-bold text-green-400">${aiTP.toFixed(2)}</span>
+                                    <span className={`font-bold ${rColor.text}`}>${aiTP.toFixed(2)}</span>
+                                    <span className="text-muted-foreground">{resistPct.toFixed(1)}% from entry</span>
                                     <span className="text-muted-foreground">+${aiProfitPS.toFixed(2)}/sh (+{aiProfitPct.toFixed(1)}%)</span>
-                                    {shares > 0 && <span className="text-green-400 font-medium">+${aiTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                                    {shares > 0 && <span className={`${rColor.text} font-medium`}>+${aiTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                                     {aiSugg?.rrRatio && (
-                                      <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                      <Badge variant="outline" className={`text-xs ${rColor.badgeBg} ${rColor.text} ${rColor.badgeBorder}`}>
                                         R:R {aiSugg.rrRatio}
                                       </Badge>
                                     )}
@@ -2252,7 +2260,8 @@ export default function SentinelEvaluatePage() {
                                   <p className="text-xs text-foreground/80">{aiSugg.reasoning}</p>
                                 )}
                               </div>
-                            )}
+                              );
+                            })()}
                           </div>
                         );
                       })()}
@@ -2260,14 +2269,21 @@ export default function SentinelEvaluatePage() {
                       {result.evaluation.logicalTargets.suggestions.length > 1 && (
                         <div className="space-y-2 mt-2">
                           <p className="text-sm font-medium text-muted-foreground">Other Levels:</p>
-                          {result.evaluation.logicalTargets.suggestions.slice(1).map((s, i) => (
-                            <div key={i} className="p-3 rounded-md border bg-muted/30">
+                          {result.evaluation.logicalTargets.suggestions.slice(1).map((s, i) => {
+                            const sPct = s.distancePercent ?? 0;
+                            const sColor = sPct < 3
+                              ? { text: 'text-red-400', badgeBg: 'bg-red-500/10', badgeBorder: 'border-red-500/30', border: 'border-red-500/30' }
+                              : sPct < 6
+                              ? { text: 'text-amber-400', badgeBg: 'bg-amber-500/10', badgeBorder: 'border-amber-500/30', border: 'border-amber-500/30' }
+                              : { text: 'text-green-400', badgeBg: 'bg-green-500/10', badgeBorder: 'border-green-500/30', border: 'border-green-500/30' };
+                            return (
+                            <div key={i} className={`p-3 rounded-md border ${sColor.border} bg-muted/30`}>
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <span className="font-medium text-sm">{s.label}</span>
-                                <span className="text-sm font-bold text-green-400">${s.price.toFixed(2)}</span>
-                                <span className="text-xs text-muted-foreground">{s.distancePercent.toFixed(1)}% from entry</span>
+                                <span className={`text-sm font-bold ${sColor.text}`}>${s.price.toFixed(2)}</span>
+                                <span className="text-xs text-muted-foreground">{sPct.toFixed(1)}% from entry</span>
                                 {s.rrRatio && (
-                                  <Badge variant="outline" className="text-xs bg-green-500/10 text-green-400 border-green-500/30">
+                                  <Badge variant="outline" className={`text-xs ${sColor.badgeBg} ${sColor.text} ${sColor.badgeBorder}`}>
                                     R:R {s.rrRatio}
                                   </Badge>
                                 )}
@@ -2290,7 +2306,8 @@ export default function SentinelEvaluatePage() {
                               </div>
                               <p className="text-xs text-muted-foreground">{s.reasoning}</p>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                       {result.evaluation.logicalTargets.partialProfitIdea && (

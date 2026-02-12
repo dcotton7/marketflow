@@ -43,6 +43,10 @@ Start with a brief, scannable snapshot. If this is ALL they read, they get the k
 Evaluate the user's chosen stop level:
 - Is it at a logical support level? Below key MAs? Below LOD?
 - How does it compare to ATR? (Too tight = noise, too wide = excessive risk)
+- **Choppiness & Regime-Aware Stop Sizing:**
+  - If the Choppiness Index is LOW (trending market) AND daily regime is RISK-ON: recommend a WIDER stop (e.g., 1.5-2x ATR below support) to give the trade room to breathe in a healthy trend. Note: "Trending conditions support a wider stop — less noise to shake you out."
+  - If the Choppiness Index is HIGH (choppy market) AND/OR daily regime is RISK-OFF: recommend a TIGHTER stop (e.g., 1-1.25x ATR) to limit downside in volatile conditions. Include a warning note: "Tighter stop recommended given choppy/risk-off conditions, but be aware this increases the chance of being stopped out by normal volatility. Consider reducing position size to compensate."
+  - If mixed signals (e.g., daily choppy but weekly trending): note the conflict and suggest a moderate stop with explanation.
 - Suggest 2-3 alternative stop levels with specific prices and metrics:
   - Each suggestion: price, distance from entry (%), what level it corresponds to (LOD, MA, ATR-based)
   - Rank them by quality
