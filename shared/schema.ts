@@ -100,8 +100,9 @@ export const sentinelUsers = pgTable("sentinel_users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   accountSize: doublePrecision("account_size").default(1000000), // Default $1M
-  isAdmin: boolean("is_admin").default(false), // Admin users can create/view special labels
-  communityOptIn: boolean("community_opt_in").default(false), // Allow anonymous rule performance sharing
+  isAdmin: boolean("is_admin").default(false),
+  tier: text("tier").default("standard").notNull(), // "standard" | "pro" | "admin"
+  communityOptIn: boolean("community_opt_in").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1258,3 +1259,34 @@ export type ScannerFavorite = typeof scannerFavorites.$inferSelect;
 export type InsertScannerThought = z.infer<typeof insertScannerThoughtSchema>;
 export type InsertScannerIdea = z.infer<typeof insertScannerIdeaSchema>;
 export type InsertScannerFavorite = z.infer<typeof insertScannerFavoriteSchema>;
+
+// === SCAN TUNING & RATINGS ===
+
+export const scanTuningHistory = pgTable("scan_tuning_history", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ideaId: integer("idea_id"),
+  scanConfig: jsonb("scan_config").notNull(),
+  funnelData: jsonb("funnel_data").notNull(),
+  aiSuggestions: jsonb("ai_suggestions").notNull(),
+  acceptedSuggestions: jsonb("accepted_suggestions"),
+  resultCountBefore: integer("result_count_before").notNull(),
+  resultCountAfter: integer("result_count_after"),
+  userFeedback: text("user_feedback"), // "thumbs_up" | "thumbs_down" | null
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const scanChartRatings = pgTable("scan_chart_ratings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ideaId: integer("idea_id"),
+  symbol: text("symbol").notNull(),
+  rating: text("rating").notNull(), // "up" | "down"
+  scanConfig: jsonb("scan_config"),
+  indicatorSnapshot: jsonb("indicator_snapshot"),
+  price: doublePrecision("price"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ScanTuningHistory = typeof scanTuningHistory.$inferSelect;
+export type ScanChartRating = typeof scanChartRatings.$inferSelect;

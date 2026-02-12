@@ -1,7 +1,7 @@
 import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
-import { scannerThoughts, scannerIdeas, scannerFavorites } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, sentinelUsers } from "@shared/schema";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
 import { evaluateScanQuality } from "./quality";
 import OpenAI from "openai";
@@ -1001,9 +1001,23 @@ Each criterion follows this structure:
 
       const results: Array<{ symbol: string; name: string; price: number; passedPaths: string[] }> = [];
       const thoughtCounts: Record<string, number> = {};
+      const funnelData: {
+        totalTickers: number;
+        fetchFails: number;
+        tooFewCandles: number;
+        perThought: Record<string, { name: string; passed: number; failed: number; failedTickers: string[] }>;
+        perIndicator: Record<string, { name: string; passed: number; failed: number; diagnosticSamples: Array<{ symbol: string; value: string; threshold: string }> }>;
+      } = {
+        totalTickers: tickers.length,
+        fetchFails: 0,
+        tooFewCandles: 0,
+        perThought: {},
+        perIndicator: {},
+      };
 
       for (const node of thoughtNodes) {
         thoughtCounts[node.id] = 0;
+        funnelData.perThought[node.id] = { name: node.thoughtName || "Unnamed", passed: 0, failed: 0, failedTickers: [] };
       }
 
       let fetchFailCount = 0;
@@ -1061,6 +1075,30 @@ Each criterion follows this structure:
                 nodeCriteriaResults[node.id] = evalResult.criteriaResults;
                 if (passed) {
                   thoughtCounts[node.id]++;
+                  if (funnelData.perThought[node.id]) funnelData.perThought[node.id].passed++;
+                } else {
+                  if (funnelData.perThought[node.id]) {
+                    funnelData.perThought[node.id].failed++;
+                    if (funnelData.perThought[node.id].failedTickers.length < 10) {
+                      funnelData.perThought[node.id].failedTickers.push(symbol);
+                    }
+                  }
+                }
+
+                for (const cr of evalResult.criteriaResults) {
+                  if (!funnelData.perIndicator[cr.indicatorId]) {
+                    funnelData.perIndicator[cr.indicatorId] = { name: cr.indicatorName, passed: 0, failed: 0, diagnosticSamples: [] };
+                  }
+                  const indFunnel = funnelData.perIndicator[cr.indicatorId];
+                  const effectivePass = cr.pass;
+                  if (effectivePass) {
+                    indFunnel.passed++;
+                  } else {
+                    indFunnel.failed++;
+                    if (cr.diagnostics && indFunnel.diagnosticSamples.length < 5) {
+                      indFunnel.diagnosticSamples.push({ symbol, value: cr.diagnostics.value, threshold: cr.diagnostics.threshold });
+                    }
+                  }
                 }
                 if (evalResult.outputData && Object.keys(evalResult.outputData).length > 0) {
                   nodeOutputData[node.id] = evalResult.outputData;
@@ -1288,12 +1326,15 @@ Each criterion follows this structure:
         }
       }
 
+      funnelData.fetchFails = fetchFailCount;
+      funnelData.tooFewCandles = tooFewCandlesCount;
+
       console.log(`[BigIdea Scan] Complete: ${results.length} results from ${tickers.length} tickers (fetchFails=${fetchFailCount}, tooFewCandles=${tooFewCandlesCount})`);
       console.log(`[BigIdea Scan] ThoughtCounts:`, JSON.stringify(thoughtCounts));
       if (dynamicDataFlows.length > 0) {
         console.log(`[BigIdea Scan] Dynamic data flows:`, dynamicDataFlows.map(d => `${d.provider} → ${d.consumer}: ${d.dataKey}`));
       }
-      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows });
+      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows, funnelData });
     } catch (error) {
       console.error("Error executing scan:", error);
       res.status(500).json({ error: "Failed to execute scan" });
@@ -1376,5 +1417,463 @@ Each criterion follows this structure:
       console.error("Error deleting favorite:", error);
       res.status(500).json({ error: "Failed to delete favorite" });
     }
+  });
+
+  // === CHART RATING ENDPOINTS ===
+
+  app.post("/api/bigidea/chart-rating", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const { symbol, rating, ideaId, scanConfig, indicatorSnapshot, price } = req.body;
+      if (!symbol || !rating || !["up", "down"].includes(rating)) {
+        return res.status(400).json({ error: "symbol and rating ('up'|'down') are required" });
+      }
+
+      const [record] = await db
+        .insert(scanChartRatings)
+        .values({
+          userId,
+          symbol,
+          rating,
+          ideaId: ideaId || null,
+          scanConfig: scanConfig || null,
+          indicatorSnapshot: indicatorSnapshot || null,
+          price: price || null,
+        })
+        .returning();
+
+      res.status(201).json(record);
+    } catch (error) {
+      console.error("Error saving chart rating:", error);
+      res.status(500).json({ error: "Failed to save chart rating" });
+    }
+  });
+
+  app.get("/api/bigidea/chart-ratings/summary", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const rawIdeaId = req.query.ideaId ? parseInt(String(req.query.ideaId)) : undefined;
+      const ideaId = rawIdeaId !== undefined && !isNaN(rawIdeaId) ? rawIdeaId : undefined;
+
+      const conditions = [eq(scanChartRatings.userId, userId)];
+      if (ideaId !== undefined) conditions.push(eq(scanChartRatings.ideaId, ideaId));
+
+      const ratings = await db
+        .select({
+          rating: scanChartRatings.rating,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(scanChartRatings)
+        .where(conditions.length > 1 ? and(...conditions) : conditions[0])
+        .groupBy(scanChartRatings.rating);
+
+      const upCount = ratings.find(r => r.rating === "up")?.count || 0;
+      const downCount = ratings.find(r => r.rating === "down")?.count || 0;
+
+      res.json({ up: upCount, down: downCount, total: upCount + downCount });
+    } catch (error) {
+      console.error("Error fetching chart rating summary:", error);
+      res.status(500).json({ error: "Failed to fetch chart ratings" });
+    }
+  });
+
+  // === AI SCAN TUNING ENDPOINT ===
+
+  app.post("/api/bigidea/scan-tune", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      const userTier = user[0]?.tier || "standard";
+      if (userTier !== "pro" && userTier !== "admin" && !user[0]?.isAdmin) {
+        return res.status(403).json({ error: "Scan tuning requires Pro or Admin tier" });
+      }
+
+      const openai = getOpenAI();
+      if (!openai) return res.status(500).json({ error: "AI service not available" });
+
+      const { nodes, edges, funnelData, resultCount, universe, ratings } = req.body;
+      if (!nodes || !funnelData) {
+        return res.status(400).json({ error: "nodes and funnelData are required" });
+      }
+
+      const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && n.thoughtCriteria);
+
+      const indicatorMeta: Array<{ id: string; name: string; category: string; currentParams: any[]; bounds: any[] }> = [];
+      for (const tn of thoughtNodes) {
+        for (const c of (tn.thoughtCriteria || [])) {
+          if (c.muted) continue;
+          const indDef = INDICATOR_LIBRARY.find((ind) => ind.id === c.indicatorId);
+          if (!indDef) continue;
+          const currentParams = (c.params || []).map((p: any) => ({
+            name: p.name,
+            value: p.value,
+            autoLinked: !!p.autoLinked,
+          }));
+          const bounds = indDef.params.map(p => ({
+            name: p.name,
+            label: p.label,
+            min: p.min,
+            max: p.max,
+            step: p.step,
+            defaultValue: p.defaultValue,
+          }));
+          indicatorMeta.push({
+            id: c.indicatorId,
+            name: c.label || indDef.name,
+            category: indDef.category,
+            currentParams,
+            bounds,
+          });
+        }
+      }
+
+      const ratingSummary = ratings
+        ? `User has rated ${ratings.up || 0} charts thumbs-up and ${ratings.down || 0} charts thumbs-down from this scan.`
+        : "No chart ratings available yet.";
+
+      const systemPrompt = `You are a stock scanner tuning assistant. Analyze the scan configuration and failure funnel data to suggest parameter adjustments that will improve scan results quality.
+
+RULES:
+- Never suggest changing auto-linked parameters (marked autoLinked: true) — they are dynamically set per-stock
+- All suggested values MUST be within the min/max bounds provided
+- Suggest at most 5 parameter changes
+- Focus on the indicators that reject the most stocks (highest rejection rate)
+- Use diagnostic samples to understand WHY stocks are being rejected
+- If the scan produces too few results, suggest loosening the tightest filters
+- If too many results, suggest tightening the weakest filters
+- Consider the user's chart ratings when available
+
+Return a JSON object with this exact structure:
+{
+  "suggestions": [
+    {
+      "indicatorId": "string",
+      "indicatorName": "string",
+      "paramName": "string",
+      "currentValue": number,
+      "suggestedValue": number,
+      "reason": "string (1-2 sentences explaining the change)"
+    }
+  ],
+  "overallAnalysis": "string (2-3 sentences about the scan's filtering behavior)"
+}`;
+
+      const userMessage = `Scan configuration:
+Universe: ${universe || "unknown"} (${funnelData.totalTickers} tickers)
+Results found: ${resultCount || 0}
+
+Indicator metadata with current params and bounds:
+${JSON.stringify(indicatorMeta, null, 2)}
+
+Failure funnel per indicator:
+${JSON.stringify(funnelData.perIndicator, null, 2)}
+
+Failure funnel per thought:
+${JSON.stringify(funnelData.perThought, null, 2)}
+
+${ratingSummary}`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-5.1",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 1500,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || "{}";
+      let aiResult: any;
+      try {
+        aiResult = JSON.parse(responseText);
+      } catch {
+        aiResult = { suggestions: [], overallAnalysis: "Failed to parse AI response" };
+      }
+
+      if (aiResult.suggestions && Array.isArray(aiResult.suggestions)) {
+        aiResult.suggestions = aiResult.suggestions.filter((s: any) => {
+          if (!s.indicatorId || !s.paramName || s.suggestedValue === undefined) return false;
+          const val = Number(s.suggestedValue);
+          if (isNaN(val)) return false;
+          s.suggestedValue = val;
+
+          const indMeta = indicatorMeta.find(m => m.id === s.indicatorId);
+          if (!indMeta) return false;
+          const param = indMeta.currentParams.find((p: any) => p.name === s.paramName);
+          if (param?.autoLinked) return false;
+          const bound = indMeta.bounds.find((b: any) => b.name === s.paramName);
+          if (bound) {
+            s.suggestedValue = Math.max(bound.min, Math.min(bound.max, s.suggestedValue));
+            if (bound.step && bound.step >= 1) {
+              s.suggestedValue = Math.round(s.suggestedValue / bound.step) * bound.step;
+            }
+          }
+          s.currentValue = param?.value ?? s.currentValue;
+          s.indicatorName = s.indicatorName || indMeta.name;
+          s.reason = s.reason || "Parameter adjustment suggested by AI";
+          return true;
+        });
+      } else {
+        aiResult.suggestions = [];
+      }
+
+      const [historyRecord] = await db
+        .insert(scanTuningHistory)
+        .values({
+          userId,
+          scanConfig: { nodes, edges, universe },
+          funnelData,
+          aiSuggestions: aiResult,
+          resultCountBefore: resultCount || 0,
+        })
+        .returning();
+
+      res.json({ ...aiResult, tuningId: historyRecord.id });
+    } catch (error) {
+      console.error("Error in scan tuning:", error);
+      res.status(500).json({ error: "Failed to generate scan tuning suggestions" });
+    }
+  });
+
+  app.patch("/api/bigidea/scan-tune/:id/feedback", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const id = parseInt(String(req.params.id));
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const { feedback, acceptedSuggestions, resultCountAfter } = req.body;
+
+      const updated = await db
+        .update(scanTuningHistory)
+        .set({
+          userFeedback: feedback || null,
+          acceptedSuggestions: acceptedSuggestions || null,
+          resultCountAfter: resultCountAfter || null,
+        })
+        .where(and(eq(scanTuningHistory.id, id), eq(scanTuningHistory.userId, userId)))
+        .returning();
+
+      if (updated.length === 0) return res.status(404).json({ error: "Tuning record not found" });
+      res.json(updated[0]);
+    } catch (error) {
+      console.error("Error updating tuning feedback:", error);
+      res.status(500).json({ error: "Failed to update feedback" });
+    }
+  });
+
+  // === PRESET SCAN TEMPLATES ===
+
+  const SCAN_PRESETS = [
+    {
+      id: "vcp_classic",
+      name: "VCP - Volatility Contraction",
+      description: "Mark Minervini's VCP pattern: stock trending above key MAs, with tightening price range and declining volume. The classic institutional accumulation setup.",
+      category: "Breakout",
+      difficulty: "intermediate",
+      nodes: [
+        {
+          id: "t1",
+          type: "thought",
+          thoughtName: "Trend Filter",
+          thoughtCategory: "Moving Averages",
+          thoughtCriteria: [
+            { indicatorId: "MA-1", label: "Price > 50 SMA", params: [{ name: "period", value: 50 }, { name: "maType", value: "sma" }, { name: "position", value: "above" }] },
+            { indicatorId: "MA-1", label: "Price > 200 SMA", params: [{ name: "period", value: 200 }, { name: "maType", value: "sma" }, { name: "position", value: "above" }] },
+            { indicatorId: "MA-3", label: "50 SMA > 200 SMA", params: [{ name: "fastPeriod", value: 50 }, { name: "slowPeriod", value: 200 }, { name: "relationship", value: "above" }] },
+          ],
+          position: { x: 100, y: 100 },
+        },
+        {
+          id: "t2",
+          type: "thought",
+          thoughtName: "Base Detection",
+          thoughtCategory: "Price Action",
+          thoughtCriteria: [
+            { indicatorId: "PA-3", label: "Consolidation Base", params: [{ name: "period", value: 30 }, { name: "minPeriod", value: 10 }, { name: "maxRange", value: 15 }, { name: "maxSlope", value: 5 }, { name: "drifterPct", value: 10 }, { name: "minBasePct", value: 0 }] },
+          ],
+          position: { x: 100, y: 250 },
+        },
+        {
+          id: "t3",
+          type: "thought",
+          thoughtName: "Volume Contraction",
+          thoughtCategory: "Volume",
+          thoughtCriteria: [
+            { indicatorId: "PA-16", label: "Volume Fade", params: [{ name: "period", value: 20 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.8 }] },
+            { indicatorId: "PA-14", label: "Tightness Ratio", params: [{ name: "period", value: 20 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.7 }] },
+          ],
+          position: { x: 100, y: 400 },
+        },
+        { id: "results", type: "results", position: { x: 100, y: 550 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "t2", logicType: "AND" },
+        { id: "e2", source: "t2", target: "t3", logicType: "AND" },
+        { id: "e3", source: "t3", target: "results", logicType: "AND" },
+      ],
+      suggestedUniverse: "sp500",
+    },
+    {
+      id: "high_tight_flag",
+      name: "High Tight Flag",
+      description: "William O'Neil's HTF: stock doubles in 4-8 weeks then pulls back less than 25%. One of the most powerful but rare patterns. Filters for strong prior advance with shallow correction.",
+      category: "Breakout",
+      difficulty: "advanced",
+      nodes: [
+        {
+          id: "t1",
+          type: "thought",
+          thoughtName: "Strong Prior Advance",
+          thoughtCategory: "Price Action",
+          thoughtCriteria: [
+            { indicatorId: "PA-12", label: "Prior Advance 80%+", params: [{ name: "lookback", value: 60 }, { name: "minGain", value: 80 }] },
+          ],
+          position: { x: 100, y: 100 },
+        },
+        {
+          id: "t2",
+          type: "thought",
+          thoughtName: "Shallow Pullback",
+          thoughtCategory: "Price Action",
+          thoughtCriteria: [
+            { indicatorId: "PA-4", label: "Base Depth < 25%", params: [{ name: "lookback", value: 40 }, { name: "maxDepth", value: 25 }, { name: "minDepth", value: 5 }] },
+          ],
+          position: { x: 100, y: 250 },
+        },
+        {
+          id: "t3",
+          type: "thought",
+          thoughtName: "Above Key MAs",
+          thoughtCategory: "Moving Averages",
+          thoughtCriteria: [
+            { indicatorId: "MA-1", label: "Price > 50 SMA", params: [{ name: "period", value: 50 }, { name: "maType", value: "sma" }, { name: "position", value: "above" }] },
+          ],
+          position: { x: 100, y: 400 },
+        },
+        { id: "results", type: "results", position: { x: 100, y: 550 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "t2", logicType: "AND" },
+        { id: "e2", source: "t2", target: "t3", logicType: "AND" },
+        { id: "e3", source: "t3", target: "results", logicType: "AND" },
+      ],
+      suggestedUniverse: "sp500",
+    },
+    {
+      id: "relative_strength_leader",
+      name: "RS Leader - Institutional Quality",
+      description: "Finds stocks showing relative strength vs. the market with accumulation volume. These are the names institutions are building positions in. Combines trend, RS, and volume analysis.",
+      category: "Momentum",
+      difficulty: "beginner",
+      nodes: [
+        {
+          id: "t1",
+          type: "thought",
+          thoughtName: "Strong Trend",
+          thoughtCategory: "Moving Averages",
+          thoughtCriteria: [
+            { indicatorId: "MA-1", label: "Price > 21 EMA", params: [{ name: "period", value: 21 }, { name: "maType", value: "ema" }, { name: "position", value: "above" }] },
+            { indicatorId: "MA-1", label: "Price > 50 SMA", params: [{ name: "period", value: 50 }, { name: "maType", value: "sma" }, { name: "position", value: "above" }] },
+          ],
+          position: { x: 100, y: 100 },
+        },
+        {
+          id: "t2",
+          type: "thought",
+          thoughtName: "Relative Strength",
+          thoughtCategory: "Relative Strength",
+          thoughtCriteria: [
+            { indicatorId: "RS-1", label: "RS vs SPY > 1.5", params: [{ name: "period", value: 60 }, { name: "minRS", value: 1.5 }] },
+          ],
+          position: { x: 100, y: 250 },
+        },
+        { id: "results", type: "results", position: { x: 100, y: 400 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "t2", logicType: "AND" },
+        { id: "e2", source: "t2", target: "results", logicType: "AND" },
+      ],
+      suggestedUniverse: "nasdaq100",
+    },
+    {
+      id: "coiling_base",
+      name: "Coiling Base - Quiet Before the Storm",
+      description: "Detects stocks in tight consolidation with shrinking volume and narrow daily ranges. These compressed springs often produce explosive breakout moves. Combines base detection with multiple tightness filters.",
+      category: "Breakout",
+      difficulty: "intermediate",
+      nodes: [
+        {
+          id: "t1",
+          type: "thought",
+          thoughtName: "Base Detection",
+          thoughtCategory: "Price Action",
+          thoughtCriteria: [
+            { indicatorId: "PA-3", label: "Consolidation Base", params: [{ name: "period", value: 25 }, { name: "minPeriod", value: 8 }, { name: "maxRange", value: 10 }, { name: "maxSlope", value: 4 }, { name: "drifterPct", value: 8 }, { name: "minBasePct", value: 0 }] },
+          ],
+          position: { x: 100, y: 100 },
+        },
+        {
+          id: "t2",
+          type: "thought",
+          thoughtName: "Tightness Confirmation",
+          thoughtCategory: "Volatility",
+          thoughtCriteria: [
+            { indicatorId: "PA-14", label: "Tight Range", params: [{ name: "period", value: 15 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.6 }] },
+            { indicatorId: "PA-15", label: "Close Clustering", params: [{ name: "period", value: 15 }, { name: "maxCluster", value: 1.5 }] },
+            { indicatorId: "PA-16", label: "Volume Fade", params: [{ name: "period", value: 15 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.7 }] },
+          ],
+          position: { x: 100, y: 250 },
+        },
+        {
+          id: "t3",
+          type: "thought",
+          thoughtName: "Trend Confirmation",
+          thoughtCategory: "Moving Averages",
+          thoughtCriteria: [
+            { indicatorId: "MA-1", label: "Price > 50 SMA", params: [{ name: "period", value: 50 }, { name: "maType", value: "sma" }, { name: "position", value: "above" }] },
+          ],
+          position: { x: 100, y: 400 },
+        },
+        { id: "results", type: "results", position: { x: 100, y: 550 } },
+      ],
+      edges: [
+        { id: "e1", source: "t1", target: "t2", logicType: "AND" },
+        { id: "e2", source: "t2", target: "t3", logicType: "AND" },
+        { id: "e3", source: "t3", target: "results", logicType: "AND" },
+      ],
+      suggestedUniverse: "sp500",
+    },
+  ];
+
+  app.get("/api/bigidea/presets", async (_req: Request, res: Response) => {
+    res.json(SCAN_PRESETS.map(p => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      category: p.category,
+      difficulty: p.difficulty,
+      suggestedUniverse: p.suggestedUniverse,
+      thoughtCount: p.nodes.filter(n => n.type === "thought").length,
+    })));
+  });
+
+  app.get("/api/bigidea/presets/:id", async (req: Request, res: Response) => {
+    const preset = SCAN_PRESETS.find(p => p.id === req.params.id);
+    if (!preset) return res.status(404).json({ error: "Preset not found" });
+    res.json(preset);
   });
 }

@@ -740,7 +740,26 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const finalHigh = Math.max(...finalSlice.map(c => c.high));
       const finalLow = Math.min(...finalSlice.map(c => c.low));
       const rangePct = finalHigh > 0 ? ((finalHigh - finalLow) / finalHigh) * 100 : 0;
-      return { pass: true, data: { detectedPeriod: bestPass, _diagnostics: { value: `${bestPass} bars`, threshold: `≥${minRequired} bars`, detail: `range ${rangePct.toFixed(1)}% (max ${maxRange}%)` } } };
+
+      const avgBaseVolume = finalSlice.reduce((s, c) => s + (c.volume || 0), 0) / finalSlice.length;
+      const preBaseStart = bestPass;
+      const preBaseEnd = Math.min(bestPass + bestPass, candles.length);
+      const preBaseSlice = candles.slice(preBaseStart, preBaseEnd);
+      const avgPreBaseVolume = preBaseSlice.length > 0
+        ? preBaseSlice.reduce((s, c) => s + (c.volume || 0), 0) / preBaseSlice.length
+        : avgBaseVolume;
+      const volumeFadeRatio = avgPreBaseVolume > 0 ? avgBaseVolume / avgPreBaseVolume : 1;
+
+      return { pass: true, data: {
+        detectedPeriod: bestPass,
+        baseTopPrice: finalHigh,
+        baseBottomPrice: finalLow,
+        baseDepthPct: rangePct,
+        avgBaseVolume: Math.round(avgBaseVolume),
+        avgPreBaseVolume: Math.round(avgPreBaseVolume),
+        volumeFadeRatio: Math.round(volumeFadeRatio * 100) / 100,
+        _diagnostics: { value: `${bestPass} bars`, threshold: `≥${minRequired} bars`, detail: `range ${rangePct.toFixed(1)}% (max ${maxRange}%), top $${finalHigh.toFixed(2)}, vol fade ${volumeFadeRatio.toFixed(2)}x` }
+      } };
     },
   },
   {

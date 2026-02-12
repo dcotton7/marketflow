@@ -292,7 +292,9 @@ export function registerSentinelRoutes(app: Express): void {
         res.json({ 
           id: user.id, 
           username: user.username, 
-          email: user.email 
+          email: user.email,
+          tier: user.tier || "standard",
+          isAdmin: user.isAdmin || false,
         });
       });
     } catch (error) {
@@ -318,7 +320,7 @@ export function registerSentinelRoutes(app: Express): void {
     if (!user) {
       return res.status(401).json({ error: "User not found" });
     }
-    res.json({ id: user.id, username: user.username, email: user.email });
+    res.json({ id: user.id, username: user.username, email: user.email, tier: user.tier || "standard", isAdmin: user.isAdmin || false });
   });
 
   app.post("/api/sentinel/suggest", requireAuth, async (req: Request, res: Response) => {
