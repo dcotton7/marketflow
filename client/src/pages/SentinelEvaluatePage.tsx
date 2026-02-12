@@ -454,16 +454,19 @@ export default function SentinelEvaluatePage() {
   const [stopPriceMode, setStopPriceMode] = useState<"amount" | "choice">("amount");
   const [stopPrice, setStopPrice] = useState("");
   const [stopPriceChoice, setStopPriceChoice] = useState("");
+  const [stopLabel, setStopLabel] = useState("");
   
   // Target price
   const [targetPriceMode, setTargetPriceMode] = useState<"amount" | "choice">("amount");
   const [targetPrice, setTargetPrice] = useState("");
   const [targetPriceChoice, setTargetPriceChoice] = useState("");
+  const [targetLabel, setTargetLabel] = useState("");
   
   // Target profit (full exit target)
   const [targetProfitMode, setTargetProfitMode] = useState<"amount" | "choice">("amount");
   const [targetProfitPrice, setTargetProfitPrice] = useState("");
   const [targetProfitChoice, setTargetProfitChoice] = useState("");
+  const [targetProfitLabel, setTargetProfitLabel] = useState("");
   
   // Position size
   const [positionSizeUnit, setPositionSizeUnit] = useState<"shares" | "dollars">("shares");
@@ -505,12 +508,15 @@ export default function SentinelEvaluatePage() {
           if (state.stopPrice) setStopPrice(state.stopPrice);
           if (state.stopPriceMode) setStopPriceMode(state.stopPriceMode);
           if (state.stopPriceChoice) setStopPriceChoice(state.stopPriceChoice);
+          if (state.stopLabel) setStopLabel(state.stopLabel);
           if (state.targetProfitPrice) setTargetProfitPrice(state.targetProfitPrice);
           if (state.targetProfitMode) setTargetProfitMode(state.targetProfitMode);
           if (state.targetProfitChoice) setTargetProfitChoice(state.targetProfitChoice);
+          if (state.targetProfitLabel) setTargetProfitLabel(state.targetProfitLabel);
           if (state.targetPrice) setTargetPrice(state.targetPrice);
           if (state.targetPriceMode) setTargetPriceMode(state.targetPriceMode);
           if (state.targetPriceChoice) setTargetPriceChoice(state.targetPriceChoice);
+          if (state.targetLabel) setTargetLabel(state.targetLabel);
           if (state.positionSize) setPositionSize(state.positionSize);
           if (state.positionSizeUnit) setPositionSizeUnit(state.positionSizeUnit);
           if (state.thesis) setThesis(state.thesis);
@@ -530,9 +536,9 @@ export default function SentinelEvaluatePage() {
     try {
       const state = {
         symbol, debouncedSymbol, direction, entryPrice,
-        stopPrice, stopPriceMode, stopPriceChoice,
-        targetProfitPrice, targetProfitMode, targetProfitChoice,
-        targetPrice, targetPriceMode, targetPriceChoice,
+        stopPrice, stopPriceMode, stopPriceChoice, stopLabel,
+        targetProfitPrice, targetProfitMode, targetProfitChoice, targetProfitLabel,
+        targetPrice, targetPriceMode, targetPriceChoice, targetLabel,
         positionSize, positionSizeUnit, thesis, setupType, deepEval, result,
       };
       sessionStorage.setItem('ivy_eval_state', JSON.stringify(state));
@@ -1103,11 +1109,11 @@ export default function SentinelEvaluatePage() {
                       step="0.01"
                       data-testid="input-stop-price"
                       value={stopPrice}
-                      onChange={(e) => setStopPrice(e.target.value)}
+                      onChange={(e) => { setStopPrice(e.target.value); setStopLabel(""); }}
                       placeholder="145.00"
                     />
                   ) : (
-                    <Select value={stopPriceChoice} onValueChange={setStopPriceChoice}>
+                    <Select value={stopPriceChoice} onValueChange={(v) => { setStopPriceChoice(v); setStopLabel(STOP_PRICE_CHOICES.find(c => c.value === v)?.label || ""); }}>
                       <SelectTrigger data-testid="select-stop-level">
                         <SelectValue placeholder="Select stop level..." />
                       </SelectTrigger>
@@ -1138,6 +1144,7 @@ export default function SentinelEvaluatePage() {
                             onClick={() => {
                               setStopPrice(s.price.toString());
                               setStopPriceMode("amount");
+                              setStopLabel(s.label);
                             }}
                             data-testid={`badge-stop-suggestion-${i}`}
                           >
@@ -1226,11 +1233,11 @@ export default function SentinelEvaluatePage() {
                           step="0.01"
                           data-testid="input-target-price"
                           value={targetPrice}
-                          onChange={(e) => setTargetPrice(e.target.value)}
+                          onChange={(e) => { setTargetPrice(e.target.value); setTargetLabel(""); }}
                           placeholder="165.00"
                         />
                       ) : (
-                        <Select value={targetPriceChoice} onValueChange={setTargetPriceChoice}>
+                        <Select value={targetPriceChoice} onValueChange={(v) => { setTargetPriceChoice(v); setTargetLabel(TARGET_PRICE_CHOICES.find(c => c.value === v)?.label || ""); }}>
                           <SelectTrigger data-testid="select-target-level">
                             <SelectValue placeholder="Select target level..." />
                           </SelectTrigger>
@@ -1351,11 +1358,11 @@ export default function SentinelEvaluatePage() {
                           step="0.01"
                           data-testid="input-target-profit"
                           value={targetProfitPrice}
-                          onChange={(e) => setTargetProfitPrice(e.target.value)}
+                          onChange={(e) => { setTargetProfitPrice(e.target.value); setTargetProfitLabel(""); }}
                           placeholder="180.00"
                         />
                       ) : (
-                        <Select value={targetProfitChoice} onValueChange={setTargetProfitChoice}>
+                        <Select value={targetProfitChoice} onValueChange={(v) => { setTargetProfitChoice(v); setTargetProfitLabel(TARGET_PROFIT_CHOICES.find(c => c.value === v)?.label || ""); }}>
                           <SelectTrigger data-testid="select-target-profit-level">
                             <SelectValue placeholder="Select target profit level..." />
                           </SelectTrigger>
@@ -1698,23 +1705,25 @@ export default function SentinelEvaluatePage() {
                       </Badge>
                     </div>
                     
-                    {/* Verdict Summary - Primary blockers at top */}
+                    {/* Verdict Summary - Risk Summary at top */}
                     {result.evaluation.verdictSummary && (
                       <div className={`p-3 rounded-md mb-3 ${
                         result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border border-green-500/30' :
                         result.evaluation.status === 'RED' ? 'bg-red-500/10 border border-red-500/30' :
                         result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-yellow-500/10 border border-yellow-500/30'
                       }`} data-testid="verdict-summary">
-                        <p className="text-sm font-medium mb-1">Verdict:</p>
-                        <p className="text-sm">{result.evaluation.verdictSummary.verdict}</p>
+                        <p className="text-xs font-medium text-muted-foreground mb-1">Verdict:</p>
+                        <p className="text-base font-medium">{result.evaluation.verdictSummary.verdict}</p>
                         {result.evaluation.verdictSummary.primaryBlockers && result.evaluation.verdictSummary.primaryBlockers.length > 0 && (
-                          <div className="mt-2">
-                            <p className="text-xs font-medium text-red-400">Primary Blockers ({result.evaluation.verdictSummary.primaryBlockers.length}):</p>
-                            <ul className="text-xs text-red-300 mt-1">
+                          <div className="mt-3">
+                            <p className="text-xs font-medium text-muted-foreground mb-1.5">Risk Summary</p>
+                            <div className="flex flex-wrap gap-1.5">
                               {result.evaluation.verdictSummary.primaryBlockers.map((blocker, i) => (
-                                <li key={i}>• {blocker}</li>
+                                <Badge key={i} variant="outline" className="text-xs border-red-500/40 text-red-400 bg-red-500/10" data-testid={`badge-risk-summary-${i}`}>
+                                  {blocker}
+                                </Badge>
                               ))}
-                            </ul>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1761,12 +1770,23 @@ export default function SentinelEvaluatePage() {
 
                     {/* Plan Summary */}
                     {result.evaluation.planSummary && (
-                      <div className="text-sm text-muted-foreground mb-3 p-2 bg-muted/30 rounded" data-testid="plan-summary">
-                        <span className="font-medium">Your Plan:</span>{' '}
-                        Entry {result.evaluation.planSummary.entry} | Stop {result.evaluation.planSummary.stop} | Risk/share {result.evaluation.planSummary.riskPerShare}
-                        {result.evaluation.planSummary.firstTrim && ` | First Trim ${result.evaluation.planSummary.firstTrim}`}
-                        {result.evaluation.planSummary.target && ` | Target ${result.evaluation.planSummary.target}`}
-                        {result.evaluation.planSummary.rrRatio && ` | R:R ${result.evaluation.planSummary.rrRatio}`}
+                      <div className={`mb-3 p-3 rounded border ${
+                        result.evaluation.status === 'GREEN' ? 'bg-green-500/10 border-green-500/30' :
+                        result.evaluation.status === 'RED' ? 'bg-red-500/10 border-red-500/30' :
+                        result.evaluation.status === 'NEEDS_PLAN' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-yellow-500/10 border-yellow-500/30'
+                      }`} data-testid="plan-summary">
+                        <p className={`text-base font-semibold ${
+                          result.evaluation.status === 'GREEN' ? 'text-green-400' :
+                          result.evaluation.status === 'RED' ? 'text-red-400' :
+                          result.evaluation.status === 'NEEDS_PLAN' ? 'text-amber-400' : 'text-yellow-400'
+                        }`}>
+                          Your Plan: Entry {result.evaluation.planSummary.entry}
+                          {result.evaluation.planSummary.stop && <> | Stop {result.evaluation.planSummary.stop}{stopLabel ? <span className="text-muted-foreground text-sm"> ({stopLabel})</span> : null}</>}
+                          {result.evaluation.planSummary.riskPerShare && <> | Risk/share {result.evaluation.planSummary.riskPerShare}</>}
+                          {result.evaluation.planSummary.firstTrim && <> | First Trim {result.evaluation.planSummary.firstTrim}{targetLabel ? <span className="text-muted-foreground text-sm"> ({targetLabel})</span> : null}</>}
+                          {result.evaluation.planSummary.target && <> | Target {result.evaluation.planSummary.target}{targetProfitLabel ? <span className="text-muted-foreground text-sm"> ({targetProfitLabel})</span> : null}</>}
+                          {result.evaluation.planSummary.rrRatio && <> | R:R {result.evaluation.planSummary.rrRatio}</>}
+                        </p>
                       </div>
                     )}
 
@@ -1805,34 +1825,57 @@ export default function SentinelEvaluatePage() {
                                 </div>
                               )}
                               {hasStop && (
-                                <div className="flex flex-wrap gap-x-6 gap-y-1">
-                                  <span>
-                                    <span className="text-muted-foreground">Risking: </span>
-                                    <span className="font-bold text-red-400">
-                                      {(() => {
-                                        const rps = result.evaluation.planSummary?.riskPerShare;
-                                        if (!rps) return "—";
-                                        const num = parseFloat(String(rps).replace(/[^0-9.-]/g, ''));
-                                        return isNaN(num) ? rps : `$${Math.abs(num).toFixed(2)}`;
-                                      })()} / Share
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
+                                    <span className="text-muted-foreground text-xs">Your Stop{stopLabel ? ` (${stopLabel})` : ''}:</span>
+                                    <span className="font-bold text-red-400">{result.evaluation.planSummary?.stop || stopPrice}</span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-x-6 gap-y-1">
+                                    <span>
+                                      <span className="text-muted-foreground">Risking: </span>
+                                      <span className="font-bold text-red-400">
+                                        {(() => {
+                                          const rps = result.evaluation.planSummary?.riskPerShare;
+                                          if (!rps) return "—";
+                                          const num = parseFloat(String(rps).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(num) ? rps : `$${Math.abs(num).toFixed(2)}`;
+                                        })()} / Share
+                                      </span>
                                     </span>
-                                  </span>
-                                  <span>
-                                    <span className="text-muted-foreground">Total Risk: </span>
-                                    <span className="font-bold text-red-400">
-                                      {(() => {
-                                        const tr = result.evaluation.moneyBreakdown.totalRisk;
-                                        if (!tr) return "—";
-                                        const num = parseFloat(String(tr).replace(/[^0-9.-]/g, ''));
-                                        return isNaN(num) ? tr : `$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                                      })()}
+                                    <span>
+                                      <span className="text-muted-foreground">Total Risk: </span>
+                                      <span className="font-bold text-red-400">
+                                        {(() => {
+                                          const tr = result.evaluation.moneyBreakdown.totalRisk;
+                                          if (!tr) return "—";
+                                          const num = parseFloat(String(tr).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(num) ? tr : `$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                        })()}
+                                      </span>
                                     </span>
-                                  </span>
+                                  </div>
                                 </div>
                               )}
                               
                               {hasTarget && (
-                                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                                <div className="space-y-1">
+                                  {(targetLabel || targetProfitLabel) && (
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1 items-baseline">
+                                      {targetLabel && result.evaluation.planSummary?.firstTrim && (
+                                        <span>
+                                          <span className="text-muted-foreground text-xs">Your First Trim ({targetLabel}):</span>{' '}
+                                          <span className="font-bold text-green-400">{result.evaluation.planSummary.firstTrim}</span>
+                                        </span>
+                                      )}
+                                      {targetProfitLabel && result.evaluation.planSummary?.target && (
+                                        <span>
+                                          <span className="text-muted-foreground text-xs">Your Target ({targetProfitLabel}):</span>{' '}
+                                          <span className="font-bold text-green-400">{result.evaluation.planSummary.target}</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="flex flex-wrap gap-x-6 gap-y-1">
                                   {result.evaluation.moneyBreakdown.firstTrimProfitPerShare && (
                                     <span>
                                       <span className="text-muted-foreground">First Profit @ 30% Trim: </span>
@@ -1857,6 +1900,7 @@ export default function SentinelEvaluatePage() {
                                       </span>
                                     </span>
                                   )}
+                                  </div>
                                 </div>
                               )}
                               
