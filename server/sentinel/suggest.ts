@@ -267,7 +267,7 @@ function generateTargetSuggestions(
 }
 
 function buildTechnicalContext(technicals: TechnicalData, direction: "long" | "short"): string {
-  const { currentPrice, sma21, sma50, sma200, atr14, distanceFromSma21, distanceFromSma50 } = technicals;
+  const { currentPrice, sma21, sma50, sma200, atr14, adr20, distanceFromSma21, extensionFrom50dAdr } = technicals;
   
   const parts: string[] = [];
   
@@ -280,15 +280,28 @@ function buildTechnicalContext(technicals: TechnicalData, direction: "long" | "s
   
   if (sma50) {
     const position = currentPrice > sma50 ? "above" : "below";
-    parts.push(`${distanceFromSma50?.toFixed(1) || "?"}% ${position} 50 SMA ($${sma50.toFixed(2)})`);
+    if (extensionFrom50dAdr !== null && adr20 > 0) {
+      const absExt = Math.abs(extensionFrom50dAdr).toFixed(1);
+      let zone = '';
+      if (extensionFrom50dAdr >= 8) zone = ' [PROFIT-TAKING ZONE]';
+      else if (extensionFrom50dAdr >= 5) zone = ' [CAUTION]';
+      parts.push(`${absExt}x ADR ${position} 50 SMA ($${sma50.toFixed(2)})${zone}`);
+    } else {
+      const distPct = ((currentPrice - sma50) / sma50 * 100).toFixed(1);
+      parts.push(`${distPct}% ${position} 50 SMA ($${sma50.toFixed(2)})`);
+    }
   }
   
   if (sma200) {
     parts.push(`200 SMA at $${sma200.toFixed(2)}`);
   }
   
+  if (adr20 > 0) {
+    parts.push(`ADR(20): $${adr20.toFixed(2)}`);
+  }
+  
   if (atr14) {
-    parts.push(`ATR(14): $${atr14.toFixed(2)} (${((atr14 / currentPrice) * 100).toFixed(1)}% daily volatility)`);
+    parts.push(`ATR(14): $${atr14.toFixed(2)}`);
   }
   
   return parts.join(" | ");

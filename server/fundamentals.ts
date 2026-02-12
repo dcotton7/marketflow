@@ -143,3 +143,41 @@ export async function getSectorAndIndustry(symbol: string): Promise<{ sector: st
   const result = await getFundamentals(symbol);
   return { sector: result.sector, industry: result.industry };
 }
+
+const fmpPeersCache = new Map<string, { data: { symbol: string; name: string; industry: string; marketCap: number }[]; ts: number }>();
+const FMP_PEERS_CACHE_TTL = 12 * 60 * 60 * 1000;
+
+export async function fetchIndustryPeersFromFMP(industry: string, sector: string, excludeSymbol: string, limit: number = 20): Promise<{ symbol: string; name: string; industry: string; marketCap: number }[]> {
+  if (!FMP_API_KEY) return [];
+
+  const cacheKey = `${sector}:${industry}`;
+  const cached = fmpPeersCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < FMP_PEERS_CACHE_TTL) {
+    return cached.data.filter(s => s.symbol !== excludeSymbol).slice(0, limit);
+  }
+
+  try {
+    const url = `https://financialmodelingprep.com/api/v3/stock-screener?industry=${encodeURIComponent(industry)}&sector=${encodeURIComponent(sector)}&exchange=NYSE,NASDAQ&isActivelyTrading=true&marketCapMoreThan=500000000&limit=30&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+
+    const peers = data
+      .filter((d: any) => d.symbol && d.companyName)
+      .map((d: any) => ({
+        symbol: d.symbol as string,
+        name: (d.companyName as string) || d.symbol,
+        industry: (d.industry as string) || industry,
+        marketCap: (d.marketCap as number) || 0,
+      }))
+      .sort((a: { marketCap: number }, b: { marketCap: number }) => b.marketCap - a.marketCap);
+
+    fmpPeersCache.set(cacheKey, { data: peers, ts: Date.now() });
+    return peers.filter(s => s.symbol !== excludeSymbol).slice(0, limit);
+  } catch (err) {
+    console.error(`[FMP] Failed to fetch industry peers for ${industry}:`, err);
+    return [];
+  }
+}

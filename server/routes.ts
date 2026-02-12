@@ -1182,10 +1182,23 @@ export async function registerRoutes(
       const sameIndustry = sectorStocks
         .filter(s => s.symbol !== symbol && s.industry === industry)
         .sort((a, b) => b.marketCap - a.marketCap);
+
+      let fmpPeers: { symbol: string; name: string; industry: string; marketCap: number }[] = [];
+      if (sameIndustry.length < 8 && industry !== 'Unknown') {
+        const { fetchIndustryPeersFromFMP } = await import('./fundamentals');
+        const localSymbols = new Set(sectorStocks.map(s => s.symbol));
+        localSymbols.add(symbol);
+        fmpPeers = (await fetchIndustryPeersFromFMP(industry, sector, symbol, 20))
+          .filter(p => !localSymbols.has(p.symbol));
+      }
+
+      const allSameIndustry = [...sameIndustry, ...fmpPeers];
+      const seenSymbols = new Set(allSameIndustry.map(s => s.symbol));
+      seenSymbols.add(symbol);
       const otherSector = sectorStocks
-        .filter(s => s.symbol !== symbol && s.industry !== industry)
+        .filter(s => !seenSymbols.has(s.symbol) && s.industry !== industry)
         .sort((a, b) => b.marketCap - a.marketCap);
-      const peers = [...sameIndustry, ...otherSector].slice(0, 20);
+      const peers = [...allSameIndustry, ...otherSector].slice(0, 20);
 
       const allSymbols = [...sectorETFsList, ...peers.map(p => p.symbol)];
       const quotes = await Promise.all(
