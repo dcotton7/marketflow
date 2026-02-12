@@ -3015,6 +3015,7 @@ export default function BigIdeaPage() {
         onOpenChange={setChartViewerOpen}
         onIndexChange={setChartViewerIndex}
         sessionId={scanSessionId}
+        tuningActive={tuningDirty}
       />
 
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
@@ -3324,6 +3325,7 @@ function ScanChartViewer({
   onOpenChange,
   onIndexChange,
   sessionId,
+  tuningActive,
 }: {
   results: ScanResultItem[];
   currentIndex: number;
@@ -3331,6 +3333,7 @@ function ScanChartViewer({
   onOpenChange: (open: boolean) => void;
   onIndexChange: (idx: number) => void;
   sessionId?: number;
+  tuningActive?: boolean;
 }) {
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const chartGridRef = useRef<HTMLDivElement>(null);
@@ -3341,6 +3344,8 @@ function ScanChartViewer({
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
 
   const { toast } = useToast();
+
+  const [thresholdToastShown, setThresholdToastShown] = useState(false);
 
   const ratingMutation = useMutation({
     mutationFn: async ({ symbol, rating, price, indicatorSnapshot }: { symbol: string; rating: "up" | "down"; price: number; indicatorSnapshot?: any }) => {
@@ -3354,7 +3359,17 @@ function ScanChartViewer({
       return res.json();
     },
     onSuccess: (_data, variables) => {
-      setChartRatings(prev => ({ ...prev, [variables.symbol]: variables.rating }));
+      setChartRatings(prev => {
+        const updated = { ...prev, [variables.symbol]: variables.rating };
+        const ratedCount = Object.keys(updated).length;
+        const total = results.length;
+        const threshold = Math.max(1, Math.ceil(total * 0.3));
+        if (tuningActive && ratedCount >= threshold && !thresholdToastShown) {
+          setThresholdToastShown(true);
+          toast({ title: "Ready to commit", description: `You've rated ${ratedCount} of ${total} charts — enough to save & commit your tuning changes.` });
+        }
+        return updated;
+      });
     },
     onError: () => {
       toast({ title: "Rating failed", description: "Could not save your chart rating. Please try again.", variant: "destructive" });
@@ -3641,6 +3656,37 @@ function ScanChartViewer({
               </TooltipContent>
             </Tooltip>
           </div>
+          {(() => {
+            const ratedCount = Object.keys(chartRatings).length;
+            const total = results.length;
+            const threshold = Math.max(1, Math.ceil(total * 0.3));
+            const meetsThreshold = ratedCount >= threshold;
+            if (ratedCount === 0 && !tuningActive) return null;
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1.5 text-xs cursor-default" data-testid="text-rating-progress">
+                    <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{ width: `${Math.min(100, (ratedCount / Math.max(1, total)) * 100)}%`, backgroundColor: meetsThreshold ? "hsl(var(--rs-green))" : "hsl(var(--muted-foreground) / 0.5)" }}
+                      />
+                    </div>
+                    <span className={meetsThreshold ? "text-rs-green" : "text-muted-foreground"}>
+                      {ratedCount}/{total}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="text-sm">
+                    {meetsThreshold
+                      ? `You've rated ${ratedCount} of ${total} charts — enough to commit tuning. Rate more for better AI learning.`
+                      : `Rate at least ${threshold} of ${total} charts (30%) before you can save & commit tuning changes.`}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            );
+          })()}
           <Button
             size="icon"
             variant="ghost"
