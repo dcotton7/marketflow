@@ -7,11 +7,13 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import sentinelLogo from "@/assets/images/sentinel-logo.png";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 export default function SentinelLoginPage() {
   const [, setLocation] = useLocation();
   const { login, register, user, isLoading: authLoading } = useSentinelAuth();
   const { toast } = useToast();
+  const { cssVariables } = useSystemSettings();
   
   // Redirect if already logged in - handles the case where login succeeds but navigation didn't work
   useEffect(() => {
@@ -52,7 +54,7 @@ export default function SentinelLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="min-h-screen sentinel-page flex items-center justify-center p-4" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img 

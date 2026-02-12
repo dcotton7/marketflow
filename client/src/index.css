@@ -103,32 +103,32 @@
   z-index: 1;
 }
 
-/* Glass card effect - 75% opacity with blur */
+/* Glass card effect - uses admin overlay color */
 .glass-card {
-  background: hsl(var(--card) / 0.75) !important;
+  background: var(--overlay-bg, hsl(var(--card) / 0.75)) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Glass effect for all cards and overlays in sentinel pages */
+/* Glass effect for all cards and overlays in sentinel pages - uses admin overlay color */
 .sentinel-page [data-slot="card"],
 .sentinel-page .bg-card {
-  background: hsl(var(--card) / 0.75) !important;
+  background: var(--overlay-bg, hsl(var(--card) / 0.75)) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Keep header slightly more solid */
+/* Keep header slightly more solid - uses admin overlay color with higher opacity */
 .sentinel-page > header {
-  background: hsl(var(--card) / 0.85) !important;
+  background: var(--overlay-bg, hsl(var(--card) / 0.85)) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Glass effect for dialogs and modals */
+/* Glass effect for dialogs and modals - uses admin overlay color */
 .sentinel-page [role="dialog"],
 .sentinel-page [data-radix-dialog-content] {
-  background: hsl(var(--card) / 0.75) !important;
+  background: var(--overlay-bg, hsl(var(--card) / 0.75)) !important;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }

@@ -10,8 +10,10 @@ import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 export default function SymbolPage() {
+  const { cssVariables } = useSystemSettings();
   const { symbol } = useParams();
   const [, setLocation] = useLocation();
   const searchString = useSearch();
@@ -102,28 +104,33 @@ export default function SymbolPage() {
 
   if (isLoading) {
     return (
+      <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <Layout>
         <div className="flex h-[50vh] items-center justify-center">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
         </div>
       </Layout>
+      </div>
     );
   }
 
   if (!quote) {
     return (
+      <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <Layout>
         <div className="text-center py-20">
           <h2 className="text-2xl font-bold">Symbol not found</h2>
           <p className="text-muted-foreground mt-2">Could not load data for {safeSymbol}</p>
         </div>
       </Layout>
+      </div>
     );
   }
 
   const isPositive = quote.change >= 0;
 
   return (
+    <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
     <Layout>
       {/* Back Button */}
       <div className="mb-4 flex items-center gap-3 flex-wrap">
@@ -421,6 +428,7 @@ export default function SymbolPage() {
         )}
       </div>
     </Layout>
+    </div>
   );
 }
 

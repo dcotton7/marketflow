@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MiniChart } from "@/components/MiniChart";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 function WatchlistItem({ item, onRemove }: { 
   item: { id: number; symbol: string }; 
@@ -114,20 +115,24 @@ function WatchlistItem({ item, onRemove }: {
 }
 
 export default function WatchlistPage() {
+  const { cssVariables } = useSystemSettings();
   const { data: watchlist, isLoading } = useWatchlist();
   const { mutate: removeFromWatchlist } = useRemoveFromWatchlist();
 
   if (isLoading) {
     return (
+      <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <Layout>
         <div className="flex h-[50vh] items-center justify-center">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
         </div>
       </Layout>
+      </div>
     );
   }
 
   return (
+    <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
     <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -163,5 +168,6 @@ export default function WatchlistPage() {
         )}
       </div>
     </Layout>
+    </div>
   );
 }

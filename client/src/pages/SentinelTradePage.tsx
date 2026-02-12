@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, AlertTriangle, CheckCircle, Clock, TrendingUp, TrendingDown, Edit2, X, Check, Loader2, DollarSign } from "lucide-react";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 interface Trade {
   id: number;
@@ -69,6 +70,7 @@ export default function SentinelTradePage() {
   const params = useParams<{ tradeId: string }>();
   const tradeId = parseInt(params.tradeId || "0");
   const { toast } = useToast();
+  const { cssVariables } = useSystemSettings();
   const queryClient = useQueryClient();
 
   const [editingStop, setEditingStop] = useState(false);
@@ -227,7 +229,7 @@ export default function SentinelTradePage() {
   const latestEval = evaluations[0];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">

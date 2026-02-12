@@ -21,6 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -491,6 +492,7 @@ const INITIAL_RESULTS_NODE: Node = {
 };
 
 export default function BigIdeaPage() {
+  const { cssVariables } = useSystemSettings();
   const { toast } = useToast();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
@@ -1482,7 +1484,7 @@ export default function BigIdeaPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <SentinelHeader showSentiment={false} />
 
       <div className="flex items-center gap-3 px-4 py-2 border-b bg-card flex-wrap">

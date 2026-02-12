@@ -139,7 +139,7 @@ function isMultiPointRole(role: string): boolean {
 
 export default function PatternTrainingPage() {
   const { user } = useSentinelAuth();
-  const { settings } = useSystemSettings();
+  const { settings, cssVariables } = useSystemSettings();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("create");
 
@@ -578,15 +578,10 @@ export default function PatternTrainingPage() {
     });
   }, [setups, libraryFilter]);
 
-  const bgStyle: any = {};
-  if (settings) {
-    if (settings.backgroundColor) bgStyle.backgroundColor = settings.backgroundColor;
-  }
-
   const hasRequiredPoints = hasRole(points, "entry") && hasRole(points, "stop") && hasRole(points, "target");
 
   return (
-    <div className="min-h-screen bg-background" style={bgStyle}>
+    <div className="min-h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <SentinelHeader />
       <div className="max-w-[1800px] mx-auto p-4">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
