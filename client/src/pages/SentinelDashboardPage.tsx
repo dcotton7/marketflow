@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2 } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2, MessageSquare } from "lucide-react";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -1122,11 +1122,41 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
             hasLiveData={hasLiveData}
             positionShares={fifoData?.totalRemaining ?? trade.positionSize}
           />
-          {trade.latestEvaluation && (
-            <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`} className="ml-2">
-              {trade.latestEvaluation.score}/100
-            </Badge>
-          )}
+          <div className="flex items-center gap-1 ml-auto">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  onClick={(e) => { e.stopPropagation(); setLocation(`/sentinel/evaluate?symbol=${trade.symbol}&from=dashboard`); }}
+                  data-testid={`button-evaluate-card-${trade.id}`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Evaluate</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  onClick={(e) => { e.stopPropagation(); handleMenuAction('chart', e); }}
+                  data-testid={`button-chart-card-${trade.id}`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Open Chart</TooltipContent>
+            </Tooltip>
+            {trade.latestEvaluation && (
+              <Badge variant={getScoreBadgeVariant(trade.latestEvaluation.score)} data-testid={`badge-score-${trade.id}`} className="ml-1">
+                {trade.latestEvaluation.score}/100
+              </Badge>
+            )}
+          </div>
         </div>
 
         {/* Realized Gain/Loss - always visible even in collapsed view */}
