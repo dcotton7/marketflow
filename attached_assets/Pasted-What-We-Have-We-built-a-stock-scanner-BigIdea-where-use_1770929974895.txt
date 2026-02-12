@@ -1,0 +1,19 @@
+What We Have
+
+We built a stock scanner (BigIdea) where users visually wire together indicator nodes to find stocks matching their criteria. After scanning, they review charts and rate them thumbs-up/down. There's also an AI Tune feature (Pro/Admin only) that asks GPT-5.1 to suggest parameter adjustments based on the scan's failure funnel.
+
+Two Database Tables
+
+Chart Ratings — symbol, up/down, price, plus empty columns for scanConfig, indicatorSnapshot, and ideaId that we never populate
+Tuning History — stores each tuning session's config, funnel data, and AI suggestions, plus empty columns for acceptedSuggestions, resultCountAfter, and userFeedback that we never populate
+Current Flow & Gaps
+
+User scans → reviews charts → rates them → tunes → applies suggestions → clicks "Done" → nothing else happens
+Rating is shallow: only saves symbol + up/down + price. No scan context, no indicator values, no idea link. The AI only sees "8 up, 1 down" as a single sentence — it has no idea which stocks were good/bad or what the indicators looked like
+No rescan after tuning: user applies suggestions but has to manually re-run the scan. The resultCountAfter field never gets filled, so we can't measure if tuning actually helped
+No accepted tracking: we don't record which suggestions the user applied vs skipped
+No session feedback: no way for users to say "this tuning session was helpful" or not
+No learning over time: since we don't track what was accepted, what the before/after results were, or which rated charts correlated with which params, the AI starts from scratch every time
+The Question
+
+How should we close these gaps to build a real learning loop where: ratings carry scan context, tuning sessions track what was accepted and whether results improved, and the AI can reference historical tuning outcomes to make better suggestions over time? What's the most impactful order to tackle this, and are there any schema changes or architectural patterns we should consider?
