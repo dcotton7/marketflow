@@ -5,7 +5,7 @@ import { StockChart } from "@/components/StockChart";
 import { TradeRiskRating } from "@/components/TradeRiskRating";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useAddToWatchlist } from "@/hooks/use-watchlist";
-import { useScannerContext } from "@/context/ScannerContext";
+import { useScannerContextSafe } from "@/context/ScannerContext";
 import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +27,9 @@ export default function SymbolPage() {
   
   const { data: quote, isLoading } = useStockQuote(safeSymbol);
   const { mutate: addToWatchlist, isPending: isAdding } = useAddToWatchlist();
-  const { filters, results } = useScannerContext();
+  const scannerCtx = useScannerContextSafe();
+  const filters = scannerCtx?.filters;
+  const results = scannerCtx?.results;
   
   // Build criteria list from URL params first, then context filters as fallback
   const getCriteriaList = (): string[] => {
@@ -43,7 +45,7 @@ export default function SymbolPage() {
     }
     
     // Add additional context filters if coming from scanner
-    if (fromScanner) {
+    if (fromScanner && filters) {
       if (!selectedPattern && filters.chartPattern && filters.chartPattern !== 'All') {
         criteria.push(`Pattern: ${filters.chartPattern}`);
       }

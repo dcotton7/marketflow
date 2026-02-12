@@ -86,3 +86,7 @@ export function useScannerContext() {
   }
   return context;
 }
+
+export function useScannerContextSafe() {
+  return useContext(ScannerContext);
+}

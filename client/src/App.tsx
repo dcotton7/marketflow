@@ -84,11 +84,9 @@ function Router() {
 
       {/* Symbol/Chart page (accessible from Industry Comps, BigIdea, etc.) */}
       <Route path="/symbol/:symbol">
-        {() => (
-          <SentinelProtectedRoute>
-            <SymbolPage />
-          </SentinelProtectedRoute>
-        )}
+        <SentinelProtectedRoute>
+          <SymbolPage />
+        </SentinelProtectedRoute>
       </Route>
       
       {/* Catch-all 404 */}

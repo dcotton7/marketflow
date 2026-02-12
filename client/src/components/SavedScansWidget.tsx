@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { useScannerContext } from "@/context/ScannerContext";
+import { useScannerContextSafe } from "@/context/ScannerContext";
 import { Bookmark, Trash2, Loader2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,7 +15,7 @@ interface SavedScan {
 
 export function SavedScansWidget() {
   const [, setLocation] = useLocation();
-  const { setFilters } = useScannerContext();
+  const scannerCtx = useScannerContextSafe();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -34,7 +34,9 @@ export function SavedScansWidget() {
   });
 
   const handleLoadScan = (scan: SavedScan) => {
-    setFilters(scan.criteria as any);
+    if (scannerCtx) {
+      scannerCtx.setFilters(scan.criteria as any);
+    }
     setLocation('/');
     toast({ title: 'Scan loaded', description: `"${scan.name}" filters applied.` });
   };
