@@ -4199,6 +4199,7 @@ function ScanChartViewer({
         sma21: rthIndices.map(i => intradayData.indicators.sma21[i] ?? null),
         sma50: rthIndices.map(i => intradayData.indicators.sma50[i] ?? null),
         sma200: rthIndices.map(i => intradayData.indicators.sma200[i] ?? null),
+        vwap: intradayData.indicators.vwap ? rthIndices.map(i => intradayData.indicators.vwap![i] ?? null) : undefined,
         avwapHigh: intradayData.indicators.avwapHigh ? rthIndices.map(i => intradayData.indicators.avwapHigh![i] ?? null) : undefined,
         avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
       },
