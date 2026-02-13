@@ -34,9 +34,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { TradingChart } from "@/components/TradingChart";
 import type { ChartCandle, ChartIndicators, ChartMarker, DiamondMarker, PriceLevelLine } from "@/components/TradingChart";
-import { MaSettingsDialog } from "@/components/MaSettingsDialog";
+import { DualChartGrid, type ChartMetrics } from "@/components/DualChartGrid";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -62,8 +61,6 @@ import {
   X,
   HelpCircle,
   Trash2,
-  Settings2,
-  Ruler,
   Link2,
   Unlink,
   CornerDownRight,
@@ -4013,13 +4010,6 @@ function ScanChartViewer({
   tuningActive?: boolean;
 }) {
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
-  const chartGridRef = useRef<HTMLDivElement>(null);
-  const [chartHeight, setChartHeight] = useState(500);
-  const [maSettingsOpen, setMaSettingsOpen] = useState(false);
-  const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
-  const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
-  const [dailyTrendLineMode, setDailyTrendLineMode] = useState(false);
-  const [intradayTrendLineMode, setIntradayTrendLineMode] = useState(false);
   const [showETH, setShowETH] = useState(false);
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
@@ -4089,10 +4079,6 @@ function ScanChartViewer({
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
 
-  const { data: maSettingsData } = useQuery<any[]>({
-    queryKey: ["/api/sentinel/ma-settings"],
-  });
-
   type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
   const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
@@ -4119,53 +4105,7 @@ function ScanChartViewer({
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
-    queryKey: ["/api/sentinel/chart-preferences"],
-    enabled: open,
-  });
-  const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
-
-  interface ScanChartMetrics {
-    currentPrice: number;
-    adr20: number;
-    adr20Dollar: number;
-    adr20Pct: number;
-    extensionFrom50dAdr: number;
-    extensionFrom50dPct: number;
-    extensionFrom200d: number;
-    extensionFrom20d: number;
-    macd: string;
-    macdTimeframe: string;
-    sectorEtf: string;
-    sectorEtfChange: number;
-    nextEarningsDate: string;
-    nextEarningsDays: number;
-    marketCap: number;
-    pe: number | null;
-    beta: number | null;
-    debtToEquity: number | null;
-    preTaxMargin: number | null;
-    analystConsensus: string;
-    targetPrice: number | null;
-    rsMomentum: number;
-    industryPeers: { symbol: string; name: string }[];
-    industryName: string;
-    companyName: string;
-    companyDescription: string;
-    sectorName: string;
-    epsCurrentQYoY: string;
-    salesGrowth3QYoY: string;
-    lastEpsSurprise: string;
-  }
-
-  const formatMarketCap = (mc: number) => {
-    if (mc >= 1e12) return `$${(mc / 1e12).toFixed(1)}T`;
-    if (mc >= 1e9) return `$${(mc / 1e9).toFixed(1)}B`;
-    if (mc >= 1e6) return `$${(mc / 1e6).toFixed(0)}M`;
-    return `$${mc.toLocaleString()}`;
-  };
-
-  const { data: chartMetrics } = useQuery<ScanChartMetrics>({
+  const { data: chartMetrics } = useQuery<ChartMetrics>({
     queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe],
     enabled: open && !!symbol,
     queryFn: async () => {
@@ -4176,53 +4116,6 @@ function ScanChartViewer({
     staleTime: 60 * 1000,
   });
 
-  const rthData = useMemo(() => {
-    if (!intradayData) return null;
-    const rthFmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      hour: "2-digit", minute: "2-digit",
-      hour12: false,
-    });
-    const rthIndices: number[] = [];
-    intradayData.candles.forEach((c, i) => {
-      const parts = rthFmt.formatToParts(new Date(c.timestamp * 1000));
-      let etH = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
-      if (etH === 24) etH = 0;
-      const etM = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
-      const totalMin = etH * 60 + etM;
-      if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
-    });
-    if (rthIndices.length === 0) return intradayData;
-    const rthResult: ChartDataResponse = {
-      ...intradayData,
-      candles: rthIndices.map(i => intradayData.candles[i]),
-      indicators: {
-        ema5: rthIndices.map(i => intradayData.indicators.ema5[i] ?? null),
-        ema10: rthIndices.map(i => intradayData.indicators.ema10[i] ?? null),
-        sma21: rthIndices.map(i => intradayData.indicators.sma21[i] ?? null),
-        sma50: rthIndices.map(i => intradayData.indicators.sma50[i] ?? null),
-        sma200: rthIndices.map(i => intradayData.indicators.sma200[i] ?? null),
-        vwap: intradayData.indicators.vwap ? rthIndices.map(i => intradayData.indicators.vwap![i] ?? null) : undefined,
-        avwapHigh: intradayData.indicators.avwapHigh ? rthIndices.map(i => intradayData.indicators.avwapHigh![i] ?? null) : undefined,
-        avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
-      },
-    };
-    return rthResult;
-  }, [intradayData]);
-
-  useEffect(() => {
-    if (!open) return;
-    const measure = () => {
-      if (chartGridRef.current) {
-        const gridH = chartGridRef.current.clientHeight;
-        setChartHeight(Math.max(180, Math.floor((gridH - 120) * 0.85)));
-      }
-    };
-    const timer = setTimeout(measure, 100);
-    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
-    if (chartGridRef.current) observer.observe(chartGridRef.current);
-    return () => { clearTimeout(timer); observer.disconnect(); };
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -4669,176 +4562,25 @@ function ScanChartViewer({
         )}
 
         <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
-        <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
-          <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>
-              <span className="text-xs text-white font-medium">Daily</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`text-white toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
-                onClick={() => setDailyMeasureMode(m => !m)}
-                style={dailyMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-                data-testid="button-daily-measure-mode"
-              >
-                <Ruler className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`text-white toggle-elevate ${dailyTrendLineMode ? "toggle-elevated bg-white/15" : ""}`}
-                onClick={() => setDailyTrendLineMode(m => !m)}
-                style={dailyTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-                data-testid="button-daily-trend-line-mode"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
-                  <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
-                  <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
-                </svg>
-              </Button>
-            </div>
-            {dailyLoading ? (
-              <Card className="flex-1">
-                <CardContent className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </CardContent>
-              </Card>
-            ) : dailyData ? (
-              <TradingChart
-                data={dailyData}
-                timeframe="daily"
-                height={chartHeight}
-                showLegend={true}
-                maSettings={maSettingsData}
-                maxBars={maxBars}
-                measureMode={dailyMeasureMode}
-                trendLineMode={dailyTrendLineMode}
-                markers={cocAnnotations.markers}
-                diamondMarkers={cocAnnotations.diamondMarkers}
-                priceLines={cocAnnotations.priceLines}
-                resistanceLines={cocAnnotations.resistanceLines}
-              />
-            ) : (
-              <Card className="flex-1">
-                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  No daily data
-                </CardContent>
-              </Card>
-            )}
-            {chartMetrics && (
-              <div className="border border-border rounded p-2 mt-1 flex-shrink-0 grid grid-cols-5 gap-x-4 gap-y-1" data-testid="scan-daily-metrics-strip">
-                <div><span className="text-[10px] text-muted-foreground">Market Cap</span><div className="text-xs font-medium text-foreground" data-testid="metric-market-cap">{formatMarketCap(chartMetrics.marketCap)}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Sales Growth 3Q YoY</span><div className="text-xs font-medium text-foreground" data-testid="metric-sales-growth">{chartMetrics.salesGrowth3QYoY}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">EPS Current Q YoY</span><div className="text-xs font-medium text-foreground" data-testid="metric-eps-yoy">{chartMetrics.epsCurrentQYoY}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Next Earnings</span><div className={`text-xs font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`} data-testid="metric-next-earnings">{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Analyst Consensus</span><div className="text-xs font-medium text-foreground" data-testid="metric-analyst-consensus">{chartMetrics.analystConsensus}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">PE</span><div className="text-xs font-medium text-foreground" data-testid="metric-pe">{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Pre-Tax Margin</span><div className="text-xs font-medium text-foreground" data-testid="metric-pretax-margin">{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Last EPS Surprise</span><div className="text-xs font-medium text-foreground" data-testid="metric-eps-surprise">{chartMetrics.lastEpsSurprise}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Debt/Equity</span><div className="text-xs font-medium text-foreground" data-testid="metric-debt-equity">{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Target Price</span><div className="text-xs font-medium text-foreground" data-testid="metric-target-price">{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>
-              <span className="text-xs text-white font-medium">Intraday</span>
-              <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
-                <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-scan-chart-intraday">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5min">5m</SelectItem>
-                  <SelectItem value="15min">15m</SelectItem>
-                  <SelectItem value="30min">30m</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-white"
-                onClick={() => setMaSettingsOpen(true)}
-                data-testid="button-scan-chart-ma-settings"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`text-white toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
-                onClick={() => setIntradayMeasureMode(m => !m)}
-                style={intradayMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-                data-testid="button-intraday-measure-mode"
-              >
-                <Ruler className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`text-white toggle-elevate ${intradayTrendLineMode ? "toggle-elevated bg-white/15" : ""}`}
-                onClick={() => setIntradayTrendLineMode(m => !m)}
-                style={intradayTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-                data-testid="button-intraday-trend-line-mode"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
-                  <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
-                  <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
-                </svg>
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`text-white text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-white/15" : ""}`}
-                onClick={() => setShowETH(e => !e)}
-                style={showETH ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-                data-testid="button-intraday-eth-toggle"
-              >
-                ETH
-              </Button>
-            </div>
-            {intradayLoading ? (
-              <Card className="flex-1">
-                <CardContent className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </CardContent>
-              </Card>
-            ) : (showETH ? intradayData : rthData) ? (
-              <TradingChart
-                data={showETH ? intradayData! : rthData!}
-                timeframe={intradayTimeframe}
-                height={chartHeight}
-                showLegend={true}
-                showDayDividers={true}
-                maSettings={maSettingsData}
-                maxBars={maxBars}
-                measureMode={intradayMeasureMode}
-                trendLineMode={intradayTrendLineMode}
-              />
-            ) : (
-              <Card className="flex-1">
-                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  No intraday data
-                </CardContent>
-              </Card>
-            )}
-            {chartMetrics && (
-              <div className="border border-border rounded p-2 mt-1 flex-shrink-0 grid grid-cols-4 gap-x-4 gap-y-1" data-testid="scan-intraday-metrics-strip">
-                <div><span className="text-[10px] text-muted-foreground">ADR(20) $</span><div className="text-xs font-medium text-foreground" data-testid="metric-adr20-dollar">${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">50d Ext (ADR)</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-50d-ext-adr">{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
-                <div><span className="text-[10px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`} data-testid="metric-macd">{chartMetrics.macd}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">Sector</span><div className="text-xs font-medium" data-testid="metric-sector-etf">{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer text-foreground underline decoration-dotted" onClick={() => window.location.href = `/charts?ticker=${chartMetrics.sectorEtf}`} data-testid="link-sector-etf">{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : "N/A"}</div></div>
-                <div><span className="text-[10px] text-muted-foreground">ADR(20) %</span><div className="text-xs font-medium text-foreground" data-testid="metric-adr20-pct">{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
-                <div><span className="text-[10px] text-muted-foreground">20d Ext %</span><div className={`text-xs font-medium ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-20d-ext">{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
-                <div><span className="text-[10px] text-muted-foreground">RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-rs-momentum">{chartMetrics.rsMomentum ?? "N/A"}</div></div>
-                <div className="col-span-1"><span className="text-[10px] text-muted-foreground">Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium text-foreground truncate" data-testid="metric-industry-peers">{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => window.location.href = `/charts?ticker=${p.symbol}`} data-testid={`link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
-              </div>
-            )}
-          </div>
-        </div>
+        <DualChartGrid
+          dailyData={dailyData}
+          dailyLoading={dailyLoading}
+          intradayData={intradayData}
+          intradayLoading={intradayLoading}
+          chartMetrics={chartMetrics ?? null}
+          intradayTimeframe={intradayTimeframe}
+          onIntradayTimeframeChange={setIntradayTimeframe}
+          showETH={showETH}
+          onShowETHChange={setShowETH}
+          dailyChartProps={{
+            markers: cocAnnotations.markers,
+            diamondMarkers: cocAnnotations.diamondMarkers,
+            priceLines: cocAnnotations.priceLines,
+            resistanceLines: cocAnnotations.resistanceLines,
+          }}
+          testIdPrefix="scan"
+        />
         </ChartErrorBoundary>
-        <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
       </div>
     </div>,
     document.body
