@@ -803,8 +803,16 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 TIMEFRAME OVERRIDE RULE:
 Each criterion can optionally specify a "timeframeOverride" field. When set to "daily", this criterion will evaluate against daily candles even when the thought itself runs on an intraday timeframe (5min, 15min, 30min). This is critical for criteria that reference daily-level indicators like the 50-day SMA, 200-day SMA, daily RSI, etc. If the user mentions "daily" bars, "daily SMA", "D1", "50-day", "200-day", or similar daily-level references, set timeframeOverride to "daily". Omit the field entirely when the criterion should use the thought's own timeframe.
 
-CRITICAL RULE FOR DESCRIPTIONS:
-The "description" field MUST accurately describe what the chosen indicators and parameters actually measure — NOT what the user asked for. If the user asks for "stocks bouncing off the 50 SMA" but the best available indicator only checks proximity to the SMA (not a bounce/reversal), the description must say "Screens for stocks whose price is currently within X% of the 50 SMA" rather than claiming it detects a bounce. Never oversell or exaggerate what the criteria can detect. Be precise and honest about what the screening actually does.
+CRITICAL RULE FOR NAMES AND DESCRIPTIONS:
+Both the thought "name" and "description" fields MUST accurately describe what the chosen indicators and parameters actually measure — NOT what the user asked for. If the user asks for "stocks that pulled back to the 50 SMA and held" but the best available indicator only checks proximity to the SMA (not a pullback/bounce/hold pattern), the name must say "Price near 50 SMA" (not "Pullback to 50 SMA") and the description must say "Screens for stocks whose price is currently within X% of the 50 SMA" rather than claiming it detects a pullback or hold. Never oversell or exaggerate what the criteria can detect in names or descriptions. Be precise and honest about what the screening actually does.
+
+Examples of BAD vs GOOD names:
+- BAD: "Pullback to 10 EMA" (MA-3 doesn't detect pullbacks, just proximity)
+  GOOD: "Price near 10 EMA"
+- BAD: "Bounce off 21 SMA" (MA-3 doesn't detect bounces)
+  GOOD: "Price near 21 SMA"
+- BAD: "Held at support" (no indicator detects "holding")
+  GOOD: "Price near support level"
 
 IMPORTANT GUIDELINES for indicator selection:
 - For "price crossed above/below a moving average" (e.g. "price crossed above the 50 SMA", "price broke below the 20 EMA"), ALWAYS use MA-9 (Price Crosses MA). Set crossType to "above" or "below". Do NOT use MA-7 for this — MA-7 is only for two MAs crossing each other.
@@ -873,13 +881,27 @@ Connect: A → Results, B → C (data-link edge), C → Results, D → Results
 CRITICAL: OR LOGIC AND AMBIGUITY EXPANSION
 Edges between thoughts can specify "logicType": "AND" (default) or "logicType": "OR". Use OR edges when the user describes alternative conditions that should any-match.
 
-AMBIGUITY EXPANSION RULE: When the user's description is vague about a specific parameter value (e.g., "a moving average" without specifying which period, "pulled back to an MA", "near a support level"), you MUST expand the ambiguity into multiple parallel thoughts connected by OR logic rather than arbitrarily picking one value.
+AMBIGUITY EXPANSION RULE: Expansion into multiple OR alternatives depends on whether the ambiguous term is the CORE CONCEPT or a SUPPORTING DETAIL.
 
-Common ambiguity patterns to expand:
-- "a moving average" / "an MA" / "the MA" (unspecified) → Create parallel thoughts for the most commonly used MAs: 10 EMA, 21 EMA, 50 SMA. Connect each with an OR edge to RESULTS.
-- "pulled back to a moving average" → Multiple thoughts, each checking proximity to a different common MA period. Connect each with an OR edge to RESULTS.
+CORE CONCEPT = the ambiguous term IS the main thing the user is asking about. The entire idea centers on it.
+SUPPORTING DETAIL = the ambiguous term is ONE piece of a larger multi-step idea. The user mentioned it in passing.
+
+When the ambiguous term is the CORE CONCEPT (the entire idea revolves around it), expand into OR alternatives:
+- "Find stocks that pulled back to a moving average" → The whole idea IS about the MA pullback. Expand to 10 EMA, 21 EMA, 50 SMA as OR alternatives.
+- "Stocks near a support level" → The whole idea IS about support. Expand.
+
+When the ambiguous term is a SUPPORTING DETAIL in a larger idea, pick ONE sensible default — do NOT expand:
+- "Uptrend stocks that gapped up and pulled back to a MA" → The idea has 3 parts (uptrend + gap + pullback). The MA is one detail. Pick 21 EMA as the default (most commonly used swing MA) and create ONE thought. The user can change the period later.
+- "Breakout above a MA with volume" → Two parts. Pick 50 SMA as a reasonable default for breakout context. ONE thought.
+
+DEFAULT MA PICKS (when not expanding):
+- For pullback/bounce context: 21 EMA (standard swing trading MA)
+- For trend/breakout context: 50 SMA (standard trend MA)
+- For short-term momentum: 10 EMA
+
+ALWAYS expand for explicit OR language:
 - "either X or Y" / "X or Y" → Explicit OR logic. Create separate thoughts for X and Y, connect with OR edges.
-- "a support level" (unspecified type) → OR branches for MA support, prior pivot support, etc.
+- "one of the key MAs" / "any moving average" / "multiple MAs" → User explicitly wants alternatives. Expand.
 
 IMPORTANT RULES FOR OR EDGES:
 - "RESULTS" is the ONLY special reserved key. Use "RESULTS" as the edge target to connect directly to the Results node on the canvas.
@@ -919,47 +941,59 @@ PREREQUISITE vs ALTERNATIVE pattern:
 - NEVER connect a prerequisite thought to alternative thoughts with OR edges. That makes the prerequisite an alternative instead of a requirement.
 
 MULTI-TIMEFRAME PATTERN:
-When the user wants a daily filter (e.g., gap up) combined with intraday alternatives (e.g., pullback to MA), set the timeframe field on each thought independently:
+When the user wants a daily filter (e.g., gap up) combined with an intraday check (e.g., pullback to MA), set the timeframe field on each thought independently:
   Thought A: "Overnight Gap Up" — timeframe: "daily" (no explicit edges → AND required)
-  Thought B: "Pullback to 10 EMA" — timeframe: "intraday"
-  Thought C: "Pullback to 21 EMA" — timeframe: "intraday"
-  Thought D: "Pullback to 50 SMA" — timeframe: "intraday"
+  Thought B: "Price near 21 EMA" — timeframe: "intraday" (no explicit edges → AND required)
+  "edges": []
+  The scan engine evaluates each thought on its specified timeframe. Daily prerequisite + intraday filter is a powerful pattern.
+
+If the user explicitly requests multiple intraday alternatives (e.g., "pulled back to either the 10 EMA or the 50 SMA intraday"), THEN use OR:
+  Thought A: "Overnight Gap Up" — timeframe: "daily"
+  Thought B: "Near 10 EMA" — timeframe: "intraday"
+  Thought C: "Near 50 SMA" — timeframe: "intraday"
   "edges": [
     { "from": "B", "to": "RESULTS", "logicType": "OR" },
-    { "from": "C", "to": "RESULTS", "logicType": "OR" },
-    { "from": "D", "to": "RESULTS", "logicType": "OR" }
+    { "from": "C", "to": "RESULTS", "logicType": "OR" }
   ]
-  The scan engine evaluates each thought on its specified timeframe. Daily prerequisite + intraday alternatives is a powerful pattern.
 
-Example: User says "Find stocks that pulled back to a moving average"
-BAD (picking one arbitrarily):
-  Thought A: MA-3 with period=21 → Results
-GOOD (expanding the ambiguity — each alternative gets its own thought with OR edges):
-  Thought A: "Pullback to 10 EMA" — MA-3 with period=10, maType=ema, maxPct=2
-  Thought B: "Pullback to 21 EMA" — MA-3 with period=21, maType=ema, maxPct=2
-  Thought C: "Pullback to 50 SMA" — MA-3 with period=50, maType=sma, maxPct=2
+Example (CORE CONCEPT — expand): User says "Find stocks that pulled back to a moving average"
+The ENTIRE idea is about the MA pullback. Expand into SEPARATE thoughts with OR edges.
+CRITICAL: Each alternative MUST be its own thought. Do NOT put multiple MA-3 criteria in one thought — criteria within a thought are ANDed (all must pass), which would require a stock to be near ALL MAs at once. Instead, create separate thoughts so OR logic works (any ONE MA match is sufficient):
+  Thought A: "Near 10 EMA" — 1 criterion: MA-3 with period=10, maType=ema, maxPct=2
+  Thought B: "Near 21 EMA" — 1 criterion: MA-3 with period=21, maType=ema, maxPct=2
+  Thought C: "Near 50 SMA" — 1 criterion: MA-3 with period=50, maType=sma, maxPct=2
   "edges": [
     { "from": "A", "to": "RESULTS", "logicType": "OR" },
     { "from": "B", "to": "RESULTS", "logicType": "OR" },
     { "from": "C", "to": "RESULTS", "logicType": "OR" }
   ]
-  A ticker passes if it pulls back to ANY of these MAs (OR logic).
+  A ticker passes if it is near ANY ONE of these MAs (OR logic). THREE thoughts, not one.
 
-Example: User says "Find stocks in an uptrend that gapped up and pulled back to a moving average and either went into a base or are lingering around the MA"
-This should produce 5+ thoughts:
+WRONG way to expand (NEVER do this):
+  Thought A: "Near key MAs" — 3 criteria: MA-3(10), MA-3(21), MA-3(50)
+  This requires a stock to be near ALL THREE MAs simultaneously (AND), which is almost impossible and not what the user wants.
+
+Example (SUPPORTING DETAIL — don't expand): User says "Uptrend stocks that gapped up and pulled back to a MA and held"
+The idea has 3 distinct parts: uptrend + gap + pullback. The MA is a supporting detail. Pick ONE default (21 EMA for pullback context). Do NOT create 3 pullback thoughts.
   Thought A (thoughtKey "A"): "Uptrend Filter" — MA-1 (price above 50 SMA) + MA-8 (50 above 200) + MA-4 (MA slope rising)
-  Thought B (thoughtKey "B"): "Overnight Gap Up" — gap detection criteria
-  Thought C (thoughtKey "C"): "Pullback to 10 EMA" — MA-3 with period=10, maType=ema, maxPct=2
-  Thought D (thoughtKey "D"): "Pullback to 21 EMA" — MA-3 with period=21, maType=ema, maxPct=2
-  Thought E (thoughtKey "E"): "Pullback to 50 SMA" — MA-3 with period=50, maType=sma, maxPct=2
-  A and B have NO explicit edges → they auto-connect to Results with AND logic (both required).
-  C, D, E need explicit OR edges (any MA pullback is acceptable):
+  Thought B (thoughtKey "B"): "Overnight Gap Up" — PA-10 gap detection
+  Thought C (thoughtKey "C"): "Price near 21 EMA" — MA-3 with period=21, maType=ema, minPct=-2, maxPct=2
+  No explicit edges needed — all 3 auto-connect to Results with AND logic.
+  "edges": []
+  Final scan behavior: Uptrend AND Gap Up AND Near 21 EMA. Simple and matches the user's intent.
+
+Example (EXPLICIT OR — expand): User says "Uptrend stocks that gapped up and pulled back to either the 10 EMA or the 21 EMA"
+The user explicitly said "either... or..." — this IS an OR request:
+  Thought A: "Uptrend Filter" — MA-1 + MA-8 + MA-4
+  Thought B: "Overnight Gap Up" — PA-10
+  Thought C: "Near 10 EMA" — MA-3 with period=10, maType=ema
+  Thought D: "Near 21 EMA" — MA-3 with period=21, maType=ema
+  A and B have no explicit edges → AND.
   "edges": [
     { "from": "C", "to": "RESULTS", "logicType": "OR" },
-    { "from": "D", "to": "RESULTS", "logicType": "OR" },
-    { "from": "E", "to": "RESULTS", "logicType": "OR" }
+    { "from": "D", "to": "RESULTS", "logicType": "OR" }
   ]
-  Final scan behavior: A stock must pass Uptrend AND Gap Up AND (Pullback to 10 EMA OR Pullback to 21 EMA OR Pullback to 50 SMA).
+  Final: Uptrend AND Gap Up AND (Near 10 EMA OR Near 21 EMA).
 
 When the user IS specific (e.g., "pulled back to the 21 EMA"), do NOT expand — just use the specified value in a single thought.
 
