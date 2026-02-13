@@ -176,6 +176,7 @@ type CriterionResult = {
 
 type ThoughtEvalResult = {
   pass: boolean;
+  allMuted: boolean;
   outputData: Record<string, any>;
   criteriaResults: CriterionResult[];
 };
@@ -187,10 +188,10 @@ function evaluateThoughtCriteria(
   candlesByTimeframe?: Record<string, CandleData[]>,
   upstreamData?: Record<string, any>
 ): ThoughtEvalResult {
-  if (!criteria || criteria.length === 0) return { pass: false, outputData: {}, criteriaResults: [] };
+  if (!criteria || criteria.length === 0) return { pass: false, allMuted: false, outputData: {}, criteriaResults: [] };
 
   const activeCriteria = criteria.filter((c: any) => !c.muted);
-  if (activeCriteria.length === 0) return { pass: true, outputData: {}, criteriaResults: [] };
+  if (activeCriteria.length === 0) return { pass: true, allMuted: true, outputData: {}, criteriaResults: [] };
 
   const outputData: Record<string, any> = {};
   const criteriaResults: CriterionResult[] = [];
@@ -243,7 +244,7 @@ function evaluateThoughtCriteria(
     if (!pass) allPass = false;
   }
 
-  return { pass: allPass, outputData, criteriaResults };
+  return { pass: allPass, allMuted: false, outputData, criteriaResults };
 }
 
 async function upsertIndicatorLearningSummary(record: any) {
@@ -1424,10 +1425,12 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
               const nodeResults: Record<string, boolean> = {};
               const nodeOutputData: Record<string, Record<string, any>> = {};
               const nodeCriteriaResults: Record<string, CriterionResult[]> = {};
+              const effectivelyMutedNodes = new Set<string>();
 
               for (const node of sortedThoughtNodes) {
                 if (node.isMuted) {
                   nodeResults[node.id] = true;
+                  effectivelyMutedNodes.add(node.id);
                   continue;
                 }
                 const tf = node.thoughtTimeframe || "daily";
@@ -1455,6 +1458,9 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   Object.keys(mergedUpstream).length > 0 ? mergedUpstream : undefined
                 );
 
+                if (evalResult.allMuted) {
+                  effectivelyMutedNodes.add(node.id);
+                }
                 let passed = evalResult.pass;
                 if (node.isNot) passed = !passed;
                 nodeResults[node.id] = passed;
@@ -1539,9 +1545,17 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   computeEffectivePass(e.source, copyVisited())
                 );
 
-                const orPass = orEdges.length === 0 || orEdges.some((e: any) =>
-                  computeEffectivePass(e.source, copyVisited())
-                );
+                const activeOrEdges = orEdges.filter((e: any) => !effectivelyMutedNodes.has(e.source));
+                let orPass: boolean;
+                if (orEdges.length === 0) {
+                  orPass = true;
+                } else if (activeOrEdges.length === 0) {
+                  orPass = true;
+                } else {
+                  orPass = activeOrEdges.some((e: any) =>
+                    computeEffectivePass(e.source, copyVisited())
+                  );
+                }
 
                 if (isResultsNode) {
                   return andPass && orPass;
