@@ -872,6 +872,37 @@ SINGLE-THOUGHT EXAMPLES (no data links needed):
 
 The number of criteria and thoughts should match the complexity of the idea. Simple ideas get 1 thought with 1 criterion. Complex ideas with data-linking get multiple thoughts with edges.
 
+CRITICAL: PARAMETER TUNING PHILOSOPHY
+A scan returning 0 results is USELESS to the user. Always err on the side of PERMISSIVE parameters that return 10-50 results, which the user can then tighten. Never stack tight filters — each additional criterion multiplies the filtering effect.
+
+PARAMETER GUIDANCE BY INDICATOR:
+- PA-3 (Consolidation/Base Detection): Use maxRange 20-30% (not the tight 15% default). Use period 40-60 for max base length. Set minPeriod to 5-10. Set maxSlope to 8-10% to allow gentle upward-drifting bases. minBasePct should be 0 unless specifically requested.
+- PA-4 (Base Depth): Use maxDepth 30-35% for swing setups. Only use tight depths (10-15%) if user explicitly says "shallow" or "tight pullback". Set minDepth to 3-5% to exclude completely flat stocks.
+- VOL-4 (Volume Dry-Up): Use maxMultiple 0.75-0.85 (not the strict 0.5 default). Volume dry-up of 0.5x is extremely rare — most healthy consolidations show 0.6-0.8x average volume.
+- VOL-3 (Up/Down Volume Ratio): Use minRatio 1.0-1.2 for accumulation bias. Don't set above 1.5 unless the user explicitly wants very strong accumulation.
+- PA-6 (Distance from 52-Week High): Use maxDistance 25-30% as default. Stocks 25% off highs can still be excellent setups.
+- MA-3 (Price vs MA Distance): For "price near MA" use 0-5% range. For "price above MA" use minPct 0 and maxPct 30-50% (wide) unless user specifies proximity.
+- MA-4 (MA Slope): Use minSlope 0.05-0.1% for "rising MA". Don't use values above 0.3% — that's extremely steep and rare.
+- RS-1/RS-2 (Relative Strength): Use minRS 0 or small positive values. Only use minRS > 5 if user says "strong" RS. Values above 15 are very restrictive.
+- PA-2 (ATR Percent): Use minPct 1.5 and maxPct 10-12% for normal volatility range. Don't set maxPct below 6% unless user specifically wants low-volatility stocks.
+- VLT-1/VLT-2 (Volatility Contraction): Use ratio 0.6-0.8 for contraction detection, not extremely tight values.
+
+CRITERIA DISTRIBUTION ACROSS THOUGHTS:
+When creating multiple thoughts, distribute criteria evenly. Avoid putting 7+ criteria in one thought and 1-2 in another. A thought with 6+ criteria is very likely to return 0 results because every criterion must pass simultaneously. Aim for 3-4 criteria per thought maximum.
+
+If the user describes a momentum/Quallamaggie-style setup (and NO consumer indicators like PA-14, PA-15, PA-16 are needed), structure as:
+- Thought A (Trend): MA structure (2-3 criteria: price above MAs, MAs rising, MA stacking)
+- Thought B (Base/Consolidation): Base quality (2-3 criteria: PA-3 base detection, PA-4 depth, VOL-4 volume dry-up)
+- Thought C (Strength): Relative strength + accumulation (2 criteria: RS vs market, up/down volume)
+Connect: A → Results, B → Results, C → Results (AND at Results intersects them all)
+
+If consumer indicators ARE needed (PA-14 Tightness, PA-15 Close Clustering, PA-16 Volume Fade), remember the DATA-LINKING HARD RULES above: PA-3 must be in a separate upstream thought, consumers in a downstream thought with an edge between them. Example:
+- Thought A (Trend): MA structure (2-3 criteria)
+- Thought B (Base Provider): PA-3 only (base detection — the data provider)
+- Thought C (Base Quality — downstream): PA-14 + PA-16 + VOL-4 (consumers + non-linked indicators)
+- Thought D (Strength): RS + volume ratio
+Connect: A → Results, B → C (data-link edge), C → Results, D → Results
+
 Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
 
       const openai = getOpenAI();
