@@ -138,7 +138,8 @@ export async function fetchIntradayPrices(
   ticker: string,
   startDate: Date,
   endDate?: Date,
-  resampleFreq: string = "5min"
+  resampleFreq: string = "5min",
+  includeETH: boolean = false
 ): Promise<TiingoCandle[]> {
   const params = new URLSearchParams({
     startDate: formatDate(startDate),
@@ -154,6 +155,7 @@ export async function fetchIntradayPrices(
   return (data || [])
     .filter((d: any) => {
       if (d.open == null || d.close == null) return false;
+      if (includeETH) return true;
       const dt = new Date(d.date);
       return isMarketHours(dt);
     })
@@ -230,11 +232,12 @@ export async function getHistoricalBars(
   symbol: string,
   startDate: Date,
   endDate: Date,
-  interval: string = "1d"
+  interval: string = "1d",
+  includeETH: boolean = false
 ): Promise<TiingoCandle[]> {
   const { isIntraday, resampleFreq } = mapTiingoInterval(interval);
   if (isIntraday) {
-    return fetchIntradayPrices(symbol, startDate, endDate, resampleFreq);
+    return fetchIntradayPrices(symbol, startDate, endDate, resampleFreq, includeETH);
   }
   return fetchEODPrices(symbol, startDate, endDate, resampleFreq);
 }

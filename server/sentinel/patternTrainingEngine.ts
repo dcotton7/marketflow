@@ -377,13 +377,13 @@ interface HistoricalBar {
   volume: number;
 }
 
-async function fetchHistoricalBars(symbol: string, days: number, interval: string = "1d"): Promise<HistoricalBar[]> {
+async function fetchHistoricalBars(symbol: string, days: number, interval: string = "1d", includeETH: boolean = false): Promise<HistoricalBar[]> {
   try {
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const candles = await tiingo.getHistoricalBars(symbol, startDate, endDate, interval);
+    const candles = await tiingo.getHistoricalBars(symbol, startDate, endDate, interval, includeETH);
     
     return candles
       .map((c: tiingo.TiingoCandle) => ({
@@ -404,7 +404,8 @@ async function fetchHistoricalBars(symbol: string, days: number, interval: strin
 export async function fetchChartData(
   ticker: string,
   timeframe: string = "daily",
-  lookbackDays?: number
+  lookbackDays?: number,
+  includeETH: boolean = false
 ): Promise<ChartDataWithIndicators | null> {
   try {
     const intradayLookback: Record<string, number> = { "5min": 90, "15min": 180, "30min": 180 };
@@ -413,7 +414,7 @@ export async function fetchChartData(
     const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
     const interval = intervalMap[timeframe] || "1d";
     
-    const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval);
+    const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval, includeETH);
     if (bars.length < 10) {
       console.error(`[PatternTraining] Insufficient data for ${ticker}: ${bars.length} bars`);
       return null;

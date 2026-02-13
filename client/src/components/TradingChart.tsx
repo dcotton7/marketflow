@@ -157,6 +157,7 @@ export interface TradingChartProps {
   maxBars?: number;
   measureMode?: boolean;
   trendLineMode?: boolean;
+  resistanceLines?: { startTime: number; startPrice: number; endTime: number; endPrice: number }[];
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -476,6 +477,7 @@ export function TradingChart({
   maxBars,
   measureMode = false,
   trendLineMode = false,
+  resistanceLines,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -493,6 +495,7 @@ export function TradingChart({
   const trendLineModeRef = useRef(trendLineMode);
   const trendLineStartRef = useRef<MeasurePoint | null>(null);
   const trendLineSeriesListRef = useRef<ISeriesApi<"Line">[]>([]);
+  const resistanceLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   useEffect(() => {
@@ -568,10 +571,14 @@ export function TradingChart({
 
       let timestamp: number;
       if (typeof param.time === "object") {
-        timestamp = Math.floor(
-          new Date(
-            `${param.time.year}-${String(param.time.month).padStart(2, "0")}-${String(param.time.day).padStart(2, "0")}`
-          ).getTime() / 1000
+        const t = param.time as { year: number; month: number; day: number };
+        const candles = candlesRef.current;
+        const matchCandle = candles.find(c => {
+          const d = new Date(c.timestamp * 1000);
+          return d.getUTCFullYear() === t.year && (d.getUTCMonth() + 1) === t.month && d.getUTCDate() === t.day;
+        });
+        timestamp = matchCandle ? matchCandle.timestamp : Math.floor(
+          new Date(`${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`).getTime() / 1000
         );
       } else {
         timestamp = param.time as number;
@@ -599,6 +606,8 @@ export function TradingChart({
               priceLineVisible: false,
               lastValueVisible: false,
               crosshairMarkerVisible: false,
+              priceScaleId: 'right',
+              autoscaleInfoProvider: () => null,
             });
             const sortedPoints = [startPt, endPt].sort((a, b) => a.time - b.time);
             trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
@@ -850,6 +859,7 @@ export function TradingChart({
     } else {
       chart.timeScale().fitContent();
     }
+    chart.timeScale().scrollToPosition(7, false);
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -877,6 +887,10 @@ export function TradingChart({
         markersHandleRef.current = null;
         priceLinesRef.current = [];
         maLineSeriesRef.current = [];
+        for (const s of resistanceLineSeriesRef.current) {
+          try { chart.removeSeries(s); } catch {}
+        }
+        resistanceLineSeriesRef.current = [];
       }
     };
   }, [displayData, height, isIntraday, showDayDividers, timeframe]);
@@ -1031,6 +1045,35 @@ export function TradingChart({
       }
     }
   }, [priceLines]);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    for (const s of resistanceLineSeriesRef.current) {
+      try { chartRef.current.removeSeries(s); } catch {}
+    }
+    resistanceLineSeriesRef.current = [];
+
+    if (resistanceLines && resistanceLines.length > 0) {
+      for (const rl of resistanceLines) {
+        const series = chartRef.current.addSeries(LineSeries, {
+          color: "#ef4444",
+          lineWidth: 2 as 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          priceScaleId: 'right',
+          autoscaleInfoProvider: () => null,
+        });
+        const points = [
+          { time: rl.startTime as any, value: rl.startPrice },
+          { time: rl.endTime as any, value: rl.endPrice },
+        ];
+        series.setData(points);
+        resistanceLineSeriesRef.current.push(series);
+      }
+    }
+  }, [resistanceLines]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;

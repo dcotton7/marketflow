@@ -4076,10 +4076,12 @@ function ScanChartViewer({
   });
 
   const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", symbol, intradayTimeframe],
+    queryKey: ["/api/sentinel/pattern-training/chart-data", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${symbol}&timeframe=${intradayTimeframe}`);
+      const params = new URLSearchParams({ ticker: symbol!, timeframe: intradayTimeframe });
+      if (showETH) params.set('includeETH', 'true');
+      const res = await fetch(`/api/sentinel/pattern-training/chart-data?${params}`);
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
@@ -4228,25 +4230,51 @@ function ScanChartViewer({
   }, [dailyData]);
 
   const cocAnnotations = useMemo(() => {
-    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], diamondMarkers: [] as DiamondMarker[], priceLines: [] as PriceLevelLine[] };
+    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], diamondMarkers: [] as DiamondMarker[], priceLines: [] as PriceLevelLine[], resistanceLines: [] as { startTime: number; startPrice: number; endTime: number; endPrice: number }[] };
 
     const markers: ChartMarker[] = [];
     const diamondMarkers: DiamondMarker[] = [];
     const priceLines: PriceLevelLine[] = [];
+    const resistanceLines: { startTime: number; startPrice: number; endTime: number; endPrice: number }[] = [];
 
     for (const thought of current.thoughtBreakdown) {
       for (const cr of thought.criteriaResults) {
         if (!cr.pass || !cr.cocHighlight) continue;
         const h = cr.cocHighlight;
 
-        if (h.type === "resistanceLine" && h.level) {
-          priceLines.push({
-            price: h.level,
-            color: "#ef4444",
-            lineWidth: 1,
-            lineStyle: "dotted",
-            label: "Resistance",
-          });
+        if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
+          if (dailyData) {
+            const endIdx = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h.endBar || 0));
+            const startIdx = Math.max(0, dailyData.candles.length - 1 - h.startBar);
+            if (startIdx >= 0 && endIdx >= startIdx && endIdx < dailyData.candles.length) {
+              if (startIdx === endIdx) {
+                const c = dailyData.candles[startIdx];
+                resistanceLines.push({
+                  startTime: c.timestamp,
+                  startPrice: h.level,
+                  endTime: c.timestamp,
+                  endPrice: h.level,
+                });
+              } else {
+                const baseCandles = dailyData.candles.slice(startIdx, endIdx + 1);
+                const thirdLen = Math.max(1, Math.floor(baseCandles.length / 3));
+                const firstThird = baseCandles.slice(0, thirdLen);
+                const lastThird = baseCandles.slice(-thirdLen);
+                const firstHigh = Math.max(...firstThird.map(c => c.high));
+                const lastHigh = Math.max(...lastThird.map(c => c.high));
+                const startCandle = firstThird[firstThird.map(c => c.high).indexOf(firstHigh)];
+                const endCandle = lastThird[lastThird.map(c => c.high).indexOf(lastHigh)];
+                if (startCandle && endCandle) {
+                  resistanceLines.push({
+                    startTime: startCandle.timestamp,
+                    startPrice: firstHigh,
+                    endTime: endCandle.timestamp,
+                    endPrice: lastHigh,
+                  });
+                }
+              }
+            }
+          }
         }
 
         if (h.type === "gapCircle" && h.barIndex !== undefined) {
@@ -4286,7 +4314,7 @@ function ScanChartViewer({
       }
     }
 
-    return { markers, diamondMarkers, priceLines };
+    return { markers, diamondMarkers, priceLines, resistanceLines };
   }, [current?.thoughtBreakdown, dailyData]);
 
   if (!open) return null;
@@ -4611,6 +4639,7 @@ function ScanChartViewer({
                 markers={cocAnnotations.markers}
                 diamondMarkers={cocAnnotations.diamondMarkers}
                 priceLines={cocAnnotations.priceLines}
+                resistanceLines={cocAnnotations.resistanceLines}
               />
             ) : (
               <Card className="flex-1">
