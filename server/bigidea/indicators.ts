@@ -1088,7 +1088,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const recentN = params.recentBars ?? 5;
       const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.8;
-      if (candles.length < baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
+      if (candles.length < recentN + baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
 
       const dailyRangePct = (c: { high: number; low: number; close: number }) =>
         c.close === 0 ? 0 : ((c.high - c.low) / c.close) * 100;
@@ -1098,7 +1098,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const recentAvg = recentSum / recentN;
 
       let baselineSum = 0;
-      for (let i = 0; i < baselineN; i++) baselineSum += dailyRangePct(candles[i]);
+      for (let i = recentN; i < recentN + baselineN; i++) baselineSum += dailyRangePct(candles[i]);
       const baselineAvg = baselineSum / baselineN;
 
       if (baselineAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `≤${maxRatio}x` } } };
@@ -1149,14 +1149,14 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const recentN = params.recentBars ?? 10;
       const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.9;
-      if (candles.length < baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
+      if (candles.length < recentN + baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
 
       let recentVol = 0;
       for (let i = 0; i < recentN; i++) recentVol += candles[i].volume;
       const recentAvg = recentVol / recentN;
 
       let baselineVol = 0;
-      for (let i = 0; i < baselineN; i++) baselineVol += candles[i].volume;
+      for (let i = recentN; i < recentN + baselineN; i++) baselineVol += candles[i].volume;
       const baselineAvg = baselineVol / baselineN;
 
       if (baselineAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `≤${maxRatio}x` } } };
