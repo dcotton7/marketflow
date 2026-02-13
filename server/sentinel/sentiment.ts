@@ -16,14 +16,16 @@ export interface DailyBasket {
   canaryTags: string[];
 }
 
-export interface WeeklyTrend {
-  state: 1 | 0 | -1;
-  stateName: "Tailwind" | "Neutral" | "Headwind";
+export interface MMTrend {
+  state: 1 | 0.5 | -0.5 | -1;
+  stateName: "Tailwind" | "Falling Tailwind" | "Slack" | "Headwind";
   confidence: "strong" | "moderate" | "weak";
   price: number;
-  ma40w: number;
-  maSlope: "rising" | "falling" | "flat";
+  ema21: number;
+  emaSlope: "rising" | "falling" | "flat";
 }
+
+export type WeeklyTrend = MMTrend;
 
 export interface SectorTrend {
   sector: string;
@@ -92,6 +94,27 @@ function calculateSlope(prices: number[], period: number): "rising" | "falling" 
   const diff = ((currentMA - previousMA) / previousMA) * 100;
   if (diff > 0.5) return "rising";
   if (diff < -0.5) return "falling";
+  return "flat";
+}
+
+function calculateEMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices[0] || 0;
+  const reversed = [...prices].reverse();
+  const k = 2 / (period + 1);
+  let ema = reversed.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < reversed.length; i++) {
+    ema = reversed[i] * k + ema * (1 - k);
+  }
+  return ema;
+}
+
+function calculateEMASlope(prices: number[], period: number): "rising" | "falling" | "flat" {
+  if (prices.length < period + 5) return "flat";
+  const currentEMA = calculateEMA(prices, period);
+  const previousEMA = calculateEMA(prices.slice(5), period);
+  const diff = ((currentEMA - previousEMA) / previousEMA) * 100;
+  if (diff > 0.3) return "rising";
+  if (diff < -0.3) return "falling";
   return "flat";
 }
 
