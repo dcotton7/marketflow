@@ -1229,7 +1229,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "Invalid universe" });
       }
 
-      const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && n.thoughtCriteria);
+      const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && (n.thoughtCriteria || n.isMuted));
 
       const linkOverrides: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }> = [];
 
@@ -1964,7 +1964,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "nodes and funnelData are required" });
       }
 
-      const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && n.thoughtCriteria);
+      const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && (n.thoughtCriteria || n.isMuted));
 
       const indicatorMeta: Array<{ id: string; name: string; category: string; currentParams: any[]; bounds: any[] }> = [];
       for (const tn of thoughtNodes) {

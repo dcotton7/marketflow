@@ -143,14 +143,14 @@ export default function SentinelChartsPage() {
   useEffect(() => {
     const measure = () => {
       if (chartGridRef.current) {
-        const gridH = chartGridRef.current.clientHeight;
-        setChartHeight(Math.max(300, gridH - 24));
+        const rect = chartGridRef.current.getBoundingClientRect();
+        const available = window.innerHeight - rect.top - 16;
+        setChartHeight(Math.max(300, available - 24));
       }
     };
     const timer = setTimeout(measure, 100);
-    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
-    if (chartGridRef.current) observer.observe(chartGridRef.current);
-    return () => { clearTimeout(timer); observer.disconnect(); };
+    window.addEventListener("resize", measure);
+    return () => { clearTimeout(timer); window.removeEventListener("resize", measure); };
   }, [activeSymbol]);
 
   const displayPrice = dayChange?.price ?? 0;
