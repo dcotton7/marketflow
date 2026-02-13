@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSearch } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { TradingChart, ChartCandle, ChartIndicators } from "@/components/TradingChart";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
@@ -10,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Search, BarChart3, Settings2, Ruler, Sparkles } from "lucide-react";
+import { Loader2, Search, BarChart3, Settings2, Ruler, Sparkles, Eye } from "lucide-react";
 
 type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
@@ -53,6 +55,7 @@ const formatMarketCap = (mc: number) => {
 
 export default function SentinelChartsPage() {
   const { cssVariables } = useSystemSettings();
+  const { toast } = useToast();
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
   const initialSymbol = urlParams.get("symbol") || "";
@@ -126,6 +129,26 @@ export default function SentinelChartsPage() {
     staleTime: 60 * 1000,
   });
 
+  const watchlistMutation = useMutation({
+    mutationFn: async ({ symbol }: { symbol: string }) => {
+      const res = await fetch("/api/sentinel/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ symbol }),
+      });
+      if (!res.ok) throw new Error("Failed to add to watchlist");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
+      toast({ title: "Added to Watchlist", description: `${activeSymbol} has been added to your watching list.` });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to add to watchlist. It may already be on your list.", variant: "destructive" });
+    },
+  });
+
   const rthData = useMemo(() => {
     if (!intradayData) return null;
     const rthFmt = new Intl.DateTimeFormat("en-US", {
@@ -171,19 +194,14 @@ export default function SentinelChartsPage() {
   useEffect(() => {
     const measure = () => {
       if (chartGridRef.current) {
-        const gridHeight = chartGridRef.current.clientHeight;
-        const labelRows = chartGridRef.current.querySelectorAll(':scope > div > div:first-child');
-        let labelHeight = 0;
-        labelRows.forEach(el => { labelHeight = Math.max(labelHeight, (el as HTMLElement).offsetHeight); });
-        const metricsEl = chartGridRef.current.querySelector('[data-testid="chart-metrics-strip"]');
-        const metricsHeight = metricsEl ? (metricsEl as HTMLElement).offsetHeight + 8 : 0;
-        const usable = gridHeight - (labelHeight || 28) - metricsHeight;
-        setChartHeight(Math.max(180, Math.floor(usable * 0.9)));
+        const gridH = chartGridRef.current.clientHeight;
+        setChartHeight(Math.max(180, Math.floor((gridH - 120) * 0.85)));
       }
     };
     const timer = setTimeout(measure, 150);
-    window.addEventListener("resize", measure);
-    return () => { clearTimeout(timer); window.removeEventListener("resize", measure); };
+    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
+    if (chartGridRef.current) observer.observe(chartGridRef.current);
+    return () => { clearTimeout(timer); observer.disconnect(); };
   }, [activeSymbol]);
 
   const displayPrice = dayChange?.price ?? 0;
@@ -226,35 +244,8 @@ export default function SentinelChartsPage() {
             </Button>
           </div>
 
-          {activeSymbol && dailyData && (
-            <div
-              className="rs-ticker flex items-center gap-0 text-xl tracking-tight"
-              data-testid={`ticker-box-${activeSymbol}`}
-            >
-              <span className="rs-ticker-symbol font-bold text-foreground" data-testid="text-chart-symbol">{activeSymbol}</span>
-              <span className="text-muted-foreground mx-1.5">|</span>
-              <span className="rs-ticker-price font-semibold text-foreground" data-testid="text-chart-price">
-                ${displayPrice.toFixed(2)}
-              </span>
-              <span className="text-muted-foreground mx-1.5">|</span>
-              <span
-                className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
-                data-testid="text-chart-change"
-              >
-                {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
-              </span>
-              <span className="text-muted-foreground mx-1">|</span>
-              <span
-                className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
-                data-testid="text-chart-pct"
-              >
-                {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
-              </span>
-            </div>
-          )}
-
-          <div className="ml-auto flex items-center gap-2">
-            {activeSymbol && (
+          {activeSymbol && (
+            <div className="ml-auto flex items-center gap-2 flex-wrap">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -275,8 +266,52 @@ export default function SentinelChartsPage() {
                   <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
                 </TooltipContent>
               </Tooltip>
-            )}
-          </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => watchlistMutation.mutate({ symbol: activeSymbol })}
+                    disabled={watchlistMutation.isPending}
+                    data-testid="button-chart-watchlist"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Watchlist</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-sm">Add this ticker to your Watching list for tracking</p>
+                </TooltipContent>
+              </Tooltip>
+              {dailyData && (
+                <div
+                  className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card"
+                  data-testid={`ticker-box-${activeSymbol}`}
+                >
+                  <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{activeSymbol}</span>
+                  <span className="text-muted-foreground text-xl">|</span>
+                  <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">
+                    ${displayPrice.toFixed(2)}
+                  </span>
+                  <span className="text-muted-foreground text-xl">|</span>
+                  <span
+                    className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
+                    data-testid="text-chart-change"
+                  >
+                    {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
+                  </span>
+                  <span className="text-muted-foreground text-xl">|</span>
+                  <span
+                    className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
+                    data-testid="text-chart-pct"
+                  >
+                    {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {!activeSymbol ? (

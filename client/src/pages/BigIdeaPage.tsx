@@ -73,6 +73,7 @@ import {
   ThumbsDown,
   Lightbulb,
   EyeOff,
+  Eye,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -4024,6 +4025,26 @@ function ScanChartViewer({
     return () => { if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current); };
   }, []);
 
+  const watchlistMutation = useMutation({
+    mutationFn: async ({ symbol }: { symbol: string }) => {
+      const res = await fetch("/api/sentinel/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ symbol }),
+      });
+      if (!res.ok) throw new Error("Failed to add to watchlist");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
+      toast({ title: "Added to Watchlist", description: `${symbol} has been added to your watching list.` });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to add to watchlist. It may already be on your list.", variant: "destructive" });
+    },
+  });
+
   const ratingMutation = useMutation({
     mutationFn: async ({ symbol, rating, price, indicatorSnapshot }: { symbol: string; rating: "up" | "down"; price: number; indicatorSnapshot?: any }) => {
       const res = await apiRequest("POST", "/api/bigidea/chart-rating", {
@@ -4180,7 +4201,7 @@ function ScanChartViewer({
     const measure = () => {
       if (chartGridRef.current) {
         const gridH = chartGridRef.current.clientHeight;
-        setChartHeight(Math.max(250, Math.floor((gridH - 24) * 0.9)));
+        setChartHeight(Math.max(180, Math.floor((gridH - 120) * 0.85)));
       }
     };
     const timer = setTimeout(measure, 100);
@@ -4440,25 +4461,45 @@ function ScanChartViewer({
               <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
             </TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => {
+                  watchlistMutation.mutate({ symbol });
+                }}
+                disabled={watchlistMutation.isPending}
+                data-testid="button-chart-watchlist"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>Watchlist</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-sm">Add this ticker to your Watching list for tracking</p>
+            </TooltipContent>
+          </Tooltip>
           <div
-            className="rs-ticker flex items-center gap-0 text-xl tracking-tight ml-auto"
+            className="ml-auto flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card"
             data-testid={`ticker-box-${symbol}`}
           >
-            <span className="rs-ticker-symbol font-bold text-foreground" data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-muted-foreground mx-1.5">|</span>
-            <span className="rs-ticker-price font-semibold text-foreground" data-testid="text-chart-price">
+            <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-muted-foreground text-xl">|</span>
+            <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">
               ${displayPrice.toFixed(2)}
             </span>
-            <span className="text-muted-foreground mx-1.5">|</span>
+            <span className="text-muted-foreground text-xl">|</span>
             <span
-              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
+              className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
               data-testid="text-chart-change"
             >
               {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
             </span>
-            <span className="text-muted-foreground mx-1">|</span>
+            <span className="text-muted-foreground text-xl">|</span>
             <span
-              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
+              className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
               data-testid="text-chart-pct"
             >
               {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
