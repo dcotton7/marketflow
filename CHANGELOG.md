@@ -6,6 +6,17 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Fix Metrics Strip Layout Shift — 20:02 UTC
+- **Task**: Bottom metrics strip was still resizing when fundamentals data loaded, causing charts to shift
+- **Files**: `DualChartGrid.tsx`
+- **Details**:
+  - Both metrics grid panels (daily 5-col, intraday 4-col) now always render their bordered grid structure from first paint
+  - When `chartMetrics` is null, invisible placeholder cells (same text sizes: `text-[10px]` label + `text-xs` value, same cell count: 10 daily / 8 intraday) fill the grids, reserving the exact same pixel height
+  - Removed the old `minHeight: 62` approach and "Loading fundamentals..." centered text — those didn't match the populated height
+  - All label spans use `whitespace-nowrap`, all value divs use `truncate`, all cell wrappers use `overflow-hidden` — prevents text wrapping from causing height variation at any width
+  - When data arrives, cell content swaps from invisible placeholders to real values with zero height change
+- **Status**: Complete
+
 ### Fix Layout Stability & Trend Line Tool — 19:56 UTC
 - **Task**: Fixed two major issues: (1) page layout blinking/shifting as data loaded at different intervals, (2) trend line tool drawing partial lines in wrong positions
 - **Files**: `DualChartGrid.tsx`, `TradingChart.tsx`
