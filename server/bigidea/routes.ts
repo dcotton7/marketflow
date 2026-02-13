@@ -256,10 +256,23 @@ function evaluateThoughtCriteria(
   const criteriaResults: CriterionResult[] = [];
   let allPass = true;
 
+  const CONSUMER_IDS_EVAL = new Set(["PA-12", "PA-13", "PA-14", "PA-15", "PA-16"]);
+
   for (const criterion of activeCriteria) {
     const repaired = repairCriterion(criterion);
     const indicator = INDICATOR_LIBRARY.find((ind) => ind.id === repaired.indicatorId);
     if (!indicator) continue;
+
+    if (CONSUMER_IDS_EVAL.has(repaired.indicatorId) && (!upstreamData || Object.keys(upstreamData).length === 0)) {
+      criteriaResults.push({
+        indicatorId: indicator.id,
+        indicatorName: criterion.label || indicator.name,
+        pass: true,
+        inverted: !!criterion.inverted,
+        diagnostics: { value: "skipped", threshold: "no upstream data", detail: "Consumer indicator skipped — no provider (PA-3/PA-7) connected upstream" },
+      });
+      continue;
+    }
 
     const overrideTf = criterion.timeframeOverride;
     const useCandles = (overrideTf && candlesByTimeframe && candlesByTimeframe[overrideTf])
@@ -764,12 +777,19 @@ Some indicators "provide" dynamic data (e.g. PA-3 outputs detectedPeriod — the
 PROVIDER indicators: PA-3, PA-7
 CONSUMER indicators: PA-12, PA-13, PA-14, PA-15, PA-16
 
-HARD RULE: A consumer indicator must NEVER be in the same thought as its provider. If the user's idea includes ANY provider AND ANY consumer from the lists above, you MUST split them:
+HARD RULE 1: A consumer indicator must NEVER be in the same thought as its provider. If the user's idea includes ANY provider AND ANY consumer from the lists above, you MUST split them:
 - Thought A (upstream): Contains the PROVIDER indicator (PA-3 or PA-7) and any non-linked indicators (MA-*, VOL-* etc.)
 - Thought B (downstream): Contains ALL consumer indicators (PA-12, PA-13, PA-14, PA-15, PA-16) — every single one goes here, no exceptions
 - Edge: A → B
 
 This is mandatory even if there is only ONE consumer. For example, if the idea uses PA-3 + PA-16, that is TWO thoughts with an edge, never one thought.
+
+HARD RULE 2: A consumer indicator must ALWAYS have a provider indicator (PA-3 or PA-7) in its DIRECT upstream thought. If you use PA-12, PA-13, PA-14, PA-15, or PA-16, there MUST be an edge from a thought containing PA-3 or PA-7 directly to the thought containing the consumer. NEVER place consumer indicators in a thought that only has non-provider thoughts upstream (like MA or RS thoughts). If the user's idea doesn't mention a base/consolidation/breakout, do NOT use consumer indicators — use the simpler alternatives instead:
+- Instead of PA-14 (Tightness Ratio — requires PA-3 upstream): Use VLT-2 (ATR Contraction) or VLT-1 (Bollinger Band Width)
+- Instead of PA-16 (Volume Fade — requires PA-3 upstream): Use VOL-4 (Volume Dry-Up) — this works standalone without data-linking
+- Instead of PA-12 (Prior Advance — requires PA-3 upstream): Use MA-4 (MA Slope) to check trend strength
+- Instead of PA-15 (Close Clustering — requires PA-3 upstream): Use VLT-4 (Squeeze Detection)
+ALWAYS prefer standalone indicators (VOL-4, VLT-2, VLT-1, etc.) over consumer indicators unless the user explicitly asks for base-linked analysis. Consumer indicators add complexity and can fail silently if wired incorrectly.
 
 The data-linking relationships:
 - PA-3 (Consolidation / Base Detection) PROVIDES detectedPeriod
@@ -1198,6 +1218,68 @@ Each criterion follows this structure:
         console.log(`[BigIdea Scan] Auto-link overrides:`, linkOverrides.map(o => `${o.thoughtName}/${o.paramName}: ${o.originalValue} → ${o.linkedValue} (from ${o.sourceName})`));
       }
 
+      const CONSUMER_INDICATOR_IDS = new Set(["PA-12", "PA-13", "PA-14", "PA-15", "PA-16"]);
+      const PROVIDER_INDICATOR_IDS_SCAN = new Set(["PA-3", "PA-7"]);
+
+      const topoSort = (nodeList: typeof thoughtNodes, edgeList: typeof edges) => {
+        const inDegree: Record<string, number> = {};
+        const adj: Record<string, string[]> = {};
+        for (const n of nodeList) {
+          inDegree[n.id] = 0;
+          adj[n.id] = [];
+        }
+        for (const e of edgeList) {
+          const src = e.source;
+          const tgt = e.target;
+          if (inDegree[tgt] !== undefined && adj[src] !== undefined) {
+            inDegree[tgt]++;
+            adj[src].push(tgt);
+          }
+        }
+        const queue: string[] = [];
+        for (const id of Object.keys(inDegree)) {
+          if (inDegree[id] === 0) queue.push(id);
+        }
+        const sorted: string[] = [];
+        while (queue.length > 0) {
+          const cur = queue.shift()!;
+          sorted.push(cur);
+          for (const next of adj[cur]) {
+            inDegree[next]--;
+            if (inDegree[next] === 0) queue.push(next);
+          }
+        }
+        if (sorted.length < nodeList.length) {
+          for (const n of nodeList) {
+            if (!sorted.includes(n.id)) sorted.push(n.id);
+          }
+        }
+        return sorted;
+      };
+
+      const thoughtEdges = edges.filter((e: any) => {
+        const srcIsThought = thoughtNodes.some((n: any) => n.id === e.source);
+        const tgtIsThought = thoughtNodes.some((n: any) => n.id === e.target);
+        return srcIsThought && tgtIsThought;
+      });
+      const evalOrder = topoSort(thoughtNodes, thoughtEdges);
+      const sortedThoughtNodes = evalOrder.map((id: string) => thoughtNodes.find((n: any) => n.id === id)!).filter(Boolean);
+      console.log(`[BigIdea Scan] Evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
+
+      for (const tn of sortedThoughtNodes) {
+        const hasConsumer = (tn.thoughtCriteria || []).some((c: any) => CONSUMER_INDICATOR_IDS.has(c.indicatorId));
+        if (hasConsumer) {
+          const upstreamIds = edges.filter((e: any) => e.target === tn.id).map((e: any) => e.source);
+          const upstreamThoughts = upstreamIds.map((id: string) => thoughtNodes.find((n: any) => n.id === id)).filter(Boolean);
+          const hasProviderUpstream = upstreamThoughts.some((ut: any) =>
+            (ut.thoughtCriteria || []).some((c: any) => PROVIDER_INDICATOR_IDS_SCAN.has(c.indicatorId))
+          );
+          if (!hasProviderUpstream) {
+            console.warn(`[BigIdea Scan] WARNING: Thought "${tn.thoughtName}" has consumer indicators but no provider (PA-3/PA-7) in upstream thoughts. Consumer criteria will be skipped.`);
+          }
+        }
+      }
+
       const timeframesNeeded = new Set<string>();
       for (const tn of thoughtNodes) {
         timeframesNeeded.add(tn.thoughtTimeframe || "daily");
@@ -1263,7 +1345,7 @@ Each criterion follows this structure:
               const nodeOutputData: Record<string, Record<string, any>> = {};
               const nodeCriteriaResults: Record<string, CriterionResult[]> = {};
 
-              for (const node of thoughtNodes) {
+              for (const node of sortedThoughtNodes) {
                 const tf = node.thoughtTimeframe || "daily";
                 const candles = candlesByTimeframe[tf] || [];
                 const minBars = tf === "daily" ? 20 : 10;
