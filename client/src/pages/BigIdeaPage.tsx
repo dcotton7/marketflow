@@ -728,12 +728,34 @@ export default function BigIdeaPage() {
         };
       });
 
-      const dataEdges: Edge[] = (edges || []).map((e: any) => ({
-        id: `e-${keyToNodeId[e.from]}-${keyToNodeId[e.to]}`,
-        source: keyToNodeId[e.from],
-        target: keyToNodeId[e.to],
-        type: "default",
-      })).filter((e: Edge) => e.source && e.target);
+      const makeEdgeCallbacks = (edgeId: string, logicType: string = "AND") => ({
+        logicType,
+        onToggle: () => {
+          setEdges((eds) =>
+            eds.map((e) => {
+              if (e.id === edgeId) {
+                const current = e.data?.logicType === "AND" ? "OR" : "AND";
+                return { ...e, data: { ...e.data, logicType: current, onToggle: e.data?.onToggle, onDelete: e.data?.onDelete } };
+              }
+              return e;
+            })
+          );
+        },
+        onDelete: () => {
+          setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+        },
+      });
+
+      const dataEdges: Edge[] = (edges || []).map((e: any) => {
+        const edgeId = `e-${keyToNodeId[e.from]}-${keyToNodeId[e.to]}`;
+        return {
+          id: edgeId,
+          source: keyToNodeId[e.from],
+          target: keyToNodeId[e.to],
+          type: "logic",
+          data: makeEdgeCallbacks(edgeId, e.logicType || "AND"),
+        };
+      }).filter((e: Edge) => e.source && e.target);
 
       const resultsNodeId = "results-node";
       const hasOutgoingDataEdge = new Set<string>();
@@ -741,12 +763,16 @@ export default function BigIdeaPage() {
 
       const scanFlowEdges: Edge[] = newNodes
         .filter((n) => !hasOutgoingDataEdge.has(n.id))
-        .map((n) => ({
-          id: `e-${n.id}-${resultsNodeId}`,
-          source: n.id,
-          target: resultsNodeId,
-          type: "default",
-        }));
+        .map((n) => {
+          const edgeId = `e-${n.id}-${resultsNodeId}`;
+          return {
+            id: edgeId,
+            source: n.id,
+            target: resultsNodeId,
+            type: "logic",
+            data: makeEdgeCallbacks(edgeId),
+          };
+        });
 
       setNodes((nds) => [...nds, ...newNodes]);
       setEdges((eds) => [...eds, ...dataEdges, ...scanFlowEdges]);
