@@ -101,8 +101,19 @@ export interface ChartMarker {
   time: number;
   position: "aboveBar" | "belowBar";
   color: string;
-  shape: "circle" | "arrowDown" | "arrowUp";
+  shape: "circle" | "square" | "arrowDown" | "arrowUp";
   text: string;
+  size?: number;
+  textColor?: string;
+}
+
+export interface DiamondMarker {
+  time: number;
+  price: number;
+  color: string;
+  size: number;
+  text?: string;
+  textColor?: string;
 }
 
 export interface PriceLevelLine {
@@ -135,6 +146,7 @@ export interface TradingChartProps {
   };
   onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
+  diamondMarkers?: DiamondMarker[];
   priceLines?: PriceLevelLine[];
   showLegend?: boolean;
   height?: number;
@@ -453,6 +465,7 @@ export function TradingChart({
   data: rawData,
   onCandleClick,
   markers,
+  diamondMarkers,
   priceLines,
   showLegend = true,
   height,
@@ -470,6 +483,7 @@ export function TradingChart({
   const onCandleClickRef = useRef(onCandleClick);
   const candlesRef = useRef(rawData.candles);
   const markersHandleRef = useRef<any>(null);
+  const diamondPrimitiveRef = useRef<any>(null);
   const priceLinesRef = useRef<any[]>([]);
   const maLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const measurePrimitiveRef = useRef<MeasurePrimitive | null>(null);
@@ -723,7 +737,7 @@ export function TradingChart({
         borderColor: "rgba(148, 163, 184, 0.12)",
         timeVisible: isIntraday,
         secondsVisible: false,
-        rightOffset: 5,
+        rightOffset: 7,
         tickMarkFormatter: (time: any) => {
           const d = new Date(time * 1000);
           if (isIntraday) {
@@ -915,11 +929,86 @@ export function TradingChart({
           shape: m.shape,
           color: m.color,
           text: m.text,
+          ...(m.size ? { size: m.size } : {}),
+          ...(m.textColor ? { textColor: m.textColor } : {}),
         }))
       );
     }
   }, [markers, isIntraday]);
 
+  useEffect(() => {
+    if (!candleSeriesRef.current || !chartRef.current) return;
+
+    if (diamondPrimitiveRef.current) {
+      try {
+        candleSeriesRef.current.detachPrimitive(diamondPrimitiveRef.current);
+      } catch {}
+      diamondPrimitiveRef.current = null;
+    }
+
+    if (diamondMarkers && diamondMarkers.length > 0) {
+      const series = candleSeriesRef.current;
+      const chart = chartRef.current;
+      const displayDiamonds = isIntraday
+        ? diamondMarkers.map(d => ({ ...d, time: shiftToEastern(d.time) }))
+        : diamondMarkers;
+
+      const primitive = {
+        _markers: displayDiamonds,
+        updateAllViews() {},
+        paneViews() {
+          return [{
+            renderer() {
+              return {
+                draw(target: any) {
+                  target.useBitmapCoordinateSpace((scope: any) => {
+                    const ctx = scope.context;
+                    const ratio = scope.horizontalPixelRatio;
+                    const vRatio = scope.verticalPixelRatio;
+                    const ts = chart.timeScale();
+
+                    for (const dm of displayDiamonds) {
+                      const x = ts.timeToCoordinate(dm.time as any);
+                      if (x === null) continue;
+                      const y = series.priceToCoordinate(dm.price);
+                      if (y === null) continue;
+
+                      const px = Math.round(x * ratio);
+                      const py = Math.round(y * vRatio);
+                      const half = Math.round((dm.size / 2) * ratio);
+
+                      ctx.save();
+                      ctx.beginPath();
+                      ctx.moveTo(px, py - half);
+                      ctx.lineTo(px + half, py);
+                      ctx.lineTo(px, py + half);
+                      ctx.lineTo(px - half, py);
+                      ctx.closePath();
+                      ctx.fillStyle = dm.color;
+                      ctx.fill();
+
+                      if (dm.text) {
+                        const fontSize = Math.max(10, Math.round(11 * ratio));
+                        ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+                        ctx.fillStyle = dm.textColor || "#ffffff";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "top";
+                        ctx.fillText(dm.text, px, py + half + Math.round(4 * vRatio));
+                      }
+                      ctx.restore();
+                    }
+                  });
+                },
+              };
+            },
+          }];
+        },
+      };
+
+      series.attachPrimitive(primitive as any);
+      diamondPrimitiveRef.current = primitive;
+    }
+  }, [diamondMarkers, isIntraday]);
 
   useEffect(() => {
     if (!candleSeriesRef.current) return;

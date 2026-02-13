@@ -35,7 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TradingChart } from "@/components/TradingChart";
-import type { ChartCandle, ChartIndicators, ChartMarker, PriceLevelLine } from "@/components/TradingChart";
+import type { ChartCandle, ChartIndicators, ChartMarker, DiamondMarker, PriceLevelLine } from "@/components/TradingChart";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -4177,7 +4177,7 @@ function ScanChartViewer({
     const measure = () => {
       if (chartGridRef.current) {
         const gridH = chartGridRef.current.clientHeight;
-        setChartHeight(Math.max(300, gridH - 24));
+        setChartHeight(Math.max(250, Math.floor((gridH - 24) * 0.9)));
       }
     };
     const timer = setTimeout(measure, 100);
@@ -4227,9 +4227,10 @@ function ScanChartViewer({
   }, [dailyData]);
 
   const cocAnnotations = useMemo(() => {
-    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], priceLines: [] as PriceLevelLine[] };
+    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], diamondMarkers: [] as DiamondMarker[], priceLines: [] as PriceLevelLine[] };
 
     const markers: ChartMarker[] = [];
+    const diamondMarkers: DiamondMarker[] = [];
     const priceLines: PriceLevelLine[] = [];
 
     for (const thought of current.thoughtBreakdown) {
@@ -4251,13 +4252,25 @@ function ScanChartViewer({
           if (dailyData && dailyData.candles.length > h.barIndex) {
             const candle = dailyData.candles[dailyData.candles.length - 1 - h.barIndex];
             if (candle) {
-              markers.push({
-                time: candle.timestamp,
-                position: "belowBar",
-                color: "#ef4444",
-                shape: "circle",
-                text: h.gapPct ? `Gap ${h.gapPct.toFixed(1)}%` : "Gap",
-              });
+              const isWedgePop = cr.indicatorId === "PA-17";
+              if (isWedgePop) {
+                diamondMarkers.push({
+                  time: candle.timestamp,
+                  price: candle.low,
+                  color: "rgba(234, 179, 8, 0.5)",
+                  size: 100,
+                  text: h.gapPct ? `WP ${h.gapPct.toFixed(1)}%` : "Wedge Pop",
+                  textColor: "#ffffff",
+                });
+              } else {
+                markers.push({
+                  time: candle.timestamp,
+                  position: "belowBar",
+                  color: "#ef4444",
+                  shape: "circle",
+                  text: h.gapPct ? `Gap ${h.gapPct.toFixed(1)}%` : "Gap",
+                });
+              }
             }
           }
         }
@@ -4279,7 +4292,7 @@ function ScanChartViewer({
       }
     }
 
-    return { markers, priceLines };
+    return { markers, diamondMarkers, priceLines };
   }, [current?.thoughtBreakdown, dailyData]);
 
   if (!open) return null;
@@ -4600,6 +4613,7 @@ function ScanChartViewer({
                 measureMode={dailyMeasureMode}
                 trendLineMode={dailyTrendLineMode}
                 markers={cocAnnotations.markers}
+                diamondMarkers={cocAnnotations.diamondMarkers}
                 priceLines={cocAnnotations.priceLines}
               />
             ) : (

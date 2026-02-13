@@ -175,7 +175,7 @@ export default function SentinelChartsPage() {
         const metricsEl = chartGridRef.current.querySelector('[data-testid="chart-metrics-strip"]');
         const metricsHeight = metricsEl ? (metricsEl as HTMLElement).offsetHeight + 8 : 0;
         const usable = gridHeight - (labelHeight || 28) - metricsHeight;
-        setChartHeight(Math.max(200, usable));
+        setChartHeight(Math.max(180, Math.floor(usable * 0.9)));
       }
     };
     const timer = setTimeout(measure, 150);
