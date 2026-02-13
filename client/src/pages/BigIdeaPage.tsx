@@ -4253,25 +4253,17 @@ function ScanChartViewer({
           if (dailyData && dailyData.candles.length > h.barIndex) {
             const candle = dailyData.candles[dailyData.candles.length - 1 - h.barIndex];
             if (candle) {
-              const isWedgePop = cr.indicatorId === "PA-17";
-              if (isWedgePop) {
-                diamondMarkers.push({
-                  time: candle.timestamp,
-                  price: candle.low,
-                  color: "rgba(234, 179, 8, 0.5)",
-                  size: 100,
-                  text: h.gapPct ? `WP ${h.gapPct.toFixed(1)}%` : "Wedge Pop",
-                  textColor: "#ffffff",
-                });
-              } else {
-                markers.push({
-                  time: candle.timestamp,
-                  position: "belowBar",
-                  color: "#ef4444",
-                  shape: "circle",
-                  text: h.gapPct ? `Gap ${h.gapPct.toFixed(1)}%` : "Gap",
-                });
-              }
+              const label = cr.indicatorId === "PA-17"
+                ? (h.gapPct ? `WP ${h.gapPct.toFixed(1)}%` : "Wedge Pop")
+                : (h.gapPct ? `Gap ${h.gapPct.toFixed(1)}%` : "Gap");
+              diamondMarkers.push({
+                time: candle.timestamp,
+                price: candle.low,
+                color: "rgba(234, 179, 8, 0.5)",
+                size: 100,
+                text: label,
+                textColor: "#ffffff",
+              });
             }
           }
         }
@@ -4280,12 +4272,13 @@ function ScanChartViewer({
           if (dailyData) {
             const count = Math.min(h.barCount, dailyData.candles.length);
             for (let i = dailyData.candles.length - count; i < dailyData.candles.length; i++) {
-              markers.push({
+              diamondMarkers.push({
                 time: dailyData.candles[i].timestamp,
-                position: "belowBar",
-                color: "#ef4444",
-                shape: "circle",
-                text: i === dailyData.candles.length - count ? "PB" : "",
+                price: dailyData.candles[i].low,
+                color: "rgba(234, 179, 8, 0.5)",
+                size: 100,
+                text: i === dailyData.candles.length - count ? cr.indicatorName || "PB" : "",
+                textColor: "#ffffff",
               });
             }
           }
