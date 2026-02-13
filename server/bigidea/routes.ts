@@ -763,6 +763,7 @@ export function registerBigIdeaRoutes(app: Express): void {
           options: p.options,
           min: p.min,
           max: p.max,
+          step: p.step,
         })),
       }));
 
@@ -848,10 +849,15 @@ Each criterion in a thought follows this structure:
       "name": "param name matching the indicator",
       "label": "param label",
       "type": "number|select|boolean",
-      "value": "the value to use"
+      "value": "the value to use",
+      "min": "copy min from indicator definition (for number params)",
+      "max": "copy max from indicator definition (for number params)",
+      "step": "copy step from indicator definition (for number params)"
     }
   ]
 }
+
+IMPORTANT: For every number param, you MUST copy the min, max, and step values from the indicator definition. This ensures the UI slider allows the correct range and precision (e.g. step 0.05 for ratio params instead of integer-only).
 
 TIMEFRAME OVERRIDE RULE:
 Each criterion can optionally specify a "timeframeOverride" field. When set to "daily", this criterion will evaluate against daily candles even when the thought itself runs on an intraday timeframe (5min, 15min, 30min). This is critical for criteria that reference daily-level indicators like the 50-day SMA, 200-day SMA, daily RSI, etc. If the user mentions "daily" bars, "daily SMA", "D1", "50-day", "200-day", or similar daily-level references, set timeframeOverride to "daily". Omit the field entirely when the criterion should use the thought's own timeframe.
@@ -1054,6 +1060,7 @@ Select the most appropriate indicators and set parameters that match the user's 
           options: p.options,
           min: p.min,
           max: p.max,
+          step: p.step,
         })),
       }));
 
@@ -1098,10 +1105,15 @@ Each criterion follows this structure:
       "name": "param name matching the indicator",
       "label": "param label",
       "type": "number|select|boolean",
-      "value": "the value to use"
+      "value": "the value to use",
+      "min": "copy min from indicator definition (for number params)",
+      "max": "copy max from indicator definition (for number params)",
+      "step": "copy step from indicator definition (for number params)"
     }
   ]
-}`;
+}
+
+IMPORTANT: For every number param, you MUST copy the min, max, and step values from the indicator definition. This ensures the UI slider allows the correct range and precision.`;
 
       const openai = getOpenAI();
       if (!openai) {

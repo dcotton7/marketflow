@@ -616,7 +616,7 @@ export default function BigIdeaPage() {
     id: string;
     name: string;
     description?: string;
-    params: Array<{ name: string; autoLink?: { linkType: string; sourceParam?: string } }>;
+    params: Array<{ name: string; label?: string; type?: string; defaultValue?: number; min?: number; max?: number; step?: number; autoLink?: { linkType: string; sourceParam?: string } }>;
     provides?: Array<{ linkType: string; paramName: string }>;
     consumes?: Array<{ paramName: string; dataKey: string }>;
   };
@@ -2955,13 +2955,19 @@ export default function BigIdeaPage() {
                                   </SelectContent>
                                 </Select>
                               )}
-                              {param.type === "number" && (
+                              {param.type === "number" && (() => {
+                                const indMeta = indicatorLibrary.find((m) => m.id === criterion.indicatorId);
+                                const metaParam = indMeta?.params.find((mp) => mp.name === param.name);
+                                const pMin = param.min ?? metaParam?.min ?? 0;
+                                const pMax = param.max ?? metaParam?.max ?? 100;
+                                const pStep = param.step ?? metaParam?.step ?? 1;
+                                return (
                                 <div className="flex items-center gap-2 mt-1">
                                   <Slider
                                     value={[Number(displayValue)]}
-                                    min={param.min ?? 0}
-                                    max={param.max ?? 100}
-                                    step={param.step ?? 1}
+                                    min={pMin}
+                                    max={pMax}
+                                    step={pStep}
                                     onValueChange={([v]) =>
                                       updateNodeCriterionParam(selectedNode.id, idx, param.name, v)
                                     }
@@ -2972,26 +2978,30 @@ export default function BigIdeaPage() {
                                   <Input
                                     type="number"
                                     value={Number(displayValue)}
-                                    min={param.min ?? 0}
-                                    max={param.max ?? 100}
-                                    step={param.step ?? 1}
+                                    min={pMin}
+                                    max={pMax}
+                                    step={pStep}
                                     disabled={isLinked && !!linkedVal}
                                     onChange={(e) => {
                                       const raw = e.target.value;
                                       if (raw === "" || raw === "-") return;
                                       let v = Number(raw);
                                       if (isNaN(v)) return;
-                                      const mn = param.min ?? 0;
-                                      const mx = param.max ?? 100;
-                                      if (v < mn) v = mn;
-                                      if (v > mx) v = mx;
+                                      if (v > pMax) v = pMax;
                                       updateNodeCriterionParam(selectedNode.id, idx, param.name, v);
+                                    }}
+                                    onBlur={(e) => {
+                                      let v = Number(e.target.value);
+                                      if (isNaN(v) || v < pMin) {
+                                        updateNodeCriterionParam(selectedNode.id, idx, param.name, pMin);
+                                      }
                                     }}
                                     className={`w-14 h-6 text-xs font-mono text-right px-1 ${isLinked && linkedVal ? "text-blue-400" : ""}`}
                                     data-testid={`input-${param.name}-${idx}`}
                                   />
                                 </div>
-                              )}
+                                );
+                              })()}
                               {param.type === "select" && param.options && (
                                 <Select
                                   value={String(param.value)}
@@ -3164,13 +3174,19 @@ export default function BigIdeaPage() {
                                   </Tooltip>
                                 )}
                               </div>
-                              {param.type === "number" && (
+                              {param.type === "number" && (() => {
+                                const aiIndMeta = indicatorLibrary.find((m) => m.id === criterion.indicatorId);
+                                const aiMetaParam = aiIndMeta?.params.find((mp) => mp.name === param.name);
+                                const aiPMin = param.min ?? aiMetaParam?.min ?? 0;
+                                const aiPMax = param.max ?? aiMetaParam?.max ?? 100;
+                                const aiPStep = param.step ?? aiMetaParam?.step ?? 1;
+                                return (
                                 <div className="flex items-center gap-2 mt-1">
                                   <Slider
                                     value={[Number(param.value)]}
-                                    min={param.min ?? 0}
-                                    max={param.max ?? 100}
-                                    step={param.step ?? 1}
+                                    min={aiPMin}
+                                    max={aiPMax}
+                                    step={aiPStep}
                                     onValueChange={([v]) => {
                                       const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
                                         if (ti !== tIdx) return t;
@@ -3187,18 +3203,15 @@ export default function BigIdeaPage() {
                                   <Input
                                     type="number"
                                     value={Number(param.value)}
-                                    min={param.min ?? 0}
-                                    max={param.max ?? 100}
-                                    step={param.step ?? 1}
+                                    min={aiPMin}
+                                    max={aiPMax}
+                                    step={aiPStep}
                                     onChange={(e) => {
                                       const raw = e.target.value;
                                       if (raw === "" || raw === "-") return;
                                       let v = Number(raw);
                                       if (isNaN(v)) return;
-                                      const mn = param.min ?? 0;
-                                      const mx = param.max ?? 100;
-                                      if (v < mn) v = mn;
-                                      if (v > mx) v = mx;
+                                      if (v > aiPMax) v = aiPMax;
                                       const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
                                         if (ti !== tIdx) return t;
                                         return { ...t, criteria: t.criteria.map((c: any, ci: number) => {
@@ -3208,11 +3221,25 @@ export default function BigIdeaPage() {
                                       })};
                                       setAiProposal(updated);
                                     }}
+                                    onBlur={(e) => {
+                                      let v = Number(e.target.value);
+                                      if (isNaN(v) || v < aiPMin) {
+                                        const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
+                                          if (ti !== tIdx) return t;
+                                          return { ...t, criteria: t.criteria.map((c: any, ci: number) => {
+                                            if (ci !== idx) return c;
+                                            return { ...c, params: c.params.map((p: any) => p.name === param.name ? { ...p, value: aiPMin } : p) };
+                                          })};
+                                        })};
+                                        setAiProposal(updated);
+                                      }
+                                    }}
                                     className="w-14 h-6 text-xs font-mono text-right px-1"
                                     data-testid={`ai-input-${param.name}-${tIdx}-${idx}`}
                                   />
                                 </div>
-                              )}
+                                );
+                              })()}
                               {param.type === "select" && param.options && (
                                 <Select
                                   value={String(param.value)}
