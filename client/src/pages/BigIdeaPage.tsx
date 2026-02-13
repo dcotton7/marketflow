@@ -2859,7 +2859,7 @@ export default function BigIdeaPage() {
                       data-testid="button-toggle-not"
                     >
                       <Ban className="h-3 w-3" />
-                      NOT {selectedNode.data.isNot ? "ON" : "OFF"}
+                      <span className="font-mono text-[11px]">[NOT]</span> {selectedNode.data.isNot ? "On" : "Off"}
                     </Button>
                     <Button
                       variant={selectedNode.data.isMuted ? "secondary" : "outline"}
