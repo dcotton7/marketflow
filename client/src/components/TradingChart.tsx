@@ -492,7 +492,7 @@ export function TradingChart({
   const measureModeRef = useRef(measureMode);
   const trendLineModeRef = useRef(trendLineMode);
   const trendLineStartRef = useRef<MeasurePoint | null>(null);
-  const trendLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const trendLineSeriesListRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   useEffect(() => {
@@ -510,12 +510,12 @@ export function TradingChart({
     trendLineModeRef.current = trendLineMode;
     if (!trendLineMode) {
       trendLineStartRef.current = null;
-      if (trendLineSeriesRef.current && chartRef.current) {
-        try {
-          chartRef.current.removeSeries(trendLineSeriesRef.current);
-        } catch (e) {}
-        trendLineSeriesRef.current = null;
+      for (const s of trendLineSeriesListRef.current) {
+        if (chartRef.current) {
+          try { chartRef.current.removeSeries(s); } catch {}
+        }
       }
+      trendLineSeriesListRef.current = [];
     }
   }, [trendLineMode]);
   useEffect(() => {
@@ -589,12 +589,6 @@ export function TradingChart({
         if (!trendLineStartRef.current) {
           trendLineStartRef.current = { time: timestamp, price: clickedPrice };
         } else {
-          if (trendLineSeriesRef.current && chartRef.current) {
-            try {
-              chartRef.current.removeSeries(trendLineSeriesRef.current);
-            } catch (e) {}
-            trendLineSeriesRef.current = null;
-          }
           if (chartRef.current) {
             const startPt = trendLineStartRef.current;
             const endPt = { time: timestamp, price: clickedPrice };
@@ -608,7 +602,7 @@ export function TradingChart({
             });
             const sortedPoints = [startPt, endPt].sort((a, b) => a.time - b.time);
             trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
-            trendLineSeriesRef.current = trendSeries;
+            trendLineSeriesListRef.current.push(trendSeries);
           }
           trendLineStartRef.current = null;
         }

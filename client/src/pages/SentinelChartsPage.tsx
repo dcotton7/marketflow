@@ -65,6 +65,7 @@ export default function SentinelChartsPage() {
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
   const [dailyTrendLineMode, setDailyTrendLineMode] = useState(false);
   const [intradayTrendLineMode, setIntradayTrendLineMode] = useState(false);
+  const [showETH, setShowETH] = useState(false);
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
 
@@ -292,8 +293,9 @@ export default function SentinelChartsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`text-black toggle-elevate ${dailyMeasureMode ? "toggle-elevated" : ""}`}
+                    className={`text-black toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-black/15" : ""}`}
                     onClick={() => setDailyMeasureMode(m => !m)}
+                    style={dailyMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                     data-testid="button-daily-measure-mode"
                   >
                     <Ruler className="h-3.5 w-3.5" />
@@ -301,8 +303,9 @@ export default function SentinelChartsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`text-black toggle-elevate ${dailyTrendLineMode ? "toggle-elevated" : ""}`}
+                    className={`text-black toggle-elevate ${dailyTrendLineMode ? "toggle-elevated bg-black/15" : ""}`}
                     onClick={() => setDailyTrendLineMode(m => !m)}
+                    style={dailyTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                     data-testid="button-daily-trend-line-mode"
                   >
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -376,8 +379,9 @@ export default function SentinelChartsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`text-black toggle-elevate ${intradayMeasureMode ? "toggle-elevated" : ""}`}
+                    className={`text-black toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-black/15" : ""}`}
                     onClick={() => setIntradayMeasureMode(m => !m)}
+                    style={intradayMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                     data-testid="button-intraday-measure-mode"
                   >
                     <Ruler className="h-3.5 w-3.5" />
@@ -385,8 +389,9 @@ export default function SentinelChartsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`text-black toggle-elevate ${intradayTrendLineMode ? "toggle-elevated" : ""}`}
+                    className={`text-black toggle-elevate ${intradayTrendLineMode ? "toggle-elevated bg-black/15" : ""}`}
                     onClick={() => setIntradayTrendLineMode(m => !m)}
+                    style={intradayTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                     data-testid="button-intraday-trend-line-mode"
                   >
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -395,6 +400,16 @@ export default function SentinelChartsPage() {
                       <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
                     </svg>
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`text-black text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-black/15" : ""}`}
+                    onClick={() => setShowETH(e => !e)}
+                    style={showETH ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
+                    data-testid="button-intraday-eth-toggle"
+                  >
+                    ETH
+                  </Button>
                 </div>
                 {intradayLoading ? (
                   <Card className="flex-1">
@@ -402,9 +417,9 @@ export default function SentinelChartsPage() {
                       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                     </CardContent>
                   </Card>
-                ) : rthData ? (
+                ) : (showETH ? intradayData : rthData) ? (
                   <TradingChart
-                    data={rthData}
+                    data={showETH ? intradayData! : rthData!}
                     timeframe={intradayTimeframe}
                     height={chartHeight}
                     showLegend={true}
