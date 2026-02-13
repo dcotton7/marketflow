@@ -190,7 +190,7 @@ function evaluateThoughtCriteria(
   if (!criteria || criteria.length === 0) return { pass: false, outputData: {}, criteriaResults: [] };
 
   const activeCriteria = criteria.filter((c: any) => !c.muted);
-  if (activeCriteria.length === 0) return { pass: false, outputData: {}, criteriaResults: [] };
+  if (activeCriteria.length === 0) return { pass: true, outputData: {}, criteriaResults: [] };
 
   const outputData: Record<string, any> = {};
   const criteriaResults: CriterionResult[] = [];
