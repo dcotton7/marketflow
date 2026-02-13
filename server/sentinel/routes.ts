@@ -6628,12 +6628,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         intradayStart.setDate(intradayStart.getDate() - (timeframe === "5min" ? 25 : timeframe === "15min" ? 40 : 55));
       }
 
-      const [dailyQuotes, intradayQuotes, quoteData] = await Promise.all([
+      const [dailyQuotes, intradayQuotes, quoteData, tickerMeta] = await Promise.all([
         tiingo.fetchEODPrices(ticker, startDate, endDate).catch(() => []),
         isIntraday
           ? tiingo.getHistoricalBars(ticker, intradayStart, endDate, tiingoInterval).catch(() => [])
           : Promise.resolve([] as tiingo.TiingoCandle[]),
         tiingo.fetchCurrentQuote(ticker),
+        tiingo.fetchTickerMeta(ticker).catch(() => null),
       ]);
 
       if (!dailyQuotes.length) {
@@ -6768,6 +6769,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf,
         sectorEtfChange,
         rsMomentum,
+        companyName: tickerMeta?.name || "",
+        companyDescription: tickerMeta?.description || "",
+        sectorName: sectorInfo.sector !== "Unknown" ? sectorInfo.sector : "",
         marketCap: extFundamentals.marketCap,
         pe: extFundamentals.pe,
         beta: extFundamentals.beta,

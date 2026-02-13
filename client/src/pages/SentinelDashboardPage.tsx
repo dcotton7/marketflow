@@ -862,35 +862,39 @@ function TickerWidget({ symbol, price, marketPctChange, direction, status, posit
         <span className={`font-bold px-1 py-0.5 rounded text-white ${directionBgColor}`} data-testid={`badge-status-${symbol}`}>
           {directionLabel}
         </span>
-        <span 
-          className="font-medium text-foreground/80 ml-1.5"
-          data-testid={`text-position-shares-${symbol}`}
-        >
-          qty: {positionShares !== undefined && positionShares > 0 ? positionShares : "—"}
-        </span>
-        <span className="text-gray-400 mx-1">|</span>
-        {hasPnLData ? (
+        {status !== "watch" && (
           <>
             <span 
-              className={`font-bold ${isPnLPositive ? "text-rs-green" : "text-rs-red"}`}
-              data-testid={`text-position-pnl-${symbol}`}
+              className="font-medium text-foreground/80 ml-1.5"
+              data-testid={`text-position-shares-${symbol}`}
             >
-              {isPnLPositive ? "+" : ""}${positionPnL.toFixed(0)}
+              qty: {positionShares !== undefined && positionShares > 0 ? positionShares : "—"}
             </span>
-            {positionPctChange !== undefined && (
+            <span className="text-gray-400 mx-1">|</span>
+            {hasPnLData ? (
               <>
-                <span className="text-gray-400 mx-1">|</span>
                 <span 
                   className={`font-bold ${isPnLPositive ? "text-rs-green" : "text-rs-red"}`}
-                  data-testid={`text-position-pct-${symbol}`}
+                  data-testid={`text-position-pnl-${symbol}`}
                 >
-                  {isPnLPositive ? "+" : ""}{positionPctChange.toFixed(1)}%
+                  {isPnLPositive ? "+" : ""}${positionPnL.toFixed(0)}
                 </span>
+                {positionPctChange !== undefined && (
+                  <>
+                    <span className="text-gray-400 mx-1">|</span>
+                    <span 
+                      className={`font-bold ${isPnLPositive ? "text-rs-green" : "text-rs-red"}`}
+                      data-testid={`text-position-pct-${symbol}`}
+                    >
+                      {isPnLPositive ? "+" : ""}{positionPctChange.toFixed(1)}%
+                    </span>
+                  </>
+                )}
               </>
+            ) : (
+              <span className="text-gray-400 font-medium" data-testid={`text-position-pnl-${symbol}`}>—</span>
             )}
           </>
-        ) : (
-          <span className="text-gray-400 font-medium" data-testid={`text-position-pnl-${symbol}`}>—</span>
         )}
       </div>
     </div>
@@ -1128,11 +1132,11 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground"
+                  className="text-muted-foreground"
                   onClick={(e) => { e.stopPropagation(); setLocation(`/sentinel/evaluate?symbol=${trade.symbol}&from=dashboard`); }}
                   data-testid={`button-evaluate-card-${trade.id}`}
                 >
-                  <MessageSquare className="w-3.5 h-3.5" />
+                  <MessageSquare className="w-5 h-5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top">Evaluate</TooltipContent>
@@ -1142,11 +1146,11 @@ function TradeCard({ trade, isActive = false, isClosed = false, onEdit, onClose,
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground"
+                  className="text-muted-foreground"
                   onClick={(e) => { e.stopPropagation(); handleMenuAction('chart', e); }}
                   data-testid={`button-chart-card-${trade.id}`}
                 >
-                  <BarChart3 className="w-3.5 h-3.5" />
+                  <BarChart3 className="w-5 h-5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top">Open Chart</TooltipContent>

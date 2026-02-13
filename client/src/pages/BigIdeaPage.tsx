@@ -4150,6 +4150,9 @@ function ScanChartViewer({
     rsMomentum: number;
     industryPeers: { symbol: string; name: string }[];
     industryName: string;
+    companyName: string;
+    companyDescription: string;
+    sectorName: string;
     epsCurrentQYoY: string;
     salesGrowth3QYoY: string;
     lastEpsSurprise: string;
@@ -4492,29 +4495,46 @@ function ScanChartViewer({
               <p className="text-sm">Add this ticker to your Watching list for tracking</p>
             </TooltipContent>
           </Tooltip>
-          <div
-            className="ml-auto flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card"
-            data-testid={`ticker-box-${symbol}`}
-          >
-            <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-muted-foreground text-xl">|</span>
-            <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">
-              ${displayPrice.toFixed(2)}
-            </span>
-            <span className="text-muted-foreground text-xl">|</span>
-            <span
-              className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
-              data-testid="text-chart-change"
+          <div className="ml-auto flex items-center gap-3 flex-wrap" data-testid={`ticker-box-${symbol}`}>
+            <div
+              className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card"
             >
-              {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
-            </span>
-            <span className="text-muted-foreground text-xl">|</span>
-            <span
-              className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
-              data-testid="text-chart-pct"
-            >
-              {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
-            </span>
+              <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{symbol}</span>
+              <span className="text-muted-foreground text-xl">|</span>
+              <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">
+                ${displayPrice.toFixed(2)}
+              </span>
+              <span className="text-muted-foreground text-xl">|</span>
+              <span
+                className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
+                data-testid="text-chart-change"
+              >
+                {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
+              </span>
+              <span className="text-muted-foreground text-xl">|</span>
+              <span
+                className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
+                data-testid="text-chart-pct"
+              >
+                {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
+              </span>
+            </div>
+            {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
+              <div className="flex flex-col gap-0.5" data-testid="text-company-info">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {chartMetrics.companyName && <span className="text-foreground font-medium">{chartMetrics.companyName}</span>}
+                  {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span>·</span>}
+                  {chartMetrics.sectorName && <span>{chartMetrics.sectorName}</span>}
+                  {chartMetrics.sectorName && chartMetrics.industryName && <span>/</span>}
+                  {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span>{chartMetrics.industryName}</span>}
+                </div>
+                {chartMetrics.companyDescription && (
+                  <p className="text-[10px] text-muted-foreground/70 line-clamp-2 max-w-[500px]" title={chartMetrics.companyDescription} data-testid="text-company-description">
+                    {chartMetrics.companyDescription}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           {(() => {
             const ratedCount = Object.keys(chartRatings).length;
@@ -4651,12 +4671,12 @@ function ScanChartViewer({
         <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.secondaryOverlayColor }}>
-              <span className="text-xs text-black font-medium">Daily</span>
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>
+              <span className="text-xs text-white font-medium">Daily</span>
               <Button
                 size="sm"
                 variant="ghost"
-                className={`text-black toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-black/15" : ""}`}
+                className={`text-white toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
                 onClick={() => setDailyMeasureMode(m => !m)}
                 style={dailyMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                 data-testid="button-daily-measure-mode"
@@ -4666,7 +4686,7 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
-                className={`text-black toggle-elevate ${dailyTrendLineMode ? "toggle-elevated bg-black/15" : ""}`}
+                className={`text-white toggle-elevate ${dailyTrendLineMode ? "toggle-elevated bg-white/15" : ""}`}
                 onClick={() => setDailyTrendLineMode(m => !m)}
                 style={dailyTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                 data-testid="button-daily-trend-line-mode"
@@ -4722,8 +4742,8 @@ function ScanChartViewer({
             )}
           </div>
           <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.secondaryOverlayColor }}>
-              <span className="text-xs text-black font-medium">Intraday</span>
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>
+              <span className="text-xs text-white font-medium">Intraday</span>
               <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
                 <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-scan-chart-intraday">
                   <SelectValue />
@@ -4737,7 +4757,7 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
-                className="text-black"
+                className="text-white"
                 onClick={() => setMaSettingsOpen(true)}
                 data-testid="button-scan-chart-ma-settings"
               >
@@ -4746,7 +4766,7 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
-                className={`text-black toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-black/15" : ""}`}
+                className={`text-white toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
                 onClick={() => setIntradayMeasureMode(m => !m)}
                 style={intradayMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                 data-testid="button-intraday-measure-mode"
@@ -4756,7 +4776,7 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
-                className={`text-black toggle-elevate ${intradayTrendLineMode ? "toggle-elevated bg-black/15" : ""}`}
+                className={`text-white toggle-elevate ${intradayTrendLineMode ? "toggle-elevated bg-white/15" : ""}`}
                 onClick={() => setIntradayTrendLineMode(m => !m)}
                 style={intradayTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                 data-testid="button-intraday-trend-line-mode"
@@ -4770,7 +4790,7 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
-                className={`text-black text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-black/15" : ""}`}
+                className={`text-white text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-white/15" : ""}`}
                 onClick={() => setShowETH(e => !e)}
                 style={showETH ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
                 data-testid="button-intraday-eth-toggle"
