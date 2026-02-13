@@ -875,8 +875,8 @@ Edges between thoughts can specify "logicType": "AND" (default) or "logicType": 
 AMBIGUITY EXPANSION RULE: When the user's description is vague about a specific parameter value (e.g., "a moving average" without specifying which period, "pulled back to an MA", "near a support level"), you MUST expand the ambiguity into multiple parallel thoughts connected by OR logic rather than arbitrarily picking one value.
 
 Common ambiguity patterns to expand:
-- "a moving average" / "an MA" / "the MA" (unspecified) → Create parallel thoughts for the most commonly used MAs: 10 EMA, 21 EMA, 50 SMA. Connect them with OR edges to a shared downstream node or Results.
-- "pulled back to a moving average" → Multiple OR-connected thoughts, each checking proximity to a different common MA period.
+- "a moving average" / "an MA" / "the MA" (unspecified) → Create parallel thoughts for the most commonly used MAs: 10 EMA, 21 EMA, 50 SMA. Connect each with an OR edge to RESULTS.
+- "pulled back to a moving average" → Multiple thoughts, each checking proximity to a different common MA period. Connect each with an OR edge to RESULTS.
 - "either X or Y" / "X or Y" → Explicit OR logic. Create separate thoughts for X and Y, connect with OR edges.
 - "a support level" (unspecified type) → OR branches for MA support, prior pivot support, etc.
 
@@ -884,6 +884,51 @@ IMPORTANT RULES FOR OR EDGES:
 - "RESULTS" is the ONLY special reserved key. Use "RESULTS" as the edge target to connect directly to the Results node on the canvas.
 - If you want OR logic, you MUST provide explicit edges with "logicType": "OR". Thoughts without explicit edges auto-connect to Results with AND logic by default.
 - Do NOT invent other special keys. Edge targets must be either a thoughtKey from your thoughts array, or "RESULTS".
+
+CRITICAL RULE — OR EDGES MUST TARGET "RESULTS" (NOT intermediate thoughts):
+OR edges should ALWAYS have "RESULTS" as the target. NEVER create OR edges between intermediate thoughts (e.g., from a prerequisite thought to alternative thoughts). This produces broken scan logic where the prerequisite substitutes for the alternative's own criteria.
+
+WRONG — intermediate OR edges (NEVER DO THIS):
+  Thought A: "Overnight Gap Up"
+  Thought B: "Pullback to 10 EMA"
+  Thought C: "Pullback to 21 EMA"
+  Thought D: "Pullback to 50 SMA"
+  "edges": [
+    { "from": "A", "to": "B", "logicType": "OR" },
+    { "from": "A", "to": "C", "logicType": "OR" },
+    { "from": "A", "to": "D", "logicType": "OR" }
+  ]
+  BUG: This makes Gap Up an OR-alternative to each pullback, so stocks pass without any pullback if they gapped up. The pullbacks auto-connect to Results with AND, requiring ALL THREE to pass. Completely wrong.
+
+CORRECT — flat OR edges to RESULTS:
+  Thought A: "Overnight Gap Up" (no explicit edges → auto-connects to Results with AND, always required)
+  Thought B: "Pullback to 10 EMA"
+  Thought C: "Pullback to 21 EMA"
+  Thought D: "Pullback to 50 SMA"
+  "edges": [
+    { "from": "B", "to": "RESULTS", "logicType": "OR" },
+    { "from": "C", "to": "RESULTS", "logicType": "OR" },
+    { "from": "D", "to": "RESULTS", "logicType": "OR" }
+  ]
+  CORRECT: Gap Up is required (AND). Any ONE pullback is sufficient (OR). Final: Gap Up AND (PB 10 OR PB 21 OR PB 50).
+
+PREREQUISITE vs ALTERNATIVE pattern:
+- Prerequisite thoughts (gap up, uptrend, base quality) = mandatory filters. Give them NO explicit edges so they auto-connect to Results with AND.
+- Alternative thoughts (different MA pullbacks, different base types) = any-one-of options. Give each an explicit edge to RESULTS with "logicType": "OR".
+- NEVER connect a prerequisite thought to alternative thoughts with OR edges. That makes the prerequisite an alternative instead of a requirement.
+
+MULTI-TIMEFRAME PATTERN:
+When the user wants a daily filter (e.g., gap up) combined with intraday alternatives (e.g., pullback to MA), set the timeframe field on each thought independently:
+  Thought A: "Overnight Gap Up" — timeframe: "daily" (no explicit edges → AND required)
+  Thought B: "Pullback to 10 EMA" — timeframe: "intraday"
+  Thought C: "Pullback to 21 EMA" — timeframe: "intraday"
+  Thought D: "Pullback to 50 SMA" — timeframe: "intraday"
+  "edges": [
+    { "from": "B", "to": "RESULTS", "logicType": "OR" },
+    { "from": "C", "to": "RESULTS", "logicType": "OR" },
+    { "from": "D", "to": "RESULTS", "logicType": "OR" }
+  ]
+  The scan engine evaluates each thought on its specified timeframe. Daily prerequisite + intraday alternatives is a powerful pattern.
 
 Example: User says "Find stocks that pulled back to a moving average"
 BAD (picking one arbitrarily):
@@ -919,11 +964,11 @@ When the user IS specific (e.g., "pulled back to the 21 EMA"), do NOT expand —
 
 EDGE FORMAT WITH LOGIC TYPE:
 Each edge can optionally include a logicType field:
-{ "from": "A", "to": "B", "logicType": "OR" }
-{ "from": "C", "to": "D" }  // defaults to AND
-{ "from": "E", "to": "F", "logicType": "AND" }
+{ "from": "A", "to": "RESULTS", "logicType": "OR" }
+{ "from": "B", "to": "RESULTS" }  // defaults to AND
+{ "from": "C", "to": "D", "logicType": "AND" }  // AND is valid for thought-to-thought (data-link) edges
 
-Use OR when the user describes alternatives. Use AND (or omit logicType) when conditions must all be met simultaneously.
+Use OR ONLY on edges targeting RESULTS when the user describes alternatives. Use AND (or omit logicType) for prerequisite/data-link thought-to-thought edges.
 
 When creating OR branches, keep each branch thought focused on ONE specific alternative (e.g., one MA period per thought). Don't combine multiple alternatives into one thought — that defeats the purpose of OR logic.
 
@@ -1420,6 +1465,27 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
               const resultsNode = nodes.find((n: any) => n.type === "results");
               if (!resultsNode) return null;
 
+              const intermediateOrEdges = edges.filter((e: any) => e.logicType === "OR" && e.target !== resultsNode.id);
+              if (intermediateOrEdges.length > 0) {
+                for (const badEdge of intermediateOrEdges) {
+                  const targetNode = badEdge.target;
+                  const existingEdgeToResults = edges.find((e: any) => e.source === targetNode && e.target === resultsNode.id);
+                  if (existingEdgeToResults) {
+                    existingEdgeToResults.logicType = "OR";
+                  } else {
+                    edges.push({ id: `auto-or-${targetNode}`, source: targetNode, target: resultsNode.id, logicType: "OR" });
+                  }
+                  badEdge.logicType = "AND";
+                }
+                const sourceNodes = Array.from(new Set(intermediateOrEdges.map((e: any) => e.source)));
+                for (const srcId of sourceNodes) {
+                  const hasEdgeToResults = edges.some((e: any) => e.source === srcId && e.target === resultsNode.id);
+                  if (!hasEdgeToResults) {
+                    edges.push({ id: `auto-and-${srcId}`, source: srcId, target: resultsNode.id, logicType: "AND" });
+                  }
+                }
+              }
+
               const anyEdgeToResults = edges.some((e: any) => e.target === resultsNode.id);
               if (!anyEdgeToResults) return null;
 
@@ -1429,6 +1495,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 
                 const incoming = edges.filter((e: any) => e.target === nodeId);
                 const ownResult = nodeResults[nodeId];
+                const isResultsNode = nodeId === resultsNode.id;
 
                 if (incoming.length === 0) {
                   return ownResult ?? false;
@@ -1447,15 +1514,15 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   computeEffectivePass(e.source, copyVisited())
                 );
 
+                if (isResultsNode) {
+                  return andPass && orPass;
+                }
+
                 if (ownResult === undefined) {
                   return andPass && orPass;
                 }
 
-                if (orEdges.length > 0) {
-                  return (ownResult || orPass) && andPass;
-                } else {
-                  return ownResult && andPass;
-                }
+                return ownResult && andPass && orPass;
               };
 
               const collectPassedPaths = (nodeId: string, visited: Set<string> = new Set()): string[] => {
