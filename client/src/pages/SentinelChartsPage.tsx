@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
@@ -91,20 +91,6 @@ export default function SentinelChartsPage() {
     },
   });
 
-  const dayChange = useMemo(() => {
-    if (!dailyData || dailyData.candles.length < 2) return null;
-    const last = dailyData.candles[dailyData.candles.length - 1];
-    const prev = dailyData.candles[dailyData.candles.length - 2];
-    const change = last.close - prev.close;
-    const changePct = (change / prev.close) * 100;
-    return { price: last.close, change, changePct };
-  }, [dailyData]);
-
-  const displayPrice = dayChange?.price ?? 0;
-  const priceChange = dayChange?.change ?? 0;
-  const pricePctChange = dayChange?.changePct ?? 0;
-  const isPriceUp = priceChange >= 0;
-
   const handleNavigateToTicker = useCallback((ticker: string) => {
     setTickerInput(ticker);
     setActiveSymbol(ticker);
@@ -154,7 +140,7 @@ export default function SentinelChartsPage() {
                     variant="outline"
                     className="gap-1.5"
                     onClick={() => {
-                      const price = dayChange?.price ?? 0;
+                      const price = dailyData?.candles?.length ? dailyData.candles[dailyData.candles.length - 1].close : 0;
                       window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(activeSymbol)}&price=${price.toFixed(2)}&from=charts`;
                     }}
                     data-testid="button-chart-evaluate"
@@ -185,49 +171,6 @@ export default function SentinelChartsPage() {
                   <p className="text-sm">Add this ticker to your Watching list for tracking</p>
                 </TooltipContent>
               </Tooltip>
-              {dailyData && (
-                <div className="flex items-center gap-3 flex-wrap" data-testid={`ticker-box-${activeSymbol}`}>
-                  <div
-                    className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card"
-                  >
-                    <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{activeSymbol}</span>
-                    <span className="text-muted-foreground text-xl">|</span>
-                    <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">
-                      ${displayPrice.toFixed(2)}
-                    </span>
-                    <span className="text-muted-foreground text-xl">|</span>
-                    <span
-                      className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
-                      data-testid="text-chart-change"
-                    >
-                      {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
-                    </span>
-                    <span className="text-muted-foreground text-xl">|</span>
-                    <span
-                      className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
-                      data-testid="text-chart-pct"
-                    >
-                      {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
-                    </span>
-                  </div>
-                  {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
-                    <div className="flex flex-col gap-0.5" data-testid="text-company-info">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        {chartMetrics.companyName && <span className="text-foreground font-medium">{chartMetrics.companyName}</span>}
-                        {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span>·</span>}
-                        {chartMetrics.sectorName && <span>{chartMetrics.sectorName}</span>}
-                        {chartMetrics.sectorName && chartMetrics.industryName && <span>/</span>}
-                        {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span>{chartMetrics.industryName}</span>}
-                      </div>
-                      {chartMetrics.companyDescription && (
-                        <p className="text-[10px] text-muted-foreground/70 line-clamp-2 max-w-[500px]" title={chartMetrics.companyDescription} data-testid="text-company-description">
-                          {chartMetrics.companyDescription}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -241,6 +184,7 @@ export default function SentinelChartsPage() {
           </div>
         ) : (
           <DualChartGrid
+            symbol={activeSymbol}
             dailyData={dailyData}
             dailyLoading={dailyLoading}
             intradayData={intradayData}

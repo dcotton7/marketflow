@@ -51,6 +51,7 @@ export const formatMarketCap = (mc: number) => {
 };
 
 interface DualChartGridProps {
+  symbol?: string;
   dailyData: ChartDataResponse | undefined;
   dailyLoading: boolean;
   intradayData: ChartDataResponse | undefined;
@@ -75,6 +76,7 @@ const TrendLineIcon = () => (
 );
 
 export function DualChartGrid({
+  symbol,
   dailyData,
   dailyLoading,
   intradayData,
@@ -157,6 +159,15 @@ export function DualChartGrid({
 
   const effectiveIntradayData = showETH ? intradayData : rthData;
 
+  const dayChange = useMemo(() => {
+    if (!dailyData || dailyData.candles.length < 2) return null;
+    const last = dailyData.candles[dailyData.candles.length - 1];
+    const prev = dailyData.candles[dailyData.candles.length - 2];
+    const change = last.close - prev.close;
+    const changePct = (change / prev.close) * 100;
+    return { price: last.close, change, changePct };
+  }, [dailyData]);
+
   const handleTickerNav = useCallback((ticker: string) => {
     if (onNavigateToTicker) {
       onNavigateToTicker(ticker);
@@ -167,8 +178,42 @@ export function DualChartGrid({
 
   const pid = testIdPrefix ? `${testIdPrefix}-` : "";
 
+  const displayPrice = dayChange?.price ?? 0;
+  const priceChange = dayChange?.change ?? 0;
+  const pricePctChange = dayChange?.changePct ?? 0;
+  const isPriceUp = priceChange >= 0;
+
   return (
     <>
+      {symbol && dailyData && (
+        <div className="flex items-start gap-4 flex-shrink-0 mb-1 flex-wrap" data-testid={`${pid}ticker-strip`}>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
+            <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-muted-foreground text-xl">|</span>
+            <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
+            <span className="text-muted-foreground text-xl">|</span>
+            <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
+            <span className="text-muted-foreground text-xl">|</span>
+            <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
+          </div>
+          {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
+            <div className="flex flex-col gap-0.5 py-1" data-testid="text-company-info">
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                {chartMetrics.companyName && <span className="text-foreground font-medium">{chartMetrics.companyName}</span>}
+                {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span>·</span>}
+                {chartMetrics.sectorName && <span>{chartMetrics.sectorName}</span>}
+                {chartMetrics.sectorName && chartMetrics.industryName && <span>/</span>}
+                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span>{chartMetrics.industryName}</span>}
+              </div>
+              {chartMetrics.companyDescription && (
+                <p className="text-xs text-muted-foreground/80 line-clamp-3 max-w-[700px]" title={chartMetrics.companyDescription} data-testid="text-company-description">
+                  {chartMetrics.companyDescription}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
         <div className="flex flex-col min-h-0">
           <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>

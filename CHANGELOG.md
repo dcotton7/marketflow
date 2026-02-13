@@ -6,6 +6,13 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Ticker/Price Strip & Company Info Moved Into DualChartGrid
+- **Task**: Moved Bloomberg-style ticker strip (symbol | price | change | %) and company info (name, sector/industry, description) from page-level headers into DualChartGrid, rendering above both charts as a full-width banner
+- **Files**: `DualChartGrid.tsx`, `BigIdeaPage.tsx`, `SentinelChartsPage.tsx`
+- **Details**: DualChartGrid now accepts `symbol` prop and internally computes dayChange from dailyData. Company description enlarged from `text-[10px] line-clamp-2 max-w-[500px]` to `text-xs line-clamp-3 max-w-[700px]`. Sector/industry label bumped from `text-xs` to `text-sm`. Applies uniformly across all chart viewers (Charts page, BigIdea scanner, Trading Card).
+- **Tested**: App compiles and runs; removed ~80 lines of duplicate ticker/company rendering from both pages
+- **Status**: Complete
+
 ### DualChartGrid Component Extraction
 - **Task**: Extracted shared dual-chart layout (Daily + Intraday) into a reusable `DualChartGrid` component, eliminating ~400 lines of duplicate code across BigIdeaPage and SentinelChartsPage
 - **Files**: `DualChartGrid.tsx` (new), `BigIdeaPage.tsx`, `SentinelChartsPage.tsx`

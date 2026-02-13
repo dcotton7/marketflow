@@ -4253,11 +4253,6 @@ function ScanChartViewer({
 
   if (!open) return null;
 
-  const displayPrice = dayChange?.price ?? current?.price ?? 0;
-  const priceChange = dayChange?.change ?? 0;
-  const pricePctChange = dayChange?.changePct ?? 0;
-  const isPriceUp = priceChange >= 0;
-
   return createPortal(
     <div
       ref={overlayRef}
@@ -4388,47 +4383,6 @@ function ScanChartViewer({
               <p className="text-sm">Add this ticker to your Watching list for tracking</p>
             </TooltipContent>
           </Tooltip>
-          <div className="ml-auto flex items-center gap-3 flex-wrap" data-testid={`ticker-box-${symbol}`}>
-            <div
-              className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card"
-            >
-              <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{symbol}</span>
-              <span className="text-muted-foreground text-xl">|</span>
-              <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">
-                ${displayPrice.toFixed(2)}
-              </span>
-              <span className="text-muted-foreground text-xl">|</span>
-              <span
-                className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
-                data-testid="text-chart-change"
-              >
-                {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
-              </span>
-              <span className="text-muted-foreground text-xl">|</span>
-              <span
-                className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`}
-                data-testid="text-chart-pct"
-              >
-                {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
-              </span>
-            </div>
-            {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
-              <div className="flex flex-col gap-0.5" data-testid="text-company-info">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {chartMetrics.companyName && <span className="text-foreground font-medium">{chartMetrics.companyName}</span>}
-                  {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span>·</span>}
-                  {chartMetrics.sectorName && <span>{chartMetrics.sectorName}</span>}
-                  {chartMetrics.sectorName && chartMetrics.industryName && <span>/</span>}
-                  {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span>{chartMetrics.industryName}</span>}
-                </div>
-                {chartMetrics.companyDescription && (
-                  <p className="text-[10px] text-muted-foreground/70 line-clamp-2 max-w-[500px]" title={chartMetrics.companyDescription} data-testid="text-company-description">
-                    {chartMetrics.companyDescription}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
           {(() => {
             const ratedCount = Object.keys(chartRatings).length;
             const total = results.length;
@@ -4563,6 +4517,7 @@ function ScanChartViewer({
 
         <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
         <DualChartGrid
+          symbol={symbol}
           dailyData={dailyData}
           dailyLoading={dailyLoading}
           intradayData={intradayData}
