@@ -143,12 +143,17 @@ export default function SentinelChartsPage() {
   useEffect(() => {
     const measure = () => {
       if (chartGridRef.current) {
-        const rect = chartGridRef.current.getBoundingClientRect();
-        const available = window.innerHeight - rect.top - 16;
-        setChartHeight(Math.max(300, available - 24));
+        const gridHeight = chartGridRef.current.clientHeight;
+        const labelRows = chartGridRef.current.querySelectorAll(':scope > div > div:first-child');
+        let labelHeight = 0;
+        labelRows.forEach(el => { labelHeight = Math.max(labelHeight, (el as HTMLElement).offsetHeight); });
+        const metricsEl = chartGridRef.current.querySelector('[data-testid="chart-metrics-strip"]');
+        const metricsHeight = metricsEl ? (metricsEl as HTMLElement).offsetHeight + 8 : 0;
+        const usable = gridHeight - (labelHeight || 28) - metricsHeight;
+        setChartHeight(Math.max(200, usable));
       }
     };
-    const timer = setTimeout(measure, 100);
+    const timer = setTimeout(measure, 150);
     window.addEventListener("resize", measure);
     return () => { clearTimeout(timer); window.removeEventListener("resize", measure); };
   }, [activeSymbol]);
@@ -159,7 +164,7 @@ export default function SentinelChartsPage() {
   const isPriceUp = priceChange >= 0;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col" style={cssVariables as any}>
+    <div className="h-screen bg-background flex flex-col overflow-hidden" style={cssVariables as any}>
       <SentinelHeader showSentiment={false} />
       <div className="flex flex-col flex-1 min-h-0 p-4 gap-3">
         <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
@@ -255,7 +260,7 @@ export default function SentinelChartsPage() {
           </div>
         ) : (
           <>
-            <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
+            <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
               <div className="flex flex-col min-h-0">
                 <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
                   <span className="text-xs text-muted-foreground font-medium">Daily</span>
