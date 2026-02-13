@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Crosshair, Lightbulb, Sparkles } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Crosshair, Lightbulb, Sparkles, BarChart3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -83,6 +83,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
   const isTrainingPage = location === "/sentinel/pattern-training";
   const isAdminPage = location.startsWith("/sentinel/admin");
   const isBigIdeaPage = location === "/sentinel/bigidea";
+  const isChartsPage = location === "/sentinel/charts";
   const isEvaluatePage = location === "/sentinel/evaluate";
 
   return (
@@ -166,6 +167,17 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               <span className="hidden sm:inline">Big Idea</span>
             </Button>
           </Link>
+          <Link href="/sentinel/charts">
+            <Button 
+              variant={isChartsPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-charts"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Charts</span>
+            </Button>
+          </Link>
           <Link href="/sentinel/evaluate">
             <Button 
               variant={isEvaluatePage ? "secondary" : "ghost"} 
@@ -212,7 +224,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Weekly:</span>
+                    <span className="text-sm font-medium text-muted-foreground">MM Mid-Term Trend:</span>
                     <Badge 
                       variant="outline" 
                       className={`text-sm px-3 py-1 ${getTrendColor(sentiment.weekly.state)}`}
@@ -224,7 +236,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p className="text-sm">SPY 40-week structure</p>
+                  <p className="text-sm">SPY price vs 21-day EMA with slope direction</p>
                   <p className="text-xs text-muted-foreground">Confidence: {sentiment.weekly.confidence}</p>
                 </TooltipContent>
               </Tooltip>
