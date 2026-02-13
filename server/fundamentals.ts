@@ -162,86 +162,183 @@ export interface ExtendedFundamentals {
 const extendedCache = new Map<string, { data: ExtendedFundamentals; ts: number }>();
 const EXTENDED_CACHE_TTL = 24 * 60 * 60 * 1000;
 
-async function fetchExtendedFundamentals(symbol: string): Promise<{ marketCap: number; pe: number | null; beta: number | null }> {
-  if (!FMP_API_KEY) return { marketCap: 0, pe: null, beta: null };
+async function fetchProfileData(symbol: string): Promise<{ marketCap: number; beta: number | null }> {
+  if (!FMP_API_KEY) return { marketCap: 0, beta: null };
   try {
     const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { marketCap: 0, pe: null, beta: null };
+    if (!res.ok) return { marketCap: 0, beta: null };
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return { marketCap: 0, pe: null, beta: null };
+    if (!Array.isArray(data) || data.length === 0) return { marketCap: 0, beta: null };
     const profile = data[0];
     return {
       marketCap: profile.marketCap || 0,
-      pe: profile.pe ?? null,
       beta: profile.beta ?? null,
     };
   } catch {
-    return { marketCap: 0, pe: null, beta: null };
+    return { marketCap: 0, beta: null };
   }
 }
 
-async function fetchKeyMetrics(symbol: string): Promise<{ debtToEquity: number | null; preTaxMargin: number | null }> {
-  if (!FMP_API_KEY) return { debtToEquity: null, preTaxMargin: null };
+async function fetchRatiosTTM(symbol: string): Promise<{ pe: number | null; debtToEquity: number | null; preTaxMargin: number | null }> {
+  if (!FMP_API_KEY) return { pe: null, debtToEquity: null, preTaxMargin: null };
   try {
-    const url = `${FMP_BASE}/key-metrics-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+    const url = `${FMP_BASE}/ratios-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { debtToEquity: null, preTaxMargin: null };
+    if (!res.ok) return { pe: null, debtToEquity: null, preTaxMargin: null };
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return { debtToEquity: null, preTaxMargin: null };
-    const metrics = data[0];
+    if (!Array.isArray(data) || data.length === 0) return { pe: null, debtToEquity: null, preTaxMargin: null };
+    const r = data[0];
     return {
-      debtToEquity: metrics.debtToEquityTTM ?? null,
-      preTaxMargin: metrics.netProfitMarginTTM ?? null,
+      pe: r.priceToEarningsRatioTTM != null ? Math.round(r.priceToEarningsRatioTTM * 100) / 100 : null,
+      debtToEquity: r.debtToEquityRatioTTM != null ? Math.round(r.debtToEquityRatioTTM * 100) / 100 : null,
+      preTaxMargin: r.pretaxProfitMarginTTM != null ? Math.round(r.pretaxProfitMarginTTM * 10000) / 100 : null,
     };
   } catch {
-    return { debtToEquity: null, preTaxMargin: null };
+    return { pe: null, debtToEquity: null, preTaxMargin: null };
   }
 }
 
-async function fetchAnalystEstimates(symbol: string): Promise<{ consensus: string; targetPrice: number | null }> {
+async function fetchPriceTargetConsensus(symbol: string): Promise<{ consensus: string; targetPrice: number | null }> {
   if (!FMP_API_KEY) return { consensus: "N/A", targetPrice: null };
   try {
-    const url = `${FMP_BASE}/analyst-estimates?symbol=${encodeURIComponent(symbol)}&limit=1&apikey=${FMP_API_KEY}`;
+    const url = `${FMP_BASE}/price-target-consensus?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return { consensus: "N/A", targetPrice: null };
     const data = await res.json();
     if (!Array.isArray(data) || data.length === 0) return { consensus: "N/A", targetPrice: null };
-    const est = data[0];
+    const pt = data[0];
+    const targetPrice = pt.targetConsensus ?? pt.targetMedian ?? null;
     let consensus = "N/A";
-    if (est.estimatedRevenueLow != null && est.estimatedRevenueHigh != null && est.estimatedRevenueAvg != null) {
-      const mid = (est.estimatedRevenueHigh + est.estimatedRevenueLow) / 2;
-      consensus = est.estimatedRevenueAvg >= mid ? "Buy" : "Hold";
+    if (targetPrice != null && pt.targetHigh != null && pt.targetLow != null) {
+      const mid = (pt.targetHigh + pt.targetLow) / 2;
+      consensus = targetPrice >= mid ? "Buy" : "Hold";
     }
-    return { consensus, targetPrice: null };
+    return { consensus, targetPrice: targetPrice != null ? Math.round(targetPrice * 100) / 100 : null };
   } catch {
     return { consensus: "N/A", targetPrice: null };
   }
 }
 
-async function fetchEarningsCalendar(symbol: string): Promise<{ nextEarningsDate: string; nextEarningsDays: number }> {
-  if (!FMP_API_KEY) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+interface IncomeQuarter {
+  date: string;
+  period: string;
+  fiscalYear: string;
+  epsDiluted: number | null;
+  revenue: number;
+}
+
+async function fetchQuarterlyIncomeStatements(symbol: string): Promise<IncomeQuarter[]> {
+  if (!FMP_API_KEY) return [];
   try {
-    const url = `${FMP_BASE}/earning-calendar?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+    const url = `${FMP_BASE}/income-statement?symbol=${encodeURIComponent(symbol)}&period=quarter&limit=5&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return [];
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const future = data
-      .filter((d: any) => d.date && new Date(d.date) >= today)
-      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    if (future.length === 0) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
-    const nextDate = new Date(future[0].date);
-    const diffDays = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (!Array.isArray(data)) return [];
+    return data.map((d: any) => ({
+      date: d.date,
+      period: d.period,
+      fiscalYear: d.fiscalYear,
+      epsDiluted: d.epsDiluted ?? null,
+      revenue: d.revenue || 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchAnalystEpsEstimates(symbol: string): Promise<{ epsAvg: number | null; date: string; numAnalysts: number } | null> {
+  if (!FMP_API_KEY) return null;
+  try {
+    const url = `${FMP_BASE}/analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const now = new Date();
+    const mostRecent = data.find((d: any) => {
+      const estDate = new Date(d.date);
+      return estDate <= now;
+    });
+    if (!mostRecent) return null;
     return {
-      nextEarningsDate: future[0].date,
-      nextEarningsDays: diffDays,
+      epsAvg: mostRecent.epsAvg ?? null,
+      date: mostRecent.date,
+      numAnalysts: mostRecent.numAnalystsEps ?? 0,
     };
   } catch {
-    return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+    return null;
   }
+}
+
+function computeEpsGrowthMetrics(quarters: IncomeQuarter[], analystEst: { epsAvg: number | null; date: string } | null): {
+  epsCurrentQYoY: string;
+  salesGrowth3QYoY: string;
+  lastEpsSurprise: string;
+  nextEarningsDate: string;
+  nextEarningsDays: number;
+} {
+  const result = {
+    epsCurrentQYoY: "N/A",
+    salesGrowth3QYoY: "N/A",
+    lastEpsSurprise: "N/A",
+    nextEarningsDate: "N/A",
+    nextEarningsDays: -1,
+  };
+
+  if (quarters.length === 0) return result;
+
+  const current = quarters[0];
+
+  if (quarters.length >= 2) {
+    const sameQLastYear = quarters.find(
+      (q) => q.period === current.period && q.fiscalYear !== current.fiscalYear
+    );
+    if (sameQLastYear && current.epsDiluted != null && sameQLastYear.epsDiluted != null && sameQLastYear.epsDiluted !== 0) {
+      const yoyPct = ((current.epsDiluted - sameQLastYear.epsDiluted) / Math.abs(sameQLastYear.epsDiluted)) * 100;
+      result.epsCurrentQYoY = `${yoyPct >= 0 ? "+" : ""}${Math.round(yoyPct)}%`;
+    } else if (current.epsDiluted != null) {
+      result.epsCurrentQYoY = `$${current.epsDiluted.toFixed(2)}`;
+    }
+  }
+
+  if (quarters.length >= 5) {
+    const recent3Rev = quarters.slice(0, 3).reduce((s, q) => s + q.revenue, 0);
+    const prior3Rev = quarters.slice(3, 5).reduce((s, q) => s + q.revenue, 0);
+    if (prior3Rev > 0 && quarters.length >= 5) {
+      const avgPrior = prior3Rev / 2;
+      const avgRecent = recent3Rev / 3;
+      const salesGrowth = ((avgRecent - avgPrior) / avgPrior) * 100;
+      result.salesGrowth3QYoY = `${salesGrowth >= 0 ? "+" : ""}${Math.round(salesGrowth)}%`;
+    }
+  }
+
+  if (analystEst && analystEst.epsAvg != null && quarters.length >= 4) {
+    const trailing4Eps = quarters.slice(0, 4).reduce((s, q) => s + (q.epsDiluted || 0), 0);
+    const annualEstEps = analystEst.epsAvg;
+    if (annualEstEps !== 0) {
+      const surprise = trailing4Eps - annualEstEps;
+      const surprisePct = ((surprise / Math.abs(annualEstEps)) * 100);
+      result.lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
+    }
+  }
+
+  if (current.date) {
+    const lastReportDate = new Date(current.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let nextEstimate = new Date(lastReportDate);
+    nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+    while (nextEstimate <= today) {
+      nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+    }
+    const diffDays = Math.ceil((nextEstimate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    result.nextEarningsDate = nextEstimate.toISOString().split("T")[0];
+    result.nextEarningsDays = diffDays;
+  }
+
+  return result;
 }
 
 export async function getExtendedFundamentals(symbol: string): Promise<ExtendedFundamentals> {
@@ -251,26 +348,29 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
     return cached.data;
   }
 
-  const [profile, keyMetrics, analyst, earnings] = await Promise.all([
-    fetchExtendedFundamentals(upper),
-    fetchKeyMetrics(upper),
-    fetchAnalystEstimates(upper),
-    fetchEarningsCalendar(upper),
+  const [profile, ratios, priceTarget, incomeQuarters, analystEst] = await Promise.all([
+    fetchProfileData(upper),
+    fetchRatiosTTM(upper),
+    fetchPriceTargetConsensus(upper),
+    fetchQuarterlyIncomeStatements(upper),
+    fetchAnalystEpsEstimates(upper),
   ]);
+
+  const growth = computeEpsGrowthMetrics(incomeQuarters, analystEst);
 
   const result: ExtendedFundamentals = {
     marketCap: profile.marketCap,
-    pe: profile.pe,
+    pe: ratios.pe,
     beta: profile.beta,
-    debtToEquity: keyMetrics.debtToEquity != null ? Math.round(keyMetrics.debtToEquity * 100) / 100 : null,
-    preTaxMargin: keyMetrics.preTaxMargin != null ? Math.round(keyMetrics.preTaxMargin * 10000) / 100 : null,
-    analystConsensus: analyst.consensus,
-    targetPrice: analyst.targetPrice,
-    nextEarningsDate: earnings.nextEarningsDate,
-    nextEarningsDays: earnings.nextEarningsDays,
-    epsCurrentQYoY: "N/A",
-    salesGrowth3QYoY: "N/A",
-    lastEpsSurprise: "N/A",
+    debtToEquity: ratios.debtToEquity,
+    preTaxMargin: ratios.preTaxMargin,
+    analystConsensus: priceTarget.consensus,
+    targetPrice: priceTarget.targetPrice,
+    nextEarningsDate: growth.nextEarningsDate,
+    nextEarningsDays: growth.nextEarningsDays,
+    epsCurrentQYoY: growth.epsCurrentQYoY,
+    salesGrowth3QYoY: growth.salesGrowth3QYoY,
+    lastEpsSurprise: growth.lastEpsSurprise,
   };
 
   extendedCache.set(upper, { data: result, ts: Date.now() });

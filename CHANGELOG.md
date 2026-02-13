@@ -6,6 +6,23 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Fix All Fundamental & Technical Data (FMP API) — 21:50 UTC
+- **Task**: Fix all fundamental data fields that were returning "N/A" due to incorrect or broken FMP API calls.
+- **Files**: `server/fundamentals.ts`
+- **Details**:
+  - **PE Ratio**: Profile endpoint doesn't return `pe` on free tier. Switched to `/stable/ratios-ttm` endpoint which provides `priceToEarningsRatioTTM`. Now returns real PE (e.g., AAPL: 32.03, NVDA: 44.82).
+  - **Debt/Equity**: `debtToEquityTTM` field didn't exist in `key-metrics-ttm`. Switched to `ratios-ttm` which provides `debtToEquityRatioTTM`. Now returns real D/E (e.g., AAPL: 1.03, NVDA: 0.09).
+  - **Pre-Tax Margin**: `netProfitMarginTTM` field didn't exist in `key-metrics-ttm`. Switched to `ratios-ttm` which provides `pretaxProfitMarginTTM`. Now returns real margin (e.g., AAPL: 32.4%, NVDA: 62.1%).
+  - **Target Price**: Was always null because analyst-estimates endpoint was broken. Added new `fetchPriceTargetConsensus()` using `/stable/price-target-consensus` endpoint which returns real consensus target (e.g., AAPL: $303.11, NVDA: $267).
+  - **Analyst Consensus**: Was "N/A" because `/analyst-estimates` required `period` param. Now derived from price target consensus data (Buy/Hold based on consensus vs midpoint of high/low range).
+  - **Next Earnings Date**: Was "N/A" because `/earning-calendar?symbol=X` returned empty. Now estimated by adding 3 months to last income statement date, with while-loop to advance past today if the projected date already passed.
+  - **EPS Current Q YoY**: Was always "N/A". Now computed from quarterly income statements (`/stable/income-statement?period=quarter&limit=5`), comparing current quarter's `epsDiluted` to same quarter last year (e.g., AAPL: +18%, NVDA: +67%).
+  - **Sales Growth 3Q YoY**: Was always "N/A". Now computed from quarterly revenue data — sum of 3 most recent quarters vs prior 3 quarters (e.g., AAPL: +8%, NVDA: +25%).
+  - **Last EPS Surprise**: Was always "N/A" (quarterly analyst estimates require premium FMP). Now uses annual analyst estimates (`/stable/analyst-estimates?period=annual`) — compares trailing 4-quarter actual EPS to annual estimate EPS (e.g., AAPL: +$0.53 (+7%), MSFT: +$2.57 (+19%)).
+  - **ADR (Average Daily Range)**: Was already working correctly. Confirmed ADR20 $ and ADR20 % compute properly (e.g., AAPL: $6.28 / 2.4%).
+  - **Beta**: Was already working from profile endpoint. Confirmed (e.g., AAPL: 1.107, NVDA: 2.314).
+- **Status**: Complete
+
 ### Platform-Wide Admin Styling Normalization — 22:00 UTC
 - **Task**: Audit and normalize ALL Rubric Shield pages so every header, overlay, background, and text tier draws from the admin-configurable database settings (SystemSettings CSS variables).
 - **Files**: `SystemSettingsContext.tsx`, `SentinelHeader.tsx`, `SentinelDashboardPage.tsx`, `SentinelEvaluatePage.tsx`, `SentinelRulesPage.tsx`, `SentinelImportPage.tsx`, `WatchlistPage.tsx`, `PatternTrainingPage.tsx`, `PatternLearningPage.tsx`, `BigIdeaPage.tsx`, `ScannerPage.tsx`, `SymbolPage.tsx`, `SentinelTradePage.tsx`, `SentinelLoginPage.tsx`
