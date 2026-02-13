@@ -6,15 +6,13 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
-### Fix Metrics Strip Layout Shift — 20:02 UTC
-- **Task**: Bottom metrics strip was still resizing when fundamentals data loaded, causing charts to shift
+### Fix All Layout Strips — Hardcoded Fixed Heights — 20:22 UTC
+- **Task**: Ticker strip and metrics strip were still bouncing/resizing as data loaded at different times
 - **Files**: `DualChartGrid.tsx`
 - **Details**:
-  - Both metrics grid panels (daily 5-col, intraday 4-col) now always render their bordered grid structure from first paint
-  - When `chartMetrics` is null, invisible placeholder cells (same text sizes: `text-[10px]` label + `text-xs` value, same cell count: 10 daily / 8 intraday) fill the grids, reserving the exact same pixel height
-  - Removed the old `minHeight: 62` approach and "Loading fundamentals..." centered text — those didn't match the populated height
-  - All label spans use `whitespace-nowrap`, all value divs use `truncate`, all cell wrappers use `overflow-hidden` — prevents text wrapping from causing height variation at any width
-  - When data arrives, cell content swaps from invisible placeholders to real values with zero height change
+  - **Ticker strip**: Locked to `h-[42px] overflow-hidden` — box is always exactly 42px from first paint. Removed `minHeight`, `flex-wrap`, multi-line company description. Symbol always renders immediately; price/change fill in when data arrives. Company info (name, sector, industry) renders inline on the same line, clipped if too long.
+  - **Metrics strip**: Locked outer container to `h-[58px] overflow-hidden` — box is always exactly 58px from first paint. Both bordered grid panels render empty when no data, content fills in when `chartMetrics` arrives. All labels `whitespace-nowrap`, all values `truncate`, inner grids also `overflow-hidden`.
+  - **Approach**: Fix the boxes first, then load content into them. No invisible placeholders, no `minHeight` guessing — hardcoded pixel heights with overflow clipping guarantee zero layout shift.
 - **Status**: Complete
 
 ### Fix Layout Stability & Trend Line Tool — 19:56 UTC

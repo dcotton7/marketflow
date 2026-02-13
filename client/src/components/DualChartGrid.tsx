@@ -188,40 +188,29 @@ export function DualChartGrid({
   return (
     <>
       {!hideTickerStrip && symbol && (
-        <div className="flex items-start gap-4 flex-shrink-0 mb-1 flex-wrap" style={{ minHeight: 42 }} data-testid={`${pid}ticker-strip`}>
-          {dailyData ? (
-            <>
-              <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
-                <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
-                <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+        <div className="flex items-center gap-4 flex-shrink-0 mb-1 h-[42px] overflow-hidden" data-testid={`${pid}ticker-strip`}>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
+            <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+            {dailyData ? (
+              <>
                 <span className="font-mono font-semibold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
                 <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
                 <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
                 <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
                 <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
-              </div>
-              {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
-                <div className="flex flex-col gap-0.5 py-1" data-testid="text-company-info">
-                  <div className="flex items-center gap-1.5 text-sm">
-                    {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
-                    {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
-                    {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
-                    {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
-                    {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
-                  </div>
-                  {chartMetrics.companyDescription && (
-                    <p className="text-xs line-clamp-3 max-w-[700px]" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription} data-testid="text-company-description">
-                      {chartMetrics.companyDescription}
-                    </p>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
-              <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
-              <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+              </>
+            ) : (
               <span className="font-mono text-2xl text-muted-foreground animate-pulse">Loading...</span>
+            )}
+          </div>
+          {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
+            <div className="flex items-center gap-1.5 text-sm whitespace-nowrap overflow-hidden" data-testid="text-company-info">
+              {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
+              {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
+              {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
+              {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
+              {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
             </div>
           )}
         </div>
@@ -358,8 +347,8 @@ export function DualChartGrid({
           )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1">
-          <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1" data-testid={`${pid}daily-metrics-strip`}>
+      <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1 h-[58px] overflow-hidden">
+          <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1 overflow-hidden" data-testid={`${pid}daily-metrics-strip`}>
             {chartMetrics ? (<>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Market Cap</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Sales Growth 3Q YoY</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
@@ -371,13 +360,9 @@ export function DualChartGrid({
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Last EPS Surprise</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-surprise`}>{chartMetrics.lastEpsSurprise}</div></div>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Debt/Equity</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-debt-equity`}>{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Target Price</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-target-price`}>{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
-            </>) : (<>
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="overflow-hidden"><span className="text-[10px] whitespace-nowrap invisible">Label</span><div className="text-xs font-medium invisible">--</div></div>
-            ))}
-            </>)}
+            </>) : null}
           </div>
-          <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1" data-testid={`${pid}intraday-metrics-strip`}>
+          <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1 overflow-hidden" data-testid={`${pid}intraday-metrics-strip`}>
             {chartMetrics ? (<>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>ADR(20) $</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>50d Ext (ADR)</span><div className={`text-xs font-medium truncate ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-adr`}>{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
@@ -387,11 +372,7 @@ export function DualChartGrid({
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>20d Ext %</span><div className={`text-xs font-medium truncate ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-20d-ext`}>{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
             <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>RS Momentum</span><div className={`text-xs font-medium truncate ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
             <div className="overflow-hidden col-span-1"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
-            </>) : (<>
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="overflow-hidden"><span className="text-[10px] whitespace-nowrap invisible">Label</span><div className="text-xs font-medium invisible">--</div></div>
-            ))}
-            </>)}
+            </>) : null}
           </div>
       </div>
       <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
