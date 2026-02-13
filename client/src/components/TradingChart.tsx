@@ -496,6 +496,7 @@ export function TradingChart({
   const trendLineStartRef = useRef<MeasurePoint | null>(null);
   const trendLineSeriesListRef = useRef<ISeriesApi<"Line">[]>([]);
   const trendLineDataRef = useRef<{ start: MeasurePoint; end: MeasurePoint }[]>([]);
+  const trendLineAnchorRef = useRef<any>(null);
   const resistanceLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
@@ -514,6 +515,10 @@ export function TradingChart({
     trendLineModeRef.current = trendLineMode;
     if (!trendLineMode) {
       trendLineStartRef.current = null;
+      if (trendLineAnchorRef.current && candleSeriesRef.current) {
+        try { candleSeriesRef.current.removePriceLine(trendLineAnchorRef.current); } catch {}
+        trendLineAnchorRef.current = null;
+      }
       for (const s of trendLineSeriesListRef.current) {
         if (chartRef.current) {
           try { chartRef.current.removeSeries(s); } catch {}
@@ -558,6 +563,38 @@ export function TradingChart({
     shiftedToOriginalRef.current = shiftedToOriginal;
   }, [shiftedToOriginal]);
 
+  const createExtendedTrendLine = useCallback((chart: IChartApi, startPt: MeasurePoint, endPt: MeasurePoint, allTimestamps: number[]) => {
+    const sorted = [startPt, endPt].sort((a, b) => a.time - b.time);
+    const t1 = sorted[0].time;
+    const p1 = sorted[0].price;
+    const t2 = sorted[1].time;
+    const p2 = sorted[1].price;
+    const slope = t2 !== t1 ? (p2 - p1) / (t2 - t1) : 0;
+
+    const uniqueTimes = new Set(allTimestamps);
+    uniqueTimes.add(t1);
+    uniqueTimes.add(t2);
+    const sortedTimes = Array.from(uniqueTimes).sort((a, b) => a - b);
+
+    const lineData = sortedTimes.map(t => ({
+      time: t as any,
+      value: p1 + slope * (t - t1),
+    }));
+
+    const trendSeries = chart.addSeries(LineSeries, {
+      color: "#87CEEB",
+      lineWidth: 1 as 1,
+      lineStyle: LineStyle.Solid,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      priceScaleId: 'right',
+      autoscaleInfoProvider: () => null,
+    });
+    trendSeries.setData(lineData);
+    return trendSeries;
+  }, []);
+
   const clearMeasure = useCallback(() => {
     measureStartRef.current = null;
     if (measurePrimitiveRef.current) {
@@ -590,29 +627,35 @@ export function TradingChart({
       if (param.point && typeof param.point.y === "number") {
         const priceFromY = candleSeriesRef.current.coordinateToPrice(param.point.y);
         if (priceFromY !== null && isFinite(priceFromY)) {
-          clickedPrice = Math.round(priceFromY * 100) / 100;
+          clickedPrice = priceFromY;
         }
       }
 
       if (trendLineModeRef.current && clickedPrice !== null) {
         if (!trendLineStartRef.current) {
           trendLineStartRef.current = { time: timestamp, price: clickedPrice };
-        } else {
-          if (chartRef.current) {
-            const startPt = trendLineStartRef.current;
-            const endPt = { time: timestamp, price: clickedPrice };
-            const trendSeries = chartRef.current.addSeries(LineSeries, {
+          if (chartRef.current && candleSeriesRef.current) {
+            if (trendLineAnchorRef.current) {
+              try { candleSeriesRef.current.removePriceLine(trendLineAnchorRef.current); } catch {}
+            }
+            trendLineAnchorRef.current = candleSeriesRef.current.createPriceLine({
+              price: clickedPrice,
               color: "#87CEEB",
               lineWidth: 1 as 1,
-              lineStyle: LineStyle.Solid,
-              priceLineVisible: false,
-              lastValueVisible: false,
-              crosshairMarkerVisible: false,
-              priceScaleId: 'right',
-              autoscaleInfoProvider: () => null,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: false,
             });
-            const sortedPoints = [startPt, endPt].sort((a, b) => a.time - b.time);
-            trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
+          }
+        } else {
+          if (chartRef.current) {
+            if (trendLineAnchorRef.current && candleSeriesRef.current) {
+              try { candleSeriesRef.current.removePriceLine(trendLineAnchorRef.current); } catch {}
+              trendLineAnchorRef.current = null;
+            }
+            const startPt = trendLineStartRef.current;
+            const endPt = { time: timestamp, price: clickedPrice };
+            const allTimestamps = candlesRef.current.map(c => c.timestamp);
+            const trendSeries = createExtendedTrendLine(chartRef.current, startPt, endPt, allTimestamps);
             trendLineSeriesListRef.current.push(trendSeries);
             trendLineDataRef.current.push({ start: startPt, end: endPt });
           }
@@ -871,19 +914,9 @@ export function TradingChart({
 
     if (trendLineDataRef.current.length > 0 && trendLineModeRef.current) {
       trendLineSeriesListRef.current = [];
+      const allTimestamps = displayData.candles.map(c => c.timestamp);
       for (const { start, end } of trendLineDataRef.current) {
-        const trendSeries = chart.addSeries(LineSeries, {
-          color: "#87CEEB",
-          lineWidth: 1 as 1,
-          lineStyle: LineStyle.Solid,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-          priceScaleId: 'right',
-          autoscaleInfoProvider: () => null,
-        });
-        const sortedPoints = [start, end].sort((a, b) => a.time - b.time);
-        trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
+        const trendSeries = createExtendedTrendLine(chart, start, end, allTimestamps);
         trendLineSeriesListRef.current.push(trendSeries);
       }
     }

@@ -157,7 +157,7 @@ export function DualChartGrid({
     const observer = new ResizeObserver(() => requestAnimationFrame(measure));
     if (chartGridRef.current) observer.observe(chartGridRef.current);
     return () => { clearTimeout(timer); observer.disconnect(); };
-  }, [dailyData, intradayData]);
+  }, []);
 
   const effectiveIntradayData = showETH ? intradayData : rthData;
 
@@ -187,31 +187,41 @@ export function DualChartGrid({
 
   return (
     <>
-      {!hideTickerStrip && symbol && dailyData && (
-        <div className="flex items-start gap-4 flex-shrink-0 mb-1 flex-wrap" data-testid={`${pid}ticker-strip`}>
-          <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
-            <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
-            <span className="font-mono font-semibold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
-            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
-            <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
-            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
-            <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
-          </div>
-          {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
-            <div className="flex flex-col gap-0.5 py-1" data-testid="text-company-info">
-              <div className="flex items-center gap-1.5 text-sm">
-                {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
-                {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
-                {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
-                {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
-                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
+      {!hideTickerStrip && symbol && (
+        <div className="flex items-start gap-4 flex-shrink-0 mb-1 flex-wrap" style={{ minHeight: 42 }} data-testid={`${pid}ticker-strip`}>
+          {dailyData ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
+                <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
+                <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+                <span className="font-mono font-semibold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
+                <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+                <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
+                <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+                <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
               </div>
-              {chartMetrics.companyDescription && (
-                <p className="text-xs line-clamp-3 max-w-[700px]" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription} data-testid="text-company-description">
-                  {chartMetrics.companyDescription}
-                </p>
+              {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
+                <div className="flex flex-col gap-0.5 py-1" data-testid="text-company-info">
+                  <div className="flex items-center gap-1.5 text-sm">
+                    {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
+                    {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
+                    {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
+                    {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
+                    {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
+                  </div>
+                  {chartMetrics.companyDescription && (
+                    <p className="text-xs line-clamp-3 max-w-[700px]" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription} data-testid="text-company-description">
+                      {chartMetrics.companyDescription}
+                    </p>
+                  )}
+                </div>
               )}
+            </>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
+              <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
+              <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+              <span className="font-mono text-2xl text-muted-foreground animate-pulse">Loading...</span>
             </div>
           )}
         </div>
@@ -348,8 +358,9 @@ export function DualChartGrid({
           )}
         </div>
       </div>
-      {chartMetrics && (
-        <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1">
+      <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1" style={{ minHeight: 62 }}>
+        {chartMetrics ? (
+          <>
           <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1" data-testid={`${pid}daily-metrics-strip`}>
             <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Market Cap</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
             <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Sales Growth 3Q YoY</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
@@ -372,8 +383,13 @@ export function DualChartGrid({
             <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
             <div className="col-span-1"><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
           </div>
-        </div>
-      )}
+          </>
+        ) : (
+          <div className="col-span-2 flex items-center justify-center text-muted-foreground text-xs animate-pulse">
+            Loading fundamentals...
+          </div>
+        )}
+      </div>
       <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
     </>
   );

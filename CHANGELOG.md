@@ -6,6 +6,21 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Fix Layout Stability & Trend Line Tool — 19:56 UTC
+- **Task**: Fixed two major issues: (1) page layout blinking/shifting as data loaded at different intervals, (2) trend line tool drawing partial lines in wrong positions
+- **Files**: `DualChartGrid.tsx`, `TradingChart.tsx`
+- **Details**:
+  - **Layout Stability (DualChartGrid)**:
+    - Ticker strip container now always renders with fixed `minHeight: 42px` — shows symbol + "Loading..." placeholder while price data arrives, preventing vertical shift
+    - Metrics strip container now always renders with fixed `minHeight: 62px` — shows "Loading fundamentals..." placeholder, preventing bottom-up layout push
+    - Removed `dailyData, intradayData` from chart height measurement `useEffect` dependency array — height now measured once on mount + via ResizeObserver, not re-triggered when data loads
+  - **Trend Line Tool (TradingChart)**:
+    - `createExtendedTrendLine` helper: calculates slope from 2 clicked points, extrapolates to every candle timestamp in the dataset, producing a full edge-to-edge line across the chart
+    - Removed aggressive `Math.round(priceFromY * 100) / 100` price rounding — prices now captured at full precision from `coordinateToPrice`
+    - Added first-click visual feedback: a dashed price line at the clicked price appears immediately after the first click, removed on second click or mode exit
+    - Chart recreation restore now uses the same extended extrapolation for persisted trend lines
+- **Status**: Complete
+
 ### Fix Overlay Header Layout & Admin CSS Variables — 18:19 UTC
 - **Task**: Fixed three layout regressions: (A) X close button position, (B) overlay header needs left/right split, (C) ugly gap from metrics strip skeleton
 - **Files**: `BigIdeaPage.tsx`, `DualChartGrid.tsx`
