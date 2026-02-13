@@ -6,6 +6,19 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Fix Trend Line Persistence & Chart Blink — 18:01 UTC
+- **Task**: Fixed two chart stability bugs: (1) metrics strip loading caused layout shift that destroyed drawn overlays, (2) multiple trend lines couldn't persist because height changes triggered full chart destruction/recreation
+- **Files**: `TradingChart.tsx`, `DualChartGrid.tsx`
+- **Details**: Removed `height` from chart creation effect dependency array — height changes now use `chart.applyOptions({ height })` which resizes without destroying the chart. Added `trendLineDataRef` to store trend line data points independently of chart series references, so trend lines are restored after any chart recreation (e.g. data changes). Metrics strip now always reserves space with `minHeight: 62px`, showing a skeleton placeholder while loading to prevent layout shift.
+- **Tested**: App compiles without LSP errors; chart height changes no longer destroy drawn trend lines
+- **Status**: Complete
+
+### CHANGELOG Timestamp Rule — 18:00 UTC
+- **Task**: Added HH:MM UTC timestamps to all changelog section headers and updated project rules
+- **Files**: `CHANGELOG.md`, `replit.md`
+- **Details**: Every changelog entry now includes `— HH:MM UTC` in the section header. Retroactively added timestamps to existing 2026-02-13 entries. Updated replit.md Changelog rule to enforce this going forward.
+- **Status**: Complete
+
 ### Ticker/Price Strip & Company Info Moved Into DualChartGrid — 17:52 UTC
 - **Task**: Moved Bloomberg-style ticker strip (symbol | price | change | %) and company info (name, sector/industry, description) from page-level headers into DualChartGrid, rendering above both charts as a full-width banner
 - **Files**: `DualChartGrid.tsx`, `BigIdeaPage.tsx`, `SentinelChartsPage.tsx`

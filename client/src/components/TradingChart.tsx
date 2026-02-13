@@ -495,6 +495,7 @@ export function TradingChart({
   const trendLineModeRef = useRef(trendLineMode);
   const trendLineStartRef = useRef<MeasurePoint | null>(null);
   const trendLineSeriesListRef = useRef<ISeriesApi<"Line">[]>([]);
+  const trendLineDataRef = useRef<{ start: MeasurePoint; end: MeasurePoint }[]>([]);
   const resistanceLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
@@ -519,6 +520,7 @@ export function TradingChart({
         }
       }
       trendLineSeriesListRef.current = [];
+      trendLineDataRef.current = [];
     }
   }, [trendLineMode]);
   useEffect(() => {
@@ -612,6 +614,7 @@ export function TradingChart({
             const sortedPoints = [startPt, endPt].sort((a, b) => a.time - b.time);
             trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
             trendLineSeriesListRef.current.push(trendSeries);
+            trendLineDataRef.current.push({ start: startPt, end: endPt });
           }
           trendLineStartRef.current = null;
         }
@@ -866,6 +869,25 @@ export function TradingChart({
       }
     });
 
+    if (trendLineDataRef.current.length > 0 && trendLineModeRef.current) {
+      trendLineSeriesListRef.current = [];
+      for (const { start, end } of trendLineDataRef.current) {
+        const trendSeries = chart.addSeries(LineSeries, {
+          color: "#87CEEB",
+          lineWidth: 1 as 1,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          priceScaleId: 'right',
+          autoscaleInfoProvider: () => null,
+        });
+        const sortedPoints = [start, end].sort((a, b) => a.time - b.time);
+        trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
+        trendLineSeriesListRef.current.push(trendSeries);
+      }
+    }
+
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (chartRef.current) {
@@ -898,7 +920,12 @@ export function TradingChart({
         resistanceLineSeriesRef.current = [];
       }
     };
-  }, [displayData, height, isIntraday, showDayDividers, timeframe]);
+  }, [displayData, isIntraday, showDayDividers, timeframe]);
+
+  useEffect(() => {
+    if (!chartRef.current || !height) return;
+    chartRef.current.applyOptions({ height });
+  }, [height]);
 
   useEffect(() => {
     if (!chartRef.current) return;
