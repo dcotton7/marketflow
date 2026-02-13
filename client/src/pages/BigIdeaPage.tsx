@@ -1091,12 +1091,30 @@ export default function BigIdeaPage() {
     toast({ title: "Canvas cleared" });
   }, [setNodes, setEdges, toast]);
 
+  const normalizeCriteriaParams = useCallback((criteria: ScannerCriterion[]): ScannerCriterion[] => {
+    return criteria.map((c) => {
+      const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
+      if (!indMeta) return c;
+      const canonicalNames = new Set(indMeta.params.map((mp) => mp.name));
+      const allMatch = c.params.every((p) => canonicalNames.has(p.name));
+      if (allMatch) return c;
+      const repairedParams = c.params.map((p, idx) => {
+        if (canonicalNames.has(p.name)) return p;
+        if (idx < indMeta.params.length) {
+          return { ...p, name: indMeta.params[idx].name };
+        }
+        return p;
+      });
+      return { ...c, params: repairedParams };
+    });
+  }, [indicatorLibrary]);
+
   const handleAcceptSuggestion = useCallback((suggestion: TuningSuggestion, index: number) => {
     let applied = false;
     setNodes((nds) =>
       nds.map((n) => {
         if (n.type !== "thought" || !n.data.criteria) return n;
-        const criteria = n.data.criteria as ScannerCriterion[];
+        const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
         const matchCriterion = criteria.find((c) =>
           c.indicatorId === suggestion.indicatorId &&
           c.params.some((p) => p.name === suggestion.paramName)
@@ -1127,13 +1145,13 @@ export default function BigIdeaPage() {
     } else {
       toast({ title: "Could not apply", description: `Parameter ${suggestion.paramName} for ${suggestion.indicatorName} not found on canvas.`, variant: "destructive" });
     }
-  }, [setNodes, toast]);
+  }, [setNodes, toast, normalizeCriteriaParams]);
 
   const handleUndoSuggestion = useCallback((suggestion: TuningSuggestion, index: number) => {
     setNodes((nds) =>
       nds.map((n) => {
         if (n.type !== "thought" || !n.data.criteria) return n;
-        const criteria = n.data.criteria as ScannerCriterion[];
+        const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
         const matchCriterion = criteria.find((c) =>
           c.indicatorId === suggestion.indicatorId &&
           c.params.some((p) => p.name === suggestion.paramName)
@@ -1163,7 +1181,7 @@ export default function BigIdeaPage() {
       return next;
     });
     toast({ title: `Undone: ${suggestion.indicatorName} → ${suggestion.paramName} reverted to ${suggestion.currentValue}` });
-  }, [setNodes, toast]);
+  }, [setNodes, toast, normalizeCriteriaParams]);
 
   const handleApplyAll = useCallback(() => {
     if (!tuneResult) return;
@@ -1877,7 +1895,8 @@ export default function BigIdeaPage() {
 
       const enrichCriteria = (criteria: ScannerCriterion[] | undefined) => {
         if (!criteria) return criteria;
-        return criteria.map((c) => {
+        const normalized = normalizeCriteriaParams(criteria);
+        return normalized.map((c) => {
           const indMeta = indicatorLibrary.find((i) => i.id === c.indicatorId);
           if (!indMeta) return c;
           return {

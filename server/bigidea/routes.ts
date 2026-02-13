@@ -171,8 +171,24 @@ async function fetchOHLCV(symbol: string, timeframe: string = "daily"): Promise<
 
 function repairCriterion(criterion: any): { indicatorId: string; params: Record<string, any> } {
   const paramValues: Record<string, any> = {};
-  for (const p of criterion.params || []) {
+  const rawParams = criterion.params || [];
+  for (const p of rawParams) {
     paramValues[p.name] = p.value;
+  }
+
+  const indDef = INDICATOR_LIBRARY.find((i) => i.id === criterion.indicatorId);
+  if (indDef) {
+    const canonicalNames = new Set(indDef.params.map((mp) => mp.name));
+    const hasStale = rawParams.some((p: any) => !canonicalNames.has(p.name));
+    if (hasStale) {
+      for (let idx = 0; idx < rawParams.length; idx++) {
+        const p = rawParams[idx];
+        if (!canonicalNames.has(p.name) && idx < indDef.params.length) {
+          delete paramValues[p.name];
+          paramValues[indDef.params[idx].name] = p.value;
+        }
+      }
+    }
   }
 
   if (criterion.indicatorId === "MA-6" && (paramValues.maxDistance === 0 || paramValues.maxDistance === undefined)) {
@@ -2325,8 +2341,8 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           thoughtName: "Volume Contraction",
           thoughtCategory: "Volume",
           thoughtCriteria: [
-            { indicatorId: "PA-16", label: "Volume Fade", params: [{ name: "period", value: 20 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.8 }] },
-            { indicatorId: "PA-14", label: "Tightness Ratio", params: [{ name: "period", value: 20 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.7 }] },
+            { indicatorId: "PA-16", label: "Volume Fade", params: [{ name: "recentBars", value: 20 }, { name: "baselineBars", value: 50 }, { name: "maxRatio", value: 0.8 }] },
+            { indicatorId: "PA-14", label: "Tightness Ratio", params: [{ name: "recentBars", value: 20 }, { name: "baselineBars", value: 50 }, { name: "maxRatio", value: 0.7 }] },
           ],
           position: { x: 100, y: 400 },
         },
@@ -2444,9 +2460,9 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           thoughtName: "Tightness Confirmation",
           thoughtCategory: "Volatility",
           thoughtCriteria: [
-            { indicatorId: "PA-14", label: "Tight Range", params: [{ name: "period", value: 15 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.6 }] },
-            { indicatorId: "PA-15", label: "Close Clustering", params: [{ name: "period", value: 15 }, { name: "maxCluster", value: 1.5 }] },
-            { indicatorId: "PA-16", label: "Volume Fade", params: [{ name: "period", value: 15 }, { name: "avgPeriod", value: 50 }, { name: "maxRatio", value: 0.7 }] },
+            { indicatorId: "PA-14", label: "Tight Range", params: [{ name: "recentBars", value: 15 }, { name: "baselineBars", value: 50 }, { name: "maxRatio", value: 0.6 }] },
+            { indicatorId: "PA-15", label: "Close Clustering", params: [{ name: "period", value: 15 }, { name: "maxClusterPct", value: 1.5 }] },
+            { indicatorId: "PA-16", label: "Volume Fade", params: [{ name: "recentBars", value: 15 }, { name: "baselineBars", value: 50 }, { name: "maxRatio", value: 0.7 }] },
           ],
           position: { x: 100, y: 250 },
         },
