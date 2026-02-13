@@ -6,6 +6,19 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### 5-Pane Layout Redesign — Zero Layout Shift — 20:51 UTC
+- **Task**: Restructured DualChartGrid into a rigid 5-pane wireframe layout: Upper Pane → Nav+Info row → Charts → Fundamentals → Lower Pane
+- **Files**: `DualChartGrid.tsx`, `BigIdeaPage.tsx` (ScanChartViewer), `SentinelChartsPage.tsx`
+- **Details**:
+  - **Architecture**: Every pane has a fixed pixel height (Upper=40px, Nav+Info=38px, Fundamentals=58px, Lower=24px). Charts row gets ALL remaining height via calculation on mount + ResizeObserver. Zero content-driven resizing.
+  - **Nav Pane** (left half): Bloomberg-style price ticker widget. In scanner mode, nav arrows, thumbs up/down, Ivy AI, and Watchlist buttons are appended via `navExtra` prop.
+  - **Info Pane** (right half): Company name, sector, industry, and one-line description. Fills in when metrics arrive — the box is already sized.
+  - **Upper Pane**: Optional via `upperPane` prop. Standalone Charts page puts the ticker input here. Scanner puts passed-paths badges here.
+  - **Lower Pane**: Optional via `lowerPane` prop. Scanner puts a compact horizontal thought breakdown strip here.
+  - **Standalone vs Scanner**: Identical component, identical layout. Only difference is which optional props are passed. No `hideTickerStrip` flag needed.
+  - **ScanChartViewer simplified**: Header bar, ticker strip, and company info sections removed — all now handled inside DualChartGrid via props. Overlay wrapper is minimal.
+- **Status**: Complete
+
 ### Fix All Layout Strips — Hardcoded Fixed Heights — 20:22 UTC
 - **Task**: Ticker strip and metrics strip were still bouncing/resizing as data loaded at different times
 - **Files**: `DualChartGrid.tsx`

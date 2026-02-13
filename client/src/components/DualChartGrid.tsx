@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from "react";
 import { TradingChart, ChartCandle, ChartIndicators } from "@/components/TradingChart";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
@@ -50,6 +50,13 @@ export const formatMarketCap = (mc: number) => {
   return `$${mc.toLocaleString()}`;
 };
 
+const UPPER_PANE_H = 40;
+const NAV_INFO_H = 38;
+const CHART_TOOLBAR_H = 28;
+const FUND_H = 58;
+const LOWER_PANE_H = 24;
+const GAP = 4;
+
 interface DualChartGridProps {
   symbol?: string;
   dailyData: ChartDataResponse | undefined;
@@ -65,7 +72,9 @@ interface DualChartGridProps {
   dailyChartProps?: Record<string, any>;
   intradayChartProps?: Record<string, any>;
   testIdPrefix?: string;
-  hideTickerStrip?: boolean;
+  upperPane?: ReactNode;
+  navExtra?: ReactNode;
+  lowerPane?: ReactNode;
 }
 
 const TrendLineIcon = () => (
@@ -91,11 +100,13 @@ export function DualChartGrid({
   dailyChartProps = {},
   intradayChartProps = {},
   testIdPrefix = "",
-  hideTickerStrip = false,
+  upperPane,
+  navExtra,
+  lowerPane,
 }: DualChartGridProps) {
   const { cssVariables } = useSystemSettings();
-  const chartGridRef = useRef<HTMLDivElement>(null);
-  const [chartHeight, setChartHeight] = useState(500);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [chartHeight, setChartHeight] = useState(300);
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
   const [dailyTrendLineMode, setDailyTrendLineMode] = useState(false);
@@ -148,16 +159,25 @@ export function DualChartGrid({
 
   useEffect(() => {
     const measure = () => {
-      if (chartGridRef.current) {
-        const gridH = chartGridRef.current.clientHeight;
-        setChartHeight(Math.max(180, Math.floor((gridH - 120) * 0.85)));
-      }
+      if (!containerRef.current) return;
+      const totalH = containerRef.current.clientHeight;
+      const hasUpper = !!upperPane;
+      const hasLower = !!lowerPane;
+      const fixedH =
+        (hasUpper ? UPPER_PANE_H + GAP : 0) +
+        NAV_INFO_H + GAP +
+        CHART_TOOLBAR_H +
+        FUND_H + GAP +
+        (hasLower ? LOWER_PANE_H + GAP : 0) +
+        GAP * 2;
+      const available = totalH - fixedH;
+      setChartHeight(Math.max(150, available));
     };
-    const timer = setTimeout(measure, 150);
+    const timer = setTimeout(measure, 50);
     const observer = new ResizeObserver(() => requestAnimationFrame(measure));
-    if (chartGridRef.current) observer.observe(chartGridRef.current);
+    if (containerRef.current) observer.observe(containerRef.current);
     return () => { clearTimeout(timer); observer.disconnect(); };
-  }, []);
+  }, [!!upperPane, !!lowerPane]);
 
   const effectiveIntradayData = showETH ? intradayData : rthData;
 
@@ -186,38 +206,56 @@ export function DualChartGrid({
   const isPriceUp = priceChange >= 0;
 
   return (
-    <>
-      {!hideTickerStrip && symbol && (
-        <div className="flex items-center gap-4 flex-shrink-0 mb-1 h-[42px] overflow-hidden" data-testid={`${pid}ticker-strip`}>
-          <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
-            <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
-            {dailyData ? (
-              <>
-                <span className="font-mono font-semibold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
-                <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
-                <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
-                <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
-                <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
-              </>
-            ) : (
-              <span className="font-mono text-2xl text-muted-foreground animate-pulse">Loading...</span>
-            )}
-          </div>
-          {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
-            <div className="flex items-center gap-1.5 text-sm whitespace-nowrap overflow-hidden" data-testid="text-company-info">
-              {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
-              {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
-              {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
-              {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
-              {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
-            </div>
-          )}
+    <div ref={containerRef} className="flex flex-col flex-1 min-h-0" data-testid={`${pid}dual-chart-container`}>
+      {upperPane && (
+        <div className="flex-shrink-0 overflow-hidden" style={{ height: UPPER_PANE_H }} data-testid={`${pid}upper-pane`}>
+          {upperPane}
         </div>
       )}
-      <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
-        <div className="flex flex-col min-h-0">
-          <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>
+
+      <div className="flex-shrink-0 overflow-hidden grid grid-cols-2 gap-3" style={{ height: NAV_INFO_H, marginTop: upperPane ? GAP : 0 }} data-testid={`${pid}nav-info-row`}>
+        <div className="flex items-center gap-2 overflow-hidden" data-testid={`${pid}nav-pane`}>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card flex-shrink-0">
+            <span className="font-mono font-bold text-lg" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol || "—"}</span>
+            <span style={{ color: cssVariables.textColorTiny }}>|</span>
+            {dailyData ? (
+              <>
+                <span className="font-mono font-semibold text-lg" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
+                <span style={{ color: cssVariables.textColorTiny }}>|</span>
+                <span className={`font-mono font-bold text-lg ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
+                <span style={{ color: cssVariables.textColorTiny }}>|</span>
+                <span className={`font-mono font-bold text-lg ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
+              </>
+            ) : (
+              <span className="font-mono text-lg text-muted-foreground animate-pulse">—</span>
+            )}
+          </div>
+          {navExtra}
+        </div>
+
+        <div className="flex items-center gap-1.5 text-sm overflow-hidden whitespace-nowrap" data-testid={`${pid}info-pane`}>
+          {chartMetrics ? (
+            <div className="flex flex-col gap-0 overflow-hidden">
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                {chartMetrics.companyName && <span className="font-medium truncate" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
+                {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span className="flex-shrink-0" style={{ color: cssVariables.textColorTiny }}>·</span>}
+                {chartMetrics.sectorName && <span className="flex-shrink-0" style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
+                {chartMetrics.sectorName && chartMetrics.industryName && <span className="flex-shrink-0" style={{ color: cssVariables.textColorTiny }}>/</span>}
+                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span className="flex-shrink-0" style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
+              </div>
+              {chartMetrics.companyDescription && (
+                <p className="text-[10px] line-clamp-1 overflow-hidden" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription}>
+                  {chartMetrics.companyDescription}
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 overflow-hidden" style={{ height: chartHeight + CHART_TOOLBAR_H, marginTop: GAP }}>
+        <div className="flex flex-col min-h-0 overflow-hidden">
+          <div className="flex items-center gap-2 px-1 flex-shrink-0 rounded-md" style={{ height: CHART_TOOLBAR_H, backgroundColor: cssVariables.overlayBg }}>
             <span className="text-xs text-white font-medium">Daily</span>
             <Button
               size="sm"
@@ -240,34 +278,37 @@ export function DualChartGrid({
               <TrendLineIcon />
             </Button>
           </div>
-          {dailyLoading ? (
-            <Card className="flex-1">
-              <CardContent className="flex items-center justify-center h-full">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </CardContent>
-            </Card>
-          ) : dailyData ? (
-            <TradingChart
-              data={dailyData}
-              timeframe="daily"
-              height={chartHeight}
-              showLegend={true}
-              maSettings={maSettingsData}
-              maxBars={maxBars}
-              measureMode={dailyMeasureMode}
-              trendLineMode={dailyTrendLineMode}
-              {...dailyChartProps}
-            />
-          ) : (
-            <Card className="flex-1">
-              <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                No daily data
-              </CardContent>
-            </Card>
-          )}
+          <div className="flex-1 min-h-0">
+            {dailyLoading ? (
+              <Card className="h-full">
+                <CardContent className="flex items-center justify-center h-full">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ) : dailyData ? (
+              <TradingChart
+                data={dailyData}
+                timeframe="daily"
+                height={chartHeight}
+                showLegend={true}
+                maSettings={maSettingsData}
+                maxBars={maxBars}
+                measureMode={dailyMeasureMode}
+                trendLineMode={dailyTrendLineMode}
+                {...dailyChartProps}
+              />
+            ) : (
+              <Card className="h-full">
+                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  No daily data
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col min-h-0">
-          <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.overlayBg }}>
+
+        <div className="flex flex-col min-h-0 overflow-hidden">
+          <div className="flex items-center gap-2 px-1 flex-shrink-0 rounded-md" style={{ height: CHART_TOOLBAR_H, backgroundColor: cssVariables.overlayBg }}>
             <span className="text-xs text-white font-medium">Intraday</span>
             <Select value={intradayTimeframe} onValueChange={onIntradayTimeframeChange}>
               <SelectTrigger className="h-6 w-20 text-[10px]" data-testid={`${pid}select-intraday-timeframe`}>
@@ -319,63 +360,73 @@ export function DualChartGrid({
               ETH
             </Button>
           </div>
-          {intradayLoading ? (
-            <Card className="flex-1">
-              <CardContent className="flex items-center justify-center h-full">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </CardContent>
-            </Card>
-          ) : effectiveIntradayData ? (
-            <TradingChart
-              data={effectiveIntradayData}
-              timeframe={intradayTimeframe}
-              height={chartHeight}
-              showLegend={true}
-              showDayDividers={true}
-              maSettings={maSettingsData}
-              maxBars={maxBars}
-              measureMode={intradayMeasureMode}
-              trendLineMode={intradayTrendLineMode}
-              {...intradayChartProps}
-            />
-          ) : (
-            <Card className="flex-1">
-              <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                No intraday data
-              </CardContent>
-            </Card>
-          )}
+          <div className="flex-1 min-h-0">
+            {intradayLoading ? (
+              <Card className="h-full">
+                <CardContent className="flex items-center justify-center h-full">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ) : effectiveIntradayData ? (
+              <TradingChart
+                data={effectiveIntradayData}
+                timeframe={intradayTimeframe}
+                height={chartHeight}
+                showLegend={true}
+                showDayDividers={true}
+                maSettings={maSettingsData}
+                maxBars={maxBars}
+                measureMode={intradayMeasureMode}
+                trendLineMode={intradayTrendLineMode}
+                {...intradayChartProps}
+              />
+            ) : (
+              <Card className="h-full">
+                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  No intraday data
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1 h-[58px] overflow-hidden">
-          <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1 overflow-hidden" data-testid={`${pid}daily-metrics-strip`}>
-            {chartMetrics ? (<>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Market Cap</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Sales Growth 3Q YoY</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>EPS Current Q YoY</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-yoy`}>{chartMetrics.epsCurrentQYoY}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Next Earnings</span><div className={`text-xs font-medium truncate ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : ""}`} style={chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? undefined : { color: cssVariables.textColorNormal }} data-testid={`${pid}metric-next-earnings`}>{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Analyst Consensus</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-analyst-consensus`}>{chartMetrics.analystConsensus}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>PE</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-pe`}>{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Pre-Tax Margin</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-pretax-margin`}>{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Last EPS Surprise</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-surprise`}>{chartMetrics.lastEpsSurprise}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Debt/Equity</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-debt-equity`}>{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Target Price</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-target-price`}>{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
-            </>) : null}
-          </div>
-          <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1 overflow-hidden" data-testid={`${pid}intraday-metrics-strip`}>
-            {chartMetrics ? (<>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>ADR(20) $</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>50d Ext (ADR)</span><div className={`text-xs font-medium truncate ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-adr`}>{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium truncate ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : ""}`} style={chartMetrics.macd !== "Open" && chartMetrics.macd !== "Closed" ? { color: cssVariables.textColorSmall } : undefined} data-testid={`${pid}metric-macd`}>{chartMetrics.macd}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Sector</span><div className="text-xs font-medium truncate" data-testid={`${pid}metric-sector-etf`}>{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer underline decoration-dotted" style={{ color: cssVariables.textColorNormal }} onClick={() => handleTickerNav(chartMetrics.sectorEtf)} data-testid={`${pid}link-sector-etf`}>{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : <span style={{ color: cssVariables.textColorSmall }}>N/A</span>}</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>ADR(20) %</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-pct`}>{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>20d Ext %</span><div className={`text-xs font-medium truncate ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-20d-ext`}>{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
-            <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>RS Momentum</span><div className={`text-xs font-medium truncate ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
-            <div className="overflow-hidden col-span-1"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
-            </>) : null}
-          </div>
+
+      <div className="flex-shrink-0 grid grid-cols-2 gap-3 overflow-hidden" style={{ height: FUND_H, marginTop: GAP }} data-testid={`${pid}fundamentals-row`}>
+        <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1 overflow-hidden" data-testid={`${pid}daily-metrics-strip`}>
+          {chartMetrics ? (<>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Market Cap</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Sales Growth 3Q YoY</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>EPS Current Q YoY</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-yoy`}>{chartMetrics.epsCurrentQYoY}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Next Earnings</span><div className={`text-xs font-medium truncate ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : ""}`} style={chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? undefined : { color: cssVariables.textColorNormal }} data-testid={`${pid}metric-next-earnings`}>{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Analyst Consensus</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-analyst-consensus`}>{chartMetrics.analystConsensus}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>PE</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-pe`}>{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Pre-Tax Margin</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-pretax-margin`}>{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Last EPS Surprise</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-surprise`}>{chartMetrics.lastEpsSurprise}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Debt/Equity</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-debt-equity`}>{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Target Price</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-target-price`}>{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
+          </>) : null}
+        </div>
+        <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1 overflow-hidden" data-testid={`${pid}intraday-metrics-strip`}>
+          {chartMetrics ? (<>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>ADR(20) $</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>50d Ext (ADR)</span><div className={`text-xs font-medium truncate ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-adr`}>{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium truncate ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : ""}`} style={chartMetrics.macd !== "Open" && chartMetrics.macd !== "Closed" ? { color: cssVariables.textColorSmall } : undefined} data-testid={`${pid}metric-macd`}>{chartMetrics.macd}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Sector</span><div className="text-xs font-medium truncate" data-testid={`${pid}metric-sector-etf`}>{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer underline decoration-dotted" style={{ color: cssVariables.textColorNormal }} onClick={() => handleTickerNav(chartMetrics.sectorEtf)} data-testid={`${pid}link-sector-etf`}>{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : <span style={{ color: cssVariables.textColorSmall }}>N/A</span>}</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>ADR(20) %</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-pct`}>{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>20d Ext %</span><div className={`text-xs font-medium truncate ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-20d-ext`}>{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
+          <div className="overflow-hidden"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>RS Momentum</span><div className={`text-xs font-medium truncate ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
+          <div className="overflow-hidden col-span-1"><span className="text-[10px] whitespace-nowrap" style={{ color: cssVariables.textColorTiny }}>Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
+          </>) : null}
+        </div>
       </div>
+
+      {lowerPane && (
+        <div className="flex-shrink-0 overflow-hidden" style={{ height: LOWER_PANE_H, marginTop: GAP }} data-testid={`${pid}lower-pane`}>
+          {lowerPane}
+        </div>
+      )}
+
       <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
-    </>
+    </div>
   );
 }

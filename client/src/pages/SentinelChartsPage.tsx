@@ -96,85 +96,86 @@ export default function SentinelChartsPage() {
     setActiveSymbol(ticker);
   }, []);
 
+  const upperPane = (
+    <div className="flex items-center gap-3 h-full">
+      <BarChart3 className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={tickerInput}
+                onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+                onKeyDown={handleKeyDown}
+                placeholder="Enter ticker..."
+                className="w-32 pl-8 text-sm font-mono uppercase"
+                data-testid="input-chart-ticker"
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="text-sm">Type a stock ticker and press Enter to load charts</p>
+          </TooltipContent>
+        </Tooltip>
+        <Button
+          size="sm"
+          onClick={handleSubmitTicker}
+          disabled={!tickerInput.trim()}
+          data-testid="button-chart-go"
+        >
+          Go
+        </Button>
+      </div>
+      {activeSymbol && (
+        <div className="ml-auto flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => {
+                  const price = dailyData?.candles?.length ? dailyData.candles[dailyData.candles.length - 1].close : 0;
+                  window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(activeSymbol)}&price=${price.toFixed(2)}&from=charts`;
+                }}
+                data-testid="button-chart-evaluate"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Ivy AI</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => watchlistMutation.mutate({ symbol: activeSymbol })}
+                disabled={watchlistMutation.isPending}
+                data-testid="button-chart-watchlist"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>Watchlist</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-sm">Add this ticker to your Watching list for tracking</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden" style={cssVariables as any}>
       <SentinelHeader showSentiment={false} />
-      <div className="flex flex-col flex-1 min-h-0 p-4 gap-3">
-        <div className="flex items-center gap-3 flex-shrink-0 flex-wrap">
-          <BarChart3 className="w-5 h-5 text-muted-foreground" />
-          <div className="flex items-center gap-1.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    value={tickerInput}
-                    onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Enter ticker..."
-                    className="w-32 pl-8 text-sm font-mono uppercase"
-                    data-testid="input-chart-ticker"
-                  />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-sm">Type a stock ticker and press Enter to load charts</p>
-              </TooltipContent>
-            </Tooltip>
-            <Button
-              size="sm"
-              onClick={handleSubmitTicker}
-              disabled={!tickerInput.trim()}
-              data-testid="button-chart-go"
-            >
-              Go
-            </Button>
-          </div>
-
-          {activeSymbol && (
-            <div className="ml-auto flex items-center gap-2 flex-wrap">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5"
-                    onClick={() => {
-                      const price = dailyData?.candles?.length ? dailyData.candles[dailyData.candles.length - 1].close : 0;
-                      window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(activeSymbol)}&price=${price.toFixed(2)}&from=charts`;
-                    }}
-                    data-testid="button-chart-evaluate"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Ivy AI</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5"
-                    onClick={() => watchlistMutation.mutate({ symbol: activeSymbol })}
-                    disabled={watchlistMutation.isPending}
-                    data-testid="button-chart-watchlist"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                    <span>Watchlist</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p className="text-sm">Add this ticker to your Watching list for tracking</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-        </div>
-
+      <div className="flex flex-col flex-1 min-h-0 p-4">
         {!activeSymbol ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center space-y-3">
@@ -195,6 +196,7 @@ export default function SentinelChartsPage() {
             showETH={showETH}
             onShowETHChange={setShowETH}
             onNavigateToTicker={handleNavigateToTicker}
+            upperPane={upperPane}
             testIdPrefix="chart"
           />
         )}
