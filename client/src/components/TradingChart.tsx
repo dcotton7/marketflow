@@ -144,6 +144,7 @@ export interface TradingChartProps {
   maSettings?: MaSettingForChart[];
   maxBars?: number;
   measureMode?: boolean;
+  trendLineMode?: boolean;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -461,6 +462,7 @@ export function TradingChart({
   maSettings,
   maxBars,
   measureMode = false,
+  trendLineMode = false,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -474,6 +476,9 @@ export function TradingChart({
   const measureStartRef = useRef<MeasurePoint | null>(null);
   const shiftKeyRef = useRef(false);
   const measureModeRef = useRef(measureMode);
+  const trendLineModeRef = useRef(trendLineMode);
+  const trendLineStartRef = useRef<MeasurePoint | null>(null);
+  const trendLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   useEffect(() => {
@@ -487,6 +492,18 @@ export function TradingChart({
       }
     }
   }, [measureMode]);
+  useEffect(() => {
+    trendLineModeRef.current = trendLineMode;
+    if (!trendLineMode) {
+      trendLineStartRef.current = null;
+      if (trendLineSeriesRef.current && chartRef.current) {
+        try {
+          chartRef.current.removeSeries(trendLineSeriesRef.current);
+        } catch (e) {}
+        trendLineSeriesRef.current = null;
+      }
+    }
+  }, [trendLineMode]);
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
@@ -552,6 +569,36 @@ export function TradingChart({
         if (priceFromY !== null && isFinite(priceFromY)) {
           clickedPrice = Math.round(priceFromY * 100) / 100;
         }
+      }
+
+      if (trendLineModeRef.current && clickedPrice !== null) {
+        if (!trendLineStartRef.current) {
+          trendLineStartRef.current = { time: timestamp, price: clickedPrice };
+        } else {
+          if (trendLineSeriesRef.current && chartRef.current) {
+            try {
+              chartRef.current.removeSeries(trendLineSeriesRef.current);
+            } catch (e) {}
+            trendLineSeriesRef.current = null;
+          }
+          if (chartRef.current) {
+            const startPt = trendLineStartRef.current;
+            const endPt = { time: timestamp, price: clickedPrice };
+            const trendSeries = chartRef.current.addSeries(LineSeries, {
+              color: "#87CEEB",
+              lineWidth: 1 as 1,
+              lineStyle: LineStyle.Solid,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+            });
+            const sortedPoints = [startPt, endPt].sort((a, b) => a.time - b.time);
+            trendSeries.setData(sortedPoints.map(p => ({ time: p.time as any, value: p.price })));
+            trendLineSeriesRef.current = trendSeries;
+          }
+          trendLineStartRef.current = null;
+        }
+        return;
       }
 
       if ((shiftKeyRef.current || measureModeRef.current) && clickedPrice !== null) {

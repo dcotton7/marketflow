@@ -20,7 +20,7 @@ import { patternTrainingSetups, patternTrainingPoints, patternTrainingEvaluation
 import { evaluateSetup, getExistingEvaluation } from "./patternEvaluationEngine";
 import * as tiingo from "../tiingo";
 import { STOCKS_BY_SECTOR } from "@shared/stocksBySector";
-import { getSectorAndIndustry } from "../fundamentals";
+import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP } from "../fundamentals";
 
 declare module "express-session" {
   interface SessionData {
@@ -6686,8 +6686,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       let sectorEtf = "";
       let sectorEtfChange = 0;
+      let sectorInfo = { sector: "Unknown", industry: "Unknown" };
       try {
-        const sectorInfo = await getSectorAndIndustry(ticker);
+        sectorInfo = await getSectorAndIndustry(ticker);
         const sector = sectorInfo.sector;
         sectorEtf = SECTOR_ETF_MAP[sector] || "";
         if (sectorEtf) {
@@ -6702,21 +6703,84 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf = "N/A";
       }
 
-      const nextEarningsDate = "N/A";
-      const nextEarningsDays = -1;
+      const adr20Dollar = Math.round(adr20 * 100) / 100;
+      const adr20Pct = currentPrice > 0 ? Math.round((adr20 / currentPrice) * 10000) / 100 : 0;
+
+      let extensionFrom20d = 0;
+      if (validDaily.length >= 20) {
+        const last20 = validDaily.slice(-20);
+        const sma20 = last20.reduce((sum: number, q: any) => sum + q.close, 0) / 20;
+        extensionFrom20d = sma20 > 0 ? Math.round(((currentPrice - sma20) / sma20) * 1000) / 10 : 0;
+      }
+
+      let rsMomentum = 0;
+      try {
+        if (validDaily.length >= 63) {
+          const spyStart = new Date();
+          spyStart.setDate(spyStart.getDate() - 400);
+          const spyDaily = await tiingo.fetchEODPrices("SPY", spyStart, new Date()).catch(() => []);
+          const spyValid = spyDaily.filter((q: any) => q.close != null);
+          if (spyValid.length >= 63) {
+            const stockNow = validDaily[validDaily.length - 1].close;
+            const stock63 = validDaily[validDaily.length - 63].close;
+            const spyNow = spyValid[spyValid.length - 1].close;
+            const spy63 = spyValid[spyValid.length - 63].close;
+            const stockPerf = ((stockNow - stock63) / stock63) * 100;
+            const spyPerf = ((spyNow - spy63) / spy63) * 100;
+            rsMomentum = Math.round((stockPerf - spyPerf) * 100) / 100;
+          }
+        }
+      } catch {}
+
+      let extFundamentals = {
+        marketCap: 0, pe: null as number | null, beta: null as number | null,
+        debtToEquity: null as number | null, preTaxMargin: null as number | null,
+        analystConsensus: "N/A", targetPrice: null as number | null,
+        nextEarningsDate: "N/A", nextEarningsDays: -1,
+        epsCurrentQYoY: "N/A", salesGrowth3QYoY: "N/A", lastEpsSurprise: "N/A",
+      };
+      let industryPeers: { symbol: string; name: string }[] = [];
+      let industryName = sectorInfo.industry;
+
+      try {
+        const [ef, peers] = await Promise.all([
+          getExtendedFundamentals(ticker),
+          sectorInfo.industry !== "Unknown" && sectorInfo.sector !== "Unknown"
+            ? fetchIndustryPeersFromFMP(sectorInfo.industry, sectorInfo.sector, ticker, 5)
+            : Promise.resolve([]),
+        ]);
+        extFundamentals = ef;
+        industryPeers = peers.map(p => ({ symbol: p.symbol, name: p.name }));
+      } catch {}
 
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
-        adr20: Math.round(adr20 * 100) / 100,
+        adr20: adr20Dollar,
+        adr20Dollar,
+        adr20Pct,
         extensionFrom50dAdr,
         extensionFrom50dPct,
         extensionFrom200d,
+        extensionFrom20d,
         macd: macdStatus,
         macdTimeframe: isIntraday ? timeframe : "daily",
         sectorEtf,
         sectorEtfChange,
-        nextEarningsDate: nextEarningsDate || "N/A",
-        nextEarningsDays,
+        rsMomentum,
+        marketCap: extFundamentals.marketCap,
+        pe: extFundamentals.pe,
+        beta: extFundamentals.beta,
+        debtToEquity: extFundamentals.debtToEquity,
+        preTaxMargin: extFundamentals.preTaxMargin,
+        analystConsensus: extFundamentals.analystConsensus,
+        targetPrice: extFundamentals.targetPrice,
+        nextEarningsDate: extFundamentals.nextEarningsDate,
+        nextEarningsDays: extFundamentals.nextEarningsDays,
+        epsCurrentQYoY: extFundamentals.epsCurrentQYoY,
+        salesGrowth3QYoY: extFundamentals.salesGrowth3QYoY,
+        lastEpsSurprise: extFundamentals.lastEpsSurprise,
+        industryPeers,
+        industryName,
       });
     } catch (error) {
       console.error("Trade chart metrics error:", error);

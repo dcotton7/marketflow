@@ -17,16 +17,39 @@ type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; 
 interface ChartMetrics {
   currentPrice: number;
   adr20: number;
+  adr20Dollar: number;
+  adr20Pct: number;
   extensionFrom50dAdr: number;
   extensionFrom50dPct: number;
   extensionFrom200d: number;
+  extensionFrom20d: number;
   macd: string;
   macdTimeframe: string;
   sectorEtf: string;
   sectorEtfChange: number;
   nextEarningsDate: string;
   nextEarningsDays: number;
+  marketCap: number;
+  pe: number | null;
+  beta: number | null;
+  debtToEquity: number | null;
+  preTaxMargin: number | null;
+  analystConsensus: string;
+  targetPrice: number | null;
+  rsMomentum: number;
+  industryPeers: { symbol: string; name: string }[];
+  industryName: string;
+  epsCurrentQYoY: string;
+  salesGrowth3QYoY: string;
+  lastEpsSurprise: string;
 }
+
+const formatMarketCap = (mc: number) => {
+  if (mc >= 1e12) return `$${(mc / 1e12).toFixed(1)}T`;
+  if (mc >= 1e9) return `$${(mc / 1e9).toFixed(1)}B`;
+  if (mc >= 1e6) return `$${(mc / 1e6).toFixed(0)}M`;
+  return `$${mc.toLocaleString()}`;
+};
 
 export default function SentinelChartsPage() {
   const { cssVariables } = useSystemSettings();
@@ -40,6 +63,8 @@ export default function SentinelChartsPage() {
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
+  const [dailyTrendLineMode, setDailyTrendLineMode] = useState(false);
+  const [intradayTrendLineMode, setIntradayTrendLineMode] = useState(false);
   const chartGridRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(500);
 
@@ -262,16 +287,29 @@ export default function SentinelChartsPage() {
           <>
             <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
               <div className="flex flex-col min-h-0">
-                <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
-                  <span className="text-xs text-muted-foreground font-medium">Daily</span>
+                <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.secondaryOverlayColor }}>
+                  <span className="text-xs text-black font-medium">Daily</span>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`toggle-elevate ${dailyMeasureMode ? "toggle-elevated" : ""}`}
+                    className={`text-black toggle-elevate ${dailyMeasureMode ? "toggle-elevated" : ""}`}
                     onClick={() => setDailyMeasureMode(m => !m)}
                     data-testid="button-daily-measure-mode"
                   >
                     <Ruler className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`text-black toggle-elevate ${dailyTrendLineMode ? "toggle-elevated" : ""}`}
+                    onClick={() => setDailyTrendLineMode(m => !m)}
+                    data-testid="button-daily-trend-line-mode"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
+                      <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
+                      <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+                    </svg>
                   </Button>
                 </div>
                 {dailyLoading ? (
@@ -289,6 +327,7 @@ export default function SentinelChartsPage() {
                     maSettings={maSettingsData}
                     maxBars={maxBars}
                     measureMode={dailyMeasureMode}
+                    trendLineMode={dailyTrendLineMode}
                   />
                 ) : (
                   <Card className="flex-1">
@@ -297,10 +336,24 @@ export default function SentinelChartsPage() {
                     </CardContent>
                   </Card>
                 )}
+                {chartMetrics && (
+                  <div className="border border-border rounded p-2 mt-1 flex-shrink-0 grid grid-cols-5 gap-x-4 gap-y-1" data-testid="chart-daily-metrics-strip">
+                    <div><span className="text-[10px] text-muted-foreground">Market Cap</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-market-cap">{formatMarketCap(chartMetrics.marketCap)}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Sales Growth 3Q YoY</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-sales-growth">{chartMetrics.salesGrowth3QYoY}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">EPS Current Q YoY</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-eps-yoy">{chartMetrics.epsCurrentQYoY}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Next Earnings</span><div className={`text-xs font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`} data-testid="metric-daily-next-earnings">{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Analyst Consensus</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-analyst-consensus">{chartMetrics.analystConsensus}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">PE</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-pe">{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Pre-Tax Margin</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-pretax-margin">{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Last EPS Surprise</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-eps-surprise">{chartMetrics.lastEpsSurprise}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Debt/Equity</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-debt-equity">{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Target Price</span><div className="text-xs font-medium text-foreground" data-testid="metric-daily-target-price">{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
+                  </div>
+                )}
               </div>
               <div className="flex flex-col min-h-0">
-                <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
-                  <span className="text-xs text-muted-foreground font-medium">Intraday</span>
+                <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.secondaryOverlayColor }}>
+                  <span className="text-xs text-black font-medium">Intraday</span>
                   <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
                     <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-chart-intraday">
                       <SelectValue />
@@ -314,6 +367,7 @@ export default function SentinelChartsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
+                    className="text-black"
                     onClick={() => setMaSettingsOpen(true)}
                     data-testid="button-chart-ma-settings"
                   >
@@ -322,11 +376,24 @@ export default function SentinelChartsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`toggle-elevate ${intradayMeasureMode ? "toggle-elevated" : ""}`}
+                    className={`text-black toggle-elevate ${intradayMeasureMode ? "toggle-elevated" : ""}`}
                     onClick={() => setIntradayMeasureMode(m => !m)}
                     data-testid="button-intraday-measure-mode"
                   >
                     <Ruler className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`text-black toggle-elevate ${intradayTrendLineMode ? "toggle-elevated" : ""}`}
+                    onClick={() => setIntradayTrendLineMode(m => !m)}
+                    data-testid="button-intraday-trend-line-mode"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
+                      <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
+                      <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+                    </svg>
                   </Button>
                 </div>
                 {intradayLoading ? (
@@ -345,6 +412,7 @@ export default function SentinelChartsPage() {
                     maSettings={maSettingsData}
                     maxBars={maxBars}
                     measureMode={intradayMeasureMode}
+                    trendLineMode={intradayTrendLineMode}
                   />
                 ) : (
                   <Card className="flex-1">
@@ -354,52 +422,15 @@ export default function SentinelChartsPage() {
                   </Card>
                 )}
                 {chartMetrics && (
-                  <div className="border border-border rounded p-2.5 flex flex-wrap gap-x-5 gap-y-1.5 mt-1 flex-shrink-0" data-testid="chart-metrics-strip">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">Price</span>
-                      <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">ADR(20)</span>
-                      <span className="text-sm font-medium text-foreground">{chartMetrics.adr20}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">50d ext</span>
-                      <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`}>
-                        {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">200d Ext</span>
-                      <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-rs-green" : "text-rs-red"}`}>
-                        {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span>
-                      <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`}>
-                        {chartMetrics.macd}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">Sector</span>
-                      <span className="text-sm font-medium text-foreground">
-                        {chartMetrics.sectorEtf}
-                        {chartMetrics.sectorEtf !== "N/A" && (
-                          <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>
-                            {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-muted-foreground">Earnings</span>
-                      <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`}>
-                        {chartMetrics.nextEarningsDate !== "N/A"
-                          ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
-                          : "N/A"}
-                      </span>
-                    </div>
+                  <div className="border border-border rounded p-2 mt-1 flex-shrink-0 grid grid-cols-4 gap-x-4 gap-y-1" data-testid="chart-intraday-metrics-strip">
+                    <div><span className="text-[10px] text-muted-foreground">ADR(20) $</span><div className="text-xs font-medium text-foreground" data-testid="metric-intraday-adr20-dollar">${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">50d Ext (ADR)</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-intraday-50d-ext-adr">{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`} data-testid="metric-intraday-macd">{chartMetrics.macd}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">Sector</span><div className="text-xs font-medium" data-testid="metric-intraday-sector-etf">{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer text-foreground underline decoration-dotted" onClick={() => { setTickerInput(chartMetrics.sectorEtf); setActiveSymbol(chartMetrics.sectorEtf); }} data-testid="link-intraday-sector-etf">{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : "N/A"}</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">ADR(20) %</span><div className="text-xs font-medium text-foreground" data-testid="metric-intraday-adr20-pct">{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">20d Ext %</span><div className={`text-xs font-medium ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-intraday-20d-ext">{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
+                    <div><span className="text-[10px] text-muted-foreground">RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-intraday-rs-momentum">{chartMetrics.rsMomentum ?? "N/A"}</div></div>
+                    <div className="col-span-1"><span className="text-[10px] text-muted-foreground">Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium text-foreground truncate" data-testid="metric-intraday-industry-peers">{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => { setTickerInput(p.symbol); setActiveSymbol(p.symbol); }} data-testid={`link-intraday-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
                   </div>
                 )}
               </div>

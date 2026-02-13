@@ -758,6 +758,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         avgBaseVolume: Math.round(avgBaseVolume),
         avgPreBaseVolume: Math.round(avgPreBaseVolume),
         volumeFadeRatio: Math.round(volumeFadeRatio * 100) / 100,
+        _cocHighlight: { type: "resistanceLine", level: finalHigh, startBar: bestPass, endBar: 0 },
         _diagnostics: { value: `${bestPass} bars`, threshold: `≥${minRequired} bars`, detail: `range ${rangePct.toFixed(1)}% (max ${maxRange}%), top $${finalHigh.toFixed(2)}, vol fade ${volumeFadeRatio.toFixed(2)}x` }
       } };
     },
@@ -782,7 +783,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       if (highVal === 0) return { pass: false, data: { _diagnostics: { value: 'high=0', threshold: `${minDepth}%-${maxDepth}%` } } };
       const currentLow = Math.min(...slice.map(c => c.low));
       const depth = ((highVal - currentLow) / highVal) * 100;
-      return { pass: depth >= minDepth && depth <= maxDepth, data: { _diagnostics: { value: `${depth.toFixed(1)}%`, threshold: `${minDepth}%-${maxDepth}%` } } };
+      const pa4Pass = depth >= minDepth && depth <= maxDepth;
+      return { pass: pa4Pass, data: { ...(pa4Pass ? { _cocHighlight: { type: "resistanceLine", level: highVal, startBar: lookback, endBar: 0 } } : {}), _diagnostics: { value: `${depth.toFixed(1)}%`, threshold: `${minDepth}%-${maxDepth}%` } } };
     },
   },
   {
@@ -942,11 +944,11 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         const curr = candles[i];
         const gapUp = ((curr.open - prev.close) / prev.close) * 100;
         const gapDown = ((prev.close - curr.open) / prev.close) * 100;
-        if (dir === "up" && gapUp >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
-        if (dir === "down" && gapDown >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
+        if (dir === "up" && gapUp >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapUp }, _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
+        if (dir === "down" && gapDown >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapDown }, _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
         if (dir === "either") {
-          if (gapUp >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
-          if (gapDown >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
+          if (gapUp >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapUp }, _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
+          if (gapDown >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapDown }, _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
         }
         const maxGapHere = Math.max(gapUp, gapDown);
         if (maxGapHere > bestGap) { bestGap = maxGapHere; bestBar = i; }
@@ -1130,7 +1132,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const stdDev = Math.sqrt(variance);
       const clusterPct = (stdDev / avg) * 100;
 
-      return { pass: clusterPct <= maxPct, data: { _diagnostics: { value: `${clusterPct.toFixed(2)}%`, threshold: `≤${maxPct}%` } } };
+      const pa15Pass = clusterPct <= maxPct;
+      return { pass: pa15Pass, data: { ...(pa15Pass ? { _cocHighlight: { type: "pullbackCircle", barCount: 3 } } : {}), _diagnostics: { value: `${clusterPct.toFixed(2)}%`, threshold: `≤${maxPct}%` } } };
     },
   },
   {
@@ -1163,7 +1166,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const ratio = recentAvg / baselineAvg;
       const fmtRecent = recentAvg >= 1e6 ? `${(recentAvg/1e6).toFixed(1)}M` : `${(recentAvg/1e3).toFixed(0)}K`;
       const fmtBase = baselineAvg >= 1e6 ? `${(baselineAvg/1e6).toFixed(1)}M` : `${(baselineAvg/1e3).toFixed(0)}K`;
-      return { pass: ratio <= maxRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${fmtRecent} vs baseline ${fmtBase}` } } };
+      const pa16Pass = ratio <= maxRatio;
+      return { pass: pa16Pass, data: { ...(pa16Pass ? { _cocHighlight: { type: "pullbackCircle", barCount: 3 } } : {}), _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${fmtRecent} vs baseline ${fmtBase}` } } };
     },
   },
   {
@@ -1353,6 +1357,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
           priceVsEmaShort: priceAboveShortEma ? "above" : "below",
           priceVsEmaLong: priceAboveLongEma ? "above" : "below",
           priceVs200dma,
+          _cocHighlight: { type: "gapCircle", barIndex: 0, gapPct },
           _diagnostics: {
             value: `${popType} pop, ${volumeRatio.toFixed(1)}x vol`,
             threshold: `≥${minVolumeRatio}x vol, ${rangeContractionPct}% contraction`,

@@ -144,6 +144,139 @@ export async function getSectorAndIndustry(symbol: string): Promise<{ sector: st
   return { sector: result.sector, industry: result.industry };
 }
 
+export interface ExtendedFundamentals {
+  marketCap: number;
+  pe: number | null;
+  beta: number | null;
+  debtToEquity: number | null;
+  preTaxMargin: number | null;
+  analystConsensus: string;
+  targetPrice: number | null;
+  nextEarningsDate: string;
+  nextEarningsDays: number;
+  epsCurrentQYoY: string;
+  salesGrowth3QYoY: string;
+  lastEpsSurprise: string;
+}
+
+const extendedCache = new Map<string, { data: ExtendedFundamentals; ts: number }>();
+const EXTENDED_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+async function fetchExtendedFundamentals(symbol: string): Promise<{ marketCap: number; pe: number | null; beta: number | null }> {
+  if (!FMP_API_KEY) return { marketCap: 0, pe: null, beta: null };
+  try {
+    const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return { marketCap: 0, pe: null, beta: null };
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return { marketCap: 0, pe: null, beta: null };
+    const profile = data[0];
+    return {
+      marketCap: profile.marketCap || 0,
+      pe: profile.pe ?? null,
+      beta: profile.beta ?? null,
+    };
+  } catch {
+    return { marketCap: 0, pe: null, beta: null };
+  }
+}
+
+async function fetchKeyMetrics(symbol: string): Promise<{ debtToEquity: number | null; preTaxMargin: number | null }> {
+  if (!FMP_API_KEY) return { debtToEquity: null, preTaxMargin: null };
+  try {
+    const url = `${FMP_BASE}/key-metrics-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return { debtToEquity: null, preTaxMargin: null };
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return { debtToEquity: null, preTaxMargin: null };
+    const metrics = data[0];
+    return {
+      debtToEquity: metrics.debtToEquityTTM ?? null,
+      preTaxMargin: metrics.netProfitMarginTTM ?? null,
+    };
+  } catch {
+    return { debtToEquity: null, preTaxMargin: null };
+  }
+}
+
+async function fetchAnalystEstimates(symbol: string): Promise<{ consensus: string; targetPrice: number | null }> {
+  if (!FMP_API_KEY) return { consensus: "N/A", targetPrice: null };
+  try {
+    const url = `${FMP_BASE}/analyst-estimates?symbol=${encodeURIComponent(symbol)}&limit=1&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return { consensus: "N/A", targetPrice: null };
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return { consensus: "N/A", targetPrice: null };
+    const est = data[0];
+    let consensus = "N/A";
+    if (est.estimatedRevenueLow != null && est.estimatedRevenueHigh != null && est.estimatedRevenueAvg != null) {
+      const mid = (est.estimatedRevenueHigh + est.estimatedRevenueLow) / 2;
+      consensus = est.estimatedRevenueAvg >= mid ? "Buy" : "Hold";
+    }
+    return { consensus, targetPrice: null };
+  } catch {
+    return { consensus: "N/A", targetPrice: null };
+  }
+}
+
+async function fetchEarningsCalendar(symbol: string): Promise<{ nextEarningsDate: string; nextEarningsDays: number }> {
+  if (!FMP_API_KEY) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+  try {
+    const url = `${FMP_BASE}/earning-calendar?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const future = data
+      .filter((d: any) => d.date && new Date(d.date) >= today)
+      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    if (future.length === 0) return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+    const nextDate = new Date(future[0].date);
+    const diffDays = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    return {
+      nextEarningsDate: future[0].date,
+      nextEarningsDays: diffDays,
+    };
+  } catch {
+    return { nextEarningsDate: "N/A", nextEarningsDays: -1 };
+  }
+}
+
+export async function getExtendedFundamentals(symbol: string): Promise<ExtendedFundamentals> {
+  const upper = symbol.toUpperCase();
+  const cached = extendedCache.get(upper);
+  if (cached && Date.now() - cached.ts < EXTENDED_CACHE_TTL) {
+    return cached.data;
+  }
+
+  const [profile, keyMetrics, analyst, earnings] = await Promise.all([
+    fetchExtendedFundamentals(upper),
+    fetchKeyMetrics(upper),
+    fetchAnalystEstimates(upper),
+    fetchEarningsCalendar(upper),
+  ]);
+
+  const result: ExtendedFundamentals = {
+    marketCap: profile.marketCap,
+    pe: profile.pe,
+    beta: profile.beta,
+    debtToEquity: keyMetrics.debtToEquity != null ? Math.round(keyMetrics.debtToEquity * 100) / 100 : null,
+    preTaxMargin: keyMetrics.preTaxMargin != null ? Math.round(keyMetrics.preTaxMargin * 10000) / 100 : null,
+    analystConsensus: analyst.consensus,
+    targetPrice: analyst.targetPrice,
+    nextEarningsDate: earnings.nextEarningsDate,
+    nextEarningsDays: earnings.nextEarningsDays,
+    epsCurrentQYoY: "N/A",
+    salesGrowth3QYoY: "N/A",
+    lastEpsSurprise: "N/A",
+  };
+
+  extendedCache.set(upper, { data: result, ts: Date.now() });
+  return result;
+}
+
 const fmpPeersCache = new Map<string, { data: { symbol: string; name: string; industry: string; marketCap: number }[]; ts: number }>();
 const FMP_PEERS_CACHE_TTL = 12 * 60 * 60 * 1000;
 

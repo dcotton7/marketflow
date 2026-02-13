@@ -172,6 +172,7 @@ type CriterionResult = {
   pass: boolean;
   inverted: boolean;
   diagnostics?: { value: string; threshold: string; detail?: string };
+  cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number };
 };
 
 type ThoughtEvalResult = {
@@ -224,9 +225,10 @@ function evaluateThoughtCriteria(
     const normalized = normalizeResult(rawResult);
 
     const diagnostics = normalized.data?._diagnostics as { value: string; threshold: string; detail?: string } | undefined;
+    const cocHighlight = normalized.data?._cocHighlight as CriterionResult["cocHighlight"] | undefined;
 
     if (normalized.data) {
-      const { _diagnostics, ...rest } = normalized.data;
+      const { _diagnostics, _cocHighlight, ...rest } = normalized.data;
       Object.assign(outputData, rest);
     }
 
@@ -239,6 +241,7 @@ function evaluateThoughtCriteria(
       pass,
       inverted: !!criterion.inverted,
       diagnostics,
+      ...(pass && cocHighlight ? { cocHighlight } : {}),
     });
 
     if (!pass) allPass = false;

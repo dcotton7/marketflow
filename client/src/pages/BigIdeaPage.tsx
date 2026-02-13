@@ -35,7 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TradingChart } from "@/components/TradingChart";
-import type { ChartCandle, ChartIndicators } from "@/components/TradingChart";
+import type { ChartCandle, ChartIndicators, ChartMarker, PriceLevelLine } from "@/components/TradingChart";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -231,6 +231,7 @@ interface CriterionResultItem {
   pass: boolean;
   inverted: boolean;
   diagnostics?: { value: string; threshold: string; detail?: string };
+  cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number };
 }
 
 interface ThoughtBreakdownItem {
@@ -4006,9 +4007,12 @@ function ScanChartViewer({
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
+  const [dailyTrendLineMode, setDailyTrendLineMode] = useState(false);
+  const [intradayTrendLineMode, setIntradayTrendLineMode] = useState(false);
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
 
+  const { cssVariables } = useSystemSettings();
   const { toast } = useToast();
 
   const [thresholdToastShown, setThresholdToastShown] = useState(false);
@@ -4090,16 +4094,39 @@ function ScanChartViewer({
   interface ScanChartMetrics {
     currentPrice: number;
     adr20: number;
+    adr20Dollar: number;
+    adr20Pct: number;
     extensionFrom50dAdr: number;
     extensionFrom50dPct: number;
     extensionFrom200d: number;
+    extensionFrom20d: number;
     macd: string;
     macdTimeframe: string;
     sectorEtf: string;
     sectorEtfChange: number;
     nextEarningsDate: string;
     nextEarningsDays: number;
+    marketCap: number;
+    pe: number | null;
+    beta: number | null;
+    debtToEquity: number | null;
+    preTaxMargin: number | null;
+    analystConsensus: string;
+    targetPrice: number | null;
+    rsMomentum: number;
+    industryPeers: { symbol: string; name: string }[];
+    industryName: string;
+    epsCurrentQYoY: string;
+    salesGrowth3QYoY: string;
+    lastEpsSurprise: string;
   }
+
+  const formatMarketCap = (mc: number) => {
+    if (mc >= 1e12) return `$${(mc / 1e12).toFixed(1)}T`;
+    if (mc >= 1e9) return `$${(mc / 1e9).toFixed(1)}B`;
+    if (mc >= 1e6) return `$${(mc / 1e6).toFixed(0)}M`;
+    return `$${mc.toLocaleString()}`;
+  };
 
   const { data: chartMetrics } = useQuery<ScanChartMetrics>({
     queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe],
@@ -4199,6 +4226,62 @@ function ScanChartViewer({
     return { price: last.close, change, changePct };
   }, [dailyData]);
 
+  const cocAnnotations = useMemo(() => {
+    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], priceLines: [] as PriceLevelLine[] };
+
+    const markers: ChartMarker[] = [];
+    const priceLines: PriceLevelLine[] = [];
+
+    for (const thought of current.thoughtBreakdown) {
+      for (const cr of thought.criteriaResults) {
+        if (!cr.pass || !cr.cocHighlight) continue;
+        const h = cr.cocHighlight;
+
+        if (h.type === "resistanceLine" && h.level) {
+          priceLines.push({
+            price: h.level,
+            color: "#ef4444",
+            lineWidth: 1,
+            lineStyle: "dotted",
+            label: "Resistance",
+          });
+        }
+
+        if (h.type === "gapCircle" && h.barIndex !== undefined) {
+          if (dailyData && dailyData.candles.length > h.barIndex) {
+            const candle = dailyData.candles[dailyData.candles.length - 1 - h.barIndex];
+            if (candle) {
+              markers.push({
+                time: candle.timestamp,
+                position: "belowBar",
+                color: "#ef4444",
+                shape: "circle",
+                text: h.gapPct ? `Gap ${h.gapPct.toFixed(1)}%` : "Gap",
+              });
+            }
+          }
+        }
+
+        if (h.type === "pullbackCircle" && h.barCount) {
+          if (dailyData) {
+            const count = Math.min(h.barCount, dailyData.candles.length);
+            for (let i = dailyData.candles.length - count; i < dailyData.candles.length; i++) {
+              markers.push({
+                time: dailyData.candles[i].timestamp,
+                position: "belowBar",
+                color: "#ef4444",
+                shape: "circle",
+                text: i === dailyData.candles.length - count ? "PB" : "",
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return { markers, priceLines };
+  }, [current?.thoughtBreakdown, dailyData]);
+
   if (!open) return null;
 
   const displayPrice = dayChange?.price ?? current?.price ?? 0;
@@ -4238,32 +4321,8 @@ function ScanChartViewer({
             onClick={() => onIndexChange(currentIndex - 1)}
             data-testid="button-chart-prev"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
           </Button>
-          <div
-            className="rs-ticker flex items-center gap-0 text-xl tracking-tight"
-            data-testid={`ticker-box-${symbol}`}
-          >
-            <span className="rs-ticker-symbol font-bold text-foreground" data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-muted-foreground mx-1.5">|</span>
-            <span className="rs-ticker-price font-semibold text-foreground" data-testid="text-chart-price">
-              ${displayPrice.toFixed(2)}
-            </span>
-            <span className="text-muted-foreground mx-1.5">|</span>
-            <span
-              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
-              data-testid="text-chart-change"
-            >
-              {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
-            </span>
-            <span className="text-muted-foreground mx-1">|</span>
-            <span
-              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
-              data-testid="text-chart-pct"
-            >
-              {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
-            </span>
-          </div>
           <span className="text-sm text-muted-foreground" data-testid="text-chart-position">
             {currentIndex + 1} of {results.length}
           </span>
@@ -4274,29 +4333,8 @@ function ScanChartViewer({
             onClick={() => onIndexChange(currentIndex + 1)}
             data-testid="button-chart-next"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
           </Button>
-          <div className="ml-auto" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => {
-                  const price = dayChange?.price ?? current?.price ?? 0;
-                  window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(symbol)}&price=${price.toFixed(2)}&from=bigidea`;
-                }}
-                data-testid="button-chart-evaluate"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>Ivy AI</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
-            </TooltipContent>
-          </Tooltip>
           <div className="flex items-center gap-1 border rounded-md px-1">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -4340,6 +4378,50 @@ function ScanChartViewer({
                 <p className="text-sm">Poor scan result — this chart doesn't fit what you're looking for. Helps AI learn your preferences.</p>
               </TooltipContent>
             </Tooltip>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => {
+                  const price = dayChange?.price ?? current?.price ?? 0;
+                  window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(symbol)}&price=${price.toFixed(2)}&from=bigidea`;
+                }}
+                data-testid="button-chart-evaluate"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Ivy AI</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
+            </TooltipContent>
+          </Tooltip>
+          <div
+            className="rs-ticker flex items-center gap-0 text-xl tracking-tight ml-auto"
+            data-testid={`ticker-box-${symbol}`}
+          >
+            <span className="rs-ticker-symbol font-bold text-foreground" data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-muted-foreground mx-1.5">|</span>
+            <span className="rs-ticker-price font-semibold text-foreground" data-testid="text-chart-price">
+              ${displayPrice.toFixed(2)}
+            </span>
+            <span className="text-muted-foreground mx-1.5">|</span>
+            <span
+              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
+              data-testid="text-chart-change"
+            >
+              {isPriceUp ? "+" : ""}{priceChange.toFixed(2)}
+            </span>
+            <span className="text-muted-foreground mx-1">|</span>
+            <span
+              className={`font-bold ${isPriceUp ? "rs-ticker-change-up text-rs-green" : "rs-ticker-change-down text-rs-red"}`}
+              data-testid="text-chart-pct"
+            >
+              {isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%
+            </span>
           </div>
           {(() => {
             const ratedCount = Object.keys(chartRatings).length;
@@ -4476,16 +4558,29 @@ function ScanChartViewer({
         <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
         <div ref={chartGridRef} className="grid grid-cols-2 gap-3 flex-1 min-h-0">
           <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
-              <span className="text-xs text-muted-foreground font-medium">Daily</span>
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.secondaryOverlayColor }}>
+              <span className="text-xs text-black font-medium">Daily</span>
               <Button
                 size="sm"
                 variant="ghost"
-                className={`toggle-elevate ${dailyMeasureMode ? "toggle-elevated" : ""}`}
+                className={`text-black toggle-elevate ${dailyMeasureMode ? "toggle-elevated" : ""}`}
                 onClick={() => setDailyMeasureMode(m => !m)}
                 data-testid="button-daily-measure-mode"
               >
                 <Ruler className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`text-black toggle-elevate ${dailyTrendLineMode ? "toggle-elevated" : ""}`}
+                onClick={() => setDailyTrendLineMode(m => !m)}
+                data-testid="button-daily-trend-line-mode"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
+                  <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
+                  <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+                </svg>
               </Button>
             </div>
             {dailyLoading ? (
@@ -4503,6 +4598,9 @@ function ScanChartViewer({
                 maSettings={maSettingsData}
                 maxBars={maxBars}
                 measureMode={dailyMeasureMode}
+                trendLineMode={dailyTrendLineMode}
+                markers={cocAnnotations.markers}
+                priceLines={cocAnnotations.priceLines}
               />
             ) : (
               <Card className="flex-1">
@@ -4511,10 +4609,24 @@ function ScanChartViewer({
                 </CardContent>
               </Card>
             )}
+            {chartMetrics && (
+              <div className="border border-border rounded p-2 mt-1 flex-shrink-0 grid grid-cols-5 gap-x-4 gap-y-1" data-testid="scan-daily-metrics-strip">
+                <div><span className="text-[10px] text-muted-foreground">Market Cap</span><div className="text-xs font-medium text-foreground" data-testid="metric-market-cap">{formatMarketCap(chartMetrics.marketCap)}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Sales Growth 3Q YoY</span><div className="text-xs font-medium text-foreground" data-testid="metric-sales-growth">{chartMetrics.salesGrowth3QYoY}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">EPS Current Q YoY</span><div className="text-xs font-medium text-foreground" data-testid="metric-eps-yoy">{chartMetrics.epsCurrentQYoY}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Next Earnings</span><div className={`text-xs font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`} data-testid="metric-next-earnings">{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Analyst Consensus</span><div className="text-xs font-medium text-foreground" data-testid="metric-analyst-consensus">{chartMetrics.analystConsensus}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">PE</span><div className="text-xs font-medium text-foreground" data-testid="metric-pe">{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Pre-Tax Margin</span><div className="text-xs font-medium text-foreground" data-testid="metric-pretax-margin">{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Last EPS Surprise</span><div className="text-xs font-medium text-foreground" data-testid="metric-eps-surprise">{chartMetrics.lastEpsSurprise}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Debt/Equity</span><div className="text-xs font-medium text-foreground" data-testid="metric-debt-equity">{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Target Price</span><div className="text-xs font-medium text-foreground" data-testid="metric-target-price">{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
+              </div>
+            )}
           </div>
           <div className="flex flex-col min-h-0">
-            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7">
-              <span className="text-xs text-muted-foreground font-medium">Intraday</span>
+            <div className="flex items-center gap-2 mb-1 px-1 flex-shrink-0 h-7 rounded-md" style={{ backgroundColor: cssVariables.secondaryOverlayColor }}>
+              <span className="text-xs text-black font-medium">Intraday</span>
               <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
                 <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-scan-chart-intraday">
                   <SelectValue />
@@ -4528,6 +4640,7 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
+                className="text-black"
                 onClick={() => setMaSettingsOpen(true)}
                 data-testid="button-scan-chart-ma-settings"
               >
@@ -4536,11 +4649,24 @@ function ScanChartViewer({
               <Button
                 size="sm"
                 variant="ghost"
-                className={`toggle-elevate ${intradayMeasureMode ? "toggle-elevated" : ""}`}
+                className={`text-black toggle-elevate ${intradayMeasureMode ? "toggle-elevated" : ""}`}
                 onClick={() => setIntradayMeasureMode(m => !m)}
                 data-testid="button-intraday-measure-mode"
               >
                 <Ruler className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`text-black toggle-elevate ${intradayTrendLineMode ? "toggle-elevated" : ""}`}
+                onClick={() => setIntradayTrendLineMode(m => !m)}
+                data-testid="button-intraday-trend-line-mode"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
+                  <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
+                  <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
+                </svg>
               </Button>
             </div>
             {intradayLoading ? (
@@ -4559,6 +4685,7 @@ function ScanChartViewer({
                 maSettings={maSettingsData}
                 maxBars={maxBars}
                 measureMode={intradayMeasureMode}
+                trendLineMode={intradayTrendLineMode}
               />
             ) : (
               <Card className="flex-1">
@@ -4568,52 +4695,15 @@ function ScanChartViewer({
               </Card>
             )}
             {chartMetrics && (
-              <div className="border border-border rounded p-2.5 flex flex-wrap gap-x-5 gap-y-1.5 mt-1 flex-shrink-0" data-testid="scan-chart-metrics">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">Price</span>
-                  <span className="text-sm font-medium text-foreground">${chartMetrics.currentPrice.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">ADR(20)</span>
-                  <span className="text-sm font-medium text-foreground">{chartMetrics.adr20}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">50d ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`}>
-                    {chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x ADR
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">200d Ext</span>
-                  <span className={`text-sm font-medium ${chartMetrics.extensionFrom200d >= 0 ? "text-rs-green" : "text-rs-red"}`}>
-                    {chartMetrics.extensionFrom200d >= 0 ? "+" : ""}{chartMetrics.extensionFrom200d}%
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span>
-                  <span className={`text-sm font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`}>
-                    {chartMetrics.macd}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">Sector</span>
-                  <span className="text-sm font-medium text-foreground">
-                    {chartMetrics.sectorEtf}
-                    {chartMetrics.sectorEtf !== "N/A" && (
-                      <span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>
-                        {chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground">Earnings</span>
-                  <span className={`text-sm font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`}>
-                    {chartMetrics.nextEarningsDate !== "N/A"
-                      ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
-                      : "N/A"}
-                  </span>
-                </div>
+              <div className="border border-border rounded p-2 mt-1 flex-shrink-0 grid grid-cols-4 gap-x-4 gap-y-1" data-testid="scan-intraday-metrics-strip">
+                <div><span className="text-[10px] text-muted-foreground">ADR(20) $</span><div className="text-xs font-medium text-foreground" data-testid="metric-adr20-dollar">${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">50d Ext (ADR)</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-50d-ext-adr">{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
+                <div><span className="text-[10px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`} data-testid="metric-macd">{chartMetrics.macd}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">Sector</span><div className="text-xs font-medium" data-testid="metric-sector-etf">{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer text-foreground underline decoration-dotted" onClick={() => window.location.href = `/charts?ticker=${chartMetrics.sectorEtf}`} data-testid="link-sector-etf">{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : "N/A"}</div></div>
+                <div><span className="text-[10px] text-muted-foreground">ADR(20) %</span><div className="text-xs font-medium text-foreground" data-testid="metric-adr20-pct">{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
+                <div><span className="text-[10px] text-muted-foreground">20d Ext %</span><div className={`text-xs font-medium ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-20d-ext">{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
+                <div><span className="text-[10px] text-muted-foreground">RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid="metric-rs-momentum">{chartMetrics.rsMomentum ?? "N/A"}</div></div>
+                <div className="col-span-1"><span className="text-[10px] text-muted-foreground">Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium text-foreground truncate" data-testid="metric-industry-peers">{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => window.location.href = `/charts?ticker=${p.symbol}`} data-testid={`link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
               </div>
             )}
           </div>
