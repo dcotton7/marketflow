@@ -577,11 +577,18 @@ export type InsertSentinelAccountSettings = z.infer<typeof insertSentinelAccount
 // System Settings - UI theming and appearance settings per user
 export const sentinelSystemSettings = pgTable("sentinel_system_settings", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().unique(), // One settings row per user
-  overlayColor: text("overlay_color").default("#1e3a5f"), // Card/overlay background color
-  overlayTransparency: integer("overlay_transparency").default(75), // 0-100 percentage
-  backgroundColor: text("background_color").default("#0f172a"), // Page background color
-  logoTransparency: integer("logo_transparency").default(6), // 0-100 percentage for watermark
+  userId: integer("user_id").notNull().unique(),
+  overlayColor: text("overlay_color").default("#1e3a5f"),
+  overlayTransparency: integer("overlay_transparency").default(75),
+  backgroundColor: text("background_color").default("#0f172a"),
+  logoTransparency: integer("logo_transparency").default(6),
+  secondaryOverlayColor: text("secondary_overlay_color").default("#e8e8e8"),
+  textColorTitle: text("text_color_title").default("#ffffff"),
+  textColorHeader: text("text_color_header").default("#ffffff"),
+  textColorSection: text("text_color_section").default("#ffffff"),
+  textColorNormal: text("text_color_normal").default("#ffffff"),
+  textColorSmall: text("text_color_small").default("#a1a1aa"),
+  textColorTiny: text("text_color_tiny").default("#71717a"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

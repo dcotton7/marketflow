@@ -1628,12 +1628,18 @@ export function registerSentinelRoutes(app: Express): void {
   app.get("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
     try {
       const settings = await sentinelModels.getSystemSettings(req.session.userId!);
-      // Return defaults if no settings exist
       res.json(settings || {
         overlayColor: "#1e3a5f",
         overlayTransparency: 75,
         backgroundColor: "#0f172a",
-        logoTransparency: 6
+        logoTransparency: 6,
+        secondaryOverlayColor: "#e8e8e8",
+        textColorTitle: "#ffffff",
+        textColorHeader: "#ffffff",
+        textColorSection: "#ffffff",
+        textColorNormal: "#ffffff",
+        textColorSmall: "#a1a1aa",
+        textColorTiny: "#71717a",
       });
     } catch (error) {
       console.error("Get system settings error:", error);
@@ -1644,12 +1650,20 @@ export function registerSentinelRoutes(app: Express): void {
   // System Settings - Update user's UI settings
   app.patch("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { overlayColor, overlayTransparency, backgroundColor, logoTransparency } = req.body;
+      const {
+        overlayColor, overlayTransparency, backgroundColor, logoTransparency,
+        secondaryOverlayColor,
+        textColorTitle, textColorHeader, textColorSection,
+        textColorNormal, textColorSmall, textColorTiny
+      } = req.body;
       const settings = await sentinelModels.upsertSystemSettings(req.session.userId!, {
         overlayColor,
         overlayTransparency,
         backgroundColor,
-        logoTransparency
+        logoTransparency,
+        secondaryOverlayColor,
+        textColorTitle, textColorHeader, textColorSection,
+        textColorNormal, textColorSmall, textColorTiny,
       });
       res.json(settings);
     } catch (error) {

@@ -2256,6 +2256,37 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     }
   });
 
+  // === ADMIN TUNING HISTORY (full log) ===
+  app.get("/api/bigidea/scan-tune/all-history", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      if (!user[0]?.isAdmin && user[0]?.tier !== "admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const allHistory = await db
+        .select()
+        .from(scanTuningHistory)
+        .where(sql`${scanTuningHistory.outcome} IS NOT NULL`)
+        .orderBy(sql`${scanTuningHistory.createdAt} DESC`)
+        .limit(100);
+
+      const enriched = await Promise.all(allHistory.map(async (h) => {
+        const submitter = await db!.select({ username: sentinelUsers.username }).from(sentinelUsers).where(eq(sentinelUsers.id, h.userId)).limit(1);
+        return { ...h, submitterUsername: submitter[0]?.username || "Unknown" };
+      }));
+
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching all tuning history:", error);
+      res.status(500).json({ error: "Failed to fetch tuning history" });
+    }
+  });
+
   // === PRESET SCAN TEMPLATES ===
 
   const SCAN_PRESETS = [

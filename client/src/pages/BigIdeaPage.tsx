@@ -476,7 +476,7 @@ function LogicEdge({
             {logicType}
           </div>
           <button
-            className="flex items-center justify-center w-5 h-5 rounded-full bg-rs-red/20 text-rs-red border border-rs-red/30 cursor-pointer hover:bg-rs-red/20 transition-colors"
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-rs-red/30 text-rs-red border-2 border-rs-red/50 cursor-pointer active-elevate-2 shadow-sm"
             onClick={(e) => {
               e.stopPropagation();
               if (data?.onDelete) {
@@ -485,7 +485,7 @@ function LogicEdge({
             }}
             data-testid={`edge-delete-${id}`}
           >
-            <X className="h-3 w-3" />
+            <X className="h-4 w-4" strokeWidth={3} />
           </button>
         </div>
       </EdgeLabelRenderer>
@@ -1431,7 +1431,7 @@ export default function BigIdeaPage() {
       if (!thoughtData || !reactFlowInstance) return;
 
       const thought: ScannerThought = JSON.parse(thoughtData);
-      const position = reactFlowInstance.screenToFlowPosition({
+      let position = reactFlowInstance.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
@@ -1451,8 +1451,37 @@ export default function BigIdeaPage() {
         };
       });
 
+      const currentNodes = reactFlowInstance.getNodes();
+      const currentEdges = reactFlowInstance.getEdges();
+      const NODE_PROXIMITY_THRESHOLD = 600;
+      const NODE_OFFSET_X = 280;
+      const NODE_OFFSET_Y = 0;
+
+      let nearestNode: Node | null = null;
+      if (currentNodes.length > 0) {
+        let nearestDist = Infinity;
+        for (const n of currentNodes) {
+          const dx = position.x - n.position.x;
+          const dy = position.y - n.position.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestNode = n;
+          }
+        }
+
+        if (nearestDist > NODE_PROXIMITY_THRESHOLD && nearestNode) {
+          position = {
+            x: nearestNode.position.x + NODE_OFFSET_X,
+            y: nearestNode.position.y + NODE_OFFSET_Y,
+          };
+        }
+      }
+
+      const newNodeId = `thought-${thought.id}-${Date.now()}`;
+
       const newNode: Node = {
-        id: `thought-${thought.id}-${Date.now()}`,
+        id: newNodeId,
         type: "thought",
         position,
         data: {
@@ -1469,8 +1498,57 @@ export default function BigIdeaPage() {
       };
 
       setNodes((nds) => [...nds, newNode]);
+
+      if (currentNodes.length > 0) {
+        const targetNodeIds = new Set(currentEdges.map((e) => e.target));
+        const unconnectedAsTarget = currentNodes.filter((n) => !targetNodeIds.has(n.id));
+
+        let connectTarget: Node | null = null;
+        if (unconnectedAsTarget.length > 0) {
+          let bestDist = Infinity;
+          for (const n of unconnectedAsTarget) {
+            const dx = position.x - n.position.x;
+            const dy = position.y - n.position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < bestDist) {
+              bestDist = dist;
+              connectTarget = n;
+            }
+          }
+        } else if (nearestNode) {
+          connectTarget = nearestNode;
+        }
+
+        if (connectTarget) {
+          const edgeId = `e-${connectTarget.id}-${newNodeId}`;
+          const autoEdge: Edge = {
+            id: edgeId,
+            source: connectTarget.id,
+            target: newNodeId,
+            type: "logic",
+            data: {
+              logicType: "AND",
+              onToggle: () => {
+                setEdges((eds) =>
+                  eds.map((e) => {
+                    if (e.id === edgeId) {
+                      const current = e.data?.logicType === "AND" ? "OR" : "AND";
+                      return { ...e, data: { ...e.data, logicType: current, onToggle: e.data?.onToggle, onDelete: e.data?.onDelete } };
+                    }
+                    return e;
+                  })
+                );
+              },
+              onDelete: () => {
+                setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+              },
+            },
+          } as Edge;
+          setEdges((eds) => addEdge(autoEdge, eds));
+        }
+      }
     },
-    [reactFlowInstance, setNodes, indicatorLibrary]
+    [reactFlowInstance, setNodes, setEdges, indicatorLibrary]
   );
 
   const toggleNotOnNode = useCallback(
@@ -2094,6 +2172,10 @@ export default function BigIdeaPage() {
                 ))
               )}
             </div>
+          <div
+            style={{ backgroundColor: cssVariables.secondaryOverlayColor + "18" }}
+            data-testid="left-pane-lower"
+          >
           {debugInfo && (
             <div className="border-t" data-testid="scan-debug-panel">
               <button
@@ -2252,6 +2334,7 @@ export default function BigIdeaPage() {
               )}
             </div>
           )}
+          </div>
           <div className="h-12 flex-shrink-0" />
           </div>
           <div
