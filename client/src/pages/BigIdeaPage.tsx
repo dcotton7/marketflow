@@ -603,6 +603,7 @@ export default function BigIdeaPage() {
   const [tuneRescanDone, setTuneRescanDone] = useState(false);
   const [unsavedTuningDialog, setUnsavedTuningDialog] = useState(false);
   const [pendingNavAction, setPendingNavAction] = useState<(() => void) | null>(null);
+  const [saveBeforeNewOpen, setSaveBeforeNewOpen] = useState(false);
 
   const { data: thoughts = [], isLoading: thoughtsLoading } = useQuery<ScannerThought[]>({
     queryKey: ["/api/bigidea/thoughts"],
@@ -2259,7 +2260,14 @@ export default function BigIdeaPage() {
         >
           <div className="p-3 border-b">
             <Button
-              onClick={() => setAiDialogOpen(true)}
+              onClick={() => {
+                const hasContent = nodes.some(n => n.type !== "results");
+                if (hasContent) {
+                  setSaveBeforeNewOpen(true);
+                } else {
+                  setAiDialogOpen(true);
+                }
+              }}
               size="lg"
               className="w-full gap-2.5 text-sm font-semibold"
               data-testid="button-create-new-idea"
@@ -3053,7 +3061,7 @@ export default function BigIdeaPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5" />
-              Create Thought with AI
+              {nodes.some(n => n.type !== "results") ? "Add Thought with AI" : "Create New Idea"}
             </DialogTitle>
             <DialogDescription>
               Describe your screening idea in plain English and AI will generate the criteria.
@@ -3371,6 +3379,53 @@ export default function BigIdeaPage() {
               data-testid="button-confirm-clear"
             >
               Clear Canvas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={saveBeforeNewOpen} onOpenChange={setSaveBeforeNewOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Idea</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have an idea on the canvas{currentIdeaId ? "" : " that hasn't been saved"}. What would you like to do before starting a new one?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel data-testid="button-cancel-new-idea">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground"
+              onClick={() => {
+                setSaveBeforeNewOpen(false);
+                handleClearIdea();
+                setTimeout(() => setAiDialogOpen(true), 100);
+              }}
+              data-testid="button-discard-and-new"
+            >
+              Discard & Start New
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={async () => {
+                setSaveBeforeNewOpen(false);
+                try {
+                  const body = buildIdeaBody();
+                  if (currentIdeaId) {
+                    await apiRequest("PATCH", `/api/bigidea/ideas/${currentIdeaId}`, body);
+                  } else {
+                    await apiRequest("POST", "/api/bigidea/ideas", body);
+                  }
+                  queryClient.invalidateQueries({ queryKey: ["/api/bigidea/ideas"] });
+                  toast({ title: "Idea saved" });
+                  handleClearIdea();
+                  setTimeout(() => setAiDialogOpen(true), 100);
+                } catch (err: any) {
+                  toast({ title: "Failed to save idea", description: err?.message, variant: "destructive" });
+                }
+              }}
+              data-testid="button-save-and-new"
+            >
+              Save & Start New
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
