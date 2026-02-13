@@ -6,6 +6,13 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### DualChartGrid Component Extraction
+- **Task**: Extracted shared dual-chart layout (Daily + Intraday) into a reusable `DualChartGrid` component, eliminating ~400 lines of duplicate code across BigIdeaPage and SentinelChartsPage
+- **Files**: `DualChartGrid.tsx` (new), `BigIdeaPage.tsx`, `SentinelChartsPage.tsx`
+- **Details**: DualChartGrid encapsulates chart headers/toolbars (measure, trend line, ETH toggle), RTH filtering, resize handling, MA settings dialog, metrics strips, loading/empty states. Scanner-specific features (CoC markers, diamond markers, price lines, resistance lines) passed via `dailyChartProps`. Exports shared `ChartMetrics` and `ChartDataResponse` types.
+- **Tested**: App compiles and runs without errors; both chart viewers render identically to pre-refactor
+- **Status**: Complete
+
 ### Chart Header Overlay Unification
 - **Task**: Changed Daily/Intraday header bars from `secondaryOverlayColor` (light gray) to `overlayBg` (admin-configurable primary overlay) with white text
 - **Files**: `BigIdeaPage.tsx`, `SentinelChartsPage.tsx`
