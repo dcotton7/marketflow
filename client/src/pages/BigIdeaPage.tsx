@@ -691,7 +691,7 @@ export default function BigIdeaPage() {
       const centerX = viewport ? (-viewport.x + 300) / (viewport.zoom || 1) : 300;
       const centerY = viewport ? (-viewport.y + 200) / (viewport.zoom || 1) : 200;
 
-      const keyToNodeId: Record<string, string> = {};
+      const keyToNodeId: Record<string, string> = { "RESULTS": "results-node" };
       const newNodes: Node[] = savedThoughts.map((t, idx) => {
         const nodeId = `thought-${t.id}-${Date.now()}-${idx}`;
         keyToNodeId[t.thoughtKey] = nodeId;

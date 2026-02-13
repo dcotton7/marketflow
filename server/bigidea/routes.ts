@@ -869,6 +869,64 @@ If consumer indicators ARE needed (PA-14 Tightness, PA-15 Close Clustering, PA-1
 - Thought D (Strength): RS + volume ratio
 Connect: A → Results, B → C (data-link edge), C → Results, D → Results
 
+CRITICAL: OR LOGIC AND AMBIGUITY EXPANSION
+Edges between thoughts can specify "logicType": "AND" (default) or "logicType": "OR". Use OR edges when the user describes alternative conditions that should any-match.
+
+AMBIGUITY EXPANSION RULE: When the user's description is vague about a specific parameter value (e.g., "a moving average" without specifying which period, "pulled back to an MA", "near a support level"), you MUST expand the ambiguity into multiple parallel thoughts connected by OR logic rather than arbitrarily picking one value.
+
+Common ambiguity patterns to expand:
+- "a moving average" / "an MA" / "the MA" (unspecified) → Create parallel thoughts for the most commonly used MAs: 10 EMA, 21 EMA, 50 SMA. Connect them with OR edges to a shared downstream node or Results.
+- "pulled back to a moving average" → Multiple OR-connected thoughts, each checking proximity to a different common MA period.
+- "either X or Y" / "X or Y" → Explicit OR logic. Create separate thoughts for X and Y, connect with OR edges.
+- "a support level" (unspecified type) → OR branches for MA support, prior pivot support, etc.
+
+IMPORTANT RULES FOR OR EDGES:
+- "RESULTS" is the ONLY special reserved key. Use "RESULTS" as the edge target to connect directly to the Results node on the canvas.
+- If you want OR logic, you MUST provide explicit edges with "logicType": "OR". Thoughts without explicit edges auto-connect to Results with AND logic by default.
+- Do NOT invent other special keys. Edge targets must be either a thoughtKey from your thoughts array, or "RESULTS".
+
+Example: User says "Find stocks that pulled back to a moving average"
+BAD (picking one arbitrarily):
+  Thought A: MA-3 with period=21 → Results
+GOOD (expanding the ambiguity — each alternative gets its own thought with OR edges):
+  Thought A: "Pullback to 10 EMA" — MA-3 with period=10, maType=ema, maxPct=2
+  Thought B: "Pullback to 21 EMA" — MA-3 with period=21, maType=ema, maxPct=2
+  Thought C: "Pullback to 50 SMA" — MA-3 with period=50, maType=sma, maxPct=2
+  "edges": [
+    { "from": "A", "to": "RESULTS", "logicType": "OR" },
+    { "from": "B", "to": "RESULTS", "logicType": "OR" },
+    { "from": "C", "to": "RESULTS", "logicType": "OR" }
+  ]
+  A ticker passes if it pulls back to ANY of these MAs (OR logic).
+
+Example: User says "Find stocks in an uptrend that gapped up and pulled back to a moving average and either went into a base or are lingering around the MA"
+This should produce 5+ thoughts:
+  Thought A (thoughtKey "A"): "Uptrend Filter" — MA-1 (price above 50 SMA) + MA-8 (50 above 200) + MA-4 (MA slope rising)
+  Thought B (thoughtKey "B"): "Overnight Gap Up" — gap detection criteria
+  Thought C (thoughtKey "C"): "Pullback to 10 EMA" — MA-3 with period=10, maType=ema, maxPct=2
+  Thought D (thoughtKey "D"): "Pullback to 21 EMA" — MA-3 with period=21, maType=ema, maxPct=2
+  Thought E (thoughtKey "E"): "Pullback to 50 SMA" — MA-3 with period=50, maType=sma, maxPct=2
+  A and B have NO explicit edges → they auto-connect to Results with AND logic (both required).
+  C, D, E need explicit OR edges (any MA pullback is acceptable):
+  "edges": [
+    { "from": "C", "to": "RESULTS", "logicType": "OR" },
+    { "from": "D", "to": "RESULTS", "logicType": "OR" },
+    { "from": "E", "to": "RESULTS", "logicType": "OR" }
+  ]
+  Final scan behavior: A stock must pass Uptrend AND Gap Up AND (Pullback to 10 EMA OR Pullback to 21 EMA OR Pullback to 50 SMA).
+
+When the user IS specific (e.g., "pulled back to the 21 EMA"), do NOT expand — just use the specified value in a single thought.
+
+EDGE FORMAT WITH LOGIC TYPE:
+Each edge can optionally include a logicType field:
+{ "from": "A", "to": "B", "logicType": "OR" }
+{ "from": "C", "to": "D" }  // defaults to AND
+{ "from": "E", "to": "F", "logicType": "AND" }
+
+Use OR when the user describes alternatives. Use AND (or omit logicType) when conditions must all be met simultaneously.
+
+When creating OR branches, keep each branch thought focused on ONE specific alternative (e.g., one MA period per thought). Don't combine multiple alternatives into one thought — that defeats the purpose of OR logic.
+
 Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
 
       const openai = getOpenAI();
