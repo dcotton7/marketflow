@@ -10,6 +10,7 @@ import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, Trendin
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MiniChart } from "@/components/MiniChart";
 import { useScannerContext } from "@/context/ScannerContext";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -18,6 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 const CHARTS_PER_PAGE = 10;
 
 export default function ScannerPage() {
+  const { cssVariables } = useSystemSettings();
   const [, setLocation] = useLocation();
   const { mutate: runScan, isPending } = useScanner();
   const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -390,15 +392,15 @@ export default function ScannerPage() {
           {/* Detailed Search Criteria Panel - positioned to the left of Scanner Settings */}
           <div className="hidden lg:block w-64 shrink-0">
             <div className="sticky top-24 p-3 border border-white/20 rounded-lg bg-muted/10">
-              <p className="text-sm font-semibold text-white/80 mb-3">Detailed Search Criteria</p>
-              <ul className="space-y-2 text-xs max-h-[calc(100vh-150px)] overflow-y-auto">
+              <p className="font-semibold mb-3" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Detailed Search Criteria</p>
+              <ul className="space-y-2 max-h-[calc(100vh-150px)] overflow-y-auto">
                 {getDetailedCriteria().map((item, idx) => (
                   <li key={idx} className="border-b border-white/10 pb-2 last:border-b-0">
                     <div className="flex justify-between items-start gap-2">
-                      <span className="text-white/60">{item.label}:</span>
-                      <span className="text-white font-medium text-right">{item.value}</span>
+                      <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>{item.label}:</span>
+                      <span className="font-medium text-right" style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }}>{item.value}</span>
                     </div>
-                    <p className="text-white/40 mt-1 leading-relaxed">{item.explanation}</p>
+                    <p className="mt-1 leading-relaxed" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>{item.explanation}</p>
                   </li>
                 ))}
               </ul>
@@ -1044,7 +1046,7 @@ export default function ScannerPage() {
                     <ChevronLeft className="w-4 h-4 mr-1" />
                     Previous
                   </Button>
-                  <span className="text-sm text-muted-foreground font-mono">
+                  <span className="font-mono" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
                     Page {currentPage} of {totalPages}
                   </span>
                   <Button
@@ -1069,7 +1071,7 @@ export default function ScannerPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-card border border-border rounded-lg p-6 w-full max-w-md shadow-xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Save Scan</h3>
+              <h3 className="font-semibold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>Save Scan</h3>
               <button 
                 onClick={() => setShowSaveDialog(false)}
                 className="text-muted-foreground hover:text-foreground"

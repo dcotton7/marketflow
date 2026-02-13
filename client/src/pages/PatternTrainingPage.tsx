@@ -649,7 +649,7 @@ export default function PatternTrainingPage() {
                   {dualChartMode ? (
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex flex-col">
-                        <div className="text-xs text-muted-foreground mb-1 px-1 font-medium">Daily</div>
+                        <div className="mb-1 px-1 font-medium" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Daily</div>
                         {chartLoading ? (
                           <Card className="flex-1">
                             <CardContent className="flex items-center justify-center h-[400px]">
@@ -678,7 +678,7 @@ export default function PatternTrainingPage() {
                       </div>
                       <div className="flex flex-col">
                         <div className="flex items-center gap-2 mb-1 px-1">
-                          <span className="text-xs text-muted-foreground font-medium">Intraday</span>
+                          <span className="font-medium" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Intraday</span>
                           <Select value={intradayTimeframe} onValueChange={setIntradayTimeframe}>
                             <SelectTrigger className="h-6 w-20 text-[10px]" data-testid="select-intraday-timeframe">
                               <SelectValue />
@@ -724,7 +724,7 @@ export default function PatternTrainingPage() {
                         {(pointsSaved && (Object.keys(calculatedMetrics).length > 0 || metricsLoading)) && (
                           <Card className="mt-3">
                             <CardHeader className="pb-2">
-                              <CardTitle className="text-sm font-medium text-muted-foreground">Calculated Data</CardTitle>
+                              <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Calculated Data</CardTitle>
                             </CardHeader>
                             <CardContent>
                               {metricsLoading ? (
@@ -795,7 +795,7 @@ export default function PatternTrainingPage() {
                   {!dualChartMode && pointsSaved && (Object.keys(calculatedMetrics).length > 0 || metricsLoading) && (
                     <Card className="mt-4">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Calculated Data</CardTitle>
+                        <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Calculated Data</CardTitle>
                       </CardHeader>
                       <CardContent>
                         {metricsLoading ? (
@@ -855,7 +855,7 @@ export default function PatternTrainingPage() {
                         <Card>
                           <CardHeader className="pb-3">
                             <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                              <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                                 <Brain className="w-4 h-4 text-purple-400" />
                                 AI Evaluation
                               </CardTitle>
@@ -872,7 +872,7 @@ export default function PatternTrainingPage() {
                               <ScoreDisplay score={evaluation.score} />
                               {evaluation.rrRatio != null && (
                                 <div className="text-center">
-                                  <div className="text-xs text-muted-foreground">R/R Ratio</div>
+                                  <div style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>R/R Ratio</div>
                                   <div className="text-lg font-bold">{evaluation.rrRatio.toFixed(2)}</div>
                                 </div>
                               )}
@@ -963,7 +963,7 @@ export default function PatternTrainingPage() {
                   {pointsSaved && (
                     <Card className="mt-4">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Setup Details</CardTitle>
+                        <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Setup Details</CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1123,7 +1123,7 @@ export default function PatternTrainingPage() {
                 <div className="w-72 shrink-0" ref={controlPointsRef}>
                   <Card>
                     <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
-                      <CardTitle className="text-sm font-medium">Setup Points</CardTitle>
+                      <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Setup Points</CardTitle>
                       {pointsSaved && (
                         <Button
                           size="sm"

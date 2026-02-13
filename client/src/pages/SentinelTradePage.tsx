@@ -230,7 +230,7 @@ export default function SentinelTradePage() {
 
   return (
     <div className="min-h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
-      <header className="border-b bg-card">
+      <header className="border-b" style={{ backgroundColor: cssVariables.headerBg }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
@@ -239,7 +239,7 @@ export default function SentinelTradePage() {
             <SentinelHeader showSentiment={true} />
           </div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight" data-testid="text-symbol">{trade.symbol}</h1>
+            <h1 className="font-bold tracking-tight" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }} data-testid="text-symbol">{trade.symbol}</h1>
             <Badge variant={trade.direction === "long" ? "default" : "destructive"}>
               {trade.direction === "long" ? (
                 <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
@@ -273,12 +273,12 @@ export default function SentinelTradePage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <Label className="text-muted-foreground">Entry Price</Label>
-                    <p className="text-lg font-medium" data-testid="text-entry">${trade.entryPrice.toFixed(2)}</p>
+                    <Label style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Entry Price</Label>
+                    <p className="font-medium" style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }} data-testid="text-entry">${trade.entryPrice.toFixed(2)}</p>
                   </div>
 
                   <div>
-                    <Label className="text-muted-foreground">Stop Price</Label>
+                    <Label style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Stop Price</Label>
                     {editingStop ? (
                       <div className="flex items-center gap-1">
                         <Input
@@ -317,7 +317,7 @@ export default function SentinelTradePage() {
                   </div>
 
                   <div>
-                    <Label className="text-muted-foreground">Target Price</Label>
+                    <Label style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Target Price</Label>
                     {editingTarget ? (
                       <div className="flex items-center gap-1">
                         <Input
@@ -356,8 +356,8 @@ export default function SentinelTradePage() {
                   </div>
 
                   <div>
-                    <Label className="text-muted-foreground">Position Size</Label>
-                    <p className="text-lg font-medium" data-testid="text-size">
+                    <Label style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Position Size</Label>
+                    <p className="font-medium" style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }} data-testid="text-size">
                       {trade.positionSize ? `$${trade.positionSize.toLocaleString()}` : "-"}
                     </p>
                   </div>
@@ -365,8 +365,8 @@ export default function SentinelTradePage() {
 
                 {trade.thesis && (
                   <div>
-                    <Label className="text-muted-foreground">Thesis</Label>
-                    <p className="text-sm mt-1" data-testid="text-thesis">{trade.thesis}</p>
+                    <Label style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Thesis</Label>
+                    <p className="mt-1" style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }} data-testid="text-thesis">{trade.thesis}</p>
                   </div>
                 )}
               </CardContent>
@@ -396,7 +396,7 @@ export default function SentinelTradePage() {
                   </div>
 
                   <div>
-                    <p className="text-sm text-muted-foreground" data-testid="text-reasoning">
+                    <p data-testid="text-reasoning" style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }}>
                       {latestEval.reasoning}
                     </p>
                   </div>
@@ -450,8 +450,8 @@ export default function SentinelTradePage() {
                       <div key={event.id} className="flex items-start gap-3 pb-3 border-b last:border-0" data-testid={`event-${event.id}`}>
                         {getEventIcon(event.eventType)}
                         <div className="flex-1">
-                          <p className="text-sm">{event.description}</p>
-                          <p className="text-xs text-muted-foreground">
+                          <p style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }}>{event.description}</p>
+                          <p style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>
                             {new Date(event.createdAt).toLocaleString()}
                           </p>
                         </div>
@@ -473,7 +473,7 @@ export default function SentinelTradePage() {
                       <div key={ev.id} className="flex items-center justify-between py-2 border-b last:border-0">
                         <div>
                           <Badge variant="outline" className="text-xs">{ev.modelUsed}</Badge>
-                          <p className="text-xs text-muted-foreground mt-1">
+                          <p className="mt-1" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>
                             {new Date(ev.createdAt).toLocaleString()}
                           </p>
                         </div>

@@ -121,8 +121,8 @@ export default function SymbolPage() {
       <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <Layout>
         <div className="text-center py-20">
-          <h2 className="text-2xl font-bold">Symbol not found</h2>
-          <p className="text-muted-foreground mt-2">Could not load data for {safeSymbol}</p>
+          <h2 className="font-bold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>Symbol not found</h2>
+          <p className="mt-2" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Could not load data for {safeSymbol}</p>
         </div>
       </Layout>
       </div>
@@ -172,7 +172,7 @@ export default function SymbolPage() {
               Stock
             </span>
           </div>
-          <p className="text-lg text-muted-foreground mt-2">{quote.companyName || "Company Name Unavailable"}</p>
+          <p className="mt-2" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>{quote.companyName || "Company Name Unavailable"}</p>
         </div>
 
         <div className="flex items-end gap-6">
@@ -203,21 +203,21 @@ export default function SymbolPage() {
         <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <Activity className="w-4 h-4" />
-            <span className="text-sm font-medium">Volume</span>
+            <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Volume</span>
           </div>
           <div className="text-xl font-mono font-semibold">{(quote.volume / 1000000).toFixed(2)}M</div>
         </div>
         <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <DollarSign className="w-4 h-4" />
-            <span className="text-sm font-medium">Open</span>
+            <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Open</span>
           </div>
           <div className="text-xl font-mono font-semibold">${quote.price.toFixed(2)}</div>
         </div>
         <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <BarChart3 className="w-4 h-4" />
-            <span className="text-sm font-medium">Market Cap</span>
+            <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Market Cap</span>
           </div>
           <div className="text-xl font-mono font-semibold">
             {quote.marketCap ? formatMarketCap(quote.marketCap) : '---'}
@@ -226,7 +226,7 @@ export default function SymbolPage() {
         <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <PieChart className="w-4 h-4" />
-            <span className="text-sm font-medium">PE Ratio</span>
+            <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>PE Ratio</span>
           </div>
           <div className="text-xl font-mono font-semibold">
             {quote.peRatio ? quote.peRatio.toFixed(2) : '---'}
@@ -235,7 +235,7 @@ export default function SymbolPage() {
         <div className="bg-card p-4 rounded-xl border border-border">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <TrendingUp className="w-4 h-4" />
-            <span className="text-sm font-medium">Q Earnings</span>
+            <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Q Earnings</span>
           </div>
           <div className="text-xl font-mono font-semibold">
             {quote.earnings?.quarterlyGrowthPct !== undefined ? (
@@ -264,7 +264,7 @@ export default function SymbolPage() {
         {/* Scanner Criteria - shown when coming from scanner */}
         {criteriaList.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="text-sm text-muted-foreground">Criteria:</span>
+            <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Criteria:</span>
             <div className="flex flex-wrap gap-2">
               {criteriaList.map((criterion, index) => (
                 <span key={index} className="text-sm text-white bg-muted/50 px-2 py-0.5 rounded">

@@ -4,6 +4,7 @@ import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLe
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
 
 interface MarketSentiment {
@@ -65,6 +66,7 @@ interface SentinelHeaderProps {
 
 export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
   const [location] = useLocation();
+  const { cssVariables } = useSystemSettings();
   const { data: sentiment, isLoading } = useQuery<MarketSentiment>({
     queryKey: ["/api/sentinel/sentiment/market"],
     enabled: showSentiment,
@@ -87,7 +89,10 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
   const isEvaluatePage = location === "/sentinel/evaluate";
 
   return (
-    <div className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3 bg-card">
+    <div
+      className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3"
+      style={{ backgroundColor: cssVariables.headerBg }}
+    >
       <div className="flex items-center gap-4">
         <Link href="/sentinel">
           <div className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md p-1" data-testid="link-sentinel-home">
@@ -95,6 +100,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               src={rubricShieldLogo} 
               alt="RubricShield" 
               className="h-10"
+              style={{ opacity: cssVariables.logoOpacity }}
               data-testid="img-sentinel-header-logo"
             />
           </div>
@@ -109,7 +115,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-dashboard"
             >
               <LayoutDashboard className="w-4 h-4" />
-              <span className="hidden sm:inline">Dashboard</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
             </Button>
           </Link>
           <Link href="/sentinel/rules">
@@ -120,7 +126,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-rules"
             >
               <BookOpen className="w-4 h-4" />
-              <span className="hidden sm:inline">Rubric</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
             </Button>
           </Link>
           <Link href="/sentinel/import">
@@ -131,7 +137,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-import"
             >
               <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline">Import</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Import</span>
             </Button>
           </Link>
           <Link href="/sentinel/patterns">
@@ -142,7 +148,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-patterns"
             >
               <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline">Patterns</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
             </Button>
           </Link>
           <Link href="/sentinel/pattern-training">
@@ -153,7 +159,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-training"
             >
               <Crosshair className="w-4 h-4" />
-              <span className="hidden sm:inline">Training</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Training</span>
             </Button>
           </Link>
           <Link href="/sentinel/bigidea">
@@ -164,7 +170,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-bigidea"
             >
               <Lightbulb className="w-4 h-4" />
-              <span className="hidden sm:inline">Big Idea</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Big Idea</span>
             </Button>
           </Link>
           <Link href="/sentinel/charts">
@@ -175,7 +181,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-charts"
             >
               <BarChart3 className="w-4 h-4" />
-              <span className="hidden sm:inline">Charts</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Charts</span>
             </Button>
           </Link>
           <Link href="/sentinel/evaluate">
@@ -186,7 +192,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
               data-testid="nav-evaluate"
             >
               <Sparkles className="w-4 h-4" />
-              <span className="hidden sm:inline">Ivy AI</span>
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Ivy AI</span>
             </Button>
           </Link>
           {userInfo?.isAdmin && (
@@ -198,7 +204,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                 data-testid="nav-admin"
               >
                 <Settings className="w-4 h-4" />
-                <span className="hidden sm:inline">Admin</span>
+                <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Admin</span>
               </Button>
             </Link>
           )}
@@ -208,27 +214,27 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
       {showSentiment && (
         <div className="flex items-center gap-4" data-testid="container-market-sentiment">
           {isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <div className="flex items-center gap-2" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
               <RefreshCw className="h-4 w-4 animate-spin" />
               <span>Loading sentiment...</span>
             </div>
           ) : sentiment ? (
             <>
-              {/* Market Sentiment Header with Fire/Ice icons */}
               <div className="flex items-center gap-2">
                 <Flame className="h-5 w-5 text-rs-amber" />
-                <span className="text-lg font-semibold">Market Sentiment</span>
+                <span className="font-semibold" style={{ color: cssVariables.textColorHeader, fontSize: cssVariables.fontSizeHeader }}>Market Sentiment</span>
                 <Snowflake className="h-5 w-5 text-blue-400" />
               </div>
 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">MM Mid-Term Trend:</span>
+                    <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>MM Mid-Term Trend:</span>
                     <Badge 
                       variant="outline" 
-                      className={`text-sm px-3 py-1 ${getTrendColor(sentiment.weekly.state)}`}
+                      className={`px-3 py-1 ${getTrendColor(sentiment.weekly.state)}`}
                       data-testid="badge-weekly-trend"
+                      style={{ fontSize: cssVariables.fontSizeSmall }}
                     >
                       <TrendIcon state={sentiment.weekly.state} />
                       <span className="ml-1">{sentiment.weekly.stateName}</span>
@@ -236,19 +242,20 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p className="text-sm">SPY price vs 21-day EMA with slope direction</p>
-                  <p className="text-xs text-muted-foreground">Confidence: {sentiment.weekly.confidence}</p>
+                  <p style={{ fontSize: cssVariables.fontSizeNormal }}>SPY price vs 21-day EMA with slope direction</p>
+                  <p style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Confidence: {sentiment.weekly.confidence}</p>
                 </TooltipContent>
               </Tooltip>
 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">Daily:</span>
+                    <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Daily:</span>
                     <Badge 
                       variant="outline" 
-                      className={`text-sm px-3 py-1 ${getTrendColor(sentiment.daily.state)}`}
+                      className={`px-3 py-1 ${getTrendColor(sentiment.daily.state)}`}
                       data-testid="badge-daily-basket"
+                      style={{ fontSize: cssVariables.fontSizeSmall }}
                     >
                       <TrendIcon state={sentiment.daily.state} />
                       <span className="ml-1">{sentiment.daily.state}</span>
@@ -256,10 +263,10 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p className="text-sm">Risk Basket: QQQ, IWO, SLY, ARKK, VIX</p>
-                  <p className="text-xs text-muted-foreground">Confidence: {sentiment.daily.confidence}</p>
+                  <p style={{ fontSize: cssVariables.fontSizeNormal }}>Risk Basket: QQQ, IWO, SLY, ARKK, VIX</p>
+                  <p style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Confidence: {sentiment.daily.confidence}</p>
                   {sentiment.daily.canaryTags.length > 0 && (
-                    <div className="mt-1 flex items-center gap-1 text-rs-yellow text-xs">
+                    <div className="mt-1 flex items-center gap-1 text-rs-yellow" style={{ fontSize: cssVariables.fontSizeTiny }}>
                       <AlertTriangle className="h-3 w-3" />
                       <span>{sentiment.daily.canaryTags.join(", ")}</span>
                     </div>
@@ -271,11 +278,12 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">Chop:</span>
+                      <span className="font-medium" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Chop:</span>
                       <Badge 
                         variant="outline" 
-                        className={`text-sm px-3 py-1 ${getChopColor(sentiment.choppiness.weekly.state)}`}
+                        className={`px-3 py-1 ${getChopColor(sentiment.choppiness.weekly.state)}`}
                         data-testid="badge-choppiness"
+                        style={{ fontSize: cssVariables.fontSizeSmall }}
                       >
                         {sentiment.choppiness.weekly.state === "CHOPPY" ? (
                           <Zap className="h-4 w-4" />
@@ -289,17 +297,17 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
                     </div>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
-                    <p className="text-sm font-medium">Choppiness Index (SPY)</p>
+                    <p className="font-medium" style={{ fontSize: cssVariables.fontSizeNormal }}>Choppiness Index (SPY)</p>
                     <div className="mt-1 space-y-1">
-                      <p className="text-xs">Daily: {sentiment.choppiness.daily.state} ({sentiment.choppiness.daily.value})</p>
-                      <p className="text-xs">Weekly: {sentiment.choppiness.weekly.state} ({sentiment.choppiness.weekly.value})</p>
+                      <p style={{ fontSize: cssVariables.fontSizeTiny }}>Daily: {sentiment.choppiness.daily.state} ({sentiment.choppiness.daily.value})</p>
+                      <p style={{ fontSize: cssVariables.fontSizeTiny }}>Weekly: {sentiment.choppiness.weekly.state} ({sentiment.choppiness.weekly.value})</p>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-2">{sentiment.choppiness.recommendation}</p>
+                    <p className="mt-2" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>{sentiment.choppiness.recommendation}</p>
                   </TooltipContent>
                 </Tooltip>
               )}
 
-              <span className="text-xs text-muted-foreground" data-testid="text-sentiment-age">
+              <span style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }} data-testid="text-sentiment-age">
                 Updated {sentiment.cacheAgeMinutes < 1 ? "just now" : `${sentiment.cacheAgeMinutes}m ago`}
               </span>
             </>

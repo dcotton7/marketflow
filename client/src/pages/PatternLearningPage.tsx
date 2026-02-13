@@ -519,11 +519,11 @@ export default function PatternLearningPage() {
       <div className="container mx-auto p-4">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
+            <h1 className="font-bold flex items-center gap-2" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>
               <Brain className="h-6 w-6" />
               Pattern Learning
             </h1>
-            <p className="text-muted-foreground">
+            <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
               Rate patterns, track formation stages, learn from AI-powered scoring
             </p>
           </div>
@@ -549,7 +549,7 @@ export default function PatternLearningPage() {
               <CardContent className="py-4">
                 <div className="grid grid-cols-12 gap-4">
                   <div className="col-span-3">
-                    <Label className="text-xs text-muted-foreground mb-1 block">Pattern Type</Label>
+                    <Label className="mb-1 block" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Pattern Type</Label>
                     <Select 
                       value={selectedMasterSetupId?.toString() || ""} 
                       onValueChange={(v) => {
@@ -573,7 +573,7 @@ export default function PatternLearningPage() {
                   </div>
                   
                   <div className="col-span-3">
-                    <Label className="text-xs text-muted-foreground mb-1 block">Timeframe Variant</Label>
+                    <Label className="mb-1 block" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Timeframe Variant</Label>
                     <Select 
                       value={selectedVariantId?.toString() || ""} 
                       onValueChange={(v) => setSelectedVariantId(v ? parseInt(v) : null)}
@@ -593,7 +593,7 @@ export default function PatternLearningPage() {
                   </div>
                   
                   <div className="col-span-3">
-                    <Label className="text-xs text-muted-foreground mb-1 block">Formation Stage</Label>
+                    <Label className="mb-1 block" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Formation Stage</Label>
                     <Select 
                       value={selectedStageId?.toString() || "none"} 
                       onValueChange={(v) => setSelectedStageId(v && v !== "none" ? parseInt(v) : null)}
@@ -615,7 +615,7 @@ export default function PatternLearningPage() {
                   </div>
                   
                   <div className="col-span-3">
-                    <Label className="text-xs text-muted-foreground mb-1 block">Ticker Symbol</Label>
+                    <Label className="mb-1 block" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Ticker Symbol</Label>
                     <div className="flex gap-2">
                       <Input
                         value={ratingTicker}
@@ -636,7 +636,7 @@ export default function PatternLearningPage() {
                 </div>
                 
                 {selectedMasterSetup && (
-                  <p className="text-xs text-muted-foreground mt-2">
+                  <p className="mt-2" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>
                     {selectedMasterSetup.description}
                   </p>
                 )}

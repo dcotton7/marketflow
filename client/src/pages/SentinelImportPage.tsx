@@ -1108,8 +1108,8 @@ export default function SentinelImportPage() {
       
       <main className="container mx-auto p-4 max-w-6xl">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold">Import Trades</h1>
-          <p className="text-muted-foreground">Upload CSV files from your brokerage to import trade history</p>
+          <h1 className="font-bold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>Import Trades</h1>
+          <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Upload CSV files from your brokerage to import trade history</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={(tab) => {
@@ -1148,7 +1148,7 @@ export default function SentinelImportPage() {
           <TabsContent value="upload" className="mt-6 space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <Building2 className="h-5 w-5" />
                   Select Broker
                 </CardTitle>
@@ -1172,7 +1172,7 @@ export default function SentinelImportPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <Clock className="h-5 w-5" />
                   Timestamp Override (Optional)
                 </CardTitle>
@@ -1206,7 +1206,7 @@ export default function SentinelImportPage() {
                     </div>
                   )}
                   {!timestampOverride && (
-                    <span className="text-sm text-muted-foreground">
+                    <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
                       Leave empty to use timestamps from CSV (if available)
                     </span>
                   )}
@@ -1216,7 +1216,7 @@ export default function SentinelImportPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <FileSpreadsheet className="h-5 w-5" />
                   Upload CSV File
                 </CardTitle>
@@ -1276,7 +1276,7 @@ export default function SentinelImportPage() {
             {previewData && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
+                  <CardTitle className="flex items-center justify-between" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                     <span className="flex items-center gap-2">
                       <Check className="h-5 w-5 text-rs-green" />
                       Preview Results
@@ -1297,22 +1297,22 @@ export default function SentinelImportPage() {
                 <CardContent className="space-y-4">
                   <div className="flex gap-4 flex-wrap">
                     <div className="bg-muted p-3 rounded-lg">
-                      <div className="text-sm text-muted-foreground">Trades Found</div>
+                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Trades Found</div>
                       <div className="text-2xl font-bold text-rs-green">{previewData.trades.length}</div>
                     </div>
                     <div className="bg-muted p-3 rounded-lg">
-                      <div className="text-sm text-muted-foreground">Rows Skipped</div>
+                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Rows Skipped</div>
                       <div className="text-2xl font-bold text-rs-yellow">{previewData.batch.skippedRows.length}</div>
                     </div>
                     <div className="bg-muted p-3 rounded-lg">
-                      <div className="text-sm text-muted-foreground">Total Value</div>
+                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Total Value</div>
                       <div className="text-2xl font-bold">
                         {formatCurrency(previewData.trades.reduce((sum, t) => sum + t.totalAmount, 0))}
                       </div>
                     </div>
                     {previewData.dateRange && (
                       <div className="bg-muted p-3 rounded-lg">
-                        <div className="text-sm text-muted-foreground">Date Range</div>
+                        <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Date Range</div>
                         <div className="text-lg font-bold">{previewData.dateRange.earliest} to {previewData.dateRange.latest}</div>
                       </div>
                     )}
@@ -1407,7 +1407,7 @@ export default function SentinelImportPage() {
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <CardTitle>Import History</CardTitle>
+                  <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Import History</CardTitle>
                   <div className="flex items-center gap-1">
                     <Button 
                       variant="ghost" 

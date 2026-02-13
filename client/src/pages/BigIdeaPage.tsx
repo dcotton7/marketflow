@@ -2114,7 +2114,7 @@ export default function BigIdeaPage() {
     <div className="flex flex-col h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <SentinelHeader showSentiment={false} />
 
-      <div className="flex items-center gap-3 px-4 py-2 border-b bg-card flex-wrap">
+      <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap" style={{ backgroundColor: cssVariables.headerBg }}>
         <Input
           value={ideaName}
           onChange={(e) => setIdeaName(e.target.value)}
@@ -2292,8 +2292,8 @@ export default function BigIdeaPage() {
 
       <div className="flex flex-1 overflow-hidden">
         <div
-          className="border-r flex flex-col bg-card/50 relative flex-shrink-0"
-          style={{ width: thoughtsPanelWidth }}
+          className="border-r flex flex-col relative flex-shrink-0"
+          style={{ backgroundColor: cssVariables.overlayBg, width: thoughtsPanelWidth }}
         >
           <div className="p-3 border-b">
             <Button
@@ -2318,7 +2318,7 @@ export default function BigIdeaPage() {
           <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-2 space-y-3">
               <div className="flex items-center gap-1.5 px-1">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Thought Library</span>
+                <span className="font-semibold uppercase tracking-wide" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Thought Library</span>
               </div>
               {thoughtsLoading ? (
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -2333,7 +2333,7 @@ export default function BigIdeaPage() {
                   <div key={cat}>
                     <div className="flex items-center gap-1.5 px-1 mb-1.5">
                       {getCategoryIcon(cat)}
-                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{cat}</span>
+                      <span className="font-medium uppercase tracking-wide" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>{cat}</span>
                     </div>
                     <div className="space-y-1">
                       {thoughtsByCategory[cat].map((thought) => (
@@ -2601,14 +2601,14 @@ export default function BigIdeaPage() {
         </div>
 
         {(showResults || selectedNode) && (
-          <div className="border-l flex flex-col bg-card/50 relative" style={{ width: detailPanelWidth }}>
+          <div className="border-l flex flex-col relative" style={{ width: detailPanelWidth, backgroundColor: cssVariables.overlayBg }}>
             <div
               className="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
               onPointerDown={handleDetailResizeStart}
               data-testid="detail-resize-handle"
             />
             <div className="p-3 border-b flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold">
+              <span className="font-semibold" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                 {showResults ? "Scan Results" : "Thought Details"}
               </span>
               <Button
@@ -2645,7 +2645,7 @@ export default function BigIdeaPage() {
                     >
                       {scanResults.length}
                     </span>
-                    <p className="text-xs text-muted-foreground">
+                    <p style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>
                       matches from {scanTotalScanned} scanned
                     </p>
                   </div>

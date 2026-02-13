@@ -149,7 +149,7 @@ export default function SentinelChartsPage() {
     <div className="h-screen bg-background flex flex-col overflow-hidden" style={cssVariables as any}>
       <SentinelHeader showSentiment={false} />
 
-      <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border" style={{ height: 48 }}>
+      <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border" style={{ height: 48, backgroundColor: cssVariables.headerBg }}>
         <img
           src={rubricShieldLogo}
           alt="Charts"

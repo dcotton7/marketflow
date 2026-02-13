@@ -41,50 +41,64 @@ const defaultSettings: SystemSettings = {
   fontSizeTiny: "0.75rem",
 };
 
+export interface CssVariables {
+  overlayBg: string;
+  headerBg: string;
+  overlayColor: string;
+  backgroundColor: string;
+  logoOpacity: number;
+  secondaryOverlayColor: string;
+  textColorTitle: string;
+  textColorHeader: string;
+  textColorSection: string;
+  textColorNormal: string;
+  textColorSmall: string;
+  textColorTiny: string;
+  fontSizeTitle: string;
+  fontSizeHeader: string;
+  fontSizeSection: string;
+  fontSizeNormal: string;
+  fontSizeSmall: string;
+  fontSizeTiny: string;
+}
+
+function buildHexAlpha(hex: string, pct: number): string {
+  return `${hex}${Math.round(pct * 2.55).toString(16).padStart(2, '0')}`;
+}
+
+function buildCssVariables(s: SystemSettings): CssVariables {
+  return {
+    overlayBg: buildHexAlpha(s.overlayColor, s.overlayTransparency),
+    headerBg: buildHexAlpha(s.overlayColor, Math.min(s.overlayTransparency + 10, 100)),
+    overlayColor: s.overlayColor,
+    backgroundColor: s.backgroundColor,
+    logoOpacity: (100 - s.logoTransparency) / 100,
+    secondaryOverlayColor: s.secondaryOverlayColor || defaultSettings.secondaryOverlayColor,
+    textColorTitle: s.textColorTitle || defaultSettings.textColorTitle,
+    textColorHeader: s.textColorHeader || defaultSettings.textColorHeader,
+    textColorSection: s.textColorSection || defaultSettings.textColorSection,
+    textColorNormal: s.textColorNormal || defaultSettings.textColorNormal,
+    textColorSmall: s.textColorSmall || defaultSettings.textColorSmall,
+    textColorTiny: s.textColorTiny || defaultSettings.textColorTiny,
+    fontSizeTitle: s.fontSizeTitle || defaultSettings.fontSizeTitle,
+    fontSizeHeader: s.fontSizeHeader || defaultSettings.fontSizeHeader,
+    fontSizeSection: s.fontSizeSection || defaultSettings.fontSizeSection,
+    fontSizeNormal: s.fontSizeNormal || defaultSettings.fontSizeNormal,
+    fontSizeSmall: s.fontSizeSmall || defaultSettings.fontSizeSmall,
+    fontSizeTiny: s.fontSizeTiny || defaultSettings.fontSizeTiny,
+  };
+}
+
 interface SystemSettingsContextType {
   settings: SystemSettings;
   isLoading: boolean;
-  cssVariables: {
-    overlayBg: string;
-    backgroundColor: string;
-    logoOpacity: number;
-    secondaryOverlayColor: string;
-    textColorTitle: string;
-    textColorHeader: string;
-    textColorSection: string;
-    textColorNormal: string;
-    textColorSmall: string;
-    textColorTiny: string;
-    fontSizeTitle: string;
-    fontSizeHeader: string;
-    fontSizeSection: string;
-    fontSizeNormal: string;
-    fontSizeSmall: string;
-    fontSizeTiny: string;
-  };
+  cssVariables: CssVariables;
 }
 
 const SystemSettingsContext = createContext<SystemSettingsContextType>({
   settings: defaultSettings,
   isLoading: false,
-  cssVariables: {
-    overlayBg: `${defaultSettings.overlayColor}bf`,
-    backgroundColor: defaultSettings.backgroundColor,
-    logoOpacity: (100 - defaultSettings.logoTransparency) / 100,
-    secondaryOverlayColor: defaultSettings.secondaryOverlayColor,
-    textColorTitle: defaultSettings.textColorTitle,
-    textColorHeader: defaultSettings.textColorHeader,
-    textColorSection: defaultSettings.textColorSection,
-    textColorNormal: defaultSettings.textColorNormal,
-    textColorSmall: defaultSettings.textColorSmall,
-    textColorTiny: defaultSettings.textColorTiny,
-    fontSizeTitle: defaultSettings.fontSizeTitle,
-    fontSizeHeader: defaultSettings.fontSizeHeader,
-    fontSizeSection: defaultSettings.fontSizeSection,
-    fontSizeNormal: defaultSettings.fontSizeNormal,
-    fontSizeSmall: defaultSettings.fontSizeSmall,
-    fontSizeTiny: defaultSettings.fontSizeTiny,
-  }
+  cssVariables: buildCssVariables(defaultSettings),
 });
 
 export function useSystemSettings() {
@@ -103,25 +117,7 @@ export function SystemSettingsProvider({ children }: SystemSettingsProviderProps
   });
 
   const currentSettings = settings || defaultSettings;
-  
-  const cssVariables = {
-    overlayBg: `${currentSettings.overlayColor}${Math.round(currentSettings.overlayTransparency * 2.55).toString(16).padStart(2, '0')}`,
-    backgroundColor: currentSettings.backgroundColor,
-    logoOpacity: (100 - currentSettings.logoTransparency) / 100,
-    secondaryOverlayColor: currentSettings.secondaryOverlayColor || defaultSettings.secondaryOverlayColor,
-    textColorTitle: currentSettings.textColorTitle || defaultSettings.textColorTitle,
-    textColorHeader: currentSettings.textColorHeader || defaultSettings.textColorHeader,
-    textColorSection: currentSettings.textColorSection || defaultSettings.textColorSection,
-    textColorNormal: currentSettings.textColorNormal || defaultSettings.textColorNormal,
-    textColorSmall: currentSettings.textColorSmall || defaultSettings.textColorSmall,
-    textColorTiny: currentSettings.textColorTiny || defaultSettings.textColorTiny,
-    fontSizeTitle: currentSettings.fontSizeTitle || defaultSettings.fontSizeTitle,
-    fontSizeHeader: currentSettings.fontSizeHeader || defaultSettings.fontSizeHeader,
-    fontSizeSection: currentSettings.fontSizeSection || defaultSettings.fontSizeSection,
-    fontSizeNormal: currentSettings.fontSizeNormal || defaultSettings.fontSizeNormal,
-    fontSizeSmall: currentSettings.fontSizeSmall || defaultSettings.fontSizeSmall,
-    fontSizeTiny: currentSettings.fontSizeTiny || defaultSettings.fontSizeTiny,
-  };
+  const cssVariables = buildCssVariables(currentSettings);
 
   return (
     <SystemSettingsContext.Provider value={{ settings: currentSettings, isLoading, cssVariables }}>

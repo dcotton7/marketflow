@@ -3211,11 +3211,11 @@ export default function SentinelDashboardPage() {
       } as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
-      <header className="border-b" style={{ backgroundColor: `${systemSettings.overlayColor}d9` }}>
+      <header className="border-b" style={{ backgroundColor: cssVariables.headerBg }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <SentinelHeader showSentiment={true} />
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground" data-testid="text-username">
+            <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }} data-testid="text-username">
               {user?.username}
             </span>
             <Button variant="outline" size="sm" onClick={handleLogout} data-testid="button-logout">
@@ -3228,7 +3228,7 @@ export default function SentinelDashboardPage() {
 
       <main className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold">Trading Cards</h2>
+          <h2 className="font-semibold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>Trading Cards</h2>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button data-testid="button-add-trade-menu">

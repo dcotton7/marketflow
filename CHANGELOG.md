@@ -6,6 +6,27 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Platform-Wide Admin Styling Normalization — 22:00 UTC
+- **Task**: Audit and normalize ALL Rubric Shield pages so every header, overlay, background, and text tier draws from the admin-configurable database settings (SystemSettings CSS variables).
+- **Files**: `SystemSettingsContext.tsx`, `SentinelHeader.tsx`, `SentinelDashboardPage.tsx`, `SentinelEvaluatePage.tsx`, `SentinelRulesPage.tsx`, `SentinelImportPage.tsx`, `WatchlistPage.tsx`, `PatternTrainingPage.tsx`, `PatternLearningPage.tsx`, `BigIdeaPage.tsx`, `ScannerPage.tsx`, `SymbolPage.tsx`, `SentinelTradePage.tsx`, `SentinelLoginPage.tsx`
+- **Details**:
+  - **SystemSettingsContext**: Added `headerBg` (overlay color + 10% more opacity) and `overlayColor` as computed CSS variables. Exported `CssVariables` type. Refactored to shared `buildCssVariables()` helper.
+  - **SentinelHeader**: Background now uses `cssVariables.headerBg` instead of hardcoded `bg-card`. Nav link text uses `fontSizeSmall`. Sentiment labels, badges, and tooltips all use admin font sizes/colors. Logo uses `cssVariables.logoOpacity`.
+  - **SentinelDashboardPage**: Header uses `cssVariables.headerBg` (was manually constructing hex). "Trading Cards" title uses `fontSizeTitle/textColorTitle`. Username uses `textColorSmall/fontSizeSmall`.
+  - **SentinelEvaluatePage**: Header uses `cssVariables.headerBg`. "Ivy AI" title uses `fontSizeTitle`. Ticker name uses `fontSizeHeader/textColorHeader`. Decision gate status uses `fontSizeHeader`. Verdict/Risk Summary labels use `fontSizeTiny/textColorTiny`.
+  - **SentinelRulesPage**: Page title, subtitle, all section CardTitles (Base, Custom, AI-Suggested, Community), rule descriptions, and labels all use admin variables.
+  - **SentinelImportPage**: Page title, subtitle, all section CardTitles, stats labels, and hint text use admin variables.
+  - **WatchlistPage**: Page title, stock count, company name, volume, empty state heading/description all use admin variables.
+  - **PatternTrainingPage**: Chart labels, CardTitles (Calculated Data, AI Evaluation, Setup Details, Setup Points), R/R label all use admin variables.
+  - **PatternLearningPage**: Page title, subtitle, form labels, setup description all use admin variables.
+  - **BigIdeaPage**: Header background, page title, section headers, panel labels all use admin variables.
+  - **ScannerPage**: Added `useSystemSettings` import (was missing). Section headers, criteria labels/values/explanations, save dialog title, pagination text all use admin variables.
+  - **SymbolPage**: Error heading, company name, stat labels, criteria label all use admin variables.
+  - **SentinelTradePage**: Header `bg-card` → `cssVariables.headerBg`. Symbol title, trade detail labels/values, timestamps all use admin variables.
+  - **SentinelLoginPage**: Card title, description, form labels, toggle auth link all use admin variables.
+  - **Context colors preserved**: All `text-rs-green`, `text-rs-red`, `text-rs-yellow`, `text-rs-amber` semantic signal colors untouched.
+- **Status**: Complete
+
 ### Admin Font Size Controls + Nav Pane Redesign — 21:25 UTC
 - **Task**: Add admin-configurable font sizes per text tier, double nav pane height for company info, move Ivy AI/Watchlist to nav pane, add close button to Charts page
 - **Files**: `shared/schema.ts`, `SystemSettingsContext.tsx`, `SentinelAdminPage.tsx`, `DualChartGrid.tsx`, `SentinelChartsPage.tsx`, `server/sentinel/routes.ts`

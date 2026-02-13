@@ -651,7 +651,7 @@ export default function SentinelRulesPage() {
               )}
             </div>
             {displayRule.description && (
-              <p className="text-sm text-muted-foreground mt-1">{displayRule.description}</p>
+              <p className="mt-1" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>{displayRule.description}</p>
             )}
             {displayRule.formula && (
               <code className="text-xs bg-muted px-1.5 py-0.5 rounded mt-1 inline-block font-mono">
@@ -836,8 +836,8 @@ export default function SentinelRulesPage() {
       <div className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold">Rubric (Trading Rules)</h1>
-            <p className="text-muted-foreground">Manage your trading discipline and evaluation criteria</p>
+            <h1 className="font-bold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>Rubric (Trading Rules)</h1>
+            <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Manage your trading discipline and evaluation criteria</p>
           </div>
         </div>
 
@@ -868,7 +868,7 @@ export default function SentinelRulesPage() {
           <TabsContent value="system" className="space-y-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Base System Rules</CardTitle>
+                <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>Base System Rules</CardTitle>
                 <CardDescription>
                   {isSystemTabLoading ? "Loading rules..." : `${starterRules.length} rules from the starter rulebook. Customize or disable rules to fit your trading style.`}
                 </CardDescription>
@@ -919,7 +919,7 @@ export default function SentinelRulesPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
-                    <CardTitle className="text-lg">My Custom Rules</CardTitle>
+                    <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>My Custom Rules</CardTitle>
                     <CardDescription>
                       {userRulesActive.length} active rules{userRulesDeleted.length > 0 && `, ${userRulesDeleted.length} archived`}
                     </CardDescription>
@@ -949,7 +949,7 @@ export default function SentinelRulesPage() {
                       checked={showDeletedRules}
                       onCheckedChange={setShowDeletedRules}
                     />
-                    <Label htmlFor="show-deleted" className="text-sm text-muted-foreground cursor-pointer">
+                    <Label htmlFor="show-deleted" className="cursor-pointer" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
                       Show archived rules ({userRulesDeleted.length})
                     </Label>
                   </div>
@@ -1003,7 +1003,7 @@ export default function SentinelRulesPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <CardTitle className="text-lg flex items-center gap-2">
+                    <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                       <Sparkles className="w-5 h-5 text-primary" />
                       AI-Suggested Rules
                     </CardTitle>
@@ -1101,7 +1101,7 @@ export default function SentinelRulesPage() {
           <TabsContent value="community" className="space-y-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <Users className="w-5 h-5" />
                   Community Rules
                 </CardTitle>
@@ -1113,7 +1113,7 @@ export default function SentinelRulesPage() {
                 <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg mb-4">
                   <div>
                     <p className="font-medium">Contribute to Community Learning</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
                       Share your anonymous rule performance data to help discover winning patterns
                     </p>
                   </div>

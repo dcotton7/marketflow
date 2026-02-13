@@ -15,6 +15,7 @@ function WatchlistItem({ item, onRemove }: {
   onRemove: (id: number) => void;
 }) {
   const [, setLocation] = useLocation();
+  const { cssVariables } = useSystemSettings();
   const { data: quote, isLoading } = useStockQuote(item.symbol);
   const isPositive = quote ? quote.changePercent >= 0 : true;
 
@@ -26,14 +27,14 @@ function WatchlistItem({ item, onRemove }: {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="font-bold font-mono text-xl text-primary" data-testid={`link-symbol-${item.symbol}`}>
+            <span className="font-bold font-mono" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }} data-testid={`link-symbol-${item.symbol}`}>
               {item.symbol}
             </span>
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : quote && (
               <>
-                <span className="font-mono text-lg font-bold" data-testid={`text-price-${item.symbol}`}>
+                <span className="font-mono font-bold" style={{ color: cssVariables.textColorHeader, fontSize: cssVariables.fontSizeHeader }} data-testid={`text-price-${item.symbol}`}>
                   ${quote.price.toFixed(2)}
                 </span>
                 <span className={`flex items-center gap-1 text-sm font-mono font-medium ${isPositive ? "text-rs-green" : "text-rs-red"}`} data-testid={`text-change-${item.symbol}`}>
@@ -63,11 +64,11 @@ function WatchlistItem({ item, onRemove }: {
           </div>
         </div>
         {quote?.companyName && (
-          <span className="text-sm text-muted-foreground" data-testid={`text-company-${item.symbol}`}>{quote.companyName}</span>
+          <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }} data-testid={`text-company-${item.symbol}`}>{quote.companyName}</span>
         )}
         {quote && (
           <div className="flex items-center gap-3 mt-1 flex-wrap">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>
               <Activity className="w-3 h-3" />
               <span data-testid={`text-volume-${item.symbol}`}>Vol: {(quote.volume / 1000000).toFixed(1)}M</span>
             </div>
@@ -138,10 +139,10 @@ export default function WatchlistPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <Star className="w-8 h-8 text-primary" />
-            <h1 className="text-3xl font-bold tracking-tight" data-testid="text-watchlist-heading">Watchlist</h1>
+            <h1 className="font-bold tracking-tight" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }} data-testid="text-watchlist-heading">Watchlist</h1>
           </div>
           {watchlist && (
-            <span className="text-sm text-muted-foreground bg-muted px-3 py-1 rounded-full font-mono">
+            <span className="bg-muted px-3 py-1 rounded-full font-mono" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
               {watchlist.length} stocks
             </span>
           )}
@@ -150,8 +151,8 @@ export default function WatchlistPage() {
         {(!watchlist || watchlist.length === 0) ? (
           <div className="border-2 border-dashed border-border rounded-xl p-12 text-center bg-card/30" data-testid="text-watchlist-empty">
             <Star className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-            <h3 className="text-lg font-medium text-foreground">No Stocks in Watchlist</h3>
-            <p className="text-muted-foreground">
+            <h3 className="font-medium" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>No Stocks in Watchlist</h3>
+            <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
               Click the "Watch" button on any stock detail page to add it here.
             </p>
           </div>

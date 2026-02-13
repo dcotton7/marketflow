@@ -67,10 +67,10 @@ export default function SentinelLoginPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle data-testid="text-auth-title">
+            <CardTitle data-testid="text-auth-title" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>
               {isRegistering ? "Create Account" : "Sign In"}
             </CardTitle>
-            <CardDescription>
+            <CardDescription style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
               {isRegistering
                 ? "Create an account to start evaluating trades"
                 : "Sign in to access your trade evaluations"}
@@ -79,7 +79,7 @@ export default function SentinelLoginPage() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="username" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Username</Label>
                 <Input
                   id="username"
                   data-testid="input-username"
@@ -92,7 +92,7 @@ export default function SentinelLoginPage() {
 
               {isRegistering && (
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Email</Label>
                   <Input
                     id="email"
                     type="email"
@@ -107,7 +107,7 @@ export default function SentinelLoginPage() {
 
               {isRegistering && (
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="password" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Password</Label>
                   <Input
                     id="password"
                     type="password"
@@ -137,7 +137,8 @@ export default function SentinelLoginPage() {
             <div className="mt-4 text-center">
               <button
                 type="button"
-                className="text-sm text-muted-foreground hover:text-foreground underline"
+                className="hover:text-foreground underline"
+                style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}
                 onClick={() => setIsRegistering(!isRegistering)}
                 data-testid="button-toggle-auth"
               >

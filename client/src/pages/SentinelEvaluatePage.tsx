@@ -826,7 +826,7 @@ export default function SentinelEvaluatePage() {
       } as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
-      <header className="border-b" style={{ backgroundColor: `${systemSettings.overlayColor}d9` }}>
+      <header className="border-b" style={{ backgroundColor: cssVariables.headerBg }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" onClick={() => {
@@ -846,8 +846,8 @@ export default function SentinelEvaluatePage() {
       <main className="container mx-auto px-4 py-6">
         {/* Ivy AI Branding */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-primary" data-testid="ivy-ai-title">Ivy AI</h1>
-          <p className="text-lg text-muted-foreground" data-testid="ivy-ai-subtitle">Advanced Trading Insights</p>
+          <h1 className="font-bold text-primary" style={{ fontSize: cssVariables.fontSizeTitle }} data-testid="ivy-ai-title">Ivy AI</h1>
+          <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSection }} data-testid="ivy-ai-subtitle">Advanced Trading Insights</p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
@@ -899,7 +899,7 @@ export default function SentinelEvaluatePage() {
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-lg" data-testid="text-ticker-name">{tickerQuery.data.name}</span>
+                            <span className="font-semibold" style={{ color: cssVariables.textColorHeader, fontSize: cssVariables.fontSizeHeader }} data-testid="text-ticker-name">{tickerQuery.data.name}</span>
                             <Badge variant="outline" className="text-xs" data-testid="badge-ticker-symbol">{tickerQuery.data.symbol}</Badge>
                           </div>
                           <div className="rs-ticker" data-testid="ticker-display">
@@ -1690,7 +1690,7 @@ export default function SentinelEvaluatePage() {
                     {/* Ticker / Direction / Model Tag Header */}
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-xl font-bold" data-testid="text-symbol-result">{symbol.toUpperCase()}</span>
+                        <span className="font-bold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }} data-testid="text-symbol-result">{symbol.toUpperCase()}</span>
                         <Badge variant={direction === "long" ? "default" : "destructive"} data-testid="badge-direction">
                           {direction.toUpperCase()}
                         </Badge>
@@ -1712,11 +1712,11 @@ export default function SentinelEvaluatePage() {
                         result.evaluation.status === 'RED' ? 'bg-rs-red/10 border border-rs-red/30' :
                         result.evaluation.status === 'NEEDS_PLAN' ? 'bg-rs-amber/10 border border-rs-amber/30' : 'bg-rs-yellow/10 border border-rs-yellow/30'
                       }`} data-testid="verdict-summary">
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Verdict:</p>
-                        <p className="text-base font-medium">{result.evaluation.verdictSummary.verdict}</p>
+                        <p className="font-medium mb-1" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Verdict:</p>
+                        <p className="font-medium" style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeNormal }}>{result.evaluation.verdictSummary.verdict}</p>
                         {result.evaluation.verdictSummary.primaryBlockers && result.evaluation.verdictSummary.primaryBlockers.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-xs font-medium text-muted-foreground mb-1.5">Risk Summary</p>
+                            <p className="font-medium mb-1.5" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>Risk Summary</p>
                             <div className="flex flex-wrap gap-1.5">
                               {result.evaluation.verdictSummary.primaryBlockers.map((blocker, i) => (
                                 <Badge key={i} variant="outline" className="text-xs border-rs-red/30 text-rs-red bg-rs-red/10" data-testid={`badge-risk-summary-${i}`}>
@@ -1747,14 +1747,14 @@ export default function SentinelEvaluatePage() {
                             <AlertTriangle className="w-8 h-8 text-rs-yellow" />
                           )}
                           <div>
-                            <p className={`text-lg font-bold ${
+                            <p className={`font-bold ${
                               result.evaluation.status === 'GREEN' ? 'text-rs-green' :
                               result.evaluation.status === 'RED' ? 'text-rs-red' :
                               result.evaluation.status === 'NEEDS_PLAN' ? 'text-rs-amber' : 'text-rs-yellow'
-                            }`} data-testid="text-status">
+                            }`} style={{ fontSize: cssVariables.fontSizeHeader }} data-testid="text-status">
                               {result.evaluation.status === 'NEEDS_PLAN' ? 'NEEDS PLAN' : result.evaluation.status}
                             </p>
-                            <p className="text-sm text-muted-foreground">Decision Gate</p>
+                            <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Decision Gate</p>
                           </div>
                         </div>
                         <div className="text-right">
