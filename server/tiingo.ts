@@ -148,6 +148,7 @@ export async function fetchIntradayPrices(
     token: getToken(),
   });
   if (endDate) params.set("endDate", formatDate(endDate));
+  if (includeETH) params.set("afterHours", "true");
 
   const url = `${TIINGO_BASE}/iex/${encodeURIComponent(ticker)}/prices?${params}`;
   const data = await tiingoFetchWithRetry(url);
