@@ -4238,6 +4238,7 @@ function ScanChartViewer({
     const resistanceLines: { startTime: number; startPrice: number; endTime: number; endPrice: number }[] = [];
 
     for (const thought of current.thoughtBreakdown) {
+      if (!thought.pass) continue;
       for (const cr of thought.criteriaResults) {
         if (!cr.pass || !cr.cocHighlight) continue;
         const h = cr.cocHighlight;

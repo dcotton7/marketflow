@@ -860,6 +860,11 @@ export function TradingChart({
       chart.timeScale().fitContent();
     }
     chart.timeScale().scrollToPosition(7, false);
+    requestAnimationFrame(() => {
+      if (chartRef.current) {
+        chartRef.current.timeScale().scrollToPosition(7, false);
+      }
+    });
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
