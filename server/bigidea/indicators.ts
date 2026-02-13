@@ -940,8 +940,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       for (let i = 0; i < lookback; i++) {
         const prev = candles[i + 1];
         const curr = candles[i];
-        const gapUp = ((curr.low - prev.high) / prev.high) * 100;
-        const gapDown = ((prev.low - curr.high) / prev.low) * 100;
+        const gapUp = ((curr.open - prev.close) / prev.close) * 100;
+        const gapDown = ((prev.close - curr.open) / prev.close) * 100;
         if (dir === "up" && gapUp >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
         if (dir === "down" && gapDown >= minGap) return { pass: true, data: { _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
         if (dir === "either") {

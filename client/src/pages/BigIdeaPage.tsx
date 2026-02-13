@@ -72,6 +72,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Lightbulb,
+  EyeOff,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -312,6 +313,7 @@ function getCategoryIcon(category: string) {
 
 function ThoughtNodeComponent({ data, selected }: NodeProps) {
   const isNot = data.isNot as boolean;
+  const isMuted = data.isMuted as boolean;
   const passCount = data.passCount as number | undefined;
   const category = data.category as string;
   const allCriteria = (data.criteria as ScannerCriterion[]) || [];
@@ -323,7 +325,9 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
   return (
     <div
       className={`rounded-md border-2 px-3 py-2 min-w-[180px] ${
-        isNot
+        isMuted
+          ? "border-muted bg-muted/30 opacity-50"
+          : isNot
           ? "border-rs-red bg-rs-red/10"
           : selected
           ? "border-primary bg-card"
@@ -334,7 +338,7 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
       <Handle type="target" position={Position.Left} className="!bg-muted-foreground !w-2 !h-2" />
       <div className="flex items-center gap-2 mb-1">
         {getCategoryIcon(category)}
-        <span className="text-sm font-medium truncate flex-1">{data.label as string}</span>
+        <span className={`text-sm font-medium truncate flex-1 ${isMuted ? "line-through text-muted-foreground" : ""}`}>{data.label as string}</span>
         <div className="flex items-center gap-0.5 shrink-0">
           {onClear && (
             <Button
@@ -371,7 +375,7 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
             {String(data.timeframe) === "5min" ? "5m" : String(data.timeframe) === "15min" ? "15m" : String(data.timeframe) === "30min" ? "30m" : String(data.timeframe)}
           </Badge>
         )}
-        {passCount !== undefined && (
+        {passCount !== undefined && !isMuted && (
           <Badge
             variant="outline"
             className={`text-xs ${passCount > 0 ? "bg-rs-green/20 text-rs-green border-rs-green/30" : "text-muted-foreground"}`}
@@ -379,7 +383,12 @@ function ThoughtNodeComponent({ data, selected }: NodeProps) {
             {passCount} pass
           </Badge>
         )}
-        {isNot && (
+        {isMuted && (
+          <Badge variant="outline" className="text-xs bg-muted/50 text-muted-foreground border-muted">
+            MUTED
+          </Badge>
+        )}
+        {isNot && !isMuted && (
           <Badge variant="outline" className="text-xs bg-rs-red/20 text-rs-red border-rs-red/30">
             NOT
           </Badge>
@@ -724,6 +733,7 @@ export default function BigIdeaPage() {
             timeframe: t.timeframe || "daily",
             thoughtId: t.id,
             isNot: false,
+            isMuted: false,
             passCount: undefined,
           },
         };
@@ -879,6 +889,7 @@ export default function BigIdeaPage() {
       thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
       thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
       isNot: n.data.isNot as boolean | undefined,
+      isMuted: n.data.isMuted as boolean | undefined,
       userRenamed: n.data.userRenamed as boolean | undefined,
       position: n.position,
       passCount: n.data.passCount as number | undefined,
@@ -939,6 +950,7 @@ export default function BigIdeaPage() {
         thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
         thoughtTimeframe: (n.data.timeframe as string | undefined) || "daily",
         isNot: n.data.isNot as boolean | undefined,
+        isMuted: n.data.isMuted as boolean | undefined,
         userRenamed: n.data.userRenamed as boolean | undefined,
         position: n.position,
         passCount: n.data.passCount as number | undefined,
@@ -1031,6 +1043,7 @@ export default function BigIdeaPage() {
         thoughtCategory: n.data.category as string | undefined,
         thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
         isNot: n.data.isNot as boolean | undefined,
+        isMuted: n.data.isMuted as boolean | undefined,
         passCount: n.data.passCount as number | undefined,
         position: n.position,
       }));
@@ -1062,6 +1075,7 @@ export default function BigIdeaPage() {
         thoughtCategory: n.data.category as string | undefined,
         thoughtCriteria: n.data.criteria as ScannerCriterion[] | undefined,
         isNot: n.data.isNot as boolean | undefined,
+        isMuted: n.data.isMuted as boolean | undefined,
         passCount: n.data.passCount as number | undefined,
       }));
       const ideaEdges = edges.map((e) => ({
@@ -1298,6 +1312,7 @@ export default function BigIdeaPage() {
         thoughtName: n.data.label,
         thoughtTimeframe: n.data.timeframe || "daily",
         isNot: n.data.isNot,
+        isMuted: n.data.isMuted,
       }));
       const scanEdges = edges.map((e) => ({
         id: e.id,
@@ -1316,6 +1331,7 @@ export default function BigIdeaPage() {
           name: n.data.label as string,
           timeframe: (n.data.timeframe as string) || "daily",
           isNot: !!n.data.isNot,
+          isMuted: !!n.data.isMuted,
           connectionTo: incomingEdge ? { target: incomingEdge.target, logicType: (incomingEdge.data as any)?.logicType || "AND" } : null,
           criteria: criteria.map((c) => ({
             indicator: c.indicatorId,
@@ -1539,6 +1555,7 @@ export default function BigIdeaPage() {
           timeframe: thought.timeframe || "daily",
           thoughtId: thought.id,
           isNot: false,
+          isMuted: false,
           passCount: undefined,
         },
       };
@@ -1650,6 +1667,7 @@ export default function BigIdeaPage() {
           timeframe: thought.timeframe || "daily",
           thoughtId: thought.id,
           isNot: false,
+          isMuted: false,
           passCount: undefined,
         },
       };
@@ -1712,6 +1730,20 @@ export default function BigIdeaPage() {
         nds.map((n) => {
           if (n.id === nodeId) {
             return { ...n, data: { ...n.data, isNot: !n.data.isNot } };
+          }
+          return n;
+        })
+      );
+    },
+    [setNodes]
+  );
+
+  const toggleMuteOnNode = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            return { ...n, data: { ...n.data, isMuted: !n.data.isMuted } };
           }
           return n;
         })
@@ -1954,6 +1986,7 @@ export default function BigIdeaPage() {
                 criteria: enrichCriteria(n.thoughtCriteria),
                 thoughtId: n.thoughtId,
                 isNot: n.isNot || false,
+                isMuted: n.isMuted || false,
                 userRenamed: n.userRenamed || false,
                 timeframe: n.thoughtTimeframe || "daily",
                 passCount: undefined,
@@ -2554,6 +2587,7 @@ export default function BigIdeaPage() {
             <MiniMap
               nodeColor={(n) => {
                 if (n.type === "results") return "hsl(var(--primary))";
+                if (n.data?.isMuted) return "hsl(var(--muted) / 0.5)";
                 if (n.data?.isNot) return "hsl(0, 80%, 50%)";
                 return "hsl(var(--muted-foreground))";
               }}
@@ -2826,6 +2860,17 @@ export default function BigIdeaPage() {
                     >
                       <Ban className="h-3 w-3" />
                       NOT {selectedNode.data.isNot ? "ON" : "OFF"}
+                    </Button>
+                    <Button
+                      variant={selectedNode.data.isMuted ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => toggleMuteOnNode(selectedNode.id)}
+                      className="gap-1"
+                      data-testid="button-toggle-mute"
+                      title="Mute this thought so the scan skips it — useful for testing different combinations without removing thoughts"
+                    >
+                      <EyeOff className="h-3 w-3" />
+                      {selectedNode.data.isMuted ? "Unmute" : "Mute"}
                     </Button>
                     <Button
                       variant="outline"

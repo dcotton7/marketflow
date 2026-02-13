@@ -1426,6 +1426,10 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
               const nodeCriteriaResults: Record<string, CriterionResult[]> = {};
 
               for (const node of sortedThoughtNodes) {
+                if (node.isMuted) {
+                  nodeResults[node.id] = true;
+                  continue;
+                }
                 const tf = node.thoughtTimeframe || "daily";
                 const candles = candlesByTimeframe[tf] || [];
                 const minBars = tf === "daily" ? 20 : 10;
