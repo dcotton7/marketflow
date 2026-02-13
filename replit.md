@@ -8,7 +8,7 @@ Preferred communication style: Simple, everyday language.
 Preferred test username: Foreboding
 Debugging rule: ALWAYS query the PRODUCTION database when investigating user-reported issues. Never use the development database for troubleshooting live app problems.
 UI rule: ALWAYS add clear ? tooltip help text to every new UI element (sliders, inputs, toggles, buttons). Use the existing PARAM_DESCRIPTIONS pattern in BigIdeaPage.tsx for indicator params. Never skip this step.
-Changelog rule: ALWAYS update CHANGELOG.md in the SAME pass as any code changes. Never treat it as a separate task. Every feature, fix, or refactor must include its changelog entry before the work is considered done.
+Changelog rule: ALWAYS update CHANGELOG.md in the SAME pass as any code changes. Never treat it as a separate task. Every feature, fix, or refactor must include its changelog entry before the work is considered done. Every changelog entry MUST include a timestamp in HH:MM UTC format appended to the section header (e.g., `### Feature Name — 18:30 UTC`).
 
 ## UI Rubric
 
