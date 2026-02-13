@@ -8,8 +8,8 @@ import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
 
 interface MarketSentiment {
   weekly: {
-    state: 1 | 0 | -1;
-    stateName: "Tailwind" | "Neutral" | "Headwind";
+    state: 1 | 0.5 | -0.5 | -1;
+    stateName: "Tailwind" | "Falling Tailwind" | "Slack" | "Headwind";
     confidence: "strong" | "moderate" | "weak";
   };
   daily: {
@@ -33,19 +33,25 @@ function getChopColor(state: "CHOPPY" | "MIXED" | "TRENDING"): string {
   return "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30";
 }
 
-function TrendIcon({ state }: { state: 1 | 0 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF" }) {
-  if (state === 1 || state === "RISK-ON") {
+function TrendIcon({ state }: { state: 1 | 0.5 | -0.5 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF" }) {
+  if (state === 1 || state === 0.5 || state === "RISK-ON") {
     return <TrendingUp className="h-3 w-3" />;
   }
-  if (state === -1 || state === "RISK-OFF") {
+  if (state === -1 || state === -0.5 || state === "RISK-OFF") {
     return <TrendingDown className="h-3 w-3" />;
   }
   return <Minus className="h-3 w-3" />;
 }
 
-function getTrendColor(state: 1 | 0 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF"): string {
+function getTrendColor(state: 1 | 0.5 | -0.5 | -1 | "RISK-ON" | "MIXED" | "RISK-OFF"): string {
   if (state === 1 || state === "RISK-ON") {
     return "bg-rs-green/20 text-rs-green border-rs-green/30";
+  }
+  if (state === 0.5) {
+    return "bg-rs-green/10 text-rs-green/80 border-rs-green/20";
+  }
+  if (state === -0.5) {
+    return "bg-rs-yellow/20 text-rs-yellow border-rs-yellow/30";
   }
   if (state === -1 || state === "RISK-OFF") {
     return "bg-rs-red/20 text-rs-red border-rs-red/30";

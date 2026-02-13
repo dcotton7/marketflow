@@ -354,49 +354,56 @@ function classifyDailyBasket(instruments: Record<string, InstrumentTrend>): Dail
   return { state, confidence, instruments, canaryTags };
 }
 
-async function fetchWeeklyTrend(): Promise<WeeklyTrend> {
-  const prices = await fetchWeeklyPrices("SPY", 50);
+async function fetchWeeklyTrend(): Promise<MMTrend> {
+  const prices = await fetchHistoricalPrices("SPY", 40);
 
-  if (prices.length < 40) {
+  if (prices.length < 25) {
     return {
       state: 0,
-      stateName: "Neutral",
+      stateName: "Slack",
       confidence: "weak",
       price: 0,
-      ma40w: 0,
-      maSlope: "flat",
-    };
+      ema21: 0,
+      emaSlope: "flat",
+    } as any;
   }
 
   const price = prices[0];
-  const ma40w = calculateMA(prices, 40);
-  const maSlope = calculateSlope(prices, 40);
+  const ema21 = calculateEMA(prices, 21);
+  const emaSlope = calculateEMASlope(prices, 21);
 
-  let state: 1 | 0 | -1;
-  let stateName: "Tailwind" | "Neutral" | "Headwind";
+  let state: 1 | 0.5 | -0.5 | -1;
+  let stateName: "Tailwind" | "Falling Tailwind" | "Slack" | "Headwind";
 
-  if (price > ma40w && (maSlope === "rising" || maSlope === "flat")) {
-    state = 1;
-    stateName = "Tailwind";
-  } else if (price < ma40w && maSlope === "falling") {
-    state = -1;
-    stateName = "Headwind";
+  if (price > ema21) {
+    if (emaSlope === "rising" || emaSlope === "flat") {
+      state = 1;
+      stateName = "Tailwind";
+    } else {
+      state = 0.5;
+      stateName = "Falling Tailwind";
+    }
   } else {
-    state = 0;
-    stateName = "Neutral";
+    if (emaSlope === "rising" || emaSlope === "flat") {
+      state = -0.5;
+      stateName = "Slack";
+    } else {
+      state = -1;
+      stateName = "Headwind";
+    }
   }
 
-  const priceDistance = Math.abs((price - ma40w) / ma40w);
+  const priceDistance = Math.abs((price - ema21) / ema21);
   let confidence: "strong" | "moderate" | "weak";
-  if (priceDistance > 0.05) {
+  if (priceDistance > 0.03) {
     confidence = "strong";
-  } else if (priceDistance > 0.02) {
+  } else if (priceDistance > 0.01) {
     confidence = "moderate";
   } else {
     confidence = "weak";
   }
 
-  return { state, stateName, confidence, price, ma40w, maSlope };
+  return { state, stateName, confidence, price, ema21, emaSlope };
 }
 
 export async function fetchMarketSentiment(): Promise<MarketSentiment> {
@@ -405,7 +412,7 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
     return sentimentCache.data;
   }
 
-  const [weekly, choppiness, ...basketPrices] = await Promise.all([
+  const [mmTrend, choppiness, ...basketPrices] = await Promise.all([
     fetchWeeklyTrend(),
     fetchChoppinessRegime(),
     ...RISK_BASKET.map((s) => fetchHistoricalPrices(s, 30)),
@@ -425,14 +432,14 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
   const daily = classifyDailyBasket(instruments);
 
   let summary: string;
-  if (weekly.state === 1 && daily.state === "RISK-ON") {
-    summary = "Strong tailwinds across weekly structure and daily execution. Favorable for longs.";
-  } else if (weekly.state === -1 && daily.state === "RISK-OFF") {
-    summary = "Headwinds at both weekly and daily levels. Defensive positioning favored.";
-  } else if (weekly.state === 1 && daily.state === "MIXED") {
-    summary = "Weekly uptrend intact but daily mixed. Selective entries on pullbacks.";
-  } else if (weekly.state === -1 && daily.state === "MIXED") {
-    summary = "Weekly downtrend with choppy daily. Reduced exposure, quick profits.";
+  if (mmTrend.state >= 0.5 && daily.state === "RISK-ON") {
+    summary = "Strong tailwinds across MM structure and daily execution. Favorable for longs.";
+  } else if (mmTrend.state <= -0.5 && daily.state === "RISK-OFF") {
+    summary = "Headwinds at both MM and daily levels. Defensive positioning favored.";
+  } else if (mmTrend.state >= 0.5 && daily.state === "MIXED") {
+    summary = "MM trend constructive but daily mixed. Selective entries on pullbacks.";
+  } else if (mmTrend.state <= -0.5 && daily.state === "MIXED") {
+    summary = "MM trend cautious with choppy daily. Reduced exposure, quick profits.";
   } else {
     summary = "Market in transition. Prioritize quality setups with tight risk management.";
   }
@@ -449,7 +456,7 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
   }
 
   const sentiment: MarketSentiment = {
-    weekly,
+    weekly: mmTrend,
     daily,
     choppiness: choppiness || undefined,
     summary,
@@ -564,54 +571,61 @@ async function fetchWeeklyPricesAsOf(symbol: string, endDate: Date, weeks: numbe
 }
 
 // Fetch weekly trend as of a historical date
-async function fetchWeeklyTrendAsOf(targetDate: Date): Promise<WeeklyTrend> {
-  const prices = await fetchWeeklyPricesAsOf("SPY", targetDate, 50);
+async function fetchWeeklyTrendAsOf(targetDate: Date): Promise<MMTrend> {
+  const prices = await fetchHistoricalPricesAsOf("SPY", targetDate, 40);
 
-  if (prices.length < 40) {
+  if (prices.length < 25) {
     return {
       state: 0,
-      stateName: "Neutral",
+      stateName: "Slack",
       confidence: "weak",
       price: 0,
-      ma40w: 0,
-      maSlope: "flat",
-    };
+      ema21: 0,
+      emaSlope: "flat",
+    } as any;
   }
 
   const price = prices[0];
-  const ma40w = calculateMA(prices, 40);
-  const maSlope = calculateSlope(prices, 40);
+  const ema21 = calculateEMA(prices, 21);
+  const emaSlope = calculateEMASlope(prices, 21);
 
-  let state: 1 | 0 | -1;
-  let stateName: "Tailwind" | "Neutral" | "Headwind";
+  let state: 1 | 0.5 | -0.5 | -1;
+  let stateName: "Tailwind" | "Falling Tailwind" | "Slack" | "Headwind";
 
-  if (price > ma40w && (maSlope === "rising" || maSlope === "flat")) {
-    state = 1;
-    stateName = "Tailwind";
-  } else if (price < ma40w && maSlope === "falling") {
-    state = -1;
-    stateName = "Headwind";
+  if (price > ema21) {
+    if (emaSlope === "rising" || emaSlope === "flat") {
+      state = 1;
+      stateName = "Tailwind";
+    } else {
+      state = 0.5;
+      stateName = "Falling Tailwind";
+    }
   } else {
-    state = 0;
-    stateName = "Neutral";
+    if (emaSlope === "rising" || emaSlope === "flat") {
+      state = -0.5;
+      stateName = "Slack";
+    } else {
+      state = -1;
+      stateName = "Headwind";
+    }
   }
 
-  const priceDistance = Math.abs((price - ma40w) / ma40w);
+  const priceDistance = Math.abs((price - ema21) / ema21);
   let confidence: "strong" | "moderate" | "weak";
-  if (priceDistance > 0.05) {
+  if (priceDistance > 0.03) {
     confidence = "strong";
-  } else if (priceDistance > 0.02) {
+  } else if (priceDistance > 0.01) {
     confidence = "moderate";
   } else {
     confidence = "weak";
   }
 
-  return { state, stateName, confidence, price, ma40w, maSlope };
+  return { state, stateName, confidence, price, ema21, emaSlope };
 }
 
 // Fetch market sentiment as of a historical date
 export async function fetchHistoricalMarketSentiment(targetDate: Date): Promise<MarketSentiment> {
-  const [weekly, ...basketPrices] = await Promise.all([
+  const [mmTrend, ...basketPrices] = await Promise.all([
     fetchWeeklyTrendAsOf(targetDate),
     ...RISK_BASKET.map((s) => fetchHistoricalPricesAsOf(s, targetDate, 30)),
   ]);
@@ -630,14 +644,14 @@ export async function fetchHistoricalMarketSentiment(targetDate: Date): Promise<
   const daily = classifyDailyBasket(instruments);
 
   let summary: string;
-  if (weekly.state === 1 && daily.state === "RISK-ON") {
-    summary = "Strong tailwinds across weekly structure and daily execution. Favorable for longs.";
-  } else if (weekly.state === -1 && daily.state === "RISK-OFF") {
-    summary = "Headwinds at both weekly and daily levels. Defensive positioning favored.";
-  } else if (weekly.state === 1 && daily.state === "MIXED") {
-    summary = "Weekly uptrend intact but daily mixed. Selective entries on pullbacks.";
-  } else if (weekly.state === -1 && daily.state === "MIXED") {
-    summary = "Weekly downtrend with choppy daily. Reduced exposure, quick profits.";
+  if (mmTrend.state >= 0.5 && daily.state === "RISK-ON") {
+    summary = "Strong tailwinds across MM structure and daily execution. Favorable for longs.";
+  } else if (mmTrend.state <= -0.5 && daily.state === "RISK-OFF") {
+    summary = "Headwinds at both MM and daily levels. Defensive positioning favored.";
+  } else if (mmTrend.state >= 0.5 && daily.state === "MIXED") {
+    summary = "MM trend constructive but daily mixed. Selective entries on pullbacks.";
+  } else if (mmTrend.state <= -0.5 && daily.state === "MIXED") {
+    summary = "MM trend cautious with choppy daily. Reduced exposure, quick profits.";
   } else {
     summary = "Market in transition. Prioritize quality setups with tight risk management.";
   }
@@ -647,7 +661,7 @@ export async function fetchHistoricalMarketSentiment(targetDate: Date): Promise<
   }
 
   return {
-    weekly,
+    weekly: mmTrend,
     daily,
     summary,
     updatedAt: targetDate,
