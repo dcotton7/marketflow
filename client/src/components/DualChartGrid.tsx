@@ -65,6 +65,7 @@ interface DualChartGridProps {
   dailyChartProps?: Record<string, any>;
   intradayChartProps?: Record<string, any>;
   testIdPrefix?: string;
+  hideTickerStrip?: boolean;
 }
 
 const TrendLineIcon = () => (
@@ -90,6 +91,7 @@ export function DualChartGrid({
   dailyChartProps = {},
   intradayChartProps = {},
   testIdPrefix = "",
+  hideTickerStrip = false,
 }: DualChartGridProps) {
   const { cssVariables } = useSystemSettings();
   const chartGridRef = useRef<HTMLDivElement>(null);
@@ -185,28 +187,28 @@ export function DualChartGrid({
 
   return (
     <>
-      {symbol && dailyData && (
+      {!hideTickerStrip && symbol && dailyData && (
         <div className="flex items-start gap-4 flex-shrink-0 mb-1 flex-wrap" data-testid={`${pid}ticker-strip`}>
           <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card">
-            <span className="font-mono font-bold text-2xl text-foreground" data-testid="text-chart-symbol">{symbol}</span>
-            <span className="text-muted-foreground text-xl">|</span>
-            <span className="font-mono font-semibold text-2xl text-foreground" data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
-            <span className="text-muted-foreground text-xl">|</span>
+            <span className="font-mono font-bold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol}</span>
+            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
+            <span className="font-mono font-semibold text-2xl" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
+            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
             <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
-            <span className="text-muted-foreground text-xl">|</span>
+            <span className="text-xl" style={{ color: cssVariables.textColorTiny }}>|</span>
             <span className={`font-mono font-bold text-2xl ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
           </div>
           {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
             <div className="flex flex-col gap-0.5 py-1" data-testid="text-company-info">
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                {chartMetrics.companyName && <span className="text-foreground font-medium">{chartMetrics.companyName}</span>}
-                {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span>·</span>}
-                {chartMetrics.sectorName && <span>{chartMetrics.sectorName}</span>}
-                {chartMetrics.sectorName && chartMetrics.industryName && <span>/</span>}
-                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span>{chartMetrics.industryName}</span>}
+              <div className="flex items-center gap-1.5 text-sm">
+                {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
+                {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
+                {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
+                {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
+                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
               </div>
               {chartMetrics.companyDescription && (
-                <p className="text-xs text-muted-foreground/80 line-clamp-3 max-w-[700px]" title={chartMetrics.companyDescription} data-testid="text-company-description">
+                <p className="text-xs line-clamp-3 max-w-[700px]" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription} data-testid="text-company-description">
                   {chartMetrics.companyDescription}
                 </p>
               )}
@@ -346,57 +348,32 @@ export function DualChartGrid({
           )}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1" style={{ minHeight: '62px' }}>
-        {chartMetrics ? (
-          <>
-            <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1" data-testid={`${pid}daily-metrics-strip`}>
-              <div><span className="text-[10px] text-muted-foreground">Market Cap</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Sales Growth 3Q YoY</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">EPS Current Q YoY</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-eps-yoy`}>{chartMetrics.epsCurrentQYoY}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Next Earnings</span><div className={`text-xs font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-foreground"}`} data-testid={`${pid}metric-next-earnings`}>{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Analyst Consensus</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-analyst-consensus`}>{chartMetrics.analystConsensus}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">PE</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-pe`}>{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Pre-Tax Margin</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-pretax-margin`}>{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Last EPS Surprise</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-eps-surprise`}>{chartMetrics.lastEpsSurprise}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Debt/Equity</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-debt-equity`}>{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Target Price</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-target-price`}>{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
-            </div>
-            <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1" data-testid={`${pid}intraday-metrics-strip`}>
-              <div><span className="text-[10px] text-muted-foreground">ADR(20) $</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">50d Ext (ADR)</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-adr`}>{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
-              <div><span className="text-[10px] text-muted-foreground">MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-muted-foreground"}`} data-testid={`${pid}metric-macd`}>{chartMetrics.macd}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">Sector</span><div className="text-xs font-medium" data-testid={`${pid}metric-sector-etf`}>{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer text-foreground underline decoration-dotted" onClick={() => handleTickerNav(chartMetrics.sectorEtf)} data-testid={`${pid}link-sector-etf`}>{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : "N/A"}</div></div>
-              <div><span className="text-[10px] text-muted-foreground">ADR(20) %</span><div className="text-xs font-medium text-foreground" data-testid={`${pid}metric-adr20-pct`}>{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
-              <div><span className="text-[10px] text-muted-foreground">20d Ext %</span><div className={`text-xs font-medium ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-20d-ext`}>{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
-              <div><span className="text-[10px] text-muted-foreground">RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
-              <div className="col-span-1"><span className="text-[10px] text-muted-foreground">Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium text-foreground truncate" data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="border border-border rounded p-2 animate-pulse">
-              <div className="grid grid-cols-5 gap-x-4 gap-y-1">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i}>
-                    <div className="h-2.5 w-16 bg-muted rounded mb-1" />
-                    <div className="h-3 w-12 bg-muted rounded" />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="border border-border rounded p-2 animate-pulse">
-              <div className="grid grid-cols-4 gap-x-4 gap-y-1">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i}>
-                    <div className="h-2.5 w-16 bg-muted rounded mb-1" />
-                    <div className="h-3 w-12 bg-muted rounded" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      {chartMetrics && (
+        <div className="grid grid-cols-2 gap-3 flex-shrink-0 mt-1">
+          <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1" data-testid={`${pid}daily-metrics-strip`}>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Market Cap</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Sales Growth 3Q YoY</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>EPS Current Q YoY</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-yoy`}>{chartMetrics.epsCurrentQYoY}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Next Earnings</span><div className={`text-xs font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : ""}`} style={chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? undefined : { color: cssVariables.textColorNormal }} data-testid={`${pid}metric-next-earnings`}>{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Analyst Consensus</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-analyst-consensus`}>{chartMetrics.analystConsensus}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>PE</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-pe`}>{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Pre-Tax Margin</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-pretax-margin`}>{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Last EPS Surprise</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-eps-surprise`}>{chartMetrics.lastEpsSurprise}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Debt/Equity</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-debt-equity`}>{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Target Price</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-target-price`}>{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
+          </div>
+          <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1" data-testid={`${pid}intraday-metrics-strip`}>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>ADR(20) $</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>50d Ext (ADR)</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-adr`}>{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : ""}`} style={chartMetrics.macd !== "Open" && chartMetrics.macd !== "Closed" ? { color: cssVariables.textColorSmall } : undefined} data-testid={`${pid}metric-macd`}>{chartMetrics.macd}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Sector</span><div className="text-xs font-medium" data-testid={`${pid}metric-sector-etf`}>{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer underline decoration-dotted" style={{ color: cssVariables.textColorNormal }} onClick={() => handleTickerNav(chartMetrics.sectorEtf)} data-testid={`${pid}link-sector-etf`}>{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : <span style={{ color: cssVariables.textColorSmall }}>N/A</span>}</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>ADR(20) %</span><div className="text-xs font-medium" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-adr20-pct`}>{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>20d Ext %</span><div className={`text-xs font-medium ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-20d-ext`}>{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
+            <div><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
+            <div className="col-span-1"><span className="text-[10px]" style={{ color: cssVariables.textColorTiny }}>Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium truncate" style={{ color: cssVariables.textColorNormal }} data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
+          </div>
+        </div>
+      )}
       <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
     </>
   );

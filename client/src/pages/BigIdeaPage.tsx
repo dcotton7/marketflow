@@ -4276,152 +4276,191 @@ function ScanChartViewer({
         </div>
       )}
       <div className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-6">
-        <div className="flex items-center gap-3 flex-shrink-0 mb-3">
-          <BarChart3 className="w-5 h-5" />
-          <Button
-            size="icon"
-            variant="outline"
-            disabled={currentIndex === 0}
-            onClick={() => onIndexChange(currentIndex - 1)}
-            data-testid="button-chart-prev"
-          >
-            <ChevronLeft className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
-          </Button>
-          <span className="text-sm text-muted-foreground" data-testid="text-chart-position">
-            {currentIndex + 1} of {results.length}
-          </span>
-          <Button
-            size="icon"
-            variant="outline"
-            disabled={currentIndex === results.length - 1}
-            onClick={() => onIndexChange(currentIndex + 1)}
-            data-testid="button-chart-next"
-          >
-            <ChevronRight className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
-          </Button>
-          <div className="flex items-center gap-1 border rounded-md px-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={`toggle-elevate ${chartRatings[symbol] === "up" ? "toggle-elevated text-rs-green" : ""}`}
-                  onClick={() => {
-                    const price = dayChange?.price ?? current?.price ?? 0;
-                    const indicatorSnapshot = current?.thoughtBreakdown || null;
-                    ratingMutation.mutate({ symbol, rating: "up", price, indicatorSnapshot });
-                  }}
-                  disabled={ratingMutation.isPending}
-                  data-testid="button-chart-thumbsup"
-                >
-                  <ThumbsUp className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-sm">Good scan result — this chart looks promising. Your ratings help AI tune scan parameters over time.</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={`toggle-elevate ${chartRatings[symbol] === "down" ? "toggle-elevated text-rs-red" : ""}`}
-                  onClick={() => {
-                    const price = dayChange?.price ?? current?.price ?? 0;
-                    const indicatorSnapshot = current?.thoughtBreakdown || null;
-                    ratingMutation.mutate({ symbol, rating: "down", price, indicatorSnapshot });
-                  }}
-                  disabled={ratingMutation.isPending}
-                  data-testid="button-chart-thumbsdown"
-                >
-                  <ThumbsDown className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-sm">Poor scan result — this chart doesn't fit what you're looking for. Helps AI learn your preferences.</p>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => {
-                  const price = dayChange?.price ?? current?.price ?? 0;
-                  window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(symbol)}&price=${price.toFixed(2)}&from=bigidea`;
-                }}
-                data-testid="button-chart-evaluate"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>Ivy AI</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => {
-                  watchlistMutation.mutate({ symbol });
-                }}
-                disabled={watchlistMutation.isPending}
-                data-testid="button-chart-watchlist"
-              >
-                <Eye className="h-3.5 w-3.5" />
-                <span>Watchlist</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-sm">Add this ticker to your Watching list for tracking</p>
-            </TooltipContent>
-          </Tooltip>
-          {(() => {
-            const ratedCount = Object.keys(chartRatings).length;
-            const total = results.length;
-            const threshold = Math.max(1, Math.ceil(total * 0.3));
-            const meetsThreshold = ratedCount >= threshold;
-            if (ratedCount === 0 && !tuningActive) return null;
-            return (
+        <div className="flex items-center justify-between gap-3 flex-shrink-0 mb-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <BarChart3 className="w-5 h-5" style={{ color: cssVariables.secondaryOverlayColor }} />
+            <Button
+              size="icon"
+              variant="outline"
+              disabled={currentIndex === 0}
+              onClick={() => onIndexChange(currentIndex - 1)}
+              data-testid="button-chart-prev"
+            >
+              <ChevronLeft className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
+            </Button>
+            <span className="text-sm" style={{ color: cssVariables.textColorSmall }} data-testid="text-chart-position">
+              {currentIndex + 1} of {results.length}
+            </span>
+            <Button
+              size="icon"
+              variant="outline"
+              disabled={currentIndex === results.length - 1}
+              onClick={() => onIndexChange(currentIndex + 1)}
+              data-testid="button-chart-next"
+            >
+              <ChevronRight className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
+            </Button>
+            <div className="flex items-center gap-1 border rounded-md px-1">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1.5 text-xs cursor-default" data-testid="text-rating-progress">
-                    <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${Math.min(100, (ratedCount / Math.max(1, total)) * 100)}%`, backgroundColor: meetsThreshold ? "hsl(var(--rs-green))" : "hsl(var(--muted-foreground) / 0.5)" }}
-                      />
-                    </div>
-                    <span className={meetsThreshold ? "text-rs-green" : "text-muted-foreground"}>
-                      {ratedCount}/{total}
-                    </span>
-                  </div>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={`toggle-elevate ${chartRatings[symbol] === "up" ? "toggle-elevated text-rs-green" : ""}`}
+                    onClick={() => {
+                      const price = dayChange?.price ?? current?.price ?? 0;
+                      const indicatorSnapshot = current?.thoughtBreakdown || null;
+                      ratingMutation.mutate({ symbol, rating: "up", price, indicatorSnapshot });
+                    }}
+                    disabled={ratingMutation.isPending}
+                    data-testid="button-chart-thumbsup"
+                  >
+                    <ThumbsUp className="h-4 w-4" />
+                  </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" className="max-w-xs">
-                  <p className="text-sm">
-                    {meetsThreshold
-                      ? `You've rated ${ratedCount} of ${total} charts — enough to commit tuning. Rate more for better AI learning.`
-                      : `Rate at least ${threshold} of ${total} charts (30%) before you can save & commit tuning changes.`}
-                  </p>
+                <TooltipContent>
+                  <p className="text-sm">Good scan result — this chart looks promising. Your ratings help AI tune scan parameters over time.</p>
                 </TooltipContent>
               </Tooltip>
-            );
-          })()}
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            data-testid="button-chart-close"
-          >
-            <X className="h-4 w-4" />
-          </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={`toggle-elevate ${chartRatings[symbol] === "down" ? "toggle-elevated text-rs-red" : ""}`}
+                    onClick={() => {
+                      const price = dayChange?.price ?? current?.price ?? 0;
+                      const indicatorSnapshot = current?.thoughtBreakdown || null;
+                      ratingMutation.mutate({ symbol, rating: "down", price, indicatorSnapshot });
+                    }}
+                    disabled={ratingMutation.isPending}
+                    data-testid="button-chart-thumbsdown"
+                  >
+                    <ThumbsDown className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-sm">Poor scan result — this chart doesn't fit what you're looking for. Helps AI learn your preferences.</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => {
+                    const price = dayChange?.price ?? current?.price ?? 0;
+                    window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(symbol)}&price=${price.toFixed(2)}&from=bigidea`;
+                  }}
+                  data-testid="button-chart-evaluate"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>Ivy AI</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => {
+                    watchlistMutation.mutate({ symbol });
+                  }}
+                  disabled={watchlistMutation.isPending}
+                  data-testid="button-chart-watchlist"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>Watchlist</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-sm">Add this ticker to your Watching list for tracking</p>
+              </TooltipContent>
+            </Tooltip>
+            {(() => {
+              const ratedCount = Object.keys(chartRatings).length;
+              const total = results.length;
+              const threshold = Math.max(1, Math.ceil(total * 0.3));
+              const meetsThreshold = ratedCount >= threshold;
+              if (ratedCount === 0 && !tuningActive) return null;
+              return (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-1.5 text-xs cursor-default" data-testid="text-rating-progress">
+                      <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${Math.min(100, (ratedCount / Math.max(1, total)) * 100)}%`, backgroundColor: meetsThreshold ? "hsl(var(--rs-green))" : "hsl(var(--muted-foreground) / 0.5)" }}
+                        />
+                      </div>
+                      <span className={meetsThreshold ? "text-rs-green" : "text-muted-foreground"}>
+                        {ratedCount}/{total}
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs">
+                    <p className="text-sm">
+                      {meetsThreshold
+                        ? `You've rated ${ratedCount} of ${total} charts — enough to commit tuning. Rate more for better AI learning.`
+                        : `Rate at least ${threshold} of ${total} charts (30%) before you can save & commit tuning changes.`}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })()}
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {dailyData && (() => {
+              const last = dailyData.candles[dailyData.candles.length - 1];
+              const prev = dailyData.candles.length >= 2 ? dailyData.candles[dailyData.candles.length - 2] : null;
+              const price = last?.close ?? 0;
+              const change = prev ? last.close - prev.close : 0;
+              const changePct = prev ? (change / prev.close) * 100 : 0;
+              const up = change >= 0;
+              return (
+                <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card" data-testid="scan-ticker-strip">
+                  <span className="font-mono font-bold text-lg" style={{ color: cssVariables.textColorHeader }}>{symbol}</span>
+                  <span style={{ color: cssVariables.textColorTiny }}>|</span>
+                  <span className="font-mono font-semibold text-lg" style={{ color: cssVariables.textColorHeader }}>${price.toFixed(2)}</span>
+                  <span style={{ color: cssVariables.textColorTiny }}>|</span>
+                  <span className={`font-mono font-bold text-lg ${up ? "text-rs-green" : "text-rs-red"}`}>{up ? "+" : ""}{change.toFixed(2)}</span>
+                  <span style={{ color: cssVariables.textColorTiny }}>|</span>
+                  <span className={`font-mono font-bold text-lg ${up ? "text-rs-green" : "text-rs-red"}`}>{up ? "+" : ""}{changePct.toFixed(2)}%</span>
+                </div>
+              );
+            })()}
+            {chartMetrics && (chartMetrics.companyName || chartMetrics.sectorName || chartMetrics.industryName) && (
+              <div className="flex flex-col gap-0 max-w-[350px]" data-testid="scan-company-info">
+                <div className="flex items-center gap-1.5 text-sm flex-wrap">
+                  {chartMetrics.companyName && <span className="font-medium" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
+                  {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span style={{ color: cssVariables.textColorTiny }}>·</span>}
+                  {chartMetrics.sectorName && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
+                  {chartMetrics.sectorName && chartMetrics.industryName && <span style={{ color: cssVariables.textColorTiny }}>/</span>}
+                  {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
+                </div>
+                {chartMetrics.companyDescription && (
+                  <p className="text-[11px] line-clamp-2" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription}>
+                    {chartMetrics.companyDescription}
+                  </p>
+                )}
+              </div>
+            )}
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              data-testid="button-chart-close"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <div className="flex items-center gap-1 flex-wrap mb-2 flex-shrink-0">
           {current?.passedPaths.map((p) => (
@@ -4527,6 +4566,7 @@ function ScanChartViewer({
           onIntradayTimeframeChange={setIntradayTimeframe}
           showETH={showETH}
           onShowETHChange={setShowETH}
+          hideTickerStrip={true}
           dailyChartProps={{
             markers: cocAnnotations.markers,
             diamondMarkers: cocAnnotations.diamondMarkers,

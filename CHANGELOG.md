@@ -6,6 +6,17 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Fix Overlay Header Layout & Admin CSS Variables — 18:19 UTC
+- **Task**: Fixed three layout regressions: (A) X close button position, (B) overlay header needs left/right split, (C) ugly gap from metrics strip skeleton
+- **Files**: `BigIdeaPage.tsx`, `DualChartGrid.tsx`
+- **Details**:
+  - Restructured BigIdea chart overlay header into two halves: left side (nav arrows, ratings, Ivy AI, Watchlist) and right side (ticker strip, company info, X close button) using `justify-between`
+  - Added `hideTickerStrip` prop to DualChartGrid so BigIdea renders ticker/company info in its own header instead of above charts — eliminates duplicate rendering
+  - Removed `minHeight: 62px` and skeleton placeholders from metrics strip — metrics now only render when data is available, no forced gap
+  - Wired admin `cssVariables` (textColorHeader, textColorNormal, textColorSmall, textColorTiny, overlayBg, secondaryOverlayColor) into ticker strip, company info, and all metrics labels — replacing hardcoded Tailwind text classes with `style={{ color: cssVariables.xxx }}`
+  - Charts page (SentinelChartsPage) continues to render ticker strip normally via DualChartGrid
+- **Status**: Complete
+
 ### Fix Trend Line Persistence & Chart Blink — 18:01 UTC
 - **Task**: Fixed two chart stability bugs: (1) metrics strip loading caused layout shift that destroyed drawn overlays, (2) multiple trend lines couldn't persist because height changes triggered full chart destruction/recreation
 - **Files**: `TradingChart.tsx`, `DualChartGrid.tsx`
