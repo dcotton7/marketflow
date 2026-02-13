@@ -1166,6 +1166,202 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       return { pass: ratio <= maxRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${fmtRecent} vs baseline ${fmtBase}` } } };
     },
   },
+  {
+    id: "PA-17",
+    name: "Wedge Pop Detection",
+    category: "Price Action",
+    description: "Oliver Kell's 'Money Pattern' — detects stocks that consolidated under declining short-term EMAs with tightening price ranges and drying volume, then broke back above those EMAs on a volume surge. The best Wedge Pops happen via a gap up through both the 10 and 20 EMA. Identifies the setup phase (wedge formation with volatility contraction and volume dry-up) and the trigger (price reclaiming EMAs on increased volume). Returns rich diagnostic data including pop type (gap/strong bar/gradual), gap %, volume ratio, wedge duration, range contraction, and position vs 200 DMA.",
+    params: [
+      { name: "emaShort", label: "Short EMA", type: "number", defaultValue: 10, min: 5, max: 50, step: 1 },
+      { name: "emaLong", label: "Long EMA", type: "number", defaultValue: 20, min: 10, max: 100, step: 1 },
+      { name: "minWedgeBars", label: "Min Wedge Bars", type: "number", defaultValue: 8, min: 3, max: 30, step: 1 },
+      { name: "maxWedgeBars", label: "Max Wedge Bars", type: "number", defaultValue: 40, min: 10, max: 80, step: 5 },
+      { name: "minVolumeRatio", label: "Min Pop Volume Ratio", type: "number", defaultValue: 1.5, min: 1.0, max: 5.0, step: 0.1 },
+      { name: "minGapPercent", label: "Min Gap %", type: "number", defaultValue: 0, min: 0, max: 10, step: 0.5 },
+      { name: "requireGap", label: "Require Gap Up", type: "boolean", defaultValue: false },
+      { name: "requireUnfilledGap", label: "Require Unfilled Gap", type: "boolean", defaultValue: false },
+      { name: "rangeContractionPct", label: "Range Contraction %", type: "number", defaultValue: 30, min: 10, max: 80, step: 5 },
+      { name: "volumeDeclinePct", label: "Volume Decline %", type: "number", defaultValue: 20, min: 5, max: 60, step: 5 },
+    ],
+    evaluate: (candles, params) => {
+      const emaShort = params.emaShort ?? 10;
+      const emaLong = params.emaLong ?? 20;
+      const minWedgeBars = params.minWedgeBars ?? 8;
+      const maxWedgeBars = params.maxWedgeBars ?? 40;
+      const minVolumeRatio = params.minVolumeRatio ?? 1.5;
+      const minGapPct = params.minGapPercent ?? 0;
+      const requireGap = params.requireGap ?? false;
+      const requireUnfilledGap = params.requireUnfilledGap ?? false;
+      const rangeContractionPct = params.rangeContractionPct ?? 30;
+      const volumeDeclinePct = params.volumeDeclinePct ?? 20;
+
+      const needed = Math.max(maxWedgeBars + emaLong + 10, 200 + 1);
+      if (candles.length < needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: 'wedge pop' } } };
+
+      const today = candles[0];
+      const prev = candles[1];
+
+      const emaShortNow = calcEMA(candles, emaShort);
+      const emaLongNow = calcEMA(candles, emaLong);
+
+      const priceAboveShortEma = today.close > emaShortNow;
+      const priceAboveLongEma = today.close > emaLongNow;
+      if (!priceAboveShortEma || !priceAboveLongEma) {
+        return { pass: false, data: { _diagnostics: { value: `close ${today.close.toFixed(2)} vs ${emaShort}e=${emaShortNow.toFixed(2)}/${emaLong}e=${emaLongNow.toFixed(2)}`, threshold: 'price must close above both EMAs' } } };
+      }
+
+      const gapPct = prev.close > 0 ? ((today.open - prev.close) / prev.close) * 100 : 0;
+      const emaShortPrev = calcEMAAt(candles, emaShort, 1);
+      const emaLongPrev = calcEMAAt(candles, emaLong, 1);
+      const gapAboveBothEmas = today.open > emaShortPrev && today.open > emaLongPrev;
+      const gapUnfilled = today.low > prev.close;
+
+      let popType: "gap" | "strong_bar" | "gradual" = "gradual";
+      if (gapAboveBothEmas && gapPct > 0.5) {
+        popType = "gap";
+      } else {
+        const prevClose = prev.close;
+        const prevBelowEma = prevClose < emaShortPrev || prevClose < emaLongPrev;
+        if (prevBelowEma && priceAboveShortEma && priceAboveLongEma) {
+          const barRange = today.high - today.low;
+          const recentRanges: number[] = [];
+          for (let i = 1; i <= 10 && i < candles.length; i++) {
+            recentRanges.push(candles[i].high - candles[i].low);
+          }
+          const avgRecentRange = recentRanges.length > 0 ? recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length : barRange;
+          if (barRange > avgRecentRange * 1.3) {
+            popType = "strong_bar";
+          }
+        }
+      }
+
+      if (requireGap && popType !== "gap") {
+        return { pass: false, data: { _diagnostics: { value: `popType=${popType}`, threshold: 'gap required' } } };
+      }
+      if (requireUnfilledGap && !(popType === "gap" && gapUnfilled)) {
+        return { pass: false, data: { _diagnostics: { value: `gap=${popType === "gap"}, unfilled=${gapUnfilled}`, threshold: 'unfilled gap required' } } };
+      }
+      if (minGapPct > 0 && gapPct < minGapPct) {
+        return { pass: false, data: { _diagnostics: { value: `gap ${gapPct.toFixed(1)}%`, threshold: `≥${minGapPct}%` } } };
+      }
+
+      let wedgeBars = 0;
+      let foundWedge = false;
+      for (let startOffset = 1; startOffset <= 5; startOffset++) {
+        for (let wb = minWedgeBars; wb <= maxWedgeBars; wb++) {
+          const wedgeEnd = startOffset + wb;
+          if (wedgeEnd >= candles.length - emaLong) break;
+
+          let belowCount = 0;
+          for (let i = startOffset; i < wedgeEnd; i++) {
+            const emaS = calcEMAAt(candles, emaShort, i);
+            const emaL = calcEMAAt(candles, emaLong, i);
+            const c = candles[i];
+            if (c.close < emaS || c.close < emaL) belowCount++;
+          }
+          if (belowCount < wb * 0.5) continue;
+
+          const emaShortWedgeStart = calcEMAAt(candles, emaShort, wedgeEnd - 1);
+          const emaShortWedgeEnd = calcEMAAt(candles, emaShort, startOffset);
+          const emaLongWedgeStart = calcEMAAt(candles, emaLong, wedgeEnd - 1);
+          const emaLongWedgeEnd = calcEMAAt(candles, emaLong, startOffset);
+          const emaShortDeclining = emaShortWedgeEnd < emaShortWedgeStart;
+          const emaLongFlat = emaLongWedgeEnd <= emaLongWedgeStart * 1.02;
+          if (!emaShortDeclining && !emaLongFlat) continue;
+
+          const halfLen = Math.floor(wb / 2);
+          let earlyRangeSum = 0;
+          let lateRangeSum = 0;
+          for (let i = wedgeEnd - halfLen; i < wedgeEnd; i++) {
+            earlyRangeSum += candles[i].high - candles[i].low;
+          }
+          for (let i = startOffset; i < startOffset + halfLen; i++) {
+            lateRangeSum += candles[i].high - candles[i].low;
+          }
+          const earlyAvgRange = earlyRangeSum / halfLen;
+          const lateAvgRange = lateRangeSum / halfLen;
+          if (earlyAvgRange === 0) continue;
+          const contraction = ((earlyAvgRange - lateAvgRange) / earlyAvgRange) * 100;
+          if (contraction < rangeContractionPct) continue;
+
+          let earlyVolSum = 0;
+          let lateVolSum = 0;
+          for (let i = wedgeEnd - halfLen; i < wedgeEnd; i++) {
+            earlyVolSum += candles[i].volume;
+          }
+          for (let i = startOffset; i < startOffset + halfLen; i++) {
+            lateVolSum += candles[i].volume;
+          }
+          const earlyAvgVol = earlyVolSum / halfLen;
+          const lateAvgVol = lateVolSum / halfLen;
+          if (earlyAvgVol === 0) continue;
+          const volDecline = ((earlyAvgVol - lateAvgVol) / earlyAvgVol) * 100;
+          if (volDecline < volumeDeclinePct) continue;
+
+          wedgeBars = wb;
+          foundWedge = true;
+          break;
+        }
+        if (foundWedge) break;
+      }
+
+      if (!foundWedge) {
+        return { pass: false, data: { _diagnostics: { value: 'no wedge formation found', threshold: `${minWedgeBars}-${maxWedgeBars} bars, ${rangeContractionPct}% contraction` } } };
+      }
+
+      let vol20Avg = 0;
+      for (let i = 1; i <= 20 && i < candles.length; i++) vol20Avg += candles[i].volume;
+      vol20Avg /= 20;
+      const volumeRatio = vol20Avg > 0 ? today.volume / vol20Avg : 0;
+      if (volumeRatio < minVolumeRatio) {
+        return { pass: false, data: { _diagnostics: { value: `vol ${volumeRatio.toFixed(1)}x`, threshold: `≥${minVolumeRatio}x` } } };
+      }
+
+      const finalHalf = Math.floor(wedgeBars / 2);
+      let finalEarlyRangeSum = 0, finalLateRangeSum = 0;
+      for (let i = 1 + wedgeBars - finalHalf; i < 1 + wedgeBars; i++) finalEarlyRangeSum += candles[i].high - candles[i].low;
+      for (let i = 1; i < 1 + finalHalf; i++) finalLateRangeSum += candles[i].high - candles[i].low;
+      const finalContraction = finalEarlyRangeSum > 0 ? ((finalEarlyRangeSum / finalHalf - finalLateRangeSum / finalHalf) / (finalEarlyRangeSum / finalHalf)) * 100 : 0;
+
+      let priceVs200dma: "above" | "near" | "below" = "below";
+      if (candles.length >= 200) {
+        const sma200 = calcSMA(candles, 200);
+        const pctFrom200 = sma200 > 0 ? ((today.close - sma200) / sma200) * 100 : 0;
+        if (pctFrom200 > 5) priceVs200dma = "above";
+        else if (pctFrom200 > -5) priceVs200dma = "near";
+      }
+
+      const diagnosticDetail = [
+        `type=${popType}`,
+        popType === "gap" ? `gap=${gapPct.toFixed(1)}%${gapUnfilled ? ' unfilled' : ' filled'}` : '',
+        `vol=${volumeRatio.toFixed(1)}x`,
+        `wedge=${wedgeBars}bars`,
+        `contraction=${finalContraction.toFixed(0)}%`,
+        `vs200dma=${priceVs200dma}`,
+      ].filter(Boolean).join(', ');
+
+      return {
+        pass: true,
+        data: {
+          wedgePopDetected: true,
+          popType,
+          gapPercent: Math.round(gapPct * 10) / 10,
+          gapFilled: popType === "gap" ? !gapUnfilled : null,
+          volumeRatio: Math.round(volumeRatio * 10) / 10,
+          wedgeBars,
+          rangeContraction: Math.round(finalContraction),
+          priceVsEmaShort: priceAboveShortEma ? "above" : "below",
+          priceVsEmaLong: priceAboveLongEma ? "above" : "below",
+          priceVs200dma,
+          _diagnostics: {
+            value: `${popType} pop, ${volumeRatio.toFixed(1)}x vol`,
+            threshold: `≥${minVolumeRatio}x vol, ${rangeContractionPct}% contraction`,
+            detail: diagnosticDetail,
+          },
+        },
+      };
+    },
+  },
 ];
 
 const RELATIVE_STRENGTH: IndicatorDefinition[] = [
