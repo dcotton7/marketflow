@@ -6,6 +6,17 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Charts Page Persistent Heading Bar — 21:05 UTC
+- **Task**: Ticker search bar was trapped inside DualChartGrid's optional upperPane — invisible until a ticker was loaded. Moved to a permanent heading row.
+- **Files**: `SentinelChartsPage.tsx`
+- **Details**:
+  - New fixed-height (48px) heading row rendered ABOVE the DualChartGrid, always visible regardless of chart state.
+  - Shows: Logo + "Charts" heading (text-rs-header, admin CSS color) + ticker search input + Go button.
+  - When a ticker is active, Ivy AI and Watchlist action buttons appear on the right.
+  - Removed `upperPane` prop from Charts page — no longer needed since the heading lives outside the grid.
+  - Empty state (no ticker) shows a centered placeholder with search icon below the heading.
+- **Status**: Complete
+
 ### 5-Pane Layout Redesign — Zero Layout Shift — 20:51 UTC
 - **Task**: Restructured DualChartGrid into a rigid 5-pane wireframe layout: Upper Pane → Nav+Info row → Charts → Fundamentals → Lower Pane
 - **Files**: `DualChartGrid.tsx`, `BigIdeaPage.tsx` (ScanChartViewer), `SentinelChartsPage.tsx`
