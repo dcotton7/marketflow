@@ -2209,7 +2209,9 @@ export default function BigIdeaPage() {
           >
             <SelectTrigger className="w-44" data-testid="select-load-idea">
               <div className="flex items-center gap-1.5">
-                <Lightbulb className="h-3.5 w-3.5 text-rs-amber flex-shrink-0" />
+                <span className="bulb-glow-badge-sm flex-shrink-0">
+                  <Lightbulb className="h-3.5 w-3.5 bulb-glow-icon" />
+                </span>
                 <SelectValue placeholder="Load Idea..." />
               </div>
             </SelectTrigger>
@@ -2232,10 +2234,13 @@ export default function BigIdeaPage() {
           <div className="p-3 border-b">
             <Button
               onClick={() => setAiDialogOpen(true)}
-              className="w-full gap-2 h-10 text-sm font-semibold"
+              size="lg"
+              className="w-full gap-2.5 text-sm font-semibold"
               data-testid="button-create-new-idea"
             >
-              <Lightbulb className="h-4 w-4" />
+              <span className="bulb-glow-badge">
+                <Lightbulb className="h-5 w-5 bulb-glow-icon" />
+              </span>
               Create New Idea
             </Button>
           </div>
