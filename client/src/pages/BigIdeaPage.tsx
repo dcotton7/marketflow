@@ -125,7 +125,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   baselineBars: "Window of bars used as the 'normal' baseline to compare against. When connected to Base Detection (PA-3), this automatically uses each stock's detected base length instead. Without a connection, uses this static value.",
   baselinePeriod: "Earlier bars used as baseline. More bars = broader comparison; fewer = more recent baseline.",
   threshold: "Min change % to trigger. Lower = looser (catches smaller moves); higher = tighter (needs bigger moves).",
-  minRatio: "Min up/down volume ratio. Lower = looser (accepts mixed volume); higher = tighter (needs strong buy pressure).",
+  minRatio: "Min up/down volume ratio. >1.0 = accumulation (more buying than selling); <1.0 = distribution (more selling). 1.2 = mild buying; 1.5+ = strong institutional demand. Lower = looser; higher = tighter.",
   maxRatio: "Maximum allowed ratio of recent activity vs the baseline 'normal'. For Tightness Ratio (PA-14): compares recent daily candle size to historical average — 0.5 = candles are half their normal size (very tight); 0.8 = slightly compressed; 1.0 = no compression at all. For Volume Fade (PA-16): compares recent volume to historical average — 0.5 = volume is half of normal (very quiet); 0.9 = slightly below normal. Lower = stricter, fewer results.",
   ratioPeriod: "Bars for volume ratio calculation. More = smoother; fewer = more recent snapshot.",
   consolidationDays: "Min bars in the consolidation range. Fewer = looser; more = tighter (needs longer consolidation).",
@@ -184,7 +184,7 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   priceUp: "Require price to close up on the signal bar.",
   minOutperformance: "Min outperformance vs benchmark (%). Lower = looser; higher = tighter.",
   minScore: "Min composite score. Lower = looser (more results); higher = tighter (only best).",
-  maxMultiple: "Max volume multiple. Higher = looser; lower = tighter cap.",
+  maxMultiple: "Max volume vs 50-day average. For Volume Dry-Up (VOL-4): 0.5 = volume must be half of normal (very quiet); 0.8 = slightly below average. Lower = stricter (needs quieter volume); higher = looser.",
   minATR: "Min ATR value. Lower = looser; higher = needs more volatility.",
   maxATR: "Max ATR value. Higher = looser; lower = tighter (calmer stocks only).",
   maPeriod: "Moving average period used in the calculation. For Pullback to Level (PA-8): the MA line the stock is pulling back to (21 = 21-day EMA, a popular support level).",
@@ -2686,7 +2686,7 @@ export default function BigIdeaPage() {
                             Auto-name
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[200px] text-xs">
+                        <TooltipContent side="left" className="max-w-[200px] text-xs">
                           Generate a name from the active criteria. Clears any custom name you set.
                         </TooltipContent>
                       </Tooltip>
@@ -2838,7 +2838,7 @@ export default function BigIdeaPage() {
                                 <TooltipTrigger asChild>
                                   <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" />
                                 </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-[260px] text-xs">
+                                <TooltipContent side="left" className="max-w-[260px] text-xs">
                                   Override which candle timeframe this criterion evaluates against. Use "daily" on an intraday thought to check daily-level conditions like the daily 50 SMA.
                                 </TooltipContent>
                               </Tooltip>
@@ -2877,7 +2877,7 @@ export default function BigIdeaPage() {
                                     <TooltipTrigger asChild>
                                       <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`help-${param.name}`} />
                                     </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-[260px] text-xs">
+                                    <TooltipContent side="left" className="max-w-[260px] text-xs">
                                       {PARAM_DESCRIPTIONS[param.name]}
                                     </TooltipContent>
                                   </Tooltip>
@@ -2905,7 +2905,7 @@ export default function BigIdeaPage() {
                                         {isLinked ? "Linked" : "Manual"}
                                       </button>
                                     </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-[280px] text-xs">
+                                    <TooltipContent side="left" className="max-w-[280px] text-xs">
                                       {isLinked
                                         ? "This value is auto-synced from a companion base indicator on the canvas. Click to switch to manual entry."
                                         : "Click to auto-link this value to a base indicator on the canvas."}
@@ -3168,7 +3168,7 @@ export default function BigIdeaPage() {
                                     <TooltipTrigger asChild>
                                       <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`ai-help-${param.name}-${tIdx}-${idx}`} />
                                     </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-[260px] text-xs">
+                                    <TooltipContent side="left" className="max-w-[260px] text-xs">
                                       {PARAM_DESCRIPTIONS[param.name]}
                                     </TooltipContent>
                                   </Tooltip>

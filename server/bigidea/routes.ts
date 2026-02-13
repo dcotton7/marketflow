@@ -5,6 +5,7 @@ import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
 import { evaluateScanQuality } from "./quality";
+import { getUniverseTickers } from "./universes";
 import OpenAI from "openai";
 import * as tiingo from "../tiingo";
 
@@ -59,67 +60,6 @@ function buildMarketRegimeSnapshot(sentiment: any): any {
   };
 }
 
-function getUniverseTickers(universe: string): string[] {
-  switch (universe) {
-    case "dow30":
-      return [
-        "AAPL","AMGN","AXP","BA","CAT","CRM","CSCO","CVX","DIS","DOW",
-        "GS","HD","HON","IBM","INTC","JNJ","JPM","KO","MCD","MMM",
-        "MRK","MSFT","NKE","PG","TRV","UNH","V","VZ","WBA","WMT"
-      ];
-    case "nasdaq100":
-      return [
-        "AAPL","ABNB","ADBE","ADI","ADP","ADSK","AEP","AMAT","AMGN","AMZN",
-        "ANSS","ARM","ASML","AVGO","AZN","BIIB","BKNG","BKR","CCEP","CDNS",
-        "CDW","CEG","CHTR","CMCSA","COST","CPRT","CRWD","CSGP","CTAS","CTSH",
-        "DASH","DDOG","DLTR","DXCM","EA","EXC","FANG","FAST","FTNT","GEHC",
-        "GFS","GILD","GOOG","GOOGL","HON","IDXX","ILMN","INTC","INTU","ISRG",
-        "KDP","KHC","KLAC","LIN","LRCX","LULU","MAR","MCHP","MDB","MDLZ",
-        "MELI","META","MNST","MRNA","MRVL","MSFT","MU","NFLX","NVDA","NXPI",
-        "ODFL","ON","ORLY","PANW","PAYX","PCAR","PDD","PEP","PYPL","QCOM",
-        "REGN","ROP","ROST","SBUX","SNPS","SPLK","TEAM","TMUS","TSLA","TTD",
-        "TTWO","TXN","VRSK","VRTX","WBD","WDAY","XEL","ZM","ZS"
-      ];
-    case "sp500":
-      return [
-        "AAPL","MSFT","AMZN","NVDA","GOOGL","META","TSLA","BRK.B","UNH","JNJ",
-        "XOM","JPM","V","PG","MA","HD","CVX","MRK","ABBV","LLY",
-        "PEP","KO","AVGO","COST","TMO","MCD","WMT","CSCO","ABT","CRM",
-        "ACN","DHR","NEE","LIN","TXN","AMD","ADBE","PM","WFC","NFLX",
-        "UPS","RTX","ORCL","HON","INTC","LOW","QCOM","BA","AMGN","IBM",
-        "AMAT","CAT","GE","SBUX","MS","BLK","DE","GS","ISRG","MDLZ",
-        "ADP","GILD","ADI","BKNG","VRTX","PLD","MMC","SYK","REGN","SCHW",
-        "CB","LRCX","C","ZTS","TMUS","MO","CI","EOG","SO","DUK",
-        "BDX","CME","BSX","CL","PGR","SLB","FIS","HUM","MCK","SNPS",
-        "PYPL","EQIX","APD","AON","MU","ITW","ICE","KLAC","SHW","CDNS"
-      ];
-    case "russell2000":
-      return [
-        "AAON","AAXN","ABCB","ABTX","ACAD","ACIA","ACLS","AEIS","AERI","AGYS",
-        "AIMC","AJRD","ALGT","AMED","AMPH","AMWD","ANAT","ANGO","APOG","AQUA",
-        "ARCB","ARCO","ARES","ARLO","ARNC","AROC","ARWR","ASGN","ASTE","ATEX",
-        "ATKR","AVAV","AVNS","AXNX","AYI","BBSI","BCEI","BCPC","BCRX","BEAT",
-        "BHF","BJRI","BL","BLKB","BMCH","BOOT","BRKR","BSIG","BWA","CALX",
-        "CARG","CARS","CASA","CATY","CBRL","CBU","CCB","CCOI","CENX","CERS",
-        "CHCO","CHE","CHGG","CHH","CIEN","CIVB","CLBK","CLDX","CLNE","CLVS",
-        "CMP","CNMD","CNNE","COHU","COLM","CONN","CORE","CORT","CRC","CREE",
-        "CRK","CROX","CRS","CRVL","CSGP","CSII","CSWI","CTRE","CUBI","CVCO",
-        "CVI","CVLT","CW","CWST","DCOM","DIOD","DLB","DNLI","DORM","DRH",
-        "EAT","EBS","ECHO","EGP","EGOV","ELVT","ENSG","EPRT","ERF","ESGR",
-        "ESSE","EVBG","EVRI","EXLS","EXPO","FARO","FATE","FBNC","FBP","FCFS",
-        "FELE","FHB","FIBK","FIVE","FIVN","FLGT","FLR","FMBI","FNB","FOLD",
-        "FORM","FOXF","FRME","FSS","FSTR","FTDR","FUL","GBX","GDEN","GEO",
-        "GKOS","GLNG","GNRC","GNTX","GPI","GRWG","GTY","GWRE","HAIN","HALO",
-        "HAYW","HBI","HCAT","HCSG","HELE","HESM","HHC","HIBB","HLI","HLNE",
-        "HMN","HNI","HOMB","HP","HQY","HRI","HUBG","HWC","IAA","IART",
-        "ICFI","ICUI","IIVI","INDB","INGN","INTA","IOSP","IPAR","IRWD","ITCI",
-        "JBT","JBGS","JCOM","KFRC","KMT","KNX","KREF","KWR","LANC","LBRT",
-        "LFUS","LGIH","LHCG","LIVN","LKFN","LNTH","LOPE","LPRO","LSTR","MATX"
-      ];
-    default:
-      return [];
-  }
-}
 
 function getIntervalConfig(timeframe: string): { interval: string; lookbackDays: number; cacheTTL: number } {
   switch (timeframe) {
