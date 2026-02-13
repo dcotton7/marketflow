@@ -4239,9 +4239,11 @@ function ScanChartViewer({
 
     for (const thought of current.thoughtBreakdown) {
       if (!thought.pass) continue;
+      const hasBase = thought.criteriaResults.some((cr: any) => cr.pass && (cr.indicatorId === "PA-3" || cr.indicatorId === "PA-4"));
       for (const cr of thought.criteriaResults) {
         if (!cr.pass || !cr.cocHighlight) continue;
         const h = cr.cocHighlight;
+        if (hasBase && cr.indicatorId !== "PA-3" && cr.indicatorId !== "PA-4") continue;
 
         if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
           if (dailyData) {
