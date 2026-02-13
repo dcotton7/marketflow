@@ -6,6 +6,19 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-13
 
+### Admin Font Size Controls + Nav Pane Redesign — 21:25 UTC
+- **Task**: Add admin-configurable font sizes per text tier, double nav pane height for company info, move Ivy AI/Watchlist to nav pane, add close button to Charts page
+- **Files**: `shared/schema.ts`, `SystemSettingsContext.tsx`, `SentinelAdminPage.tsx`, `DualChartGrid.tsx`, `SentinelChartsPage.tsx`, `server/sentinel/routes.ts`
+- **Details**:
+  - **Schema**: Added 6 font size columns to `sentinel_system_settings` (fontSizeTitle=1.5rem, fontSizeHeader=1.125rem, fontSizeSection=1rem, fontSizeNormal=0.875rem, fontSizeSmall=0.8125rem, fontSizeTiny=0.75rem)
+  - **SystemSettingsContext**: Exposed all 6 font size values in cssVariables object
+  - **Admin Panel**: Each text tier row now has a size dropdown (10px-36px) alongside the color picker. "Sample" text renders at both the chosen color AND size for live preview.
+  - **Nav Pane doubled**: NAV_INFO_H increased from 38px to 76px. Company name now uses fontSizeHeader (larger), sector/industry on own line with fontSizeSmall, description gets line-clamp-2 with fontSizeTiny.
+  - **Ivy AI & Watchlist**: Moved from Charts heading bar into navExtra prop — now renders in the nav pane next to the ticker widget, matching scanner behavior.
+  - **Close button**: X button added to Charts page heading bar to clear the active ticker and return to empty state.
+  - **Routes**: GET/PATCH system settings endpoints updated to include all 6 font size fields.
+- **Status**: Complete
+
 ### Charts Page Persistent Heading Bar — 21:05 UTC
 - **Task**: Ticker search bar was trapped inside DualChartGrid's optional upperPane — invisible until a ticker was loaded. Moved to a permanent heading row.
 - **Files**: `SentinelChartsPage.tsx`

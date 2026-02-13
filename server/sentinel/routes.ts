@@ -1640,6 +1640,12 @@ export function registerSentinelRoutes(app: Express): void {
         textColorNormal: "#ffffff",
         textColorSmall: "#a1a1aa",
         textColorTiny: "#71717a",
+        fontSizeTitle: "1.5rem",
+        fontSizeHeader: "1.125rem",
+        fontSizeSection: "1rem",
+        fontSizeNormal: "0.875rem",
+        fontSizeSmall: "0.8125rem",
+        fontSizeTiny: "0.75rem",
       });
     } catch (error) {
       console.error("Get system settings error:", error);
@@ -1654,7 +1660,9 @@ export function registerSentinelRoutes(app: Express): void {
         overlayColor, overlayTransparency, backgroundColor, logoTransparency,
         secondaryOverlayColor,
         textColorTitle, textColorHeader, textColorSection,
-        textColorNormal, textColorSmall, textColorTiny
+        textColorNormal, textColorSmall, textColorTiny,
+        fontSizeTitle, fontSizeHeader, fontSizeSection,
+        fontSizeNormal, fontSizeSmall, fontSizeTiny,
       } = req.body;
       const settings = await sentinelModels.upsertSystemSettings(req.session.userId!, {
         overlayColor,
@@ -1664,6 +1672,8 @@ export function registerSentinelRoutes(app: Express): void {
         secondaryOverlayColor,
         textColorTitle, textColorHeader, textColorSection,
         textColorNormal, textColorSmall, textColorTiny,
+        fontSizeTitle, fontSizeHeader, fontSizeSection,
+        fontSizeNormal, fontSizeSmall, fontSizeTiny,
       });
       res.json(settings);
     } catch (error) {

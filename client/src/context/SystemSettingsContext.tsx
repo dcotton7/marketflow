@@ -13,6 +13,12 @@ interface SystemSettings {
   textColorNormal: string;
   textColorSmall: string;
   textColorTiny: string;
+  fontSizeTitle: string;
+  fontSizeHeader: string;
+  fontSizeSection: string;
+  fontSizeNormal: string;
+  fontSizeSmall: string;
+  fontSizeTiny: string;
 }
 
 const defaultSettings: SystemSettings = {
@@ -27,6 +33,12 @@ const defaultSettings: SystemSettings = {
   textColorNormal: "#ffffff",
   textColorSmall: "#a1a1aa",
   textColorTiny: "#71717a",
+  fontSizeTitle: "1.5rem",
+  fontSizeHeader: "1.125rem",
+  fontSizeSection: "1rem",
+  fontSizeNormal: "0.875rem",
+  fontSizeSmall: "0.8125rem",
+  fontSizeTiny: "0.75rem",
 };
 
 interface SystemSettingsContextType {
@@ -43,6 +55,12 @@ interface SystemSettingsContextType {
     textColorNormal: string;
     textColorSmall: string;
     textColorTiny: string;
+    fontSizeTitle: string;
+    fontSizeHeader: string;
+    fontSizeSection: string;
+    fontSizeNormal: string;
+    fontSizeSmall: string;
+    fontSizeTiny: string;
   };
 }
 
@@ -60,6 +78,12 @@ const SystemSettingsContext = createContext<SystemSettingsContextType>({
     textColorNormal: defaultSettings.textColorNormal,
     textColorSmall: defaultSettings.textColorSmall,
     textColorTiny: defaultSettings.textColorTiny,
+    fontSizeTitle: defaultSettings.fontSizeTitle,
+    fontSizeHeader: defaultSettings.fontSizeHeader,
+    fontSizeSection: defaultSettings.fontSizeSection,
+    fontSizeNormal: defaultSettings.fontSizeNormal,
+    fontSizeSmall: defaultSettings.fontSizeSmall,
+    fontSizeTiny: defaultSettings.fontSizeTiny,
   }
 });
 
@@ -91,6 +115,12 @@ export function SystemSettingsProvider({ children }: SystemSettingsProviderProps
     textColorNormal: currentSettings.textColorNormal || defaultSettings.textColorNormal,
     textColorSmall: currentSettings.textColorSmall || defaultSettings.textColorSmall,
     textColorTiny: currentSettings.textColorTiny || defaultSettings.textColorTiny,
+    fontSizeTitle: currentSettings.fontSizeTitle || defaultSettings.fontSizeTitle,
+    fontSizeHeader: currentSettings.fontSizeHeader || defaultSettings.fontSizeHeader,
+    fontSizeSection: currentSettings.fontSizeSection || defaultSettings.fontSizeSection,
+    fontSizeNormal: currentSettings.fontSizeNormal || defaultSettings.fontSizeNormal,
+    fontSizeSmall: currentSettings.fontSizeSmall || defaultSettings.fontSizeSmall,
+    fontSizeTiny: currentSettings.fontSizeTiny || defaultSettings.fontSizeTiny,
   };
 
   return (

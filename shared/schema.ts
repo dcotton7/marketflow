@@ -589,6 +589,12 @@ export const sentinelSystemSettings = pgTable("sentinel_system_settings", {
   textColorNormal: text("text_color_normal").default("#ffffff"),
   textColorSmall: text("text_color_small").default("#a1a1aa"),
   textColorTiny: text("text_color_tiny").default("#71717a"),
+  fontSizeTitle: text("font_size_title").default("1.5rem"),
+  fontSizeHeader: text("font_size_header").default("1.125rem"),
+  fontSizeSection: text("font_size_section").default("1rem"),
+  fontSizeNormal: text("font_size_normal").default("0.875rem"),
+  fontSizeSmall: text("font_size_small").default("0.8125rem"),
+  fontSizeTiny: text("font_size_tiny").default("0.75rem"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

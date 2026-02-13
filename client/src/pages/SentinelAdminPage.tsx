@@ -117,6 +117,12 @@ interface SystemSettings {
   textColorNormal: string;
   textColorSmall: string;
   textColorTiny: string;
+  fontSizeTitle: string;
+  fontSizeHeader: string;
+  fontSizeSection: string;
+  fontSizeNormal: string;
+  fontSizeSmall: string;
+  fontSizeTiny: string;
 }
 
 interface AdminUser {
@@ -285,6 +291,12 @@ function SystemSettingsTab() {
     textColorNormal: "#ffffff",
     textColorSmall: "#a1a1aa",
     textColorTiny: "#71717a",
+    fontSizeTitle: "1.5rem",
+    fontSizeHeader: "1.125rem",
+    fontSizeSection: "1rem",
+    fontSizeNormal: "0.875rem",
+    fontSizeSmall: "0.8125rem",
+    fontSizeTiny: "0.75rem",
   });
 
   const { data: settings, isLoading } = useQuery<SystemSettings>({
@@ -427,36 +439,61 @@ function SystemSettingsTab() {
         </div>
 
         <div className="border-t pt-6">
-          <h3 className="text-lg font-semibold mb-1">Text Colors</h3>
-          <p className="text-sm text-muted-foreground mb-4">Customize the text color hierarchy across the interface</p>
+          <h3 className="text-lg font-semibold mb-1">Text Colors & Sizes</h3>
+          <p className="text-sm text-muted-foreground mb-4">Customize the text color and size hierarchy across the interface</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {([
-              { key: "textColorTitle" as const, label: "Title", desc: "Largest text, page titles" },
-              { key: "textColorHeader" as const, label: "Header", desc: "Page headers, major sections" },
-              { key: "textColorSection" as const, label: "Section Header", desc: "Sub-section labels" },
-              { key: "textColorNormal" as const, label: "Normal", desc: "Standard reading text" },
-              { key: "textColorSmall" as const, label: "Small", desc: "Supplementary info" },
-              { key: "textColorTiny" as const, label: "Tiny", desc: "Timestamps, debug info" },
+              { colorKey: "textColorTitle" as const, sizeKey: "fontSizeTitle" as const, label: "Title", desc: "Largest text, page titles" },
+              { colorKey: "textColorHeader" as const, sizeKey: "fontSizeHeader" as const, label: "Header", desc: "Page headers, major sections" },
+              { colorKey: "textColorSection" as const, sizeKey: "fontSizeSection" as const, label: "Section Header", desc: "Sub-section labels" },
+              { colorKey: "textColorNormal" as const, sizeKey: "fontSizeNormal" as const, label: "Normal", desc: "Standard reading text" },
+              { colorKey: "textColorSmall" as const, sizeKey: "fontSizeSmall" as const, label: "Small", desc: "Supplementary info" },
+              { colorKey: "textColorTiny" as const, sizeKey: "fontSizeTiny" as const, label: "Tiny", desc: "Timestamps, debug info" },
             ]).map((item) => (
-              <div key={item.key} className="space-y-2">
+              <div key={item.colorKey} className="space-y-2">
                 <Label className="text-sm font-medium">{item.label}</Label>
                 <p className="text-xs text-muted-foreground">{item.desc}</p>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
                     type="color"
-                    value={localSettings[item.key]}
-                    onChange={(e) => setLocalSettings(prev => ({ ...prev, [item.key]: e.target.value }))}
-                    className="w-10 h-8 rounded border cursor-pointer"
-                    data-testid={`input-${item.key}`}
+                    value={localSettings[item.colorKey]}
+                    onChange={(e) => setLocalSettings(prev => ({ ...prev, [item.colorKey]: e.target.value }))}
+                    className="w-10 h-8 rounded border cursor-pointer flex-shrink-0"
+                    data-testid={`input-${item.colorKey}`}
                   />
                   <Input
-                    value={localSettings[item.key]}
-                    onChange={(e) => setLocalSettings(prev => ({ ...prev, [item.key]: e.target.value }))}
+                    value={localSettings[item.colorKey]}
+                    onChange={(e) => setLocalSettings(prev => ({ ...prev, [item.colorKey]: e.target.value }))}
                     className="w-24 font-mono text-xs"
-                    data-testid={`input-${item.key}-text`}
+                    data-testid={`input-${item.colorKey}-text`}
                   />
-                  <span className="text-sm" style={{ color: localSettings[item.key] }}>Sample</span>
+                  <Select
+                    value={localSettings[item.sizeKey]}
+                    onValueChange={(val) => setLocalSettings(prev => ({ ...prev, [item.sizeKey]: val }))}
+                  >
+                    <SelectTrigger className="w-24 text-xs" data-testid={`select-${item.sizeKey}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0.625rem">10px</SelectItem>
+                      <SelectItem value="0.75rem">12px</SelectItem>
+                      <SelectItem value="0.8125rem">13px</SelectItem>
+                      <SelectItem value="0.875rem">14px</SelectItem>
+                      <SelectItem value="1rem">16px</SelectItem>
+                      <SelectItem value="1.125rem">18px</SelectItem>
+                      <SelectItem value="1.25rem">20px</SelectItem>
+                      <SelectItem value="1.5rem">24px</SelectItem>
+                      <SelectItem value="1.875rem">30px</SelectItem>
+                      <SelectItem value="2.25rem">36px</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
+                <span
+                  style={{ color: localSettings[item.colorKey], fontSize: localSettings[item.sizeKey] }}
+                  data-testid={`sample-${item.colorKey}`}
+                >
+                  Sample
+                </span>
               </div>
             ))}
           </div>

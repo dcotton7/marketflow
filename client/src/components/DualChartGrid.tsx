@@ -51,7 +51,7 @@ export const formatMarketCap = (mc: number) => {
 };
 
 const UPPER_PANE_H = 40;
-const NAV_INFO_H = 38;
+const NAV_INFO_H = 76;
 const CHART_TOOLBAR_H = 28;
 const FUND_H = 58;
 const LOWER_PANE_H = 24;
@@ -233,18 +233,19 @@ export function DualChartGrid({
           {navExtra}
         </div>
 
-        <div className="flex items-center gap-1.5 text-sm overflow-hidden whitespace-nowrap" data-testid={`${pid}info-pane`}>
+        <div className="flex items-start gap-1.5 overflow-hidden" data-testid={`${pid}info-pane`}>
           {chartMetrics ? (
-            <div className="flex flex-col gap-0 overflow-hidden">
-              <div className="flex items-center gap-1.5 overflow-hidden">
-                {chartMetrics.companyName && <span className="font-medium truncate" style={{ color: cssVariables.textColorNormal }}>{chartMetrics.companyName}</span>}
-                {chartMetrics.companyName && (chartMetrics.sectorName || chartMetrics.industryName) && <span className="flex-shrink-0" style={{ color: cssVariables.textColorTiny }}>·</span>}
-                {chartMetrics.sectorName && <span className="flex-shrink-0" style={{ color: cssVariables.textColorSmall }}>{chartMetrics.sectorName}</span>}
-                {chartMetrics.sectorName && chartMetrics.industryName && <span className="flex-shrink-0" style={{ color: cssVariables.textColorTiny }}>/</span>}
-                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span className="flex-shrink-0" style={{ color: cssVariables.textColorSmall }}>{chartMetrics.industryName}</span>}
+            <div className="flex flex-col gap-0.5 overflow-hidden">
+              <div className="flex items-center gap-1.5 overflow-hidden flex-wrap">
+                {chartMetrics.companyName && <span className="font-semibold truncate" style={{ color: cssVariables.textColorHeader, fontSize: cssVariables.fontSizeHeader }}>{chartMetrics.companyName}</span>}
+              </div>
+              <div className="flex items-center gap-1.5 overflow-hidden flex-wrap">
+                {chartMetrics.sectorName && <span className="flex-shrink-0" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>{chartMetrics.sectorName}</span>}
+                {chartMetrics.sectorName && chartMetrics.industryName && <span className="flex-shrink-0" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>/</span>}
+                {chartMetrics.industryName && chartMetrics.industryName !== "Unknown" && <span className="flex-shrink-0" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>{chartMetrics.industryName}</span>}
               </div>
               {chartMetrics.companyDescription && (
-                <p className="text-[10px] line-clamp-1 overflow-hidden" style={{ color: cssVariables.textColorTiny }} title={chartMetrics.companyDescription}>
+                <p className="line-clamp-2 overflow-hidden leading-tight" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }} title={chartMetrics.companyDescription}>
                   {chartMetrics.companyDescription}
                 </p>
               )}
