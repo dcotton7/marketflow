@@ -2607,6 +2607,96 @@ export default function BigIdeaPage() {
                     </p>
                   </div>
 
+                  {scanResults.length === 0 && (() => {
+                    const thoughtNodes = nodes.filter((n) => n.type === "thought");
+                    const resultsNodeId = nodes.find((n) => n.type === "results")?.id;
+                    if (!resultsNodeId || thoughtNodes.length < 2) return null;
+                    const indicatorGroups = new Map<string, string[]>();
+                    for (const t of thoughtNodes) {
+                      const criteria = (t.data.criteria as any[]) || [];
+                      if (criteria.length === 1) {
+                        const indId = criteria[0].indicatorId;
+                        if (!indicatorGroups.has(indId)) indicatorGroups.set(indId, []);
+                        indicatorGroups.get(indId)!.push(t.id);
+                      }
+                    }
+                    const candidateGroups: { ids: string[]; names: string[] }[] = [];
+                    for (const [, ids] of Array.from(indicatorGroups.entries())) {
+                      if (ids.length >= 2) {
+                        const allAnd = ids.every((id: string) => {
+                          const edge = edges.find((e) => e.source === id && e.target === resultsNodeId);
+                          return !edge || (edge.data?.logicType || "AND") === "AND";
+                        });
+                        if (allAnd) {
+                          candidateGroups.push({
+                            ids,
+                            names: ids.map((id: string) => (nodes.find((n) => n.id === id)?.data.label as string) || id),
+                          });
+                        }
+                      }
+                    }
+                    if (candidateGroups.length === 0) return null;
+                    const switchToOr = (nodeIds: string[]) => {
+                      setEdges((eds) => {
+                        const updated = eds.map((e) => {
+                          if (nodeIds.includes(e.source) && e.target === resultsNodeId) {
+                            return { ...e, data: { ...e.data, logicType: "OR" } };
+                          }
+                          return e;
+                        });
+                        const existingSources = new Set(updated.filter((e) => e.target === resultsNodeId).map((e) => e.source));
+                        const newEdges: Edge[] = [];
+                        for (const nid of nodeIds) {
+                          if (!existingSources.has(nid)) {
+                            const edgeId = `e-${nid}-${resultsNodeId}-or`;
+                            newEdges.push({
+                              id: edgeId,
+                              source: nid,
+                              target: resultsNodeId!,
+                              type: "logic",
+                              data: {
+                                logicType: "OR",
+                                onToggle: () => {
+                                  setEdges((es) =>
+                                    es.map((e2) => {
+                                      if (e2.id === edgeId) {
+                                        const cur = e2.data?.logicType === "AND" ? "OR" : "AND";
+                                        return { ...e2, data: { ...e2.data, logicType: cur } };
+                                      }
+                                      return e2;
+                                    })
+                                  );
+                                },
+                                onDelete: () => setEdges((es) => es.filter((e2) => e2.id !== edgeId)),
+                              },
+                            });
+                          }
+                        }
+                        return [...updated, ...newEdges];
+                      });
+                    };
+                    return (
+                      <div className="rounded-md border border-rs-amber/30 bg-rs-amber/5 p-2 text-xs space-y-1.5" data-testid="or-suggestion-hint">
+                        <p className="text-rs-amber font-medium">Similar thoughts are all AND-connected</p>
+                        <p className="text-muted-foreground">These look like alternatives — a stock can only be near one MA at a time. Switch to OR so any one match counts.</p>
+                        {candidateGroups.map((g, i) => (
+                          <div key={i} className="flex items-center gap-2 flex-wrap">
+                            <span className="text-muted-foreground">{g.names.join(", ")}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 text-xs px-2"
+                              data-testid={`button-switch-or-${i}`}
+                              onClick={() => switchToOr(g.ids)}
+                            >
+                              Switch to OR
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex items-center gap-2">
                     <Button
                       variant="ghost"

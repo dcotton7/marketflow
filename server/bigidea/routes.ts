@@ -962,6 +962,8 @@ This should produce 5+ thoughts:
 
 When the user IS specific (e.g., "pulled back to the 21 EMA"), do NOT expand — just use the specified value in a single thought.
 
+CRITICAL: You MUST return an "edges" array in your JSON response. If you omit edges, ALL thoughts auto-connect to Results with AND logic, which is WRONG for alternative thoughts. When you have 2+ thoughts that represent alternatives (same indicator, different params), you MUST include explicit OR edges for them. NEVER rely on the default — always return edges.
+
 EDGE FORMAT WITH LOGIC TYPE:
 Each edge can optionally include a logicType field:
 { "from": "A", "to": "RESULTS", "logicType": "OR" }
@@ -1062,6 +1064,29 @@ Select the most appropriate indicators and set parameters that match the user's 
           console.log(`[BigIdea AI] Auto-split thought "${thought.name}" — provider/consumer violation fixed`);
         } else {
           fixedThoughts.push(thought);
+        }
+      }
+
+      const indicatorGroups = new Map<string, string[]>();
+      for (const thought of fixedThoughts) {
+        const criteria = thought.criteria || [];
+        if (criteria.length === 1) {
+          const indId = criteria[0].indicatorId;
+          if (!indicatorGroups.has(indId)) indicatorGroups.set(indId, []);
+          indicatorGroups.get(indId)!.push(thought.thoughtKey);
+        }
+      }
+      for (const [indId, keys] of Array.from(indicatorGroups.entries())) {
+        if (keys.length >= 2) {
+          const hasAnyExplicitEdge = keys.some((k: string) =>
+            fixedEdges.some((e: any) => e.from === k)
+          );
+          if (!hasAnyExplicitEdge) {
+            for (const key of keys) {
+              fixedEdges.push({ from: key, to: "RESULTS", logicType: "OR" });
+            }
+            console.log(`[BigIdea AI] Auto-OR: ${keys.length} thoughts with indicator ${indId} auto-connected with OR to RESULTS`);
+          }
         }
       }
 
