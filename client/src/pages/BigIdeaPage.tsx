@@ -1476,8 +1476,13 @@ export default function BigIdeaPage() {
     if (node.type === "thought") {
       setSelectedNodeId(node.id);
       setShowResults(false);
+    } else if (node.type === "results") {
+      setSelectedNodeId(null);
+      if (scanResults && scanResults.length > 0) {
+        setShowResults(true);
+      }
     }
-  }, []);
+  }, [scanResults]);
 
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null);
@@ -2393,10 +2398,10 @@ export default function BigIdeaPage() {
                 ))
               )}
             </div>
-          <div
-            style={{ backgroundColor: cssVariables.secondaryOverlayColor + "18" }}
-            data-testid="left-pane-lower"
-          >
+            <div
+              style={{ backgroundColor: cssVariables.secondaryOverlayColor + "18" }}
+              data-testid="left-pane-lower"
+            >
           {debugInfo && (
             <div className="border-t" data-testid="scan-debug-panel">
               <button
@@ -2613,8 +2618,13 @@ export default function BigIdeaPage() {
                 size="icon"
                 variant="ghost"
                 onClick={() => {
-                  setShowResults(false);
-                  setSelectedNodeId(null);
+                  if (!showResults && scanResults && scanResults.length > 0) {
+                    setSelectedNodeId(null);
+                    setShowResults(true);
+                  } else {
+                    setShowResults(false);
+                    setSelectedNodeId(null);
+                  }
                 }}
                 data-testid="button-close-panel"
               >
