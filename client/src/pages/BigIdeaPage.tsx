@@ -4237,13 +4237,16 @@ function ScanChartViewer({
     const priceLines: PriceLevelLine[] = [];
     const resistanceLines: { startTime: number; startPrice: number; endTime: number; endPrice: number }[] = [];
 
+    const ideaHasBase = current.thoughtBreakdown.some((t: any) =>
+      t.criteriaResults?.some((cr: any) => (cr.indicatorId === "PA-3" || cr.indicatorId === "PA-4"))
+    );
+
     for (const thought of current.thoughtBreakdown) {
       if (!thought.pass) continue;
-      const hasBase = thought.criteriaResults.some((cr: any) => cr.pass && (cr.indicatorId === "PA-3" || cr.indicatorId === "PA-4"));
       for (const cr of thought.criteriaResults) {
         if (!cr.pass || !cr.cocHighlight) continue;
         const h = cr.cocHighlight;
-        if (hasBase && cr.indicatorId !== "PA-3" && cr.indicatorId !== "PA-4") continue;
+        if (ideaHasBase && cr.indicatorId !== "PA-3" && cr.indicatorId !== "PA-4") continue;
 
         if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
           if (dailyData) {
