@@ -2686,7 +2686,7 @@ export default function BigIdeaPage() {
                             Auto-name
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent side="left" className="max-w-[200px] text-xs">
+                        <TooltipContent side="top" align="end" className="max-w-[260px] text-xs">
                           Generate a name from the active criteria. Clears any custom name you set.
                         </TooltipContent>
                       </Tooltip>
@@ -2838,7 +2838,7 @@ export default function BigIdeaPage() {
                                 <TooltipTrigger asChild>
                                   <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" />
                                 </TooltipTrigger>
-                                <TooltipContent side="left" className="max-w-[260px] text-xs">
+                                <TooltipContent side="top" align="end" className="max-w-[260px] text-xs">
                                   Override which candle timeframe this criterion evaluates against. Use "daily" on an intraday thought to check daily-level conditions like the daily 50 SMA.
                                 </TooltipContent>
                               </Tooltip>
@@ -2877,7 +2877,7 @@ export default function BigIdeaPage() {
                                     <TooltipTrigger asChild>
                                       <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`help-${param.name}`} />
                                     </TooltipTrigger>
-                                    <TooltipContent side="left" className="max-w-[260px] text-xs">
+                                    <TooltipContent side="top" align="end" className="max-w-[260px] text-xs">
                                       {PARAM_DESCRIPTIONS[param.name]}
                                     </TooltipContent>
                                   </Tooltip>
@@ -2905,7 +2905,7 @@ export default function BigIdeaPage() {
                                         {isLinked ? "Linked" : "Manual"}
                                       </button>
                                     </TooltipTrigger>
-                                    <TooltipContent side="left" className="max-w-[280px] text-xs">
+                                    <TooltipContent side="top" align="end" className="max-w-[280px] text-xs">
                                       {isLinked
                                         ? "This value is auto-synced from a companion base indicator on the canvas. Click to switch to manual entry."
                                         : "Click to auto-link this value to a base indicator on the canvas."}
@@ -3168,7 +3168,7 @@ export default function BigIdeaPage() {
                                     <TooltipTrigger asChild>
                                       <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" data-testid={`ai-help-${param.name}-${tIdx}-${idx}`} />
                                     </TooltipTrigger>
-                                    <TooltipContent side="left" className="max-w-[260px] text-xs">
+                                    <TooltipContent side="top" align="end" className="max-w-[260px] text-xs">
                                       {PARAM_DESCRIPTIONS[param.name]}
                                     </TooltipContent>
                                   </Tooltip>
@@ -3817,6 +3817,7 @@ function ScanChartViewer({
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
+  const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
 
   const { toast } = useToast();
 
@@ -4203,9 +4204,19 @@ function ScanChartViewer({
             {current.thoughtBreakdown.map((thought) => {
               const passCount = thought.criteriaResults.filter(c => c.pass).length;
               const totalCount = thought.criteriaResults.length;
+              const isExpanded = expandedThoughts[thought.thoughtId] ?? false;
               return (
                 <div key={thought.thoughtId} className="flex flex-col gap-0.5">
-                  <div className="flex items-center gap-2 text-[11px] flex-wrap">
+                  <button
+                    className="flex items-center gap-2 text-[11px] flex-wrap w-full text-left cursor-pointer hover-elevate rounded px-1 py-0.5 -mx-1"
+                    onClick={() => setExpandedThoughts(prev => ({ ...prev, [thought.thoughtId]: !isExpanded }))}
+                    data-testid={`toggle-thought-${thought.thoughtId}`}
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                    )}
                     {thought.pass ? (
                       <CheckCircle2 className="h-3 w-3 text-rs-green flex-shrink-0" />
                     ) : (
@@ -4215,9 +4226,9 @@ function ScanChartViewer({
                     <span className={`font-semibold ${passCount === totalCount ? "text-rs-green" : "text-rs-amber"}`}>
                       {passCount}/{totalCount} pass
                     </span>
-                  </div>
-                  {thought.criteriaResults.map((cr, ci) => (
-                    <div key={ci} className="flex items-center gap-1.5 text-[10px] pl-5 flex-wrap" data-testid={`criterion-result-${cr.indicatorId}`}>
+                  </button>
+                  {isExpanded && thought.criteriaResults.map((cr, ci) => (
+                    <div key={ci} className="flex items-center gap-1.5 text-[10px] pl-7 flex-wrap" data-testid={`criterion-result-${cr.indicatorId}`}>
                       {cr.pass ? (
                         <CheckCircle2 className="h-2.5 w-2.5 text-rs-green flex-shrink-0" />
                       ) : (
