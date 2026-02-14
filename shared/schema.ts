@@ -1375,3 +1375,19 @@ export type ScanChartRating = typeof scanChartRatings.$inferSelect;
 export type IndicatorLearningSummary = typeof indicatorLearningSummary.$inferSelect;
 export type ThoughtScoreRule = typeof thoughtScoreRules.$inferSelect;
 export type ThoughtSelectionWeight = typeof thoughtSelectionWeights.$inferSelect;
+
+export const chartDrawings = pgTable("chart_drawings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  ticker: text("ticker").notNull(),
+  timeframe: text("timeframe").notNull(),
+  toolType: text("tool_type").notNull(),
+  points: jsonb("points").notNull(),
+  styling: jsonb("styling"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertChartDrawingSchema = createInsertSchema(chartDrawings).omit({ id: true, createdAt: true, updatedAt: true });
+export type ChartDrawing = typeof chartDrawings.$inferSelect;
+export type InsertChartDrawing = z.infer<typeof insertChartDrawingSchema>;

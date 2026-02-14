@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from "react";
+import { IChartApi, ISeriesApi } from "lightweight-charts";
 import { TradingChart, ChartCandle, ChartIndicators } from "@/components/TradingChart";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useQuery } from "@tanstack/react-query";
+import { useChartDrawings, DrawingToolType } from "@/hooks/useChartDrawings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Settings2, Ruler } from "lucide-react";
+import { Loader2, Settings2, Ruler, Minus, Trash2 } from "lucide-react";
 
 export type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
@@ -109,9 +111,28 @@ export function DualChartGrid({
   const [chartHeight, setChartHeight] = useState(300);
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
-  const [dailyTrendLineMode, setDailyTrendLineMode] = useState(false);
-  const [intradayTrendLineMode, setIntradayTrendLineMode] = useState(false);
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
+
+  const dailyChartRef = useRef<IChartApi | null>(null);
+  const dailySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const intradayChartRef = useRef<IChartApi | null>(null);
+  const intradaySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+
+  const dailyDrawings = useChartDrawings({
+    ticker: symbol || "",
+    timeframe: "daily",
+    chartRef: dailyChartRef,
+    seriesRef: dailySeriesRef,
+    enabled: !!symbol && !!dailyData,
+  });
+
+  const intradayDrawings = useChartDrawings({
+    ticker: symbol || "",
+    timeframe: intradayTimeframe,
+    chartRef: intradayChartRef,
+    seriesRef: intradaySeriesRef,
+    enabled: !!symbol && !!intradayData,
+  });
 
   const { data: maSettingsData } = useQuery<any[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -271,13 +292,37 @@ export function DualChartGrid({
             <Button
               size="sm"
               variant="ghost"
-              className={`text-white toggle-elevate ${dailyTrendLineMode ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => setDailyTrendLineMode(m => !m)}
-              style={dailyTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
+              className={`text-white toggle-elevate ${dailyDrawings.activeTool === "trendline" ? "toggle-elevated bg-white/15" : ""}`}
+              onClick={() => dailyDrawings.setActiveTool(dailyDrawings.activeTool === "trendline" ? null : "trendline")}
+              style={dailyDrawings.activeTool === "trendline" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-daily-trend-line-mode`}
+              title="Trend Line"
             >
               <TrendLineIcon />
             </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`text-white toggle-elevate ${dailyDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
+              onClick={() => dailyDrawings.setActiveTool(dailyDrawings.activeTool === "horizontal" ? null : "horizontal")}
+              style={dailyDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
+              data-testid={`${pid}button-daily-horizontal-line`}
+              title="Horizontal Line"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            {dailyDrawings.drawings.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-white"
+                onClick={() => dailyDrawings.clearAll()}
+                data-testid={`${pid}button-daily-clear-drawings`}
+                title="Clear All Drawings"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
           <div className="flex-1 min-h-0">
             {dailyLoading ? (
@@ -295,7 +340,16 @@ export function DualChartGrid({
                 maSettings={maSettingsData}
                 maxBars={maxBars}
                 measureMode={dailyMeasureMode}
-                trendLineMode={dailyTrendLineMode}
+                drawingToolActive={dailyDrawings.activeTool}
+                onChartReady={(chart, series) => {
+                  dailyChartRef.current = chart;
+                  dailySeriesRef.current = series;
+                  dailyDrawings.syncPrimitivesToChart();
+                }}
+                onChartClick={dailyDrawings.handleChartClick}
+                onChartMouseDown={dailyDrawings.handleMouseDown}
+                onChartCrosshairMove={dailyDrawings.handleMouseMove}
+                onChartMouseUp={dailyDrawings.handleMouseUp}
                 {...dailyChartProps}
               />
             ) : (
@@ -343,13 +397,37 @@ export function DualChartGrid({
             <Button
               size="sm"
               variant="ghost"
-              className={`text-white toggle-elevate ${intradayTrendLineMode ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => setIntradayTrendLineMode(m => !m)}
-              style={intradayTrendLineMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
+              className={`text-white toggle-elevate ${intradayDrawings.activeTool === "trendline" ? "toggle-elevated bg-white/15" : ""}`}
+              onClick={() => intradayDrawings.setActiveTool(intradayDrawings.activeTool === "trendline" ? null : "trendline")}
+              style={intradayDrawings.activeTool === "trendline" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-intraday-trend-line-mode`}
+              title="Trend Line"
             >
               <TrendLineIcon />
             </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`text-white toggle-elevate ${intradayDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
+              onClick={() => intradayDrawings.setActiveTool(intradayDrawings.activeTool === "horizontal" ? null : "horizontal")}
+              style={intradayDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
+              data-testid={`${pid}button-intraday-horizontal-line`}
+              title="Horizontal Line"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            {intradayDrawings.drawings.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-white"
+                onClick={() => intradayDrawings.clearAll()}
+                data-testid={`${pid}button-intraday-clear-drawings`}
+                title="Clear All Drawings"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -378,7 +456,16 @@ export function DualChartGrid({
                 maSettings={maSettingsData}
                 maxBars={maxBars}
                 measureMode={intradayMeasureMode}
-                trendLineMode={intradayTrendLineMode}
+                drawingToolActive={intradayDrawings.activeTool}
+                onChartReady={(chart, series) => {
+                  intradayChartRef.current = chart;
+                  intradaySeriesRef.current = series;
+                  intradayDrawings.syncPrimitivesToChart();
+                }}
+                onChartClick={intradayDrawings.handleChartClick}
+                onChartMouseDown={intradayDrawings.handleMouseDown}
+                onChartCrosshairMove={intradayDrawings.handleMouseMove}
+                onChartMouseUp={intradayDrawings.handleMouseUp}
                 {...intradayChartProps}
               />
             ) : (

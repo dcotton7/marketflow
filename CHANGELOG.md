@@ -6,6 +6,18 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Professional Chart Drawing Tools — 07:17 UTC
+- **Task**: Implement persistent drawing tools (trend lines, horizontal lines) for the dual chart grid with full PostgreSQL storage, drag/move, and delete functionality.
+- **Files**: `shared/schema.ts`, `server/routes.ts`, `client/src/lib/chartDrawingPrimitives.ts`, `client/src/hooks/useChartDrawings.ts`, `client/src/components/TradingChart.tsx`, `client/src/components/DualChartGrid.tsx`
+- **Details**:
+  - **Database schema**: Added `chart_drawings` table with userId, ticker, timeframe, toolType, points (JSONB), styling (JSONB) columns. Full CRUD API routes (GET/POST/PUT/DELETE) with per-user scoping.
+  - **Drawing primitives**: Built `TrendLinePrimitive` and `HorizontalLinePrimitive` as lightweight-charts v5 series primitives following the existing MeasurePrimitive pattern. Features include HiDPI-aware rendering via `useBitmapCoordinateSpace`, drag handles (circles at endpoints), selection highlighting, and proper `attached()/detached()/paneViews()` lifecycle.
+  - **Hit detection**: `hitTestDrawings()` function with 8px grab radius on handles and line projection for selection. Returns which handle (p1/p2/line) was hit for drag differentiation.
+  - **useChartDrawings hook**: Full drawing state machine (idle/drawing/dragging modes). Loads drawings from API per ticker+timeframe, click-to-place for both tool types (2-click for trend lines, 1-click for horizontal lines), drag endpoints or entire trend lines, 300ms debounced saves on drag, Delete/Backspace to remove selected drawing, Escape to cancel.
+  - **TradingChart integration**: Added new props (`drawingToolActive`, `onChartReady`, `onChartClick`, `onChartMouseDown`, `onChartCrosshairMove`, `onChartMouseUp`) for external drawing control. Forward all events through refs to avoid stale closures. Crosshair cursor when drawing tool is active. Removed old broken LineSeries-based trend line code (`createExtendedTrendLine`, `trendLineDataRef`, `trendLineSeriesListRef`, etc.).
+  - **DualChartGrid toolbar**: Replaced old trend line toggle with proper drawing tool buttons — Trend Line (diagonal icon), Horizontal Line (minus icon), and Clear All (trash icon, shown only when drawings exist). Both daily and intraday charts have independent drawing instances. Integrated `useChartDrawings` hook for each chart pane.
+- **Status**: Complete
+
 ### CB-1 Find Base Indicator — Chart Rendering & AI Integration — 14:00 UTC
 - **Task**: Complete the CB-1 Find Base indicator by adding chart annotations, category support, and AI prompt awareness.
 - **Files**: `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`, `server/bigidea/indicators.ts`

@@ -158,6 +158,12 @@ export interface TradingChartProps {
   measureMode?: boolean;
   trendLineMode?: boolean;
   resistanceLines?: { startTime: number; startPrice: number; endTime: number; endPrice: number }[];
+  drawingToolActive?: string | null;
+  onChartReady?: (chartApi: IChartApi, seriesApi: ISeriesApi<"Candlestick">) => void;
+  onChartClick?: (param: any) => void;
+  onChartMouseDown?: (param: any) => void;
+  onChartCrosshairMove?: (param: any) => void;
+  onChartMouseUp?: () => void;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -478,6 +484,12 @@ export function TradingChart({
   measureMode = false,
   trendLineMode = false,
   resistanceLines,
+  drawingToolActive,
+  onChartReady,
+  onChartClick,
+  onChartMouseDown,
+  onChartCrosshairMove,
+  onChartMouseUp,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -492,11 +504,6 @@ export function TradingChart({
   const measureStartRef = useRef<MeasurePoint | null>(null);
   const shiftKeyRef = useRef(false);
   const measureModeRef = useRef(measureMode);
-  const trendLineModeRef = useRef(trendLineMode);
-  const trendLineStartRef = useRef<MeasurePoint | null>(null);
-  const trendLineSeriesListRef = useRef<ISeriesApi<"Line">[]>([]);
-  const trendLineDataRef = useRef<{ start: MeasurePoint; end: MeasurePoint }[]>([]);
-  const trendLineAnchorRef = useRef<any>(null);
   const resistanceLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
@@ -511,23 +518,6 @@ export function TradingChart({
       }
     }
   }, [measureMode]);
-  useEffect(() => {
-    trendLineModeRef.current = trendLineMode;
-    if (!trendLineMode) {
-      trendLineStartRef.current = null;
-      if (trendLineAnchorRef.current && candleSeriesRef.current) {
-        try { candleSeriesRef.current.removePriceLine(trendLineAnchorRef.current); } catch {}
-        trendLineAnchorRef.current = null;
-      }
-      for (const s of trendLineSeriesListRef.current) {
-        if (chartRef.current) {
-          try { chartRef.current.removeSeries(s); } catch {}
-        }
-      }
-      trendLineSeriesListRef.current = [];
-      trendLineDataRef.current = [];
-    }
-  }, [trendLineMode]);
   useEffect(() => {
     onCandleClickRef.current = onCandleClick;
   }, [onCandleClick]);
@@ -563,38 +553,6 @@ export function TradingChart({
     shiftedToOriginalRef.current = shiftedToOriginal;
   }, [shiftedToOriginal]);
 
-  const createExtendedTrendLine = useCallback((chart: IChartApi, startPt: MeasurePoint, endPt: MeasurePoint, allTimestamps: number[]) => {
-    const sorted = [startPt, endPt].sort((a, b) => a.time - b.time);
-    const t1 = sorted[0].time;
-    const p1 = sorted[0].price;
-    const t2 = sorted[1].time;
-    const p2 = sorted[1].price;
-    const slope = t2 !== t1 ? (p2 - p1) / (t2 - t1) : 0;
-
-    const uniqueTimes = new Set(allTimestamps);
-    uniqueTimes.add(t1);
-    uniqueTimes.add(t2);
-    const sortedTimes = Array.from(uniqueTimes).sort((a, b) => a - b);
-
-    const lineData = sortedTimes.map(t => ({
-      time: t as any,
-      value: p1 + slope * (t - t1),
-    }));
-
-    const trendSeries = chart.addSeries(LineSeries, {
-      color: "#87CEEB",
-      lineWidth: 1 as 1,
-      lineStyle: LineStyle.Solid,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      priceScaleId: 'right',
-      autoscaleInfoProvider: () => null,
-    });
-    trendSeries.setData(lineData);
-    return trendSeries;
-  }, []);
-
   const clearMeasure = useCallback(() => {
     measureStartRef.current = null;
     if (measurePrimitiveRef.current) {
@@ -604,8 +562,25 @@ export function TradingChart({
     setMeasureEndPrice(null);
   }, []);
 
+  const onChartClickRef = useRef(onChartClick);
+  const onChartMouseDownRef = useRef(onChartMouseDown);
+  const onChartCrosshairMoveRef = useRef(onChartCrosshairMove);
+  const onChartMouseUpRef = useRef(onChartMouseUp);
+  const drawingToolActiveRef = useRef(drawingToolActive);
+  useEffect(() => { onChartClickRef.current = onChartClick; }, [onChartClick]);
+  useEffect(() => { onChartMouseDownRef.current = onChartMouseDown; }, [onChartMouseDown]);
+  useEffect(() => { onChartCrosshairMoveRef.current = onChartCrosshairMove; }, [onChartCrosshairMove]);
+  useEffect(() => { onChartMouseUpRef.current = onChartMouseUp; }, [onChartMouseUp]);
+  useEffect(() => { drawingToolActiveRef.current = drawingToolActive; }, [drawingToolActive]);
+
   const handleChartClick = useCallback(
     (param: any) => {
+      if (onChartClickRef.current) {
+        onChartClickRef.current(param);
+      }
+
+      if (drawingToolActiveRef.current) return;
+
       if (!param.time || !candleSeriesRef.current) return;
 
       let timestamp: number;
@@ -629,39 +604,6 @@ export function TradingChart({
         if (priceFromY !== null && isFinite(priceFromY)) {
           clickedPrice = priceFromY;
         }
-      }
-
-      if (trendLineModeRef.current && clickedPrice !== null) {
-        if (!trendLineStartRef.current) {
-          trendLineStartRef.current = { time: timestamp, price: clickedPrice };
-          if (chartRef.current && candleSeriesRef.current) {
-            if (trendLineAnchorRef.current) {
-              try { candleSeriesRef.current.removePriceLine(trendLineAnchorRef.current); } catch {}
-            }
-            trendLineAnchorRef.current = candleSeriesRef.current.createPriceLine({
-              price: clickedPrice,
-              color: "#87CEEB",
-              lineWidth: 1 as 1,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: false,
-            });
-          }
-        } else {
-          if (chartRef.current) {
-            if (trendLineAnchorRef.current && candleSeriesRef.current) {
-              try { candleSeriesRef.current.removePriceLine(trendLineAnchorRef.current); } catch {}
-              trendLineAnchorRef.current = null;
-            }
-            const startPt = trendLineStartRef.current;
-            const endPt = { time: timestamp, price: clickedPrice };
-            const allTimestamps = candlesRef.current.map(c => c.timestamp);
-            const trendSeries = createExtendedTrendLine(chartRef.current, startPt, endPt, allTimestamps);
-            trendLineSeriesListRef.current.push(trendSeries);
-            trendLineDataRef.current.push({ start: startPt, end: endPt });
-          }
-          trendLineStartRef.current = null;
-        }
-        return;
       }
 
       if ((shiftKeyRef.current || measureModeRef.current) && clickedPrice !== null) {
@@ -895,8 +837,34 @@ export function TradingChart({
     candleSeries.attachPrimitive(measurePrimitive);
     measurePrimitiveRef.current = measurePrimitive;
 
-    chart.subscribeCrosshairMove(() => {});
+    const crosshairHandler = (param: any) => {
+      if (onChartCrosshairMoveRef.current) {
+        onChartCrosshairMoveRef.current(param);
+      }
+    };
+    chart.subscribeCrosshairMove(crosshairHandler);
     chart.subscribeClick(handleChartClick);
+
+    if (onChartReady) {
+      onChartReady(chart, candleSeries);
+    }
+
+    const chartContainer = containerRef.current;
+    const mouseDownHandler = (e: MouseEvent) => {
+      if (onChartMouseDownRef.current) {
+        const rect = chartContainer!.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        onChartMouseDownRef.current({ point: { x, y } });
+      }
+    };
+    const mouseUpHandler = () => {
+      if (onChartMouseUpRef.current) {
+        onChartMouseUpRef.current();
+      }
+    };
+    chartContainer!.addEventListener("mousedown", mouseDownHandler);
+    document.addEventListener("mouseup", mouseUpHandler);
 
     if (maxBars && displayData.candles.length > maxBars) {
       const from = displayData.candles.length - maxBars;
@@ -911,15 +879,6 @@ export function TradingChart({
         chartRef.current.timeScale().scrollToPosition(7, false);
       }
     });
-
-    if (trendLineDataRef.current.length > 0 && trendLineModeRef.current) {
-      trendLineSeriesListRef.current = [];
-      const allTimestamps = displayData.candles.map(c => c.timestamp);
-      for (const { start, end } of trendLineDataRef.current) {
-        const trendSeries = createExtendedTrendLine(chart, start, end, allTimestamps);
-        trendLineSeriesListRef.current.push(trendSeries);
-      }
-    }
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -939,7 +898,12 @@ export function TradingChart({
       resizeObserver.disconnect();
       measurePrimitiveRef.current = null;
       measureStartRef.current = null;
+      if (chartContainer) {
+        chartContainer.removeEventListener("mousedown", mouseDownHandler);
+      }
+      document.removeEventListener("mouseup", mouseUpHandler);
       if (chartRef.current) {
+        chartRef.current.unsubscribeCrosshairMove(crosshairHandler);
         chartRef.current.unsubscribeClick(handleChartClick);
         chartRef.current.remove();
         chartRef.current = null;
@@ -1291,7 +1255,7 @@ export function TradingChart({
           <Settings2 className="h-3.5 w-3.5 text-slate-400" />
         </Button>
       </div>
-      <div ref={containerRef} className="w-full flex-1 min-h-[400px]" />
+      <div ref={containerRef} className="w-full flex-1 min-h-[400px]" style={drawingToolActive ? { cursor: 'crosshair' } : undefined} />
       <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
     </div>
   );

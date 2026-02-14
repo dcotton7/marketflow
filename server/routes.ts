@@ -1550,6 +1550,117 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  app.get("/api/chart-drawings", async (req: any, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Unauthorized" });
+    const { ticker, timeframe } = req.query;
+    if (!ticker || !timeframe) return res.status(400).json({ error: "ticker and timeframe required" });
+    try {
+      const db = (await import("./db")).getDb();
+      if (!db) return res.json([]);
+      const { chartDrawings } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const drawings = await db.select().from(chartDrawings).where(
+        and(
+          eq(chartDrawings.userId, req.session.userId),
+          eq(chartDrawings.ticker, String(ticker).toUpperCase()),
+          eq(chartDrawings.timeframe, String(timeframe))
+        )
+      );
+      res.json(drawings);
+    } catch (error: any) {
+      console.error("Failed to load drawings:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chart-drawings", async (req: any, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const db = (await import("./db")).getDb();
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      const { chartDrawings } = await import("@shared/schema");
+      const { ticker, timeframe, toolType, points, styling } = req.body;
+      if (!ticker || !timeframe || !toolType || !points) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      const [drawing] = await db.insert(chartDrawings).values({
+        userId: req.session.userId,
+        ticker: String(ticker).toUpperCase(),
+        timeframe: String(timeframe),
+        toolType: String(toolType),
+        points,
+        styling: styling || null,
+      }).returning();
+      res.json(drawing);
+    } catch (error: any) {
+      console.error("Failed to save drawing:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/chart-drawings/:id", async (req: any, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const db = (await import("./db")).getDb();
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      const { chartDrawings } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const drawingId = parseInt(req.params.id);
+      const { points, styling } = req.body;
+      const [updated] = await db.update(chartDrawings)
+        .set({ points, styling, updatedAt: new Date() })
+        .where(and(eq(chartDrawings.id, drawingId), eq(chartDrawings.userId, req.session.userId)))
+        .returning();
+      if (!updated) return res.status(404).json({ error: "Drawing not found" });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Failed to update drawing:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/chart-drawings/:id", async (req: any, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const db = (await import("./db")).getDb();
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      const { chartDrawings } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const drawingId = parseInt(req.params.id);
+      const [deleted] = await db.delete(chartDrawings)
+        .where(and(eq(chartDrawings.id, drawingId), eq(chartDrawings.userId, req.session.userId)))
+        .returning();
+      if (!deleted) return res.status(404).json({ error: "Drawing not found" });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Failed to delete drawing:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/chart-drawings", async (req: any, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: "Unauthorized" });
+    const { ticker, timeframe } = req.query;
+    if (!ticker || !timeframe) return res.status(400).json({ error: "ticker and timeframe required" });
+    try {
+      const db = (await import("./db")).getDb();
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      const { chartDrawings } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      await db.delete(chartDrawings).where(
+        and(
+          eq(chartDrawings.userId, req.session.userId),
+          eq(chartDrawings.ticker, String(ticker).toUpperCase()),
+          eq(chartDrawings.timeframe, String(timeframe))
+        )
+      );
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Failed to clear drawings:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Seed default watchlist if empty (only if database is available)
   if (isDatabaseAvailable()) {
     try {
