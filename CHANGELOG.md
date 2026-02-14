@@ -6,6 +6,25 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Fix Overlapping Bases in Find Base (Historical) Chaining — 08:30 UTC
+- **Task**: Fix overlapping base highlights when chaining multiple Find Base (Historical) indicators to detect sequential base patterns (e.g., historical base → price advance → current base).
+- **Files**: `server/bigidea/indicators.ts`
+- **Details**:
+  - **Root cause**: Find Base (Historical) consumed `baseEndBar` from upstream, which is the MORE RECENT end of the upstream base. This caused the downstream search to start INSIDE the upstream base's bar range, producing overlapping base highlights.
+  - **Fix**: Changed `consumes` from `{ dataKey: "baseEndBar" }` to `{ dataKey: "baseStartBar" }` so the downstream search begins at the OLDER end of the upstream base. Added +1 offset (`upstreamStartBar + 1`) in the evaluate function to ensure zero overlap at the boundary.
+  - Updated the evaluate function's data reference from `upstreamData?.baseEndBar` to `upstreamData?.baseStartBar` to match.
+  - Updated indicator description to clarify it starts searching "PAST the upstream base's oldest bar."
+- **Status**: Complete
+
+### Scan Debug Copy Button — 08:25 UTC
+- **Task**: Add a clipboard copy icon to the Scan Debug panel header so users can copy all debug info as formatted text.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - Added `ClipboardCopy` icon button next to "Scan Debug" header text.
+  - Click formats all debug sections into clean multi-line text: timestamp/duration/universe, result count, eval order, thought stems, auto-linked params, dynamic data flows, and per-thought criteria breakdowns with params.
+  - Uses `navigator.clipboard.writeText()` with toast confirmation.
+- **Status**: Complete
+
 ### AI Scan Tuning: Add/Remove Criterion Suggestions — 08:15 UTC
 - **Task**: Expand AI scan tuning to support adding new criteria and removing existing criteria, not just parameter adjustments.
 - **Files**: `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`

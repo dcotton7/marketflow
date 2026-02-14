@@ -75,6 +75,7 @@ import {
   MoreHorizontal,
   Layers,
   Minus,
+  ClipboardCopy,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -2530,14 +2531,56 @@ export default function BigIdeaPage() {
             >
           {debugInfo && (
             <div className="border-t" data-testid="scan-debug-panel">
-              <button
-                onClick={() => setDebugOpen(!debugOpen)}
-                className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover-elevate"
-                data-testid="button-toggle-debug"
-              >
-                <span>Scan Debug</span>
-                {debugOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
-              </button>
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <button
+                  onClick={() => setDebugOpen(!debugOpen)}
+                  className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover-elevate"
+                  data-testid="button-toggle-debug"
+                >
+                  <span>Scan Debug</span>
+                  {debugOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                </button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-5 w-5"
+                  data-testid="button-copy-debug"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const lines: string[] = [];
+                    lines.push(`Scan Debug — ${debugInfo.timestamp} — ${debugInfo.durationMs}ms — universe: ${debugInfo.universe}`);
+                    lines.push(`Result: ${debugInfo.matchCount} / ${debugInfo.totalScanned}`);
+                    if (debugInfo.evalOrder?.length > 0) {
+                      lines.push(`\nEval Order: ${debugInfo.evalOrder.join(" → ")}`);
+                    }
+                    if (debugInfo.connections?.length > 0) {
+                      lines.push(`\nThought Stems:`);
+                      debugInfo.connections.forEach((c: any) => lines.push(`  ${c.from} ${c.logic} ${c.to}`));
+                    }
+                    if (debugInfo.linkOverrides?.length > 0) {
+                      lines.push(`\nAuto-Linked Params:`);
+                      debugInfo.linkOverrides.forEach((o: any) => lines.push(`  ${o.thoughtName} / ${o.paramName}: ${o.originalValue} → ${o.linkedValue} (from: ${o.sourceName})`));
+                    }
+                    if (debugInfo.dynamicDataFlows?.length > 0) {
+                      lines.push(`\nDynamic Per-Stock Data:`);
+                      debugInfo.dynamicDataFlows.forEach((d: any) => lines.push(`  ${d.dataKey}: ${d.provider} → ${d.consumer} — ${d.description}`));
+                    }
+                    debugInfo.thoughts?.forEach((t: any) => {
+                      const passCount = debugInfo.thoughtCounts[t.nodeId];
+                      lines.push(`\nThought: ${t.name}${t.isNot ? " [NOT]" : ""} (${t.timeframe})${passCount !== undefined ? ` — ${passCount} pass` : ""}`);
+                      t.criteria?.forEach((c: any) => {
+                        lines.push(`  ${c.muted ? "[MUTED] " : ""}${c.indicator}${c.inverted ? " INV" : ""}${c.tfOverride ? ` @${c.tfOverride}` : ""} — ${c.label}`);
+                        const paramStr = Object.entries(c.params).map(([k, v]) => `${k}=${String(v)}`).join(", ");
+                        if (paramStr) lines.push(`    ${paramStr}`);
+                      });
+                    });
+                    navigator.clipboard.writeText(lines.join("\n"));
+                    toast({ title: "Debug info copied to clipboard" });
+                  }}
+                >
+                  <ClipboardCopy className="h-3 w-3" />
+                </Button>
+              </div>
               {debugOpen && (
                 <ScrollArea className="max-h-[200px]">
                   <div className="px-3 pb-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
