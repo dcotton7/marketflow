@@ -1490,6 +1490,7 @@ export default function BigIdeaPage() {
         totalScanned: data.totalScanned,
         matchCount: data.results.length,
         thoughtCounts: data.thoughtCounts || {},
+        perThoughtFunnel: data.funnelData?.perThought || {},
         linkOverrides: data.linkOverrides || [],
         dynamicDataFlows: data.dynamicDataFlows || [],
       });
@@ -2567,7 +2568,9 @@ export default function BigIdeaPage() {
                     }
                     debugInfo.thoughts?.forEach((t: any) => {
                       const passCount = debugInfo.thoughtCounts[t.nodeId];
-                      lines.push(`\nThought: ${t.name}${t.isNot ? " [NOT]" : ""} (${t.timeframe})${passCount !== undefined ? ` — ${passCount} pass` : ""}`);
+                      const funnel = debugInfo.perThoughtFunnel?.[t.nodeId];
+                      const funnelStr = funnel ? ` — eval ${funnel.evaluated}/${debugInfo.totalScanned}${funnel.skipped > 0 ? `, ${funnel.skipped} skipped` : ""}` : "";
+                      lines.push(`\nThought: ${t.name}${t.isNot ? " [NOT]" : ""} (${t.timeframe})${passCount !== undefined ? ` — ${passCount} pass` : ""}${funnelStr}`);
                       t.criteria?.forEach((c: any) => {
                         lines.push(`  ${c.muted ? "[MUTED] " : ""}${c.indicator}${c.inverted ? " INV" : ""}${c.tfOverride ? ` @${c.tfOverride}` : ""} — ${c.label}`);
                         const paramStr = Object.entries(c.params).map(([k, v]) => `${k}=${String(v)}`).join(", ");
@@ -2649,14 +2652,21 @@ export default function BigIdeaPage() {
 
                     {debugInfo.thoughts.map((t: any) => {
                       const passCount = debugInfo.thoughtCounts[t.nodeId];
+                      const funnel = debugInfo.perThoughtFunnel?.[t.nodeId];
                       return (
                         <div key={t.nodeId} className="border-t border-dashed pt-1">
                           <div className="flex items-center gap-1 flex-wrap">
                             <span className="font-semibold text-foreground">{t.name}</span>
                             {t.isNot && <span className="text-rs-red">[NOT]</span>}
                             <span className="text-muted-foreground/60">({t.timeframe})</span>
+                            {funnel && funnel.evaluated < debugInfo.totalScanned ? (
+                              <span className="text-muted-foreground/60">eval {funnel.evaluated}</span>
+                            ) : null}
                             {passCount !== undefined && (
                               <span className="text-rs-green">{passCount} pass</span>
+                            )}
+                            {funnel && funnel.skipped > 0 && (
+                              <span className="text-muted-foreground/40">{funnel.skipped} skipped</span>
                             )}
                           </div>
                           {t.criteria.map((c: any, ci: number) => (

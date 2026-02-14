@@ -1486,6 +1486,25 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       const sortedThoughtNodes = evalOrder.map((id: string) => thoughtNodes.find((n: any) => n.id === id)!).filter(Boolean);
       console.log(`[BigIdea Scan] Evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
 
+      const downstreamMap: Record<string, string[]> = {};
+      for (const n of thoughtNodes) downstreamMap[n.id] = [];
+      for (const e of thoughtEdges) {
+        if (downstreamMap[e.source]) downstreamMap[e.source].push(e.target);
+      }
+      const getTransitiveDownstream = (nodeId: string): string[] => {
+        const result = new Set<string>();
+        const queue = [...(downstreamMap[nodeId] || [])];
+        while (queue.length > 0) {
+          const cur = queue.shift()!;
+          if (!result.has(cur)) {
+            result.add(cur);
+            const children = downstreamMap[cur] || [];
+            for (let ci = 0; ci < children.length; ci++) queue.push(children[ci]);
+          }
+        }
+        return Array.from(result);
+      };
+
       for (const tn of sortedThoughtNodes) {
         const hasConsumer = (tn.thoughtCriteria || []).some((c: any) => CONSUMER_INDICATOR_IDS.has(c.indicatorId));
         if (hasConsumer) {
@@ -1527,7 +1546,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         totalTickers: number;
         fetchFails: number;
         tooFewCandles: number;
-        perThought: Record<string, { name: string; passed: number; failed: number; failedTickers: string[] }>;
+        perThought: Record<string, { name: string; passed: number; failed: number; evaluated: number; skipped: number; failedTickers: string[] }>;
         perIndicator: Record<string, { name: string; passed: number; failed: number; diagnosticSamples: Array<{ symbol: string; value: string; threshold: string }> }>;
       } = {
         totalTickers: tickers.length,
@@ -1539,7 +1558,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 
       for (const node of thoughtNodes) {
         thoughtCounts[node.id] = 0;
-        funnelData.perThought[node.id] = { name: node.thoughtName || "Unnamed", passed: 0, failed: 0, failedTickers: [] };
+        funnelData.perThought[node.id] = { name: node.thoughtName || "Unnamed", passed: 0, failed: 0, evaluated: 0, skipped: 0, failedTickers: [] };
       }
 
       let fetchFailCount = 0;
@@ -1570,11 +1589,19 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
               const nodeOutputData: Record<string, Record<string, any>> = {};
               const nodeCriteriaResults: Record<string, CriterionResult[]> = {};
               const effectivelyMutedNodes = new Set<string>();
+              const skippedNodes = new Set<string>();
 
               for (const node of sortedThoughtNodes) {
+                if (skippedNodes.has(node.id)) {
+                  nodeResults[node.id] = false;
+                  if (funnelData.perThought[node.id]) funnelData.perThought[node.id].skipped++;
+                  continue;
+                }
+
                 if (node.isMuted) {
                   nodeResults[node.id] = true;
                   effectivelyMutedNodes.add(node.id);
+                  if (funnelData.perThought[node.id]) funnelData.perThought[node.id].evaluated++;
                   continue;
                 }
                 const tf = node.thoughtTimeframe || "daily";
@@ -1582,6 +1609,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                 const minBars = tf === "daily" ? 20 : 10;
                 if (candles.length < minBars) {
                   nodeResults[node.id] = false;
+                  const downstream = getTransitiveDownstream(node.id);
+                  for (const dId of downstream) skippedNodes.add(dId);
                   continue;
                 }
 
@@ -1615,6 +1644,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                 if (node.isNot) passed = !passed;
                 nodeResults[node.id] = passed;
                 nodeCriteriaResults[node.id] = evalResult.criteriaResults;
+                if (funnelData.perThought[node.id]) funnelData.perThought[node.id].evaluated++;
                 if (passed) {
                   thoughtCounts[node.id]++;
                   if (funnelData.perThought[node.id]) funnelData.perThought[node.id].passed++;
@@ -1625,6 +1655,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                       funnelData.perThought[node.id].failedTickers.push(symbol);
                     }
                   }
+                  const downstream = getTransitiveDownstream(node.id);
+                  for (const dId of downstream) skippedNodes.add(dId);
                 }
 
                 for (const cr of evalResult.criteriaResults) {
