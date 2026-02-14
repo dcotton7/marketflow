@@ -689,6 +689,10 @@ export default function BigIdeaPage() {
     mutationFn: async (proposal: { thoughts: any[]; edges: any[] }) => {
       const savedThoughts: any[] = [];
       for (const t of proposal.thoughts) {
+        if (t.reuseThoughtId) {
+          savedThoughts.push({ ...t, id: t.reuseThoughtId, thoughtKey: t.thoughtKey });
+          continue;
+        }
         const res = await apiRequest("POST", "/api/bigidea/thoughts", {
           name: t.name,
           category: t.category,
@@ -3237,13 +3241,21 @@ export default function BigIdeaPage() {
                     <div className="flex items-center gap-2 border-b border-border/60 pb-1">
                       <Badge variant="outline" className="text-[10px]">{thought.thoughtKey}</Badge>
                       <span className="text-xs font-semibold">{thought.name}</span>
+                      {thought.reuseThoughtId && (
+                        <Badge variant="secondary" className="text-[9px]" data-testid={`badge-reused-${tIdx}`}>Reusing existing</Badge>
+                      )}
                     </div>
                   )}
 
                   {(aiProposal.thoughts || []).length === 1 && (
                     <div>
                       <Label className="text-xs text-muted-foreground">Name</Label>
-                      <p className="text-sm font-medium">{thought.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{thought.name}</p>
+                        {thought.reuseThoughtId && (
+                          <Badge variant="secondary" className="text-[9px]" data-testid="badge-reused-single">Reusing existing</Badge>
+                        )}
+                      </div>
                     </div>
                   )}
 

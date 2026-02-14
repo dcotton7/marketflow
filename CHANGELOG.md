@@ -14,7 +14,7 @@ All completed development tasks, fixes, and features are tracked here with dates
   - **Scoring Rules (admin-configurable)**: Rule 1 — modified thoughts get +3 on idea save (server-side criteria comparison). Rule 2 — non-muted thoughts get +1 when scan returns results. Rule 3 — non-muted thoughts get +1/-1 on chart thumbs-up/down.
   - **Admin UI**: New "AI Score Weighting" sub-tab in TNN admin page with editable Scoring Rules table and Selection Weights table. Weight total shown with green/amber color. Retroactive "Backfill Scores" button to apply current rules to existing chart_ratings and scan_sessions.
   - **Thought Library**: Categories are now collapsible with chevron arrows and item counts. Thoughts sorted by score descending. Score badges displayed next to thought names with context colors (negative=red, 0-20=white, 21-100=yellow, 100+=green).
-  - **AI Selection**: Weighted random selection endpoint (`GET /api/bigidea/thoughts/ai-selection`) reads configurable weights from DB. Three strategies: pure random, random from top N scored, highest rated. Prevents convergence on single thought.
+  - **AI Selection**: Weighted random selection endpoint (`GET /api/bigidea/thoughts/ai-selection`) reads configurable weights from DB. Three strategies: pure random, random from top N scored, highest rated. Prevents convergence on single thought. AI idea generator now checks existing thoughts and reuses highly-rated ones when they closely match (same indicators/params/purpose), creating new thoughts only when no close match exists. Reused thoughts show a "Reusing existing" badge in the proposal dialog.
   - **Backfill**: Admin endpoint processes historical chart_ratings and scan_sessions to retroactively score thoughts.
 - **Status**: Complete
 

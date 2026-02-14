@@ -1059,12 +1059,25 @@ Select the most appropriate indicators and set parameters that match the user's 
 
       let existingThoughtsContext = "";
       try {
-        const suggestedThoughts = await selectThoughtsByWeight(userId, 5);
+        const suggestedThoughts = await selectThoughtsByWeight(userId, 8);
         if (suggestedThoughts.length > 0) {
-          const summaries = suggestedThoughts.map(t =>
-            `- "${t.name}" (category: ${t.category}, score: ${t.score}, id: ${t.id}): ${t.description || "no description"}`
-          ).join("\n");
-          existingThoughtsContext = `\n\nThe user has these highly-rated existing thoughts in their library. If any of them are relevant to the user's idea, you may reference their criteria patterns (but still generate the full criteria yourself — do not reference IDs):\n${summaries}`;
+          const summaries = suggestedThoughts.map(t => {
+            const criteriaDesc = (t.criteria as any[] || []).map((c: any) => {
+              const ind = INDICATOR_LIBRARY.find(i => i.id === c.indicatorId);
+              const paramStr = (c.params || []).map((p: any) => `${p.name}=${p.value}`).join(", ");
+              return `${ind?.name || c.indicatorId}(${paramStr})${c.inverted ? " [inverted]" : ""}`;
+            }).join("; ");
+            return `- EXISTING_THOUGHT_ID=${t.id} "${t.name}" (category: ${t.category}, score: ${t.score}, timeframe: ${t.timeframe || "daily"}): ${t.description || "no description"}. Criteria: [${criteriaDesc}]`;
+          }).join("\n");
+          existingThoughtsContext = `\n\nEXISTING THOUGHT REUSE RULES:
+The user has these highly-rated existing thoughts. When generating your response, for EACH thought you would create, check these existing thoughts first:
+- If an existing thought is a VERY CLOSE match (same indicators, similar parameters, same purpose), REUSE it by setting "reuseThoughtId" to its EXISTING_THOUGHT_ID instead of generating new criteria. A reused thought needs only: { "thoughtKey": "A", "reuseThoughtId": 42 }
+- If no existing thought is close enough, generate new criteria as normal.
+- "Very close" means: covers the same concept with the same or nearly identical indicators. Small parameter differences (e.g. period 20 vs 21) count as close. Different indicator choices or different concepts do NOT count as close.
+- When in doubt, generate new — only reuse when the match is clearly strong.
+
+Existing thoughts:
+${summaries}`;
         }
       } catch (e) {
         // Non-critical, continue without existing thoughts context
@@ -1094,6 +1107,30 @@ Select the most appropriate indicators and set parameters that match the user's 
           thoughts: [{ thoughtKey: "A", ...parsed }],
           edges: [],
         };
+      }
+
+      // Resolve reused thoughts: replace reuseThoughtId references with full thought data from DB
+      for (let i = 0; i < result.thoughts.length; i++) {
+        const t = result.thoughts[i];
+        if (t.reuseThoughtId && isDatabaseAvailable() && db) {
+          try {
+            const [existing] = await db.select().from(scannerThoughts).where(eq(scannerThoughts.id, t.reuseThoughtId));
+            if (existing) {
+              result.thoughts[i] = {
+                thoughtKey: t.thoughtKey,
+                name: existing.name,
+                category: existing.category,
+                description: existing.description,
+                criteria: existing.criteria,
+                timeframe: existing.timeframe,
+                reuseThoughtId: existing.id,
+              };
+              console.log(`[BigIdea AI] Reusing existing thought #${existing.id} "${existing.name}" (score: ${existing.score})`);
+            }
+          } catch (e) {
+            console.error(`[BigIdea AI] Failed to look up reused thought #${t.reuseThoughtId}:`, e);
+          }
+        }
       }
 
       const PROVIDER_IDS = new Set(["PA-3", "PA-7"]);
