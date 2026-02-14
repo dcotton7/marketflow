@@ -3166,19 +3166,53 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       const rules = await getScoreRulesMap();
       const stats = { ratingsProcessed: 0, sessionsProcessed: 0, thoughtsScored: 0 };
 
+      const allThoughts = await db.select({ id: scannerThoughts.id, name: scannerThoughts.name }).from(scannerThoughts);
+      const thoughtNameToId = new Map<string, number>();
+      for (const t of allThoughts) {
+        thoughtNameToId.set(t.name.toLowerCase().trim(), t.id);
+      }
+
+      const resolveThoughtIdsFromNodes = (nodes: any[]): number[] => {
+        const ids: number[] = [];
+        const seen = new Set<number>();
+        for (const n of nodes) {
+          if (n.type !== "thought" || n.isMuted) continue;
+          let resolved: number | undefined;
+          if (n.thoughtId && typeof n.thoughtId === "number") {
+            resolved = n.thoughtId;
+          } else if (n.thoughtName) {
+            resolved = thoughtNameToId.get(n.thoughtName.toLowerCase().trim());
+          }
+          if (resolved && !seen.has(resolved)) {
+            seen.add(resolved);
+            ids.push(resolved);
+          }
+        }
+        return ids;
+      };
+
       // Backfill from chart_ratings (Rule 3)
       const upRule = rules["chart_thumbs_up"];
       const downRule = rules["chart_thumbs_down"];
       if ((upRule?.enabled || downRule?.enabled)) {
         const ratings = await db.select().from(scanChartRatings);
         for (const r of ratings) {
-          if (!r.ideaId) continue;
-          const idea = await db.select().from(scannerIdeas).where(eq(scannerIdeas.id, r.ideaId));
-          if (!idea.length) continue;
-          const ideaNodes = idea[0].nodes as any[];
-          const tIds = ideaNodes
-            .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
-            .map((n: any) => n.thoughtId as number);
+          let tIds: number[] = [];
+          if (r.ideaId) {
+            const idea = await db.select().from(scannerIdeas).where(eq(scannerIdeas.id, r.ideaId));
+            if (idea.length) {
+              tIds = resolveThoughtIdsFromNodes(idea[0].nodes as any[]);
+            }
+          }
+          if (tIds.length === 0 && r.sessionId) {
+            const session = await db.select().from(scanSessions).where(eq(scanSessions.id, r.sessionId));
+            if (session.length) {
+              const config = session[0].scanConfig as any;
+              if (config?.nodes) {
+                tIds = resolveThoughtIdsFromNodes(config.nodes as any[]);
+              }
+            }
+          }
           if (tIds.length === 0) continue;
           const rule = r.rating === "up" ? upRule : downRule;
           if (rule?.enabled && rule.scoreValue !== 0) {
@@ -3196,9 +3230,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         for (const s of sessions) {
           const config = s.scanConfig as any;
           if (!config?.nodes) continue;
-          const tIds = (config.nodes as any[])
-            .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
-            .map((n: any) => n.thoughtId as number);
+          const tIds = resolveThoughtIdsFromNodes(config.nodes as any[]);
           if (tIds.length === 0) continue;
           await applyScoreToThoughts(tIds, scanRule.scoreValue);
           stats.thoughtsScored += tIds.length;
@@ -3210,6 +3242,48 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     } catch (error) {
       console.error("Error backfilling thought scores:", error);
       res.status(500).json({ error: "Failed to backfill scores" });
+    }
+  });
+
+  app.get("/api/bigidea/thought-scores/stats", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const now = new Date();
+      const todayStart = new Date(now);
+      todayStart.setUTCHours(0, 0, 0, 0);
+      const weekStart = new Date(now);
+      weekStart.setUTCDate(now.getUTCDate() - now.getUTCDay());
+      weekStart.setUTCHours(0, 0, 0, 0);
+
+      const thoughtStats = await db.select({
+        total: sql<number>`count(*)`,
+        scored: sql<number>`count(case when ${scannerThoughts.score} != 0 then 1 end)`,
+        totalPoints: sql<number>`coalesce(sum(${scannerThoughts.score}), 0)`,
+      }).from(scannerThoughts);
+
+      const sessionCounts = await db.select({
+        allTime: sql<number>`count(*)`,
+        today: sql<number>`count(case when ${scanSessions.createdAt} >= ${todayStart} then 1 end)`,
+        thisWeek: sql<number>`count(case when ${scanSessions.createdAt} >= ${weekStart} then 1 end)`,
+      }).from(scanSessions).where(sql`${scanSessions.resultCount} > 0`);
+
+      const ratingCounts = await db.select({
+        allTime: sql<number>`count(*)`,
+        today: sql<number>`count(case when ${scanChartRatings.createdAt} >= ${todayStart} then 1 end)`,
+        thisWeek: sql<number>`count(case when ${scanChartRatings.createdAt} >= ${weekStart} then 1 end)`,
+      }).from(scanChartRatings);
+
+      res.json({
+        thoughts: thoughtStats[0],
+        sessions: sessionCounts[0],
+        ratings: ratingCounts[0],
+      });
+    } catch (error) {
+      console.error("Error fetching score stats:", error);
+      res.status(500).json({ error: "Failed to fetch score stats" });
     }
   });
 

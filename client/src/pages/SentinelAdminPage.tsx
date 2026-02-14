@@ -852,6 +852,15 @@ export default function SentinelAdminPage() {
     enabled: !!userInfo?.isAdmin,
   });
 
+  const { data: scoreStats } = useQuery<{
+    thoughts: { total: number; scored: number; totalPoints: number };
+    sessions: { allTime: number; today: number; thisWeek: number };
+    ratings: { allTime: number; today: number; thisWeek: number };
+  }>({
+    queryKey: ["/api/bigidea/thought-scores/stats"],
+    enabled: !!userInfo?.isAdmin,
+  });
+
   const updateScoreRuleMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: number; updates: Partial<ThoughtScoreRule> }) => {
       const res = await apiRequest("PUT", `/api/bigidea/score-rules/${id}`, updates);
@@ -885,6 +894,7 @@ export default function SentinelAdminPage() {
     },
     onSuccess: (data: { stats: { ratingsProcessed: number; sessionsProcessed: number; thoughtsScored: number } }) => {
       toast({ title: "Backfill complete", description: `Processed ${data.stats.ratingsProcessed} ratings, ${data.stats.sessionsProcessed} sessions, scored ${data.stats.thoughtsScored} thoughts` });
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thought-scores/stats"] });
     },
     onError: (err: Error) => {
       toast({ title: "Backfill failed", description: err.message, variant: "destructive" });
@@ -1707,6 +1717,38 @@ export default function SentinelAdminPage() {
 
                   <TabsContent value="ai-scoring" data-testid="content-ai-scoring">
                     <div className="space-y-6">
+                      {scoreStats && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="score-stats-grid">
+                          <Card>
+                            <CardContent className="p-4">
+                              <div className="text-xs text-muted-foreground mb-1">Scored Thoughts</div>
+                              <div className="text-2xl font-bold" data-testid="stat-scored-thoughts">{scoreStats.thoughts.scored} <span className="text-sm font-normal text-muted-foreground">/ {scoreStats.thoughts.total}</span></div>
+                              <div className="text-xs text-muted-foreground mt-1">{scoreStats.thoughts.totalPoints} total pts</div>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardContent className="p-4">
+                              <div className="text-xs text-muted-foreground mb-1">Scans Today</div>
+                              <div className="text-2xl font-bold" data-testid="stat-scans-today">{scoreStats.sessions.today}</div>
+                              <div className="text-xs text-muted-foreground mt-1">{scoreStats.sessions.thisWeek} this week</div>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardContent className="p-4">
+                              <div className="text-xs text-muted-foreground mb-1">Ratings Today</div>
+                              <div className="text-2xl font-bold" data-testid="stat-ratings-today">{scoreStats.ratings.today}</div>
+                              <div className="text-xs text-muted-foreground mt-1">{scoreStats.ratings.thisWeek} this week</div>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardContent className="p-4">
+                              <div className="text-xs text-muted-foreground mb-1">All Time Events</div>
+                              <div className="text-2xl font-bold" data-testid="stat-all-time">{scoreStats.sessions.allTime + scoreStats.ratings.allTime}</div>
+                              <div className="text-xs text-muted-foreground mt-1">{scoreStats.sessions.allTime} scans, {scoreStats.ratings.allTime} ratings</div>
+                            </CardContent>
+                          </Card>
+                        </div>
+                      )}
                       <Card>
                         <CardHeader className="pb-3">
                           <CardTitle className="text-lg flex items-center gap-2" data-testid="text-scoring-rules-title">

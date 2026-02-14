@@ -76,6 +76,8 @@ import {
   Layers,
   Minus,
   ClipboardCopy,
+  ChevronsDownUp,
+  ChevronsUpDown,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -2419,7 +2421,36 @@ export default function BigIdeaPage() {
           <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-2 space-y-3">
               <div className="flex items-center gap-1.5 px-1">
-                <span className="font-semibold uppercase tracking-wide" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Thought Library</span>
+                <span className="font-semibold uppercase tracking-wide flex-1" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Thought Library</span>
+                {thoughts.length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5"
+                        data-testid="button-collapse-all-categories"
+                        onClick={() => {
+                          const activeCats = CATEGORY_ORDER.filter((cat) => thoughtsByCategory[cat]?.length);
+                          const allCollapsed = activeCats.every(cat => collapsedCategories.has(cat));
+                          if (allCollapsed) {
+                            setCollapsedCategories(new Set());
+                          } else {
+                            setCollapsedCategories(new Set(activeCats));
+                          }
+                        }}
+                      >
+                        {CATEGORY_ORDER.filter((cat) => thoughtsByCategory[cat]?.length).every(cat => collapsedCategories.has(cat))
+                          ? <ChevronsUpDown className="h-3 w-3" />
+                          : <ChevronsDownUp className="h-3 w-3" />
+                        }
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>{CATEGORY_ORDER.filter((cat) => thoughtsByCategory[cat]?.length).every(cat => collapsedCategories.has(cat)) ? "Expand all categories" : "Collapse all categories"}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
               </div>
               {thoughtsLoading ? (
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -2541,10 +2572,12 @@ export default function BigIdeaPage() {
                   <span>Scan Debug</span>
                   {debugOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
                 </button>
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-5 w-5"
+                  className="h-6 w-6"
                   data-testid="button-copy-debug"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -2581,8 +2614,13 @@ export default function BigIdeaPage() {
                     toast({ title: "Debug info copied to clipboard" });
                   }}
                 >
-                  <ClipboardCopy className="h-3 w-3" />
+                  <ClipboardCopy className="h-3.5 w-3.5" />
                 </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Copy debug info to clipboard</p>
+                </TooltipContent>
+                </Tooltip>
               </div>
               {debugOpen && (
                 <ScrollArea className="max-h-[200px]">

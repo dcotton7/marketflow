@@ -6,6 +6,54 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Fix PA-3 / CB-1 Base Overlap in Chained Scans — 16:55 UTC
+- **Task**: Prevent overlapping base detection when PA-3 (Current Coiling Base) is chained downstream from CB-1 (Find Base Historical) in scans like "Test Dual Base".
+- **Files**: `server/bigidea/indicators.ts`
+- **Details**:
+  - **Root cause**: PA-3 had no `consumes` declaration and didn't accept `upstreamData`, so it was completely unaware of any historical base found by CB-1 upstream. Both indicators could detect bases in the same bar range.
+  - **Fix**: Added `consumes: [{ paramName: "maxBaseLimit", dataKey: "baseEndBar" }]` to PA-3 so it receives CB-1's `baseEndBar` (the newest bar of the historical base). PA-3 now caps its max search length to `baseEndBar`, ensuring it only looks for bases in bars BEFORE the historical base starts.
+  - If the historical base is too close to the current bar (not enough room for a min-length base), PA-3 returns a clear diagnostic: "upstream base too close".
+  - Updated PA-3 description to note anti-overlap behavior when connected downstream from CB-1.
+- **Status**: Complete
+
+### Collapse All Button for Thought Library — 16:50 UTC
+- **Task**: Add a "Collapse All / Expand All" toggle button to the Thought Library panel header.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - Added a `ChevronsDownUp` / `ChevronsUpDown` icon button next to the "Thought Library" header.
+  - Click toggles between collapsing all categories and expanding all categories.
+  - Includes tooltip ("Collapse all categories" / "Expand all categories").
+  - Only shows when thoughts exist.
+- **Status**: Complete
+
+### Copy Debug Button Visibility Improvement — 16:50 UTC
+- **Task**: Make the clipboard copy button in the Scan Debug panel easier to find.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - Increased button size from h-5 w-5 to h-6 w-6, icon from h-3 w-3 to h-3.5 w-3.5.
+  - Added tooltip ("Copy debug info to clipboard") so users can discover the button.
+- **Status**: Complete
+
+### Fix Backfill for Production Data — 16:52 UTC
+- **Task**: Fix thought score backfill to work with production data where `idea_id` is NULL and config nodes lack `thoughtId`.
+- **Files**: `server/bigidea/routes.ts`
+- **Details**:
+  - **Root cause**: Backfill skipped all 105 chart ratings because `if (!r.ideaId) continue`. Scan sessions filtered on `n.thoughtId` which doesn't exist on production config nodes (they use `thoughtName` instead).
+  - **Fix**: Created `resolveThoughtIdsFromNodes()` helper that first tries `thoughtId` (numeric), then falls back to matching `thoughtName` against the `scanner_thoughts` table by name (case-insensitive).
+  - For chart ratings: first tries `ideaId` → idea's nodes, then falls back to `sessionId` → session's `scan_config.nodes`. Only skips truly orphan ratings with neither link.
+  - Pre-fetches all thoughts once into a name→id map for efficient lookups.
+  - 87 of 105 chart ratings now have a valid `sessionId` path; 18 remain orphaned.
+- **Status**: Complete
+
+### Score Counters on AI Score Weighting Tab — 16:53 UTC
+- **Task**: Add score event counters (Scored Thoughts, Scans Today, Ratings Today, All Time Events) to the AI Score Weighting admin tab.
+- **Files**: `server/bigidea/routes.ts`, `client/src/pages/SentinelAdminPage.tsx`
+- **Details**:
+  - Added `GET /api/bigidea/thought-scores/stats` endpoint returning thought stats (total, scored, totalPoints), session counts (allTime, today, thisWeek), and rating counts (allTime, today, thisWeek).
+  - Added a 4-card stats grid at the top of the AI Scoring tab showing: Scored Thoughts (X/total, Y pts), Scans Today (+ this week), Ratings Today (+ this week), All Time Events (scans + ratings combined).
+  - Stats auto-refresh after backfill completes.
+- **Status**: Complete
+
 ### Scan Performance Optimization — 09:00 UTC
 - **Task**: Speed up BigIdea scan execution by increasing parallelism, implementing lazy data fetching, and adding database indexes.
 - **Files**: `server/bigidea/routes.ts`, database DDL

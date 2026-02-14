@@ -637,8 +637,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-3",
     name: "Consolidation / Base Detection",
     category: "Price Action",
-    description: "The core base-building indicator. Scans recent bars to find a flat sideways zone where price traded within a tight range. The allowed range tightens as the base gets longer, so short bases can be wider and long bases must be tighter. Rejects bases where price is sitting in the lower half (weak), where the base drifts/slopes too much, or where most closes aren't in the upper portion. Key knobs: Max Range %, Max Slope %, and Min Base Length directly control which stocks pass. Drifter Tolerance affects how far the base extends (and the detected length passed downstream to Prior Advance / Smooth Advance) but won't change pass/fail on its own — it matters most when paired with Min Base % of Lookback or downstream indicators.",
+    description: "The core base-building indicator. Scans recent bars to find a flat sideways zone where price traded within a tight range. The allowed range tightens as the base gets longer, so short bases can be wider and long bases must be tighter. Rejects bases where price is sitting in the lower half (weak), where the base drifts/slopes too much, or where most closes aren't in the upper portion. Key knobs: Max Range %, Max Slope %, and Min Base Length directly control which stocks pass. Drifter Tolerance affects how far the base extends (and the detected length passed downstream to Prior Advance / Smooth Advance) but won't change pass/fail on its own — it matters most when paired with Min Base % of Lookback or downstream indicators. When connected downstream from Find Base (CB-1), automatically limits its search to bars BEFORE the historical base to prevent overlap.",
     provides: [{ linkType: "basePeriod", paramName: "period" }],
+    consumes: [{ paramName: "maxBaseLimit", dataKey: "baseEndBar" }],
     params: [
       { name: "period", label: "Max Base Length", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minPeriod", label: "Min Base Length", type: "number", defaultValue: 5, min: 5, max: 50, step: 1 },
@@ -647,7 +648,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "drifterPct", label: "Drifter Tolerance %", type: "number", defaultValue: 10, min: 0, max: 25, step: 1 },
       { name: "minBasePct", label: "Min Base % of Lookback", type: "number", defaultValue: 0, min: 0, max: 100, step: 5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
       const maxPeriod = params.period ?? 20;
       const minPeriod = Math.max(5, params.minPeriod ?? 5);
       const maxRange = params.maxRange ?? 15;
@@ -656,7 +657,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const minBasePct = params.minBasePct ?? 0;
       if (candles.length < minPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minPeriod} bars, ≤${maxRange}% range` } } };
 
-      const maxLen = Math.min(maxPeriod, candles.length);
+      const upstreamBaseEnd = typeof upstreamData?.baseEndBar === "number" ? upstreamData.baseEndBar : null;
+      const effectiveMaxPeriod = upstreamBaseEnd !== null ? Math.min(maxPeriod, upstreamBaseEnd) : maxPeriod;
+      if (upstreamBaseEnd !== null && effectiveMaxPeriod < minPeriod) {
+        return { pass: false, data: { _diagnostics: { value: `upstream base too close (bar ${upstreamBaseEnd})`, threshold: `need ≥${minPeriod} bars before historical base` } } };
+      }
+      const maxLen = Math.min(effectiveMaxPeriod, candles.length);
 
       const recentSlice = candles.slice(0, minPeriod);
       const refHigh = Math.max(...recentSlice.map(c => c.high));
