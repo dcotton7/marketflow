@@ -25,6 +25,29 @@ interface HitResult {
   handle: "p1" | "p2" | "line";
 }
 
+function resolveTimeFromParam(param: any, chart: IChartApi | null): number | null {
+  if (param.time) {
+    if (typeof param.time === "object") {
+      const t = param.time as { year: number; month: number; day: number };
+      return Math.floor(new Date(Date.UTC(t.year, t.month - 1, t.day)).getTime() / 1000);
+    }
+    return param.time as number;
+  }
+  if (chart && param.point && typeof param.point.x === "number") {
+    try {
+      const timeVal = chart.timeScale().coordinateToTime(param.point.x);
+      if (timeVal != null) {
+        if (typeof timeVal === "object") {
+          const t = timeVal as { year: number; month: number; day: number };
+          return Math.floor(new Date(Date.UTC(t.year, t.month - 1, t.day)).getTime() / 1000);
+        }
+        return timeVal as number;
+      }
+    } catch {}
+  }
+  return null;
+}
+
 export function useChartDrawings({
   ticker,
   timeframe,
@@ -37,6 +60,7 @@ export function useChartDrawings({
   const [mode, setMode] = useState<ToolMode>("idle");
   const [selectedId, setSelectedId] = useState<number | string | null>(null);
 
+  const [chartReady, setChartReady] = useState(false);
   const primitivesRef = useRef<(TrendLinePrimitive | HorizontalLinePrimitive)[]>([]);
   const tempPointRef = useRef<DrawingPoint | null>(null);
   const dragInfoRef = useRef<HitResult | null>(null);
@@ -73,6 +97,7 @@ export function useChartDrawings({
   }, [ticker, timeframe]);
 
   useEffect(() => {
+    setChartReady(false);
     if (enabled && ticker) {
       loadDrawings();
     }
@@ -122,6 +147,8 @@ export function useChartDrawings({
     const series = seriesRef.current;
     if (!series) return;
 
+    setChartReady(true);
+
     for (const prim of primitivesRef.current) {
       try { series.detachPrimitive(prim); } catch {}
     }
@@ -150,14 +177,17 @@ export function useChartDrawings({
   }, [seriesRef, selectedId]);
 
   useEffect(() => {
-    syncPrimitivesToChart();
-  }, [drawings, selectedId, syncPrimitivesToChart]);
+    if (chartReady) {
+      syncPrimitivesToChart();
+    }
+  }, [drawings, selectedId, chartReady, syncPrimitivesToChart]);
 
   const handleChartClick = useCallback((param: any) => {
     if (!enabled) return;
     if (!param.point) return;
 
     const series = seriesRef.current;
+    const chart = chartRef.current;
     if (!series) return;
 
     let clickedPrice: number | null = null;
@@ -166,15 +196,7 @@ export function useChartDrawings({
       if (p !== null && isFinite(p as number)) clickedPrice = p as number;
     }
 
-    let clickedTime: number | null = null;
-    if (param.time) {
-      if (typeof param.time === "object") {
-        const t = param.time as { year: number; month: number; day: number };
-        clickedTime = Math.floor(new Date(Date.UTC(t.year, t.month - 1, t.day)).getTime() / 1000);
-      } else {
-        clickedTime = param.time as number;
-      }
-    }
+    const clickedTime = resolveTimeFromParam(param, chart);
 
     if (modeRef.current === "idle" && !activeToolRef.current) {
       const hit = hitTestDrawings(drawingsRef.current, primitivesRef.current, param.point.x, param.point.y);
@@ -222,7 +244,7 @@ export function useChartDrawings({
       }
       return;
     }
-  }, [enabled, seriesRef, saveDrawingToDb]);
+  }, [enabled, seriesRef, chartRef, saveDrawingToDb]);
 
   const handleMouseDown = useCallback((param: any) => {
     if (!enabled || !param.point) return;
@@ -244,6 +266,7 @@ export function useChartDrawings({
     if (!enabled || modeRef.current !== "dragging" || !dragInfoRef.current || !param.point) return;
 
     const series = seriesRef.current;
+    const chart = chartRef.current;
     if (!series) return;
 
     let newPrice: number | null = null;
@@ -252,15 +275,7 @@ export function useChartDrawings({
       if (p !== null && isFinite(p as number)) newPrice = p as number;
     }
 
-    let newTime: number | null = null;
-    if (param.time) {
-      if (typeof param.time === "object") {
-        const t = param.time as { year: number; month: number; day: number };
-        newTime = Math.floor(new Date(Date.UTC(t.year, t.month - 1, t.day)).getTime() / 1000);
-      } else {
-        newTime = param.time as number;
-      }
-    }
+    const newTime = resolveTimeFromParam(param, chart);
 
     if (newPrice == null) return;
 
@@ -294,7 +309,7 @@ export function useChartDrawings({
       }
       return d;
     }));
-  }, [enabled, seriesRef]);
+  }, [enabled, seriesRef, chartRef]);
 
   const handleMouseUp = useCallback(() => {
     if (modeRef.current === "dragging" && dragInfoRef.current) {

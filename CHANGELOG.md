@@ -6,6 +6,41 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### AI Scan Tuning: Add/Remove Criterion Suggestions — 08:15 UTC
+- **Task**: Expand AI scan tuning to support adding new criteria and removing existing criteria, not just parameter adjustments.
+- **Files**: `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - **Backend**: System prompt updated with 3 suggestion types: `param_change` (existing), `add_criterion` (new), `remove_criterion` (new). User message now includes thought node summary (nodeId, name, criteria) and available indicator library (indicators not on canvas). Server-side validation/filtering handles all 3 types with proper bounds checking, criterion construction from INDICATOR_LIBRARY defaults, and auto-detection of target thought nodes. Max completion tokens increased to 2500.
+  - **Frontend Accept/Undo**: `handleAcceptSuggestion` handles all 3 types — param_change updates param values, add_criterion appends criterion to target thought, remove_criterion filters it out (capturing the removed criterion for undo). `handleUndoSuggestion` reverses each type correctly.
+  - **Frontend UI**: Suggestion cards render conditionally based on type — param_change shows current→suggested value with strikethrough, add_criterion shows green Plus icon with "Add criterion" label, remove_criterion shows red Minus icon with "Remove criterion" label. All types share the same Apply/Undo button pattern.
+  - **TuningSuggestion type**: Already extended with `type`, `thoughtId`, and `criterion` optional fields.
+- **Status**: Complete
+
+### Thought Library Preview Feature — 08:00 UTC
+- **Task**: Clicking a thought in the library panel shows a read-only preview in the right pane with greyed-out controls.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - Clicking a library thought sets `previewThought` state showing the thought's criteria in the right pane at 70% opacity.
+  - Sliders disabled with `pointer-events-none`, values shown as Badges instead of interactive controls.
+  - "Drag onto canvas to adjust parameters" message displayed.
+- **Status**: Complete
+
+### Fix Chart Blink on Scanner Arrow Navigation — 07:45 UTC
+- **Task**: Eliminate the visual flash/blink when navigating between scanner results using arrow keys or prev/next buttons in the scan chart viewer.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - Removed dynamic `key` prop (`key={currentIndex-symbol}`) from `ChartErrorBoundary` that was forcing a full remount of DualChartGrid on every navigation. Replaced with a stable key.
+  - Added `placeholderData: (prev) => prev` to both daily and intraday chart data queries so the previous chart remains visible while the new ticker's data loads, preventing a flash to loading state.
+- **Status**: Complete
+
+### Measure & Drawing Tools Made Mutually Exclusive — 07:40 UTC
+- **Task**: Make the measure tool (ruler) and drawing tools (trend line, horizontal line) mutually exclusive — activating one deactivates the other.
+- **Files**: `client/src/components/DualChartGrid.tsx`
+- **Details**:
+  - Daily toolbar: Clicking the measure button now clears any active drawing tool (`dailyDrawings.setActiveTool(null)`). Clicking either drawing tool now turns off measure mode (`setDailyMeasureMode(false)`).
+  - Intraday toolbar: Same mutual exclusion pattern applied — measure clears drawing tools, drawing tools clear measure mode.
+- **Status**: Complete
+
 ### Fix AI Idea Creation Timeframe Detection — 07:30 UTC
 - **Task**: Fix the AI "Create New Idea" prompt so it correctly detects intraday timeframe references (e.g., "5-min", "15-minute") from combined descriptions and sets the thought-level timeframe accordingly instead of always defaulting to "daily".
 - **Files**: `server/bigidea/routes.ts`

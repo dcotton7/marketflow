@@ -283,7 +283,7 @@ export function DualChartGrid({
               size="sm"
               variant="ghost"
               className={`text-white toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => setDailyMeasureMode(m => !m)}
+              onClick={() => { setDailyMeasureMode(m => !m); dailyDrawings.setActiveTool(null); }}
               style={dailyMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-daily-measure-mode`}
             >
@@ -293,7 +293,7 @@ export function DualChartGrid({
               size="sm"
               variant="ghost"
               className={`text-white toggle-elevate ${dailyDrawings.activeTool === "trendline" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => dailyDrawings.setActiveTool(dailyDrawings.activeTool === "trendline" ? null : "trendline")}
+              onClick={() => { dailyDrawings.setActiveTool(dailyDrawings.activeTool === "trendline" ? null : "trendline"); setDailyMeasureMode(false); }}
               style={dailyDrawings.activeTool === "trendline" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-daily-trend-line-mode`}
               title="Trend Line"
@@ -304,7 +304,7 @@ export function DualChartGrid({
               size="sm"
               variant="ghost"
               className={`text-white toggle-elevate ${dailyDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => dailyDrawings.setActiveTool(dailyDrawings.activeTool === "horizontal" ? null : "horizontal")}
+              onClick={() => { dailyDrawings.setActiveTool(dailyDrawings.activeTool === "horizontal" ? null : "horizontal"); setDailyMeasureMode(false); }}
               style={dailyDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-daily-horizontal-line`}
               title="Horizontal Line"
@@ -388,7 +388,7 @@ export function DualChartGrid({
               size="sm"
               variant="ghost"
               className={`text-white toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => setIntradayMeasureMode(m => !m)}
+              onClick={() => { setIntradayMeasureMode(m => !m); intradayDrawings.setActiveTool(null); }}
               style={intradayMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-intraday-measure-mode`}
             >
@@ -398,7 +398,7 @@ export function DualChartGrid({
               size="sm"
               variant="ghost"
               className={`text-white toggle-elevate ${intradayDrawings.activeTool === "trendline" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => intradayDrawings.setActiveTool(intradayDrawings.activeTool === "trendline" ? null : "trendline")}
+              onClick={() => { intradayDrawings.setActiveTool(intradayDrawings.activeTool === "trendline" ? null : "trendline"); setIntradayMeasureMode(false); }}
               style={intradayDrawings.activeTool === "trendline" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-intraday-trend-line-mode`}
               title="Trend Line"
@@ -409,7 +409,7 @@ export function DualChartGrid({
               size="sm"
               variant="ghost"
               className={`text-white toggle-elevate ${intradayDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => intradayDrawings.setActiveTool(intradayDrawings.activeTool === "horizontal" ? null : "horizontal")}
+              onClick={() => { intradayDrawings.setActiveTool(intradayDrawings.activeTool === "horizontal" ? null : "horizontal"); setIntradayMeasureMode(false); }}
               style={intradayDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
               data-testid={`${pid}button-intraday-horizontal-line`}
               title="Horizontal Line"

@@ -2285,43 +2285,88 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         console.warn("[Tuning] Failed to fetch learning context:", histErr);
       }
 
-      const systemPrompt = `You are a stock scanner tuning assistant. Analyze the scan configuration and failure funnel data to suggest parameter adjustments that will improve scan results quality.
+      const systemPrompt = `You are a stock scanner tuning assistant. Analyze the scan configuration and failure funnel data to suggest parameter adjustments, criterion additions, or criterion removals that will improve scan results quality.
 
 RULES:
 - Never suggest changing auto-linked parameters (marked autoLinked: true) — they are dynamically set per-stock
-- All suggested values MUST be within the min/max bounds provided
-- Suggest at most 5 parameter changes
+- All suggested param values MUST be within the min/max bounds provided
+- Suggest at most 7 changes total (param_change + add_criterion + remove_criterion combined)
 - Focus on the indicators that reject the most stocks (highest rejection rate)
 - Use diagnostic samples to understand WHY stocks are being rejected
-- If the scan produces too few results, suggest loosening the tightest filters
-- If too many results, suggest tightening the weakest filters
+- If the scan produces too few results, suggest loosening the tightest filters or removing overly restrictive criteria
+- If too many results, suggest tightening the weakest filters or adding new filtering criteria
 - Consider the user's chart ratings when available
 - When historical learning data is available, use it to inform your suggestions — prefer parameter directions and values that led to accepted sessions and good thumbs-up retention
 - Pay special attention to CURRENT REGIME, CURRENT UNIVERSE, and ARCHETYPE sections — these show how parameters performed in conditions similar to right now
 - If a regime or archetype shows low retention, consider adjusting parameters differently than all-time averages suggest
 - AVOID suggesting parameter changes that were previously discarded by users or listed in AVOID PARAMS
+- For add_criterion: suggest an indicator from the available indicator library that would complement the existing scan. Include the indicatorId, indicatorName, and a full criterion object with default params
+- For remove_criterion: suggest removing a criterion that is overly restrictive or redundant. Specify which thought/node contains it via thoughtId
+
+SUGGESTION TYPES:
+1. "param_change" — adjust a parameter value on an existing criterion
+2. "add_criterion" — add a new criterion to an existing thought node (provide the full criterion object)
+3. "remove_criterion" — remove an existing criterion from a thought node
 
 Return a JSON object with this exact structure:
 {
   "suggestions": [
     {
+      "type": "param_change",
       "indicatorId": "string",
       "indicatorName": "string",
       "paramName": "string",
       "currentValue": number,
       "suggestedValue": number,
       "reason": "string (1-2 sentences explaining the change)"
+    },
+    {
+      "type": "add_criterion",
+      "indicatorId": "string",
+      "indicatorName": "string",
+      "thoughtId": "string (the node id to add to)",
+      "criterion": { "indicatorId": "string", "label": "string", "params": [...] },
+      "reason": "string (1-2 sentences explaining why this criterion helps)"
+    },
+    {
+      "type": "remove_criterion",
+      "indicatorId": "string",
+      "indicatorName": "string",
+      "thoughtId": "string (the node id containing the criterion)",
+      "reason": "string (1-2 sentences explaining why this criterion should be removed)"
     }
   ],
   "overallAnalysis": "string (2-3 sentences about the scan's filtering behavior)"
 }`;
 
+      const usedIndicatorIds = new Set(indicatorMeta.map(m => m.id));
+      const availableIndicators = INDICATOR_LIBRARY
+        .filter(ind => !usedIndicatorIds.has(ind.id))
+        .map(ind => ({
+          id: ind.id,
+          name: ind.name,
+          category: ind.category,
+          params: ind.params.map(p => ({ name: p.name, label: p.label, type: p.type, defaultValue: p.defaultValue, min: p.min, max: p.max, step: p.step, options: p.options })),
+        }));
+
+      const thoughtNodeSummary = thoughtNodes.map((tn: any) => ({
+        nodeId: tn.id,
+        thoughtName: tn.thoughtName || tn.label || tn.id,
+        criteria: (tn.thoughtCriteria || []).map((c: any) => ({ indicatorId: c.indicatorId, label: c.label })),
+      }));
+
       const userMessage = `Scan configuration:
 Universe: ${universe || "unknown"} (${funnelData.totalTickers} tickers)
 Results found: ${resultCount || 0}
 
+Thought nodes on canvas (use nodeId for thoughtId in add/remove suggestions):
+${JSON.stringify(thoughtNodeSummary, null, 2)}
+
 Indicator metadata with current params and bounds:
 ${JSON.stringify(indicatorMeta, null, 2)}
+
+Available indicators NOT currently on canvas (for add_criterion suggestions):
+${JSON.stringify(availableIndicators.slice(0, 20), null, 2)}
 
 Failure funnel per indicator:
 ${JSON.stringify(funnelData.perIndicator, null, 2)}
@@ -2341,7 +2386,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         ],
         response_format: { type: "json_object" },
         temperature: 0.3,
-        max_completion_tokens: 1500,
+        max_completion_tokens: 2500,
       });
 
       const responseText = completion.choices[0]?.message?.content || "{}";
@@ -2354,26 +2399,70 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
 
       if (aiResult.suggestions && Array.isArray(aiResult.suggestions)) {
         aiResult.suggestions = aiResult.suggestions.filter((s: any) => {
-          if (!s.indicatorId || !s.paramName || s.suggestedValue === undefined) return false;
-          const val = Number(s.suggestedValue);
-          if (isNaN(val)) return false;
-          s.suggestedValue = val;
+          if (!s.indicatorId) return false;
+          s.type = s.type || "param_change";
+          s.reason = s.reason || "Suggested by AI";
 
-          const indMeta = indicatorMeta.find(m => m.id === s.indicatorId);
-          if (!indMeta) return false;
-          const param = indMeta.currentParams.find((p: any) => p.name === s.paramName);
-          if (param?.autoLinked) return false;
-          const bound = indMeta.bounds.find((b: any) => b.name === s.paramName);
-          if (bound) {
-            s.suggestedValue = Math.max(bound.min, Math.min(bound.max, s.suggestedValue));
-            if (bound.step && bound.step >= 1) {
-              s.suggestedValue = Math.round(s.suggestedValue / bound.step) * bound.step;
+          if (s.type === "param_change") {
+            if (!s.paramName || s.suggestedValue === undefined) return false;
+            const val = Number(s.suggestedValue);
+            if (isNaN(val)) return false;
+            s.suggestedValue = val;
+
+            const indMeta = indicatorMeta.find(m => m.id === s.indicatorId);
+            if (!indMeta) return false;
+            const param = indMeta.currentParams.find((p: any) => p.name === s.paramName);
+            if (param?.autoLinked) return false;
+            const bound = indMeta.bounds.find((b: any) => b.name === s.paramName);
+            if (bound) {
+              s.suggestedValue = Math.max(bound.min, Math.min(bound.max, s.suggestedValue));
+              if (bound.step && bound.step >= 1) {
+                s.suggestedValue = Math.round(s.suggestedValue / bound.step) * bound.step;
+              }
             }
+            s.currentValue = param?.value ?? s.currentValue;
+            s.indicatorName = s.indicatorName || indMeta.name;
+            return true;
           }
-          s.currentValue = param?.value ?? s.currentValue;
-          s.indicatorName = s.indicatorName || indMeta.name;
-          s.reason = s.reason || "Parameter adjustment suggested by AI";
-          return true;
+
+          if (s.type === "add_criterion") {
+            const indDef = INDICATOR_LIBRARY.find(ind => ind.id === s.indicatorId);
+            if (!indDef) return false;
+            s.indicatorName = s.indicatorName || indDef.name;
+            if (!s.criterion) {
+              s.criterion = {
+                indicatorId: indDef.id,
+                label: indDef.name,
+                params: indDef.params.map(p => ({
+                  name: p.name,
+                  label: p.label,
+                  type: p.type,
+                  value: p.defaultValue,
+                  min: p.min,
+                  max: p.max,
+                  step: p.step,
+                  options: p.options,
+                })),
+              };
+            }
+            if (!s.thoughtId) {
+              s.thoughtId = thoughtNodes[0]?.id || null;
+            }
+            return !!s.thoughtId;
+          }
+
+          if (s.type === "remove_criterion") {
+            s.indicatorName = s.indicatorName || s.indicatorId;
+            if (!s.thoughtId) {
+              const matchNode = thoughtNodes.find((tn: any) =>
+                (tn.thoughtCriteria || []).some((c: any) => c.indicatorId === s.indicatorId)
+              );
+              s.thoughtId = matchNode?.id || null;
+            }
+            return !!s.thoughtId;
+          }
+
+          return false;
         });
       } else {
         aiResult.suggestions = [];

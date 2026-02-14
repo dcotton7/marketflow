@@ -74,6 +74,7 @@ import {
   Eye,
   MoreHorizontal,
   Layers,
+  Minus,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -271,12 +272,15 @@ interface ScanResponse {
 }
 
 interface TuningSuggestion {
+  type?: "param_change" | "add_criterion" | "remove_criterion";
   indicatorId: string;
   indicatorName: string;
-  paramName: string;
-  currentValue: number;
-  suggestedValue: number;
+  paramName?: string;
+  currentValue?: number;
+  suggestedValue?: number;
   reason: string;
+  thoughtId?: string;
+  criterion?: ScannerCriterion;
 }
 
 interface TuningResult {
@@ -544,6 +548,7 @@ export default function BigIdeaPage() {
   const [loadedIdeaName, setLoadedIdeaName] = useState<string | null>(null);
   const [universe, setUniverse] = useState("sp500");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [previewThoughtId, setPreviewThoughtId] = useState<number | null>(null);
   const [currentIdeaId, setCurrentIdeaId] = useState<number | null>(null);
   const [renameForkOpen, setRenameForkOpen] = useState(false);
 
@@ -1167,77 +1172,156 @@ export default function BigIdeaPage() {
   }, [indicatorLibrary]);
 
   const handleAcceptSuggestion = useCallback((suggestion: TuningSuggestion, index: number) => {
+    const suggType = suggestion.type || "param_change";
     let applied = false;
-    setNodes((nds) =>
-      nds.map((n) => {
-        if (n.type !== "thought" || !n.data.criteria) return n;
-        const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
-        const matchCriterion = criteria.find((c) =>
-          c.indicatorId === suggestion.indicatorId &&
-          c.params.some((p) => p.name === suggestion.paramName)
-        );
-        if (!matchCriterion) return n;
-        applied = true;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            criteria: criteria.map((c) => {
-              if (c.indicatorId !== suggestion.indicatorId) return c;
-              return {
-                ...c,
-                params: c.params.map((p) =>
-                  p.name === suggestion.paramName ? { ...p, value: suggestion.suggestedValue } : p
-                ),
-              };
-            }),
-          },
-        };
-      })
-    );
+
+    if (suggType === "param_change") {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.type !== "thought" || !n.data.criteria) return n;
+          const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
+          const matchCriterion = criteria.find((c) =>
+            c.indicatorId === suggestion.indicatorId &&
+            c.params.some((p) => p.name === suggestion.paramName)
+          );
+          if (!matchCriterion) return n;
+          applied = true;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              criteria: criteria.map((c) => {
+                if (c.indicatorId !== suggestion.indicatorId) return c;
+                return {
+                  ...c,
+                  params: c.params.map((p) =>
+                    p.name === suggestion.paramName ? { ...p, value: suggestion.suggestedValue } : p
+                  ),
+                };
+              }),
+            },
+          };
+        })
+      );
+      if (applied) {
+        toast({ title: `Applied: ${suggestion.indicatorName} → ${suggestion.paramName} = ${suggestion.suggestedValue}` });
+      }
+    } else if (suggType === "add_criterion" && suggestion.criterion) {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== suggestion.thoughtId || n.type !== "thought") return n;
+          const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
+          applied = true;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              criteria: [...criteria, suggestion.criterion!],
+            },
+          };
+        })
+      );
+      if (applied) {
+        toast({ title: `Added: ${suggestion.indicatorName} criterion` });
+      }
+    } else if (suggType === "remove_criterion") {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== suggestion.thoughtId || n.type !== "thought") return n;
+          const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
+          const removed = criteria.find((c) => c.indicatorId === suggestion.indicatorId);
+          const filtered = criteria.filter((c) => c.indicatorId !== suggestion.indicatorId);
+          if (filtered.length === criteria.length) return n;
+          applied = true;
+          if (removed) suggestion.criterion = removed;
+          return {
+            ...n,
+            data: { ...n.data, criteria: filtered },
+          };
+        })
+      );
+      if (applied) {
+        toast({ title: `Removed: ${suggestion.indicatorName} criterion` });
+      }
+    }
+
     if (applied) {
       setAcceptedTuneIndices((prev) => { const next = new Set(Array.from(prev)); next.add(index); return next; });
       setTuningDirty(true);
-      toast({ title: `Applied: ${suggestion.indicatorName} → ${suggestion.paramName} = ${suggestion.suggestedValue}` });
     } else {
-      toast({ title: "Could not apply", description: `Parameter ${suggestion.paramName} for ${suggestion.indicatorName} not found on canvas.`, variant: "destructive" });
+      toast({ title: "Could not apply", description: `${suggestion.indicatorName} not found on canvas.`, variant: "destructive" });
     }
   }, [setNodes, toast, normalizeCriteriaParams]);
 
   const handleUndoSuggestion = useCallback((suggestion: TuningSuggestion, index: number) => {
-    setNodes((nds) =>
-      nds.map((n) => {
-        if (n.type !== "thought" || !n.data.criteria) return n;
-        const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
-        const matchCriterion = criteria.find((c) =>
-          c.indicatorId === suggestion.indicatorId &&
-          c.params.some((p) => p.name === suggestion.paramName)
-        );
-        if (!matchCriterion) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            criteria: criteria.map((c) => {
-              if (c.indicatorId !== suggestion.indicatorId) return c;
-              return {
-                ...c,
-                params: c.params.map((p) =>
-                  p.name === suggestion.paramName ? { ...p, value: suggestion.currentValue } : p
-                ),
-              };
-            }),
-          },
-        };
-      })
-    );
+    const suggType = suggestion.type || "param_change";
+
+    if (suggType === "param_change") {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.type !== "thought" || !n.data.criteria) return n;
+          const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
+          const matchCriterion = criteria.find((c) =>
+            c.indicatorId === suggestion.indicatorId &&
+            c.params.some((p) => p.name === suggestion.paramName)
+          );
+          if (!matchCriterion) return n;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              criteria: criteria.map((c) => {
+                if (c.indicatorId !== suggestion.indicatorId) return c;
+                return {
+                  ...c,
+                  params: c.params.map((p) =>
+                    p.name === suggestion.paramName ? { ...p, value: suggestion.currentValue } : p
+                  ),
+                };
+              }),
+            },
+          };
+        })
+      );
+      toast({ title: `Undone: ${suggestion.indicatorName} → ${suggestion.paramName} reverted to ${suggestion.currentValue}` });
+    } else if (suggType === "add_criterion") {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== suggestion.thoughtId || n.type !== "thought") return n;
+          const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              criteria: criteria.filter((c) => c.indicatorId !== suggestion.indicatorId),
+            },
+          };
+        })
+      );
+      toast({ title: `Undone: removed ${suggestion.indicatorName} criterion` });
+    } else if (suggType === "remove_criterion" && suggestion.criterion) {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== suggestion.thoughtId || n.type !== "thought") return n;
+          const criteria = normalizeCriteriaParams(n.data.criteria as ScannerCriterion[]);
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              criteria: [...criteria, suggestion.criterion!],
+            },
+          };
+        })
+      );
+      toast({ title: `Undone: restored ${suggestion.indicatorName} criterion` });
+    }
+
     setAcceptedTuneIndices((prev) => {
       const next = new Set(Array.from(prev));
       next.delete(index);
       if (next.size === 0) setTuningDirty(false);
       return next;
     });
-    toast({ title: `Undone: ${suggestion.indicatorName} → ${suggestion.paramName} reverted to ${suggestion.currentValue}` });
   }, [setNodes, toast, normalizeCriteriaParams]);
 
   const handleApplyAll = useCallback(() => {
@@ -1490,8 +1574,10 @@ export default function BigIdeaPage() {
     if (node.type === "thought") {
       setSelectedNodeId(node.id);
       setShowResults(false);
+      setPreviewThoughtId(null);
     } else if (node.type === "results") {
       setSelectedNodeId(null);
+      setPreviewThoughtId(null);
       if (scanResults && scanResults.length > 0) {
         setShowResults(true);
       }
@@ -2105,6 +2191,7 @@ export default function BigIdeaPage() {
   );
 
   const selectedNode = selectedNodeId ? nodesWithCallbacks.find((n) => n.id === selectedNodeId) : null;
+  const previewThought = previewThoughtId ? thoughts.find((t) => t.id === previewThoughtId) : null;
 
   const sortedResults = useMemo(() => {
     if (!scanResults) return [];
@@ -2369,7 +2456,12 @@ export default function BigIdeaPage() {
                             e.dataTransfer.setData("application/bigidea-thought", JSON.stringify(thought));
                             e.dataTransfer.effectAllowed = "move";
                           }}
-                          className="rounded-md border px-2.5 py-2 cursor-grab active:cursor-grabbing hover-elevate"
+                          onClick={() => {
+                            setPreviewThoughtId(prev => prev === thought.id ? null : thought.id);
+                            setSelectedNodeId(null);
+                            setShowResults(false);
+                          }}
+                          className={`rounded-md border px-2.5 py-2 cursor-grab active:cursor-grabbing hover-elevate ${previewThoughtId === thought.id ? "border-primary/50 bg-primary/5" : ""}`}
                           data-testid={`thought-card-${thought.id}`}
                         >
                           <div className="flex items-center gap-1.5">
@@ -2588,7 +2680,7 @@ export default function BigIdeaPage() {
           </ReactFlow>
         </div>
 
-        {(showResults || selectedNode) && (
+        {(showResults || selectedNode || previewThought) && (
           <div className="border-l flex flex-col relative" style={{ width: detailPanelWidth, backgroundColor: cssVariables.overlayBg }}>
             <div
               className="absolute top-0 left-0 w-1.5 h-full cursor-col-resize hover:bg-primary/20 active:bg-primary/30 z-10"
@@ -2597,18 +2689,19 @@ export default function BigIdeaPage() {
             />
             <div className="p-3 border-b flex items-center justify-between gap-2">
               <span className="font-semibold" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
-                {showResults ? "Scan Results" : "Thought Details"}
+                {showResults ? "Scan Results" : previewThought ? "Thought Preview" : "Thought Details"}
               </span>
               <Button
                 size="icon"
                 variant="ghost"
                 onClick={() => {
-                  if (!showResults && scanResults && scanResults.length > 0) {
+                  if (!showResults && !previewThought && scanResults && scanResults.length > 0) {
                     setSelectedNodeId(null);
                     setShowResults(true);
                   } else {
                     setShowResults(false);
                     setSelectedNodeId(null);
+                    setPreviewThoughtId(null);
                   }
                 }}
                 data-testid="button-close-panel"
@@ -2780,6 +2873,100 @@ export default function BigIdeaPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {!showResults && !selectedNode && previewThought && (
+                <div className="p-3 pr-5 space-y-4 opacity-70" data-testid="thought-preview-panel">
+                  <div className="rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2.5 text-center">
+                    <GripVertical className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground font-medium">Drag onto canvas to adjust parameters</p>
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold">{previewThought.name}</span>
+                    {previewThought.description && (
+                      <p className="text-xs text-muted-foreground mt-1">{previewThought.description}</p>
+                    )}
+                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                      {previewThought.timeframe && (
+                        <Badge variant="outline" className="text-[10px]">
+                          {previewThought.timeframe === "5min" ? "5m" : previewThought.timeframe === "15min" ? "15m" : previewThought.timeframe === "30min" ? "30m" : previewThought.timeframe}
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="text-[10px]">{previewThought.category}</Badge>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Criteria
+                    </Label>
+                    {(previewThought.criteria || []).map((criterion, idx) => {
+                      const indMeta = indicatorLibrary.find((i) => i.id === criterion.indicatorId);
+                      return (
+                        <Card key={idx} className="overflow-visible">
+                          <CardHeader className="p-2.5 pb-1.5">
+                            <CardTitle className="text-xs">{criterion.label}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-2.5 pt-0 space-y-2">
+                            {indMeta?.description && (
+                              <p className="text-[11px] text-muted-foreground/80 leading-relaxed pb-1 border-b border-border/40 mb-1">{indMeta.description}</p>
+                            )}
+                            {criterion.params.map((param) => (
+                              <div key={param.name}>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-[11px] text-muted-foreground">{param.label}</Label>
+                                  {PARAM_DESCRIPTIONS[param.name] && (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <HelpCircle className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" />
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" align="end" className="max-w-[260px] text-xs">
+                                        {PARAM_DESCRIPTIONS[param.name]}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  )}
+                                </div>
+                                {param.type === "number" && (
+                                  <div className="mt-1">
+                                    <Slider
+                                      disabled
+                                      value={[param.value as number]}
+                                      min={param.min ?? 0}
+                                      max={param.max ?? 100}
+                                      step={param.step ?? 1}
+                                      className="pointer-events-none"
+                                    />
+                                    <span className="text-[10px] font-mono text-muted-foreground">{String(param.value)}</span>
+                                  </div>
+                                )}
+                                {param.type === "select" && (
+                                  <div className="mt-1">
+                                    <Badge variant="secondary" className="text-[10px]">{String(param.value)}</Badge>
+                                  </div>
+                                )}
+                                {param.type === "boolean" && (
+                                  <div className="mt-1">
+                                    <Badge variant={param.value ? "default" : "outline"} className="text-[10px]">{param.value ? "Yes" : "No"}</Badge>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    className="w-full gap-2"
+                    onClick={() => {
+                      addThoughtToCanvas(previewThought);
+                      setPreviewThoughtId(null);
+                    }}
+                    data-testid="button-preview-add-to-canvas"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add to Canvas
+                  </Button>
                 </div>
               )}
 
@@ -3721,18 +3908,46 @@ export default function BigIdeaPage() {
                         className={`rounded-md border p-3 space-y-1.5 ${isAccepted ? "border-rs-green/30 bg-rs-green/10" : ""}`}
                         data-testid={`tune-suggestion-${i}`}
                       >
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-1.5">
-                            <Badge variant="outline" className="text-[10px]">{s.indicatorName}</Badge>
-                            <span className="text-sm font-medium">{s.paramName}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground line-through">{s.currentValue}</span>
-                            <ArrowDown className="h-3 w-3 text-muted-foreground rotate-[-90deg]" />
-                            <span className="text-sm font-bold">{s.suggestedValue}</span>
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{s.reason}</p>
+                        {(!s.type || s.type === "param_change") && (
+                          <>
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant="outline" className="text-[10px]">{s.indicatorName}</Badge>
+                                <span className="text-sm font-medium">{s.paramName}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground line-through">{s.currentValue}</span>
+                                <ArrowDown className="h-3 w-3 text-muted-foreground rotate-[-90deg]" />
+                                <span className="text-sm font-bold">{s.suggestedValue}</span>
+                              </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{s.reason}</p>
+                          </>
+                        )}
+                        {s.type === "add_criterion" && (
+                          <>
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <Plus className="h-3.5 w-3.5 text-rs-green" />
+                                <Badge variant="outline" className="text-[10px] border-rs-green/50 text-rs-green">{s.indicatorName}</Badge>
+                                <span className="text-sm font-medium text-rs-green">Add criterion</span>
+                              </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{s.reason}</p>
+                          </>
+                        )}
+                        {s.type === "remove_criterion" && (
+                          <>
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <Minus className="h-3.5 w-3.5 text-rs-red" />
+                                <Badge variant="outline" className="text-[10px] border-rs-red/50 text-rs-red">{s.indicatorName}</Badge>
+                                <span className="text-sm font-medium text-rs-red">Remove criterion</span>
+                              </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{s.reason}</p>
+                          </>
+                        )}
                         {!isAccepted ? (
                           <Button
                             size="sm"
@@ -4134,6 +4349,7 @@ function ScanChartViewer({
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
@@ -4147,6 +4363,7 @@ function ScanChartViewer({
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
+    placeholderData: (prev) => prev,
   });
 
   const { data: chartMetrics } = useQuery<ChartMetrics>({
@@ -4520,7 +4737,7 @@ function ScanChartViewer({
         </div>
       )}
       <div className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-4">
-        <ChartErrorBoundary key={`${currentIndex}-${symbol}`} onClose={() => onOpenChange(false)}>
+        <ChartErrorBoundary key="scan-chart-viewer" onClose={() => onOpenChange(false)}>
         <DualChartGrid
           symbol={symbol}
           dailyData={dailyData}
