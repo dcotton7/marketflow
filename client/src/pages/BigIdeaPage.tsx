@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
@@ -71,6 +72,7 @@ import {
   Lightbulb,
   EyeOff,
   Eye,
+  MoreHorizontal,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -2122,6 +2124,33 @@ export default function BigIdeaPage() {
           className="w-48 text-sm font-medium"
           data-testid="input-idea-name"
         />
+
+        <Select
+          value=""
+          onValueChange={(val) => {
+            const idea = ideas.find((i) => String(i.id) === val);
+            if (idea) loadIdea(idea);
+          }}
+        >
+          <SelectTrigger className="w-44" data-testid="select-load-idea">
+            <div className="flex items-center gap-1.5">
+              <span className="bulb-glow-badge-sm flex-shrink-0">
+                <Lightbulb className="h-3.5 w-3.5 bulb-glow-icon" />
+              </span>
+              <SelectValue placeholder="List" />
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            {ideas.length > 0 ? ideas.map((idea) => (
+              <SelectItem key={idea.id} value={String(idea.id)} data-testid={`option-idea-${idea.id}`}>
+                {idea.name}
+              </SelectItem>
+            )) : (
+              <SelectItem value="__none__" disabled>No saved ideas</SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+
         <Select value={universe} onValueChange={setUniverse}>
           <SelectTrigger className="w-40" data-testid="select-universe">
             <SelectValue />
@@ -2156,45 +2185,28 @@ export default function BigIdeaPage() {
           Save Idea
         </Button>
 
-        {tuningDirty && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={handleCommitTuning}
-                disabled={commitTuningMutation.isPending || !tuneRescanDone}
-                className="gap-2"
-                data-testid="button-commit-tuning"
-              >
-                {commitTuningMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Save & Commit Tuning
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs">
-              <p>{!tuneRescanDone ? "Rescan and review charts first before committing tuning changes to the AI learning system." : "Saves your idea and commits the tuning changes to improve AI suggestions for everyone."}</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
-
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="outline"
-              onClick={() => qualityMutation.mutate()}
-              disabled={qualityMutation.isPending || nodes.filter(n => n.type === "thought").length === 0}
+              onClick={() => {
+                if (tuningDirty) {
+                  setPendingNavAction(() => () => setClearConfirmOpen(true));
+                  setUnsavedTuningDialog(true);
+                  return;
+                }
+                setClearConfirmOpen(true);
+              }}
+              disabled={nodes.filter(n => n.type === "thought").length === 0}
               className="gap-2"
-              data-testid="button-rate-quality"
+              data-testid="button-clear-idea"
             >
-              {qualityMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
-              Rate
-              {qualityResult && (
-                <span className={`font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
-                  {qualityResult.grade}
-                </span>
-              )}
+              <Trash2 className="h-4 w-4" />
+              Clear
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="max-w-xs">
-            <p>Analyzes your scan across 5 dimensions: criteria diversity, filter funnel effectiveness, data-link usage, parameter quality, and signal coverage. Helps identify gaps and improvements.</p>
+            <p>Removes all thoughts, connections, and results from the canvas. Starts fresh with an empty scan.</p>
           </TooltipContent>
         </Tooltip>
 
@@ -2238,56 +2250,41 @@ export default function BigIdeaPage() {
           </TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (tuningDirty) {
-                  setPendingNavAction(() => () => setClearConfirmOpen(true));
-                  setUnsavedTuningDialog(true);
-                  return;
-                }
-                setClearConfirmOpen(true);
-              }}
-              disabled={nodes.filter(n => n.type === "thought").length === 0}
-              className="gap-2"
-              data-testid="button-clear-idea"
-            >
-              <Trash2 className="h-4 w-4" />
-              Clear
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" data-testid="button-more-options">
+              <MoreHorizontal className="h-4 w-4" style={{ strokeWidth: 3 }} />
             </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="max-w-xs">
-            <p>Removes all thoughts, connections, and results from the canvas. Starts fresh with an empty scan.</p>
-          </TooltipContent>
-        </Tooltip>
-
-        {ideas.length > 0 && (
-          <Select
-            value=""
-            onValueChange={(val) => {
-              const idea = ideas.find((i) => String(i.id) === val);
-              if (idea) loadIdea(idea);
-            }}
-          >
-            <SelectTrigger className="w-44" data-testid="select-load-idea">
-              <div className="flex items-center gap-1.5">
-                <span className="bulb-glow-badge-sm flex-shrink-0">
-                  <Lightbulb className="h-3.5 w-3.5 bulb-glow-icon" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem
+              onClick={() => qualityMutation.mutate()}
+              disabled={qualityMutation.isPending || nodes.filter(n => n.type === "thought").length === 0}
+              data-testid="menu-rate-quality"
+            >
+              <Target className="h-4 w-4 mr-2" />
+              Rate Quality
+              {qualityResult && (
+                <span className={`ml-auto font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
+                  {qualityResult.grade}
                 </span>
-                <SelectValue placeholder="Load Idea..." />
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              {ideas.map((idea) => (
-                <SelectItem key={idea.id} value={String(idea.id)} data-testid={`option-idea-${idea.id}`}>
-                  {idea.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+              )}
+            </DropdownMenuItem>
+            {tuningDirty && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleCommitTuning}
+                  disabled={commitTuningMutation.isPending || !tuneRescanDone}
+                  data-testid="menu-commit-tuning"
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  Save & Commit Tuning
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -2503,55 +2500,6 @@ export default function BigIdeaPage() {
                         </div>
                       );
                     })}
-                  </div>
-                </ScrollArea>
-              )}
-            </div>
-          )}
-          {qualityResult && (
-            <div className="border-t" data-testid="scan-quality-panel">
-              <button
-                onClick={() => setQualityOpen(!qualityOpen)}
-                className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover-elevate"
-                data-testid="button-toggle-quality"
-              >
-                <span className="flex items-center gap-2">
-                  Scan Quality
-                  <span className={`text-sm font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
-                    {qualityResult.grade}
-                  </span>
-                  <span className="text-muted-foreground/60 normal-case">
-                    {qualityResult.overallScore}/{qualityResult.maxScore}
-                  </span>
-                </span>
-                {qualityOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
-              </button>
-              {qualityOpen && (
-                <ScrollArea className="max-h-[200px]">
-                  <div className="px-3 pb-2 space-y-2 text-[10px] leading-relaxed">
-                    {qualityResult.dimensions.map((dim) => (
-                      <div key={dim.name} className="border-t border-dashed pt-1.5" data-testid={`quality-dim-${dim.name.replace(/\s+/g, "-").toLowerCase()}`}>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-foreground">{dim.name}</span>
-                          <span className={`font-bold text-xs px-1.5 py-0.5 rounded border ${GRADE_BG_COLORS[dim.grade]}`}>
-                            {dim.grade}
-                          </span>
-                          <span className="text-muted-foreground/60">{dim.score}/{dim.maxScore}</span>
-                        </div>
-                        {dim.details.map((d, i) => (
-                          <div key={i} className="ml-2 text-muted-foreground/80 flex items-start gap-1">
-                            <span className="text-foreground/40 flex-shrink-0">·</span>
-                            <span>{d}</span>
-                          </div>
-                        ))}
-                        {dim.suggestions.length > 0 && dim.suggestions.map((s, i) => (
-                          <div key={`s-${i}`} className="ml-2 flex items-start gap-1 text-rs-amber">
-                            <Sparkles className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />
-                            <span>{s}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
                   </div>
                 </ScrollArea>
               )}
@@ -3483,6 +3431,54 @@ export default function BigIdeaPage() {
         sessionId={scanSessionId}
         tuningActive={tuningDirty}
       />
+
+      <Dialog open={qualityOpen && !!qualityResult} onOpenChange={setQualityOpen}>
+        <DialogContent className="max-w-lg" style={{ backgroundColor: cssVariables.overlayBg, borderColor: cssVariables.secondaryOverlayColor }} data-testid="quality-overlay">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3" style={{ fontSize: cssVariables.fontSizeHeader, color: cssVariables.textColorHeader }}>
+              Scan Quality
+              {qualityResult && (
+                <>
+                  <span className={`text-2xl font-bold ${GRADE_COLORS[qualityResult.grade]}`}>{qualityResult.grade}</span>
+                  <span className="text-sm font-normal" style={{ color: cssVariables.textColorSmall }}>{qualityResult.overallScore}/{qualityResult.maxScore}</span>
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {qualityResult && (
+            <ScrollArea className="max-h-[60vh]">
+              <div className="space-y-3 pr-3">
+                {qualityResult.dimensions.map((dim) => (
+                  <div key={dim.name} className="border-t border-dashed pt-2" data-testid={`quality-dim-${dim.name.replace(/\s+/g, "-").toLowerCase()}`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold" style={{ fontSize: cssVariables.fontSizeNormal, color: cssVariables.textColorNormal }}>{dim.name}</span>
+                      <span className={`font-bold text-xs px-1.5 py-0.5 rounded border ${GRADE_BG_COLORS[dim.grade]}`}>
+                        {dim.grade}
+                      </span>
+                      <span style={{ fontSize: cssVariables.fontSizeTiny, color: cssVariables.textColorTiny }}>{dim.score}/{dim.maxScore}</span>
+                    </div>
+                    {dim.details.map((d, i) => (
+                      <div key={i} className="ml-2 flex items-start gap-1 mt-0.5" style={{ fontSize: cssVariables.fontSizeSmall, color: cssVariables.textColorSmall }}>
+                        <span className="text-foreground/40 flex-shrink-0">·</span>
+                        <span>{d}</span>
+                      </div>
+                    ))}
+                    {dim.suggestions.length > 0 && dim.suggestions.map((s, i) => (
+                      <div key={`s-${i}`} className="ml-2 flex items-start gap-1 text-rs-amber mt-0.5" style={{ fontSize: cssVariables.fontSizeSmall }}>
+                        <Sparkles className="h-3 w-3 flex-shrink-0 mt-0.5" />
+                        <span>{s}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQualityOpen(false)} data-testid="button-close-quality">Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
         <AlertDialogContent>

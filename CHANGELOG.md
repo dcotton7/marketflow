@@ -6,6 +6,16 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### BigIdea Toolbar Reorder & Quality Rating Overlay — 05:10 UTC
+- **Task**: Reorder BigIdea toolbar, add ellipsis dropdown menu, move scan quality rating from left sidebar into a styled overlay dialog.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - **Toolbar reorder**: New order is Idea Name → List (load dropdown, always visible) → Universe → Run Scan → Save Idea → Clear → Tune → Ellipsis ("...") dropdown button.
+  - **Ellipsis dropdown**: New `MoreHorizontal` icon button (same height as other toolbar buttons) opens a DropdownMenu with "Rate Quality" (shows current grade if available) and conditionally "Save & Commit Tuning" (only visible when tuning is dirty).
+  - **Quality overlay**: Removed the collapsible scan quality panel from the bottom of the left sidebar. Quality results now display in a full Dialog overlay styled with sysadmin colors (`overlayBg` background, `secondaryOverlayColor` border). Shows overall grade, score, and all 5 dimensions with details and suggestions. Only action is [Close] which returns to scan setup.
+  - **Repeatable rating**: User can press "Rate Quality" from the ellipsis menu as often as they like. Each press triggers a fresh API call and opens the overlay with updated results reflecting any changes made to the idea.
+- **Status**: Complete
+
 ### Fix Fundamentals Strip Clipping — 04:45 UTC
 - **Task**: Fundamentals values (PE, Pre-Tax Margin, Debt/Equity, Target Price, etc.) were invisible because the fixed pane height was too short and `overflow-hidden` clipped the second row of values.
 - **Files**: `client/src/components/DualChartGrid.tsx`
