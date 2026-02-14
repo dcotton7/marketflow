@@ -6,6 +6,13 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Fix Admin Check on Score/Weight Routes — 05:52 UTC
+- **Task**: Fix 403 "Admin only" error when editing AI score rules and selection weights.
+- **Files**: `server/bigidea/routes.ts`
+- **Details**:
+  - Three admin-only endpoints (PUT score-rules, PUT selection-weights, POST backfill) were checking only `tier === "admin"` but not the `isAdmin` flag. Updated all three to use `(tier !== "admin" && !isAdmin)`, consistent with other admin checks throughout the codebase.
+- **Status**: Complete
+
 ### Standardize Top Menu Bar & BigIdea Toolbar Fix — 05:49 UTC
 - **Task**: Standardize top navigation bar across all pages to match BigIdea pattern, fix BigIdea toolbar order, fix admin tier issue.
 - **Files**: `client/src/components/SentinelHeader.tsx`, `client/src/pages/SentinelDashboardPage.tsx`, `client/src/pages/SentinelTradePage.tsx`, `client/src/pages/SentinelChartsPage.tsx`, `client/src/pages/SentinelEvaluatePage.tsx`, `client/src/pages/BigIdeaPage.tsx`

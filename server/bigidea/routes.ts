@@ -2951,7 +2951,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
       const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId));
-      if (!user.length || user[0].tier !== "admin") return res.status(403).json({ error: "Admin only" });
+      if (!user.length || (user[0].tier !== "admin" && !user[0].isAdmin)) return res.status(403).json({ error: "Admin only" });
 
       const id = parseInt(String(req.params.id));
       if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
@@ -2989,7 +2989,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
       const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId));
-      if (!user.length || user[0].tier !== "admin") return res.status(403).json({ error: "Admin only" });
+      if (!user.length || (user[0].tier !== "admin" && !user[0].isAdmin)) return res.status(403).json({ error: "Admin only" });
 
       const id = parseInt(String(req.params.id));
       if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
@@ -3016,7 +3016,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
       const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId));
-      if (!user.length || user[0].tier !== "admin") return res.status(403).json({ error: "Admin only" });
+      if (!user.length || (user[0].tier !== "admin" && !user[0].isAdmin)) return res.status(403).json({ error: "Admin only" });
 
       const rules = await getScoreRulesMap();
       const stats = { ratingsProcessed: 0, sessionsProcessed: 0, thoughtsScored: 0 };
