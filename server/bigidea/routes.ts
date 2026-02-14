@@ -173,6 +173,7 @@ type CriterionResult = {
   inverted: boolean;
   diagnostics?: { value: string; threshold: string; detail?: string };
   cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number };
+  cocHighlight2?: { type: string; level?: number; startBar?: number; endBar?: number };
 };
 
 type ThoughtEvalResult = {
@@ -226,9 +227,10 @@ function evaluateThoughtCriteria(
 
     const diagnostics = normalized.data?._diagnostics as { value: string; threshold: string; detail?: string } | undefined;
     const cocHighlight = normalized.data?._cocHighlight as CriterionResult["cocHighlight"] | undefined;
+    const cocHighlight2 = normalized.data?._cocHighlight2 as CriterionResult["cocHighlight2"] | undefined;
 
     if (normalized.data) {
-      const { _diagnostics, _cocHighlight, ...rest } = normalized.data;
+      const { _diagnostics, _cocHighlight, _cocHighlight2, ...rest } = normalized.data;
       Object.assign(outputData, rest);
     }
 
@@ -242,6 +244,7 @@ function evaluateThoughtCriteria(
       inverted: !!criterion.inverted,
       diagnostics,
       ...(pass && cocHighlight ? { cocHighlight } : {}),
+      ...(pass && cocHighlight2 ? { cocHighlight2 } : {}),
     });
 
     if (!pass) allPass = false;
@@ -776,8 +779,9 @@ ALWAYS prefer standalone indicators (VOL-4, VLT-2, VLT-1, etc.) over consumer in
 The data-linking relationships:
 - PA-3 (Consolidation / Base Detection) PROVIDES detectedPeriod
 - PA-7 (Breakout Detection) PROVIDES detectedPeriod
-- PA-12 (Prior Price Advance) CONSUMES detectedPeriod → skipBars
-- PA-13 (Smooth Trending Advance) CONSUMES detectedPeriod → skipBars
+- CB-1 (Find Base) PROVIDES baseStartBar, baseEndBar, baseTopPrice, baseLowPrice — scans backward/forward through price history to locate consolidation bases; supports chaining (consume baseStartBar from an upstream CB-1 to find a second base after a move)
+- PA-12 (Prior Price Advance) CONSUMES detectedPeriod → skipBars OR baseStartBar (from CB-1)
+- PA-13 (Smooth Trending Advance) CONSUMES detectedPeriod → skipBars OR baseStartBar (from CB-1)
 - PA-14 (Tightness Ratio) CONSUMES detectedPeriod → baselineBars
 - PA-15 (Close Clustering) CONSUMES detectedPeriod → period
 - PA-16 (Volume Fade) CONSUMES detectedPeriod → baselineBars
@@ -788,7 +792,7 @@ You must respond with valid JSON. When the idea needs multiple thoughts, use thi
     {
       "thoughtKey": "A",
       "name": "Short descriptive name",
-      "category": "One of: Momentum, Value, Trend, Volatility, Volume, Custom",
+      "category": "One of: Momentum, Value, Trend, Volatility, Volume, Consolidation, Custom",
       "description": "What this thought screens for",
       "criteria": [...]
     },
@@ -1273,7 +1277,7 @@ The user will give you an instruction like "make it looser", "tighten the filter
 You must respond with valid JSON in this exact format:
 {
   "name": "Updated short descriptive name",
-  "category": "One of: Momentum, Value, Trend, Volatility, Volume, Custom",
+  "category": "One of: Momentum, Value, Trend, Volatility, Volume, Consolidation, Custom",
   "description": "Updated description of what this thought screens for",
   "criteria": [... updated criteria array ...]
 }
@@ -1858,8 +1862,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
               for (const sc of (srcNode.thoughtCriteria || [])) {
                 const srcInd = INDICATOR_LIBRARY.find((ind) => ind.id === sc.indicatorId);
                 if (!srcInd?.provides) continue;
-                const prov = srcInd.provides.find((p) => p.linkType === "basePeriod");
-                if (prov) {
+                if (srcInd.provides.length > 0) {
                   dynamicDataFlows.push({
                     provider: `${srcNode.thoughtName || "Unnamed"} (${srcInd.name})`,
                     consumer: `${tn.thoughtName || "Unnamed"} (${indDef.name})`,

@@ -6,6 +6,18 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### CB-1 Find Base Indicator — Chart Rendering & AI Integration — 14:00 UTC
+- **Task**: Complete the CB-1 Find Base indicator by adding chart annotations, category support, and AI prompt awareness.
+- **Files**: `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`, `server/bigidea/indicators.ts`
+- **Details**:
+  - **cocHighlight2 support**: Added `cocHighlight2` property to `CriterionResult` types (both server and client) so Find Base can render both resistance (top) and support (bottom) price lines on charts.
+  - **Route extraction**: Updated `evaluateThought` to extract `_cocHighlight2` from indicator output data and include it in criteria results.
+  - **Chart annotations**: BigIdeaPage now processes `cocHighlight2` support lines from CB-1 results, pushing them into the resistance lines array for chart rendering.
+  - **Category support**: Added "Consolidation" to `CATEGORY_ORDER` and `CATEGORY_ICONS` (using Layers icon) in BigIdeaPage.
+  - **Base filter**: Updated `ideaHasBase` check and annotation filter to include CB-1 alongside PA-3/PA-4.
+  - **AI prompt**: Updated AI scan tuning prompts with CB-1 data-linking relationships (provides baseStartBar/baseEndBar/baseTopPrice/baseLowPrice, supports chaining). Added "Consolidation" to the AI thought category list.
+- **Status**: Complete
+
 ### Fix Admin Check on Score/Weight Routes — 05:52 UTC
 - **Task**: Fix 403 "Admin only" error when editing AI score rules and selection weights.
 - **Files**: `server/bigidea/routes.ts`

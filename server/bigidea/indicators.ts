@@ -39,7 +39,7 @@ export type IndicatorResult = boolean | { pass: boolean; data?: Record<string, a
 export type IndicatorDefinition = {
   id: string;
   name: string;
-  category: "Moving Averages" | "Volume" | "Price Action" | "Relative Strength" | "Volatility";
+  category: "Moving Averages" | "Volume" | "Price Action" | "Relative Strength" | "Volatility" | "Consolidation";
   description: string;
   params: IndicatorParam[];
   provides?: IndicatorProvides[];
@@ -995,15 +995,15 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-12",
     name: "Prior Price Advance",
     category: "Price Action",
-    description: "Verifies that the stock had a meaningful price advance BEFORE it built the current base. Skips over the base, then checks how much the stock gained in the window before that. Stocks that consolidate after a strong run-up (30%+) are building a classic base-on-advance pattern. When connected to Base Detection, automatically uses each stock's actual base length.",
-    consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }],
+    description: "Verifies that the stock had a meaningful price advance BEFORE it built the current base. Skips over the base, then checks how much the stock gained in the window before that. Stocks that consolidate after a strong run-up (30%+) are building a classic base-on-advance pattern. When connected to Base Detection (PA-3), automatically uses each stock's actual base length. When connected to Find Base (CB-1), uses the found base's end bar as the skip offset — measuring the advance that led into that historical base.",
+    consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }, { paramName: "skipBars", dataKey: "baseStartBar" }],
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
       { name: "minGain", label: "Min Gain %", type: "number", defaultValue: 30, min: 5, max: 500, step: 5 },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
-      const dynamicSkip = upstreamData?.detectedPeriod;
+      const dynamicSkip = upstreamData?.baseStartBar ?? upstreamData?.detectedPeriod;
       const skip = dynamicSkip ?? params.skipBars ?? 20;
       const lookback = params.lookbackBars ?? 120;
       const minGain = params.minGain ?? 30;
@@ -1013,15 +1013,15 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const priceAtAdvanceStart = candles[skip + lookback - 1]?.close;
       if (!priceAtBaseStart || !priceAtAdvanceStart || priceAtAdvanceStart === 0) return { pass: false, data: { _diagnostics: { value: 'missing price data', threshold: `≥${minGain}% gain` } } };
       const gain = ((priceAtBaseStart - priceAtAdvanceStart) / priceAtAdvanceStart) * 100;
-      return { pass: gain >= minGain, data: { _diagnostics: { value: `${gain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceAtAdvanceStart.toFixed(2)} → $${priceAtBaseStart.toFixed(2)} over ${lookback} bars` } } };
+      return { pass: gain >= minGain, data: { _diagnostics: { value: `${gain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceAtAdvanceStart.toFixed(2)} → $${priceAtBaseStart.toFixed(2)} over ${lookback} bars (skip=${skip})` } } };
     },
   },
   {
     id: "PA-13",
     name: "Smooth Trending Advance",
     category: "Price Action",
-    description: "Checks the QUALITY of the advance before the base — not just that it gained, but that it did so cleanly. Requires: (1) minimum net gain, (2) no single pullback deeper than Max Drawdown (rolling high to low), and (3) price stayed above a key SMA for most of the advance. This separates clean institutional staircase advances from volatile, choppy run-ups. Uses per-stock base length when connected to Base Detection.",
-    consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }],
+    description: "Checks the QUALITY of the advance before the base — not just that it gained, but that it did so cleanly. Requires: (1) minimum net gain, (2) no single pullback deeper than Max Drawdown (rolling high to low), and (3) price stayed above a key SMA for most of the advance. This separates clean institutional staircase advances from volatile, choppy run-ups. Uses per-stock base length when connected to Base Detection (PA-3) or Find Base (CB-1).",
+    consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }, { paramName: "skipBars", dataKey: "baseStartBar" }],
     params: [
       { name: "skipBars", label: "Skip Recent Bars (base)", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
@@ -1031,7 +1031,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "minBarsAboveSMA", label: "Min % Bars Above SMA", type: "number", defaultValue: 70, min: 30, max: 100, step: 5 },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
-      const dynamicSkip = upstreamData?.detectedPeriod;
+      const dynamicSkip = upstreamData?.baseStartBar ?? upstreamData?.detectedPeriod;
       const skip = dynamicSkip ?? params.skipBars ?? 20;
       const lookback = params.lookbackBars ?? 120;
       const minGain = params.minGain ?? 30;
@@ -1660,10 +1660,177 @@ const VOLATILITY: IndicatorDefinition[] = [
   },
 ];
 
+const CONSOLIDATION: IndicatorDefinition[] = [
+  {
+    id: "CB-1",
+    name: "Find Base (Historical)",
+    category: "Consolidation",
+    description: "Searches through price history to LOCATE a consolidation (base) — a period where price traded sideways within a tight range. Unlike PA-3 which checks if the stock is currently IN a base, this indicator scans backwards (or forwards) through up to 500 bars to find WHERE a base existed and passes its location downstream. Use it to chain patterns: Find Base → Price Advance → Find Another Base. When connected downstream from another Find Base, automatically starts searching from the upstream base's end bar. Provides base top/bottom price lines for chart rendering.",
+    provides: [{ linkType: "baseBar", paramName: "searchWindow" }],
+    consumes: [{ paramName: "searchStart", dataKey: "baseEndBar" }],
+    params: [
+      { name: "searchWindow", label: "Search Window (bars)", type: "number", defaultValue: 200, min: 20, max: 500, step: 10 },
+      { name: "searchDirection", label: "Search Direction", type: "select", defaultValue: "backward", options: ["backward", "forward"] },
+      { name: "minBaseLength", label: "Min Base Length (bars)", type: "number", defaultValue: 10, min: 5, max: 100, step: 1 },
+      { name: "maxBaseLength", label: "Max Base Length (bars)", type: "number", defaultValue: 60, min: 10, max: 200, step: 5 },
+      { name: "maxRangePct", label: "Max Price Range %", type: "number", defaultValue: 15, min: 3, max: 40, step: 0.5 },
+      { name: "volumeContraction", label: "Require Volume Contraction", type: "boolean", defaultValue: true },
+      { name: "volumeDeclinePct", label: "Volume Decline %", type: "number", defaultValue: 30, min: 10, max: 80, step: 5 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const searchWindow = params.searchWindow ?? 200;
+      const direction = params.searchDirection ?? "backward";
+      const minLen = params.minBaseLength ?? 10;
+      const maxLen = params.maxBaseLength ?? 60;
+      const maxRange = params.maxRangePct ?? 15;
+      const requireVolContraction = params.volumeContraction ?? true;
+      const volDecline = params.volumeDeclinePct ?? 30;
+
+      const upstreamStartBar = upstreamData?.baseEndBar;
+      const startOffset = typeof upstreamStartBar === "number" ? upstreamStartBar : 0;
+
+      if (candles.length < startOffset + minLen + 10) {
+        return { pass: false, data: { _diagnostics: { value: "insufficient data", threshold: `${minLen}-${maxLen} bar base within ${searchWindow} bars` } } };
+      }
+
+      const maxSearchEnd = Math.min(startOffset + searchWindow, candles.length);
+
+      let bestBase: { start: number; end: number; topPrice: number; lowPrice: number; depth: number; duration: number } | null = null;
+
+      if (direction === "backward") {
+        for (let scanStart = startOffset; scanStart < maxSearchEnd - minLen; scanStart++) {
+          for (let length = maxLen; length >= minLen; length--) {
+            const scanEnd = scanStart + length;
+            if (scanEnd > maxSearchEnd) continue;
+            if (scanEnd > candles.length) continue;
+
+            const slice = candles.slice(scanStart, scanEnd);
+            if (slice.length < minLen) continue;
+
+            const high = Math.max(...slice.map(c => c.high));
+            const low = Math.min(...slice.map(c => c.low));
+            if (high === 0) continue;
+            const rangePct = ((high - low) / high) * 100;
+            if (rangePct > maxRange) continue;
+
+            const closes = slice.map(c => c.close);
+            const n = closes.length;
+            const sumX = (n * (n - 1)) / 2;
+            const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
+            let sumY = 0, sumXY = 0;
+            for (let i = 0; i < n; i++) { sumY += closes[i]; sumXY += i * closes[i]; }
+            const denom = n * sumX2 - sumX * sumX;
+            if (denom !== 0) {
+              const slope = (n * sumXY - sumX * sumY) / denom;
+              const avgPrice = sumY / n;
+              if (avgPrice > 0) {
+                const totalDrift = Math.abs((slope / avgPrice) * 100 * n);
+                if (totalDrift > maxRange * 0.5) continue;
+              }
+            }
+
+            if (requireVolContraction) {
+              const baseVol = slice.reduce((s, c) => s + (c.volume || 0), 0) / slice.length;
+              const preBaseStart = scanEnd;
+              const preBaseEnd = Math.min(scanEnd + length, candles.length);
+              const preSlice = candles.slice(preBaseStart, preBaseEnd);
+              if (preSlice.length > 0) {
+                const preVol = preSlice.reduce((s, c) => s + (c.volume || 0), 0) / preSlice.length;
+                if (preVol > 0) {
+                  const decline = ((preVol - baseVol) / preVol) * 100;
+                  if (decline < volDecline) continue;
+                }
+              }
+            }
+
+            bestBase = { start: scanEnd - 1, end: scanStart, topPrice: high, lowPrice: low, depth: rangePct, duration: length };
+            break;
+          }
+          if (bestBase) break;
+        }
+      } else {
+        for (let scanStart = maxSearchEnd - minLen; scanStart >= startOffset; scanStart--) {
+          for (let length = maxLen; length >= minLen; length--) {
+            const scanEnd = scanStart + length;
+            if (scanEnd > candles.length) continue;
+
+            const slice = candles.slice(scanStart, scanEnd);
+            if (slice.length < minLen) continue;
+
+            const high = Math.max(...slice.map(c => c.high));
+            const low = Math.min(...slice.map(c => c.low));
+            if (high === 0) continue;
+            const rangePct = ((high - low) / high) * 100;
+            if (rangePct > maxRange) continue;
+
+            const closes = slice.map(c => c.close);
+            const n = closes.length;
+            const sumX = (n * (n - 1)) / 2;
+            const sumX2 = ((n - 1) * n * (2 * n - 1)) / 6;
+            let sumY = 0, sumXY = 0;
+            for (let i = 0; i < n; i++) { sumY += closes[i]; sumXY += i * closes[i]; }
+            const denom = n * sumX2 - sumX * sumX;
+            if (denom !== 0) {
+              const slope = (n * sumXY - sumX * sumY) / denom;
+              const avgPrice = sumY / n;
+              if (avgPrice > 0) {
+                const totalDrift = Math.abs((slope / avgPrice) * 100 * n);
+                if (totalDrift > maxRange * 0.5) continue;
+              }
+            }
+
+            if (requireVolContraction) {
+              const baseVol = slice.reduce((s, c) => s + (c.volume || 0), 0) / slice.length;
+              const preBaseStart = scanEnd;
+              const preBaseEnd = Math.min(scanEnd + length, candles.length);
+              const preSlice = candles.slice(preBaseStart, preBaseEnd);
+              if (preSlice.length > 0) {
+                const preVol = preSlice.reduce((s, c) => s + (c.volume || 0), 0) / preSlice.length;
+                if (preVol > 0) {
+                  const decline = ((preVol - baseVol) / preVol) * 100;
+                  if (decline < volDecline) continue;
+                }
+              }
+            }
+
+            bestBase = { start: scanEnd - 1, end: scanStart, topPrice: high, lowPrice: low, depth: rangePct, duration: length };
+            break;
+          }
+          if (bestBase) break;
+        }
+      }
+
+      if (!bestBase) {
+        return { pass: false, data: { _diagnostics: { value: "no base found", threshold: `${minLen}-${maxLen} bars, ≤${maxRange}% range, window ${searchWindow}` } } };
+      }
+
+      return {
+        pass: true,
+        data: {
+          baseStartBar: bestBase.start,
+          baseEndBar: bestBase.end,
+          baseTopPrice: bestBase.topPrice,
+          baseLowPrice: bestBase.lowPrice,
+          baseDepth: bestBase.depth,
+          baseDuration: bestBase.duration,
+          _cocHighlight: { type: "resistanceLine", level: bestBase.topPrice, startBar: bestBase.start, endBar: bestBase.end },
+          _cocHighlight2: { type: "supportLine", level: bestBase.lowPrice, startBar: bestBase.start, endBar: bestBase.end },
+          _diagnostics: {
+            value: `${bestBase.duration} bars`,
+            threshold: `${minLen}-${maxLen} bars, ≤${maxRange}%`,
+            detail: `bars ${bestBase.start}→${bestBase.end}, top $${bestBase.topPrice.toFixed(2)}, low $${bestBase.lowPrice.toFixed(2)}, depth ${bestBase.depth.toFixed(1)}%`
+          }
+        }
+      };
+    },
+  },
+];
+
 export const INDICATOR_LIBRARY: IndicatorDefinition[] = [
   ...MOVING_AVERAGES,
   ...VOLUME,
   ...PRICE_ACTION,
   ...RELATIVE_STRENGTH,
   ...VOLATILITY,
+  ...CONSOLIDATION,
 ];

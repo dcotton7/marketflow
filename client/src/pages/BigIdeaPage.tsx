@@ -73,6 +73,7 @@ import {
   EyeOff,
   Eye,
   MoreHorizontal,
+  Layers,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -89,13 +90,14 @@ const CATEGORY_ICONS: Record<string, typeof TrendingUp> = {
   "Price Action": Crosshair,
   "Relative Strength": Zap,
   "Volatility": Activity,
+  "Consolidation": Layers,
   "Momentum": Zap,
   "Value": Target,
   "Trend": TrendingUp,
   "Custom": SlidersHorizontal,
 };
 
-const CATEGORY_ORDER = ["Moving Averages", "Volume", "Price Action", "Relative Strength", "Volatility", "Momentum", "Value", "Trend", "Custom"];
+const CATEGORY_ORDER = ["Moving Averages", "Volume", "Price Action", "Relative Strength", "Volatility", "Consolidation", "Momentum", "Value", "Trend", "Custom"];
 
 function getScoreColor(score: number): string {
   if (score < 0) return "text-rs-red";
@@ -239,6 +241,7 @@ interface CriterionResultItem {
   inverted: boolean;
   diagnostics?: { value: string; threshold: string; detail?: string };
   cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number };
+  cocHighlight2?: { type: string; level?: number; startBar?: number; endBar?: number };
 }
 
 interface ThoughtBreakdownItem {
@@ -4207,7 +4210,7 @@ function ScanChartViewer({
     const resistanceLines: { startTime: number; startPrice: number; endTime: number; endPrice: number }[] = [];
 
     const ideaHasBase = current.thoughtBreakdown.some((t: any) =>
-      t.criteriaResults?.some((cr: any) => (cr.indicatorId === "PA-3" || cr.indicatorId === "PA-4"))
+      t.criteriaResults?.some((cr: any) => (cr.indicatorId === "PA-3" || cr.indicatorId === "PA-4" || cr.indicatorId === "CB-1"))
     );
 
     for (const thought of current.thoughtBreakdown) {
@@ -4215,7 +4218,7 @@ function ScanChartViewer({
       for (const cr of thought.criteriaResults) {
         if (!cr.pass || !cr.cocHighlight) continue;
         const h = cr.cocHighlight;
-        if (ideaHasBase && cr.indicatorId !== "PA-3" && cr.indicatorId !== "PA-4") continue;
+        if (ideaHasBase && cr.indicatorId !== "PA-3" && cr.indicatorId !== "PA-4" && cr.indicatorId !== "CB-1") continue;
 
         if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
           if (dailyData) {
@@ -4247,6 +4250,26 @@ function ScanChartViewer({
                     endPrice: lastHigh,
                   });
                 }
+              }
+            }
+          }
+        }
+
+        if (cr.cocHighlight2 && cr.cocHighlight2.type === "supportLine" && cr.cocHighlight2.level && cr.cocHighlight2.startBar !== undefined) {
+          const h2 = cr.cocHighlight2;
+          if (dailyData) {
+            const endIdx2 = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h2.endBar || 0));
+            const startIdx2 = Math.max(0, dailyData.candles.length - 1 - h2.startBar);
+            if (startIdx2 >= 0 && endIdx2 >= startIdx2 && endIdx2 < dailyData.candles.length) {
+              const startCandle2 = dailyData.candles[startIdx2];
+              const endCandle2 = dailyData.candles[endIdx2];
+              if (startCandle2 && endCandle2) {
+                resistanceLines.push({
+                  startTime: startCandle2.timestamp,
+                  startPrice: h2.level,
+                  endTime: endCandle2.timestamp,
+                  endPrice: h2.level,
+                });
               }
             }
           }
