@@ -1193,6 +1193,8 @@ export const scannerThoughts = pgTable("scanner_thoughts", {
   aiPrompt: text("ai_prompt"),
   criteria: jsonb("criteria").$type<ScannerCriterion[]>().notNull(),
   timeframe: text("timeframe").notNull().default("daily"),
+  score: integer("score").notNull().default(0),
+  lastUsedAt: timestamp("last_used_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1263,7 +1265,7 @@ export interface IdeaEdge {
   logicType: "AND" | "OR";
 }
 
-export const insertScannerThoughtSchema = createInsertSchema(scannerThoughts).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertScannerThoughtSchema = createInsertSchema(scannerThoughts).omit({ id: true, score: true, lastUsedAt: true, createdAt: true, updatedAt: true });
 export const insertScannerIdeaSchema = createInsertSchema(scannerIdeas).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertScannerFavoriteSchema = createInsertSchema(scannerFavorites).omit({ id: true, addedAt: true });
 
@@ -1348,7 +1350,28 @@ export const indicatorLearningSummary = pgTable("indicator_learning_summary", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const thoughtScoreRules = pgTable("thought_score_rules", {
+  id: serial("id").primaryKey(),
+  ruleKey: text("rule_key").notNull().unique(),
+  label: text("label").notNull(),
+  description: text("description"),
+  scoreValue: integer("score_value").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+});
+
+export const thoughtSelectionWeights = pgTable("thought_selection_weights", {
+  id: serial("id").primaryKey(),
+  strategyKey: text("strategy_key").notNull().unique(),
+  label: text("label").notNull(),
+  description: text("description"),
+  weightPercent: integer("weight_percent").notNull(),
+  configN: integer("config_n"),
+  enabled: boolean("enabled").notNull().default(true),
+});
+
 export type ScanSession = typeof scanSessions.$inferSelect;
 export type ScanTuningHistory = typeof scanTuningHistory.$inferSelect;
 export type ScanChartRating = typeof scanChartRatings.$inferSelect;
 export type IndicatorLearningSummary = typeof indicatorLearningSummary.$inferSelect;
+export type ThoughtScoreRule = typeof thoughtScoreRules.$inferSelect;
+export type ThoughtSelectionWeight = typeof thoughtSelectionWeights.$inferSelect;

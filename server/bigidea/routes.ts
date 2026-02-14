@@ -1,6 +1,6 @@
 import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
-import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary } from "@shared/schema";
+import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights } from "@shared/schema";
 import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
@@ -395,7 +395,8 @@ export function registerBigIdeaRoutes(app: Express): void {
       const thoughts = await db
         .select()
         .from(scannerThoughts)
-        .where(eq(scannerThoughts.userId, userId));
+        .where(eq(scannerThoughts.userId, userId))
+        .orderBy(sql`${scannerThoughts.score} DESC NULLS LAST`);
 
       res.json(thoughts);
     } catch (error) {
@@ -571,6 +572,23 @@ export function registerBigIdeaRoutes(app: Express): void {
         })
         .returning();
 
+      try {
+        const thoughtIds = (nodes as any[]).filter((n: any) => n.type === "thought" && n.thoughtId).map((n: any) => n.thoughtId as number);
+        if (thoughtIds.length > 0) {
+          await touchThoughtsLastUsed(thoughtIds);
+          const rules = await getScoreRulesMap();
+          const modifiedRule = rules["idea_save_modified"];
+          if (modifiedRule?.enabled && modifiedRule.scoreValue !== 0) {
+            const modifiedIds = await detectModifiedThoughts(nodes as any[]);
+            if (modifiedIds.length > 0) {
+              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue);
+            }
+          }
+        }
+      } catch (scoreErr) {
+        console.error("Error scoring thoughts on idea create:", scoreErr);
+      }
+
       res.status(201).json(idea);
     } catch (error) {
       console.error("Error creating idea:", error);
@@ -611,6 +629,25 @@ export function registerBigIdeaRoutes(app: Express): void {
         .set(updates)
         .where(and(eq(scannerIdeas.id, id), eq(scannerIdeas.userId, userId)))
         .returning();
+
+      // Score thoughts on idea update
+      try {
+        const newNodes = (req.body.nodes || updated.nodes) as any[];
+        const thoughtIds = newNodes.filter((n: any) => n.type === "thought" && n.thoughtId).map((n: any) => n.thoughtId as number);
+        if (thoughtIds.length > 0) {
+          await touchThoughtsLastUsed(thoughtIds);
+          const rules = await getScoreRulesMap();
+          const modifiedRule = rules["idea_save_modified"];
+          if (modifiedRule?.enabled && modifiedRule.scoreValue !== 0) {
+            const modifiedIds = await detectModifiedThoughts(newNodes as any[]);
+            if (modifiedIds.length > 0) {
+              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue);
+            }
+          }
+        }
+      } catch (scoreErr) {
+        console.error("Error scoring thoughts on idea update:", scoreErr);
+      }
 
       res.json(updated);
     } catch (error) {
@@ -1020,10 +1057,23 @@ Select the most appropriate indicators and set parameters that match the user's 
         return res.status(500).json({ error: "AI service not configured. Please ensure OpenAI API key is set." });
       }
 
+      let existingThoughtsContext = "";
+      try {
+        const suggestedThoughts = await selectThoughtsByWeight(userId, 5);
+        if (suggestedThoughts.length > 0) {
+          const summaries = suggestedThoughts.map(t =>
+            `- "${t.name}" (category: ${t.category}, score: ${t.score}, id: ${t.id}): ${t.description || "no description"}`
+          ).join("\n");
+          existingThoughtsContext = `\n\nThe user has these highly-rated existing thoughts in their library. If any of them are relevant to the user's idea, you may reference their criteria patterns (but still generate the full criteria yourself — do not reference IDs):\n${summaries}`;
+        }
+      } catch (e) {
+        // Non-critical, continue without existing thoughts context
+      }
+
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: systemPrompt + existingThoughtsContext },
           { role: "user", content: description },
         ],
         response_format: { type: "json_object" },
@@ -1812,6 +1862,24 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
             .returning();
           sessionId = session.id;
           console.log(`[BigIdea Scan] Session ${sessionId} created with ${results.length} results`);
+
+          // Rule 2: Score non-muted thoughts when scan returned results
+          if (results.length > 0) {
+            try {
+              const rules = await getScoreRulesMap();
+              const rule = rules["scan_returned_data"];
+              if (rule?.enabled && rule.scoreValue !== 0) {
+                const nonMutedThoughtIds = nodes
+                  .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
+                  .map((n: any) => n.thoughtId as number);
+                if (nonMutedThoughtIds.length > 0) {
+                  await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue);
+                }
+              }
+            } catch (scoreErr) {
+              console.error("[BigIdea Scan] Error scoring thoughts for results:", scoreErr);
+            }
+          }
         } catch (err: any) {
           console.error("[BigIdea Scan] Failed to create session:", err?.message);
         }
@@ -1928,6 +1996,29 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           price: price || null,
         })
         .returning();
+
+      // Rule 3: Score thoughts on chart thumbs-up/down
+      if (ideaId) {
+        try {
+          const rules = await getScoreRulesMap();
+          const ruleKey = rating === "up" ? "chart_thumbs_up" : "chart_thumbs_down";
+          const rule = rules[ruleKey];
+          if (rule?.enabled && rule.scoreValue !== 0) {
+            const idea = await db.select().from(scannerIdeas).where(eq(scannerIdeas.id, ideaId));
+            if (idea.length > 0) {
+              const ideaNodes = idea[0].nodes as any[];
+              const nonMutedThoughtIds = ideaNodes
+                .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
+                .map((n: any) => n.thoughtId as number);
+              if (nonMutedThoughtIds.length > 0) {
+                await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue);
+              }
+            }
+          }
+        } catch (scoreErr) {
+          console.error("Error scoring thoughts for chart rating:", scoreErr);
+        }
+      }
 
       res.status(201).json(record);
     } catch (error) {
@@ -2775,4 +2866,300 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     if (!preset) return res.status(404).json({ error: "Preset not found" });
     res.json(preset);
   });
+
+  // === THOUGHT SCORE RULES & SELECTION WEIGHTS ===
+
+  async function seedScoreRulesIfNeeded() {
+    if (!isDatabaseAvailable() || !db) return;
+    const existing = await db.select().from(thoughtScoreRules);
+    if (existing.length > 0) return;
+    await db.insert(thoughtScoreRules).values([
+      { ruleKey: "idea_save_modified", label: "Thought modified before save", description: "Applied when a thought's settings were changed (by user or AI tuning) before the idea is saved", scoreValue: 3, enabled: true },
+      { ruleKey: "scan_returned_data", label: "Idea scan returned results", description: "Applied to all non-muted thoughts when the idea's scan finds at least one matching stock", scoreValue: 1, enabled: true },
+      { ruleKey: "chart_thumbs_up", label: "Chart received thumbs up", description: "Applied to all non-muted thoughts when a user gives a scan result chart a thumbs-up rating", scoreValue: 1, enabled: true },
+      { ruleKey: "chart_thumbs_down", label: "Chart received thumbs down", description: "Applied to all non-muted thoughts when a user gives a scan result chart a thumbs-down rating", scoreValue: -1, enabled: true },
+    ]);
+  }
+
+  async function seedSelectionWeightsIfNeeded() {
+    if (!isDatabaseAvailable() || !db) return;
+    const existing = await db.select().from(thoughtSelectionWeights);
+    if (existing.length > 0) return;
+    await db.insert(thoughtSelectionWeights).values([
+      { strategyKey: "random", label: "Random thought", description: "Pick any thought for this indicator regardless of score — pure exploration", weightPercent: 30, configN: null, enabled: true },
+      { strategyKey: "random_top_n", label: "Random among highest N", description: "Pick randomly from the top N highest-scored thoughts for this indicator", weightPercent: 33, configN: 3, enabled: true },
+      { strategyKey: "highest_rated", label: "Highest rated", description: "Always pick the #1 highest-scored thought for this indicator — pure exploitation", weightPercent: 34, configN: null, enabled: true },
+    ]);
+  }
+
+  seedScoreRulesIfNeeded().catch(e => console.error("Failed to seed score rules:", e));
+  seedSelectionWeightsIfNeeded().catch(e => console.error("Failed to seed selection weights:", e));
+
+  app.get("/api/bigidea/score-rules", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+      const rules = await db.select().from(thoughtScoreRules);
+      res.json(rules);
+    } catch (error) {
+      console.error("Error fetching score rules:", error);
+      res.status(500).json({ error: "Failed to fetch score rules" });
+    }
+  });
+
+  app.put("/api/bigidea/score-rules/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId));
+      if (!user.length || user[0].tier !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      const id = parseInt(String(req.params.id));
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const updates: any = {};
+      if (req.body.scoreValue !== undefined) updates.scoreValue = req.body.scoreValue;
+      if (req.body.enabled !== undefined) updates.enabled = req.body.enabled;
+      if (req.body.label !== undefined) updates.label = req.body.label;
+      if (req.body.description !== undefined) updates.description = req.body.description;
+
+      const [updated] = await db.update(thoughtScoreRules).set(updates).where(eq(thoughtScoreRules.id, id)).returning();
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating score rule:", error);
+      res.status(500).json({ error: "Failed to update score rule" });
+    }
+  });
+
+  app.get("/api/bigidea/selection-weights", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+      const weights = await db.select().from(thoughtSelectionWeights);
+      res.json(weights);
+    } catch (error) {
+      console.error("Error fetching selection weights:", error);
+      res.status(500).json({ error: "Failed to fetch selection weights" });
+    }
+  });
+
+  app.put("/api/bigidea/selection-weights/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId));
+      if (!user.length || user[0].tier !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      const id = parseInt(String(req.params.id));
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const updates: any = {};
+      if (req.body.weightPercent !== undefined) updates.weightPercent = req.body.weightPercent;
+      if (req.body.configN !== undefined) updates.configN = req.body.configN;
+      if (req.body.enabled !== undefined) updates.enabled = req.body.enabled;
+      if (req.body.label !== undefined) updates.label = req.body.label;
+      if (req.body.description !== undefined) updates.description = req.body.description;
+
+      const [updated] = await db.update(thoughtSelectionWeights).set(updates).where(eq(thoughtSelectionWeights.id, id)).returning();
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating selection weight:", error);
+      res.status(500).json({ error: "Failed to update selection weight" });
+    }
+  });
+
+  // Admin endpoint: backfill thought scores from historical chart_ratings and scan_sessions
+  app.post("/api/bigidea/thought-scores/backfill", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId));
+      if (!user.length || user[0].tier !== "admin") return res.status(403).json({ error: "Admin only" });
+
+      const rules = await getScoreRulesMap();
+      const stats = { ratingsProcessed: 0, sessionsProcessed: 0, thoughtsScored: 0 };
+
+      // Backfill from chart_ratings (Rule 3)
+      const upRule = rules["chart_thumbs_up"];
+      const downRule = rules["chart_thumbs_down"];
+      if ((upRule?.enabled || downRule?.enabled)) {
+        const ratings = await db.select().from(scanChartRatings);
+        for (const r of ratings) {
+          if (!r.ideaId) continue;
+          const idea = await db.select().from(scannerIdeas).where(eq(scannerIdeas.id, r.ideaId));
+          if (!idea.length) continue;
+          const ideaNodes = idea[0].nodes as any[];
+          const tIds = ideaNodes
+            .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
+            .map((n: any) => n.thoughtId as number);
+          if (tIds.length === 0) continue;
+          const rule = r.rating === "up" ? upRule : downRule;
+          if (rule?.enabled && rule.scoreValue !== 0) {
+            await applyScoreToThoughts(tIds, rule.scoreValue);
+            stats.thoughtsScored += tIds.length;
+          }
+          stats.ratingsProcessed++;
+        }
+      }
+
+      // Backfill from scan_sessions with results > 0 (Rule 2)
+      const scanRule = rules["scan_returned_data"];
+      if (scanRule?.enabled && scanRule.scoreValue !== 0) {
+        const sessions = await db.select().from(scanSessions).where(sql`${scanSessions.resultCount} > 0`);
+        for (const s of sessions) {
+          const config = s.scanConfig as any;
+          if (!config?.nodes) continue;
+          const tIds = (config.nodes as any[])
+            .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
+            .map((n: any) => n.thoughtId as number);
+          if (tIds.length === 0) continue;
+          await applyScoreToThoughts(tIds, scanRule.scoreValue);
+          stats.thoughtsScored += tIds.length;
+          stats.sessionsProcessed++;
+        }
+      }
+
+      res.json({ success: true, stats });
+    } catch (error) {
+      console.error("Error backfilling thought scores:", error);
+      res.status(500).json({ error: "Failed to backfill scores" });
+    }
+  });
+
+  // Helper: get score rules as a keyed map for use in scoring logic
+  async function getScoreRulesMap(): Promise<Record<string, { scoreValue: number; enabled: boolean }>> {
+    if (!isDatabaseAvailable() || !db) return {};
+    const rules = await db.select().from(thoughtScoreRules);
+    const map: Record<string, { scoreValue: number; enabled: boolean }> = {};
+    for (const r of rules) {
+      map[r.ruleKey] = { scoreValue: r.scoreValue, enabled: r.enabled };
+    }
+    return map;
+  }
+
+  // Helper: apply score delta to thoughts by IDs
+  async function applyScoreToThoughts(thoughtIds: number[], delta: number) {
+    if (!isDatabaseAvailable() || !db || thoughtIds.length === 0 || delta === 0) return;
+    await db.update(scannerThoughts)
+      .set({ score: sql`${scannerThoughts.score} + ${delta}` })
+      .where(sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`);
+  }
+
+  // Helper: update lastUsedAt for thoughts by IDs
+  async function touchThoughtsLastUsed(thoughtIds: number[]) {
+    if (!isDatabaseAvailable() || !db || thoughtIds.length === 0) return;
+    await db.update(scannerThoughts)
+      .set({ lastUsedAt: new Date() })
+      .where(sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`);
+  }
+
+  async function selectThoughtsByWeight(userId: number, count: number): Promise<any[]> {
+    if (!isDatabaseAvailable() || !db || count <= 0) return [];
+    const allThoughts = await db.select().from(scannerThoughts)
+      .where(eq(scannerThoughts.userId, userId))
+      .orderBy(sql`${scannerThoughts.score} DESC NULLS LAST`);
+    if (allThoughts.length === 0) return [];
+
+    const weights = await db.select().from(thoughtSelectionWeights);
+    const weightMap: Record<string, { weightPercent: number; configN: number | null; enabled: boolean }> = {};
+    for (const w of weights) {
+      weightMap[w.strategyKey] = { weightPercent: w.weightPercent, configN: w.configN, enabled: w.enabled };
+    }
+
+    const selected: any[] = [];
+    const usedIds = new Set<number>();
+
+    const pickRandom = (pool: any[]): any | null => {
+      const available = pool.filter(t => !usedIds.has(t.id));
+      if (available.length === 0) return null;
+      const pick = available[Math.floor(Math.random() * available.length)];
+      usedIds.add(pick.id);
+      return pick;
+    };
+
+    for (let i = 0; i < count; i++) {
+      const roll = Math.random() * 100;
+      let cumulative = 0;
+      let picked: any = null;
+
+      const pure = weightMap["pure_random"];
+      if (pure?.enabled) {
+        cumulative += pure.weightPercent;
+        if (roll < cumulative) {
+          picked = pickRandom(allThoughts);
+        }
+      }
+
+      if (!picked) {
+        const topN = weightMap["top_n_random"];
+        if (topN?.enabled) {
+          cumulative += topN.weightPercent;
+          if (roll < cumulative) {
+            const n = topN.configN || 3;
+            const topPool = allThoughts.slice(0, Math.min(n, allThoughts.length));
+            picked = pickRandom(topPool);
+          }
+        }
+      }
+
+      if (!picked) {
+        const highest = weightMap["highest_rated"];
+        if (highest?.enabled) {
+          const available = allThoughts.filter(t => !usedIds.has(t.id));
+          if (available.length > 0) {
+            picked = available[0];
+            usedIds.add(picked.id);
+          }
+        }
+      }
+
+      if (!picked) {
+        picked = pickRandom(allThoughts);
+      }
+
+      if (picked) selected.push(picked);
+    }
+
+    return selected;
+  }
+
+  app.get("/api/bigidea/thoughts/ai-selection", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const count = Math.min(parseInt(String(req.query.count || "3")), 10);
+      const selected = await selectThoughtsByWeight(userId, count);
+      res.json(selected);
+    } catch (error) {
+      console.error("Error selecting thoughts:", error);
+      res.status(500).json({ error: "Failed to select thoughts" });
+    }
+  });
+
+  async function detectModifiedThoughts(ideaNodes: any[]): Promise<number[]> {
+    if (!isDatabaseAvailable() || !db) return [];
+    const thoughtNodes = ideaNodes.filter((n: any) => n.type === "thought" && n.thoughtId);
+    if (thoughtNodes.length === 0) return [];
+    const ids = thoughtNodes.map((n: any) => n.thoughtId as number);
+    const stored = await db.select({ id: scannerThoughts.id, criteria: scannerThoughts.criteria })
+      .from(scannerThoughts)
+      .where(sql`${scannerThoughts.id} IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`);
+    const storedMap = new Map(stored.map(s => [s.id, JSON.stringify(s.criteria || [])]));
+    const modified: number[] = [];
+    for (const n of thoughtNodes) {
+      const storedCriteria = storedMap.get(n.thoughtId);
+      const nodeCriteria = JSON.stringify(n.thoughtCriteria || []);
+      if (storedCriteria && storedCriteria !== nodeCriteria) {
+        modified.push(n.thoughtId);
+      }
+    }
+    return modified;
+  }
 }

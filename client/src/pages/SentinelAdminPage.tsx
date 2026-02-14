@@ -94,6 +94,25 @@ interface TnnSetting {
   description: string | null;
 }
 
+interface ThoughtScoreRule {
+  id: number;
+  ruleKey: string;
+  label: string;
+  description: string | null;
+  scoreValue: number;
+  enabled: boolean;
+}
+
+interface ThoughtSelectionWeight {
+  id: number;
+  strategyKey: string;
+  label: string;
+  description: string | null;
+  weightPercent: number;
+  configN: number | null;
+  enabled: boolean;
+}
+
 const MARKET_CONDITIONS = [
   { key: "choppy_daily", name: "Choppy Daily Market" },
   { key: "choppy_weekly", name: "Choppy Weekly Market" },
@@ -781,6 +800,7 @@ export default function SentinelAdminPage() {
   const [, navigate] = useLocation();
   const { settings: systemSettings, cssVariables } = useSystemSettings();
   const [activeTab, setActiveTab] = useState("tnn");
+  const [tnnSubTab, setTnnSubTab] = useState("discipline");
   const [expandedFactors, setExpandedFactors] = useState<number[]>([]);
   const [suggestionAction, setSuggestionAction] = useState<{ id: number; value: number } | null>(null);
   const [showAddModifier, setShowAddModifier] = useState(false);
@@ -820,6 +840,55 @@ export default function SentinelAdminPage() {
   const { data: settings } = useQuery<TnnSetting[]>({
     queryKey: ["/api/sentinel/tnn/settings"],
     enabled: !!userInfo?.isAdmin,
+  });
+
+  const { data: scoreRules } = useQuery<ThoughtScoreRule[]>({
+    queryKey: ["/api/bigidea/score-rules"],
+    enabled: !!userInfo?.isAdmin,
+  });
+
+  const { data: selectionWeights } = useQuery<ThoughtSelectionWeight[]>({
+    queryKey: ["/api/bigidea/selection-weights"],
+    enabled: !!userInfo?.isAdmin,
+  });
+
+  const updateScoreRuleMutation = useMutation({
+    mutationFn: async ({ id, updates }: { id: number; updates: Partial<ThoughtScoreRule> }) => {
+      const res = await apiRequest("PUT", `/api/bigidea/score-rules/${id}`, updates);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/score-rules"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to update rule", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const updateSelectionWeightMutation = useMutation({
+    mutationFn: async ({ id, updates }: { id: number; updates: Partial<ThoughtSelectionWeight> }) => {
+      const res = await apiRequest("PUT", `/api/bigidea/selection-weights/${id}`, updates);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/selection-weights"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to update weight", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/bigidea/thought-scores/backfill");
+      return res.json();
+    },
+    onSuccess: (data: { stats: { ratingsProcessed: number; sessionsProcessed: number; thoughtsScored: number } }) => {
+      toast({ title: "Backfill complete", description: `Processed ${data.stats.ratingsProcessed} ratings, ${data.stats.sessionsProcessed} sessions, scored ${data.stats.thoughtsScored} thoughts` });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Backfill failed", description: err.message, variant: "destructive" });
+    },
   });
 
   const seedMutation = useMutation({
@@ -1085,6 +1154,19 @@ export default function SentinelAdminPage() {
                   </CardHeader>
                 </Card>
 
+                <Tabs value={tnnSubTab} onValueChange={setTnnSubTab}>
+                  <TabsList>
+                    <TabsTrigger value="discipline" className="gap-2" data-testid="tab-tnn-discipline">
+                      <TrendingUp className="w-4 h-4" />
+                      Discipline
+                    </TabsTrigger>
+                    <TabsTrigger value="ai-scoring" className="gap-2" data-testid="tab-tnn-ai-scoring">
+                      <Sparkles className="w-4 h-4" />
+                      AI Score Weighting
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="discipline">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2 space-y-4">
                     <Card>
@@ -1621,6 +1703,154 @@ export default function SentinelAdminPage() {
                     </Card>
                   </div>
                 </div>
+                  </TabsContent>
+
+                  <TabsContent value="ai-scoring" data-testid="content-ai-scoring">
+                    <div className="space-y-6">
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-lg flex items-center gap-2" data-testid="text-scoring-rules-title">
+                            <TrendingUp className="w-5 h-5" />
+                            Thought Scoring Rules
+                          </CardTitle>
+                          <CardDescription>Configure how thoughts earn or lose score points</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-3">
+                            {!scoreRules ? (
+                              <div className="flex items-center justify-center py-8">
+                                <Loader2 className="w-6 h-6 animate-spin" />
+                              </div>
+                            ) : scoreRules.map(rule => (
+                              <div key={rule.id} className="flex items-center justify-between p-3 border rounded-lg gap-3" data-testid={`score-rule-${rule.ruleKey}`}>
+                                <div className="flex items-center gap-3 flex-1 min-w-0">
+                                  <Switch
+                                    checked={rule.enabled}
+                                    onCheckedChange={(checked) => updateScoreRuleMutation.mutate({ id: rule.id, updates: { enabled: checked } })}
+                                    data-testid={`switch-rule-${rule.ruleKey}`}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="font-medium text-sm" data-testid={`text-rule-label-${rule.ruleKey}`}>{rule.label}</div>
+                                    {rule.description && <div className="text-xs text-muted-foreground truncate">{rule.description}</div>}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <Input
+                                    type="number"
+                                    value={rule.scoreValue}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value);
+                                      if (!isNaN(val)) updateScoreRuleMutation.mutate({ id: rule.id, updates: { scoreValue: val } });
+                                    }}
+                                    className="w-20 text-center font-bold"
+                                    data-testid={`input-rule-value-${rule.ruleKey}`}
+                                  />
+                                  <span className="text-xs text-muted-foreground">pts</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-lg flex items-center gap-2" data-testid="text-selection-weights-title">
+                            <Sparkles className="w-5 h-5 text-purple-400" />
+                            AI Thought Selection Weights
+                          </CardTitle>
+                          <CardDescription>How the AI chooses thoughts when generating ideas. Percentages should sum to 100%.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-3">
+                            {!selectionWeights ? (
+                              <div className="flex items-center justify-center py-8">
+                                <Loader2 className="w-6 h-6 animate-spin" />
+                              </div>
+                            ) : (
+                              <>
+                                {selectionWeights.map(weight => (
+                                  <div key={weight.id} className="flex items-center justify-between p-3 border rounded-lg gap-3" data-testid={`selection-weight-${weight.strategyKey}`}>
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                      <Switch
+                                        checked={weight.enabled}
+                                        onCheckedChange={(checked) => updateSelectionWeightMutation.mutate({ id: weight.id, updates: { enabled: checked } })}
+                                        data-testid={`switch-weight-${weight.strategyKey}`}
+                                      />
+                                      <div className="min-w-0">
+                                        <div className="font-medium text-sm" data-testid={`text-weight-label-${weight.strategyKey}`}>{weight.label}</div>
+                                        {weight.description && <div className="text-xs text-muted-foreground truncate">{weight.description}</div>}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      <Input
+                                        type="number"
+                                        value={weight.weightPercent}
+                                        min={0}
+                                        max={100}
+                                        onChange={(e) => {
+                                          const val = parseInt(e.target.value);
+                                          if (!isNaN(val) && val >= 0 && val <= 100) updateSelectionWeightMutation.mutate({ id: weight.id, updates: { weightPercent: val } });
+                                        }}
+                                        className="w-20 text-center font-bold"
+                                        data-testid={`input-weight-percent-${weight.strategyKey}`}
+                                      />
+                                      <span className="text-xs text-muted-foreground">%</span>
+                                      {weight.strategyKey === "random_top_n" && (
+                                        <div className="flex items-center gap-1 ml-2">
+                                          <span className="text-xs text-muted-foreground">N:</span>
+                                          <Input
+                                            type="number"
+                                            value={weight.configN ?? 3}
+                                            min={1}
+                                            max={20}
+                                            onChange={(e) => {
+                                              const val = parseInt(e.target.value);
+                                              if (!isNaN(val) && val >= 1) updateSelectionWeightMutation.mutate({ id: weight.id, updates: { configN: val } });
+                                            }}
+                                            className="w-16 text-center"
+                                            data-testid={`input-weight-config-n-${weight.strategyKey}`}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                                {(() => {
+                                  const total = selectionWeights.filter(w => w.enabled).reduce((sum, w) => sum + w.weightPercent, 0);
+                                  return (
+                                    <div className={`text-sm text-right font-medium ${total === 100 ? 'text-rs-green' : 'text-rs-amber'}`} data-testid="text-weight-total">
+                                      Total: {total}% {total !== 100 && "(should be 100%)"}
+                                    </div>
+                                  );
+                                })()}
+                              </>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="pt-4">
+                          <div className="flex items-center justify-between gap-4 flex-wrap">
+                            <div>
+                              <p className="text-rs-normal font-medium">Retroactive Backfill</p>
+                              <p className="text-rs-small text-muted-foreground">Apply current scoring rules to all existing chart ratings and scan sessions. Scores are additive — run once after initial setup.</p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              data-testid="button-backfill-scores"
+                              disabled={backfillMutation.isPending}
+                              onClick={() => backfillMutation.mutate()}
+                            >
+                              {backfillMutation.isPending ? "Running..." : "Backfill Scores"}
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </div>
             )}
           </TabsContent>

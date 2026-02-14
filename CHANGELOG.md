@@ -6,6 +6,18 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### BigIdea Thought Scoring & AI Selection System — 06:30 UTC
+- **Task**: Implement a thought scoring system and AI-weighted selection for the BigIdea scan builder.
+- **Files**: `shared/schema.ts`, `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`, `client/src/pages/SentinelAdminPage.tsx`
+- **Details**:
+  - **Schema**: Added `score` (int, default 0) and `lastUsedAt` (timestamp) to `scanner_thoughts`. Created `thought_score_rules` table (ruleKey, label, description, scoreValue, enabled) with 4 seeded defaults. Created `thought_selection_weights` table (strategyKey, label, description, weightPercent, configN, enabled) with 3 seeded defaults (30% pure random, 33% top-N random, 34% highest rated).
+  - **Scoring Rules (admin-configurable)**: Rule 1 — modified thoughts get +3 on idea save (server-side criteria comparison). Rule 2 — non-muted thoughts get +1 when scan returns results. Rule 3 — non-muted thoughts get +1/-1 on chart thumbs-up/down.
+  - **Admin UI**: New "AI Score Weighting" sub-tab in TNN admin page with editable Scoring Rules table and Selection Weights table. Weight total shown with green/amber color. Retroactive "Backfill Scores" button to apply current rules to existing chart_ratings and scan_sessions.
+  - **Thought Library**: Categories are now collapsible with chevron arrows and item counts. Thoughts sorted by score descending. Score badges displayed next to thought names with context colors (negative=red, 0-20=white, 21-100=yellow, 100+=green).
+  - **AI Selection**: Weighted random selection endpoint (`GET /api/bigidea/thoughts/ai-selection`) reads configurable weights from DB. Three strategies: pure random, random from top N scored, highest rated. Prevents convergence on single thought.
+  - **Backfill**: Admin endpoint processes historical chart_ratings and scan_sessions to retroactively score thoughts.
+- **Status**: Complete
+
 ### BigIdea Toolbar Reorder & Quality Rating Overlay — 05:10 UTC
 - **Task**: Reorder BigIdea toolbar, add ellipsis dropdown menu, move scan quality rating from left sidebar into a styled overlay dialog.
 - **Files**: `client/src/pages/BigIdeaPage.tsx`

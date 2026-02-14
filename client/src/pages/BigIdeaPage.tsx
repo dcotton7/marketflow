@@ -97,6 +97,13 @@ const CATEGORY_ICONS: Record<string, typeof TrendingUp> = {
 
 const CATEGORY_ORDER = ["Moving Averages", "Volume", "Price Action", "Relative Strength", "Volatility", "Momentum", "Value", "Trend", "Custom"];
 
+function getScoreColor(score: number): string {
+  if (score < 0) return "text-rs-red";
+  if (score <= 20) return "text-foreground";
+  if (score <= 100) return "text-rs-yellow";
+  return "text-rs-green";
+}
+
 const UNIVERSE_OPTIONS = [
   { value: "sp500", label: "S&P 500" },
   { value: "nasdaq100", label: "Nasdaq 100" },
@@ -606,6 +613,7 @@ export default function BigIdeaPage() {
   const [tuneResult, setTuneResult] = useState<TuningResult | null>(null);
   const [acceptedTuneIndices, setAcceptedTuneIndices] = useState<Set<number>>(new Set());
   const [tuningDirty, setTuningDirty] = useState(false);
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [tuningPreSnapshot, setTuningPreSnapshot] = useState<any>(null);
   const [tuningId, setTuningId] = useState<number | null>(null);
   const [preTuneResultCount, setPreTuneResultCount] = useState<number>(0);
@@ -2326,12 +2334,25 @@ export default function BigIdeaPage() {
                   No thoughts yet. Create one with AI!
                 </div>
               ) : (
-                CATEGORY_ORDER.filter((cat) => thoughtsByCategory[cat]?.length).map((cat) => (
+                CATEGORY_ORDER.filter((cat) => thoughtsByCategory[cat]?.length).map((cat) => {
+                  const isCollapsed = collapsedCategories.has(cat);
+                  return (
                   <div key={cat}>
-                    <div className="flex items-center gap-1.5 px-1 mb-1.5">
+                    <button
+                      className="flex items-center gap-1.5 px-1 mb-1.5 w-full hover-elevate rounded py-0.5"
+                      onClick={() => setCollapsedCategories(prev => {
+                        const next = new Set(prev);
+                        if (next.has(cat)) next.delete(cat); else next.add(cat);
+                        return next;
+                      })}
+                      data-testid={`button-toggle-category-${cat.replace(/\s+/g, '-').toLowerCase()}`}
+                    >
+                      {isCollapsed ? <ChevronRight className="h-3 w-3 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
                       {getCategoryIcon(cat)}
-                      <span className="font-medium uppercase tracking-wide" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>{cat}</span>
-                    </div>
+                      <span className="font-medium uppercase tracking-wide flex-1 text-left" style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>{cat}</span>
+                      <span className="text-muted-foreground" style={{ fontSize: cssVariables.fontSizeTiny }}>{thoughtsByCategory[cat].length}</span>
+                    </button>
+                    {!isCollapsed && (
                     <div className="space-y-1">
                       {thoughtsByCategory[cat].map((thought) => (
                         <div
@@ -2363,6 +2384,16 @@ export default function BigIdeaPage() {
                             </Tooltip>
                             <GripVertical className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                             <span className="text-sm font-medium truncate flex-1">{thought.name}</span>
+                            {(thought as any).score !== undefined && (thought as any).score !== 0 && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className={`text-[10px] font-mono font-medium flex-shrink-0 ${getScoreColor((thought as any).score)}`} data-testid={`text-thought-score-${thought.id}`}>
+                                    {(thought as any).score > 0 ? "+" : ""}{(thought as any).score}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="right">AI score: accumulated from modifications, scans, and chart ratings</TooltipContent>
+                              </Tooltip>
+                            )}
                             {thought.timeframe && thought.timeframe !== "daily" && (
                               <Badge variant="outline" className="text-[9px] px-1 py-0 flex-shrink-0">
                                 {thought.timeframe === "5min" ? "5m" : thought.timeframe === "15min" ? "15m" : thought.timeframe === "30min" ? "30m" : thought.timeframe}
@@ -2388,8 +2419,10 @@ export default function BigIdeaPage() {
                         </div>
                       ))}
                     </div>
+                    )}
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
             <div
