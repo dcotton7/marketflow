@@ -4,6 +4,14 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ---
 
+## 2026-02-14
+
+### Fix Fundamentals Strip Clipping — 04:45 UTC
+- **Task**: Fundamentals values (PE, Pre-Tax Margin, Debt/Equity, Target Price, etc.) were invisible because the fixed pane height was too short and `overflow-hidden` clipped the second row of values.
+- **Files**: `client/src/components/DualChartGrid.tsx`
+- **Details**: Increased `FUND_H` from 58px to 70px. The two-row grid (labels at 10px + values at 12px, with padding and gap) needs ~66px minimum; 58px was 8px too short, cutting off all bottom-row values.
+- **Status**: Complete
+
 ## 2026-02-13
 
 ### Fix All Fundamental & Technical Data (FMP API) — 21:50 UTC

@@ -53,7 +53,7 @@ export const formatMarketCap = (mc: number) => {
 const UPPER_PANE_H = 40;
 const NAV_INFO_H = 76;
 const CHART_TOOLBAR_H = 28;
-const FUND_H = 58;
+const FUND_H = 70;
 const LOWER_PANE_H = 24;
 const GAP = 4;
 
