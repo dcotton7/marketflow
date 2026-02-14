@@ -1544,21 +1544,26 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 
       let fetchFailCount = 0;
       let tooFewCandlesCount = 0;
-      const BATCH_SIZE = 10;
+      const BATCH_SIZE = 25;
       for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
         const batch = tickers.slice(i, i + BATCH_SIZE);
         const batchResults = await Promise.all(
           batch.map(async (symbol) => {
             try {
               const candlesByTimeframe: Record<string, CandleData[]> = {};
-              for (const tf of timeframesArray) {
-                candlesByTimeframe[tf] = await fetchOHLCV(symbol, tf);
-              }
+              const fetchTimeframe = async (tf: string): Promise<CandleData[]> => {
+                if (!(tf in candlesByTimeframe)) {
+                  candlesByTimeframe[tf] = await fetchOHLCV(symbol, tf);
+                }
+                return candlesByTimeframe[tf];
+              };
 
-              const dailyCandles = candlesByTimeframe["daily"] || [];
-              if (dailyCandles.length < 20 && timeframesNeeded.has("daily")) {
-                tooFewCandlesCount++;
-                if (timeframesNeeded.size === 1) return null;
+              if (timeframesNeeded.has("daily")) {
+                const dailyCandles = await fetchTimeframe("daily");
+                if (dailyCandles.length < 20) {
+                  tooFewCandlesCount++;
+                  if (timeframesNeeded.size === 1) return null;
+                }
               }
 
               const nodeResults: Record<string, boolean> = {};
@@ -1573,11 +1578,17 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   continue;
                 }
                 const tf = node.thoughtTimeframe || "daily";
-                const candles = candlesByTimeframe[tf] || [];
+                const candles = await fetchTimeframe(tf);
                 const minBars = tf === "daily" ? 20 : 10;
                 if (candles.length < minBars) {
                   nodeResults[node.id] = false;
                   continue;
+                }
+
+                for (const c of (node.thoughtCriteria || [])) {
+                  if (c.timeframeOverride && c.timeframeOverride !== tf) {
+                    await fetchTimeframe(c.timeframeOverride);
+                  }
                 }
 
                 const upstreamNodes = edges

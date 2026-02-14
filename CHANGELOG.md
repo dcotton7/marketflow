@@ -6,6 +6,18 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Scan Performance Optimization — 09:00 UTC
+- **Task**: Speed up BigIdea scan execution by increasing parallelism, implementing lazy data fetching, and adding database indexes.
+- **Files**: `server/bigidea/routes.ts`, database DDL
+- **Details**:
+  - **Batch size**: Increased scan batch size from 10 to 25 concurrent tickers. Tiingo Business tier supports high concurrency, and 10 was overly conservative.
+  - **Lazy timeframe fetching**: Candle data for each timeframe (daily, weekly, intraday) is now fetched on-demand when a thought node first needs it, instead of fetching all timeframes upfront for every ticker. If a ticker fails early on a "daily" criterion, we never fetch its "weekly" data — saving API calls and latency.
+  - **Database indexes**: Added 7 missing indexes across scan tables for future query performance as tables grow:
+    - `scan_chart_ratings`: `user_id`, `(user_id, idea_id)`
+    - `scan_tuning_history`: `outcome`, `session_id`, `(outcome, admin_approved)`
+    - `scan_sessions`: `idea_id`, `(user_id, idea_id)`
+- **Status**: Complete
+
 ### Fix Overlapping Bases in Find Base (Historical) Chaining — 08:30 UTC
 - **Task**: Fix overlapping base highlights when chaining multiple Find Base (Historical) indicators to detect sequential base patterns (e.g., historical base → price advance → current base).
 - **Files**: `server/bigidea/indicators.ts`
