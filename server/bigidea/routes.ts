@@ -985,17 +985,27 @@ PREREQUISITE vs ALTERNATIVE pattern:
 - Alternative thoughts (different MA pullbacks, different base types) = any-one-of options. Give each an explicit edge to RESULTS with "logicType": "OR".
 - NEVER connect a prerequisite thought to alternative thoughts with OR edges. That makes the prerequisite an alternative instead of a requirement.
 
+THOUGHT TIMEFRAME DETECTION — CRITICAL:
+Each thought has a "timeframe" field. Valid values are: "daily", "5min", "15min", "30min".
+Default to "daily" ONLY when nothing in the description suggests a shorter timeframe.
+You MUST detect intraday timeframe references from the user's description and set the thought timeframe accordingly:
+- "5-min", "5 min", "5-minute", "5m", "five minute" → timeframe: "5min"
+- "15-min", "15 min", "15-minute", "15m", "fifteen minute" → timeframe: "15min"
+- "30-min", "30 min", "30-minute", "30m", "thirty minute" → timeframe: "30min"
+- "daily", "D1", "day", or no timeframe mentioned → timeframe: "daily"
+When the user's description contains a combined/multi-part idea where SOME parts reference an intraday timeframe and others reference daily, split into separate thoughts with the appropriate timeframe on each.
+
 MULTI-TIMEFRAME PATTERN:
 When the user wants a daily filter (e.g., gap up) combined with an intraday check (e.g., pullback to MA), set the timeframe field on each thought independently:
   Thought A: "Overnight Gap Up" — timeframe: "daily" (no explicit edges → AND required)
-  Thought B: "Price near 21 EMA" — timeframe: "intraday" (no explicit edges → AND required)
+  Thought B: "Price near 21 EMA" — timeframe: "5min" (no explicit edges → AND required)
   "edges": []
   The scan engine evaluates each thought on its specified timeframe. Daily prerequisite + intraday filter is a powerful pattern.
 
 If the user explicitly requests multiple intraday alternatives (e.g., "pulled back to either the 10 EMA or the 50 SMA intraday"), THEN use OR:
   Thought A: "Overnight Gap Up" — timeframe: "daily"
-  Thought B: "Near 10 EMA" — timeframe: "intraday"
-  Thought C: "Near 50 SMA" — timeframe: "intraday"
+  Thought B: "Near 10 EMA" — timeframe: "5min"
+  Thought C: "Near 50 SMA" — timeframe: "5min"
   "edges": [
     { "from": "B", "to": "RESULTS", "logicType": "OR" },
     { "from": "C", "to": "RESULTS", "logicType": "OR" }

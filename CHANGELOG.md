@@ -6,6 +6,15 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Fix AI Idea Creation Timeframe Detection — 07:30 UTC
+- **Task**: Fix the AI "Create New Idea" prompt so it correctly detects intraday timeframe references (e.g., "5-min", "15-minute") from combined descriptions and sets the thought-level timeframe accordingly instead of always defaulting to "daily".
+- **Files**: `server/bigidea/routes.ts`
+- **Details**:
+  - Added "THOUGHT TIMEFRAME DETECTION — CRITICAL" block to the AI system prompt listing all valid timeframe values ("daily", "5min", "15min", "30min") with explicit mapping rules for common user phrases ("5-min" → "5min", "15-minute" → "15min", etc.).
+  - Instructs the AI to split multi-timeframe combined descriptions into separate thoughts with correct timeframes on each.
+  - Fixed multi-timeframe examples in the prompt to use actual valid values ("5min") instead of the invalid "intraday" placeholder.
+- **Status**: Complete
+
 ### Professional Chart Drawing Tools — 07:17 UTC
 - **Task**: Implement persistent drawing tools (trend lines, horizontal lines) for the dual chart grid with full PostgreSQL storage, drag/move, and delete functionality.
 - **Files**: `shared/schema.ts`, `server/routes.ts`, `client/src/lib/chartDrawingPrimitives.ts`, `client/src/hooks/useChartDrawings.ts`, `client/src/components/TradingChart.tsx`, `client/src/components/DualChartGrid.tsx`
