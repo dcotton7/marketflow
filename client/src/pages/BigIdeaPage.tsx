@@ -2137,6 +2137,19 @@ export default function BigIdeaPage() {
           data-testid="input-idea-name"
         />
 
+        <Select value={universe} onValueChange={setUniverse}>
+          <SelectTrigger className="w-40" data-testid="select-universe">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {UNIVERSE_OPTIONS.map((u) => (
+              <SelectItem key={u.value} value={u.value} data-testid={`option-universe-${u.value}`}>
+                {u.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <Select
           value=""
           onValueChange={(val) => {
@@ -2160,19 +2173,6 @@ export default function BigIdeaPage() {
             )) : (
               <SelectItem value="__none__" disabled>No saved ideas</SelectItem>
             )}
-          </SelectContent>
-        </Select>
-
-        <Select value={universe} onValueChange={setUniverse}>
-          <SelectTrigger className="w-40" data-testid="select-universe">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {UNIVERSE_OPTIONS.map((u) => (
-              <SelectItem key={u.value} value={u.value} data-testid={`option-universe-${u.value}`}>
-                {u.label}
-              </SelectItem>
-            ))}
           </SelectContent>
         </Select>
 

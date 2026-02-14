@@ -825,23 +825,17 @@ export default function SentinelEvaluatePage() {
         '--overlay-bg': cssVariables.overlayBg,
       } as React.CSSProperties}
     >
-      {/* Watermark applied via background-image on container */}
-      <header className="border-b" style={{ backgroundColor: cssVariables.headerBg }}>
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => {
-              if (fromParam === 'bigidea') setLocation("/sentinel/bigidea");
-              else if (fromParam === 'training') setLocation("/sentinel/pattern-training");
-              else if (fromParam === 'watchlist') setLocation("/watchlist");
-              else if (fromParam?.startsWith('trade:')) setLocation(`/sentinel/trade/${fromParam.split(':')[1]}`);
-              else setLocation("/sentinel/dashboard");
-            }} data-testid="button-back">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <SentinelHeader showSentiment={true} />
-          </div>
-        </div>
-      </header>
+      <SentinelHeader showSentiment={true} rightContent={
+        <Button variant="ghost" size="icon" onClick={() => {
+          if (fromParam === 'bigidea') setLocation("/sentinel/bigidea");
+          else if (fromParam === 'training') setLocation("/sentinel/pattern-training");
+          else if (fromParam === 'watchlist') setLocation("/watchlist");
+          else if (fromParam?.startsWith('trade:')) setLocation(`/sentinel/trade/${fromParam.split(':')[1]}`);
+          else setLocation("/sentinel/dashboard");
+        }} data-testid="button-back">
+          <ArrowLeft className="w-5 h-5" />
+        </Button>
+      } />
 
       <main className="container mx-auto px-4 py-6">
         {/* Ivy AI Branding */}

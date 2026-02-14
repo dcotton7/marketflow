@@ -6,6 +6,19 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-14
 
+### Standardize Top Menu Bar & BigIdea Toolbar Fix — 05:49 UTC
+- **Task**: Standardize top navigation bar across all pages to match BigIdea pattern, fix BigIdea toolbar order, fix admin tier issue.
+- **Files**: `client/src/components/SentinelHeader.tsx`, `client/src/pages/SentinelDashboardPage.tsx`, `client/src/pages/SentinelTradePage.tsx`, `client/src/pages/SentinelChartsPage.tsx`, `client/src/pages/SentinelEvaluatePage.tsx`, `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - **SentinelHeader**: Added `rightContent` prop for page-specific right-side elements (logout, back buttons) rendered inside the standard header layout.
+  - **Dashboard**: Removed extra `<header>` wrapper. Logout/username now passed as `rightContent` to SentinelHeader.
+  - **Trade Page**: Removed extra `<header>` wrapper. Trade info (symbol, badges, actions) moved to a sub-toolbar below the standard SentinelHeader, matching BigIdea's toolbar pattern.
+  - **Charts Page**: Removed duplicate logo and "Charts" title from the sub-toolbar. Ticker input and controls remain as a clean sub-toolbar row.
+  - **Evaluate Page**: Removed extra `<header>` wrapper. Back button passed as `rightContent` to SentinelHeader.
+  - **BigIdea Toolbar**: Swapped "List" dropdown to appear after the Index/Solution selector (user request).
+  - **Admin Tier**: Fixed Foreboding user tier from "standard" to "admin" so admin weight editing works.
+- **Status**: Complete
+
 ### BigIdea Thought Scoring & AI Selection System — 06:30 UTC
 - **Task**: Implement a thought scoring system and AI-weighted selection for the BigIdea scan builder.
 - **Files**: `shared/schema.ts`, `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`, `client/src/pages/SentinelAdminPage.tsx`

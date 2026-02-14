@@ -62,9 +62,10 @@ function getTrendColor(state: 1 | 0.5 | -0.5 | -1 | "RISK-ON" | "MIXED" | "RISK-
 
 interface SentinelHeaderProps {
   showSentiment?: boolean;
+  rightContent?: React.ReactNode;
 }
 
-export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
+export function SentinelHeader({ showSentiment = true, rightContent }: SentinelHeaderProps) {
   const [location] = useLocation();
   const { cssVariables } = useSystemSettings();
   const { data: sentiment, isLoading } = useQuery<MarketSentiment>({
@@ -211,6 +212,7 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
         </nav>
       </div>
 
+      <div className="flex items-center gap-4">
       {showSentiment && (
         <div className="flex items-center gap-4" data-testid="container-market-sentiment">
           {isLoading ? (
@@ -314,6 +316,8 @@ export function SentinelHeader({ showSentiment = true }: SentinelHeaderProps) {
           ) : null}
         </div>
       )}
+      {rightContent}
+      </div>
     </div>
   );
 }

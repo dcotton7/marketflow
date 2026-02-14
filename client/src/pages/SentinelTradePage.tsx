@@ -230,38 +230,36 @@ export default function SentinelTradePage() {
 
   return (
     <div className="min-h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
-      <header className="border-b" style={{ backgroundColor: cssVariables.headerBg }}>
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <SentinelHeader showSentiment={true} />
-          </div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-bold tracking-tight" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }} data-testid="text-symbol">{trade.symbol}</h1>
-            <Badge variant={trade.direction === "long" ? "default" : "destructive"}>
-              {trade.direction === "long" ? (
-                <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
-              ) : (
-                <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
-              )}
-            </Badge>
-            <Badge variant="outline" data-testid="badge-status">{trade.status}</Badge>
-            {trade.status === "considering" && (
-              <Button size="sm" onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending} data-testid="button-commit">
-                {commitMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Commit Trade"}
-              </Button>
+      <SentinelHeader showSentiment={true} />
+      <div className="flex items-center justify-between gap-3 px-4 py-2 border-b flex-wrap" style={{ backgroundColor: cssVariables.headerBg }}>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <h1 className="font-bold tracking-tight" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }} data-testid="text-symbol">{trade.symbol}</h1>
+          <Badge variant={trade.direction === "long" ? "default" : "destructive"}>
+            {trade.direction === "long" ? (
+              <><TrendingUp className="w-3 h-3 mr-1" /> LONG</>
+            ) : (
+              <><TrendingDown className="w-3 h-3 mr-1" /> SHORT</>
             )}
-            {trade.status === "active" && (
-              <Button size="sm" variant="outline" onClick={() => setShowCloseDialog(true)} data-testid="button-close">
-                <DollarSign className="w-4 h-4 mr-2" />
-                Close Trade
-              </Button>
-            )}
-          </div>
+          </Badge>
+          <Badge variant="outline" data-testid="badge-status">{trade.status}</Badge>
         </div>
-      </header>
+        <div className="flex items-center gap-2">
+          {trade.status === "considering" && (
+            <Button size="sm" onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending} data-testid="button-commit">
+              {commitMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Commit Trade"}
+            </Button>
+          )}
+          {trade.status === "active" && (
+            <Button size="sm" variant="outline" onClick={() => setShowCloseDialog(true)} data-testid="button-close">
+              <DollarSign className="w-4 h-4 mr-2" />
+              Close Trade
+            </Button>
+          )}
+        </div>
+      </div>
 
       <main className="container mx-auto px-4 py-6">
         <div className="grid gap-6 md:grid-cols-3">

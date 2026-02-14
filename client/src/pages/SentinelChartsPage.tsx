@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Search, Sparkles, Eye, X } from "lucide-react";
-import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
+
 
 export default function SentinelChartsPage() {
   const { cssVariables } = useSystemSettings();
@@ -149,16 +149,7 @@ export default function SentinelChartsPage() {
     <div className="h-screen bg-background flex flex-col overflow-hidden" style={cssVariables as any}>
       <SentinelHeader showSentiment={false} />
 
-      <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border" style={{ height: 48, backgroundColor: cssVariables.headerBg }}>
-        <img
-          src={rubricShieldLogo}
-          alt="Charts"
-          className="h-7 flex-shrink-0"
-          style={{ opacity: cssVariables.logoOpacity ?? 1 }}
-          data-testid="img-charts-logo"
-        />
-        <span className="flex-shrink-0" style={{ color: cssVariables.textColorHeader, fontSize: cssVariables.fontSizeHeader, fontWeight: 600 }}>Charts</span>
-
+      <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border" style={{ backgroundColor: cssVariables.headerBg }}>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>

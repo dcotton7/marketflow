@@ -3210,21 +3210,17 @@ export default function SentinelDashboardPage() {
         '--overlay-bg': cssVariables.overlayBg,
       } as React.CSSProperties}
     >
-      {/* Watermark applied via background-image on container */}
-      <header className="border-b" style={{ backgroundColor: cssVariables.headerBg }}>
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
-          <SentinelHeader showSentiment={true} />
-          <div className="flex items-center gap-4">
-            <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }} data-testid="text-username">
-              {user?.username}
-            </span>
-            <Button variant="outline" size="sm" onClick={handleLogout} data-testid="button-logout">
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
-          </div>
+      <SentinelHeader showSentiment={true} rightContent={
+        <div className="flex items-center gap-4">
+          <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }} data-testid="text-username">
+            {user?.username}
+          </span>
+          <Button variant="outline" size="sm" onClick={handleLogout} data-testid="button-logout">
+            <LogOut className="w-4 h-4 mr-2" />
+            Logout
+          </Button>
         </div>
-      </header>
+      } />
 
       <main className="container mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
