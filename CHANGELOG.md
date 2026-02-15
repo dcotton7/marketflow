@@ -6,6 +6,16 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Fix Chart Drawing Tool (Trend Lines & Horizontal Lines) — 08:40 UTC
+- **Task**: Fix drawing tool where trend lines and horizontal lines were not appearing when clicking on charts despite tool activation.
+- **Files**: `client/src/components/TradingChart.tsx`, `client/src/hooks/useChartDrawings.ts`
+- **Details**:
+  - **Root cause**: The drawing hook's `resolveTimeFromParam` function resolved click timestamps independently from TradingChart's internal time resolution. For daily charts where lightweight-charts returns `{year, month, day}` objects, the drawing hook constructed midnight UTC timestamps that could mismatch the actual candle timestamps used by the chart. When the drawing primitive tried to render, `timeToCoordinate()` couldn't find the stored timestamp in the chart data and returned null, silently preventing the line from rendering.
+  - **Fix**: Centralized time resolution in TradingChart's `resolveClickTime` function, which matches click times against actual candle timestamps (same logic used by the working MeasurePrimitive). The resolved time is passed to the drawing handler as `param._resolvedTime`, ensuring drawings always use timestamps that exactly match the chart's internal data. The drawing hook's `resolveTimeFromParam` now checks for `_resolvedTime` first.
+  - **Crosshair enrichment**: Also enriched crosshair move events with resolved timestamps for proper drag behavior when repositioning drawing points.
+  - **Fallback chain**: Added robust fallback: (1) match param.time to actual candle timestamp, (2) coordinateToTime with candle matching, (3) snap to nearest visible candle by x-coordinate when clicking outside data range.
+- **Status**: Complete
+
 ### Fix Overlapping Base Zones & Advance-Then-Collapse Filter — 08:15 UTC
 - **Task**: Fix two scan issues: (1) CB-1 historical base zone overlapping PA-3 current base zone, (2) PA-12 passing stocks that advanced then collapsed back down before forming a base.
 - **Files**: `server/bigidea/indicators.ts`, `client/src/pages/BigIdeaPage.tsx`

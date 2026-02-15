@@ -25,11 +25,17 @@ interface HitResult {
   handle: "p1" | "p2" | "line";
 }
 
+function businessDayToUTC(t: { year: number; month: number; day: number }): number {
+  return Math.floor(Date.UTC(t.year, t.month - 1, t.day) / 1000);
+}
+
 function resolveTimeFromParam(param: any, chart: IChartApi | null): number | null {
+  if (param._resolvedTime != null) {
+    return param._resolvedTime as number;
+  }
   if (param.time) {
     if (typeof param.time === "object") {
-      const t = param.time as { year: number; month: number; day: number };
-      return Math.floor(new Date(Date.UTC(t.year, t.month - 1, t.day)).getTime() / 1000);
+      return businessDayToUTC(param.time as { year: number; month: number; day: number });
     }
     return param.time as number;
   }
@@ -38,8 +44,7 @@ function resolveTimeFromParam(param: any, chart: IChartApi | null): number | nul
       const timeVal = chart.timeScale().coordinateToTime(param.point.x);
       if (timeVal != null) {
         if (typeof timeVal === "object") {
-          const t = timeVal as { year: number; month: number; day: number };
-          return Math.floor(new Date(Date.UTC(t.year, t.month - 1, t.day)).getTime() / 1000);
+          return businessDayToUTC(timeVal as { year: number; month: number; day: number });
         }
         return timeVal as number;
       }

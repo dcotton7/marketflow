@@ -585,30 +585,72 @@ export function TradingChart({
   useEffect(() => { onChartMouseUpRef.current = onChartMouseUp; }, [onChartMouseUp]);
   useEffect(() => { drawingToolActiveRef.current = drawingToolActive; }, [drawingToolActive]);
 
+  const matchBusinessDayToCandle = useCallback((t: { year: number; month: number; day: number }): number => {
+    const candles = candlesRef.current;
+    const matchCandle = candles.find(c => {
+      const d = new Date(c.timestamp * 1000);
+      return d.getUTCFullYear() === t.year && (d.getUTCMonth() + 1) === t.month && d.getUTCDate() === t.day;
+    });
+    return matchCandle ? matchCandle.timestamp : Math.floor(
+      Date.UTC(t.year, t.month - 1, t.day) / 1000
+    );
+  }, []);
+
+  const findNearestCandleTime = useCallback((xCoord: number): number | null => {
+    const candles = candlesRef.current;
+    const chart = chartRef.current;
+    if (!candles.length || !chart) return null;
+    const ts = chart.timeScale();
+    let bestDist = Infinity;
+    let bestTs: number | null = null;
+    for (const c of candles) {
+      const cx = ts.timeToCoordinate(c.timestamp as any);
+      if (cx == null) continue;
+      const dist = Math.abs(cx - xCoord);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestTs = c.timestamp;
+      }
+    }
+    return bestTs;
+  }, []);
+
+  const resolveClickTime = useCallback((param: any): number | null => {
+    if (param.time) {
+      if (typeof param.time === "object") {
+        return matchBusinessDayToCandle(param.time as { year: number; month: number; day: number });
+      }
+      return param.time as number;
+    }
+    if (chartRef.current && param.point && typeof param.point.x === "number") {
+      try {
+        const timeVal = chartRef.current.timeScale().coordinateToTime(param.point.x);
+        if (timeVal != null) {
+          if (typeof timeVal === "object") {
+            return matchBusinessDayToCandle(timeVal as { year: number; month: number; day: number });
+          }
+          return timeVal as number;
+        }
+      } catch {}
+      return findNearestCandleTime(param.point.x);
+    }
+    return null;
+  }, [matchBusinessDayToCandle, findNearestCandleTime]);
+
   const handleChartClick = useCallback(
     (param: any) => {
+      const resolvedTime = resolveClickTime(param);
+
       if (onChartClickRef.current) {
-        onChartClickRef.current(param);
+        const enrichedParam = { ...param, _resolvedTime: resolvedTime };
+        onChartClickRef.current(enrichedParam);
       }
 
       if (drawingToolActiveRef.current) return;
 
-      if (!param.time || !candleSeriesRef.current) return;
+      if (!resolvedTime || !candleSeriesRef.current) return;
 
-      let timestamp: number;
-      if (typeof param.time === "object") {
-        const t = param.time as { year: number; month: number; day: number };
-        const candles = candlesRef.current;
-        const matchCandle = candles.find(c => {
-          const d = new Date(c.timestamp * 1000);
-          return d.getUTCFullYear() === t.year && (d.getUTCMonth() + 1) === t.month && d.getUTCDate() === t.day;
-        });
-        timestamp = matchCandle ? matchCandle.timestamp : Math.floor(
-          new Date(`${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`).getTime() / 1000
-        );
-      } else {
-        timestamp = param.time as number;
-      }
+      const timestamp = resolvedTime;
 
       let clickedPrice: number | null = null;
       if (param.point && typeof param.point.y === "number") {
@@ -851,7 +893,9 @@ export function TradingChart({
 
     const crosshairHandler = (param: any) => {
       if (onChartCrosshairMoveRef.current) {
-        onChartCrosshairMoveRef.current(param);
+        const resolvedTime = resolveClickTime(param);
+        const enrichedParam = { ...param, _resolvedTime: resolvedTime };
+        onChartCrosshairMoveRef.current(enrichedParam);
       }
     };
     chart.subscribeCrosshairMove(crosshairHandler);
