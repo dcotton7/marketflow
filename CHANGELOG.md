@@ -4,6 +4,21 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ---
 
+## 2026-02-15
+
+### BigIdea UI Improvements — 05:02 UTC
+- **Task**: Multiple UX improvements to the BigIdea scan page toolbar and thought library.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - **Delete thought trash icon**: Changed from nearly invisible (`text-muted-foreground/50`) to red (`text-destructive/70`) so it's clearly visible in the thought library.
+  - **Delete Idea**: Added "Delete Idea" option to the Rate Quality dropdown menu. Only appears when a saved idea is loaded. Shows a confirmation dialog before permanently deleting the idea from the database and clearing the canvas.
+  - **Debug overlay**: Moved the Scan Debug panel from the bottom of the left pane (where it was often hidden off-screen) to a Popover overlay triggered by an Info icon button in the top toolbar. Appears only after a scan runs. Includes the copy-to-clipboard button inside the overlay header.
+  - **Rate Quality button**: Changed the ellipsis (`...`) icon-only button to a labeled "Rate Quality" button with the Target icon, making it more discoverable. The dropdown still contains Rate Quality, Save & Commit Tuning (when dirty), and now Delete Idea (when a saved idea is loaded).
+  - Removed unused `MoreHorizontal` import.
+- **Status**: Complete
+
+---
+
 ## 2026-02-14
 
 ### Fix PA-3 / CB-1 Base Overlap in Chained Scans — 16:55 UTC

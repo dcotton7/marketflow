@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -72,12 +73,12 @@ import {
   Lightbulb,
   EyeOff,
   Eye,
-  MoreHorizontal,
   Layers,
   Minus,
   ClipboardCopy,
   ChevronsDownUp,
   ChevronsUpDown,
+  Info,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -1406,6 +1407,23 @@ export default function BigIdeaPage() {
     },
   });
 
+  const [deleteIdeaConfirm, setDeleteIdeaConfirm] = useState(false);
+  const deleteIdeaMutation = useMutation({
+    mutationFn: async (ideaId: number) => {
+      await apiRequest("DELETE", `/api/bigidea/ideas/${ideaId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bigidea/ideas"] });
+      handleClearIdea();
+      setDeleteIdeaConfirm(false);
+      toast({ title: "Idea deleted" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to delete idea", description: err.message, variant: "destructive" });
+      setDeleteIdeaConfirm(false);
+    },
+  });
+
   const scanMutation = useMutation({
     mutationFn: async () => {
       const scanNodes = nodes.map((n) => ({
@@ -2358,8 +2376,14 @@ export default function BigIdeaPage() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" data-testid="button-more-options">
-              <MoreHorizontal className="h-4 w-4" style={{ strokeWidth: 3 }} />
+            <Button variant="outline" className="gap-2" data-testid="button-more-options">
+              <Target className="h-4 w-4" />
+              Rate Quality
+              {qualityResult && (
+                <span className={`font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
+                  {qualityResult.grade}
+                </span>
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
@@ -2370,11 +2394,6 @@ export default function BigIdeaPage() {
             >
               <Target className="h-4 w-4 mr-2" />
               Rate Quality
-              {qualityResult && (
-                <span className={`ml-auto font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
-                  {qualityResult.grade}
-                </span>
-              )}
             </DropdownMenuItem>
             {tuningDirty && (
               <>
@@ -2389,8 +2408,178 @@ export default function BigIdeaPage() {
                 </DropdownMenuItem>
               </>
             )}
+            {currentIdeaId && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setDeleteIdeaConfirm(true)}
+                  className="text-destructive focus:text-destructive"
+                  data-testid="menu-delete-idea"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Idea
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {debugInfo && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon" data-testid="button-debug-overlay">
+                <Info className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent side="bottom" align="end" className="w-[420px] max-h-[400px] overflow-auto p-0">
+              <div className="flex items-center justify-between px-3 py-2 border-b">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Scan Debug</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      data-testid="button-copy-debug"
+                      onClick={() => {
+                        const lines: string[] = [];
+                        lines.push(`Scan Debug — ${debugInfo.timestamp} — ${debugInfo.durationMs}ms — universe: ${debugInfo.universe}`);
+                        lines.push(`Result: ${debugInfo.matchCount} / ${debugInfo.totalScanned}`);
+                        if (debugInfo.evalOrder?.length > 0) {
+                          lines.push(`\nEval Order: ${debugInfo.evalOrder.join(" → ")}`);
+                        }
+                        if (debugInfo.connections?.length > 0) {
+                          lines.push(`\nThought Stems:`);
+                          debugInfo.connections.forEach((c: any) => lines.push(`  ${c.from} ${c.logic} ${c.to}`));
+                        }
+                        if (debugInfo.linkOverrides?.length > 0) {
+                          lines.push(`\nAuto-Linked Params:`);
+                          debugInfo.linkOverrides.forEach((o: any) => lines.push(`  ${o.thoughtName} / ${o.paramName}: ${o.originalValue} → ${o.linkedValue} (from: ${o.sourceName})`));
+                        }
+                        if (debugInfo.dynamicDataFlows?.length > 0) {
+                          lines.push(`\nDynamic Per-Stock Data:`);
+                          debugInfo.dynamicDataFlows.forEach((d: any) => lines.push(`  ${d.dataKey}: ${d.provider} → ${d.consumer} — ${d.description}`));
+                        }
+                        debugInfo.thoughts?.forEach((t: any) => {
+                          const passCount = debugInfo.thoughtCounts[t.nodeId];
+                          const funnel = debugInfo.perThoughtFunnel?.[t.nodeId];
+                          const funnelStr = funnel ? ` — eval ${funnel.evaluated}/${debugInfo.totalScanned}${funnel.skipped > 0 ? `, ${funnel.skipped} skipped` : ""}` : "";
+                          lines.push(`\nThought: ${t.name}${t.isNot ? " [NOT]" : ""} (${t.timeframe})${passCount !== undefined ? ` — ${passCount} pass` : ""}${funnelStr}`);
+                          t.criteria?.forEach((c: any) => {
+                            lines.push(`  ${c.muted ? "[MUTED] " : ""}${c.indicator}${c.inverted ? " INV" : ""}${c.tfOverride ? ` @${c.tfOverride}` : ""} — ${c.label}`);
+                            const paramStr = Object.entries(c.params).map(([k, v]) => `${k}=${String(v)}`).join(", ");
+                            if (paramStr) lines.push(`    ${paramStr}`);
+                          });
+                        });
+                        navigator.clipboard.writeText(lines.join("\n"));
+                        toast({ title: "Debug info copied to clipboard" });
+                      }}
+                    >
+                      <ClipboardCopy className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>Copy debug info to clipboard</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="px-3 py-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span>{debugInfo.timestamp}</span>
+                  <span>{debugInfo.durationMs}ms</span>
+                  <span>universe: {debugInfo.universe}</span>
+                </div>
+                <div className="border-t border-dashed pt-1">
+                  <span className="font-semibold text-foreground">Result: {debugInfo.matchCount} / {debugInfo.totalScanned}</span>
+                </div>
+                {debugInfo.evalOrder?.length > 0 && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-foreground">Eval Order:</span>
+                    <div className="ml-2">
+                      {debugInfo.evalOrder.map((name: string, i: number) => (
+                        <span key={i}>{i > 0 ? " → " : ""}{name}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {debugInfo.connections.length > 0 && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-foreground">Thought Stems:</span>
+                    {debugInfo.connections.map((c: any, i: number) => (
+                      <div key={i} className="ml-2">
+                        {c.from} <span className={c.logic === "OR" ? "text-rs-yellow" : "text-blue-400"}>{c.logic}</span> {c.to}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {debugInfo.linkOverrides?.length > 0 && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-blue-400">Auto-Linked Params:</span>
+                    {debugInfo.linkOverrides.map((o: any, i: number) => (
+                      <div key={i} className="ml-2">
+                        <span className="text-foreground/80">{o.thoughtName}</span>
+                        <span className="text-muted-foreground/60"> / {o.paramName}:</span>
+                        <span className="text-rs-yellow"> {String(o.originalValue)}</span>
+                        <span className="text-muted-foreground/60"> → </span>
+                        <span className="text-blue-400">{String(o.linkedValue)}</span>
+                        <div className="ml-3 text-muted-foreground/50">from: {o.sourceName}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {debugInfo.dynamicDataFlows?.length > 0 && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-emerald-400">Dynamic Per-Stock Data:</span>
+                    {debugInfo.dynamicDataFlows.map((d: any, i: number) => (
+                      <div key={i} className="ml-2">
+                        <span className="text-emerald-300">{d.dataKey}</span>
+                        <span className="text-muted-foreground/60">: </span>
+                        <span className="text-foreground/80">{d.provider}</span>
+                        <span className="text-muted-foreground/60"> → </span>
+                        <span className="text-foreground/80">{d.consumer}</span>
+                        <div className="ml-3 text-muted-foreground/50">{d.description}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {debugInfo.thoughts.map((t: any) => {
+                  const passCount = debugInfo.thoughtCounts[t.nodeId];
+                  const funnel = debugInfo.perThoughtFunnel?.[t.nodeId];
+                  return (
+                    <div key={t.nodeId} className="border-t border-dashed pt-1">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className="font-semibold text-foreground">{t.name}</span>
+                        {t.isNot && <span className="text-rs-red">[NOT]</span>}
+                        <span className="text-muted-foreground/60">({t.timeframe})</span>
+                        {funnel && funnel.evaluated < debugInfo.totalScanned ? (
+                          <span className="text-muted-foreground/60">eval {funnel.evaluated}</span>
+                        ) : null}
+                        {passCount !== undefined && (
+                          <span className="text-rs-green">{passCount} pass</span>
+                        )}
+                        {funnel && funnel.skipped > 0 && (
+                          <span className="text-muted-foreground/40">{funnel.skipped} skipped</span>
+                        )}
+                      </div>
+                      {t.criteria.map((c: any, ci: number) => (
+                        <div key={ci} className={`ml-2 ${c.muted ? "line-through opacity-50" : ""}`}>
+                          <span className="text-foreground/80">{c.indicator}</span>
+                          {c.inverted && <span className="text-rs-yellow"> INV</span>}
+                          {c.tfOverride && <span className="text-cyan-400"> @{c.tfOverride}</span>}
+                          <span className="text-muted-foreground/70"> {c.label}</span>
+                          <div className="ml-3 text-muted-foreground/50">
+                            {Object.entries(c.params).map(([k, v]) => (
+                              <span key={k} className="mr-2">{k}={String(v)}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -2532,7 +2721,7 @@ export default function BigIdeaPage() {
                               </Badge>
                             )}
                             <button
-                              className="flex-shrink-0 p-0.5 rounded text-muted-foreground/50 hover:text-destructive transition-colors"
+                              className="flex-shrink-0 p-0.5 rounded text-destructive/70 hover:text-destructive transition-colors"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 e.preventDefault();
@@ -2561,173 +2750,6 @@ export default function BigIdeaPage() {
               style={{ backgroundColor: cssVariables.secondaryOverlayColor + "18" }}
               data-testid="left-pane-lower"
             >
-          {debugInfo && (
-            <div className="border-t" data-testid="scan-debug-panel">
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <button
-                  onClick={() => setDebugOpen(!debugOpen)}
-                  className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider hover-elevate"
-                  data-testid="button-toggle-debug"
-                >
-                  <span>Scan Debug</span>
-                  {debugOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
-                </button>
-                <Tooltip>
-                <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6"
-                  data-testid="button-copy-debug"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const lines: string[] = [];
-                    lines.push(`Scan Debug — ${debugInfo.timestamp} — ${debugInfo.durationMs}ms — universe: ${debugInfo.universe}`);
-                    lines.push(`Result: ${debugInfo.matchCount} / ${debugInfo.totalScanned}`);
-                    if (debugInfo.evalOrder?.length > 0) {
-                      lines.push(`\nEval Order: ${debugInfo.evalOrder.join(" → ")}`);
-                    }
-                    if (debugInfo.connections?.length > 0) {
-                      lines.push(`\nThought Stems:`);
-                      debugInfo.connections.forEach((c: any) => lines.push(`  ${c.from} ${c.logic} ${c.to}`));
-                    }
-                    if (debugInfo.linkOverrides?.length > 0) {
-                      lines.push(`\nAuto-Linked Params:`);
-                      debugInfo.linkOverrides.forEach((o: any) => lines.push(`  ${o.thoughtName} / ${o.paramName}: ${o.originalValue} → ${o.linkedValue} (from: ${o.sourceName})`));
-                    }
-                    if (debugInfo.dynamicDataFlows?.length > 0) {
-                      lines.push(`\nDynamic Per-Stock Data:`);
-                      debugInfo.dynamicDataFlows.forEach((d: any) => lines.push(`  ${d.dataKey}: ${d.provider} → ${d.consumer} — ${d.description}`));
-                    }
-                    debugInfo.thoughts?.forEach((t: any) => {
-                      const passCount = debugInfo.thoughtCounts[t.nodeId];
-                      const funnel = debugInfo.perThoughtFunnel?.[t.nodeId];
-                      const funnelStr = funnel ? ` — eval ${funnel.evaluated}/${debugInfo.totalScanned}${funnel.skipped > 0 ? `, ${funnel.skipped} skipped` : ""}` : "";
-                      lines.push(`\nThought: ${t.name}${t.isNot ? " [NOT]" : ""} (${t.timeframe})${passCount !== undefined ? ` — ${passCount} pass` : ""}${funnelStr}`);
-                      t.criteria?.forEach((c: any) => {
-                        lines.push(`  ${c.muted ? "[MUTED] " : ""}${c.indicator}${c.inverted ? " INV" : ""}${c.tfOverride ? ` @${c.tfOverride}` : ""} — ${c.label}`);
-                        const paramStr = Object.entries(c.params).map(([k, v]) => `${k}=${String(v)}`).join(", ");
-                        if (paramStr) lines.push(`    ${paramStr}`);
-                      });
-                    });
-                    navigator.clipboard.writeText(lines.join("\n"));
-                    toast({ title: "Debug info copied to clipboard" });
-                  }}
-                >
-                  <ClipboardCopy className="h-3.5 w-3.5" />
-                </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>Copy debug info to clipboard</p>
-                </TooltipContent>
-                </Tooltip>
-              </div>
-              {debugOpen && (
-                <ScrollArea className="max-h-[200px]">
-                  <div className="px-3 pb-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span>{debugInfo.timestamp}</span>
-                      <span>{debugInfo.durationMs}ms</span>
-                      <span>universe: {debugInfo.universe}</span>
-                    </div>
-                    <div className="border-t border-dashed pt-1">
-                      <span className="font-semibold text-foreground">Result: {debugInfo.matchCount} / {debugInfo.totalScanned}</span>
-                    </div>
-
-                    {debugInfo.evalOrder?.length > 0 && (
-                      <div className="border-t border-dashed pt-1">
-                        <span className="font-semibold text-foreground">Eval Order:</span>
-                        <div className="ml-2">
-                          {debugInfo.evalOrder.map((name: string, i: number) => (
-                            <span key={i}>{i > 0 ? " → " : ""}{name}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {debugInfo.connections.length > 0 && (
-                      <div className="border-t border-dashed pt-1">
-                        <span className="font-semibold text-foreground">Thought Stems:</span>
-                        {debugInfo.connections.map((c: any, i: number) => (
-                          <div key={i} className="ml-2">
-                            {c.from} <span className={c.logic === "OR" ? "text-rs-yellow" : "text-blue-400"}>{c.logic}</span> {c.to}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {debugInfo.linkOverrides?.length > 0 && (
-                      <div className="border-t border-dashed pt-1">
-                        <span className="font-semibold text-blue-400">Auto-Linked Params:</span>
-                        {debugInfo.linkOverrides.map((o: any, i: number) => (
-                          <div key={i} className="ml-2">
-                            <span className="text-foreground/80">{o.thoughtName}</span>
-                            <span className="text-muted-foreground/60"> / {o.paramName}:</span>
-                            <span className="text-rs-yellow"> {String(o.originalValue)}</span>
-                            <span className="text-muted-foreground/60"> → </span>
-                            <span className="text-blue-400">{String(o.linkedValue)}</span>
-                            <div className="ml-3 text-muted-foreground/50">from: {o.sourceName}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {debugInfo.dynamicDataFlows?.length > 0 && (
-                      <div className="border-t border-dashed pt-1">
-                        <span className="font-semibold text-emerald-400">Dynamic Per-Stock Data:</span>
-                        {debugInfo.dynamicDataFlows.map((d: any, i: number) => (
-                          <div key={i} className="ml-2">
-                            <span className="text-emerald-300">{d.dataKey}</span>
-                            <span className="text-muted-foreground/60">: </span>
-                            <span className="text-foreground/80">{d.provider}</span>
-                            <span className="text-muted-foreground/60"> → </span>
-                            <span className="text-foreground/80">{d.consumer}</span>
-                            <div className="ml-3 text-muted-foreground/50">{d.description}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {debugInfo.thoughts.map((t: any) => {
-                      const passCount = debugInfo.thoughtCounts[t.nodeId];
-                      const funnel = debugInfo.perThoughtFunnel?.[t.nodeId];
-                      return (
-                        <div key={t.nodeId} className="border-t border-dashed pt-1">
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <span className="font-semibold text-foreground">{t.name}</span>
-                            {t.isNot && <span className="text-rs-red">[NOT]</span>}
-                            <span className="text-muted-foreground/60">({t.timeframe})</span>
-                            {funnel && funnel.evaluated < debugInfo.totalScanned ? (
-                              <span className="text-muted-foreground/60">eval {funnel.evaluated}</span>
-                            ) : null}
-                            {passCount !== undefined && (
-                              <span className="text-rs-green">{passCount} pass</span>
-                            )}
-                            {funnel && funnel.skipped > 0 && (
-                              <span className="text-muted-foreground/40">{funnel.skipped} skipped</span>
-                            )}
-                          </div>
-                          {t.criteria.map((c: any, ci: number) => (
-                            <div key={ci} className={`ml-2 ${c.muted ? "line-through opacity-50" : ""}`}>
-                              <span className="text-foreground/80">{c.indicator}</span>
-                              {c.inverted && <span className="text-rs-yellow"> INV</span>}
-                              {c.tfOverride && <span className="text-cyan-400"> @{c.tfOverride}</span>}
-                              <span className="text-muted-foreground/70"> {c.label}</span>
-                              <div className="ml-3 text-muted-foreground/50">
-                                {Object.entries(c.params).map(([k, v]) => (
-                                  <span key={k} className="mr-2">{k}={String(v)}</span>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-              )}
-            </div>
-          )}
           </div>
           <div className="h-12 flex-shrink-0" />
           </div>
@@ -3824,6 +3846,29 @@ export default function BigIdeaPage() {
               data-testid="button-confirm-delete"
             >
               {deleteThoughtMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteIdeaConfirm} onOpenChange={setDeleteIdeaConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Idea</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete "{loadedIdeaName || ideaName}"? This will remove the saved idea and clear the canvas. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-idea">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground"
+              onClick={() => {
+                if (currentIdeaId) deleteIdeaMutation.mutate(currentIdeaId);
+              }}
+              data-testid="button-confirm-delete-idea"
+            >
+              {deleteIdeaMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
