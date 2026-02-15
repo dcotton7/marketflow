@@ -1,0 +1,41 @@
+Scan Debug — 2:01:38 AM — 1407ms — universe: sp500
+Result: 21 / undefined
+
+Eval Order: Flat consolidation base detection → Historical Base Detection → Price Advance After Base → Current Coiling Base
+
+Thought Stems:
+  Historical Base Detection AND Price Advance After Base
+  Price Advance After Base AND Current Coiling Base
+  Flat consolidation base detection AND Results
+  Current Coiling Base AND Results
+
+Auto-Linked Params:
+  Price Advance After Base / skipBars: 20 → 20 (from: Current Coiling Base → Consolidation / Base Detection (period=20))
+
+Dynamic Per-Stock Data:
+  detectedPeriod: Historical Base Detection (Find Base (Historical)) → Price Advance After Base (Prior Price Advance) — skipBars uses per-stock detectedPeriod from upstream
+  baseStartBar: Historical Base Detection (Find Base (Historical)) → Price Advance After Base (Prior Price Advance) — skipBars uses per-stock baseStartBar from upstream
+
+Thought: Flat consolidation base detection (daily) — 94 pass — eval 501/undefined
+  PA-3 — Flat consolidation base
+    period=20, minPeriod=6, maxRange=10, maxSlope=3, drifterPct=10, minBasePct=0
+  MA-1 @daily — Price above 50-day SMA
+    period=50, direction=above
+  MA-4 — 50-day MA upward or flat
+    period=50, maType=sma, slopeDays=10, minSlope=0
+
+Thought: Historical Base Detection (daily) — 473 pass — eval 501/undefined
+  CB-1 — Find a historical base within the last 80 bars
+    searchWindow=80, searchDirection=backward, minBaseLength=10, maxBaseLength=60, maxRangePct=15, volumeContraction=true, volumeDeclinePct=30
+
+Thought: Price Advance After Base (daily) — 192 pass — eval 473/undefined, 28 skipped
+  PA-12 @daily — Prior Price Advance
+    skipBars=20, lookbackBars=60, minGain=5
+
+Thought: Current Coiling Base (daily) — 28 pass — eval 192/undefined, 309 skipped
+  PA-3 @daily — Consolidation / Base Detection
+    period=20, minPeriod=6, maxRange=10, maxSlope=3, drifterPct=10, minBasePct=0
+  PA-6 — Near 52-week high
+    maxDistance=25, minDistance=0
+  PA-4 — Limit current base depth
+    lookback=60, maxDepth=25, minDepth=5
