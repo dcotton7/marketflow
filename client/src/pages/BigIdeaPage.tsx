@@ -4605,17 +4605,18 @@ function ScanChartViewer({
 
         if (h.type === "baseZone" && h.topPrice && h.lowPrice && h.startBar !== undefined) {
           if (dailyData) {
-            const startIdx = Math.max(0, dailyData.candles.length - 1 - h.startBar);
-            const endIdx = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h.endBar || 0));
-            if (startIdx < dailyData.candles.length && endIdx < dailyData.candles.length && startIdx <= endIdx) {
-              const startCandle = dailyData.candles[startIdx];
-              const endCandle = dailyData.candles[endIdx];
-              if (startCandle && endCandle) {
+            const len = dailyData.candles.length;
+            const olderIdx = Math.min(len - 1, h.startBar);
+            const newerIdx = Math.max(0, h.endBar ?? 0);
+            if (olderIdx < len && newerIdx < len && olderIdx >= newerIdx) {
+              const olderCandle = dailyData.candles[olderIdx];
+              const newerCandle = dailyData.candles[newerIdx];
+              if (olderCandle && newerCandle) {
                 const color = BASE_ZONE_COLORS[zoneColorIdx % BASE_ZONE_COLORS.length];
                 zoneColorIdx++;
                 baseZones.push({
-                  startTime: startCandle.timestamp,
-                  endTime: endCandle.timestamp,
+                  startTime: olderCandle.timestamp,
+                  endTime: newerCandle.timestamp,
                   topPrice: h.topPrice,
                   lowPrice: h.lowPrice,
                   color,
@@ -4628,16 +4629,17 @@ function ScanChartViewer({
 
         if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
           if (dailyData) {
-            const endIdx = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h.endBar || 0));
-            const startIdx = Math.max(0, dailyData.candles.length - 1 - h.startBar);
-            if (startIdx >= 0 && endIdx >= startIdx && endIdx < dailyData.candles.length) {
-              const startCandle = dailyData.candles[startIdx];
-              const endCandle = dailyData.candles[endIdx];
-              if (startCandle && endCandle) {
+            const len = dailyData.candles.length;
+            const olderIdx = Math.min(len - 1, h.startBar);
+            const newerIdx = Math.max(0, h.endBar ?? 0);
+            if (olderIdx < len && newerIdx < len && olderIdx >= newerIdx) {
+              const olderCandle = dailyData.candles[olderIdx];
+              const newerCandle = dailyData.candles[newerIdx];
+              if (olderCandle && newerCandle) {
                 resistanceLines.push({
-                  startTime: startCandle.timestamp,
+                  startTime: olderCandle.timestamp,
                   startPrice: h.level,
-                  endTime: endCandle.timestamp,
+                  endTime: newerCandle.timestamp,
                   endPrice: h.level,
                 });
               }
@@ -4648,16 +4650,17 @@ function ScanChartViewer({
         if (cr.cocHighlight2 && cr.cocHighlight2.type === "supportLine" && cr.cocHighlight2.level && cr.cocHighlight2.startBar !== undefined) {
           const h2 = cr.cocHighlight2;
           if (dailyData) {
-            const endIdx2 = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h2.endBar || 0));
-            const startIdx2 = Math.max(0, dailyData.candles.length - 1 - h2.startBar!);
-            if (startIdx2 >= 0 && endIdx2 >= startIdx2 && endIdx2 < dailyData.candles.length) {
-              const startCandle2 = dailyData.candles[startIdx2];
-              const endCandle2 = dailyData.candles[endIdx2];
-              if (startCandle2 && endCandle2) {
+            const len2 = dailyData.candles.length;
+            const olderIdx2 = Math.min(len2 - 1, h2.startBar!);
+            const newerIdx2 = Math.max(0, h2.endBar ?? 0);
+            if (olderIdx2 < len2 && newerIdx2 < len2 && olderIdx2 >= newerIdx2) {
+              const olderCandle2 = dailyData.candles[olderIdx2];
+              const newerCandle2 = dailyData.candles[newerIdx2];
+              if (olderCandle2 && newerCandle2) {
                 resistanceLines.push({
-                  startTime: startCandle2.timestamp,
+                  startTime: olderCandle2.timestamp,
                   startPrice: h2.level!,
-                  endTime: endCandle2.timestamp,
+                  endTime: newerCandle2.timestamp,
                   endPrice: h2.level!,
                 });
               }
@@ -4667,7 +4670,7 @@ function ScanChartViewer({
 
         if (h.type === "gapCircle" && h.barIndex !== undefined) {
           if (dailyData && dailyData.candles.length > h.barIndex) {
-            const candle = dailyData.candles[dailyData.candles.length - 1 - h.barIndex];
+            const candle = dailyData.candles[h.barIndex];
             if (candle) {
               const label = cr.indicatorId === "PA-17"
                 ? (h.gapPct ? `WP ${h.gapPct.toFixed(1)}%` : "Wedge Pop")
@@ -4687,13 +4690,13 @@ function ScanChartViewer({
         if (h.type === "pullbackCircle" && h.barCount) {
           if (dailyData) {
             const count = Math.min(h.barCount, dailyData.candles.length);
-            for (let i = dailyData.candles.length - count; i < dailyData.candles.length; i++) {
+            for (let i = 0; i < count; i++) {
               diamondMarkers.push({
                 time: dailyData.candles[i].timestamp,
                 price: dailyData.candles[i].low,
                 color: "rgba(234, 179, 8, 0.5)",
                 size: 100,
-                text: i === dailyData.candles.length - count ? cr.indicatorName || "PB" : "",
+                text: i === count - 1 ? cr.indicatorName || "PB" : "",
                 textColor: "#ffffff",
               });
             }
@@ -4702,7 +4705,17 @@ function ScanChartViewer({
       }
     }
 
-    return { markers, diamondMarkers, priceLines, resistanceLines, baseZones };
+    const dedupedBaseZones = baseZones.filter((zone, idx) => {
+      for (let j = 0; j < idx; j++) {
+        const prev = baseZones[j];
+        const timeOverlap = Math.abs(zone.startTime - prev.startTime) < 86400 * 5 && Math.abs(zone.endTime - prev.endTime) < 86400 * 5;
+        const priceOverlap = Math.abs(zone.topPrice - prev.topPrice) / prev.topPrice < 0.02 && Math.abs(zone.lowPrice - prev.lowPrice) / prev.lowPrice < 0.02;
+        if (timeOverlap && priceOverlap) return false;
+      }
+      return true;
+    });
+
+    return { markers, diamondMarkers, priceLines, resistanceLines, baseZones: dedupedBaseZones };
   }, [current?.thoughtBreakdown, dailyData]);
 
   if (!open) return null;

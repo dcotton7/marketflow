@@ -6,6 +6,20 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Fix Chart Overlay Index Conversion & Zone Dedup — 06:50 UTC
+- **Task**: Fix all chart overlay bar-to-timestamp conversions that were inverted (rendering at wrong end of chart) and add base zone deduplication.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`, `client/src/components/TradingChart.tsx`
+- **Details**:
+  - **Root cause**: All `cocHighlight` bar index → timestamp conversions used `len - 1 - barIndex` which is only correct for oldest-first arrays. Both `dailyData.candles` and scan engine candles are newest-first (index 0 = most recent bar). This caused base zones, resistance/support lines, gap circles, and pullback circles to render at the wrong end of the chart (oldest bars instead of newest).
+  - **Fix — baseZone**: Use bar indices directly (`olderIdx = startBar`, `newerIdx = endBar`) since startBar is the older boundary (higher "bars ago") and endBar is the newer boundary.
+  - **Fix — resistanceLine/supportLine (cocHighlight2)**: Same direct index usage fix.
+  - **Fix — gapCircle**: Use `h.barIndex` directly instead of `len - 1 - h.barIndex`.
+  - **Fix — pullbackCircle**: Iterate from index 0 to count (most recent N bars) instead of from `len - count` to `len` (oldest N bars).
+  - **Deduplication**: Added base zone dedup filter — zones within 5 days and 2% price of a previously-added zone are filtered out, preventing visual clutter from multiple PA-3 instances detecting the same base.
+  - **Stale rendering fix**: Added `displayData` dependency to both `resistanceLines` and `baseZones` useEffect hooks in TradingChart, ensuring overlays re-render when the chart is destroyed and recreated on ticker change.
+  - **Cleanup**: Removed debug console.log statements from TradingChart base zone effect.
+- **Status**: Complete
+
 ### Fix Base Zone Chart Rendering — 06:15 UTC
 - **Task**: Replace sloped resistance/support line rendering of base zones with proper flat horizontal rectangles on the scan chart viewer.
 - **Files**: `server/bigidea/indicators.ts`, `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`, `client/src/components/TradingChart.tsx`

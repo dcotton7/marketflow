@@ -1118,7 +1118,7 @@ export function TradingChart({
         resistanceLineSeriesRef.current.push(series);
       }
     }
-  }, [resistanceLines]);
+  }, [resistanceLines, displayData]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1162,7 +1162,7 @@ export function TradingChart({
         baseZoneSeriesRef.current.push(bottomSeries);
       }
     }
-  }, [baseZones]);
+  }, [baseZones, displayData]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
