@@ -1098,25 +1098,29 @@ export function TradingChart({
     }
     resistanceLineSeriesRef.current = [];
 
-    if (resistanceLines && resistanceLines.length > 0) {
-      for (const rl of resistanceLines) {
-        const series = chartRef.current.addSeries(LineSeries, {
-          color: "#ef4444",
-          lineWidth: 2 as 2,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-          priceScaleId: 'right',
-          autoscaleInfoProvider: () => null,
-        });
-        const points = [
-          { time: rl.startTime as any, value: rl.startPrice },
-          { time: rl.endTime as any, value: rl.endPrice },
-        ];
-        series.setData(points);
-        resistanceLineSeriesRef.current.push(series);
+    try {
+      if (resistanceLines && resistanceLines.length > 0) {
+        for (const rl of resistanceLines) {
+          const series = chartRef.current!.addSeries(LineSeries, {
+            color: "#ef4444",
+            lineWidth: 2 as 2,
+            lineStyle: LineStyle.Dashed,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+            priceScaleId: 'right',
+            autoscaleInfoProvider: () => null,
+          });
+          const points = [
+            { time: rl.startTime as any, value: rl.startPrice },
+            { time: rl.endTime as any, value: rl.endPrice },
+          ];
+          series.setData(points);
+          resistanceLineSeriesRef.current.push(series);
+        }
       }
+    } catch (e) {
+      console.warn("[TradingChart] resistanceLines render error:", e);
     }
   }, [resistanceLines, displayData]);
 
@@ -1127,40 +1131,44 @@ export function TradingChart({
     }
     baseZoneSeriesRef.current = [];
 
-    if (baseZones && baseZones.length > 0) {
-      for (const zone of baseZones) {
-        const topSeries = chartRef.current.addSeries(LineSeries, {
-          color: zone.color,
-          lineWidth: 2 as 2,
-          lineStyle: LineStyle.Solid,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-          priceScaleId: 'right',
-          autoscaleInfoProvider: () => null,
-        });
-        topSeries.setData([
-          { time: zone.startTime as any, value: zone.topPrice },
-          { time: zone.endTime as any, value: zone.topPrice },
-        ]);
-        baseZoneSeriesRef.current.push(topSeries);
+    try {
+      if (baseZones && baseZones.length > 0) {
+        for (const zone of baseZones) {
+          const topSeries = chartRef.current!.addSeries(LineSeries, {
+            color: zone.color,
+            lineWidth: 2 as 2,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+            priceScaleId: 'right',
+            autoscaleInfoProvider: () => null,
+          });
+          topSeries.setData([
+            { time: zone.startTime as any, value: zone.topPrice },
+            { time: zone.endTime as any, value: zone.topPrice },
+          ]);
+          baseZoneSeriesRef.current.push(topSeries);
 
-        const bottomSeries = chartRef.current.addSeries(LineSeries, {
-          color: zone.color,
-          lineWidth: 2 as 2,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-          priceScaleId: 'right',
-          autoscaleInfoProvider: () => null,
-        });
-        bottomSeries.setData([
-          { time: zone.startTime as any, value: zone.lowPrice },
-          { time: zone.endTime as any, value: zone.lowPrice },
-        ]);
-        baseZoneSeriesRef.current.push(bottomSeries);
+          const bottomSeries = chartRef.current!.addSeries(LineSeries, {
+            color: zone.color,
+            lineWidth: 2 as 2,
+            lineStyle: LineStyle.Dashed,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+            priceScaleId: 'right',
+            autoscaleInfoProvider: () => null,
+          });
+          bottomSeries.setData([
+            { time: zone.startTime as any, value: zone.lowPrice },
+            { time: zone.endTime as any, value: zone.lowPrice },
+          ]);
+          baseZoneSeriesRef.current.push(bottomSeries);
+        }
       }
+    } catch (e) {
+      console.warn("[TradingChart] baseZones render error:", e);
     }
   }, [baseZones, displayData]);
 

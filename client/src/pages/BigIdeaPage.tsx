@@ -4606,9 +4606,9 @@ function ScanChartViewer({
         if (h.type === "baseZone" && h.topPrice && h.lowPrice && h.startBar !== undefined) {
           if (dailyData) {
             const len = dailyData.candles.length;
-            const olderIdx = Math.min(len - 1, h.startBar);
-            const newerIdx = Math.max(0, h.endBar ?? 0);
-            if (olderIdx < len && newerIdx < len && olderIdx >= newerIdx) {
+            const olderIdx = Math.max(0, len - 1 - h.startBar);
+            const newerIdx = Math.min(len - 1, len - 1 - (h.endBar ?? 0));
+            if (olderIdx >= 0 && newerIdx >= olderIdx && newerIdx < len) {
               const olderCandle = dailyData.candles[olderIdx];
               const newerCandle = dailyData.candles[newerIdx];
               if (olderCandle && newerCandle) {
@@ -4630,9 +4630,9 @@ function ScanChartViewer({
         if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
           if (dailyData) {
             const len = dailyData.candles.length;
-            const olderIdx = Math.min(len - 1, h.startBar);
-            const newerIdx = Math.max(0, h.endBar ?? 0);
-            if (olderIdx < len && newerIdx < len && olderIdx >= newerIdx) {
+            const olderIdx = Math.max(0, len - 1 - h.startBar);
+            const newerIdx = Math.min(len - 1, len - 1 - (h.endBar ?? 0));
+            if (olderIdx >= 0 && newerIdx >= olderIdx && newerIdx < len) {
               const olderCandle = dailyData.candles[olderIdx];
               const newerCandle = dailyData.candles[newerIdx];
               if (olderCandle && newerCandle) {
@@ -4651,9 +4651,9 @@ function ScanChartViewer({
           const h2 = cr.cocHighlight2;
           if (dailyData) {
             const len2 = dailyData.candles.length;
-            const olderIdx2 = Math.min(len2 - 1, h2.startBar!);
-            const newerIdx2 = Math.max(0, h2.endBar ?? 0);
-            if (olderIdx2 < len2 && newerIdx2 < len2 && olderIdx2 >= newerIdx2) {
+            const olderIdx2 = Math.max(0, len2 - 1 - h2.startBar!);
+            const newerIdx2 = Math.min(len2 - 1, len2 - 1 - (h2.endBar ?? 0));
+            if (olderIdx2 >= 0 && newerIdx2 >= olderIdx2 && newerIdx2 < len2) {
               const olderCandle2 = dailyData.candles[olderIdx2];
               const newerCandle2 = dailyData.candles[newerIdx2];
               if (olderCandle2 && newerCandle2) {
@@ -4670,7 +4670,7 @@ function ScanChartViewer({
 
         if (h.type === "gapCircle" && h.barIndex !== undefined) {
           if (dailyData && dailyData.candles.length > h.barIndex) {
-            const candle = dailyData.candles[h.barIndex];
+            const candle = dailyData.candles[dailyData.candles.length - 1 - h.barIndex];
             if (candle) {
               const label = cr.indicatorId === "PA-17"
                 ? (h.gapPct ? `WP ${h.gapPct.toFixed(1)}%` : "Wedge Pop")
@@ -4690,13 +4690,13 @@ function ScanChartViewer({
         if (h.type === "pullbackCircle" && h.barCount) {
           if (dailyData) {
             const count = Math.min(h.barCount, dailyData.candles.length);
-            for (let i = 0; i < count; i++) {
+            for (let i = dailyData.candles.length - count; i < dailyData.candles.length; i++) {
               diamondMarkers.push({
                 time: dailyData.candles[i].timestamp,
                 price: dailyData.candles[i].low,
                 color: "rgba(234, 179, 8, 0.5)",
                 size: 100,
-                text: i === count - 1 ? cr.indicatorName || "PB" : "",
+                text: i === dailyData.candles.length - count ? cr.indicatorName || "PB" : "",
                 textColor: "#ffffff",
               });
             }
