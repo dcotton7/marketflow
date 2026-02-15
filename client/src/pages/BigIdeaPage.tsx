@@ -4512,10 +4512,10 @@ function ScanChartViewer({
   type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
   const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", symbol, "daily"],
+    queryKey: ["/api/sentinel/chart-data", symbol, "daily"],
     enabled: open && !!symbol,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${symbol}&timeframe=daily`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${symbol}&timeframe=daily`);
       if (!res.ok) throw new Error("Failed to fetch daily chart data");
       return res.json();
     },
@@ -4524,12 +4524,12 @@ function ScanChartViewer({
   });
 
   const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", symbol, intradayTimeframe, showETH],
+    queryKey: ["/api/sentinel/chart-data", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
     queryFn: async () => {
       const params = new URLSearchParams({ ticker: symbol!, timeframe: intradayTimeframe });
       if (showETH) params.set('includeETH', 'true');
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?${params}`);
+      const res = await fetch(`/api/sentinel/chart-data?${params}`);
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },

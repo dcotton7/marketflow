@@ -6,6 +6,19 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Archive Pattern Training Feature — 20:17 UTC
+- **Task**: Archive the Pattern Training feature to clean up the codebase without deleting code or DB tables.
+- **Details**:
+  - **Archived files**: Moved 4 files to `_archived/pattern-training/` preserving client/server folder structure:
+    - `PatternTrainingPage.tsx`, `PatternTrainingChart.tsx` (client)
+    - `patternTrainingEngine.ts`, `patternEvaluationEngine.ts` (server)
+  - **Route & nav removal**: Removed `/sentinel/pattern-training` route from `App.tsx`, nav link from `SentinelHeader.tsx`, and stale back-navigation case from `SentinelEvaluatePage.tsx`.
+  - **API cleanup**: Removed all pattern training endpoints (~15 routes) and imports from `server/sentinel/routes.ts`.
+  - **Shared code extraction**: Extracted `fetchChartData` (used by BigIdea, Charts, Dashboard pages) to `server/sentinel/chartDataEngine.ts` with a new `/api/sentinel/chart-data` endpoint. Updated all frontend references from the old pattern-training endpoint to the new standalone endpoint.
+  - **Schema**: Commented out `patternTrainingSetups`, `patternTrainingPoints`, `patternTrainingEvaluations` table definitions and their type exports in `shared/schema.ts`. DB tables remain untouched for potential future restoration.
+- **Files**: `_archived/pattern-training/`, `shared/schema.ts`, `server/sentinel/routes.ts`, `server/sentinel/chartDataEngine.ts`, `client/src/App.tsx`, `client/src/components/SentinelHeader.tsx`, `client/src/pages/SentinelEvaluatePage.tsx`, `client/src/pages/BigIdeaPage.tsx`, `client/src/pages/SentinelChartsPage.tsx`, `client/src/pages/SentinelDashboardPage.tsx`, `replit.md`
+- **Status**: Complete
+
 ### My Watchlist Universe for BigIdea Scanner — 16:11 UTC
 - **Task**: Add "My Watchlist" option to the BigIdea scan universe selector so users can scan their Sentinel watchlist symbols instead of a predefined index.
 - **Details**:

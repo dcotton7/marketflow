@@ -58,7 +58,7 @@ A robust **Trade Import System** supports multi-broker CSV imports with features
 
 **Order Levels Management** supports multiple stop loss and profit target orders per trade, displayed on trade cards with proximity alerts. An "Orders Import" tab processes Fidelity Orders CSV files.
 
-The **Pattern Training Tool** is an interactive chart-based system for users to annotate stock setups, capturing over 40 technical indicators at key points. It includes a modular TradingChart component shared with Trading Card position views, supporting custom MA settings and a dual-chart layout. An **AI Setup Evaluation** feature scores annotated setups, provides feedback, and leverages a learning layer to analyze historical outcomes.
+The **Pattern Training Tool** has been **archived** to `_archived/pattern-training/`. Its DB tables remain intact but the Drizzle schema definitions are commented out. The shared `fetchChartData` function was extracted to `server/sentinel/chartDataEngine.ts` and a standalone `/api/sentinel/chart-data` endpoint serves chart data for the remaining pages. The TradingChart component (shared with Trading Card position views) and dual-chart layout remain active.
 
 The **Trading Card Chart View** shows a position's ticker in a dual-chart layout with price lines for entry, exit, stop, and target. It supports refining execution times by clicking chart bars.
 

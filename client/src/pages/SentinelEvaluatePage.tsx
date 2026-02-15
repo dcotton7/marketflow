@@ -828,7 +828,6 @@ export default function SentinelEvaluatePage() {
       <SentinelHeader showSentiment={true} rightContent={
         <Button variant="ghost" size="icon" onClick={() => {
           if (fromParam === 'bigidea') setLocation("/sentinel/bigidea");
-          else if (fromParam === 'training') setLocation("/sentinel/pattern-training");
           else if (fromParam === 'watchlist') setLocation("/watchlist");
           else if (fromParam?.startsWith('trade:')) setLocation(`/sentinel/trade/${fromParam.split(':')[1]}`);
           else setLocation("/sentinel/dashboard");

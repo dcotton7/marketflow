@@ -16,7 +16,6 @@ import SentinelRulesPage from "@/pages/SentinelRulesPage";
 import SentinelAdminPage from "@/pages/SentinelAdminPage";
 import SentinelImportPage from "@/pages/SentinelImportPage";
 import PatternLearningPage from "@/pages/PatternLearningPage";
-import PatternTrainingPage from "@/pages/PatternTrainingPage";
 import BigIdeaPage from "@/pages/BigIdeaPage";
 import SentinelChartsPage from "@/pages/SentinelChartsPage";
 import SymbolPage from "@/pages/SymbolPage";
@@ -65,11 +64,6 @@ function Router() {
       <Route path="/sentinel/patterns">
         <SentinelProtectedRoute>
           <PatternLearningPage />
-        </SentinelProtectedRoute>
-      </Route>
-      <Route path="/sentinel/pattern-training">
-        <SentinelProtectedRoute>
-          <PatternTrainingPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/bigidea">

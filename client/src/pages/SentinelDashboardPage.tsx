@@ -1445,10 +1445,10 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
   type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
   const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", trade.symbol, "daily"],
+    queryKey: ["/api/sentinel/chart-data", trade.symbol, "daily"],
     enabled: open,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${trade.symbol}&timeframe=daily`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${trade.symbol}&timeframe=daily`);
       if (!res.ok) throw new Error("Failed to fetch daily chart data");
       return res.json();
     },
@@ -1456,10 +1456,10 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
   });
 
   const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", trade.symbol, intradayTimeframe],
+    queryKey: ["/api/sentinel/chart-data", trade.symbol, intradayTimeframe],
     enabled: open,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${trade.symbol}&timeframe=${intradayTimeframe}`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${trade.symbol}&timeframe=${intradayTimeframe}`);
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },

@@ -986,152 +986,13 @@ export const TRAINING_OUTCOMES = [
   { value: "scratch", label: "Scratch" },
 ] as const;
 
-export const patternTrainingSetups = pgTable("pattern_training_setups", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => sentinelUsers.id),
-  ticker: text("ticker").notNull(),
-  patternType: text("pattern_type").notNull(),
-  timeframe: text("timeframe").notNull(),
-  rating: integer("rating"),
-  outcome: text("outcome"),
-  pnlPercent: doublePrecision("pnl_percent"),
-  daysHeld: integer("days_held"),
-  notes: text("notes"),
-  tags: text("tags").array().default([]),
-  entryTactics: jsonb("entry_tactics").$type<{
-    fiveMinEMACross?: boolean;
-    macdCross?: boolean;
-    other?: string;
-  }>().default({}),
-  calculatedMetrics: jsonb("calculated_metrics").$type<{
-    riskReward?: number;
-    maStacking?: string;
-    volumeRatio?: number;
-    baseDepthPct?: number;
-    baseWidthDays?: number;
-    atrPercent?: number;
-    rsVsSpy?: number;
-    momentum5d?: number;
-    momentum20d?: number;
-    momentum50d?: number;
-    pctFrom52wHigh?: number;
-    bollingerWidth?: number;
-    rangeTightness?: number;
-    upDownVolume?: string;
-    consecutiveUpDays?: number;
-    avwapRecentHigh?: number;
-    avwapRecentLow?: number;
-    avwapEP?: number;
-    ema6_20CrossStatus?: string;
-    macdCrossStatus?: string;
-    sessionVwapDistance?: number;
-    resistanceTouchCount?: number;
-    [key: string]: number | string | undefined;
-  }>().default({}),
-  chartDateRange: jsonb("chart_date_range").$type<{
-    start: string;
-    end: string;
-  }>(),
-  triggerTimeframe: text("trigger_timeframe"),
-  triggerSetupId: integer("trigger_setup_id"),
-  pointsSaved: boolean("points_saved").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-export const patternTrainingPoints = pgTable("pattern_training_points", {
-  id: serial("id").primaryKey(),
-  setupId: integer("setup_id").notNull().references(() => patternTrainingSetups.id, { onDelete: "cascade" }),
-  pointRole: text("point_role").notNull(),
-  price: doublePrecision("price").notNull(),
-  pointDate: text("point_date").notNull(),
-  ohlcv: jsonb("ohlcv").$type<{
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-  }>(),
-  percentFromEntry: doublePrecision("percent_from_entry"),
-  percentFrom50d: doublePrecision("percent_from_50d"),
-  percentFrom200d: doublePrecision("percent_from_200d"),
-  percentFromVwap: doublePrecision("percent_from_vwap"),
-  avwapDistances: jsonb("avwap_distances").$type<{
-    recentHigh?: number;
-    recentLow?: number;
-    ep?: number;
-  }>(),
-  nearestMa: text("nearest_ma"),
-  nearestMaDistance: doublePrecision("nearest_ma_distance"),
-  technicalData: jsonb("technical_data").$type<{
-    sma10?: number;
-    ema21?: number;
-    sma50?: number;
-    sma150?: number;
-    sma200?: number;
-    distSma10?: number;
-    distEma21?: number;
-    distSma50?: number;
-    distSma150?: number;
-    distSma200?: number;
-    volume?: number;
-    avgVolume50d?: number;
-    volumeRatio?: number;
-    atr14?: number;
-    atrPercent?: number;
-    rsi14?: number;
-    macdLine?: number;
-    macdSignal?: number;
-    macdHistogram?: number;
-    ema6?: number;
-    ema20?: number;
-    sessionVwap?: number;
-    bollingerUpper?: number;
-    bollingerLower?: number;
-    bollingerWidth?: number;
-    [key: string]: number | undefined;
-  }>(),
-  secondPointPrice: doublePrecision("second_point_price"),
-  secondPointDate: text("second_point_date"),
-  resistanceTouchCount: integer("resistance_touch_count"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const patternTrainingEvaluations = pgTable("pattern_training_evaluations", {
-  id: serial("id").primaryKey(),
-  setupId: integer("setup_id").notNull().references(() => patternTrainingSetups.id, { onDelete: "cascade" }),
-  userId: integer("user_id").notNull().references(() => sentinelUsers.id),
-  score: integer("score").notNull(),
-  confidence: integer("confidence").notNull(),
-  rrRatio: doublePrecision("rr_ratio"),
-  verdict: text("verdict").notNull(),
-  strengths: text("strengths").array().default([]),
-  weaknesses: text("weaknesses").array().default([]),
-  suggestions: text("suggestions").array().default([]),
-  riskFlags: text("risk_flags").array().default([]),
-  similarSetups: jsonb("similar_setups").$type<{
-    setupId: number;
-    ticker: string;
-    patternType: string;
-    outcome: string;
-    score: number;
-    similarity: string;
-  }[]>().default([]),
-  patternStats: jsonb("pattern_stats").$type<{
-    totalSetups: number;
-    setupsWithOutcomes: number;
-    winRate: number;
-    avgRR: number;
-    byPatternType: Record<string, { count: number; wins: number; winRate: number; avgRR: number }>;
-  }>(),
-  learningContext: jsonb("learning_context").$type<{
-    totalSetupsUsed: number;
-    setupsWithOutcomes: number;
-    similarSetupsFound: number;
-    patternTypesKnown: string[];
-  }>(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+/* ARCHIVED — Pattern Training tables (DB tables still exist, code moved to _archived/pattern-training/)
+ * Uncomment to restore. See _archived/pattern-training/ for the full feature code.
+ *
+ * export const patternTrainingSetups = pgTable("pattern_training_setups", { ... });
+ * export const patternTrainingPoints = pgTable("pattern_training_points", { ... });
+ * export const patternTrainingEvaluations = pgTable("pattern_training_evaluations", { ... });
+ */
 
 // User MA Settings - per-user indicator configuration for charts
 export const userMaSettings = pgTable("user_ma_settings", {
@@ -1169,18 +1030,6 @@ export const userChartPreferences = pgTable("user_chart_preferences", {
 
 export type UserChartPreference = typeof userChartPreferences.$inferSelect;
 
-// Schema exports for Pattern Training
-export const insertPatternTrainingSetupSchema = createInsertSchema(patternTrainingSetups).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertPatternTrainingPointSchema = createInsertSchema(patternTrainingPoints).omit({ id: true, createdAt: true });
-export const insertPatternTrainingEvaluationSchema = createInsertSchema(patternTrainingEvaluations).omit({ id: true, createdAt: true });
-
-// Type exports for Pattern Training
-export type PatternTrainingSetup = typeof patternTrainingSetups.$inferSelect;
-export type PatternTrainingPoint = typeof patternTrainingPoints.$inferSelect;
-export type PatternTrainingEvaluation = typeof patternTrainingEvaluations.$inferSelect;
-export type InsertPatternTrainingSetup = z.infer<typeof insertPatternTrainingSetupSchema>;
-export type InsertPatternTrainingPoint = z.infer<typeof insertPatternTrainingPointSchema>;
-export type InsertPatternTrainingEvaluation = z.infer<typeof insertPatternTrainingEvaluationSchema>;
 
 // === BIG IDEA SCANNER ===
 

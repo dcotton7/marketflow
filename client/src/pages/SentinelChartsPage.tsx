@@ -43,10 +43,10 @@ export default function SentinelChartsPage() {
   }, []);
 
   const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", activeSymbol, "daily"],
+    queryKey: ["/api/sentinel/chart-data", activeSymbol, "daily"],
     enabled: !!activeSymbol,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?ticker=${activeSymbol}&timeframe=daily`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${activeSymbol}&timeframe=daily`);
       if (!res.ok) throw new Error("Failed to fetch daily chart data");
       return res.json();
     },
@@ -54,12 +54,12 @@ export default function SentinelChartsPage() {
   });
 
   const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/pattern-training/chart-data", activeSymbol, intradayTimeframe, showETH],
+    queryKey: ["/api/sentinel/chart-data", activeSymbol, intradayTimeframe, showETH],
     enabled: !!activeSymbol,
     queryFn: async () => {
       const params = new URLSearchParams({ ticker: activeSymbol!, timeframe: intradayTimeframe });
       if (showETH) params.set('includeETH', 'true');
-      const res = await fetch(`/api/sentinel/pattern-training/chart-data?${params}`);
+      const res = await fetch(`/api/sentinel/chart-data?${params}`);
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
