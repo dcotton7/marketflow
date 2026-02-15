@@ -27,7 +27,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
@@ -2580,6 +2579,26 @@ export default function BigIdeaPage() {
             </PopoverContent>
           </Popover>
         )}
+
+        <div className="h-6 w-px bg-border mx-1" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteIdeaConfirm(true)}
+              disabled={!currentIdeaId}
+              className="gap-2 border-red-600/40 text-red-400"
+              data-testid="button-delete-idea"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Permanently delete the currently loaded saved idea</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <div className="flex flex-1 overflow-hidden">

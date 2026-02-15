@@ -6,6 +6,20 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### BigIdea Toolbar Reorganization — 06:05 UTC
+- **Task**: Reorganize the BigIdea scan page toolbar for better clarity and discoverability.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - **New layout** (left to right): Idea Name | Index | List | Run Scan | Save (green) | Clear | SEPARATOR | Tune (Music icon, yellow) | Save & Commit (standalone, active when dirty) | Rate (standalone button with grade) | Info (debug overlay) | SEPARATOR | Delete (red, confirmation dialog)
+  - **Tune icon**: Changed from Sparkles to Music (musical note) icon, with yellow accent color.
+  - **Save button**: Green accent color (`border-green-600/40 text-green-400`), shortened label from "Save Idea" to "Save".
+  - **Save & Commit**: Extracted from Rate Quality dropdown into its own standalone toolbar button. Disabled (grey) when no tuning changes are pending, active when dirty.
+  - **Rate**: Simplified from dropdown to a direct button that triggers quality rating. Shows grade inline. Removed Save & Commit and Delete Idea items from dropdown.
+  - **Delete**: Moved from Rate Quality dropdown to standalone red button (`border-red-600/40 text-red-400`) after a separator. Only enabled when a saved idea is loaded. Keeps existing confirmation dialog.
+  - **Separators**: Added vertical dividers after Clear and after Info icon to visually group related actions.
+  - All Sparkles icon references throughout the file replaced with Music icon.
+- **Status**: Complete
+
 ### Fix CB-1 / PA-3 Base Overlap in Chained Scans — 05:15 UTC
 - **Task**: Prevent CB-1 (Find Base Historical) from finding bases that overlap with an upstream PA-3 (Consolidation / Base Detection) current base.
 - **Files**: `server/bigidea/indicators.ts`
