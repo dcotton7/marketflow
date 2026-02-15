@@ -219,6 +219,8 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   minBarsAboveSMA: "What percentage of bars during the advance must close above the SMA (%). Used by Smooth Advance (PA-13). 70% = price was above the MA most of the time (healthy trend); 90% = very clean advance; 50% = allows more back-and-forth.",
   recentBars: "Number of recent bars that define the 'tight zone' being measured. For Tightness Ratio (PA-14): 5 bars = last week's candle sizes vs normal. For Volume Fade (PA-16): 10 bars = last 2 weeks of volume vs normal. Smaller = more sensitive to very recent action; larger = smoother read.",
   maxClusterPct: "Maximum allowed spread of closing prices (standard deviation as % of average close). Used by Close Clustering (PA-15). 1% = closes barely move day-to-day (very tight coil); 2% = reasonably clustered; 3%+ = loose, wandering closes. Think of it as how much the close 'jiggles' — lower = quieter.",
+  skipRecentBars: "How many of the most recent bars to skip before searching for a historical base. Auto-links to PA-3's period when both are in the scan, preventing the historical base from overlapping with the current base detection zone. 0 = start from the most recent bar (may overlap); 20 = skip the last month.",
+  maxRetracement: "Maximum % of the advance the stock can give back. Prevents 'advance then collapse' patterns where price ran up but dropped back down before forming a base. 50% = stock must retain at least half its gains; 75% = allows a deeper pullback; 100% (default) = no retracement check.",
 };
 
 interface DynamicDataConsumer {

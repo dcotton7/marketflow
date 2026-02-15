@@ -6,6 +6,15 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Fix Overlapping Base Zones & Advance-Then-Collapse Filter — 08:15 UTC
+- **Task**: Fix two scan issues: (1) CB-1 historical base zone overlapping PA-3 current base zone, (2) PA-12 passing stocks that advanced then collapsed back down before forming a base.
+- **Files**: `server/bigidea/indicators.ts`, `client/src/pages/BigIdeaPage.tsx`
+- **Details**:
+  - **CB-1 overlap fix**: Added `skipRecentBars` param to CB-1 (Find Base Historical) with `autoLink: { linkType: "basePeriod" }`. When PA-3 (Consolidation / Base Detection) is in the same scan, CB-1's skipRecentBars auto-links to PA-3's period value (e.g., 20), ensuring CB-1 starts searching at least 20 bars back from the most recent bar. The `startOffset` now takes the maximum of the dynamic upstream start and the skipRecentBars value. Default is 0 for backward compatibility when PA-3 isn't in the scan.
+  - **PA-12 retracement filter**: Added `maxRetracement` param (default 100%, range 10-100%). When set below 100%, PA-12 finds the peak price during the advance window, then checks if the current price (bar 0) has given back more than maxRetracement% of the total advance. Example: stock went $55→$85 peak→$78 current. Total advance = $30, given back = $7, retracement = 23%. With maxRetracement=50%, this passes (23% < 50%). With maxRetracement=20%, it fails. CVS-style patterns ($55→$85→$78, large giveback) are filtered when maxRetracement is set to a reasonable threshold.
+  - **Tooltip help text**: Added PARAM_DESCRIPTIONS entries for `skipRecentBars` and `maxRetracement` in BigIdeaPage.tsx.
+- **Status**: Complete
+
 ### Fix Blank Daily Chart & Overlay Stability — 07:37 UTC
 - **Task**: Fix blank daily chart after scan, restore correct bar-to-timestamp conversions, and harden overlay rendering.
 - **Files**: `client/src/pages/BigIdeaPage.tsx`, `client/src/components/TradingChart.tsx`

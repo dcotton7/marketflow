@@ -1001,25 +1001,46 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     id: "PA-12",
     name: "Prior Price Advance",
     category: "Price Action",
-    description: "Verifies that the stock had a meaningful price advance BEFORE it built the current base. Skips over the base, then checks how much the stock gained in the window before that. Stocks that consolidate after a strong run-up (30%+) are building a classic base-on-advance pattern. When connected to Base Detection (PA-3), automatically uses each stock's actual base length. When connected to Find Base (CB-1), uses the found base's end bar as the skip offset — measuring the advance that led into that historical base.",
+    description: "Verifies that the stock had a meaningful price advance BEFORE it built the current base. Skips over the base, then checks how much the stock gained in the window before that. Stocks that consolidate after a strong run-up (30%+) are building a classic base-on-advance pattern. When connected to Base Detection (PA-3), automatically uses each stock's actual base length. When connected to Find Base (CB-1), uses the found base's end bar as the skip offset — measuring the advance that led into that historical base. Max Retracement % prevents stocks that ran up then collapsed back down — the current price must not have given back more than this % of the peak gain (e.g., 50% means at least half the advance must be retained).",
     consumes: [{ paramName: "skipBars", dataKey: "detectedPeriod" }, { paramName: "skipBars", dataKey: "baseStartBar" }],
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 20, min: 5, max: 60, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "lookbackBars", label: "Advance Window (bars)", type: "number", defaultValue: 120, min: 20, max: 300, step: 5 },
       { name: "minGain", label: "Min Gain %", type: "number", defaultValue: 30, min: 5, max: 500, step: 5 },
+      { name: "maxRetracement", label: "Max Retracement %", type: "number", defaultValue: 100, min: 10, max: 100, step: 5 },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
       const dynamicSkip = upstreamData?.baseStartBar ?? upstreamData?.detectedPeriod;
       const skip = dynamicSkip ?? params.skipBars ?? 20;
       const lookback = params.lookbackBars ?? 120;
       const minGain = params.minGain ?? 30;
+      const maxRetracement = params.maxRetracement ?? 100;
       const totalNeeded = skip + lookback;
       if (candles.length < totalNeeded) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minGain}% gain` } } };
-      const priceAtBaseStart = candles[skip]?.close;
-      const priceAtAdvanceStart = candles[skip + lookback - 1]?.close;
+      const advanceSlice = candles.slice(skip, skip + lookback);
+      const priceAtBaseStart = advanceSlice[0]?.close;
+      const priceAtAdvanceStart = advanceSlice[advanceSlice.length - 1]?.close;
       if (!priceAtBaseStart || !priceAtAdvanceStart || priceAtAdvanceStart === 0) return { pass: false, data: { _diagnostics: { value: 'missing price data', threshold: `≥${minGain}% gain` } } };
       const gain = ((priceAtBaseStart - priceAtAdvanceStart) / priceAtAdvanceStart) * 100;
-      return { pass: gain >= minGain, data: { _diagnostics: { value: `${gain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceAtAdvanceStart.toFixed(2)} → $${priceAtBaseStart.toFixed(2)} over ${lookback} bars (skip=${skip})` } } };
+      if (gain < minGain) return { pass: false, data: { _diagnostics: { value: `${gain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceAtAdvanceStart.toFixed(2)} → $${priceAtBaseStart.toFixed(2)} over ${lookback} bars (skip=${skip})` } } };
+
+      if (maxRetracement < 100) {
+        let peakPrice = priceAtAdvanceStart;
+        for (let i = advanceSlice.length - 1; i >= 0; i--) {
+          if (advanceSlice[i].high > peakPrice) peakPrice = advanceSlice[i].high;
+        }
+        const currentPrice = candles[0]?.close;
+        if (currentPrice && peakPrice > priceAtAdvanceStart) {
+          const totalAdvance = peakPrice - priceAtAdvanceStart;
+          const givenBack = peakPrice - currentPrice;
+          const retracementPct = (givenBack / totalAdvance) * 100;
+          if (retracementPct > maxRetracement) {
+            return { pass: false, data: { _diagnostics: { value: `retraced ${retracementPct.toFixed(0)}%`, threshold: `≤${maxRetracement}% retracement`, detail: `peak $${peakPrice.toFixed(2)}, now $${currentPrice.toFixed(2)}, advance $${priceAtAdvanceStart.toFixed(2)} → $${peakPrice.toFixed(2)}` } } };
+          }
+        }
+      }
+
+      return { pass: true, data: { _diagnostics: { value: `${gain.toFixed(1)}%`, threshold: `≥${minGain}%`, detail: `$${priceAtAdvanceStart.toFixed(2)} → $${priceAtBaseStart.toFixed(2)} over ${lookback} bars (skip=${skip})` } } };
     },
   },
   {
@@ -1671,7 +1692,7 @@ const CONSOLIDATION: IndicatorDefinition[] = [
     id: "CB-1",
     name: "Find Base (Historical)",
     category: "Consolidation",
-    description: "Searches through price history to LOCATE a consolidation (base) — a period where price traded sideways within a tight range. Unlike PA-3 which checks if the stock is currently IN a base, this indicator scans backwards (or forwards) through up to 500 bars to find WHERE a base existed and passes its location downstream. Use it to chain patterns: Find Base → Price Advance → Find Another Base. When connected downstream from another Find Base, automatically starts searching PAST the upstream base's oldest bar to prevent overlap. When connected downstream from PA-3 (Consolidation / Base Detection), automatically starts searching PAST the current base's detected period to prevent overlap. Provides base top/bottom price lines for chart rendering.",
+    description: "Searches through price history to LOCATE a consolidation (base) — a period where price traded sideways within a tight range. Unlike PA-3 which checks if the stock is currently IN a base, this indicator scans backwards (or forwards) through up to 500 bars to find WHERE a base existed and passes its location downstream. Use it to chain patterns: Find Base → Price Advance → Find Another Base. When connected downstream from another Find Base, automatically starts searching PAST the upstream base's oldest bar to prevent overlap. When connected downstream from PA-3 (Consolidation / Base Detection), automatically starts searching PAST the current base's detected period to prevent overlap. The Skip Recent Bars param auto-links to PA-3's period when both are in the scan, ensuring the historical base search doesn't overlap with the current base detection zone. Provides base top/bottom price lines for chart rendering.",
     provides: [{ linkType: "baseBar", paramName: "searchWindow" }],
     consumes: [{ paramName: "searchStart", dataKey: "baseStartBar" }, { paramName: "searchStart", dataKey: "detectedPeriod" }],
     params: [
@@ -1682,6 +1703,7 @@ const CONSOLIDATION: IndicatorDefinition[] = [
       { name: "maxRangePct", label: "Max Price Range %", type: "number", defaultValue: 15, min: 3, max: 40, step: 0.5 },
       { name: "volumeContraction", label: "Require Volume Contraction", type: "boolean", defaultValue: true },
       { name: "volumeDeclinePct", label: "Volume Decline %", type: "number", defaultValue: 30, min: 10, max: 80, step: 5 },
+      { name: "skipRecentBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 100, step: 1, autoLink: { linkType: "basePeriod" } },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
       const searchWindow = params.searchWindow ?? 200;
@@ -1691,11 +1713,13 @@ const CONSOLIDATION: IndicatorDefinition[] = [
       const maxRange = params.maxRangePct ?? 15;
       const requireVolContraction = params.volumeContraction ?? true;
       const volDecline = params.volumeDeclinePct ?? 30;
+      const skipRecent = params.skipRecentBars ?? 0;
 
       const upstreamBaseStart = upstreamData?.baseStartBar;
       const upstreamDetectedPeriod = upstreamData?.detectedPeriod;
       const upstreamStartBar = typeof upstreamBaseStart === "number" ? upstreamBaseStart : (typeof upstreamDetectedPeriod === "number" ? upstreamDetectedPeriod : undefined);
-      const startOffset = typeof upstreamStartBar === "number" ? upstreamStartBar + 1 : 0;
+      const dynamicStart = typeof upstreamStartBar === "number" ? upstreamStartBar + 1 : 0;
+      const startOffset = Math.max(dynamicStart, skipRecent);
 
       if (candles.length < startOffset + minLen + 10) {
         return { pass: false, data: { _diagnostics: { value: "insufficient data", threshold: `${minLen}-${maxLen} bar base within ${searchWindow} bars` } } };
