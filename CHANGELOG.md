@@ -14,6 +14,16 @@ All completed development tasks, fixes, and features are tracked here with dates
 - **Files**: `client/src/pages/BigIdeaPage.tsx`, `server/bigidea/routes.ts`
 - **Status**: Complete
 
+### Chart Viewer Black Screen Fix (z-index stacking) — 16:35 UTC
+- **Task**: Fix persistent black screen when opening chart viewer from scan results.
+- **Details**:
+  - **Root cause**: The backdrop `bg-black/80` was rendered as `absolute inset-0` without an explicit `z-index`, while the chart window used `relative z-10`. In some rendering scenarios, the backdrop could paint on top of the chart window due to CSS stacking context rules for absolute vs relative positioned siblings.
+  - **Fix**: Added explicit `z-0` to the backdrop element to guarantee the chart window (`z-10`) always renders above it.
+  - **Error boundary key**: Changed `ChartErrorBoundary` key from static string to `scan-chart-viewer-${symbol}` so the boundary properly resets when switching between tickers, preventing stale error states from blanking out the chart.
+  - **setIsScanning bug**: Removed invalid `setIsScanning(false)` call in the watchlist empty check — the scan function is inside a `useMutation` and doesn't use manual scanning state.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Status**: Complete
+
 ### Fix Debug Overlay Black Screen & Layout — 16:11 UTC
 - **Task**: Fix black screen caused by debug overlay inside overflow-hidden lower pane; move debug overlay panel out of lower pane into chart window container as a sibling of DualChartGrid.
 - **Details**:

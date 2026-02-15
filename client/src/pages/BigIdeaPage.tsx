@@ -5063,7 +5063,7 @@ function ScanChartViewer({
       onClick={(e) => e.stopPropagation()}
       data-testid="scan-chart-overlay"
     >
-      <div className="absolute inset-0 bg-black/80" />
+      <div className="absolute inset-0 bg-black/80 z-0" />
       {commitReadyBanner && (
         <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none" data-testid="commit-ready-banner">
           <div className="bg-background/95 border border-rs-green/30 rounded-lg px-6 py-4 shadow-2xl max-w-md text-center animate-in fade-in zoom-in-95 duration-300">
@@ -5076,7 +5076,7 @@ function ScanChartViewer({
         </div>
       )}
       <div ref={chartWindowRef} className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-4">
-        <ChartErrorBoundary key="scan-chart-viewer" onClose={() => onOpenChange(false)}>
+        <ChartErrorBoundary key={`scan-chart-viewer-${symbol}`} onClose={() => onOpenChange(false)}>
         <DualChartGrid
           symbol={symbol}
           dailyData={dailyData}
