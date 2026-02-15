@@ -188,7 +188,7 @@ export function useChartDrawings({
 
     const series = seriesRef.current;
     const chart = chartRef.current;
-    if (!series) return;
+    if (!series) { console.warn("[Drawing] handleChartClick: no series ref"); return; }
 
     let clickedPrice: number | null = null;
     if (typeof param.point.y === "number") {
@@ -197,6 +197,8 @@ export function useChartDrawings({
     }
 
     const clickedTime = resolveTimeFromParam(param, chart);
+
+    console.log("[Drawing] click:", { activeTool: activeToolRef.current, mode: modeRef.current, clickedPrice, clickedTime, paramTime: param.time, paramPoint: param.point, hasChart: !!chart, hasTempPoint: !!tempPointRef.current });
 
     if (modeRef.current === "idle" && !activeToolRef.current) {
       const hit = hitTestDrawings(drawingsRef.current, primitivesRef.current, param.point.x, param.point.y);
