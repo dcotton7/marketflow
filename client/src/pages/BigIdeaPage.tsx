@@ -50,7 +50,7 @@ import {
   Play,
   Save,
   Loader2,
-  Sparkles,
+  Music,
   GripVertical,
   Ban,
   ArrowDown,
@@ -2298,16 +2298,23 @@ export default function BigIdeaPage() {
           Run Scan
         </Button>
 
-        <Button
-          variant="outline"
-          onClick={handleSaveClick}
-          disabled={saveIdeaMutation.isPending}
-          className="gap-2"
-          data-testid="button-save-idea"
-        >
-          {saveIdeaMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          Save Idea
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={handleSaveClick}
+              disabled={saveIdeaMutation.isPending}
+              className="gap-2 border-green-600/40 text-green-400"
+              data-testid="button-save-idea"
+            >
+              {saveIdeaMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Save this idea to your library</p>
+          </TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -2333,6 +2340,8 @@ export default function BigIdeaPage() {
             <p>Removes all thoughts, connections, and results from the canvas. Starts fresh with an empty scan.</p>
           </TooltipContent>
         </Tooltip>
+
+        <div className="h-6 w-px bg-border mx-1" />
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -2362,10 +2371,10 @@ export default function BigIdeaPage() {
                 setTuneDialogOpen(true);
               }}
               disabled={tuneMutation.isPending || nodes.filter(n => n.type === "thought").length === 0 || !lastFunnelData}
-              className="gap-2"
+              className="gap-2 border-yellow-600/40 text-yellow-400"
               data-testid="button-tune-scan"
             >
-              {tuneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {tuneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Music className="h-4 w-4" />}
               Tune
             </Button>
           </TooltipTrigger>
@@ -2374,55 +2383,46 @@ export default function BigIdeaPage() {
           </TooltipContent>
         </Tooltip>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="gap-2" data-testid="button-more-options">
-              <Target className="h-4 w-4" />
-              Rate Quality
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={handleCommitTuning}
+              disabled={!tuningDirty || commitTuningMutation.isPending || !tuneRescanDone}
+              className="gap-2"
+              data-testid="button-commit-tuning"
+            >
+              {commitTuningMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Save & Commit
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <p>Commit your tuning changes to the learning system. Requires a rescan and chart review first.</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={() => qualityMutation.mutate()}
+              disabled={qualityMutation.isPending || nodes.filter(n => n.type === "thought").length === 0}
+              className="gap-2"
+              data-testid="button-rate-quality"
+            >
+              {qualityMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+              Rate
               {qualityResult && (
                 <span className={`font-bold ${GRADE_COLORS[qualityResult.grade]}`}>
                   {qualityResult.grade}
                 </span>
               )}
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem
-              onClick={() => qualityMutation.mutate()}
-              disabled={qualityMutation.isPending || nodes.filter(n => n.type === "thought").length === 0}
-              data-testid="menu-rate-quality"
-            >
-              <Target className="h-4 w-4 mr-2" />
-              Rate Quality
-            </DropdownMenuItem>
-            {tuningDirty && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleCommitTuning}
-                  disabled={commitTuningMutation.isPending || !tuneRescanDone}
-                  data-testid="menu-commit-tuning"
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Save & Commit Tuning
-                </DropdownMenuItem>
-              </>
-            )}
-            {currentIdeaId && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => setDeleteIdeaConfirm(true)}
-                  className="text-destructive focus:text-destructive"
-                  data-testid="menu-delete-idea"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete Idea
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>Rate the quality of your scan idea across five dimensions</p>
+          </TooltipContent>
+        </Tooltip>
 
         {debugInfo && (
           <Popover>
@@ -3181,7 +3181,7 @@ export default function BigIdeaPage() {
                       className="gap-1 text-xs"
                       data-testid="button-restate"
                     >
-                      <Sparkles className="h-3 w-3" />
+                      <Music className="h-3 w-3" />
                       Restate
                     </Button>
                   </div>
@@ -3207,7 +3207,7 @@ export default function BigIdeaPage() {
                           {restateMutation.isPending ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : (
-                            <Sparkles className="h-3 w-3" />
+                            <Music className="h-3 w-3" />
                           )}
                           Regenerate
                         </Button>
@@ -3492,7 +3492,7 @@ export default function BigIdeaPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5" />
+              <Music className="h-5 w-5" />
               {nodes.some(n => n.type !== "results") ? "Add Thought with AI" : "Create New Idea"}
             </DialogTitle>
             <DialogDescription>
@@ -3519,7 +3519,7 @@ export default function BigIdeaPage() {
                   {aiCreateMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Sparkles className="h-4 w-4" />
+                    <Music className="h-4 w-4" />
                   )}
                   Generate
                 </Button>
@@ -3813,7 +3813,7 @@ export default function BigIdeaPage() {
                     ))}
                     {dim.suggestions.length > 0 && dim.suggestions.map((s, i) => (
                       <div key={`s-${i}`} className="ml-2 flex items-start gap-1 text-rs-amber mt-0.5" style={{ fontSize: cssVariables.fontSizeSmall }}>
-                        <Sparkles className="h-3 w-3 flex-shrink-0 mt-0.5" />
+                        <Music className="h-3 w-3 flex-shrink-0 mt-0.5" />
                         <span>{s}</span>
                       </div>
                     ))}
@@ -3973,7 +3973,7 @@ export default function BigIdeaPage() {
         <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5" />
+              <Music className="h-5 w-5" />
               AI Scan Tuning
             </DialogTitle>
             <DialogDescription>
@@ -4016,7 +4016,7 @@ export default function BigIdeaPage() {
                   className="gap-2"
                   data-testid="button-run-tune"
                 >
-                  {tuneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {tuneMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Music className="h-4 w-4" />}
                   {tuneMutation.isPending ? "Analyzing..." : "Get Suggestions"}
                 </Button>
               </DialogFooter>
@@ -4145,7 +4145,7 @@ export default function BigIdeaPage() {
                         onClick={() => { setTuneResult(null); setTuneInstruction(""); setAcceptedTuneIndices(new Set()); }}
                         data-testid="button-more-suggestions"
                       >
-                        <Sparkles className="h-4 w-4" />
+                        <Music className="h-4 w-4" />
                         More Suggestions
                       </Button>
                     </TooltipTrigger>
@@ -4749,7 +4749,7 @@ function ScanChartViewer({
             }}
             data-testid="button-chart-evaluate"
           >
-            <Sparkles className="h-3.5 w-3.5" />
+            <Music className="h-3.5 w-3.5" />
             <span>Ivy AI</span>
           </Button>
         </TooltipTrigger>
