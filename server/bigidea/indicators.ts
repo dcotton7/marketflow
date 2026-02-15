@@ -764,7 +764,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         avgBaseVolume: Math.round(avgBaseVolume),
         avgPreBaseVolume: Math.round(avgPreBaseVolume),
         volumeFadeRatio: Math.round(volumeFadeRatio * 100) / 100,
-        _cocHighlight: { type: "resistanceLine", level: finalHigh, startBar: bestPass, endBar: 0 },
+        _cocHighlight: { type: "baseZone", topPrice: finalHigh, lowPrice: finalLow, startBar: bestPass, endBar: 0 },
         _diagnostics: { value: `${bestPass} bars`, threshold: `≥${minRequired} bars`, detail: `range ${rangePct.toFixed(1)}% (max ${maxRange}%), top $${finalHigh.toFixed(2)}, vol fade ${volumeFadeRatio.toFixed(2)}x` }
       } };
     },
@@ -1821,8 +1821,7 @@ const CONSOLIDATION: IndicatorDefinition[] = [
           baseLowPrice: bestBase.lowPrice,
           baseDepth: bestBase.depth,
           baseDuration: bestBase.duration,
-          _cocHighlight: { type: "resistanceLine", level: bestBase.topPrice, startBar: bestBase.start, endBar: bestBase.end },
-          _cocHighlight2: { type: "supportLine", level: bestBase.lowPrice, startBar: bestBase.start, endBar: bestBase.end },
+          _cocHighlight: { type: "baseZone", topPrice: bestBase.topPrice, lowPrice: bestBase.lowPrice, startBar: bestBase.start, endBar: bestBase.end },
           _diagnostics: {
             value: `${bestBase.duration} bars`,
             threshold: `${minLen}-${maxLen} bars, ≤${maxRange}%`,

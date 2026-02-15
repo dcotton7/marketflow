@@ -6,6 +6,17 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Fix Base Zone Chart Rendering — 06:15 UTC
+- **Task**: Replace sloped resistance/support line rendering of base zones with proper flat horizontal rectangles on the scan chart viewer.
+- **Files**: `server/bigidea/indicators.ts`, `server/bigidea/routes.ts`, `client/src/pages/BigIdeaPage.tsx`, `client/src/components/TradingChart.tsx`
+- **Details**:
+  - **Root cause**: PA-3 (Consolidation / Base Detection) and CB-1 (Find Base Historical) were outputting base zones as `type: "resistanceLine"` + `type: "supportLine"` pairs. The chart rendering code split the base candles into thirds, found highest high of first/last third, and drew sloped dashed lines connecting them — creating triangular/wedge patterns on charts instead of proper flat base boundaries.
+  - **Fix — Indicator output**: Changed PA-3 and CB-1 `_cocHighlight` to use new `type: "baseZone"` with `topPrice`, `lowPrice`, `startBar`, `endBar` fields. CB-1 no longer emits `_cocHighlight2` (supportLine) since both bounds are in the single baseZone highlight.
+  - **Fix — Chart rendering**: Added `BaseZone` interface to TradingChart (`startTime`, `endTime`, `topPrice`, `lowPrice`, `color`, `label`). Each zone is rendered as two flat horizontal lines — solid for the top price, dashed for the bottom price — at the actual price levels from `startBar` to `endBar`.
+  - **Fix — BigIdeaPage**: cocAnnotations useMemo now detects `type: "baseZone"` highlights, converts bar indices to timestamps, and assigns distinct colors per zone from a 6-color palette (green, blue, purple, amber, cyan, pink). Zones are passed to DualChartGrid → TradingChart via new `baseZones` prop.
+  - **Type updates**: `CriterionResult.cocHighlight` in routes.ts and `CriterionResultItem` in BigIdeaPage.tsx both updated with `topPrice?` and `lowPrice?` fields.
+- **Status**: Complete
+
 ### BigIdea Toolbar Reorganization — 06:05 UTC
 - **Task**: Reorganize the BigIdea scan page toolbar for better clarity and discoverability.
 - **Files**: `client/src/pages/BigIdeaPage.tsx`

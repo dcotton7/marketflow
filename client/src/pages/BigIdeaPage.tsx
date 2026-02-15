@@ -35,7 +35,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ChartCandle, ChartIndicators, ChartMarker, DiamondMarker, PriceLevelLine } from "@/components/TradingChart";
+import type { ChartCandle, ChartIndicators, ChartMarker, DiamondMarker, PriceLevelLine, BaseZone } from "@/components/TradingChart";
 import { DualChartGrid, type ChartMetrics } from "@/components/DualChartGrid";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -244,7 +244,7 @@ interface CriterionResultItem {
   pass: boolean;
   inverted: boolean;
   diagnostics?: { value: string; threshold: string; detail?: string };
-  cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number };
+  cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number; topPrice?: number; lowPrice?: number };
   cocHighlight2?: { type: string; level?: number; startBar?: number; endBar?: number };
 }
 
@@ -4574,17 +4574,28 @@ function ScanChartViewer({
   }, [dailyData]);
 
   const cocAnnotations = useMemo(() => {
-    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], diamondMarkers: [] as DiamondMarker[], priceLines: [] as PriceLevelLine[], resistanceLines: [] as { startTime: number; startPrice: number; endTime: number; endPrice: number }[] };
+    if (!current?.thoughtBreakdown) return { markers: [] as ChartMarker[], diamondMarkers: [] as DiamondMarker[], priceLines: [] as PriceLevelLine[], resistanceLines: [] as { startTime: number; startPrice: number; endTime: number; endPrice: number }[], baseZones: [] as BaseZone[] };
 
     const markers: ChartMarker[] = [];
     const diamondMarkers: DiamondMarker[] = [];
     const priceLines: PriceLevelLine[] = [];
     const resistanceLines: { startTime: number; startPrice: number; endTime: number; endPrice: number }[] = [];
+    const baseZones: BaseZone[] = [];
+
+    const BASE_ZONE_COLORS = [
+      "#22c55e",
+      "#3b82f6",
+      "#a855f7",
+      "#f59e0b",
+      "#06b6d4",
+      "#ec4899",
+    ];
 
     const ideaHasBase = current.thoughtBreakdown.some((t: any) =>
       t.criteriaResults?.some((cr: any) => (cr.indicatorId === "PA-3" || cr.indicatorId === "PA-4" || cr.indicatorId === "CB-1"))
     );
 
+    let zoneColorIdx = 0;
     for (const thought of current.thoughtBreakdown) {
       if (!thought.pass) continue;
       for (const cr of thought.criteriaResults) {
@@ -4592,36 +4603,43 @@ function ScanChartViewer({
         const h = cr.cocHighlight;
         if (ideaHasBase && cr.indicatorId !== "PA-3" && cr.indicatorId !== "PA-4" && cr.indicatorId !== "CB-1") continue;
 
+        if (h.type === "baseZone" && h.topPrice && h.lowPrice && h.startBar !== undefined) {
+          if (dailyData) {
+            const startIdx = Math.max(0, dailyData.candles.length - 1 - h.startBar);
+            const endIdx = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h.endBar || 0));
+            if (startIdx < dailyData.candles.length && endIdx < dailyData.candles.length && startIdx <= endIdx) {
+              const startCandle = dailyData.candles[startIdx];
+              const endCandle = dailyData.candles[endIdx];
+              if (startCandle && endCandle) {
+                const color = BASE_ZONE_COLORS[zoneColorIdx % BASE_ZONE_COLORS.length];
+                zoneColorIdx++;
+                baseZones.push({
+                  startTime: startCandle.timestamp,
+                  endTime: endCandle.timestamp,
+                  topPrice: h.topPrice,
+                  lowPrice: h.lowPrice,
+                  color,
+                  label: cr.indicatorName,
+                });
+              }
+            }
+          }
+        }
+
         if (h.type === "resistanceLine" && h.level && h.startBar !== undefined) {
           if (dailyData) {
             const endIdx = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h.endBar || 0));
             const startIdx = Math.max(0, dailyData.candles.length - 1 - h.startBar);
             if (startIdx >= 0 && endIdx >= startIdx && endIdx < dailyData.candles.length) {
-              if (startIdx === endIdx) {
-                const c = dailyData.candles[startIdx];
+              const startCandle = dailyData.candles[startIdx];
+              const endCandle = dailyData.candles[endIdx];
+              if (startCandle && endCandle) {
                 resistanceLines.push({
-                  startTime: c.timestamp,
+                  startTime: startCandle.timestamp,
                   startPrice: h.level,
-                  endTime: c.timestamp,
+                  endTime: endCandle.timestamp,
                   endPrice: h.level,
                 });
-              } else {
-                const baseCandles = dailyData.candles.slice(startIdx, endIdx + 1);
-                const thirdLen = Math.max(1, Math.floor(baseCandles.length / 3));
-                const firstThird = baseCandles.slice(0, thirdLen);
-                const lastThird = baseCandles.slice(-thirdLen);
-                const firstHigh = Math.max(...firstThird.map(c => c.high));
-                const lastHigh = Math.max(...lastThird.map(c => c.high));
-                const startCandle = firstThird[firstThird.map(c => c.high).indexOf(firstHigh)];
-                const endCandle = lastThird[lastThird.map(c => c.high).indexOf(lastHigh)];
-                if (startCandle && endCandle) {
-                  resistanceLines.push({
-                    startTime: startCandle.timestamp,
-                    startPrice: firstHigh,
-                    endTime: endCandle.timestamp,
-                    endPrice: lastHigh,
-                  });
-                }
               }
             }
           }
@@ -4631,16 +4649,16 @@ function ScanChartViewer({
           const h2 = cr.cocHighlight2;
           if (dailyData) {
             const endIdx2 = Math.min(dailyData.candles.length - 1, dailyData.candles.length - 1 - (h2.endBar || 0));
-            const startIdx2 = Math.max(0, dailyData.candles.length - 1 - h2.startBar);
+            const startIdx2 = Math.max(0, dailyData.candles.length - 1 - h2.startBar!);
             if (startIdx2 >= 0 && endIdx2 >= startIdx2 && endIdx2 < dailyData.candles.length) {
               const startCandle2 = dailyData.candles[startIdx2];
               const endCandle2 = dailyData.candles[endIdx2];
               if (startCandle2 && endCandle2) {
                 resistanceLines.push({
                   startTime: startCandle2.timestamp,
-                  startPrice: h2.level,
+                  startPrice: h2.level!,
                   endTime: endCandle2.timestamp,
-                  endPrice: h2.level,
+                  endPrice: h2.level!,
                 });
               }
             }
@@ -4684,7 +4702,7 @@ function ScanChartViewer({
       }
     }
 
-    return { markers, diamondMarkers, priceLines, resistanceLines };
+    return { markers, diamondMarkers, priceLines, resistanceLines, baseZones };
   }, [current?.thoughtBreakdown, dailyData]);
 
   if (!open) return null;
@@ -4912,6 +4930,7 @@ function ScanChartViewer({
             diamondMarkers: cocAnnotations.diamondMarkers,
             priceLines: cocAnnotations.priceLines,
             resistanceLines: cocAnnotations.resistanceLines,
+            baseZones: cocAnnotations.baseZones,
           }}
           testIdPrefix="scan"
         />

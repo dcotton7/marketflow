@@ -124,6 +124,15 @@ export interface PriceLevelLine {
   lineWidth?: number;
 }
 
+export interface BaseZone {
+  startTime: number;
+  endTime: number;
+  topPrice: number;
+  lowPrice: number;
+  color: string;
+  label?: string;
+}
+
 export interface MaSettingForChart {
   rowId: string;
   title: string;
@@ -158,6 +167,7 @@ export interface TradingChartProps {
   measureMode?: boolean;
   trendLineMode?: boolean;
   resistanceLines?: { startTime: number; startPrice: number; endTime: number; endPrice: number }[];
+  baseZones?: BaseZone[];
   drawingToolActive?: string | null;
   onChartReady?: (chartApi: IChartApi, seriesApi: ISeriesApi<"Candlestick">) => void;
   onChartClick?: (param: any) => void;
@@ -484,6 +494,7 @@ export function TradingChart({
   measureMode = false,
   trendLineMode = false,
   resistanceLines,
+  baseZones,
   drawingToolActive,
   onChartReady,
   onChartClick,
@@ -505,6 +516,7 @@ export function TradingChart({
   const shiftKeyRef = useRef(false);
   const measureModeRef = useRef(measureMode);
   const resistanceLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const baseZoneSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   useEffect(() => {
@@ -915,6 +927,10 @@ export function TradingChart({
           try { chart.removeSeries(s); } catch {}
         }
         resistanceLineSeriesRef.current = [];
+        for (const s of baseZoneSeriesRef.current) {
+          try { chart.removeSeries(s); } catch {}
+        }
+        baseZoneSeriesRef.current = [];
       }
     };
   }, [displayData, isIntraday, showDayDividers, timeframe]);
@@ -1103,6 +1119,50 @@ export function TradingChart({
       }
     }
   }, [resistanceLines]);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    for (const s of baseZoneSeriesRef.current) {
+      try { chartRef.current.removeSeries(s); } catch {}
+    }
+    baseZoneSeriesRef.current = [];
+
+    if (baseZones && baseZones.length > 0) {
+      for (const zone of baseZones) {
+        const topSeries = chartRef.current.addSeries(LineSeries, {
+          color: zone.color,
+          lineWidth: 2 as 2,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          priceScaleId: 'right',
+          autoscaleInfoProvider: () => null,
+        });
+        topSeries.setData([
+          { time: zone.startTime as any, value: zone.topPrice },
+          { time: zone.endTime as any, value: zone.topPrice },
+        ]);
+        baseZoneSeriesRef.current.push(topSeries);
+
+        const bottomSeries = chartRef.current.addSeries(LineSeries, {
+          color: zone.color,
+          lineWidth: 2 as 2,
+          lineStyle: LineStyle.Dashed,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+          priceScaleId: 'right',
+          autoscaleInfoProvider: () => null,
+        });
+        bottomSeries.setData([
+          { time: zone.startTime as any, value: zone.lowPrice },
+          { time: zone.endTime as any, value: zone.lowPrice },
+        ]);
+        baseZoneSeriesRef.current.push(bottomSeries);
+      }
+    }
+  }, [baseZones]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;

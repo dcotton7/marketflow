@@ -172,7 +172,7 @@ type CriterionResult = {
   pass: boolean;
   inverted: boolean;
   diagnostics?: { value: string; threshold: string; detail?: string };
-  cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number };
+  cocHighlight?: { type: string; level?: number; startBar?: number; endBar?: number; barIndex?: number; gapPct?: number; barCount?: number; topPrice?: number; lowPrice?: number };
   cocHighlight2?: { type: string; level?: number; startBar?: number; endBar?: number };
 };
 
