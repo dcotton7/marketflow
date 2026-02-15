@@ -6,6 +6,16 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Per-Ticker Debug Overlay & Chart Copy — 08:47 UTC
+- **Task**: Add info icon to the chart viewer's lower pane (thought breakdown strip) that opens a per-ticker debug overlay with detailed criteria results, diagnostics, and copy functionality.
+- **Details**:
+  - **Info icon**: Added `(i)` icon in the lower pane strip (left side) styled in blue. Clicking opens a popover overlay similar to the scan debug overlay on the BigIdea page.
+  - **Ticker debug overlay**: Shows each thought's pass/fail status with per-criteria detail including indicator name, pass/fail, value, threshold, and detail diagnostics. Uses the same mono font, dashed-border section style as the scan debug overlay.
+  - **Copy debug text**: ClipboardCopy button copies structured text debug info (ticker, thoughts, criteria with diagnostics) to clipboard.
+  - **Copy chart as image**: Camera button captures the entire chart window (both charts, metrics, debug overlay) as a high-res PNG image to clipboard using html2canvas. Falls back to file download if clipboard API is unavailable.
+  - **Chart window ref**: Added `chartWindowRef` on the chart container for html2canvas targeting.
+- **Status**: Complete
+
 ### Fix Chart Drawing Tool (Trend Lines & Horizontal Lines) — 08:40 UTC
 - **Task**: Fix drawing tool where trend lines and horizontal lines were not appearing when clicking on charts despite tool activation.
 - **Files**: `client/src/components/TradingChart.tsx`, `client/src/hooks/useChartDrawings.ts`
