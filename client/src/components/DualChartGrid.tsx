@@ -509,7 +509,7 @@ export function DualChartGrid({
       </div>
 
       {lowerPane && (
-        <div className="flex-shrink-0 overflow-visible" style={{ height: LOWER_PANE_H, marginTop: GAP }} data-testid={`${pid}lower-pane`}>
+        <div className="flex-shrink-0 overflow-hidden" style={{ height: LOWER_PANE_H, marginTop: GAP }} data-testid={`${pid}lower-pane`}>
           {lowerPane}
         </div>
       )}

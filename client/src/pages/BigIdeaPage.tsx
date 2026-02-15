@@ -116,6 +116,7 @@ const UNIVERSE_OPTIONS = [
   { value: "nasdaq100", label: "Nasdaq 100" },
   { value: "dow30", label: "Dow 30" },
   { value: "russell2000", label: "Russell 2000" },
+  { value: "watchlist", label: "My Watchlist" },
 ];
 
 const PARAM_DESCRIPTIONS: Record<string, string> = {
@@ -1495,11 +1496,20 @@ export default function BigIdeaPage() {
 
       const scanStartTime = Date.now();
 
-      const res = await apiRequest("POST", "/api/bigidea/scan", {
-        nodes: scanNodes,
-        edges: scanEdges,
-        universe,
-      });
+      let scanBody: any = { nodes: scanNodes, edges: scanEdges, universe };
+      if (universe === "watchlist") {
+        const wlRes = await apiRequest("GET", "/api/sentinel/watchlist");
+        const wlItems = await wlRes.json() as Array<{ symbol: string }>;
+        const wlTickers = wlItems.map((w) => w.symbol.toUpperCase());
+        if (wlTickers.length === 0) {
+          toast({ title: "Your watchlist is empty — add tickers in Sentinel first", variant: "destructive" });
+          setIsScanning(false);
+          return;
+        }
+        scanBody = { nodes: scanNodes, edges: scanEdges, customTickers: wlTickers };
+      }
+
+      const res = await apiRequest("POST", "/api/bigidea/scan", scanBody);
       const data = await res.json() as ScanResponse;
 
       setDebugInfo({
@@ -4870,7 +4880,7 @@ function ScanChartViewer({
         onClick={() => onOpenChange(false)}
         data-testid="button-chart-close"
       >
-        <X className="h-4 w-4" />
+        <X className="h-8 w-8" />
       </Button>
     </div>
   );
@@ -4936,7 +4946,7 @@ function ScanChartViewer({
   }, [current, symbol, toast]);
 
   const scanLowerPane = current?.thoughtBreakdown && current.thoughtBreakdown.length > 0 ? (
-    <div className="relative flex items-center gap-2 h-full overflow-x-auto overflow-y-hidden px-2 text-[10px] rounded-md border border-blue-800/40 bg-blue-950/15" data-testid="thought-breakdown-strip">
+    <div className="flex items-center gap-2 h-full overflow-x-auto overflow-y-hidden px-2 text-[10px] rounded-md border border-blue-800/40 bg-blue-950/15" data-testid="thought-breakdown-strip">
       <button
         className="flex-shrink-0 p-0.5 rounded hover-elevate"
         onClick={() => setTickerDebugOpen(v => !v)}
@@ -4944,85 +4954,6 @@ function ScanChartViewer({
       >
         <Info className="h-3 w-3 text-blue-400" />
       </button>
-      {tickerDebugOpen && (
-        <div
-          className="absolute left-0 bottom-full mb-1 w-[480px] max-h-[420px] overflow-auto rounded-md border bg-popover shadow-lg z-50"
-          data-testid="ticker-debug-overlay"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between px-3 py-2 border-b">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ticker Debug — {symbol}</span>
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon" variant="ghost" onClick={handleCopyTickerDebugText} data-testid="button-copy-ticker-debug-text">
-                    <ClipboardCopy className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top"><p>Copy debug text to clipboard</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon" variant="ghost" onClick={handleCopyChartWindow} data-testid="button-copy-chart-image">
-                    <Camera className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top"><p>Copy entire chart window as image to clipboard</p></TooltipContent>
-              </Tooltip>
-              <Button size="icon" variant="ghost" onClick={() => setTickerDebugOpen(false)} data-testid="button-close-ticker-debug">
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
-          <div className="px-3 py-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
-            {current.thoughtBreakdown.map((thought) => {
-              const passCount = thought.criteriaResults.filter((c: any) => c.pass).length;
-              const totalCount = thought.criteriaResults.length;
-              return (
-                <div key={thought.thoughtId} className="border-t border-dashed pt-1 first:border-t-0 first:pt-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {thought.pass ? (
-                      <CheckCircle2 className="h-2.5 w-2.5 text-rs-green flex-shrink-0" />
-                    ) : (
-                      <XCircle className="h-2.5 w-2.5 text-rs-red flex-shrink-0" />
-                    )}
-                    <span className="font-semibold text-foreground">{thought.thoughtName}</span>
-                    <span className={`font-semibold ${passCount === totalCount ? "text-rs-green" : "text-rs-amber"}`}>
-                      {passCount}/{totalCount}
-                    </span>
-                  </div>
-                  <div className="ml-4 mt-1 space-y-0.5">
-                    {thought.criteriaResults.map((cr: any, ci: number) => (
-                      <div key={ci} className="flex items-start gap-1.5">
-                        {cr.pass ? (
-                          <CheckCircle2 className="h-2 w-2 text-rs-green flex-shrink-0 mt-0.5" />
-                        ) : (
-                          <XCircle className="h-2 w-2 text-rs-red flex-shrink-0 mt-0.5" />
-                        )}
-                        <div className="flex-1">
-                          <span className="text-foreground/80">{cr.indicatorName}</span>
-                          {cr.inverted && <span className="text-rs-yellow ml-1">[INV]</span>}
-                          {cr.diagnostics && (
-                            <div className="ml-2 text-muted-foreground/70">
-                              <span className="text-foreground/60">val: </span>
-                              <span className={cr.pass ? "text-rs-green" : "text-rs-red"}>{cr.diagnostics.value}</span>
-                              <span className="text-foreground/60 ml-1.5">thresh: </span>
-                              <span>{cr.diagnostics.threshold}</span>
-                              {cr.diagnostics.detail && (
-                                <span className="text-muted-foreground/50 ml-1.5">{cr.diagnostics.detail}</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
       {current.thoughtBreakdown.map((thought) => {
         const passCount = thought.criteriaResults.filter((c: any) => c.pass).length;
         const totalCount = thought.criteriaResults.length;
@@ -5042,6 +4973,86 @@ function ScanChartViewer({
       })}
     </div>
   ) : undefined;
+
+  const tickerDebugPanel = tickerDebugOpen && current?.thoughtBreakdown && current.thoughtBreakdown.length > 0 ? (
+    <div
+      className="absolute left-4 bottom-14 w-[480px] max-h-[420px] overflow-auto rounded-md border bg-popover shadow-lg z-50"
+      data-testid="ticker-debug-overlay"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Ticker Debug — {symbol}</span>
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="ghost" onClick={handleCopyTickerDebugText} data-testid="button-copy-ticker-debug-text">
+                <ClipboardCopy className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Copy debug text to clipboard</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" variant="ghost" onClick={handleCopyChartWindow} data-testid="button-copy-chart-image">
+                <Camera className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><p>Copy entire chart window as image to clipboard</p></TooltipContent>
+          </Tooltip>
+          <Button size="icon" variant="ghost" onClick={() => setTickerDebugOpen(false)} data-testid="button-close-ticker-debug">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="px-3 py-2 space-y-2 text-[10px] font-mono text-muted-foreground leading-relaxed">
+        {current.thoughtBreakdown.map((thought) => {
+          const passCount = thought.criteriaResults.filter((c: any) => c.pass).length;
+          const totalCount = thought.criteriaResults.length;
+          return (
+            <div key={thought.thoughtId} className="border-t border-dashed pt-1 first:border-t-0 first:pt-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {thought.pass ? (
+                  <CheckCircle2 className="h-2.5 w-2.5 text-rs-green flex-shrink-0" />
+                ) : (
+                  <XCircle className="h-2.5 w-2.5 text-rs-red flex-shrink-0" />
+                )}
+                <span className="font-semibold text-foreground">{thought.thoughtName}</span>
+                <span className={`font-semibold ${passCount === totalCount ? "text-rs-green" : "text-rs-amber"}`}>
+                  {passCount}/{totalCount}
+                </span>
+              </div>
+              <div className="ml-4 mt-1 space-y-0.5">
+                {thought.criteriaResults.map((cr: any, ci: number) => (
+                  <div key={ci} className="flex items-start gap-1.5">
+                    {cr.pass ? (
+                      <CheckCircle2 className="h-2 w-2 text-rs-green flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <XCircle className="h-2 w-2 text-rs-red flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <span className="text-foreground/80">{cr.indicatorName}</span>
+                      {cr.inverted && <span className="text-rs-yellow ml-1">[INV]</span>}
+                      {cr.diagnostics && (
+                        <div className="ml-2 text-muted-foreground/70">
+                          <span className="text-foreground/60">val: </span>
+                          <span className={cr.pass ? "text-rs-green" : "text-rs-red"}>{cr.diagnostics.value}</span>
+                          <span className="text-foreground/60 ml-1.5">thresh: </span>
+                          <span>{cr.diagnostics.threshold}</span>
+                          {cr.diagnostics.detail && (
+                            <span className="text-muted-foreground/50 ml-1.5">{cr.diagnostics.detail}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  ) : null;
 
   return createPortal(
     <div
@@ -5091,6 +5102,7 @@ function ScanChartViewer({
           testIdPrefix="scan"
         />
         </ChartErrorBoundary>
+        {tickerDebugPanel}
       </div>
     </div>,
     document.body

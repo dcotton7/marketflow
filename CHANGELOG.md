@@ -6,6 +6,24 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### My Watchlist Universe for BigIdea Scanner — 16:11 UTC
+- **Task**: Add "My Watchlist" option to the BigIdea scan universe selector so users can scan their Sentinel watchlist symbols instead of a predefined index.
+- **Details**:
+  - **Frontend**: Added "My Watchlist" option to `UNIVERSE_OPTIONS`. When selected, the scan function fetches `/api/sentinel/watchlist`, extracts ticker symbols, and sends them as `customTickers` in the scan request body. Shows a toast error if the watchlist is empty.
+  - **Backend**: Updated `POST /api/bigidea/scan` to accept an optional `customTickers` array. When provided, uses those tickers (uppercased) instead of resolving a named universe via `getUniverseTickers()`.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`, `server/bigidea/routes.ts`
+- **Status**: Complete
+
+### Fix Debug Overlay Black Screen & Layout — 16:11 UTC
+- **Task**: Fix black screen caused by debug overlay inside overflow-hidden lower pane; move debug overlay panel out of lower pane into chart window container as a sibling of DualChartGrid.
+- **Details**:
+  - Separated `tickerDebugPanel` from `scanLowerPane` — lower pane now only contains the thought breakdown strip with info icon.
+  - Debug overlay panel rendered as `{tickerDebugPanel}` inside `chartWindowRef` container, positioned `absolute left-4 bottom-14` with `z-50`.
+  - Lower pane reverted to simple `overflow-x-auto overflow-y-hidden` without relative positioning.
+  - Chart viewer X close button icon doubled from `h-4 w-4` to `h-8 w-8` for better visibility.
+- **Files**: `client/src/pages/BigIdeaPage.tsx`
+- **Status**: Complete
+
 ### Per-Ticker Debug Overlay & Chart Copy — 08:47 UTC
 - **Task**: Add info icon to the chart viewer's lower pane (thought breakdown strip) that opens a per-ticker debug overlay with detailed criteria results, diagnostics, and copy functionality.
 - **Details**:

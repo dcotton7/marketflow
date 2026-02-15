@@ -1359,14 +1359,16 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-      const { nodes, edges, universe, ideaId } = req.body;
-      if (!nodes || !edges || !universe) {
-        return res.status(400).json({ error: "nodes, edges, and universe are required" });
+      const { nodes, edges, universe, ideaId, customTickers } = req.body;
+      if (!nodes || !edges || (!universe && !customTickers)) {
+        return res.status(400).json({ error: "nodes, edges, and universe (or customTickers) are required" });
       }
 
-      const tickers = getUniverseTickers(universe);
+      const tickers = customTickers && Array.isArray(customTickers) && customTickers.length > 0
+        ? customTickers.map((t: string) => t.toUpperCase())
+        : getUniverseTickers(universe);
       if (tickers.length === 0) {
-        return res.status(400).json({ error: "Invalid universe" });
+        return res.status(400).json({ error: "Invalid universe or empty watchlist" });
       }
 
       const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && (n.thoughtCriteria || n.isMuted));
