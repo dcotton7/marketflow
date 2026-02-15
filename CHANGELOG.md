@@ -6,6 +6,15 @@ All completed development tasks, fixes, and features are tracked here with dates
 
 ## 2026-02-15
 
+### Fix CB-1 / PA-3 Base Overlap in Chained Scans — 05:15 UTC
+- **Task**: Prevent CB-1 (Find Base Historical) from finding bases that overlap with an upstream PA-3 (Consolidation / Base Detection) current base.
+- **Files**: `server/bigidea/indicators.ts`
+- **Details**:
+  - **Root cause**: CB-1 only consumed `baseStartBar` from another CB-1 upstream, but had no awareness of PA-3's current base. When PA-3 ran first (e.g. "Flat consolidation base detection") and found a 20-bar base, CB-1 would search the same bar range and detect an overlapping historical base. This caused overlapping colored zones on the chart (visible on BA, COO, F).
+  - **Fix**: Added `{ paramName: "searchStart", dataKey: "detectedPeriod" }` to CB-1's `consumes` array AND updated CB-1's evaluate function to read `upstreamData?.detectedPeriod` in addition to `upstreamData?.baseStartBar`. The evaluate logic now checks both keys (preferring `baseStartBar` from another CB-1, falling back to `detectedPeriod` from PA-3). When PA-3 finds a current base of N bars, CB-1 receives `detectedPeriod = N` and offsets its search to begin at bar N+1 — past the current base.
+  - Updated CB-1 description to document this anti-overlap behavior.
+- **Status**: Complete
+
 ### BigIdea UI Improvements — 05:02 UTC
 - **Task**: Multiple UX improvements to the BigIdea scan page toolbar and thought library.
 - **Files**: `client/src/pages/BigIdeaPage.tsx`

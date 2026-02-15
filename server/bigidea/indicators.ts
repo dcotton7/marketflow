@@ -1671,9 +1671,9 @@ const CONSOLIDATION: IndicatorDefinition[] = [
     id: "CB-1",
     name: "Find Base (Historical)",
     category: "Consolidation",
-    description: "Searches through price history to LOCATE a consolidation (base) — a period where price traded sideways within a tight range. Unlike PA-3 which checks if the stock is currently IN a base, this indicator scans backwards (or forwards) through up to 500 bars to find WHERE a base existed and passes its location downstream. Use it to chain patterns: Find Base → Price Advance → Find Another Base. When connected downstream from another Find Base, automatically starts searching PAST the upstream base's oldest bar to prevent overlap. Provides base top/bottom price lines for chart rendering.",
+    description: "Searches through price history to LOCATE a consolidation (base) — a period where price traded sideways within a tight range. Unlike PA-3 which checks if the stock is currently IN a base, this indicator scans backwards (or forwards) through up to 500 bars to find WHERE a base existed and passes its location downstream. Use it to chain patterns: Find Base → Price Advance → Find Another Base. When connected downstream from another Find Base, automatically starts searching PAST the upstream base's oldest bar to prevent overlap. When connected downstream from PA-3 (Consolidation / Base Detection), automatically starts searching PAST the current base's detected period to prevent overlap. Provides base top/bottom price lines for chart rendering.",
     provides: [{ linkType: "baseBar", paramName: "searchWindow" }],
-    consumes: [{ paramName: "searchStart", dataKey: "baseStartBar" }],
+    consumes: [{ paramName: "searchStart", dataKey: "baseStartBar" }, { paramName: "searchStart", dataKey: "detectedPeriod" }],
     params: [
       { name: "searchWindow", label: "Search Window (bars)", type: "number", defaultValue: 200, min: 20, max: 500, step: 10 },
       { name: "searchDirection", label: "Search Direction", type: "select", defaultValue: "backward", options: ["backward", "forward"] },
@@ -1692,7 +1692,9 @@ const CONSOLIDATION: IndicatorDefinition[] = [
       const requireVolContraction = params.volumeContraction ?? true;
       const volDecline = params.volumeDeclinePct ?? 30;
 
-      const upstreamStartBar = upstreamData?.baseStartBar;
+      const upstreamBaseStart = upstreamData?.baseStartBar;
+      const upstreamDetectedPeriod = upstreamData?.detectedPeriod;
+      const upstreamStartBar = typeof upstreamBaseStart === "number" ? upstreamBaseStart : (typeof upstreamDetectedPeriod === "number" ? upstreamDetectedPeriod : undefined);
       const startOffset = typeof upstreamStartBar === "number" ? upstreamStartBar + 1 : 0;
 
       if (candles.length < startOffset + minLen + 10) {
