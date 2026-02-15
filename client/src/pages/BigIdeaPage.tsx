@@ -1503,7 +1503,6 @@ export default function BigIdeaPage() {
         const wlTickers = wlItems.map((w) => w.symbol.toUpperCase());
         if (wlTickers.length === 0) {
           toast({ title: "Your watchlist is empty — add tickers in Sentinel first", variant: "destructive" });
-          setIsScanning(false);
           return;
         }
         scanBody = { nodes: scanNodes, edges: scanEdges, customTickers: wlTickers };
