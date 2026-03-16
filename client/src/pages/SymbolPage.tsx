@@ -6,11 +6,13 @@ import { TradeRiskRating } from "@/components/TradeRiskRating";
 import { useStockQuote } from "@/hooks/use-stocks";
 import { useAddToWatchlist } from "@/hooks/use-watchlist";
 import { useScannerContextSafe } from "@/context/ScannerContext";
-import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart, ArrowRight } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Star, Activity, DollarSign, BarChart3, ArrowLeft, Building2, PieChart, ArrowRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
+import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
+import { useToast } from "@/hooks/use-toast";
 
 export default function SymbolPage() {
   const { cssVariables } = useSystemSettings();
@@ -30,6 +32,16 @@ export default function SymbolPage() {
   const scannerCtx = useScannerContextSafe();
   const filters = scannerCtx?.filters;
   const results = scannerCtx?.results;
+  const { syncToMarketSurge } = useMarketSurgeSync();
+  const { toast } = useToast();
+  const [msSyncEnabled, setMsSyncEnabled] = useState(false);
+  
+  // Auto-sync to MarketSurge when symbol changes (if enabled)
+  useEffect(() => {
+    if (msSyncEnabled && safeSymbol) {
+      syncToMarketSurge(safeSymbol, 'day');
+    }
+  }, [msSyncEnabled, safeSymbol, syncToMarketSurge]);
   
   // Build criteria list from URL params first, then context filters as fallback
   const getCriteriaList = (): string[] => {
@@ -137,9 +149,9 @@ export default function SymbolPage() {
       {/* Back Button */}
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Button 
-          variant="ghost" 
+          variant="outline" 
           onClick={handleBackToResults}
-          className="gap-2"
+          className="gap-2 bg-purple-600/10 text-purple-400 border-purple-500/50 hover:bg-purple-600/20 hover:text-purple-300"
           data-testid="button-back-to-results"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -148,7 +160,7 @@ export default function SymbolPage() {
         {evalReturn && (
           <Button
             variant="outline"
-            className="gap-2 border-primary/50 text-primary"
+            className="gap-2 bg-purple-600/10 text-purple-400 border-purple-500/50 hover:bg-purple-600/20 hover:text-purple-300"
             onClick={() => {
               sessionStorage.removeItem('ivy_eval_return');
               setLocation(`/sentinel/evaluate?from=eval-return`);
@@ -186,15 +198,39 @@ export default function SymbolPage() {
             </div>
           </div>
           
-          <Button 
-            size="lg" 
-            className="shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all"
-            onClick={() => addToWatchlist({ symbol: quote.symbol })}
-            disabled={isAdding}
-          >
-            {isAdding ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Star className="w-4 h-4 mr-2" />}
-            Watch
-          </Button>
+          <div className="flex items-center gap-4">
+            <Button 
+              size="lg" 
+              className="shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all"
+              onClick={() => addToWatchlist({ symbol: quote.symbol })}
+              disabled={isAdding}
+            >
+              {isAdding ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Star className="w-4 h-4 mr-2" />}
+              Watch
+            </Button>
+            
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="ms-sync-symbol"
+                checked={msSyncEnabled}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setMsSyncEnabled(enabled);
+                  if (enabled) {
+                    syncToMarketSurge(quote.symbol, 'day');
+                    toast({
+                      title: 'MarketSurge Sync Active',
+                    });
+                  }
+                }}
+                className="w-4 h-4 rounded border-border bg-background"
+              />
+              <label htmlFor="ms-sync-symbol" className="text-sm cursor-pointer">
+                MarketSurge
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 

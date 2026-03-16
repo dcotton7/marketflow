@@ -39,7 +39,7 @@ export type IndicatorResult = boolean | { pass: boolean; data?: Record<string, a
 export type IndicatorDefinition = {
   id: string;
   name: string;
-  category: "Moving Averages" | "Volume" | "Price Action" | "Relative Strength" | "Volatility" | "Consolidation";
+  category: "Moving Averages" | "Volume" | "Price Action" | "Relative Strength" | "Volatility" | "Consolidation" | "Momentum" | "Fundamental" | "Intraday";
   description: string;
   params: IndicatorParam[];
   provides?: IndicatorProvides[];
@@ -233,6 +233,66 @@ function calcBollingerBands(candles: CandleData[], period: number, stdDevMult: n
   return { upper, middle, lower, width: middle > 0 ? ((upper - lower) / middle) * 100 : 0 };
 }
 
+function calcStochastic(candles: CandleData[], kPeriod: number, dPeriod: number, smooth: number = 3): { k: number; d: number; prevK: number; prevD: number } {
+  if (candles.length < kPeriod + dPeriod + smooth) return { k: 50, d: 50, prevK: 50, prevD: 50 };
+  
+  // Calculate raw %K values
+  const rawKValues: number[] = [];
+  for (let i = 0; i < dPeriod + smooth + 1; i++) {
+    const slice = candles.slice(i, i + kPeriod);
+    const highs = slice.map(c => c.high);
+    const lows = slice.map(c => c.low);
+    const highestHigh = Math.max(...highs);
+    const lowestLow = Math.min(...lows);
+    const currentClose = slice[0].close;
+    const rawK = highestHigh !== lowestLow ? ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100 : 50;
+    rawKValues.push(rawK);
+  }
+  
+  // Smooth %K (Fast Stochastic becomes Slow Stochastic)
+  const smoothedK: number[] = [];
+  for (let i = 0; i <= rawKValues.length - smooth; i++) {
+    const sum = rawKValues.slice(i, i + smooth).reduce((a, b) => a + b, 0);
+    smoothedK.push(sum / smooth);
+  }
+  
+  // Calculate %D (SMA of smoothed %K)
+  const dValues: number[] = [];
+  for (let i = 0; i <= smoothedK.length - dPeriod; i++) {
+    const sum = smoothedK.slice(i, i + dPeriod).reduce((a, b) => a + b, 0);
+    dValues.push(sum / dPeriod);
+  }
+  
+  return {
+    k: smoothedK[0] ?? 50,
+    d: dValues[0] ?? 50,
+    prevK: smoothedK[1] ?? 50,
+    prevD: dValues[1] ?? 50,
+  };
+}
+
+function calcVWAP(candles: CandleData[]): number {
+  if (candles.length === 0) return 0;
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  // VWAP from oldest to newest
+  const reversed = [...candles].reverse();
+  for (const c of reversed) {
+    const typicalPrice = (c.high + c.low + c.close) / 3;
+    cumulativeTPV += typicalPrice * c.volume;
+    cumulativeVolume += c.volume;
+  }
+  return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : candles[0].close;
+}
+
+function calcRSISeries(candles: CandleData[], period: number, length: number): number[] {
+  const rsiValues: number[] = [];
+  for (let i = 0; i < length && i + period < candles.length; i++) {
+    rsiValues.push(calcRSI(candles.slice(i), period));
+  }
+  return rsiValues;
+}
+
 function getMA(candles: CandleData[], period: number, type: "sma" | "ema"): number {
   return type === "sma" ? calcSMA(candles, period) : calcEMA(candles, period);
 }
@@ -248,17 +308,20 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Finds stocks trading above or below their Simple Moving Average. Use 'above 50 SMA' to find stocks in an uptrend, or 'below 200 SMA' to find stocks that have broken down. The SMA smooths out price noise by averaging the last N closing prices equally.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "direction", label: "Direction", type: "select", defaultValue: "above", options: ["above", "below"] },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 50;
       const direction = params.direction ?? "above";
-      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ${period} SMA` } } };
-      const sma = calcSMA(candles, period);
-      const price = candles[0].close;
+      if (candles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ${period} SMA` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const sma = calcSMA(effectiveCandles, period);
+      const price = effectiveCandles[0].close;
       const pass = direction === "above" ? price > sma : price < sma;
-      return { pass, data: { _diagnostics: { value: `$${price.toFixed(2)}`, threshold: `${direction === "above" ? ">" : "<"} SMA $${sma.toFixed(2)}`, detail: `${((price / sma - 1) * 100).toFixed(1)}% ${price >= sma ? "above" : "below"}` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `$${price.toFixed(2)}`, threshold: `${direction === "above" ? ">" : "<"} SMA $${sma.toFixed(2)}`, detail: `${((price / sma - 1) * 100).toFixed(1)}% ${price >= sma ? "above" : "below"}` } } };
     },
   },
   {
@@ -267,17 +330,20 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Finds stocks trading above or below their Exponential Moving Average. The EMA reacts faster than SMA by weighting recent bars more heavily. Use 'above 21 EMA' for short-term momentum stocks, or 'below 50 EMA' for stocks losing their trend.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Period", type: "number", defaultValue: 21, min: 5, max: 500, step: 1 },
       { name: "direction", label: "Direction", type: "select", defaultValue: "above", options: ["above", "below"] },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 21;
       const direction = params.direction ?? "above";
-      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ${period} EMA` } } };
-      const ema = calcEMA(candles, period);
-      const price = candles[0].close;
+      if (candles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ${period} EMA` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const ema = calcEMA(effectiveCandles, period);
+      const price = effectiveCandles[0].close;
       const pass = direction === "above" ? price > ema : price < ema;
-      return { pass, data: { _diagnostics: { value: `$${price.toFixed(2)}`, threshold: `${direction === "above" ? ">" : "<"} EMA $${ema.toFixed(2)}`, detail: `${((price / ema - 1) * 100).toFixed(1)}% ${price >= ema ? "above" : "below"}` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `$${price.toFixed(2)}`, threshold: `${direction === "above" ? ">" : "<"} EMA $${ema.toFixed(2)}`, detail: `${((price / ema - 1) * 100).toFixed(1)}% ${price >= ema ? "above" : "below"}` } } };
     },
   },
   {
@@ -286,21 +352,24 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Finds stocks within a specific percentage band around a moving average. Example: 0-5% above the 50 SMA catches stocks hugging the MA from above (a buy zone in an uptrend). Negative values find stocks below the MA. Great for pullback scans and 'near support' setups.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
       { name: "minPct", label: "Min % Distance", type: "number", defaultValue: 0, min: -100, max: 200, step: 0.5 },
       { name: "maxPct", label: "Max % Distance", type: "number", defaultValue: 10, min: -100, max: 200, step: 0.5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 50;
       const maType = params.maType ?? "sma";
       const minPct = params.minPct ?? 0;
       const maxPct = params.maxPct ?? 10;
-      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minPct}% to ${maxPct}%` } } };
-      const ma = getMA(candles, period, maType);
+      if (candles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minPct}% to ${maxPct}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const ma = getMA(effectiveCandles, period, maType);
       if (ma === 0) return { pass: false, data: { _diagnostics: { value: 'MA=0', threshold: `${minPct}% to ${maxPct}%` } } };
-      const pct = ((candles[0].close - ma) / ma) * 100;
-      return { pass: pct >= minPct && pct <= maxPct, data: { _diagnostics: { value: `${pct.toFixed(1)}%`, threshold: `${minPct}% to ${maxPct}%` } } };
+      const pct = ((effectiveCandles[0].close - ma) / ma) * 100;
+      return { pass: pct >= minPct && pct <= maxPct, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${pct.toFixed(1)}%`, threshold: `${minPct}% to ${maxPct}%` } } };
     },
   },
   {
@@ -309,22 +378,25 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Checks whether a moving average is trending up or down by measuring its slope over recent bars. A rising 50 SMA means the trend is healthy and price has been climbing. Use Min Slope > 0 to find uptrends only; use negative values to find declining MAs.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
       { name: "slopeDays", label: "Slope Lookback (bars)", type: "number", defaultValue: 10, min: 1, max: 60, step: 1 },
       { name: "minSlope", label: "Min Slope %", type: "number", defaultValue: 0, min: -50, max: 50, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 50;
       const maType = params.maType ?? "sma";
       const slopeDays = params.slopeDays ?? 10;
       const minSlope = params.minSlope ?? 0;
-      if (candles.length < period + slopeDays) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minSlope}%` } } };
-      const maNow = getMA(candles, period, maType);
-      const maThen = getMAAt(candles, period, maType, slopeDays);
+      if (candles.length < skip + period + slopeDays) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minSlope}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const maNow = getMA(effectiveCandles, period, maType);
+      const maThen = getMAAt(effectiveCandles, period, maType, slopeDays);
       if (maThen === 0) return { pass: false, data: { _diagnostics: { value: 'MA=0', threshold: `≥${minSlope}%` } } };
       const slope = ((maNow - maThen) / maThen) * 100;
-      return { pass: slope >= minSlope, data: { _diagnostics: { value: `${slope.toFixed(2)}%`, threshold: `≥${minSlope}%`, detail: `over ${slopeDays} bars` } } };
+      return { pass: slope >= minSlope, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${slope.toFixed(2)}%`, threshold: `≥${minSlope}%`, detail: `over ${slopeDays} bars` } } };
     },
   },
   {
@@ -333,24 +405,27 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Finds stocks where three moving averages are lined up in order. Bullish stacking (Price > Short MA > Medium MA > Long MA) confirms a strong, organized uptrend — the kind institutions like to buy. This is a Minervini trend template staple. Bearish stacking finds downtrends.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "order", label: "Stack Order", type: "select", defaultValue: "bullish", options: ["bullish", "bearish"] },
       { name: "ma1", label: "Short MA", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "ma2", label: "Medium MA", type: "number", defaultValue: 150, min: 5, max: 500, step: 1 },
       { name: "ma3", label: "Long MA", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const order = params.order ?? "bullish";
       const ma1p = params.ma1 ?? 50;
       const ma2p = params.ma2 ?? 150;
       const ma3p = params.ma3 ?? 200;
       const needed = Math.max(ma1p, ma2p, ma3p);
-      if (candles.length < needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${order} stack` } } };
-      const price = candles[0].close;
-      const v1 = calcSMA(candles, ma1p);
-      const v2 = calcSMA(candles, ma2p);
-      const v3 = calcSMA(candles, ma3p);
+      if (candles.length < skip + needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${order} stack` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const price = effectiveCandles[0].close;
+      const v1 = calcSMA(effectiveCandles, ma1p);
+      const v2 = calcSMA(effectiveCandles, ma2p);
+      const v3 = calcSMA(effectiveCandles, ma3p);
       const pass = order === "bullish" ? (price > v1 && v1 > v2 && v2 > v3) : (price < v1 && v1 < v2 && v2 < v3);
-      return { pass, data: { _diagnostics: { value: `P$${price.toFixed(0)} ${ma1p}:$${v1.toFixed(0)} ${ma2p}:$${v2.toFixed(0)} ${ma3p}:$${v3.toFixed(0)}`, threshold: `${order} stack` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `P$${price.toFixed(0)} ${ma1p}:$${v1.toFixed(0)} ${ma2p}:$${v2.toFixed(0)} ${ma3p}:$${v3.toFixed(0)}`, threshold: `${order} stack` } } };
     },
   },
   {
@@ -359,22 +434,25 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Finds stocks where two moving averages are close together. When the 50 and 200 SMA are within 5% of each other, the stock is at a decision point — a crossover may be near. Use this to catch stocks where moving averages are converging, which often precedes a trend change.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
       { name: "maxDistance", label: "Max Distance %", type: "number", defaultValue: 5, min: 0, max: 50, step: 0.5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const fastP = params.fastPeriod ?? 50;
       const slowP = params.slowPeriod ?? 200;
       const maType = params.maType ?? "sma";
       const maxDist = params.maxDistance ?? 5;
-      if (candles.length < Math.max(fastP, slowP)) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxDist}%` } } };
-      const fastMA = getMA(candles, fastP, maType);
-      const slowMA = getMA(candles, slowP, maType);
+      if (candles.length < skip + Math.max(fastP, slowP)) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxDist}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const fastMA = getMA(effectiveCandles, fastP, maType);
+      const slowMA = getMA(effectiveCandles, slowP, maType);
       if (slowMA === 0) return { pass: false, data: { _diagnostics: { value: 'slow MA=0', threshold: `≤${maxDist}%` } } };
       const dist = Math.abs((fastMA - slowMA) / slowMA) * 100;
-      return { pass: dist <= maxDist, data: { _diagnostics: { value: `${dist.toFixed(1)}%`, threshold: `≤${maxDist}%`, detail: `fast $${fastMA.toFixed(2)} vs slow $${slowMA.toFixed(2)}` } } };
+      return { pass: dist <= maxDist, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${dist.toFixed(1)}%`, threshold: `≤${maxDist}%`, detail: `fast $${fastMA.toFixed(2)} vs slow $${slowMA.toFixed(2)}` } } };
     },
   },
   {
@@ -383,31 +461,34 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Finds stocks where a fast MA recently crossed above or below a slow MA. A bullish cross (50 above 200 = golden cross) signals a new uptrend starting. Set a short lookback (3-5 bars) to catch fresh crosses, or longer (10-20) to find crosses that happened recently.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
       { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
       { name: "crossType", label: "Cross Type", type: "select", defaultValue: "bullish", options: ["bullish", "bearish"] },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const fastP = params.fastPeriod ?? 50;
       const slowP = params.slowPeriod ?? 200;
       const maType = params.maType ?? "sma";
       const lookback = params.lookback ?? 5;
       const crossType = params.crossType ?? "bullish";
       const needed = Math.max(fastP, slowP) + lookback;
-      if (candles.length < needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${crossType} within ${lookback} bars` } } };
-      const fastNowVal = getMAAt(candles, fastP, maType, 0);
-      const slowNowVal = getMAAt(candles, slowP, maType, 0);
+      if (candles.length < skip + needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${crossType} within ${lookback} bars` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const fastNowVal = getMAAt(effectiveCandles, fastP, maType, 0);
+      const slowNowVal = getMAAt(effectiveCandles, slowP, maType, 0);
       for (let i = 0; i < lookback; i++) {
-        const fastNow = getMAAt(candles, fastP, maType, i);
-        const slowNow = getMAAt(candles, slowP, maType, i);
-        const fastPrev = getMAAt(candles, fastP, maType, i + 1);
-        const slowPrev = getMAAt(candles, slowP, maType, i + 1);
-        if (crossType === "bullish" && fastPrev <= slowPrev && fastNow > slowNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
-        if (crossType === "bearish" && fastPrev >= slowPrev && fastNow < slowNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
+        const fastNow = getMAAt(effectiveCandles, fastP, maType, i);
+        const slowNow = getMAAt(effectiveCandles, slowP, maType, i);
+        const fastPrev = getMAAt(effectiveCandles, fastP, maType, i + 1);
+        const slowPrev = getMAAt(effectiveCandles, slowP, maType, i + 1);
+        if (crossType === "bullish" && fastPrev <= slowPrev && fastNow > slowNow) return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `cross at bar ${i}`, threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
+        if (crossType === "bearish" && fastPrev >= slowPrev && fastNow < slowNow) return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `cross at bar ${i}`, threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
       }
-      return { pass: false, data: { _diagnostics: { value: 'no cross', threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
+      return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no cross', threshold: `${crossType} within ${lookback} bars`, detail: `fast $${fastNowVal.toFixed(2)} vs slow $${slowNowVal.toFixed(2)}` } } };
     },
   },
   {
@@ -416,53 +497,65 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
     category: "Moving Averages",
     description: "Checks if one MA is currently above or below another — without requiring a recent cross. Use '50 SMA above 200 SMA' to confirm a stock is in a confirmed uptrend. Unlike MA Crossover, this doesn't care when the cross happened — just the current relationship.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "fastPeriod", label: "Fast MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "slowPeriod", label: "Slow MA Period", type: "number", defaultValue: 200, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
       { name: "direction", label: "Direction", type: "select", defaultValue: "fast_above_slow", options: ["fast_above_slow", "fast_below_slow"] },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const fastP = params.fastPeriod ?? 50;
       const slowP = params.slowPeriod ?? 200;
       const maType = params.maType ?? "sma";
       const direction = params.direction ?? "fast_above_slow";
-      if (candles.length < Math.max(fastP, slowP)) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: direction } } };
-      const fastMA = getMA(candles, fastP, maType);
-      const slowMA = getMA(candles, slowP, maType);
+      if (candles.length < skip + Math.max(fastP, slowP)) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: direction } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const fastMA = getMA(effectiveCandles, fastP, maType);
+      const slowMA = getMA(effectiveCandles, slowP, maType);
       const pass = direction === "fast_above_slow" ? fastMA > slowMA : fastMA < slowMA;
       const gap = slowMA > 0 ? ((fastMA - slowMA) / slowMA * 100).toFixed(1) : '0';
-      return { pass, data: { _diagnostics: { value: `fast $${fastMA.toFixed(2)} vs slow $${slowMA.toFixed(2)}`, threshold: direction, detail: `gap ${gap}%` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `fast $${fastMA.toFixed(2)} vs slow $${slowMA.toFixed(2)}`, threshold: direction, detail: `gap ${gap}%` } } };
     },
   },
   {
     id: "MA-9",
     name: "Price Crosses MA",
     category: "Moving Averages",
-    description: "Finds stocks where the price itself recently crossed above or below a single MA. Unlike MA Crossover (which compares two MAs), this checks price vs one MA. Use 'price crossed above 50 SMA' to find stocks reclaiming a key trend line, or 'crossed below 21 EMA' for breakdowns.",
+    description: "Finds stocks where the price itself recently crossed above or below a single MA. Unlike MA Crossover (which compares two MAs), this checks price vs one MA. Use 'price crossed above 50 SMA' to find stocks reclaiming a key trend line, or 'crossed below 21 EMA' for breakdowns. Use 'any' to find crosses in either direction.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 50, min: 5, max: 500, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
       { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
-      { name: "crossType", label: "Cross Direction", type: "select", defaultValue: "above", options: ["above", "below"] },
+      { name: "crossType", label: "Cross Direction", type: "select", defaultValue: "above", options: ["above", "below", "any"] },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const maPeriod = params.maPeriod ?? 50;
       const maType = params.maType ?? "sma";
       const lookback = params.lookback ?? 5;
       const crossType = params.crossType ?? "above";
-      if (candles.length < maPeriod + lookback + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `price ${crossType} ${maPeriod} ${maType} within ${lookback} bars` } } };
-      const currentMA = getMAAt(candles, maPeriod, maType, 0);
-      const currentPrice = candles[0].close;
+      if (candles.length < skip + maPeriod + lookback + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `price ${crossType} ${maPeriod} ${maType} within ${lookback} bars` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const currentMA = getMAAt(effectiveCandles, maPeriod, maType, 0);
+      const currentPrice = effectiveCandles[0].close;
       for (let i = 0; i < lookback; i++) {
-        const maNow = getMAAt(candles, maPeriod, maType, i);
-        const maPrev = getMAAt(candles, maPeriod, maType, i + 1);
+        const maNow = getMAAt(effectiveCandles, maPeriod, maType, i);
+        const maPrev = getMAAt(effectiveCandles, maPeriod, maType, i + 1);
         if (maNow === 0 || maPrev === 0) continue;
-        const priceNow = candles[i].close;
-        const pricePrev = candles[i + 1].close;
-        if (crossType === "above" && pricePrev <= maPrev && priceNow > maNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
-        if (crossType === "below" && pricePrev >= maPrev && priceNow < maNow) return { pass: true, data: { _diagnostics: { value: `cross at bar ${i}`, threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+        const priceNow = effectiveCandles[i].close;
+        const pricePrev = effectiveCandles[i + 1].close;
+        const crossedAbove = pricePrev <= maPrev && priceNow > maNow;
+        const crossedBelow = pricePrev >= maPrev && priceNow < maNow;
+        if (crossType === "above" && crossedAbove) return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `cross above at bar ${i}`, threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+        if (crossType === "below" && crossedBelow) return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `cross below at bar ${i}`, threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+        if (crossType === "any" && (crossedAbove || crossedBelow)) {
+          const direction = crossedAbove ? "above" : "below";
+          return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, crossDirection: direction, _diagnostics: { value: `cross ${direction} at bar ${i}`, threshold: `price cross (any) within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+        }
       }
-      return { pass: false, data: { _diagnostics: { value: 'no cross', threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+      return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no cross', threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
     },
   },
 ];
@@ -474,17 +567,20 @@ const VOLUME: IndicatorDefinition[] = [
     category: "Volume",
     description: "Finds stocks where today's volume is unusually high compared to the average. A 1.5x multiple means volume is 50% above normal — something is happening. Great for confirming breakouts, institutional activity, or news-driven moves. Higher multiples catch bigger spikes.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 5, max: 200, step: 1 },
       { name: "minMultiple", label: "Min Multiple", type: "number", defaultValue: 1.5, min: 0.1, max: 20, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 50;
       const minMult = params.minMultiple ?? 1.5;
-      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minMult}x` } } };
-      const avgVol = candles.slice(1, period + 1).reduce((s, c) => s + c.volume, 0) / period;
+      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minMult}x` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const avgVol = effectiveCandles.slice(1, period + 1).reduce((s, c) => s + c.volume, 0) / period;
       if (avgVol === 0) return { pass: false, data: { _diagnostics: { value: 'avg vol=0', threshold: `≥${minMult}x` } } };
-      const ratio = candles[0].volume / avgVol;
-      return { pass: ratio >= minMult, data: { _diagnostics: { value: `${ratio.toFixed(1)}x avg`, threshold: `≥${minMult}x` } } };
+      const ratio = effectiveCandles[0].volume / avgVol;
+      return { pass: ratio >= minMult, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${ratio.toFixed(1)}x avg`, threshold: `≥${minMult}x` } } };
     },
   },
   {
@@ -493,25 +589,28 @@ const VOLUME: IndicatorDefinition[] = [
     category: "Volume",
     description: "Detects whether volume is ramping up or fading over time. Compares the average volume over recent bars to a longer baseline. 'Increasing' finds stocks gaining trading interest (accumulation); 'Decreasing' finds stocks where volume is drying up (potential base forming).",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "recentPeriod", label: "Recent Period", type: "number", defaultValue: 10, min: 3, max: 50, step: 1 },
       { name: "baselinePeriod", label: "Baseline Period", type: "number", defaultValue: 50, min: 10, max: 200, step: 1 },
       { name: "direction", label: "Trend Direction", type: "select", defaultValue: "increasing", options: ["increasing", "decreasing"] },
       { name: "threshold", label: "Min Change %", type: "number", defaultValue: 20, min: 0, max: 200, step: 5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const recentP = params.recentPeriod ?? 10;
       const baseP = params.baselinePeriod ?? 50;
       const direction = params.direction ?? "increasing";
       const threshold = params.threshold ?? 20;
-      if (candles.length < baseP) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ≥${threshold}%` } } };
-      const recentAvg = candles.slice(0, recentP).reduce((s, c) => s + c.volume, 0) / recentP;
-      const baseAvg = candles.slice(0, baseP).reduce((s, c) => s + c.volume, 0) / baseP;
+      if (candles.length < skip + baseP) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} ≥${threshold}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const recentAvg = effectiveCandles.slice(0, recentP).reduce((s, c) => s + c.volume, 0) / recentP;
+      const baseAvg = effectiveCandles.slice(0, baseP).reduce((s, c) => s + c.volume, 0) / baseP;
       if (baseAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `${direction} ≥${threshold}%` } } };
       const changePct = ((recentAvg - baseAvg) / baseAvg) * 100;
       const pass = direction === "increasing" ? changePct >= threshold : changePct <= -threshold;
       const fmtRecent = recentAvg >= 1e6 ? `${(recentAvg/1e6).toFixed(1)}M` : `${(recentAvg/1e3).toFixed(0)}K`;
       const fmtBase = baseAvg >= 1e6 ? `${(baseAvg/1e6).toFixed(1)}M` : `${(baseAvg/1e3).toFixed(0)}K`;
-      return { pass, data: { _diagnostics: { value: `${changePct.toFixed(1)}%`, threshold: `${direction === "increasing" ? "≥" : "≤-"}${threshold}%`, detail: `recent avg: ${fmtRecent} vs baseline avg: ${fmtBase}` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${changePct.toFixed(1)}%`, threshold: `${direction === "increasing" ? "≥" : "≤-"}${threshold}%`, detail: `recent avg: ${fmtRecent} vs baseline avg: ${fmtBase}` } } };
     },
   },
   {
@@ -520,25 +619,28 @@ const VOLUME: IndicatorDefinition[] = [
     category: "Volume",
     description: "Measures buying pressure vs selling pressure by comparing volume on up-days to volume on down-days. A ratio above 1.0 means more volume flows in on green bars — a sign of accumulation. Ratios of 1.5+ suggest strong institutional buying interest. Below 1.0 means distribution.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minRatio", label: "Min Ratio", type: "number", defaultValue: 1.2, min: 0.1, max: 10, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 20;
       const minRatio = params.minRatio ?? 1.2;
-      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minRatio}x` } } };
+      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minRatio}x` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
       let upVol = 0;
       let downVol = 0;
       for (let i = 0; i < period; i++) {
-        if (candles[i].close >= candles[i + 1].close) upVol += candles[i].volume;
-        else downVol += candles[i].volume;
+        if (effectiveCandles[i].close >= effectiveCandles[i + 1].close) upVol += effectiveCandles[i].volume;
+        else downVol += effectiveCandles[i].volume;
       }
       if (downVol === 0) {
         const pass = upVol > 0;
-        return { pass, data: { _diagnostics: { value: `∞ (no down vol)`, threshold: `≥${minRatio}x` } } };
+        return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `∞ (no down vol)`, threshold: `≥${minRatio}x` } } };
       }
       const ratio = upVol / downVol;
-      return { pass: ratio >= minRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≥${minRatio}x` } } };
+      return { pass: ratio >= minRatio, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≥${minRatio}x` } } };
     },
   },
   {
@@ -547,49 +649,28 @@ const VOLUME: IndicatorDefinition[] = [
     category: "Volume",
     description: "Finds stocks where volume has been consistently quiet for several bars in a row — all recent bars below a fraction of the average. This 'dry-up' pattern often appears right before breakouts as sellers dry up and supply evaporates. Combine with tightness indicators for coiling setups.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 10, max: 200, step: 1 },
       { name: "dryUpDays", label: "Dry-Up Window (bars)", type: "number", defaultValue: 5, min: 1, max: 20, step: 1 },
       { name: "maxMultiple", label: "Max Volume Multiple", type: "number", defaultValue: 0.5, min: 0.1, max: 1, step: 0.05 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 50;
       const dryUpDays = params.dryUpDays ?? 5;
       const maxMult = params.maxMultiple ?? 0.5;
-      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
-      const avgVol = candles.slice(dryUpDays, dryUpDays + period).reduce((s, c) => s + c.volume, 0) / period;
+      if (candles.length < skip + dryUpDays + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const avgVol = effectiveCandles.slice(dryUpDays, dryUpDays + period).reduce((s, c) => s + c.volume, 0) / period;
       if (avgVol === 0) return { pass: false, data: { _diagnostics: { value: 'avg vol=0', threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
       let maxSeen = 0;
       let allBelow = true;
       for (let i = 0; i < dryUpDays; i++) {
-        const r = candles[i].volume / avgVol;
+        const r = effectiveCandles[i].volume / avgVol;
         if (r > maxSeen) maxSeen = r;
         if (r > maxMult) allBelow = false;
       }
-      return { pass: allBelow, data: { _diagnostics: { value: `max ${maxSeen.toFixed(2)}x avg`, threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
-    },
-  },
-  {
-    id: "VOL-5",
-    name: "Volume Surge",
-    category: "Volume",
-    description: "Finds stocks that had a sudden massive spike in volume on a single bar. A 2x surge means double the normal volume — often a breakout day or big institutional entry. 'Require Price Up' filters out panic selling spikes, keeping only bullish volume surges.",
-    params: [
-      { name: "period", label: "Avg Volume Period", type: "number", defaultValue: 50, min: 5, max: 200, step: 1 },
-      { name: "surgeMultiple", label: "Surge Multiple", type: "number", defaultValue: 2.0, min: 1.5, max: 20, step: 0.5 },
-      { name: "priceUp", label: "Require Price Up", type: "boolean", defaultValue: true },
-    ],
-    evaluate: (candles, params) => {
-      const period = params.period ?? 50;
-      const surgeMult = params.surgeMultiple ?? 2.0;
-      const priceUp = params.priceUp ?? true;
-      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${surgeMult}x` } } };
-      const avgVol = candles.slice(1, period + 1).reduce((s, c) => s + c.volume, 0) / period;
-      if (avgVol === 0) return { pass: false, data: { _diagnostics: { value: 'avg vol=0', threshold: `≥${surgeMult}x` } } };
-      const volRatio = candles[0].volume / avgVol;
-      const volPass = volRatio >= surgeMult;
-      const pricePass = !priceUp || candles[0].close > candles[1].close;
-      const pass = volPass && pricePass;
-      return { pass, data: { _diagnostics: { value: `${volRatio.toFixed(1)}x avg`, threshold: `≥${surgeMult}x`, detail: priceUp ? `price ${candles[0].close > candles[1].close ? "up" : "down"}` : undefined } } };
+      return { pass: allBelow, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `max ${maxSeen.toFixed(2)}x avg`, threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
     },
   },
 ];
@@ -601,16 +682,20 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Filters stocks by their Average True Range — a measure of daily price movement in dollar terms. Stocks with very low ATR are too quiet to trade; stocks with very high ATR may be too volatile. Use Min/Max ATR to find your sweet spot for risk management.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minATR", label: "Min ATR", type: "number", defaultValue: 0, min: 0, max: 100, step: 0.1 },
       { name: "maxATR", label: "Max ATR", type: "number", defaultValue: 999, min: 0, max: 1000, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 14;
       const minATR = params.minATR ?? 0;
       const maxATR = params.maxATR ?? 999;
-      const atr = calcATR(candles, period);
-      return { pass: atr >= minATR && atr <= maxATR, data: { _diagnostics: { value: `$${atr.toFixed(2)}`, threshold: `$${minATR}-$${maxATR}` } } };
+      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `$${minATR}-$${maxATR}` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const atr = calcATR(effectiveCandles, period);
+      return { pass: atr >= minATR && atr <= maxATR, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `$${atr.toFixed(2)}`, threshold: `$${minATR}-$${maxATR}` } } };
     },
   },
   {
@@ -619,18 +704,22 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Filters stocks by ATR as a percentage of the stock price — normalizing volatility across all price levels. A $200 stock with $4 ATR = 2% (calm); a $20 stock with $3 ATR = 15% (wild). Use this instead of raw ATR when scanning across different-priced stocks.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minPct", label: "Min ATR %", type: "number", defaultValue: 2, min: 0, max: 50, step: 0.1 },
       { name: "maxPct", label: "Max ATR %", type: "number", defaultValue: 8, min: 0, max: 50, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 14;
       const minPct = params.minPct ?? 2;
       const maxPct = params.maxPct ?? 8;
-      if (candles.length < period + 1 || candles[0].close === 0) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minPct}%-${maxPct}%` } } };
-      const atr = calcATR(candles, period);
-      const pct = (atr / candles[0].close) * 100;
-      return { pass: pct >= minPct && pct <= maxPct, data: { _diagnostics: { value: `${pct.toFixed(1)}%`, threshold: `${minPct}%-${maxPct}%`, detail: `ATR $${atr.toFixed(2)} / price $${candles[0].close.toFixed(2)}` } } };
+      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minPct}%-${maxPct}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      if (effectiveCandles[0].close === 0) return { pass: false, data: { _diagnostics: { value: 'price=0', threshold: `${minPct}%-${maxPct}%` } } };
+      const atr = calcATR(effectiveCandles, period);
+      const pct = (atr / effectiveCandles[0].close) * 100;
+      return { pass: pct >= minPct && pct <= maxPct, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${pct.toFixed(1)}%`, threshold: `${minPct}%-${maxPct}%`, detail: `ATR $${atr.toFixed(2)} / price $${effectiveCandles[0].close.toFixed(2)}` } } };
     },
   },
   {
@@ -641,6 +730,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     provides: [{ linkType: "basePeriod", paramName: "period" }],
     consumes: [{ paramName: "maxBaseLimit", dataKey: "baseEndBar" }],
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Max Base Length", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minPeriod", label: "Min Base Length", type: "number", defaultValue: 5, min: 5, max: 50, step: 1 },
       { name: "maxRange", label: "Max Range %", type: "number", defaultValue: 15, min: 1, max: 50, step: 0.5 },
@@ -649,22 +739,24 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "minBasePct", label: "Min Base % of Lookback", type: "number", defaultValue: 0, min: 0, max: 100, step: 5 },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const maxPeriod = params.period ?? 20;
       const minPeriod = Math.max(5, params.minPeriod ?? 5);
       const maxRange = params.maxRange ?? 15;
       const maxSlope = params.maxSlope ?? 5;
       const drifterPct = params.drifterPct ?? 10;
       const minBasePct = params.minBasePct ?? 0;
-      if (candles.length < minPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minPeriod} bars, ≤${maxRange}% range` } } };
+      if (candles.length < skip + minPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minPeriod} bars, ≤${maxRange}% range` } } };
 
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
       const upstreamBaseEnd = typeof upstreamData?.baseEndBar === "number" ? upstreamData.baseEndBar : null;
-      const effectiveMaxPeriod = upstreamBaseEnd !== null ? Math.min(maxPeriod, upstreamBaseEnd) : maxPeriod;
+      const effectiveMaxPeriod = upstreamBaseEnd !== null ? Math.min(maxPeriod, Math.max(0, upstreamBaseEnd - skip)) : maxPeriod;
       if (upstreamBaseEnd !== null && effectiveMaxPeriod < minPeriod) {
         return { pass: false, data: { _diagnostics: { value: `upstream base too close (bar ${upstreamBaseEnd})`, threshold: `need ≥${minPeriod} bars before historical base` } } };
       }
-      const maxLen = Math.min(effectiveMaxPeriod, candles.length);
+      const maxLen = Math.min(effectiveMaxPeriod, effectiveCandles.length);
 
-      const recentSlice = candles.slice(0, minPeriod);
+      const recentSlice = effectiveCandles.slice(0, minPeriod);
       const refHigh = Math.max(...recentSlice.map(c => c.high));
       const refLow = Math.min(...recentSlice.map(c => c.low));
 
@@ -675,7 +767,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const minRequired = Math.max(minPeriod, Math.ceil(maxPeriod * minBasePct / 100));
 
       const passesQuality = (len: number): boolean => {
-        const baseSlice = candles.slice(0, len);
+        const baseSlice = effectiveCandles.slice(0, len);
         const closes = baseSlice.map(c => c.close);
         const baseHigh = Math.max(...baseSlice.map(c => c.high));
         const baseLow = Math.min(...baseSlice.map(c => c.low));
@@ -718,7 +810,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       }
 
       for (let i = minPeriod; i < maxLen; i++) {
-        const bar = candles[i];
+        const bar = effectiveCandles[i];
         if (bar.high === 0) break;
         const testHigh = Math.max(runHigh, bar.high);
         const testLow = Math.min(runLow, bar.low);
@@ -742,21 +834,24 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       }
 
       if (bestPass === 0) return { pass: false, data: { _diagnostics: { value: 'no base found', threshold: `≥${minRequired} bars, ≤${maxRange}% range` } } };
-      const finalSlice = candles.slice(0, bestPass);
+      const finalSlice = effectiveCandles.slice(0, bestPass);
       const finalHigh = Math.max(...finalSlice.map(c => c.high));
       const finalLow = Math.min(...finalSlice.map(c => c.low));
       const rangePct = finalHigh > 0 ? ((finalHigh - finalLow) / finalHigh) * 100 : 0;
 
       const avgBaseVolume = finalSlice.reduce((s, c) => s + (c.volume || 0), 0) / finalSlice.length;
       const preBaseStart = bestPass;
-      const preBaseEnd = Math.min(bestPass + bestPass, candles.length);
-      const preBaseSlice = candles.slice(preBaseStart, preBaseEnd);
+      const preBaseEnd = Math.min(bestPass + bestPass, effectiveCandles.length);
+      const preBaseSlice = effectiveCandles.slice(preBaseStart, preBaseEnd);
       const avgPreBaseVolume = preBaseSlice.length > 0
         ? preBaseSlice.reduce((s, c) => s + (c.volume || 0), 0) / preBaseSlice.length
         : avgBaseVolume;
       const volumeFadeRatio = avgPreBaseVolume > 0 ? avgBaseVolume / avgPreBaseVolume : 1;
 
       return { pass: true, data: {
+        evaluationStartBar: skip,
+        evaluationEndBar: skip,
+        patternEndBar: skip,
         detectedPeriod: bestPass,
         baseTopPrice: finalHigh,
         baseBottomPrice: finalLow,
@@ -775,22 +870,25 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Measures how deep the current pullback is from the highest price over a lookback window. Shallow bases (10-20% correction) suggest institutions are holding — strong demand. Deep corrections (30%+) may signal damaged charts. Use Min Depth to exclude stocks that haven't pulled back at all.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "maxDepth", label: "Max Depth %", type: "number", defaultValue: 25, min: 1, max: 60, step: 1 },
       { name: "minDepth", label: "Min Depth %", type: "number", defaultValue: 5, min: 0, max: 50, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const lookback = params.lookback ?? 60;
       const maxDepth = params.maxDepth ?? 25;
       const minDepth = params.minDepth ?? 5;
-      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minDepth}%-${maxDepth}%` } } };
-      const slice = candles.slice(0, lookback);
+      if (candles.length < skip + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minDepth}%-${maxDepth}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const slice = effectiveCandles.slice(0, lookback);
       const highVal = Math.max(...slice.map(c => c.high));
       if (highVal === 0) return { pass: false, data: { _diagnostics: { value: 'high=0', threshold: `${minDepth}%-${maxDepth}%` } } };
       const currentLow = Math.min(...slice.map(c => c.low));
       const depth = ((highVal - currentLow) / highVal) * 100;
       const pa4Pass = depth >= minDepth && depth <= maxDepth;
-      return { pass: pa4Pass, data: { ...(pa4Pass ? { _cocHighlight: { type: "resistanceLine", level: highVal, startBar: lookback, endBar: 0 } } : {}), _diagnostics: { value: `${depth.toFixed(1)}%`, threshold: `${minDepth}%-${maxDepth}%` } } };
+      return { pass: pa4Pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, ...(pa4Pass ? { _cocHighlight: { type: "resistanceLine", level: highVal, startBar: lookback, endBar: 0 } } : {}), _diagnostics: { value: `${depth.toFixed(1)}%`, threshold: `${minDepth}%-${maxDepth}%` } } };
     },
   },
   {
@@ -799,18 +897,21 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Counts how many separate consolidation pauses a stock has made during its advance. 1st and 2nd bases are highest probability for breakouts — later bases (3rd, 4th+) increasingly fail as the move gets extended. Set Max Bases to 2-3 to focus on early-stage leaders.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 120, min: 30, max: 500, step: 10 },
       { name: "consolidationRange", label: "Base Range %", type: "number", defaultValue: 15, min: 5, max: 30, step: 1 },
       { name: "minBaseDays", label: "Min Base Width (bars)", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
       { name: "maxBases", label: "Max Bases", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const lookback = params.lookback ?? 120;
       const consolRange = params.consolidationRange ?? 15;
       const minBaseDays = params.minBaseDays ?? 10;
       const maxBases = params.maxBases ?? 3;
-      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `1-${maxBases} bases` } } };
-      const slice = candles.slice(0, lookback).reverse();
+      if (candles.length < skip + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `1-${maxBases} bases` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const slice = effectiveCandles.slice(0, lookback).reverse();
       let baseCount = 0;
       let i = 0;
       while (i < slice.length - minBaseDays) {
@@ -824,7 +925,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
           i++;
         }
       }
-      return { pass: baseCount >= 1 && baseCount <= maxBases, data: { _diagnostics: { value: `${baseCount} bases`, threshold: `1-${maxBases} bases` } } };
+      return { pass: baseCount >= 1 && baseCount <= maxBases, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${baseCount} bases`, threshold: `1-${maxBases} bases` } } };
     },
   },
   {
@@ -833,18 +934,22 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Finds stocks near or far from their 52-week high. Stocks within 5-15% of highs are in 'buy zone' territory — strong enough to be near the top but pulled back enough to offer entry. Stocks 50%+ away may be damaged or in downtrends. Adjust Min/Max Distance to target your range.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "maxDistance", label: "Max Distance %", type: "number", defaultValue: 25, min: 0, max: 100, step: 1 },
       { name: "minDistance", label: "Min Distance %", type: "number", defaultValue: 0, min: 0, max: 100, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const maxDist = params.maxDistance ?? 25;
       const minDist = params.minDistance ?? 0;
-      const period = Math.min(260, candles.length);
+      if (candles.length < skip + 20) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minDist}%-${maxDist}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const period = Math.min(260, effectiveCandles.length);
       if (period < 20) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minDist}%-${maxDist}%` } } };
-      const high52 = Math.max(...candles.slice(0, period).map(c => c.high));
+      const high52 = Math.max(...effectiveCandles.slice(0, period).map(c => c.high));
       if (high52 === 0) return { pass: false, data: { _diagnostics: { value: 'high=0', threshold: `${minDist}%-${maxDist}%` } } };
-      const dist = ((high52 - candles[0].close) / high52) * 100;
-      return { pass: dist >= minDist && dist <= maxDist, data: { _diagnostics: { value: `${dist.toFixed(1)}%`, threshold: `${minDist}%-${maxDist}%`, detail: `52wk high $${high52.toFixed(2)}, price $${candles[0].close.toFixed(2)}` } } };
+      const dist = ((high52 - effectiveCandles[0].close) / high52) * 100;
+      return { pass: dist >= minDist && dist <= maxDist, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${dist.toFixed(1)}%`, threshold: `${minDist}%-${maxDist}%`, detail: `52wk high $${high52.toFixed(2)}, price $${effectiveCandles[0].close.toFixed(2)}` } } };
     },
   },
   {
@@ -854,27 +959,30 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     description: "Finds stocks that recently broke out above the highest price of a prior base/consolidation zone. The breakout window controls how recently it must have happened (1-3 bars = just broke out; 10 = within last 2 weeks). Enable Volume Confirm to filter out weak, low-conviction breakouts.",
     provides: [{ linkType: "basePeriod", paramName: "basePeriod" }],
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "basePeriod", label: "Base Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "lookback", label: "Breakout Window (bars)", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
       { name: "volumeConfirm", label: "Require Volume Surge", type: "boolean", defaultValue: true },
       { name: "volumeMultiple", label: "Volume Multiple", type: "number", defaultValue: 1.5, min: 1, max: 10, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const basePeriod = params.basePeriod ?? 20;
       const lookback = params.lookback ?? 3;
       const volumeConfirm = params.volumeConfirm ?? true;
       const volumeMult = params.volumeMultiple ?? 1.5;
-      if (candles.length < basePeriod + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `breakout within ${lookback} bars` } } };
-      const baseHigh = Math.max(...candles.slice(lookback, lookback + basePeriod).map(c => c.high));
+      if (candles.length < skip + basePeriod + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `breakout within ${lookback} bars` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const baseHigh = Math.max(...effectiveCandles.slice(lookback, lookback + basePeriod).map(c => c.high));
       for (let i = 0; i < lookback; i++) {
-        if (candles[i].close > baseHigh) {
-          if (!volumeConfirm) return { pass: true, data: { _diagnostics: { value: `$${candles[i].close.toFixed(2)} > base $${baseHigh.toFixed(2)}`, threshold: `breakout within ${lookback} bars`, detail: `bar ${i}` } } };
-          const avgVol = candles.slice(lookback, lookback + 50).reduce((s, c) => s + c.volume, 0) / Math.min(50, candles.length - lookback);
-          const volRatio = avgVol > 0 ? candles[i].volume / avgVol : 0;
-          if (avgVol > 0 && volRatio >= volumeMult) return { pass: true, data: { _diagnostics: { value: `$${candles[i].close.toFixed(2)} > base $${baseHigh.toFixed(2)}`, threshold: `breakout within ${lookback} bars`, detail: `bar ${i}, vol ${volRatio.toFixed(1)}x (≥${volumeMult}x)` } } };
+        if (effectiveCandles[i].close > baseHigh) {
+          if (!volumeConfirm) return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `$${effectiveCandles[i].close.toFixed(2)} > base $${baseHigh.toFixed(2)}`, threshold: `breakout within ${lookback} bars`, detail: `bar ${i}` } } };
+          const avgVol = effectiveCandles.slice(lookback, lookback + 50).reduce((s, c) => s + c.volume, 0) / Math.min(50, effectiveCandles.length - lookback);
+          const volRatio = avgVol > 0 ? effectiveCandles[i].volume / avgVol : 0;
+          if (avgVol > 0 && volRatio >= volumeMult) return { pass: true, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `$${effectiveCandles[i].close.toFixed(2)} > base $${baseHigh.toFixed(2)}`, threshold: `breakout within ${lookback} bars`, detail: `bar ${i}, vol ${volRatio.toFixed(1)}x (≥${volumeMult}x)` } } };
         }
       }
-      return { pass: false, data: { _diagnostics: { value: `price $${candles[0].close.toFixed(2)}`, threshold: `> base high $${baseHigh.toFixed(2)}` } } };
+      return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `price $${effectiveCandles[0].close.toFixed(2)}`, threshold: `> base high $${baseHigh.toFixed(2)}` } } };
     },
   },
   {
@@ -883,19 +991,22 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Finds stocks that have pulled back to test a moving average as support. The low of the current bar must be within a tolerance band of the MA. A stock touching its rising 21 EMA after an advance is a classic buy-the-dip entry point in strong uptrends.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 21, min: 5, max: 200, step: 1 },
       { name: "maType", label: "MA Type", type: "select", defaultValue: "ema", options: ["sma", "ema"] },
       { name: "tolerance", label: "Tolerance %", type: "number", defaultValue: 2, min: 0.5, max: 10, step: 0.5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const maPeriod = params.maPeriod ?? 21;
       const maType = params.maType ?? "ema";
       const tolerance = params.tolerance ?? 2;
-      if (candles.length < maPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${tolerance}% from ${maPeriod} ${maType}` } } };
-      const ma = getMA(candles, maPeriod, maType);
+      if (candles.length < skip + maPeriod) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${tolerance}% from ${maPeriod} ${maType}` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const ma = getMA(effectiveCandles, maPeriod, maType);
       if (ma === 0) return { pass: false, data: { _diagnostics: { value: 'MA=0', threshold: `≤${tolerance}%` } } };
-      const dist = Math.abs((candles[0].low - ma) / ma) * 100;
-      return { pass: dist <= tolerance, data: { _diagnostics: { value: `${dist.toFixed(1)}% away`, threshold: `≤${tolerance}%`, detail: `low $${candles[0].low.toFixed(2)} vs MA $${ma.toFixed(2)}` } } };
+      const dist = Math.abs((effectiveCandles[0].low - ma) / ma) * 100;
+      return { pass: dist <= tolerance, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${dist.toFixed(1)}% away`, threshold: `≤${tolerance}%`, detail: `low $${effectiveCandles[0].low.toFixed(2)} vs MA $${ma.toFixed(2)}` } } };
     },
   },
   {
@@ -904,14 +1015,17 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Detects the Volatility Contraction Pattern (VCP) — a series of price swings where each one is smaller than the last, forming a staircase of tightening contractions. This pattern shows sellers are drying up and supply is shrinking. More segments = more defined pattern but fewer matches.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 40, min: 15, max: 120, step: 5 },
       { name: "segments", label: "Number of Segments", type: "number", defaultValue: 3, min: 2, max: 5, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const lookback = params.lookback ?? 40;
       const segments = params.segments ?? 3;
-      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${segments} contracting segments` } } };
-      const slice = candles.slice(0, lookback).reverse();
+      if (candles.length < skip + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${segments} contracting segments` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const slice = effectiveCandles.slice(0, lookback).reverse();
       const segLen = Math.floor(slice.length / segments);
       if (segLen < 3) return { pass: false, data: { _diagnostics: { value: 'segments too short', threshold: `${segments} contracting segments` } } };
       const ranges: number[] = [];
@@ -925,41 +1039,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       for (let i = 1; i < ranges.length; i++) {
         if (ranges[i] >= ranges[i - 1]) { contracting = false; break; }
       }
-      return { pass: contracting, data: { _diagnostics: { value: ranges.map(r => `${r.toFixed(1)}%`).join(' → '), threshold: `${segments} contracting segments` } } };
-    },
-  },
-  {
-    id: "PA-10",
-    name: "Price Gap Detection",
-    category: "Price Action",
-    description: "Finds stocks that gapped up or down recently — meaning the open was significantly above/below the prior close, leaving a visible gap on the chart. Gaps often signal news, earnings surprises, or institutional moves. Set min gap to 2%+ for meaningful gaps only.",
-    params: [
-      { name: "lookback", label: "Lookback (bars)", type: "number", defaultValue: 3, min: 1, max: 20, step: 1 },
-      { name: "minGapPct", label: "Min Gap %", type: "number", defaultValue: 2, min: 0.5, max: 20, step: 0.5 },
-      { name: "gapDirection", label: "Gap Direction", type: "select", defaultValue: "up", options: ["up", "down", "either"] },
-    ],
-    evaluate: (candles, params) => {
-      const lookback = params.lookback ?? 3;
-      const minGap = params.minGapPct ?? 2;
-      const dir = params.gapDirection ?? "up";
-      if (candles.length < lookback + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minGap}% gap ${dir}` } } };
-      let bestGap = 0;
-      let bestBar = -1;
-      for (let i = 0; i < lookback; i++) {
-        const prev = candles[i + 1];
-        const curr = candles[i];
-        const gapUp = ((curr.open - prev.close) / prev.close) * 100;
-        const gapDown = ((prev.close - curr.open) / prev.close) * 100;
-        if (dir === "up" && gapUp >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapUp }, _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
-        if (dir === "down" && gapDown >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapDown }, _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% ${dir}`, detail: `bar ${i}` } } };
-        if (dir === "either") {
-          if (gapUp >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapUp }, _diagnostics: { value: `${gapUp.toFixed(1)}% gap up`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
-          if (gapDown >= minGap) return { pass: true, data: { _cocHighlight: { type: "gapCircle", barIndex: i, gapPct: gapDown }, _diagnostics: { value: `${gapDown.toFixed(1)}% gap down`, threshold: `≥${minGap}% either`, detail: `bar ${i}` } } };
-        }
-        const maxGapHere = Math.max(gapUp, gapDown);
-        if (maxGapHere > bestGap) { bestGap = maxGapHere; bestBar = i; }
-      }
-      return { pass: false, data: { _diagnostics: { value: bestGap > 0 ? `best ${bestGap.toFixed(1)}%` : 'no gap', threshold: `≥${minGap}% ${dir}` } } };
+      return { pass: contracting, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: ranges.map(r => `${r.toFixed(1)}%`).join(' → '), threshold: `${segments} contracting segments` } } };
     },
   },
   {
@@ -968,18 +1048,21 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Finds stocks trading near a key price level — either VWAP (volume-weighted average price) or a pivot point. Stocks hugging VWAP are at their 'fair value' — a tight distance means the price is respecting this institutional reference. Good for finding stocks at decision points.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "level", label: "Level Type", type: "select", defaultValue: "vwap", options: ["vwap", "pivot"] },
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "maxDistance", label: "Max Distance %", type: "number", defaultValue: 3, min: 0, max: 20, step: 0.5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const level = params.level ?? "vwap";
       const lookback = params.lookback ?? 20;
       const maxDist = params.maxDistance ?? 3;
-      if (candles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxDist}% from ${level}` } } };
+      if (candles.length < skip + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxDist}% from ${level}` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
       let keyLevel: number;
       if (level === "vwap") {
-        const slice = candles.slice(0, lookback);
+        const slice = effectiveCandles.slice(0, lookback);
         let tpv = 0;
         let vol = 0;
         for (const c of slice) {
@@ -989,12 +1072,12 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         }
         keyLevel = vol > 0 ? tpv / vol : 0;
       } else {
-        const prev = candles[1] || candles[0];
+        const prev = effectiveCandles[1] || effectiveCandles[0];
         keyLevel = (prev.high + prev.low + prev.close) / 3;
       }
       if (keyLevel === 0) return { pass: false, data: { _diagnostics: { value: `${level}=0`, threshold: `≤${maxDist}%` } } };
-      const dist = Math.abs((candles[0].close - keyLevel) / keyLevel) * 100;
-      return { pass: dist <= maxDist, data: { _diagnostics: { value: `${dist.toFixed(1)}% from ${level}`, threshold: `≤${maxDist}%`, detail: `${level} $${keyLevel.toFixed(2)}, price $${candles[0].close.toFixed(2)}` } } };
+      const dist = Math.abs((effectiveCandles[0].close - keyLevel) / keyLevel) * 100;
+      return { pass: dist <= maxDist, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${dist.toFixed(1)}% from ${level}`, threshold: `≤${maxDist}%`, detail: `${level} $${keyLevel.toFixed(2)}, price $${effectiveCandles[0].close.toFixed(2)}` } } };
     },
   },
   {
@@ -1103,36 +1186,39 @@ const PRICE_ACTION: IndicatorDefinition[] = [
   },
   {
     id: "PA-14",
-    name: "Tightness Ratio",
+    name: "Daily Range Contraction",
     category: "Price Action",
-    description: "Compares the size of recent daily candles to the historical average. A ratio of 0.5 means candles are half their normal size — the stock is coiling with shrinking daily ranges. This tightness often precedes explosive moves. Works best combined with Volume Fade and Close Clustering to confirm a full 'quiet before the storm' setup. When connected to Base Detection, automatically uses each stock's detected base length as the baseline window.",
+    description: "Compares the size of recent daily candles to the historical average. A ratio of 0.5 means candles are half their normal size — the stock is coiling with shrinking daily ranges. This contraction often precedes explosive moves. Works best combined with Volume Trend and Close Clustering to confirm a full 'quiet before the storm' setup. When connected to Base Detection, automatically uses each stock's detected base length as the baseline window.",
     consumes: [{ paramName: "baselineBars", dataKey: "detectedPeriod" }],
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 5, min: 3, max: 20, step: 1 },
       { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5, autoLink: { linkType: "basePeriod" } },
-      { name: "maxRatio", label: "Max Tightness Ratio", type: "number", defaultValue: 0.8, min: 0.1, max: 1.5, step: 0.05 },
+      { name: "maxRatio", label: "Max Range Ratio", type: "number", defaultValue: 0.8, min: 0.1, max: 1.5, step: 0.05 },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const dynamicBaseline = upstreamData?.detectedPeriod;
       const recentN = params.recentBars ?? 5;
       const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
       const maxRatio = params.maxRatio ?? 0.8;
-      if (candles.length < recentN + baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
+      if (candles.length < skip + recentN + baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
 
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
       const dailyRangePct = (c: { high: number; low: number; close: number }) =>
         c.close === 0 ? 0 : ((c.high - c.low) / c.close) * 100;
 
       let recentSum = 0;
-      for (let i = 0; i < recentN; i++) recentSum += dailyRangePct(candles[i]);
+      for (let i = 0; i < recentN; i++) recentSum += dailyRangePct(effectiveCandles[i]);
       const recentAvg = recentSum / recentN;
 
       let baselineSum = 0;
-      for (let i = recentN; i < recentN + baselineN; i++) baselineSum += dailyRangePct(candles[i]);
+      for (let i = recentN; i < recentN + baselineN; i++) baselineSum += dailyRangePct(effectiveCandles[i]);
       const baselineAvg = baselineSum / baselineN;
 
       if (baselineAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `≤${maxRatio}x` } } };
       const ratio = recentAvg / baselineAvg;
-      return { pass: ratio <= maxRatio, data: { _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${recentAvg.toFixed(2)}% vs baseline ${baselineAvg.toFixed(2)}%` } } };
+      return { pass: ratio <= maxRatio, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${recentAvg.toFixed(2)}% vs baseline ${baselineAvg.toFixed(2)}%` } } };
     },
   },
   {
@@ -1142,16 +1228,19 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     description: "Measures how tightly closing prices bunch together over recent bars. A 1% cluster means closes barely move day-to-day — the stock has settled into a narrow equilibrium. Think of it as a 'coil' indicator: the tighter the clustering, the more energy is stored for the next directional move. Use with Tightness Ratio for stronger confirmation. When connected to Base Detection, automatically uses each stock's detected base length as the period.",
     consumes: [{ paramName: "period", dataKey: "detectedPeriod" }],
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Period", type: "number", defaultValue: 10, min: 5, max: 50, step: 1, autoLink: { linkType: "basePeriod" } },
       { name: "maxClusterPct", label: "Max Cluster %", type: "number", defaultValue: 3.0, min: 0.1, max: 5, step: 0.1 },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const dynamicPeriod = upstreamData?.detectedPeriod;
       const period = dynamicPeriod ?? params.period ?? 10;
       const maxPct = params.maxClusterPct ?? 3.0;
-      if (candles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxPct}%` } } };
+      if (candles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxPct}%` } } };
 
-      const closes = candles.slice(0, period).map(c => c.close);
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const closes = effectiveCandles.slice(0, period).map(c => c.close);
       const avg = closes.reduce((s, v) => s + v, 0) / period;
       if (avg === 0) return { pass: false, data: { _diagnostics: { value: 'avg=0', threshold: `≤${maxPct}%` } } };
 
@@ -1160,41 +1249,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const clusterPct = (stdDev / avg) * 100;
 
       const pa15Pass = clusterPct <= maxPct;
-      return { pass: pa15Pass, data: { ...(pa15Pass ? { _cocHighlight: { type: "pullbackCircle", barCount: 3 } } : {}), _diagnostics: { value: `${clusterPct.toFixed(2)}%`, threshold: `≤${maxPct}%` } } };
-    },
-  },
-  {
-    id: "PA-16",
-    name: "Volume Fade",
-    category: "Price Action",
-    description: "Checks if recent volume has dried up compared to the historical average. A ratio of 0.5 means volume is half of normal — weak hands have been shaken out and the remaining holders aren't selling. Volume fade during a tight base is a classic sign that supply has been absorbed. Combine with Tightness Ratio and Close Clustering for the strongest coiling signals. When connected to Base Detection, automatically uses each stock's detected base length as the baseline window.",
-    consumes: [{ paramName: "baselineBars", dataKey: "detectedPeriod" }],
-    params: [
-      { name: "recentBars", label: "Recent Bars", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
-      { name: "baselineBars", label: "Baseline Bars", type: "number", defaultValue: 50, min: 20, max: 200, step: 5, autoLink: { linkType: "basePeriod" } },
-      { name: "maxRatio", label: "Max Volume Ratio", type: "number", defaultValue: 0.9, min: 0.1, max: 1.5, step: 0.05 },
-    ],
-    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
-      const dynamicBaseline = upstreamData?.detectedPeriod;
-      const recentN = params.recentBars ?? 10;
-      const baselineN = dynamicBaseline ?? params.baselineBars ?? 50;
-      const maxRatio = params.maxRatio ?? 0.9;
-      if (candles.length < recentN + baselineN) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≤${maxRatio}x` } } };
-
-      let recentVol = 0;
-      for (let i = 0; i < recentN; i++) recentVol += candles[i].volume;
-      const recentAvg = recentVol / recentN;
-
-      let baselineVol = 0;
-      for (let i = recentN; i < recentN + baselineN; i++) baselineVol += candles[i].volume;
-      const baselineAvg = baselineVol / baselineN;
-
-      if (baselineAvg === 0) return { pass: false, data: { _diagnostics: { value: 'baseline=0', threshold: `≤${maxRatio}x` } } };
-      const ratio = recentAvg / baselineAvg;
-      const fmtRecent = recentAvg >= 1e6 ? `${(recentAvg/1e6).toFixed(1)}M` : `${(recentAvg/1e3).toFixed(0)}K`;
-      const fmtBase = baselineAvg >= 1e6 ? `${(baselineAvg/1e6).toFixed(1)}M` : `${(baselineAvg/1e3).toFixed(0)}K`;
-      const pa16Pass = ratio <= maxRatio;
-      return { pass: pa16Pass, data: { ...(pa16Pass ? { _cocHighlight: { type: "pullbackCircle", barCount: 3 } } : {}), _diagnostics: { value: `${ratio.toFixed(2)}x`, threshold: `≤${maxRatio}x`, detail: `recent ${fmtRecent} vs baseline ${fmtBase}` } } };
+      return { pass: pa15Pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, ...(pa15Pass ? { _cocHighlight: { type: "pullbackCircle", barCount: 3 } } : {}), _diagnostics: { value: `${clusterPct.toFixed(2)}%`, threshold: `≤${maxPct}%` } } };
     },
   },
   {
@@ -1203,6 +1258,7 @@ const PRICE_ACTION: IndicatorDefinition[] = [
     category: "Price Action",
     description: "Oliver Kell's 'Money Pattern' — detects stocks that consolidated under declining short-term EMAs with tightening price ranges and drying volume, then broke back above those EMAs on a volume surge. The best Wedge Pops happen via a gap up through both the 10 and 20 EMA. Identifies the setup phase (wedge formation with volatility contraction and volume dry-up) and the trigger (price reclaiming EMAs on increased volume). Returns rich diagnostic data including pop type (gap/strong bar/gradual), gap %, volume ratio, wedge duration, range contraction, and position vs 200 DMA.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "emaShort", label: "Short EMA", type: "number", defaultValue: 10, min: 5, max: 50, step: 1 },
       { name: "emaLong", label: "Long EMA", type: "number", defaultValue: 20, min: 10, max: 100, step: 1 },
       { name: "minWedgeBars", label: "Min Wedge Bars", type: "number", defaultValue: 8, min: 3, max: 30, step: 1 },
@@ -1214,7 +1270,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       { name: "rangeContractionPct", label: "Range Contraction %", type: "number", defaultValue: 30, min: 10, max: 80, step: 5 },
       { name: "volumeDeclinePct", label: "Volume Decline %", type: "number", defaultValue: 20, min: 5, max: 60, step: 5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const emaShort = params.emaShort ?? 10;
       const emaLong = params.emaLong ?? 20;
       const minWedgeBars = params.minWedgeBars ?? 8;
@@ -1227,23 +1284,24 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       const volumeDeclinePct = params.volumeDeclinePct ?? 20;
 
       const needed = Math.max(maxWedgeBars + emaLong + 10, 200 + 1);
-      if (candles.length < needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: 'wedge pop' } } };
+      if (candles.length < skip + needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: 'wedge pop' } } };
 
-      const today = candles[0];
-      const prev = candles[1];
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const today = effectiveCandles[0];
+      const prev = effectiveCandles[1];
 
-      const emaShortNow = calcEMA(candles, emaShort);
-      const emaLongNow = calcEMA(candles, emaLong);
+      const emaShortNow = calcEMA(effectiveCandles, emaShort);
+      const emaLongNow = calcEMA(effectiveCandles, emaLong);
 
       const priceAboveShortEma = today.close > emaShortNow;
       const priceAboveLongEma = today.close > emaLongNow;
       if (!priceAboveShortEma || !priceAboveLongEma) {
-        return { pass: false, data: { _diagnostics: { value: `close ${today.close.toFixed(2)} vs ${emaShort}e=${emaShortNow.toFixed(2)}/${emaLong}e=${emaLongNow.toFixed(2)}`, threshold: 'price must close above both EMAs' } } };
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `close ${today.close.toFixed(2)} vs ${emaShort}e=${emaShortNow.toFixed(2)}/${emaLong}e=${emaLongNow.toFixed(2)}`, threshold: 'price must close above both EMAs' } } };
       }
 
       const gapPct = prev.close > 0 ? ((today.open - prev.close) / prev.close) * 100 : 0;
-      const emaShortPrev = calcEMAAt(candles, emaShort, 1);
-      const emaLongPrev = calcEMAAt(candles, emaLong, 1);
+      const emaShortPrev = calcEMAAt(effectiveCandles, emaShort, 1);
+      const emaLongPrev = calcEMAAt(effectiveCandles, emaLong, 1);
       const gapAboveBothEmas = today.open > emaShortPrev && today.open > emaLongPrev;
       const gapUnfilled = today.low > prev.close;
 
@@ -1256,8 +1314,8 @@ const PRICE_ACTION: IndicatorDefinition[] = [
         if (prevBelowEma && priceAboveShortEma && priceAboveLongEma) {
           const barRange = today.high - today.low;
           const recentRanges: number[] = [];
-          for (let i = 1; i <= 10 && i < candles.length; i++) {
-            recentRanges.push(candles[i].high - candles[i].low);
+          for (let i = 1; i <= 10 && i < effectiveCandles.length; i++) {
+            recentRanges.push(effectiveCandles[i].high - effectiveCandles[i].low);
           }
           const avgRecentRange = recentRanges.length > 0 ? recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length : barRange;
           if (barRange > avgRecentRange * 1.3) {
@@ -1267,13 +1325,13 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       }
 
       if (requireGap && popType !== "gap") {
-        return { pass: false, data: { _diagnostics: { value: `popType=${popType}`, threshold: 'gap required' } } };
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `popType=${popType}`, threshold: 'gap required' } } };
       }
       if (requireUnfilledGap && !(popType === "gap" && gapUnfilled)) {
-        return { pass: false, data: { _diagnostics: { value: `gap=${popType === "gap"}, unfilled=${gapUnfilled}`, threshold: 'unfilled gap required' } } };
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `gap=${popType === "gap"}, unfilled=${gapUnfilled}`, threshold: 'unfilled gap required' } } };
       }
       if (minGapPct > 0 && gapPct < minGapPct) {
-        return { pass: false, data: { _diagnostics: { value: `gap ${gapPct.toFixed(1)}%`, threshold: `≥${minGapPct}%` } } };
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `gap ${gapPct.toFixed(1)}%`, threshold: `≥${minGapPct}%` } } };
       }
 
       let wedgeBars = 0;
@@ -1281,21 +1339,21 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       for (let startOffset = 1; startOffset <= 5; startOffset++) {
         for (let wb = minWedgeBars; wb <= maxWedgeBars; wb++) {
           const wedgeEnd = startOffset + wb;
-          if (wedgeEnd >= candles.length - emaLong) break;
+          if (wedgeEnd >= effectiveCandles.length - emaLong) break;
 
           let belowCount = 0;
           for (let i = startOffset; i < wedgeEnd; i++) {
-            const emaS = calcEMAAt(candles, emaShort, i);
-            const emaL = calcEMAAt(candles, emaLong, i);
-            const c = candles[i];
+            const emaS = calcEMAAt(effectiveCandles, emaShort, i);
+            const emaL = calcEMAAt(effectiveCandles, emaLong, i);
+            const c = effectiveCandles[i];
             if (c.close < emaS || c.close < emaL) belowCount++;
           }
           if (belowCount < wb * 0.5) continue;
 
-          const emaShortWedgeStart = calcEMAAt(candles, emaShort, wedgeEnd - 1);
-          const emaShortWedgeEnd = calcEMAAt(candles, emaShort, startOffset);
-          const emaLongWedgeStart = calcEMAAt(candles, emaLong, wedgeEnd - 1);
-          const emaLongWedgeEnd = calcEMAAt(candles, emaLong, startOffset);
+          const emaShortWedgeStart = calcEMAAt(effectiveCandles, emaShort, wedgeEnd - 1);
+          const emaShortWedgeEnd = calcEMAAt(effectiveCandles, emaShort, startOffset);
+          const emaLongWedgeStart = calcEMAAt(effectiveCandles, emaLong, wedgeEnd - 1);
+          const emaLongWedgeEnd = calcEMAAt(effectiveCandles, emaLong, startOffset);
           const emaShortDeclining = emaShortWedgeEnd < emaShortWedgeStart;
           const emaLongFlat = emaLongWedgeEnd <= emaLongWedgeStart * 1.02;
           if (!emaShortDeclining && !emaLongFlat) continue;
@@ -1304,10 +1362,10 @@ const PRICE_ACTION: IndicatorDefinition[] = [
           let earlyRangeSum = 0;
           let lateRangeSum = 0;
           for (let i = wedgeEnd - halfLen; i < wedgeEnd; i++) {
-            earlyRangeSum += candles[i].high - candles[i].low;
+            earlyRangeSum += effectiveCandles[i].high - effectiveCandles[i].low;
           }
           for (let i = startOffset; i < startOffset + halfLen; i++) {
-            lateRangeSum += candles[i].high - candles[i].low;
+            lateRangeSum += effectiveCandles[i].high - effectiveCandles[i].low;
           }
           const earlyAvgRange = earlyRangeSum / halfLen;
           const lateAvgRange = lateRangeSum / halfLen;
@@ -1318,10 +1376,10 @@ const PRICE_ACTION: IndicatorDefinition[] = [
           let earlyVolSum = 0;
           let lateVolSum = 0;
           for (let i = wedgeEnd - halfLen; i < wedgeEnd; i++) {
-            earlyVolSum += candles[i].volume;
+            earlyVolSum += effectiveCandles[i].volume;
           }
           for (let i = startOffset; i < startOffset + halfLen; i++) {
-            lateVolSum += candles[i].volume;
+            lateVolSum += effectiveCandles[i].volume;
           }
           const earlyAvgVol = earlyVolSum / halfLen;
           const lateAvgVol = lateVolSum / halfLen;
@@ -1337,26 +1395,26 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       }
 
       if (!foundWedge) {
-        return { pass: false, data: { _diagnostics: { value: 'no wedge formation found', threshold: `${minWedgeBars}-${maxWedgeBars} bars, ${rangeContractionPct}% contraction` } } };
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no wedge formation found', threshold: `${minWedgeBars}-${maxWedgeBars} bars, ${rangeContractionPct}% contraction` } } };
       }
 
       let vol20Avg = 0;
-      for (let i = 1; i <= 20 && i < candles.length; i++) vol20Avg += candles[i].volume;
+      for (let i = 1; i <= 20 && i < effectiveCandles.length; i++) vol20Avg += effectiveCandles[i].volume;
       vol20Avg /= 20;
       const volumeRatio = vol20Avg > 0 ? today.volume / vol20Avg : 0;
       if (volumeRatio < minVolumeRatio) {
-        return { pass: false, data: { _diagnostics: { value: `vol ${volumeRatio.toFixed(1)}x`, threshold: `≥${minVolumeRatio}x` } } };
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `vol ${volumeRatio.toFixed(1)}x`, threshold: `≥${minVolumeRatio}x` } } };
       }
 
       const finalHalf = Math.floor(wedgeBars / 2);
       let finalEarlyRangeSum = 0, finalLateRangeSum = 0;
-      for (let i = 1 + wedgeBars - finalHalf; i < 1 + wedgeBars; i++) finalEarlyRangeSum += candles[i].high - candles[i].low;
-      for (let i = 1; i < 1 + finalHalf; i++) finalLateRangeSum += candles[i].high - candles[i].low;
+      for (let i = 1 + wedgeBars - finalHalf; i < 1 + wedgeBars; i++) finalEarlyRangeSum += effectiveCandles[i].high - effectiveCandles[i].low;
+      for (let i = 1; i < 1 + finalHalf; i++) finalLateRangeSum += effectiveCandles[i].high - effectiveCandles[i].low;
       const finalContraction = finalEarlyRangeSum > 0 ? ((finalEarlyRangeSum / finalHalf - finalLateRangeSum / finalHalf) / (finalEarlyRangeSum / finalHalf)) * 100 : 0;
 
       let priceVs200dma: "above" | "near" | "below" = "below";
-      if (candles.length >= 200) {
-        const sma200 = calcSMA(candles, 200);
+      if (effectiveCandles.length >= 200) {
+        const sma200 = calcSMA(effectiveCandles, 200);
         const pctFrom200 = sma200 > 0 ? ((today.close - sma200) / sma200) * 100 : 0;
         if (pctFrom200 > 5) priceVs200dma = "above";
         else if (pctFrom200 > -5) priceVs200dma = "near";
@@ -1374,6 +1432,9 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       return {
         pass: true,
         data: {
+          evaluationStartBar: skip,
+          evaluationEndBar: skip,
+          patternEndBar: skip,
           wedgePopDetected: true,
           popType,
           gapPercent: Math.round(gapPct * 10) / 10,
@@ -1394,6 +1455,349 @@ const PRICE_ACTION: IndicatorDefinition[] = [
       };
     },
   },
+  {
+    id: "PA-18",
+    name: "Price Change Over Period",
+    category: "Price Action",
+    description: "Measures price change from a starting point forward over a specified number of bars. Unlike other indicators that look backward from today, this checks what happened AFTER a pattern. Use for sequences like '3 updays then 5% decline' or 'base then 10% advance'. When connected to upstream patterns, automatically starts measuring from where that pattern ended.",
+    provides: [{ linkType: "sequenceOffset", paramName: "period" }],
+    consumes: [{ paramName: "startBar", dataKey: "patternEndBar" }],
+    params: [
+      { name: "startBar", label: "Start Bar", type: "number", defaultValue: 10, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "period", label: "Period (bars)", type: "number", defaultValue: 5, min: 1, max: 50, step: 1 },
+      { name: "changeType", label: "Change Type", type: "select", defaultValue: "gain", options: ["gain", "decline", "any"] },
+      { name: "minChangePct", label: "Min Change %", type: "number", defaultValue: 5, min: 0, max: 100, step: 0.5 },
+      { name: "maxChangePct", label: "Max Change %", type: "number", defaultValue: 100, min: 0, max: 200, step: 1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const startBar = upstreamData?.patternEndBar ?? params.startBar ?? 10;
+      const period = params.period ?? 5;
+      const changeType = params.changeType ?? "gain";
+      const minChange = params.minChangePct ?? 5;
+      const maxChange = params.maxChangePct ?? 100;
+      
+      const endBar = Math.max(0, startBar - period);
+      
+      if (candles.length <= startBar) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minChange}%-${maxChange}% ${changeType}` } } };
+      }
+      
+      const startPrice = candles[startBar]?.close;
+      const endPrice = candles[endBar]?.close;
+      
+      if (!startPrice || !endPrice || startPrice === 0) {
+        return { pass: false, data: { _diagnostics: { value: 'missing price data', threshold: `${minChange}%-${maxChange}% ${changeType}` } } };
+      }
+      
+      const changePct = ((endPrice - startPrice) / startPrice) * 100;
+      const absChange = Math.abs(changePct);
+      
+      let pass = false;
+      if (changeType === "gain") {
+        pass = changePct >= minChange && changePct <= maxChange;
+      } else if (changeType === "decline") {
+        pass = changePct <= -minChange && changePct >= -maxChange;
+      } else {
+        pass = absChange >= minChange && absChange <= maxChange;
+      }
+      
+      return { 
+        pass, 
+        data: { 
+          priceChangeStartBar: startBar,
+          priceChangeEndBar: endBar,
+          patternEndBar: endBar,
+          _diagnostics: { 
+            value: `${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%`, 
+            threshold: `${minChange}%-${maxChange}% ${changeType}`,
+            detail: `$${startPrice.toFixed(2)} (bar ${startBar}) → $${endPrice.toFixed(2)} (bar ${endBar}) over ${period} bars`
+          } 
+        }
+      };
+    },
+  },
+  {
+    id: "PA-19",
+    name: "Undercut & Rally",
+    category: "Price Action",
+    description: "Detects the classic U&R shakeout pattern: price undercuts (closes below) a key moving average, then rallies back above it within a specified number of bars. This pattern traps weak hands and often precedes strong moves. Requires price to currently be above the MA after completing the undercut-rally sequence. Use Max Bars Below to control how long the undercut can last, and Min Undercut Depth to require meaningful penetration below the MA.",
+    provides: [{ linkType: "sequenceOffset", paramName: "lookback" }],
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 21, min: 5, max: 200, step: 1 },
+      { name: "maType", label: "MA Type", type: "select", defaultValue: "ema", options: ["sma", "ema"] },
+      { name: "lookback", label: "Lookback Window (bars)", type: "number", defaultValue: 10, min: 3, max: 30, step: 1 },
+      { name: "maxUndercutBars", label: "Max Bars Below MA", type: "number", defaultValue: 5, min: 1, max: 15, step: 1 },
+      { name: "minUndercutPct", label: "Min Undercut Depth %", type: "number", defaultValue: 0, min: 0, max: 10, step: 0.5 },
+      { name: "requireVolumeSpike", label: "Require Volume on Rally", type: "boolean", defaultValue: false },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const maPeriod = params.maPeriod ?? 21;
+      const maType = (params.maType ?? "ema") as "sma" | "ema";
+      const lookback = params.lookback ?? 10;
+      const maxUndercutBars = params.maxUndercutBars ?? 5;
+      const minUndercutPct = params.minUndercutPct ?? 0;
+      const requireVolume = params.requireVolumeSpike ?? false;
+      
+      if (candles.length < skip + maPeriod + lookback + 5) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `U&R within ${lookback} bars` } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const currentPrice = effectiveCandles[0].close;
+      const currentMA = maType === "sma" ? calcSMA(effectiveCandles, maPeriod) : calcEMA(effectiveCandles, maPeriod);
+      
+      if (currentPrice <= currentMA) {
+        return { pass: false, data: { _diagnostics: { 
+          value: 'price below MA', 
+          threshold: `need price > ${maPeriod} ${maType.toUpperCase()}`,
+          detail: `$${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}`
+        }}};
+      }
+      
+      const getMAAt = (offset: number): number => {
+        if (effectiveCandles.length < offset + maPeriod) return 0;
+        const slice = effectiveCandles.slice(offset);
+        return maType === "sma" ? calcSMA(slice, maPeriod) : calcEMA(slice, maPeriod);
+      };
+      
+      for (let rallyBar = 1; rallyBar < lookback; rallyBar++) {
+        const rallyMA = getMAAt(rallyBar);
+        const rallyPrice = effectiveCandles[rallyBar].close;
+        const prevPrice = effectiveCandles[rallyBar + 1]?.close;
+        const prevMA = getMAAt(rallyBar + 1);
+        
+        if (!prevPrice || prevMA === 0 || rallyMA === 0) continue;
+        
+        if (prevPrice <= prevMA && rallyPrice > rallyMA) {
+          let undercutBar = -1;
+          let undercutDepth = 0;
+          let barsBelow = 0;
+          let undercutLow = Infinity;
+          
+          for (let i = rallyBar + 1; i < Math.min(rallyBar + 1 + maxUndercutBars + 3, effectiveCandles.length - maPeriod); i++) {
+            const barPrice = effectiveCandles[i].close;
+            const barMA = getMAAt(i);
+            
+            if (barMA === 0) break;
+            
+            if (barPrice < barMA) {
+              barsBelow++;
+              const depth = ((barMA - barPrice) / barMA) * 100;
+              if (depth > undercutDepth) {
+                undercutDepth = depth;
+                undercutBar = i;
+              }
+              if (barPrice < undercutLow) undercutLow = barPrice;
+            } else if (barsBelow > 0) {
+              break;
+            }
+          }
+          
+          if (undercutBar > 0 && barsBelow <= maxUndercutBars && undercutDepth >= minUndercutPct) {
+            if (requireVolume) {
+              const volSlice = effectiveCandles.slice(rallyBar + 1, Math.min(rallyBar + 21, effectiveCandles.length));
+              const avgVol = volSlice.reduce((s, c) => s + c.volume, 0) / volSlice.length;
+              const rallyVol = effectiveCandles[rallyBar].volume;
+              if (rallyVol < avgVol * 1.2) continue;
+            }
+            
+            return { 
+              pass: true, 
+              data: { 
+                evaluationStartBar: skip + undercutBar,
+                evaluationEndBar: skip + rallyBar,
+                patternEndBar: skip,
+                undercutBar: skip + undercutBar,
+                rallyBar: skip + rallyBar,
+                barsBelow,
+                undercutDepthPct: undercutDepth,
+                undercutLowPrice: undercutLow,
+                _cocHighlight: { type: "urPattern", undercutBar: skip + undercutBar, rallyBar: skip + rallyBar, maValue: currentMA },
+                _diagnostics: { 
+                  value: `U&R ${rallyBar} bars ago`, 
+                  threshold: `within ${lookback} bars`,
+                  detail: `undercut ${undercutDepth.toFixed(1)}% below ${maPeriod} ${maType.toUpperCase()} for ${barsBelow} bars, rallied bar ${rallyBar}`
+                } 
+              }
+            };
+          }
+        }
+      }
+      
+      return { 
+        pass: false, 
+        data: { 
+          patternEndBar: skip,
+          _diagnostics: { 
+            value: 'no U&R found', 
+            threshold: `within ${lookback} bars`,
+            detail: `price $${currentPrice.toFixed(2)} vs ${maPeriod} ${maType.toUpperCase()} $${currentMA.toFixed(2)}`
+          }
+        }
+      };
+    },
+  },
+  {
+    id: "PA-20",
+    name: "Pullback to MA",
+    category: "Price Action",
+    description: "Finds stocks that ran up, pulled back to touch or approach a key moving average, and are now bouncing. The classic 'buy the dip' setup in an uptrend. Requires a prior advance, a pullback that brings price near the MA (within touch threshold), and current price recovering above the recent low. Optional volume dry-up during pullback confirms institutional holding.",
+    provides: [{ linkType: "sequenceOffset", paramName: "lookback" }],
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "maPeriod", label: "MA Period", type: "number", defaultValue: 21, min: 5, max: 200, step: 1 },
+      { name: "maType", label: "MA Type", type: "select", defaultValue: "ema", options: ["sma", "ema"] },
+      { name: "lookback", label: "Lookback Window (bars)", type: "number", defaultValue: 20, min: 5, max: 60, step: 1 },
+      { name: "priorAdvancePct", label: "Min Prior Advance %", type: "number", defaultValue: 15, min: 5, max: 100, step: 5 },
+      { name: "priorAdvanceBars", label: "Prior Advance Lookback", type: "number", defaultValue: 60, min: 20, max: 200, step: 10 },
+      { name: "touchThresholdPct", label: "MA Touch Threshold %", type: "number", defaultValue: 2, min: 0, max: 5, step: 0.5 },
+      { name: "bounceConfirmPct", label: "Bounce Confirm %", type: "number", defaultValue: 1, min: 0, max: 10, step: 0.5 },
+      { name: "requireVolumeDryUp", label: "Require Volume Dry-Up", type: "boolean", defaultValue: false },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const maPeriod = params.maPeriod ?? 21;
+      const maType = (params.maType ?? "ema") as "sma" | "ema";
+      const lookback = params.lookback ?? 20;
+      const priorAdvancePct = params.priorAdvancePct ?? 15;
+      const priorAdvanceBars = params.priorAdvanceBars ?? 60;
+      const touchThreshold = params.touchThresholdPct ?? 2;
+      const bounceConfirm = params.bounceConfirmPct ?? 1;
+      const requireVolDryUp = params.requireVolumeDryUp ?? false;
+      
+      const needed = skip + Math.max(maPeriod, lookback) + priorAdvanceBars;
+      if (candles.length < needed) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `pullback to ${maPeriod} ${maType.toUpperCase()}` } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const currentPrice = effectiveCandles[0].close;
+      const currentMA = maType === "sma" ? calcSMA(effectiveCandles, maPeriod) : calcEMA(effectiveCandles, maPeriod);
+      
+      if (currentPrice <= currentMA * 0.97) {
+        return { pass: false, data: { _diagnostics: { 
+          value: 'price too far below MA', 
+          threshold: `need price near/above ${maPeriod} ${maType.toUpperCase()}`,
+          detail: `$${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}`
+        }}};
+      }
+      
+      const getMAAt = (offset: number): number => {
+        if (effectiveCandles.length < offset + maPeriod) return 0;
+        const slice = effectiveCandles.slice(offset);
+        return maType === "sma" ? calcSMA(slice, maPeriod) : calcEMA(slice, maPeriod);
+      };
+      
+      let peakPrice = 0;
+      let peakBar = -1;
+      for (let i = 0; i < Math.min(priorAdvanceBars, effectiveCandles.length); i++) {
+        if (effectiveCandles[i].high > peakPrice) {
+          peakPrice = effectiveCandles[i].high;
+          peakBar = i;
+        }
+      }
+      
+      if (peakBar < 3) {
+        return { pass: false, data: { _diagnostics: { 
+          value: 'peak too recent', 
+          threshold: `need pullback from high`,
+          detail: `peak $${peakPrice.toFixed(2)} at bar ${peakBar}`
+        }}};
+      }
+      
+      const advanceStart = Math.min(peakBar + priorAdvanceBars, effectiveCandles.length - 1);
+      const advanceStartPrice = effectiveCandles[advanceStart].close;
+      const advance = advanceStartPrice > 0 ? ((peakPrice - advanceStartPrice) / advanceStartPrice) * 100 : 0;
+      
+      if (advance < priorAdvancePct) {
+        return { pass: false, data: { _diagnostics: { 
+          value: `advance ${advance.toFixed(1)}%`, 
+          threshold: `need ≥${priorAdvancePct}% prior advance`,
+          detail: `$${advanceStartPrice.toFixed(2)} → $${peakPrice.toFixed(2)}`
+        }}};
+      }
+      
+      let touchBar = -1;
+      let touchLow = Infinity;
+      let touchMA = 0;
+      
+      for (let i = 1; i < Math.min(lookback, peakBar); i++) {
+        const barLow = effectiveCandles[i].low;
+        const barMA = getMAAt(i);
+        if (barMA === 0) continue;
+        
+        const distFromMA = ((barLow - barMA) / barMA) * 100;
+        
+        if (distFromMA <= touchThreshold && distFromMA >= -touchThreshold) {
+          if (barLow < touchLow) {
+            touchLow = barLow;
+            touchBar = i;
+            touchMA = barMA;
+          }
+        }
+      }
+      
+      if (touchBar < 0) {
+        return { pass: false, data: { _diagnostics: { 
+          value: 'no MA touch', 
+          threshold: `need price within ${touchThreshold}% of ${maPeriod} ${maType.toUpperCase()}`,
+          detail: `during pullback from $${peakPrice.toFixed(2)}`
+        }}};
+      }
+      
+      const bounceFromLow = touchLow > 0 ? ((currentPrice - touchLow) / touchLow) * 100 : 0;
+      if (bounceFromLow < bounceConfirm) {
+        return { pass: false, data: { _diagnostics: { 
+          value: `bounce ${bounceFromLow.toFixed(1)}%`, 
+          threshold: `need ≥${bounceConfirm}% bounce from low`,
+          detail: `low $${touchLow.toFixed(2)} at bar ${touchBar}`
+        }}};
+      }
+      
+      if (requireVolDryUp) {
+        const pbSlice = effectiveCandles.slice(1, touchBar + 1);
+        const preSlice = effectiveCandles.slice(touchBar + 1, touchBar + 21);
+        if (pbSlice.length > 0 && preSlice.length > 0) {
+          const pbAvgVol = pbSlice.reduce((s, c) => s + c.volume, 0) / pbSlice.length;
+          const preAvgVol = preSlice.reduce((s, c) => s + c.volume, 0) / preSlice.length;
+          if (preAvgVol > 0 && pbAvgVol > preAvgVol * 0.8) {
+            return { pass: false, data: { _diagnostics: { 
+              value: 'no volume dry-up', 
+              threshold: `need volume contraction on pullback`,
+              detail: `pullback vol ${(pbAvgVol/preAvgVol*100).toFixed(0)}% of prior`
+            }}};
+          }
+        }
+      }
+      
+      const pullbackDepth = peakPrice > 0 ? ((peakPrice - touchLow) / peakPrice) * 100 : 0;
+      
+      return { 
+        pass: true, 
+        data: { 
+          evaluationStartBar: skip + peakBar,
+          evaluationEndBar: skip + touchBar,
+          patternEndBar: skip,
+          peakBar: skip + peakBar,
+          peakPrice,
+          touchBar: skip + touchBar,
+          touchLowPrice: touchLow,
+          touchMAPrice: touchMA,
+          priorAdvancePct: advance,
+          pullbackDepthPct: pullbackDepth,
+          bounceFromLowPct: bounceFromLow,
+          _cocHighlight: { type: "pullbackPattern", peakBar: skip + peakBar, touchBar: skip + touchBar, maValue: currentMA },
+          _diagnostics: { 
+            value: `PB to ${maPeriod} ${maType.toUpperCase()}`, 
+            threshold: `within ${lookback} bars`,
+            detail: `${advance.toFixed(0)}% advance, ${pullbackDepth.toFixed(1)}% pullback, touched MA bar ${touchBar}, bounced ${bounceFromLow.toFixed(1)}%`
+          } 
+        }
+      };
+    },
+  },
 ];
 
 const RELATIVE_STRENGTH: IndicatorDefinition[] = [
@@ -1403,17 +1807,21 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "Finds stocks outperforming the benchmark index (S&P 500) over a time period. A stock that gained 15% while the index gained 5% has 10% outperformance. Leaders in a bull market consistently outperform the index — this filters for those winners and rejects laggards.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "minOutperformance", label: "Min Outperformance %", type: "number", defaultValue: 5, min: -50, max: 100, step: 1 },
     ],
-    evaluate: (candles, params, benchmarkCandles) => {
+    evaluate: (candles, params, benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 60;
       const minOut = params.minOutperformance ?? 5;
-      if (candles.length < period || !benchmarkCandles || benchmarkCandles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minOut}%` } } };
-      const stockReturn = ((candles[0].close - candles[period - 1].close) / candles[period - 1].close) * 100;
-      const benchReturn = ((benchmarkCandles[0].close - benchmarkCandles[period - 1].close) / benchmarkCandles[period - 1].close) * 100;
+      if (candles.length < skip + period || !benchmarkCandles || benchmarkCandles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minOut}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const effectiveBench = skip > 0 ? benchmarkCandles.slice(skip) : benchmarkCandles;
+      const stockReturn = ((effectiveCandles[0].close - effectiveCandles[period - 1].close) / effectiveCandles[period - 1].close) * 100;
+      const benchReturn = ((effectiveBench[0].close - effectiveBench[period - 1].close) / effectiveBench[period - 1].close) * 100;
       const outperf = stockReturn - benchReturn;
-      return { pass: outperf >= minOut, data: { _diagnostics: { value: `${outperf.toFixed(1)}%`, threshold: `≥${minOut}%`, detail: `stock ${stockReturn.toFixed(1)}% vs bench ${benchReturn.toFixed(1)}%` } } };
+      return { pass: outperf >= minOut, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${outperf.toFixed(1)}%`, threshold: `≥${minOut}%`, detail: `stock ${stockReturn.toFixed(1)}% vs bench ${benchReturn.toFixed(1)}%` } } };
     },
   },
   {
@@ -1422,18 +1830,22 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "Calculates a raw strength ratio: stock return divided by benchmark return. A score of 1.5 means the stock gained 50% more than the index. Scores above 1.0 = outperforming; below 1.0 = underperforming. Use Min RS Score of 1.2+ to find meaningful leaders, not just marginal outperformers.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "minScore", label: "Min RS Score", type: "number", defaultValue: 1.2, min: 0, max: 5, step: 0.1 },
     ],
-    evaluate: (candles, params, benchmarkCandles) => {
+    evaluate: (candles, params, benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 60;
       const minScore = params.minScore ?? 1.2;
-      if (candles.length < period || !benchmarkCandles || benchmarkCandles.length < period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minScore}x` } } };
-      const stockReturn = candles[0].close / candles[period - 1].close;
-      const benchReturn = benchmarkCandles[0].close / benchmarkCandles[period - 1].close;
+      if (candles.length < skip + period || !benchmarkCandles || benchmarkCandles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minScore}x` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const effectiveBench = skip > 0 ? benchmarkCandles.slice(skip) : benchmarkCandles;
+      const stockReturn = effectiveCandles[0].close / effectiveCandles[period - 1].close;
+      const benchReturn = effectiveBench[0].close / effectiveBench[period - 1].close;
       if (benchReturn === 0) return { pass: false, data: { _diagnostics: { value: 'bench=0', threshold: `≥${minScore}x` } } };
       const score = stockReturn / benchReturn;
-      return { pass: score >= minScore, data: { _diagnostics: { value: `${score.toFixed(2)}x`, threshold: `≥${minScore}x` } } };
+      return { pass: score >= minScore, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${score.toFixed(2)}x`, threshold: `≥${minScore}x` } } };
     },
   },
   {
@@ -1442,17 +1854,21 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "Checks if the stock's relative strength line vs the benchmark is making or near a new high. When the RS line hits new highs, the stock is outperforming the market more than it has in months — a hallmark of true market leaders. Tolerance allows stocks within a few percent of the high to pass.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "lookback", label: "Lookback Period", type: "number", defaultValue: 60, min: 10, max: 260, step: 5 },
       { name: "tolerance", label: "Tolerance %", type: "number", defaultValue: 2, min: 0, max: 10, step: 0.5 },
     ],
-    evaluate: (candles, params, benchmarkCandles) => {
+    evaluate: (candles, params, benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const lookback = params.lookback ?? 60;
       const tolerance = params.tolerance ?? 2;
-      if (candles.length < lookback || !benchmarkCandles || benchmarkCandles.length < lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `within ${tolerance}% of high` } } };
+      if (candles.length < skip + lookback || !benchmarkCandles || benchmarkCandles.length < skip + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `within ${tolerance}% of high` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const effectiveBench = skip > 0 ? benchmarkCandles.slice(skip) : benchmarkCandles;
       const rsRatios: number[] = [];
       for (let i = 0; i < lookback; i++) {
-        if (benchmarkCandles[i].close > 0) {
-          rsRatios.push(candles[i].close / benchmarkCandles[i].close);
+        if (effectiveBench[i].close > 0) {
+          rsRatios.push(effectiveCandles[i].close / effectiveBench[i].close);
         }
       }
       if (rsRatios.length < 2) return { pass: false, data: { _diagnostics: { value: 'insufficient RS data', threshold: `within ${tolerance}% of high` } } };
@@ -1460,7 +1876,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
       const maxRS = Math.max(...rsRatios);
       const pass = currentRS >= maxRS * (1 - tolerance / 100);
       const pctFromHigh = maxRS > 0 ? ((maxRS - currentRS) / maxRS * 100).toFixed(1) : '0';
-      return { pass, data: { _diagnostics: { value: `${pctFromHigh}% from high`, threshold: `within ${tolerance}%`, detail: `RS ${currentRS.toFixed(3)}, max ${maxRS.toFixed(3)}` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${pctFromHigh}% from high`, threshold: `within ${tolerance}%`, detail: `RS ${currentRS.toFixed(3)}, max ${maxRS.toFixed(3)}` } } };
     },
   },
   {
@@ -1469,16 +1885,20 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "The classic RSI momentum oscillator, ranging 0-100. Values above 50 show bullish momentum; above 70 is overbought (strong but potentially extended). Values below 30 are oversold (weak but potentially bouncing). Use a 50-80 range to find stocks with healthy upward momentum that aren't overheated.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "RSI Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minRSI", label: "Min RSI", type: "number", defaultValue: 50, min: 0, max: 100, step: 1 },
       { name: "maxRSI", label: "Max RSI", type: "number", defaultValue: 80, min: 0, max: 100, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 14;
       const minRSI = params.minRSI ?? 50;
       const maxRSI = params.maxRSI ?? 80;
-      const rsi = calcRSI(candles, period);
-      return { pass: rsi >= minRSI && rsi <= maxRSI, data: { _diagnostics: { value: `${rsi.toFixed(1)}`, threshold: `${minRSI}-${maxRSI}` } } };
+      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minRSI}-${maxRSI}` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const rsi = calcRSI(effectiveCandles, period);
+      return { pass: rsi >= minRSI && rsi <= maxRSI, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${rsi.toFixed(1)}`, threshold: `${minRSI}-${maxRSI}` } } };
     },
   },
   {
@@ -1487,19 +1907,22 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "The MACD momentum indicator with multiple signal conditions. 'Bullish cross' catches the moment the MACD line crosses above the signal line — a buy signal. 'Histogram positive' confirms upward momentum. 'Above zero' means the fast EMA is above the slow EMA. Use for momentum confirmation alongside trend filters.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "fastPeriod", label: "Fast Period", type: "number", defaultValue: 12, min: 5, max: 50, step: 1 },
       { name: "slowPeriod", label: "Slow Period", type: "number", defaultValue: 26, min: 10, max: 100, step: 1 },
       { name: "signalPeriod", label: "Signal Period", type: "number", defaultValue: 9, min: 3, max: 30, step: 1 },
       { name: "condition", label: "Condition", type: "select", defaultValue: "bullish_cross", options: ["bullish_cross", "bearish_cross", "histogram_positive", "histogram_negative", "above_zero", "below_zero"] },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const fast = params.fastPeriod ?? 12;
       const slow = params.slowPeriod ?? 26;
       const sig = params.signalPeriod ?? 9;
       const condition = params.condition ?? "bullish_cross";
-      if (candles.length < slow + sig) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
-      const macd = calcMACD(candles, fast, slow, sig);
-      const prevMACD = calcMACD(candles.slice(1), fast, slow, sig);
+      if (candles.length < skip + slow + sig) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const macd = calcMACD(effectiveCandles, fast, slow, sig);
+      const prevMACD = calcMACD(effectiveCandles.slice(1), fast, slow, sig);
       let pass = false;
       switch (condition) {
         case "bullish_cross": pass = prevMACD.macd <= prevMACD.signal && macd.macd > macd.signal; break;
@@ -1510,7 +1933,7 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
         case "below_zero": pass = macd.macd < 0; break;
         default: pass = false;
       }
-      return { pass, data: { _diagnostics: { value: `MACD ${macd.macd.toFixed(2)}, sig ${macd.signal.toFixed(2)}`, threshold: condition, detail: `hist ${macd.histogram.toFixed(2)}` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `MACD ${macd.macd.toFixed(2)}, sig ${macd.signal.toFixed(2)}`, threshold: condition, detail: `hist ${macd.histogram.toFixed(2)}` } } };
     },
   },
   {
@@ -1519,17 +1942,21 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "Measures how STRONG the current trend is, regardless of direction. ADX above 25 = well-defined trend; above 40 = very strong trend; below 20 = no trend (choppy, range-bound). Enable 'Require Bullish' to filter for uptrends only (where buying pressure exceeds selling pressure).",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "ADX Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
       { name: "minADX", label: "Min ADX", type: "number", defaultValue: 25, min: 0, max: 100, step: 1 },
       { name: "requireBullish", label: "Require Bullish (+DI > -DI)", type: "boolean", defaultValue: true },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 14;
       const minADX = params.minADX ?? 25;
       const requireBullish = params.requireBullish ?? true;
-      const { adx, plusDI, minusDI } = calcADX(candles, period);
+      if (candles.length < skip + period * 2 + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `≥${minADX}` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const { adx, plusDI, minusDI } = calcADX(effectiveCandles, period);
       const pass = adx >= minADX && (!requireBullish || plusDI > minusDI);
-      return { pass, data: { _diagnostics: { value: `ADX ${adx.toFixed(1)}`, threshold: `≥${minADX}`, detail: `+DI ${plusDI.toFixed(1)} / -DI ${minusDI.toFixed(1)}` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `ADX ${adx.toFixed(1)}`, threshold: `≥${minADX}`, detail: `+DI ${plusDI.toFixed(1)} / -DI ${minusDI.toFixed(1)}` } } };
     },
   },
   {
@@ -1538,18 +1965,21 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     category: "Relative Strength",
     description: "Elder's momentum indicator comparing price extremes to the EMA. Bull Power (High minus EMA) > 0 means buyers pushed price above the trend — bullish. 'Bull rising' catches improving momentum across multiple bars. 'Bear rising' (negative bear power getting less negative) signals selling pressure is fading.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "EMA Period", type: "number", defaultValue: 13, min: 5, max: 50, step: 1 },
       { name: "condition", label: "Condition", type: "select", defaultValue: "bull_positive", options: ["bull_positive", "bear_negative", "bull_rising", "bear_rising"] },
       { name: "lookback", label: "Lookback (for rising)", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 13;
       const condition = params.condition ?? "bull_positive";
       const lookback = params.lookback ?? 3;
-      if (candles.length < period + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
-      const ema = calcEMA(candles, period);
-      const bullPower = candles[0].high - ema;
-      const bearPower = candles[0].low - ema;
+      if (candles.length < skip + period + lookback) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const ema = calcEMA(effectiveCandles, period);
+      const bullPower = effectiveCandles[0].high - ema;
+      const bearPower = effectiveCandles[0].low - ema;
       let pass = false;
       switch (condition) {
         case "bull_positive": pass = bullPower > 0; break;
@@ -1557,10 +1987,10 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
         case "bull_rising": {
           pass = true;
           for (let i = 0; i < lookback - 1; i++) {
-            const e1 = calcEMA(candles.slice(i), period);
-            const e2 = calcEMA(candles.slice(i + 1), period);
-            const bp1 = candles[i].high - e1;
-            const bp2 = candles[i + 1].high - e2;
+            const e1 = calcEMA(effectiveCandles.slice(i), period);
+            const e2 = calcEMA(effectiveCandles.slice(i + 1), period);
+            const bp1 = effectiveCandles[i].high - e1;
+            const bp2 = effectiveCandles[i + 1].high - e2;
             if (bp1 <= bp2) { pass = false; break; }
           }
           break;
@@ -1568,17 +1998,17 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
         case "bear_rising": {
           pass = true;
           for (let i = 0; i < lookback - 1; i++) {
-            const e1 = calcEMA(candles.slice(i), period);
-            const e2 = calcEMA(candles.slice(i + 1), period);
-            const bp1 = candles[i].low - e1;
-            const bp2 = candles[i + 1].low - e2;
+            const e1 = calcEMA(effectiveCandles.slice(i), period);
+            const e2 = calcEMA(effectiveCandles.slice(i + 1), period);
+            const bp1 = effectiveCandles[i].low - e1;
+            const bp2 = effectiveCandles[i + 1].low - e2;
             if (bp1 <= bp2) { pass = false; break; }
           }
           break;
         }
         default: pass = false;
       }
-      return { pass, data: { _diagnostics: { value: `bull ${bullPower.toFixed(2)}, bear ${bearPower.toFixed(2)}`, threshold: condition } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `bull ${bullPower.toFixed(2)}, bear ${bearPower.toFixed(2)}`, threshold: condition } } };
     },
   },
 ];
@@ -1590,49 +2020,22 @@ const VOLATILITY: IndicatorDefinition[] = [
     category: "Volatility",
     description: "Measures how wide the Bollinger Bands are. Narrow bands (low width %) mean the stock is in a low-volatility squeeze — historically, these often precede big breakout moves. A width under 10% is compressed; under 5% is an extreme squeeze. Use Max Width to find stocks that are coiled tight.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "BB Period", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
       { name: "stdDev", label: "Std Dev Multiplier", type: "number", defaultValue: 2, min: 1, max: 4, step: 0.5 },
       { name: "maxWidth", label: "Max Width %", type: "number", defaultValue: 10, min: 1, max: 50, step: 0.5 },
       { name: "minWidth", label: "Min Width %", type: "number", defaultValue: 0, min: 0, max: 50, step: 0.5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 20;
       const stdDev = params.stdDev ?? 2;
       const maxWidth = params.maxWidth ?? 10;
       const minWidth = params.minWidth ?? 0;
-      const bb = calcBollingerBands(candles, period, stdDev);
-      return { pass: bb.width >= minWidth && bb.width <= maxWidth, data: { _diagnostics: { value: `${bb.width.toFixed(1)}%`, threshold: `${minWidth}%-${maxWidth}%` } } };
-    },
-  },
-  {
-    id: "VLT-2",
-    name: "ATR Contraction/Expansion",
-    category: "Volatility",
-    description: "Compares the stock's recent volatility (ATR) to its historical volatility. 'Contracting' finds stocks where recent ATR has dropped significantly — the calm before the storm. 'Expanding' catches stocks where volatility is exploding — breakout or breakdown in progress. The threshold sets how much change (%) is needed to pass.",
-    params: [
-      { name: "atrPeriod", label: "ATR Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
-      { name: "recentDays", label: "Recent Bars", type: "number", defaultValue: 5, min: 1, max: 30, step: 1 },
-      { name: "baselineDays", label: "Baseline Offset (bars)", type: "number", defaultValue: 20, min: 5, max: 100, step: 5 },
-      { name: "condition", label: "Condition", type: "select", defaultValue: "contracting", options: ["contracting", "expanding"] },
-      { name: "threshold", label: "Change Threshold %", type: "number", defaultValue: 25, min: 5, max: 80, step: 5 },
-    ],
-    evaluate: (candles, params) => {
-      const atrPeriod = params.atrPeriod ?? 14;
-      const recentDays = params.recentDays ?? 5;
-      const baselineDays = params.baselineDays ?? 20;
-      const condition = params.condition ?? "contracting";
-      const threshold = params.threshold ?? 25;
-      if (candles.length < atrPeriod + baselineDays + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${condition} ≥${threshold}%` } } };
-      let recentATRSum = 0;
-      for (let i = 0; i < recentDays; i++) {
-        recentATRSum += calcATR(candles.slice(i), atrPeriod);
-      }
-      const recentATR = recentATRSum / recentDays;
-      const baselineATR = calcATR(candles.slice(baselineDays), atrPeriod);
-      if (baselineATR === 0) return { pass: false, data: { _diagnostics: { value: 'baseline ATR=0', threshold: `${condition} ≥${threshold}%` } } };
-      const changePct = ((recentATR - baselineATR) / baselineATR) * 100;
-      const pass = condition === "contracting" ? changePct <= -threshold : changePct >= threshold;
-      return { pass, data: { _diagnostics: { value: `${changePct.toFixed(1)}%`, threshold: `${condition === "contracting" ? "≤-" : "≥"}${threshold}%`, detail: `recent ATR $${recentATR.toFixed(2)} vs baseline $${baselineATR.toFixed(2)}` } } };
+      if (candles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minWidth}%-${maxWidth}%` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const bb = calcBollingerBands(effectiveCandles, period, stdDev);
+      return { pass: bb.width >= minWidth && bb.width <= maxWidth, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${bb.width.toFixed(1)}%`, threshold: `${minWidth}%-${maxWidth}%` } } };
     },
   },
   {
@@ -1641,22 +2044,25 @@ const VOLATILITY: IndicatorDefinition[] = [
     category: "Volatility",
     description: "Compares today's bar range (high minus low) to the average daily range. A multiple under 0.5 means today's bar is half the normal size — tight, quiet action. A multiple above 2.0 means today was twice as wide as normal — an expansion day. Use for spotting narrow-range days inside bases or breakout expansion bars.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "period", label: "Avg Range Period", type: "number", defaultValue: 20, min: 5, max: 100, step: 1 },
       { name: "minMultiple", label: "Min Range Multiple", type: "number", defaultValue: 0, min: 0, max: 10, step: 0.1 },
       { name: "maxMultiple", label: "Max Range Multiple", type: "number", defaultValue: 1.5, min: 0.1, max: 10, step: 0.1 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 20;
       const minMult = params.minMultiple ?? 0;
       const maxMult = params.maxMultiple ?? 1.5;
-      if (candles.length < period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minMult}x-${maxMult}x` } } };
-      const todayRange = candles[0].high - candles[0].low;
+      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minMult}x-${maxMult}x` } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const todayRange = effectiveCandles[0].high - effectiveCandles[0].low;
       let avgRange = 0;
-      for (let i = 1; i <= period; i++) avgRange += candles[i].high - candles[i].low;
+      for (let i = 1; i <= period; i++) avgRange += effectiveCandles[i].high - effectiveCandles[i].low;
       avgRange /= period;
       if (avgRange === 0) return { pass: false, data: { _diagnostics: { value: 'avg range=0', threshold: `${minMult}x-${maxMult}x` } } };
       const multiple = todayRange / avgRange;
-      return { pass: multiple >= minMult && multiple <= maxMult, data: { _diagnostics: { value: `${multiple.toFixed(2)}x avg`, threshold: `${minMult}x-${maxMult}x`, detail: `today $${todayRange.toFixed(2)} vs avg $${avgRange.toFixed(2)}` } } };
+      return { pass: multiple >= minMult && multiple <= maxMult, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${multiple.toFixed(2)}x avg`, threshold: `${minMult}x-${maxMult}x`, detail: `today $${todayRange.toFixed(2)} vs avg $${avgRange.toFixed(2)}` } } };
     },
   },
   {
@@ -1665,24 +2071,65 @@ const VOLATILITY: IndicatorDefinition[] = [
     category: "Volatility",
     description: "Detects the TTM Squeeze — when Bollinger Bands contract inside the Keltner Channels. This extreme low-volatility state is like a compressed spring. When the squeeze fires (bands expand back outside Keltner), the stock often makes a sharp directional move. One of the most reliable volatility-based setups.",
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "bbPeriod", label: "BB Period", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
       { name: "bbStdDev", label: "BB Std Dev", type: "number", defaultValue: 2, min: 1, max: 4, step: 0.5 },
       { name: "kcPeriod", label: "Keltner Period", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
       { name: "kcMult", label: "Keltner ATR Multiplier", type: "number", defaultValue: 1.5, min: 0.5, max: 4, step: 0.5 },
     ],
-    evaluate: (candles, params) => {
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const bbPeriod = params.bbPeriod ?? 20;
       const bbStdDev = params.bbStdDev ?? 2;
       const kcPeriod = params.kcPeriod ?? 20;
       const kcMult = params.kcMult ?? 1.5;
-      if (candles.length < Math.max(bbPeriod, kcPeriod) + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: 'BB inside KC' } } };
-      const bb = calcBollingerBands(candles, bbPeriod, bbStdDev);
-      const ema = calcEMA(candles, kcPeriod);
-      const atr = calcATR(candles, kcPeriod);
+      const needed = Math.max(bbPeriod, kcPeriod) + 1;
+      if (candles.length < skip + needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: 'BB inside KC' } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const bb = calcBollingerBands(effectiveCandles, bbPeriod, bbStdDev);
+      const ema = calcEMA(effectiveCandles, kcPeriod);
+      const atr = calcATR(effectiveCandles, kcPeriod);
       const kcUpper = ema + kcMult * atr;
       const kcLower = ema - kcMult * atr;
       const pass = bb.lower > kcLower && bb.upper < kcUpper;
-      return { pass, data: { _diagnostics: { value: `BB ${bb.width.toFixed(1)}%`, threshold: 'BB inside KC', detail: `BB [${bb.lower.toFixed(2)}-${bb.upper.toFixed(2)}] KC [${kcLower.toFixed(2)}-${kcUpper.toFixed(2)}]` } } };
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `BB ${bb.width.toFixed(1)}%`, threshold: 'BB inside KC', detail: `BB [${bb.lower.toFixed(2)}-${bb.upper.toFixed(2)}] KC [${kcLower.toFixed(2)}-${kcUpper.toFixed(2)}]` } } };
+    },
+  },
+  {
+    id: "VLT-5",
+    name: "Price vs Bollinger Bands",
+    category: "Volatility",
+    description: "Checks where the current price sits relative to the Bollinger Bands. 'Above upper' finds stocks breaking out above the upper band (strong momentum but potentially overextended). 'Below lower' finds oversold bounces. 'Near middle' catches stocks reverting to the mean. The %B indicator (0-100) shows the exact position: 0 = at lower band, 50 = at middle, 100 = at upper band.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "period", label: "BB Period", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
+      { name: "stdDev", label: "Std Dev Multiplier", type: "number", defaultValue: 2, min: 1, max: 4, step: 0.5 },
+      { name: "position", label: "Price Position", type: "select", defaultValue: "above_upper", options: ["above_upper", "below_lower", "near_upper", "near_middle", "near_lower", "inside_bands"] },
+      { name: "tolerance", label: "Near Tolerance %", type: "number", defaultValue: 5, min: 1, max: 20, step: 1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const period = params.period ?? 20;
+      const stdDev = params.stdDev ?? 2;
+      const position = params.position ?? "above_upper";
+      const tolerance = (params.tolerance ?? 5) / 100;
+      if (candles.length < skip + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: position } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const bb = calcBollingerBands(effectiveCandles, period, stdDev);
+      const price = effectiveCandles[0].close;
+      const bandRange = bb.upper - bb.lower;
+      const percentB = bandRange > 0 ? ((price - bb.lower) / bandRange) * 100 : 50;
+      
+      let pass = false;
+      switch (position) {
+        case "above_upper": pass = price > bb.upper; break;
+        case "below_lower": pass = price < bb.lower; break;
+        case "near_upper": pass = Math.abs(price - bb.upper) / bb.upper <= tolerance; break;
+        case "near_middle": pass = Math.abs(price - bb.middle) / bb.middle <= tolerance; break;
+        case "near_lower": pass = Math.abs(price - bb.lower) / bb.lower <= tolerance; break;
+        case "inside_bands": pass = price >= bb.lower && price <= bb.upper; break;
+      }
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `%B: ${percentB.toFixed(1)}`, threshold: position, detail: `price $${price.toFixed(2)} vs bands [${bb.lower.toFixed(2)}-${bb.upper.toFixed(2)}]` } } };
     },
   },
 ];
@@ -1696,6 +2143,7 @@ const CONSOLIDATION: IndicatorDefinition[] = [
     provides: [{ linkType: "baseBar", paramName: "searchWindow" }],
     consumes: [{ paramName: "searchStart", dataKey: "baseStartBar" }, { paramName: "searchStart", dataKey: "detectedPeriod" }],
     params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "searchWindow", label: "Search Window (bars)", type: "number", defaultValue: 200, min: 20, max: 500, step: 10 },
       { name: "searchDirection", label: "Search Direction", type: "select", defaultValue: "backward", options: ["backward", "forward"] },
       { name: "minBaseLength", label: "Min Base Length (bars)", type: "number", defaultValue: 10, min: 5, max: 100, step: 1 },
@@ -1706,6 +2154,7 @@ const CONSOLIDATION: IndicatorDefinition[] = [
       { name: "skipRecentBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 100, step: 1, autoLink: { linkType: "basePeriod" } },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const searchWindow = params.searchWindow ?? 200;
       const direction = params.searchDirection ?? "backward";
       const minLen = params.minBaseLength ?? 10;
@@ -1719,7 +2168,7 @@ const CONSOLIDATION: IndicatorDefinition[] = [
       const upstreamDetectedPeriod = upstreamData?.detectedPeriod;
       const upstreamStartBar = typeof upstreamBaseStart === "number" ? upstreamBaseStart : (typeof upstreamDetectedPeriod === "number" ? upstreamDetectedPeriod : undefined);
       const dynamicStart = typeof upstreamStartBar === "number" ? upstreamStartBar + 1 : 0;
-      const startOffset = Math.max(dynamicStart, skipRecent);
+      const startOffset = Math.max(dynamicStart, skipRecent, skip);
 
       if (candles.length < startOffset + minLen + 10) {
         return { pass: false, data: { _diagnostics: { value: "insufficient data", threshold: `${minLen}-${maxLen} bar base within ${searchWindow} bars` } } };
@@ -1839,6 +2288,9 @@ const CONSOLIDATION: IndicatorDefinition[] = [
       return {
         pass: true,
         data: {
+          evaluationStartBar: startOffset,
+          evaluationEndBar: bestBase.end,
+          patternEndBar: bestBase.end,
           baseStartBar: bestBase.start,
           baseEndBar: bestBase.end,
           baseTopPrice: bestBase.topPrice,
@@ -1857,6 +2309,444 @@ const CONSOLIDATION: IndicatorDefinition[] = [
   },
 ];
 
+// === MOMENTUM INDICATORS ===
+const MOMENTUM: IndicatorDefinition[] = [
+  {
+    id: "MOM-1",
+    name: "Stochastic Oscillator",
+    category: "Momentum",
+    description: "The classic Stochastic momentum oscillator comparing the closing price to the high-low range over a period. %K is the fast line, %D is the smoothed signal line. Values above 80 are overbought (strong but extended); below 20 are oversold (weak but potential bounce). A bullish cross (%K crosses above %D) in oversold territory is a classic buy signal. Use for momentum confirmation and reversal detection.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "kPeriod", label: "%K Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
+      { name: "dPeriod", label: "%D Period", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
+      { name: "smooth", label: "Smoothing", type: "number", defaultValue: 3, min: 1, max: 10, step: 1 },
+      { name: "condition", label: "Condition", type: "select", defaultValue: "bullish_cross", options: ["bullish_cross", "bearish_cross", "overbought", "oversold", "k_above_d", "k_below_d"] },
+      { name: "overboughtLevel", label: "Overbought Level", type: "number", defaultValue: 80, min: 50, max: 95, step: 5 },
+      { name: "oversoldLevel", label: "Oversold Level", type: "number", defaultValue: 20, min: 5, max: 50, step: 5 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const kPeriod = params.kPeriod ?? 14;
+      const dPeriod = params.dPeriod ?? 3;
+      const smooth = params.smooth ?? 3;
+      const condition = params.condition ?? "bullish_cross";
+      const overbought = params.overboughtLevel ?? 80;
+      const oversold = params.oversoldLevel ?? 20;
+      const needed = kPeriod + dPeriod + smooth;
+      if (candles.length < skip + needed) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const stoch = calcStochastic(effectiveCandles, kPeriod, dPeriod, smooth);
+      let pass = false;
+      
+      switch (condition) {
+        case "bullish_cross": pass = stoch.k > stoch.d && stoch.prevK <= stoch.prevD; break;
+        case "bearish_cross": pass = stoch.k < stoch.d && stoch.prevK >= stoch.prevD; break;
+        case "overbought": pass = stoch.k >= overbought && stoch.d >= overbought; break;
+        case "oversold": pass = stoch.k <= oversold && stoch.d <= oversold; break;
+        case "k_above_d": pass = stoch.k > stoch.d; break;
+        case "k_below_d": pass = stoch.k < stoch.d; break;
+      }
+      
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `%K: ${stoch.k.toFixed(1)}, %D: ${stoch.d.toFixed(1)}`, threshold: condition, detail: `prev %K: ${stoch.prevK.toFixed(1)}, prev %D: ${stoch.prevD.toFixed(1)}` } } };
+    },
+  },
+  {
+    id: "MOM-2",
+    name: "RSI Divergence",
+    category: "Momentum",
+    description: "Detects divergence between price and RSI — a powerful reversal signal. Bullish divergence: price makes a lower low but RSI makes a higher low (hidden buying pressure). Bearish divergence: price makes a higher high but RSI makes a lower high (hidden selling pressure). Divergences often precede trend reversals. The lookback period controls how far back to search for the divergence pattern.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "rsiPeriod", label: "RSI Period", type: "number", defaultValue: 14, min: 5, max: 30, step: 1 },
+      { name: "lookback", label: "Divergence Lookback (bars)", type: "number", defaultValue: 20, min: 5, max: 50, step: 1 },
+      { name: "divergenceType", label: "Divergence Type", type: "select", defaultValue: "bullish", options: ["bullish", "bearish", "any"] },
+      { name: "minDivergence", label: "Min RSI Divergence", type: "number", defaultValue: 5, min: 1, max: 20, step: 1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const rsiPeriod = params.rsiPeriod ?? 14;
+      const lookback = params.lookback ?? 20;
+      const divergenceType = params.divergenceType ?? "bullish";
+      const minDiv = params.minDivergence ?? 5;
+      
+      if (candles.length < skip + lookback + rsiPeriod + 5) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${divergenceType} divergence` } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const rsiValues = calcRSISeries(effectiveCandles, rsiPeriod, lookback + 1);
+      const currentPrice = effectiveCandles[0].close;
+      const currentRSI = rsiValues[0];
+      
+      // Find swing lows/highs in price and RSI
+      let bullishDiv = false;
+      let bearishDiv = false;
+      
+      for (let i = 5; i < lookback - 2; i++) {
+        const pastPrice = effectiveCandles[i].close;
+        const pastRSI = rsiValues[i];
+        
+        // Bullish divergence: price lower low, RSI higher low
+        if (currentPrice < pastPrice && currentRSI > pastRSI + minDiv) {
+          // Check if these are actual swing lows
+          const priceIsLow = effectiveCandles[0].low <= Math.min(...effectiveCandles.slice(0, 3).map(c => c.low));
+          const pastPriceWasLow = effectiveCandles[i].low <= Math.min(...effectiveCandles.slice(i-2, i+3).map(c => c.low));
+          if (priceIsLow && pastPriceWasLow) bullishDiv = true;
+        }
+        
+        // Bearish divergence: price higher high, RSI lower high
+        if (currentPrice > pastPrice && currentRSI < pastRSI - minDiv) {
+          const priceIsHigh = effectiveCandles[0].high >= Math.max(...effectiveCandles.slice(0, 3).map(c => c.high));
+          const pastPriceWasHigh = effectiveCandles[i].high >= Math.max(...effectiveCandles.slice(i-2, i+3).map(c => c.high));
+          if (priceIsHigh && pastPriceWasHigh) bearishDiv = true;
+        }
+      }
+      
+      let pass = false;
+      let found = "none";
+      if (divergenceType === "bullish" && bullishDiv) { pass = true; found = "bullish"; }
+      else if (divergenceType === "bearish" && bearishDiv) { pass = true; found = "bearish"; }
+      else if (divergenceType === "any" && (bullishDiv || bearishDiv)) { pass = true; found = bullishDiv ? "bullish" : "bearish"; }
+      
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `RSI ${currentRSI.toFixed(1)}, div: ${found}`, threshold: `${divergenceType} divergence`, detail: `lookback ${lookback} bars, min div ${minDiv}` } } };
+    },
+  },
+  {
+    id: "MOM-3",
+    name: "MACD Histogram",
+    category: "Momentum",
+    description: "Focuses on the MACD histogram — the difference between the MACD line and signal line. A rising histogram (bars getting taller) shows accelerating momentum. 'Positive rising' catches stocks where bullish momentum is increasing. 'Negative falling' (histogram getting more negative) catches accelerating selloffs. Use for momentum confirmation and acceleration detection.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "fastPeriod", label: "Fast EMA", type: "number", defaultValue: 12, min: 5, max: 30, step: 1 },
+      { name: "slowPeriod", label: "Slow EMA", type: "number", defaultValue: 26, min: 10, max: 50, step: 1 },
+      { name: "signalPeriod", label: "Signal Period", type: "number", defaultValue: 9, min: 3, max: 20, step: 1 },
+      { name: "condition", label: "Histogram Condition", type: "select", defaultValue: "positive_rising", options: ["positive_rising", "positive_falling", "negative_rising", "negative_falling", "positive", "negative", "zero_cross_up", "zero_cross_down"] },
+      { name: "barsToCheck", label: "Bars to Check Trend", type: "number", defaultValue: 3, min: 2, max: 10, step: 1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const fast = params.fastPeriod ?? 12;
+      const slow = params.slowPeriod ?? 26;
+      const sig = params.signalPeriod ?? 9;
+      const condition = params.condition ?? "positive_rising";
+      const barsToCheck = params.barsToCheck ?? 3;
+      
+      if (candles.length < skip + slow + sig + barsToCheck + 5) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: condition } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const histValues: number[] = [];
+      for (let i = 0; i < barsToCheck + 1; i++) {
+        const macd = calcMACD(effectiveCandles.slice(i), fast, slow, sig);
+        histValues.push(macd.histogram);
+      }
+      
+      const currentHist = histValues[0];
+      const prevHist = histValues[1];
+      const isRising = histValues.slice(0, barsToCheck).every((v, i, arr) => i === 0 || v >= arr[i-1] * 0.95);
+      const isFalling = histValues.slice(0, barsToCheck).every((v, i, arr) => i === 0 || v <= arr[i-1] * 1.05);
+      
+      let pass = false;
+      switch (condition) {
+        case "positive_rising": pass = currentHist > 0 && isRising; break;
+        case "positive_falling": pass = currentHist > 0 && isFalling; break;
+        case "negative_rising": pass = currentHist < 0 && isRising; break;
+        case "negative_falling": pass = currentHist < 0 && isFalling; break;
+        case "positive": pass = currentHist > 0; break;
+        case "negative": pass = currentHist < 0; break;
+        case "zero_cross_up": pass = currentHist > 0 && prevHist <= 0; break;
+        case "zero_cross_down": pass = currentHist < 0 && prevHist >= 0; break;
+      }
+      
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `Hist: ${currentHist.toFixed(3)}`, threshold: condition, detail: `rising: ${isRising}, falling: ${isFalling}` } } };
+    },
+  },
+];
+
+// === FUNDAMENTAL INDICATORS ===
+// NOTE: These indicators require external fundamental data passed via the scan context.
+// The evaluate function checks for fundamentalData in upstreamData which must be populated
+// by the scan engine before running these indicators.
+const FUNDAMENTAL: IndicatorDefinition[] = [
+  {
+    id: "FND-1",
+    name: "Market Cap Filter",
+    category: "Fundamental",
+    description: "Filters stocks by market capitalization. Micro-cap (<$300M), Small-cap ($300M-$2B), Mid-cap ($2B-$10B), Large-cap ($10B-$200B), Mega-cap (>$200B). Smaller caps tend to be more volatile with higher growth potential; larger caps are more stable. Use to focus on your preferred liquidity and volatility profile. Requires fundamental data from external source.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "minMarketCap", label: "Min Market Cap ($M)", type: "number", defaultValue: 300, min: 0, max: 100000, step: 100 },
+      { name: "maxMarketCap", label: "Max Market Cap ($M)", type: "number", defaultValue: 50000, min: 0, max: 500000, step: 1000 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const minCap = (params.minMarketCap ?? 300) * 1000000;
+      const maxCap = (params.maxMarketCap ?? 50000) * 1000000;
+      const marketCap = upstreamData?.fundamentalData?.marketCap;
+      
+      // Treat undefined, null, or 0 as "no data" (0 is returned by getFundamentals when data not found)
+      if (marketCap === undefined || marketCap === null || marketCap === 0) {
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no market cap data', threshold: `$${params.minMarketCap}M-$${params.maxMarketCap}M` } } };
+      }
+      
+      const pass = marketCap >= minCap && marketCap <= maxCap;
+      const capInM = (marketCap / 1000000).toFixed(0);
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `$${capInM}M`, threshold: `$${params.minMarketCap}M-$${params.maxMarketCap}M` } } };
+    },
+  },
+  {
+    id: "FND-2",
+    name: "PE Ratio Filter",
+    category: "Fundamental",
+    description: "Filters stocks by Price-to-Earnings ratio. Low PE (<15) may indicate undervaluation or slow growth. High PE (>30) suggests high growth expectations or overvaluation. Negative PE means the company is unprofitable. Use to screen for value stocks (low PE) or exclude expensive growth stocks. Requires fundamental data from external source.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "minPE", label: "Min PE Ratio", type: "number", defaultValue: 0, min: -100, max: 500, step: 1 },
+      { name: "maxPE", label: "Max PE Ratio", type: "number", defaultValue: 50, min: 0, max: 1000, step: 5 },
+      { name: "excludeNegative", label: "Exclude Negative PE", type: "boolean", defaultValue: true },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const minPE = params.minPE ?? 0;
+      const maxPE = params.maxPE ?? 50;
+      const excludeNeg = params.excludeNegative ?? true;
+      const pe = upstreamData?.fundamentalData?.pe;
+      
+      if (pe === undefined || pe === null) {
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no PE data', threshold: `${minPE}-${maxPE}` } } };
+      }
+      
+      if (excludeNeg && pe < 0) {
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `PE: ${pe.toFixed(1)} (negative)`, threshold: `${minPE}-${maxPE}` } } };
+      }
+      
+      const pass = pe >= minPE && pe <= maxPE;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `PE: ${pe.toFixed(1)}`, threshold: `${minPE}-${maxPE}` } } };
+    },
+  },
+  {
+    id: "FND-3",
+    name: "Sector Filter",
+    category: "Fundamental",
+    description: "Filters stocks by their sector classification. Use to focus on specific sectors (Technology, Healthcare, Financials, etc.) or exclude sectors you want to avoid. Great for sector rotation strategies or avoiding overexposure. Requires fundamental data from external source with sector information.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "sectors", label: "Sectors (comma-separated)", type: "select", defaultValue: "Technology", options: ["Technology", "Healthcare", "Financials", "Consumer Cyclical", "Consumer Defensive", "Industrials", "Energy", "Basic Materials", "Real Estate", "Utilities", "Communication Services"] },
+      { name: "mode", label: "Filter Mode", type: "select", defaultValue: "include", options: ["include", "exclude"] },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const targetSector = params.sectors ?? "Technology";
+      const mode = params.mode ?? "include";
+      const sector = upstreamData?.fundamentalData?.sector;
+      
+      if (!sector) {
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no sector data', threshold: `${mode} ${targetSector}` } } };
+      }
+      
+      const match = sector.toLowerCase().includes(targetSector.toLowerCase());
+      const pass = mode === "include" ? match : !match;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: sector, threshold: `${mode} ${targetSector}` } } };
+    },
+  },
+  {
+    id: "FND-4",
+    name: "Earnings Proximity",
+    category: "Fundamental",
+    description: "Filters stocks based on how close they are to their next earnings report. Avoid stocks with earnings in 1-5 days to reduce binary event risk. Or target stocks with imminent earnings for volatility plays. Negative days means earnings have already passed. Requires fundamental data with next earnings date.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "minDays", label: "Min Days to Earnings", type: "number", defaultValue: 7, min: -30, max: 90, step: 1 },
+      { name: "maxDays", label: "Max Days to Earnings", type: "number", defaultValue: 60, min: 0, max: 120, step: 5 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const minDays = params.minDays ?? 7;
+      const maxDays = params.maxDays ?? 60;
+      const daysToEarnings = upstreamData?.fundamentalData?.daysToEarnings;
+      
+      if (daysToEarnings === undefined || daysToEarnings === null) {
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no earnings date', threshold: `${minDays}-${maxDays} days` } } };
+      }
+      
+      const pass = daysToEarnings >= minDays && daysToEarnings <= maxDays;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${daysToEarnings} days`, threshold: `${minDays}-${maxDays} days` } } };
+    },
+  },
+];
+
+// === INTRADAY INDICATORS ===
+const INTRADAY: IndicatorDefinition[] = [
+  {
+    id: "ITD-1",
+    name: "Opening Range Breakout",
+    category: "Intraday",
+    description: "Detects stocks breaking out of their opening range — the high and low established in the first N minutes of trading. A breakout above the opening range high with volume suggests strong buyer interest. Works best on intraday timeframes (5min, 15min). The opening range is calculated from the first N bars of the session.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "orbBars", label: "Opening Range Bars", type: "number", defaultValue: 3, min: 1, max: 12, step: 1 },
+      { name: "breakoutDir", label: "Breakout Direction", type: "select", defaultValue: "up", options: ["up", "down", "any"] },
+      { name: "minBreakout", label: "Min Breakout %", type: "number", defaultValue: 0.1, min: 0, max: 5, step: 0.1 },
+      { name: "volumeConfirm", label: "Require Volume Surge", type: "boolean", defaultValue: false },
+      { name: "volumeMultiple", label: "Volume Multiple", type: "number", defaultValue: 1.5, min: 1, max: 5, step: 0.1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const orbBars = params.orbBars ?? 3;
+      const direction = params.breakoutDir ?? "up";
+      const minBreakout = (params.minBreakout ?? 0.1) / 100;
+      const volumeConfirm = params.volumeConfirm ?? false;
+      const volumeMult = params.volumeMultiple ?? 1.5;
+      
+      if (candles.length < skip + orbBars + 5) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `ORB ${direction}` } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const recentBars = effectiveCandles.slice(0, orbBars * 2);
+      const orbHigh = Math.max(...recentBars.slice(orbBars, orbBars * 2).map(c => c.high));
+      const orbLow = Math.min(...recentBars.slice(orbBars, orbBars * 2).map(c => c.low));
+      
+      const currentPrice = effectiveCandles[0].close;
+      const currentHigh = effectiveCandles[0].high;
+      const currentLow = effectiveCandles[0].low;
+      
+      const breakoutUp = currentHigh > orbHigh * (1 + minBreakout);
+      const breakoutDown = currentLow < orbLow * (1 - minBreakout);
+      
+      let pass = false;
+      if (direction === "up") pass = breakoutUp;
+      else if (direction === "down") pass = breakoutDown;
+      else pass = breakoutUp || breakoutDown;
+      
+      if (pass && volumeConfirm) {
+        const avgVol = effectiveCandles.slice(1, 21).reduce((s, c) => s + c.volume, 0) / 20;
+        if (effectiveCandles[0].volume < avgVol * volumeMult) pass = false;
+      }
+      
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `ORB: $${orbLow.toFixed(2)}-$${orbHigh.toFixed(2)}`, threshold: `${direction} breakout`, detail: `current $${currentPrice.toFixed(2)}` } } };
+    },
+  },
+  {
+    id: "ITD-2",
+    name: "VWAP Position",
+    category: "Intraday",
+    description: "Checks where price is relative to VWAP (Volume Weighted Average Price). VWAP is the average price weighted by volume — institutional traders often use it as a benchmark. Price above VWAP suggests buyers are in control; below suggests sellers. A cross above VWAP can be a bullish signal. Best used on intraday timeframes.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "vwapBars", label: "VWAP Calculation Bars", type: "number", defaultValue: 78, min: 10, max: 390, step: 1 },
+      { name: "position", label: "Price Position", type: "select", defaultValue: "above", options: ["above", "below", "cross_above", "cross_below", "near"] },
+      { name: "tolerance", label: "Near Tolerance %", type: "number", defaultValue: 0.2, min: 0.05, max: 2, step: 0.05 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const vwapBars = params.vwapBars ?? 78;
+      const position = params.position ?? "above";
+      const tolerance = (params.tolerance ?? 0.2) / 100;
+      
+      if (candles.length < skip + vwapBars + 2) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `VWAP ${position}` } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const vwap = calcVWAP(effectiveCandles.slice(0, vwapBars));
+      const prevVwap = calcVWAP(effectiveCandles.slice(1, vwapBars + 1));
+      const price = effectiveCandles[0].close;
+      const prevPrice = effectiveCandles[1].close;
+      
+      let pass = false;
+      switch (position) {
+        case "above": pass = price > vwap; break;
+        case "below": pass = price < vwap; break;
+        case "cross_above": pass = price > vwap && prevPrice <= prevVwap; break;
+        case "cross_below": pass = price < vwap && prevPrice >= prevVwap; break;
+        case "near": pass = Math.abs(price - vwap) / vwap <= tolerance; break;
+      }
+      
+      const distPct = ((price - vwap) / vwap * 100).toFixed(2);
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `VWAP: $${vwap.toFixed(2)} (${distPct}%)`, threshold: position, detail: `price $${price.toFixed(2)}` } } };
+    },
+  },
+  {
+    id: "ITD-3",
+    name: "Gap Detection",
+    category: "Intraday",
+    description: "Detects price gaps — when today's open is significantly different from the prior close. Gap ups often signal positive news or strong buying interest; gap downs signal selling pressure. Large gaps (>3%) can be playable setups. This can be used on daily timeframe to find overnight gaps or intraday for session gaps.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "gapDirection", label: "Gap Direction", type: "select", defaultValue: "up", options: ["up", "down", "any"] },
+      { name: "minGapPct", label: "Min Gap %", type: "number", defaultValue: 1, min: 0.1, max: 20, step: 0.1 },
+      { name: "maxGapPct", label: "Max Gap %", type: "number", defaultValue: 15, min: 1, max: 50, step: 1 },
+      { name: "gapFilled", label: "Gap Status", type: "select", defaultValue: "any", options: ["unfilled", "partially_filled", "filled", "any"] },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const direction = params.gapDirection ?? "up";
+      const minGap = params.minGapPct ?? 1;
+      const maxGap = params.maxGapPct ?? 15;
+      const gapStatus = params.gapFilled ?? "any";
+      
+      if (candles.length < skip + 2) {
+        return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${direction} gap ${minGap}%-${maxGap}%` } } };
+      }
+      
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const todayOpen = effectiveCandles[0].open;
+      const yesterdayClose = effectiveCandles[1].close;
+      const gapPct = ((todayOpen - yesterdayClose) / yesterdayClose) * 100;
+      const absGap = Math.abs(gapPct);
+      
+      const isGapUp = gapPct > 0;
+      const isGapDown = gapPct < 0;
+      
+      let dirPass = false;
+      if (direction === "up") dirPass = isGapUp;
+      else if (direction === "down") dirPass = isGapDown;
+      else dirPass = true;
+      
+      const sizePass = absGap >= minGap && absGap <= maxGap;
+      
+      // Check gap fill status
+      let statusPass = true;
+      if (gapStatus !== "any") {
+        const currentPrice = effectiveCandles[0].close;
+        const gapTop = Math.max(todayOpen, yesterdayClose);
+        const gapBottom = Math.min(todayOpen, yesterdayClose);
+        const todayLow = effectiveCandles[0].low;
+        const todayHigh = effectiveCandles[0].high;
+        
+        const gapFillPct = isGapUp 
+          ? (todayOpen - todayLow) / (todayOpen - yesterdayClose)
+          : (todayHigh - todayOpen) / (yesterdayClose - todayOpen);
+        
+        if (gapStatus === "unfilled") statusPass = gapFillPct < 0.25;
+        else if (gapStatus === "partially_filled") statusPass = gapFillPct >= 0.25 && gapFillPct < 1;
+        else if (gapStatus === "filled") statusPass = gapFillPct >= 1;
+      }
+      
+      const pass = dirPass && sizePass && statusPass;
+      
+      return { 
+        pass, 
+        data: { 
+          evaluationStartBar: skip,
+          evaluationEndBar: skip,
+          patternEndBar: skip,
+          _diagnostics: { 
+            value: `${gapPct.toFixed(2)}%`, 
+            threshold: `${direction} ${minGap}%-${maxGap}%`,
+            detail: `open $${todayOpen.toFixed(2)} vs prev close $${yesterdayClose.toFixed(2)}`
+          },
+          _cocHighlight: pass ? { type: "gapDiamond", barIndex: 0, gapPct: Math.abs(gapPct) } : undefined
+        }
+      };
+    },
+  },
+];
+
 export const INDICATOR_LIBRARY: IndicatorDefinition[] = [
   ...MOVING_AVERAGES,
   ...VOLUME,
@@ -1864,4 +2754,44 @@ export const INDICATOR_LIBRARY: IndicatorDefinition[] = [
   ...RELATIVE_STRENGTH,
   ...VOLATILITY,
   ...CONSOLIDATION,
+  ...MOMENTUM,
+  ...FUNDAMENTAL,
+  ...INTRADAY,
 ];
+
+/**
+ * Get indicator library for a specific user, including their custom indicators
+ */
+export async function getIndicatorLibraryForUser(userId: number): Promise<IndicatorDefinition[]> {
+  const { db, isDatabaseAvailable } = await import("../db");
+  const { userIndicators } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
+  const { evaluateDslIndicator } = await import("./dsl-evaluator");
+
+  if (!isDatabaseAvailable()) {
+    return INDICATOR_LIBRARY;
+  }
+
+  try {
+    const customIndicators = await db
+      .select()
+      .from(userIndicators)
+      .where(eq(userIndicators.userId, userId));
+
+    const customIndicatorDefs: IndicatorDefinition[] = customIndicators.map(ind => ({
+      id: ind.customId,
+      name: `${ind.name} (Custom)`,
+      category: ind.category as any,
+      description: ind.description,
+      params: ind.params as any[] || [],
+      evaluate: (candles: CandleData[], params: Record<string, any>) => {
+        return evaluateDslIndicator(ind.logicDefinition as any, candles, params);
+      },
+    }));
+
+    return [...INDICATOR_LIBRARY, ...customIndicatorDefs];
+  } catch (error) {
+    console.error('[getIndicatorLibraryForUser] Error loading custom indicators:', error);
+    return INDICATOR_LIBRARY;
+  }
+}

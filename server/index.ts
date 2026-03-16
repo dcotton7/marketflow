@@ -1,7 +1,21 @@
+import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+
+// Keep server from exiting on unhandled errors (common with polling/DB/WS)
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[FATAL] Unhandled promise rejection:", reason);
+  console.error("Promise:", promise);
+  // Don't exit - log and continue so server stays up
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught exception:", err);
+  // Give time to flush logs, then exit (process may be in bad state)
+  setTimeout(() => process.exit(1), 1000);
+});
 
 const app = express();
 const httpServer = createServer(app);
@@ -64,6 +78,32 @@ app.use((req, res, next) => {
   try {
     console.log("Starting application initialization...");
     
+    // Initialize database FIRST
+    console.log("Attempting database connection...");
+    const { initializeDatabase } = await import("./db");
+    await initializeDatabase();
+    
+    // Initialize theme members cache (needs DB)
+    console.log("Initializing theme members cache from database...");
+    const { initializeThemeMembersCache } = await import("./market-condition/utils/theme-db-loader");
+    await initializeThemeMembersCache();
+    console.log("Theme members cache initialized");
+    
+    // Initialize acceleration baseline (needs DB)
+    console.log("Initializing acceleration baseline from snapshots...");
+    const { initializePreviousValuesFromSnapshots } = await import("./market-condition/engine/theme-score");
+    await initializePreviousValuesFromSnapshots();
+    console.log("Acceleration baseline initialized");
+
+    // Preload constituent lists from local CSVs (fast, no network after first refresh)
+    console.log("Preloading universe constituents...");
+    const { getConstituents } = await import("./universe/constituents");
+    await getConstituents("russell3000");
+    await getConstituents("sp500");
+    await getConstituents("russell2000");
+    console.log("Universe constituents preloaded");
+    
+    // NOW register routes (which starts polling)
     await registerRoutes(httpServer, app);
     console.log("Routes registered successfully");
 
@@ -80,9 +120,6 @@ app.use((req, res, next) => {
       return res.status(status).json({ message });
     });
 
-    // importantly only setup vite in development and after
-    // setting up all the other routes so the catch-all route
-    // doesn't interfere with the other routes
     if (process.env.NODE_ENV === "production") {
       console.log("Setting up static file serving for production...");
       serveStatic(app);
@@ -91,23 +128,12 @@ app.use((req, res, next) => {
       await setupVite(httpServer, app);
     }
 
-    // ALWAYS serve the app on the port specified in the environment variable PORT
-    // Other ports are firewalled. Default to 5000 if not specified.
-    // this serves both the API and the client.
-    // It is the only port that is not firewalled.
     const port = parseInt(process.env.PORT || "5000", 10);
-    console.log(`Starting HTTP server on port ${port}...`);
-    
-    httpServer.listen(
-      {
-        port,
-        host: "0.0.0.0",
-        reusePort: true,
-      },
-      () => {
-        log(`serving on port ${port}`);
-      },
-    );
+    const host = process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
+    console.log(`Starting HTTP server on ${host}:${port}...`);
+    httpServer.listen(port, host, () => {
+      log(`serving on port ${port}`);
+    });
   } catch (error) {
     console.error("Fatal error during application startup:", error);
     process.exit(1);

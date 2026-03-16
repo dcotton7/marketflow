@@ -12,13 +12,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ShieldAlert, BarChart3, Loader2, MessageSquare } from "lucide-react";
+import { Plus, LogOut, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle, Eye, Crosshair, BookOpen, X, DollarSign, Brain, Sparkles, Lightbulb, ChevronRight, MoreHorizontal, Trash2, Edit3, XCircle, Check, Target, CircleDot, Search, ArrowUpDown, LayoutGrid, LayoutList, ChevronDown, ChevronUp, ShieldAlert, BarChart3, Loader2, MessageSquare } from "lucide-react";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { CopyScreenButton } from "@/components/CopyScreenButton";
 import { TradingChart, type ChartCandle, type ChartIndicators, type PriceLevelLine } from "@/components/TradingChart";
 
 function isDateOnly(dateStr: string): boolean {
@@ -112,6 +113,7 @@ interface TradeEvent {
 interface WatchlistItem {
   id: number;
   symbol: string;
+  direction?: string;
   targetEntry?: number;
   stopPlan?: number;
   targetPlan?: number;
@@ -120,6 +122,13 @@ interface WatchlistItem {
   priority: string;
   status: string;
   createdAt: string;
+  // Ivy Stock Eval fields
+  ivyEvalId?: number;
+  ivyEvalText?: string;
+  ivyRecommendedEntry?: number;
+  ivyRecommendedStop?: number;
+  ivyRecommendedTarget?: number;
+  ivyRiskAssessment?: string;
 }
 
 interface TradingRule {
@@ -1453,6 +1462,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
       return res.json();
     },
     staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
   });
 
   const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
@@ -1463,7 +1473,8 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000, // Auto-refresh every 1 minute
   });
 
   interface TradeChartMetrics {
@@ -1886,10 +1897,18 @@ function EventItem({ event }: { event: TradeEvent }) {
 
 function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id: number) => void }) {
   const [, setLocation] = useLocation();
+  const [evalExpanded, setEvalExpanded] = useState(false);
+  
   const priorityColors = {
     high: "text-rs-red bg-rs-red/10",
     medium: "text-rs-yellow bg-rs-yellow/10",
     low: "text-rs-green bg-rs-green/10",
+  };
+
+  const riskColors = {
+    low: "text-rs-green bg-rs-green/10 border-rs-green/30",
+    medium: "text-rs-yellow bg-rs-yellow/10 border-rs-yellow/30",
+    high: "text-rs-red bg-rs-red/10 border-rs-red/30",
   };
 
   const { data: quoteData } = useQuery<{ last: number; prevClose: number; changePercent: number }>({
@@ -1905,16 +1924,26 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
 
   const livePrice = quoteData?.last || 0;
   const marketPctChange = quoteData?.changePercent;
+  
+  // Check if we have Ivy recommendations that differ from user's plan
+  const hasIvyData = item.ivyEvalId || item.ivyRecommendedEntry || item.ivyRecommendedStop || item.ivyRecommendedTarget;
+  const entryDiffers = item.ivyRecommendedEntry && item.targetEntry && 
+    Math.abs(item.ivyRecommendedEntry - item.targetEntry) / item.targetEntry > 0.01;
+  const stopDiffers = item.ivyRecommendedStop && item.stopPlan && 
+    Math.abs(item.ivyRecommendedStop - item.stopPlan) / item.stopPlan > 0.01;
+  const targetDiffers = item.ivyRecommendedTarget && item.targetPlan && 
+    Math.abs(item.ivyRecommendedTarget - item.targetPlan) / item.targetPlan > 0.01;
 
   return (
     <Card className="hover-elevate" data-testid={`card-watchlist-${item.id}`}>
       <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-1">
+        {/* Header with Ticker Widget */}
+        <div className="flex items-center justify-between mb-2">
           <TickerWidget
             symbol={item.symbol}
             price={livePrice}
             marketPctChange={marketPctChange}
-            direction="long"
+            direction={(item.direction as "long" | "short") || "long"}
             status="watch"
             hasLiveData={livePrice > 0}
           />
@@ -1939,13 +1968,13 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-muted-foreground"
-                  onClick={() => setLocation(`/sentinel/evaluate?symbol=${item.symbol}&from=watchlist`)}
+                  onClick={() => setLocation(`/sentinel/charts?source=watchlist&symbol=${item.symbol}`)}
                   data-testid={`button-chart-watch-${item.id}`}
                 >
                   <BarChart3 className="w-3.5 h-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">Open Chart</TooltipContent>
+              <TooltipContent side="top">Scanner Chart</TooltipContent>
             </Tooltip>
             <Badge className={priorityColors[item.priority as keyof typeof priorityColors] || priorityColors.medium}>
               {item.priority}
@@ -1956,16 +1985,106 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
           </div>
         </div>
 
-        <div className="text-sm text-muted-foreground space-y-1">
-          {item.targetEntry && <div>Target Entry: ${item.targetEntry.toFixed(2)}</div>}
-          {item.alertPrice && <div>Alert at: ${item.alertPrice.toFixed(2)}</div>}
-          <div className="flex gap-4 flex-wrap">
-            {item.stopPlan && <span>Stop Plan: ${item.stopPlan.toFixed(2)}</span>}
-            {item.targetPlan && <span>Target Plan: ${item.targetPlan.toFixed(2)}</span>}
+        {/* Risk Assessment Badge (if Ivy eval exists) */}
+        {item.ivyRiskAssessment && (
+          <div className="mb-2">
+            <Badge 
+              variant="outline"
+              className={riskColors[item.ivyRiskAssessment as keyof typeof riskColors] || riskColors.medium}
+            >
+              Risk: {item.ivyRiskAssessment.toUpperCase()}
+            </Badge>
           </div>
-        </div>
+        )}
 
-        {item.thesis && (
+        {/* Side-by-side comparison: Your Plan vs Ivy's */}
+        {hasIvyData ? (
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            {/* User's Plan */}
+            <div className="space-y-1">
+              <div className="font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">Your Plan</div>
+              <div className="space-y-0.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Entry:</span>
+                  <span className={entryDiffers ? "text-amber-400" : ""}>
+                    {item.targetEntry ? `$${item.targetEntry.toFixed(2)}` : '--'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Stop:</span>
+                  <span className={stopDiffers ? "text-amber-400" : ""}>
+                    {item.stopPlan ? `$${item.stopPlan.toFixed(2)}` : '--'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Target:</span>
+                  <span className={targetDiffers ? "text-amber-400" : ""}>
+                    {item.targetPlan ? `$${item.targetPlan.toFixed(2)}` : '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Ivy's Recommendation */}
+            <div className="space-y-1">
+              <div className="font-semibold text-primary/70 uppercase tracking-wide text-[10px] flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Ivy's Plan
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Entry:</span>
+                  <span className={entryDiffers ? "text-primary" : ""}>
+                    {item.ivyRecommendedEntry ? `$${item.ivyRecommendedEntry.toFixed(2)}` : '--'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Stop:</span>
+                  <span className={stopDiffers ? "text-primary" : ""}>
+                    {item.ivyRecommendedStop ? `$${item.ivyRecommendedStop.toFixed(2)}` : '--'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Target:</span>
+                  <span className={targetDiffers ? "text-primary" : ""}>
+                    {item.ivyRecommendedTarget ? `$${item.ivyRecommendedTarget.toFixed(2)}` : '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Original simple display if no Ivy data */
+          <div className="text-sm text-muted-foreground space-y-1">
+            {item.targetEntry && <div>Target Entry: ${item.targetEntry.toFixed(2)}</div>}
+            {item.alertPrice && <div>Alert at: ${item.alertPrice.toFixed(2)}</div>}
+            <div className="flex gap-4 flex-wrap">
+              {item.stopPlan && <span>Stop: ${item.stopPlan.toFixed(2)}</span>}
+              {item.targetPlan && <span>Target: ${item.targetPlan.toFixed(2)}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible Ivy Eval Text */}
+        {item.ivyEvalText && (
+          <div className="mt-3">
+            <button
+              onClick={() => setEvalExpanded(!evalExpanded)}
+              className="flex items-center gap-1 text-xs text-primary/70 hover:text-primary transition-colors"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>Ivy's Analysis</span>
+              {evalExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {evalExpanded && (
+              <div className="mt-2 p-2 rounded bg-muted/30 text-xs text-muted-foreground leading-relaxed">
+                {item.ivyEvalText}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Thesis (if no Ivy eval) */}
+        {!item.ivyEvalText && item.thesis && (
           <div className="mt-2 text-sm text-muted-foreground italic line-clamp-2">
             {item.thesis}
           </div>
@@ -3211,7 +3330,8 @@ export default function SentinelDashboardPage() {
       } as React.CSSProperties}
     >
       <SentinelHeader showSentiment={true} rightContent={
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <CopyScreenButton />
           <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }} data-testid="text-username">
             {user?.username}
           </span>
@@ -3235,7 +3355,7 @@ export default function SentinelDashboardPage() {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setLocation("/sentinel/evaluate")} data-testid="menu-new-evaluation">
                 <Brain className="w-4 h-4 mr-2" />
-                Ask Ivy (Evaluation)
+                Trade Plan
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setShowAddTrade(true)} data-testid="menu-add-trade-direct">
                 <Plus className="w-4 h-4 mr-2" />

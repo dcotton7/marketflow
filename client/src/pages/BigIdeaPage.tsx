@@ -22,13 +22,18 @@ import {
 import "@xyflow/react/dist/style.css";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
+import { OptimizerMetricsOverlay } from "@/components/OptimizerMetricsOverlay";
+import { AskIvyOverlay } from "@/components/AskIvyOverlay";
+import { CopyScreenButton } from "@/components/CopyScreenButton";
+import { NoIndicatorFoundDialog } from "@/components/bigidea/NoIndicatorFoundDialog";
+import { CustomIndicatorPreviewDialog } from "@/components/bigidea/CustomIndicatorPreviewDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -39,6 +44,10 @@ import type { ChartCandle, ChartIndicators, ChartMarker, DiamondMarker, PriceLev
 import { DualChartGrid, type ChartMetrics } from "@/components/DualChartGrid";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
+import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useSelectedWatchlistId, useWatchlists } from "@/hooks/use-watchlist";
+import { WatchlistSelector } from "@/components/WatchlistSelector";
+import { BulkAddToWatchlist } from "@/components/BulkAddToWatchlist";
 import {
   TrendingUp,
   BarChart3,
@@ -50,6 +59,7 @@ import {
   Save,
   Loader2,
   Music,
+  Sparkles,
   GripVertical,
   Ban,
   ArrowDown,
@@ -69,9 +79,11 @@ import {
   XCircle,
   ThumbsUp,
   ThumbsDown,
+  ExternalLink,
   Lightbulb,
   EyeOff,
   Eye,
+  Star,
   Layers,
   Minus,
   ClipboardCopy,
@@ -79,6 +91,10 @@ import {
   ChevronsUpDown,
   Info,
   Camera,
+  GraduationCap,
+  Send,
+  MessageSquare,
+  Newspaper,
 } from "lucide-react";
 import type {
   ScannerThought,
@@ -111,12 +127,10 @@ function getScoreColor(score: number): string {
   return "text-rs-green";
 }
 
-const UNIVERSE_OPTIONS = [
+const INDEX_OPTIONS = [
   { value: "sp500", label: "S&P 500" },
-  { value: "nasdaq100", label: "Nasdaq 100" },
-  { value: "dow30", label: "Dow 30" },
   { value: "russell2000", label: "Russell 2000" },
-  { value: "watchlist", label: "My Watchlist" },
+  { value: "russell3000", label: "Russell 3000" },
 ];
 
 const PARAM_DESCRIPTIONS: Record<string, string> = {
@@ -545,6 +559,7 @@ const INITIAL_RESULTS_NODE: Node = {
 export default function BigIdeaPage() {
   const { cssVariables } = useSystemSettings();
   const { toast } = useToast();
+  const { data: userWatchlists } = useWatchlists();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
 
@@ -567,6 +582,7 @@ export default function BigIdeaPage() {
 
   const [chartViewerOpen, setChartViewerOpen] = useState(false);
   const [chartViewerIndex, setChartViewerIndex] = useState(0);
+  const [chartNavigationMode, setChartNavigationMode] = useState<'scan' | 'watchlist'>('scan');
 
   const [thoughtsPanelWidth, setThoughtsPanelWidth] = useState(320);
   const thoughtsResizing = useRef(false);
@@ -613,7 +629,11 @@ export default function BigIdeaPage() {
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
   const [aiProposal, setAiProposal] = useState<any>(null);
+  const [refinementChat, setRefinementChat] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [refinementInput, setRefinementInput] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<{ thoughtId: number; name: string; nodeId?: string } | null>(null);
+  const [customIndicatorDialog, setCustomIndicatorDialog] = useState<any>(null);
+  const [customIndicatorPreview, setCustomIndicatorPreview] = useState<any>(null);
   const [restateText, setRestateText] = useState("");
   const [restateNodeId, setRestateNodeId] = useState<string | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -658,6 +678,36 @@ export default function BigIdeaPage() {
     queryKey: ["/api/bigidea/indicators"],
   });
 
+  const { data: watchlist } = useWatchlist();
+
+  // Handle deep link from dashboard
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const navMode = params.get('navMode');
+    const symbol = params.get('symbol');
+    
+    if (navMode === 'watchlist' && symbol && watchlist) {
+      setChartNavigationMode('watchlist');
+      
+      // Find index of symbol in watchlist
+      const index = watchlist.findIndex(w => w.symbol === symbol);
+      if (index >= 0) {
+        // Convert watchlist to scan result format
+        const watchlistResults = watchlist.map(w => ({
+          symbol: w.symbol,
+          price: 0,
+          passedPaths: [] as string[],
+        }));
+        setScanResults(watchlistResults);
+        setChartViewerIndex(index);
+        setChartViewerOpen(true);
+        
+        // Clear URL params after handling
+        window.history.replaceState({}, '', '/sentinel/bigidea');
+      }
+    }
+  }, [watchlist]);
+
   useEffect(() => {
     if (indicatorLibrary.length === 0) return;
     setNodes((nds) =>
@@ -688,12 +738,17 @@ export default function BigIdeaPage() {
       const res = await apiRequest("POST", "/api/bigidea/thoughts", body);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
       setAiDialogOpen(false);
       setAiProposal(null);
       setAiDescription("");
-      toast({ title: "Thought saved" });
+      setRefinementChat([]);
+      if (data?.timeframeWarning) {
+        toast({ title: "Timeframe Auto-Corrected", description: data.timeframeWarning, duration: 8000 });
+      } else {
+        toast({ title: "Thought saved" });
+      }
     },
     onError: (err: Error) => {
       toast({ title: "Failed to save thought", description: err.message, variant: "destructive" });
@@ -723,6 +778,16 @@ export default function BigIdeaPage() {
     },
     onSuccess: ({ savedThoughts, edges }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
+
+      // Check for timeframe auto-correction warnings
+      const warnings = savedThoughts.filter((t: any) => t.timeframeWarning);
+      if (warnings.length > 0) {
+        toast({
+          title: "Timeframe Auto-Corrected",
+          description: warnings[0].timeframeWarning,
+          duration: 8000,
+        });
+      }
 
       const viewport = reactFlowInstance?.getViewport();
       const centerX = viewport ? (-viewport.x + 300) / (viewport.zoom || 1) : 300;
@@ -819,6 +884,7 @@ export default function BigIdeaPage() {
       setAiDialogOpen(false);
       setAiProposal(null);
       setAiDescription("");
+      setRefinementChat([]);
       toast({ title: `${savedThoughts.length} thought${savedThoughts.length > 1 ? "s" : ""} saved and placed on canvas` });
     },
     onError: (err: Error) => {
@@ -832,10 +898,40 @@ export default function BigIdeaPage() {
       return res.json();
     },
     onSuccess: (data) => {
-      setAiProposal(data);
+      if (data.needsCustomIndicator) {
+        setCustomIndicatorDialog(data);
+        setAiDialogOpen(false);
+      } else {
+        setAiProposal(data);
+        setRefinementChat([]);
+      }
     },
     onError: (err: Error) => {
       toast({ title: "AI generation failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const refineProposalMutation = useMutation({
+    mutationFn: async ({ message }: { message: string }) => {
+      const res = await apiRequest("POST", "/api/bigidea/ai/refine-proposal", {
+        currentProposal: aiProposal,
+        message,
+        conversationHistory: refinementChat,
+        originalDescription: aiDescription,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setRefinementChat(prev => [
+        ...prev,
+        { role: "user", content: refinementInput },
+        { role: "assistant", content: data.response },
+      ]);
+      setAiProposal(data.proposal);
+      setRefinementInput("");
+    },
+    onError: (err: Error) => {
+      toast({ title: "AI refinement failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -1497,12 +1593,13 @@ export default function BigIdeaPage() {
       const scanStartTime = Date.now();
 
       let scanBody: any = { nodes: scanNodes, edges: scanEdges, universe };
-      if (universe === "watchlist") {
-        const wlRes = await apiRequest("GET", "/api/sentinel/watchlist");
+      if (universe.startsWith("watchlist-")) {
+        const watchlistId = parseInt(universe.replace("watchlist-", ""));
+        const wlRes = await apiRequest("GET", `/api/sentinel/watchlist?watchlistId=${watchlistId}`);
         const wlItems = await wlRes.json() as Array<{ symbol: string }>;
         const wlTickers = wlItems.map((w) => w.symbol.toUpperCase());
         if (wlTickers.length === 0) {
-          toast({ title: "Your watchlist is empty — add tickers in Sentinel first", variant: "destructive" });
+          toast({ title: "This watchlist is empty — add tickers first", variant: "destructive" });
           return;
         }
         scanBody = { nodes: scanNodes, edges: scanEdges, customTickers: wlTickers };
@@ -1524,6 +1621,12 @@ export default function BigIdeaPage() {
         perThoughtFunnel: data.funnelData?.perThought || {},
         linkOverrides: data.linkOverrides || [],
         dynamicDataFlows: data.dynamicDataFlows || [],
+        // Enhanced debug info from backend
+        ideaName: (data as any).debugInfo?.ideaName || null,
+        ideaDescription: (data as any).debugInfo?.ideaDescription || null,
+        fullCriteria: (data as any).debugInfo?.fullCriteria || [],
+        canvasNodes: (data as any).debugInfo?.thoughtNodes || [],
+        canvasEdges: (data as any).debugInfo?.edges || [],
       });
       setDebugOpen(true);
 
@@ -2252,6 +2355,7 @@ export default function BigIdeaPage() {
       <SentinelHeader showSentiment={false} />
 
       <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap" style={{ backgroundColor: cssVariables.headerBg }}>
+        <CopyScreenButton className="flex-shrink-0" />
         <Input
           value={ideaName}
           onChange={(e) => setIdeaName(e.target.value)}
@@ -2261,15 +2365,31 @@ export default function BigIdeaPage() {
         />
 
         <Select value={universe} onValueChange={setUniverse}>
-          <SelectTrigger className="w-40" data-testid="select-universe">
+          <SelectTrigger className="w-48" data-testid="select-universe">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {UNIVERSE_OPTIONS.map((u) => (
-              <SelectItem key={u.value} value={u.value} data-testid={`option-universe-${u.value}`}>
-                {u.label}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              <SelectLabel>Indexes</SelectLabel>
+              {INDEX_OPTIONS.map((u) => (
+                <SelectItem key={u.value} value={u.value} data-testid={`option-universe-${u.value}`}>
+                  {u.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+            {userWatchlists && userWatchlists.length > 0 && (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>Watchlists</SelectLabel>
+                  {userWatchlists.map((wl) => (
+                    <SelectItem key={`watchlist-${wl.id}`} value={`watchlist-${wl.id}`} data-testid={`option-watchlist-${wl.id}`}>
+                      {wl.name} {wl.isDefault && "(default)"}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </>
+            )}
           </SelectContent>
         </Select>
 
@@ -2455,6 +2575,15 @@ export default function BigIdeaPage() {
                         const lines: string[] = [];
                         lines.push(`Scan Debug — ${debugInfo.timestamp} — ${debugInfo.durationMs}ms — universe: ${debugInfo.universe}`);
                         lines.push(`Result: ${debugInfo.matchCount} / ${debugInfo.totalScanned}`);
+                        
+                        // Idea info if available
+                        if (debugInfo.ideaName) {
+                          lines.push(`\nIdea: "${debugInfo.ideaName}"`);
+                          if (debugInfo.ideaDescription) {
+                            lines.push(`Description: ${debugInfo.ideaDescription}`);
+                          }
+                        }
+                        
                         if (debugInfo.evalOrder?.length > 0) {
                           lines.push(`\nEval Order: ${debugInfo.evalOrder.join(" → ")}`);
                         }
@@ -2462,6 +2591,29 @@ export default function BigIdeaPage() {
                           lines.push(`\nThought Stems:`);
                           debugInfo.connections.forEach((c: any) => lines.push(`  ${c.from} ${c.logic} ${c.to}`));
                         }
+                        
+                        // Canvas Layout with full indicator details and per-thought AI prompts
+                        if (debugInfo.fullCriteria?.length > 0) {
+                          lines.push(`\nCanvas Layout & Criteria:`);
+                          debugInfo.fullCriteria.forEach((thought: any) => {
+                            lines.push(`\n${thought.thought} (${thought.timeframe || 'daily'}):`);
+                            if (thought.aiPrompt) {
+                              lines.push(`  Original Prompt: "${thought.aiPrompt}"`);
+                            }
+                            thought.criteria?.forEach((crit: any) => {
+                              lines.push(`  ${crit.name} (${crit.id})`);
+                              if (crit.description) {
+                                lines.push(`    Desc: ${crit.description}`);
+                              }
+                              if (crit.params?.length > 0) {
+                                crit.params.forEach((p: any) => {
+                                  lines.push(`    ${p.label || p.name}: ${p.value}`);
+                                });
+                              }
+                            });
+                          });
+                        }
+                        
                         if (debugInfo.linkOverrides?.length > 0) {
                           lines.push(`\nAuto-Linked Params:`);
                           debugInfo.linkOverrides.forEach((o: any) => lines.push(`  ${o.thoughtName} / ${o.paramName}: ${o.originalValue} → ${o.linkedValue} (from: ${o.sourceName})`));
@@ -2502,6 +2654,15 @@ export default function BigIdeaPage() {
                 <div className="border-t border-dashed pt-1">
                   <span className="font-semibold text-foreground">Result: {debugInfo.matchCount} / {debugInfo.totalScanned}</span>
                 </div>
+                {debugInfo.ideaName && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-purple-400">Idea:</span>
+                    <div className="ml-2 text-foreground/90">"{debugInfo.ideaName}"</div>
+                    {debugInfo.ideaDescription && (
+                      <div className="ml-2 text-foreground/70 italic text-[11px]">{debugInfo.ideaDescription}</div>
+                    )}
+                  </div>
+                )}
                 {debugInfo.evalOrder?.length > 0 && (
                   <div className="border-t border-dashed pt-1">
                     <span className="font-semibold text-foreground">Eval Order:</span>
@@ -2548,6 +2709,65 @@ export default function BigIdeaPage() {
                         <span className="text-muted-foreground/60"> → </span>
                         <span className="text-foreground/80">{d.consumer}</span>
                         <div className="ml-3 text-muted-foreground/50">{d.description}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {debugInfo.canvasNodes?.length > 0 && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-cyan-400">Canvas Layout:</span>
+                    {debugInfo.canvasNodes.map((node: any, i: number) => (
+                      <div key={i} className="ml-2 mt-1 border-l-2 border-cyan-500/30 pl-2">
+                        <div className="text-foreground/90 font-medium">
+                          {node.name} 
+                          <span className="text-muted-foreground/60"> ({node.timeframe || 'daily'})</span>
+                          {node.muted && <span className="text-muted-foreground/40"> [MUTED]</span>}
+                        </div>
+                        {node.criteria?.map((crit: any, ci: number) => (
+                          <div key={ci} className="ml-3 mt-1">
+                            <div className="flex items-start gap-1 flex-wrap">
+                              <span className="text-blue-300 font-mono">{crit.indicatorId}</span>
+                              <span className="text-muted-foreground/60">—</span>
+                              <span className="text-foreground/80">{crit.indicatorName}</span>
+                              {crit.muted && <span className="text-muted-foreground/40">[MUTED]</span>}
+                              {crit.inverted && <span className="text-rs-yellow">[INV]</span>}
+                            </div>
+                            {crit.params?.length > 0 && (
+                              <div className="ml-4 text-[9px] text-muted-foreground/50 mt-0.5">
+                                {crit.params.map((p: any, pi: number) => (
+                                  <span key={pi} className="mr-2">{p.label || p.name}={String(p.value)}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {debugInfo.fullCriteria?.length > 0 && (
+                  <div className="border-t border-dashed pt-1">
+                    <span className="font-semibold text-cyan-400">Canvas Layout:</span>
+                    {debugInfo.fullCriteria.map((thought: any, i: number) => (
+                      <div key={i} className="ml-2 mt-1">
+                        <div className="text-foreground/90 font-medium">{thought.thought} <span className="text-muted-foreground/60">({thought.timeframe || 'daily'})</span></div>
+                        {thought.aiPrompt && (
+                          <div className="ml-2 text-purple-400/80 italic text-[9px]">Prompt: "{thought.aiPrompt}"</div>
+                        )}
+                        {thought.criteria?.map((crit: any, ci: number) => (
+                          <div key={ci} className="ml-3 mt-0.5">
+                            <span className="text-blue-300">{crit.id}</span>
+                            <span className="text-muted-foreground/60"> — </span>
+                            <span className="text-foreground/70">{crit.name}</span>
+                            {crit.params?.length > 0 && (
+                              <div className="ml-4 text-muted-foreground/50">
+                                {crit.params.map((p: any, pi: number) => (
+                                  <span key={pi} className="mr-2">{p.label || p.name}={String(p.value)}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     ))}
                   </div>
@@ -2812,6 +3032,7 @@ export default function BigIdeaPage() {
           >
             <Background gap={16} size={1} />
             <Controls data-testid="canvas-controls" />
+            <OptimizerMetricsOverlay />
             <MiniMap
               nodeColor={(n) => {
                 if (n.type === "results") return "hsl(var(--primary))";
@@ -2873,6 +3094,13 @@ export default function BigIdeaPage() {
                     <p style={{ color: cssVariables.textColorTiny, fontSize: cssVariables.fontSizeTiny }}>
                       matches from {scanTotalScanned} scanned
                     </p>
+                    {scanResults.length > 0 && (
+                      <div className="mt-2">
+                        <BulkAddToWatchlist 
+                          symbols={scanResults.map(r => r.symbol)}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {scanResults.length === 0 && (() => {
@@ -3774,10 +4002,70 @@ export default function BigIdeaPage() {
                 </div>
               )}
 
-              <DialogFooter className="gap-2">
+              {/* Refinement Chat Section */}
+              <div className="border-t border-border/60 pt-3 mt-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Refine with AI
+                  </span>
+                </div>
+                
+                {/* Conversation History */}
+                {refinementChat.length > 0 && (
+                  <div className="space-y-2 mb-3 max-h-32 overflow-y-auto">
+                    {refinementChat.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        className={`text-xs px-2 py-1.5 rounded ${
+                          msg.role === "user"
+                            ? "bg-primary/10 text-primary ml-4"
+                            : "bg-muted/50 mr-4"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Refinement Input */}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder='e.g., "Also add RSI > 50" or "Remove the volume filter"'
+                    value={refinementInput}
+                    onChange={(e) => setRefinementInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && refinementInput.trim() && !refineProposalMutation.isPending) {
+                        refineProposalMutation.mutate({ message: refinementInput.trim() });
+                      }
+                    }}
+                    className="flex-1 h-8 text-sm"
+                    data-testid="input-refinement"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => refineProposalMutation.mutate({ message: refinementInput.trim() })}
+                    disabled={!refinementInput.trim() || refineProposalMutation.isPending}
+                    className="h-8 px-3"
+                    data-testid="button-refine"
+                  >
+                    {refineProposalMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2 mt-3">
                 <Button
                   variant="outline"
-                  onClick={() => setAiProposal(null)}
+                  onClick={() => {
+                    setAiProposal(null);
+                    setRefinementChat([]);
+                  }}
                   data-testid="button-ai-back"
                 >
                   Back
@@ -3801,15 +4089,19 @@ export default function BigIdeaPage() {
         </DialogContent>
       </Dialog>
 
-      <ScanChartViewer
-        results={sortedResults}
-        currentIndex={chartViewerIndex}
-        open={chartViewerOpen}
-        onOpenChange={setChartViewerOpen}
-        onIndexChange={setChartViewerIndex}
-        sessionId={scanSessionId}
-        tuningActive={tuningDirty}
-      />
+      {chartViewerOpen ? (
+        <ScanChartViewer
+          results={sortedResults}
+          currentIndex={chartViewerIndex}
+          open={chartViewerOpen}
+          onOpenChange={setChartViewerOpen}
+          onIndexChange={setChartViewerIndex}
+          sessionId={scanSessionId}
+          tuningActive={tuningDirty}
+          navigationMode={chartNavigationMode}
+          onNavigationModeChange={setChartNavigationMode}
+        />
+      ) : null}
 
       <Dialog open={qualityOpen && !!qualityResult} onOpenChange={setQualityOpen}>
         <DialogContent className="max-w-lg" style={{ backgroundColor: cssVariables.overlayBg, borderColor: cssVariables.secondaryOverlayColor }} data-testid="quality-overlay">
@@ -4069,12 +4361,34 @@ export default function BigIdeaPage() {
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Suggested Changes</p>
                   {tuneResult.suggestions.map((s, i) => {
                     const isAccepted = acceptedTuneIndices.has(i);
+                    
+                    // Check if suggestion is still valid based on current canvas state
+                    const canvasIndicatorIds = new Set(
+                      nodes
+                        .filter((n): n is Node => n.type === "thought")
+                        .flatMap((n) => ((n.data?.criteria as ScannerCriterion[]) || []).map((c) => c.indicatorId))
+                    );
+                    
+                    let isStale = false;
+                    if (!s.type || s.type === "param_change" || s.type === "remove_criterion") {
+                      // param_change and remove_criterion need the indicator to exist on canvas
+                      isStale = !canvasIndicatorIds.has(s.indicatorId);
+                    } else if (s.type === "add_criterion") {
+                      // add_criterion needs the indicator to NOT exist (can't add duplicates)
+                      isStale = canvasIndicatorIds.has(s.indicatorId);
+                    }
+                    
                     return (
                       <div
                         key={i}
-                        className={`rounded-md border p-3 space-y-1.5 ${isAccepted ? "border-rs-green/30 bg-rs-green/10" : ""}`}
+                        className={`rounded-md border p-3 space-y-1.5 ${isAccepted ? "border-rs-green/30 bg-rs-green/10" : ""} ${isStale && !isAccepted ? "opacity-40 border-dashed" : ""}`}
                         data-testid={`tune-suggestion-${i}`}
                       >
+                        {isStale && !isAccepted && (
+                          <div className="text-[10px] text-amber-500 font-medium mb-1">
+                            ⚠ Stale — canvas changed, this suggestion no longer applies
+                          </div>
+                        )}
                         {(!s.type || s.type === "param_change") && (
                           <>
                             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -4121,10 +4435,11 @@ export default function BigIdeaPage() {
                             variant="outline"
                             onClick={() => handleAcceptSuggestion(s, i)}
                             className="gap-1.5"
+                            disabled={isStale}
                             data-testid={`button-accept-suggestion-${i}`}
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            Apply
+                            {isStale ? "N/A" : "Apply"}
                           </Button>
                         ) : (
                           <div className="flex items-center gap-2">
@@ -4251,6 +4566,69 @@ export default function BigIdeaPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <NoIndicatorFoundDialog
+        open={!!customIndicatorDialog}
+        onClose={() => setCustomIndicatorDialog(null)}
+        requestDescription={customIndicatorDialog?.requestDescription || ""}
+        suggestedIndicatorName={customIndicatorDialog?.suggestedIndicatorName || ""}
+        category={customIndicatorDialog?.category || ""}
+        reason={customIndicatorDialog?.reason || ""}
+        originalRequest={customIndicatorDialog?.originalRequest || ""}
+        onIndicatorCreated={(indicator) => {
+          setCustomIndicatorPreview({ indicator, aiPrompt: customIndicatorDialog.originalRequest });
+          setCustomIndicatorDialog(null);
+        }}
+      />
+
+      {customIndicatorPreview && (
+        <CustomIndicatorPreviewDialog
+          open={!!customIndicatorPreview}
+          onClose={() => setCustomIndicatorPreview(null)}
+          indicator={customIndicatorPreview.indicator}
+          aiPrompt={customIndicatorPreview.aiPrompt || ""}
+          onSaved={(savedIndicator) => {
+            // Invalidate indicators cache first so the new indicator is available
+            queryClient.invalidateQueries({ queryKey: ["/api/bigidea/indicators"] });
+            
+            // Automatically create a thought using the new indicator
+            const thoughtData = {
+              name: savedIndicator.name,
+              category: savedIndicator.category || "Custom",
+              description: savedIndicator.description || customIndicatorPreview.aiPrompt,
+              timeframe: "daily",
+              aiPrompt: customIndicatorPreview.aiPrompt,
+              criteria: [{
+                indicatorId: savedIndicator.customId,
+                label: savedIndicator.name,
+                muted: false,
+                inverted: false,
+                params: (savedIndicator.params || []).map((p: any) => ({
+                  name: p.name,
+                  label: p.label,
+                  type: p.type,
+                  value: p.defaultValue,
+                  min: p.min,
+                  max: p.max,
+                  step: p.step,
+                })),
+              }],
+            };
+            
+            // Use the saveAndPlaceMultiThoughts to create and place the thought
+            saveAndPlaceMultiThoughts.mutate({
+              thoughts: [{ ...thoughtData, thoughtKey: "custom-thought" }],
+              edges: [{ source: "custom-thought", target: "RESULTS", logicType: "AND" }],
+            });
+            
+            setCustomIndicatorPreview(null);
+            toast({
+              title: "Custom Indicator Created & Added",
+              description: `"${savedIndicator.name}" has been saved and added to your canvas.`,
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -4426,6 +4804,11 @@ function ScanChartViewer({
   onIndexChange,
   sessionId,
   tuningActive,
+  trainingMode,
+  sourceSetupId,
+  sourceSetupName,
+  navigationMode,
+  onNavigationModeChange,
 }: {
   results: ScanResultItem[];
   currentIndex: number;
@@ -4434,17 +4817,85 @@ function ScanChartViewer({
   onIndexChange: (idx: number) => void;
   sessionId?: number;
   tuningActive?: boolean;
+  trainingMode?: boolean;
+  sourceSetupId?: number;
+  sourceSetupName?: string;
+  navigationMode?: 'scan' | 'watchlist';
+  onNavigationModeChange?: (mode: 'scan' | 'watchlist') => void;
 }) {
   const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
   const [showETH, setShowETH] = useState(false);
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
+  const [newsOpen, setNewsOpen] = useState(false);
+  // Persist Trade Plan open state in localStorage
+  const [askIvyOpen, setAskIvyOpenState] = useState(() => {
+    try {
+      return localStorage.getItem("askIvyOverlayOpen") === "true";
+    } catch { return false; }
+  });
+  const setAskIvyOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    setAskIvyOpenState((prev) => {
+      const newValue = typeof value === "function" ? value(prev) : value;
+      try { localStorage.setItem("askIvyOverlayOpen", String(newValue)); } catch {}
+      return newValue;
+    });
+  };
+  const [ivyEntryLevel, setIvyEntryLevel] = useState<{ price: number; label: string; type?: string } | null>(null);
+  const [ivyStopLevel, setIvyStopLevel] = useState<{ price: number; label: string; type?: string } | null>(null);
+  const [ivyTargetLevel, setIvyTargetLevel] = useState<{ price: number; label: string } | null>(null);
+  
+  // Chart click state for Trade Plan
+  const [ivyChartClick, setIvyChartClick] = useState<{ price: number; timestamp: number } | null>(null);
+  const [ivyActiveClickField, setIvyActiveClickField] = useState<"entry" | "stop" | "target" | null>(null);
+  
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
   const [tickerDebugOpen, setTickerDebugOpen] = useState(false);
 
   useEffect(() => { setTickerDebugOpen(false); }, [currentIndex]);
+  
+  // Debug logging - must be at top with other hooks
+  useEffect(() => {
+    if (open) {
+      console.log("[ScanChartViewer] Opened with:", { currentIndex, symbol: results[currentIndex]?.symbol, resultsLength: results.length });
+    }
+  }, [open, currentIndex, results]);
 
   const { cssVariables } = useSystemSettings();
   const { toast } = useToast();
+  const { syncToMarketSurge } = useMarketSurgeSync();
+  const [msSyncEnabled, setMsSyncEnabled] = useState(false);
+
+  // Watchlist integration
+  const { data: watchlist } = useWatchlist();
+  const { mutate: addToWatchlist, isPending: isAddingToWatchlist } = useAddToWatchlist();
+  const { mutate: removeFromWatchlist, isPending: isRemovingFromWatchlist } = useRemoveFromWatchlist();
+  const { mutate: updateWatchlist } = useUpdateWatchlist();
+  const { mutate: addToWatchlistWithTradePlan } = useAddToWatchlistWithTradePlan();
+  
+  // Fetch setup's Ivy config for context-aware suggestions
+  const { data: setupConfig } = useQuery<{
+    id: number;
+    name: string;
+    ivyEntryStrategy?: string | null;
+    ivyStopStrategy?: string | null;
+    ivyTargetStrategy?: string | null;
+    ivyContextNotes?: string | null;
+    ivyApproved?: boolean;
+  }>({
+    queryKey: ["/api/bigidea/setups", sourceSetupId],
+    enabled: !!sourceSetupId,
+  });
+
+  // Navigation mode state
+  const [activeNavigationMode, setActiveNavigationMode] = useState(navigationMode || 'scan');
+
+  // Compute navigation list based on mode
+  const navigationList = useMemo(() => {
+    if (activeNavigationMode === 'watchlist' && watchlist) {
+      return watchlist.map(w => ({ symbol: w.symbol, price: 0, passedPaths: [] as string[] }));
+    }
+    return results;
+  }, [activeNavigationMode, watchlist, results]);
 
   const chartWindowRef = useRef<HTMLDivElement>(null);
   const [thresholdToastShown, setThresholdToastShown] = useState(false);
@@ -4455,26 +4906,6 @@ function ScanChartViewer({
     return () => { if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current); };
   }, []);
 
-  const watchlistMutation = useMutation({
-    mutationFn: async ({ symbol }: { symbol: string }) => {
-      const res = await fetch("/api/sentinel/watchlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ symbol }),
-      });
-      if (!res.ok) throw new Error("Failed to add to watchlist");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
-      toast({ title: "Added to Watchlist", description: `${symbol} has been added to your watching list.` });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to add to watchlist. It may already be on your list.", variant: "destructive" });
-    },
-  });
-
   const ratingMutation = useMutation({
     mutationFn: async ({ symbol, rating, price, indicatorSnapshot }: { symbol: string; rating: "up" | "down"; price: number; indicatorSnapshot?: any }) => {
       const res = await apiRequest("POST", "/api/bigidea/chart-rating", {
@@ -4483,6 +4914,9 @@ function ScanChartViewer({
         price,
         sessionId,
         indicatorSnapshot: indicatorSnapshot || null,
+        ratingType: trainingMode ? "admin" : "user",
+        trainingMode: trainingMode || false,
+        sourceSetupId: sourceSetupId || null,
       });
       return res.json();
     },
@@ -4506,48 +4940,111 @@ function ScanChartViewer({
     },
   });
 
-  const current = results[currentIndex];
+  const current = navigationList[currentIndex];
   const symbol = current?.symbol || "";
 
   type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
-  const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
+  const { data: dailyData, isLoading: dailyLoading, error: dailyError } = useQuery<ChartDataResponse>({
     queryKey: ["/api/sentinel/chart-data", symbol, "daily"],
     enabled: open && !!symbol,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchInterval: 5 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/chart-data?ticker=${symbol}&timeframe=daily`);
-      if (!res.ok) throw new Error("Failed to fetch daily chart data");
-      return res.json();
+      console.log(`[ScanChartViewer] Fetching daily data for ${symbol}`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${symbol}&timeframe=daily&_=${Date.now()}`, { 
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (!res.ok) {
+        console.error(`[ScanChartViewer] Daily data fetch failed: ${res.status} ${res.statusText}`);
+        throw new Error("Failed to fetch daily chart data");
+      }
+      const data = await res.json();
+      console.log(`[ScanChartViewer] Daily data loaded: ${data.candles?.length || 0} candles`);
+      if (data.candles?.length > 0) {
+        const first = new Date(data.candles[0].timestamp * 1000);
+        const last = new Date(data.candles[data.candles.length - 1].timestamp * 1000);
+        console.log(`[ScanChartViewer] Daily range: ${first.toLocaleDateString()} to ${last.toLocaleDateString()}`);
+      }
+      return data;
     },
-    staleTime: 5 * 60 * 1000,
-    placeholderData: (prev) => prev,
+    staleTime: 0,
   });
 
-  const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
+  const { data: intradayData, isLoading: intradayLoading, error: intradayError } = useQuery<ChartDataResponse>({
     queryKey: ["/api/sentinel/chart-data", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchInterval: 60 * 1000,
     queryFn: async () => {
-      const params = new URLSearchParams({ ticker: symbol!, timeframe: intradayTimeframe });
+      const params = new URLSearchParams({ ticker: symbol!, timeframe: intradayTimeframe, _: Date.now().toString() });
       if (showETH) params.set('includeETH', 'true');
-      const res = await fetch(`/api/sentinel/chart-data?${params}`);
-      if (!res.ok) throw new Error("Failed to fetch intraday chart data");
-      return res.json();
+      console.log(`[ScanChartViewer] Fetching intraday data for ${symbol} (${intradayTimeframe}, ETH=${showETH})`);
+      const res = await fetch(`/api/sentinel/chart-data?${params}`, { 
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (!res.ok) {
+        console.error(`[ScanChartViewer] Intraday data fetch failed: ${res.status} ${res.statusText}`);
+        throw new Error("Failed to fetch intraday chart data");
+      }
+      const data = await res.json();
+      console.log(`[ScanChartViewer] Intraday data loaded: ${data.candles?.length || 0} candles`);
+      if (data.candles?.length > 0) {
+        const first = new Date(data.candles[0].timestamp * 1000);
+        const last = new Date(data.candles[data.candles.length - 1].timestamp * 1000);
+        console.log(`[ScanChartViewer] Intraday range: ${first.toLocaleString()} to ${last.toLocaleString()}`);
+      }
+      return data;
     },
-    staleTime: 5 * 60 * 1000,
-    placeholderData: (prev) => prev,
+    staleTime: 0,
   });
 
-  const { data: chartMetrics } = useQuery<ChartMetrics>({
+  const { data: chartMetrics, error: metricsError } = useQuery<ChartMetrics>({
     queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe],
     enabled: open && !!symbol,
     queryFn: async () => {
+      console.log(`[ScanChartViewer] Fetching metrics for ${symbol}`);
       const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${symbol}&timeframe=${intradayTimeframe}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch metrics");
-      return res.json();
+      if (!res.ok) {
+        console.error(`[ScanChartViewer] Metrics fetch failed: ${res.status} ${res.statusText}`);
+        throw new Error("Failed to fetch metrics");
+      }
+      const data = await res.json();
+      console.log(`[ScanChartViewer] Metrics loaded:`, data);
+      console.log(`[ScanChartViewer] Metrics keys:`, Object.keys(data));
+      console.log(`[ScanChartViewer] Sample values - PE: ${data.pe}, Market Cap: ${data.marketCap}, Target Price: ${data.targetPrice}`);
+      return data;
     },
     staleTime: 60 * 1000,
   });
 
+  // News query - only fetch when panel is open (lazy loading)
+  interface NewsArticle {
+    id: number;
+    headline: string;
+    summary: string;
+    source: string;
+    url: string;
+    datetime: number;
+    image: string;
+  }
+  
+  const { data: newsData, isLoading: newsLoading } = useQuery<NewsArticle[]>({
+    queryKey: ["/api/news", symbol],
+    enabled: open && newsOpen && !!symbol,
+    queryFn: async () => {
+      const res = await fetch(`/api/news/${symbol}?days=14`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch news");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -4579,6 +5076,16 @@ function ScanChartViewer({
       document.body.style.overflow = "";
     };
   }, [open, onOpenChange]);
+
+  // Auto-sync to MarketSurge when navigating stocks
+  useEffect(() => {
+    if (open && msSyncEnabled && results.length > 0) {
+      const currentStock = results[currentIndex];
+      if (currentStock?.ticker || currentStock?.symbol) {
+        syncToMarketSurge(currentStock.ticker || currentStock.symbol, 'day');
+      }
+    }
+  }, [open, currentIndex, msSyncEnabled, results, syncToMarketSurge]);
 
   const dayChange = useMemo(() => {
     if (!dailyData || dailyData.candles.length < 2) return null;
@@ -4718,6 +5225,62 @@ function ScanChartViewer({
             }
           }
         }
+
+        // Undercut & Rally pattern (PA-19)
+        if (h.type === "urPattern" && h.undercutBar !== undefined && h.rallyBar !== undefined) {
+          if (dailyData) {
+            const len = dailyData.candles.length;
+            
+            // Diamond on undercut bar (where price dipped below MA) - red/orange
+            const undercutIdx = len - 1 - h.undercutBar;
+            if (undercutIdx >= 0 && undercutIdx < len) {
+              const undercutCandle = dailyData.candles[undercutIdx];
+              diamondMarkers.push({
+                time: undercutCandle.timestamp,
+                price: undercutCandle.low,
+                color: "rgba(239, 68, 68, 0.7)", // Red for undercut
+                size: 50,
+                text: "Undercut",
+                textColor: "#ffffff",
+              });
+            }
+            
+            // Diamond on rally bar (where price crossed back above MA) - green
+            const rallyIdx = len - 1 - h.rallyBar;
+            if (rallyIdx >= 0 && rallyIdx < len) {
+              const rallyCandle = dailyData.candles[rallyIdx];
+              diamondMarkers.push({
+                time: rallyCandle.timestamp,
+                price: rallyCandle.high,
+                color: "rgba(34, 197, 94, 0.7)", // Green for rally
+                size: 50,
+                text: "Rally",
+                textColor: "#ffffff",
+              });
+            }
+          }
+        }
+
+        // Pullback to MA pattern (PA-20)
+        if (h.type === "pullbackPattern" && h.touchBar !== undefined) {
+          if (dailyData) {
+            const len = dailyData.candles.length;
+            
+            // Diamond on touch bar (where price touched the MA) - yellow
+            const touchIdx = len - 1 - h.touchBar;
+            if (touchIdx >= 0 && touchIdx < len) {
+              const touchCandle = dailyData.candles[touchIdx];
+              diamondMarkers.push({
+                time: touchCandle.timestamp,
+                price: touchCandle.low,
+                color: "rgba(234, 179, 8, 0.7)", // Yellow for MA touch
+                size: 50,
+                text: "PB Touch",
+                textColor: "#ffffff",
+              });
+            }
+          }
+        }
       }
     }
 
@@ -4734,10 +5297,153 @@ function ScanChartViewer({
     return { markers, diamondMarkers, priceLines, resistanceLines, baseZones: dedupedBaseZones };
   }, [current?.thoughtBreakdown, dailyData]);
 
+  // Define callbacks BEFORE early return - hooks must always be called
+  const handleCopyChartWindow = useCallback(async () => {
+    const el = chartWindowRef.current;
+    if (!el) return;
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(el, {
+        backgroundColor: null,
+        useCORS: true,
+        scale: 2,
+        logging: false,
+      });
+      canvas.toBlob(async (blob) => {
+        if (!blob) { toast({ title: "Failed to capture image" }); return; }
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          toast({ title: "Chart copied to clipboard as image" });
+        } catch {
+          const link = document.createElement("a");
+          link.download = `${symbol}_chart.png`;
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+          toast({ title: "Chart saved as image (clipboard not available)" });
+        }
+      }, "image/png");
+    } catch {
+      toast({ title: "Failed to capture chart" });
+    }
+  }, [symbol, toast]);
+
+  const handleCopyTickerDebugText = useCallback(async () => {
+    if (!current?.thoughtBreakdown) return;
+    const lines: string[] = [];
+    lines.push(`Ticker Debug: ${symbol}`);
+    current.thoughtBreakdown.forEach((thought) => {
+      const passCount = thought.criteriaResults.filter((c: any) => c.pass).length;
+      const totalCount = thought.criteriaResults.length;
+      lines.push(`\n${thought.pass ? "PASS" : "FAIL"} ${thought.thoughtName} (${passCount}/${totalCount})`);
+      thought.criteriaResults.forEach((cr: any) => {
+        const diag = cr.diagnostics;
+        lines.push(`  ${cr.pass ? "+" : "-"} ${cr.indicatorName}${cr.inverted ? " [INV]" : ""}${diag ? ` — val: ${diag.value}, thresh: ${diag.threshold}${diag.detail ? `, ${diag.detail}` : ""}` : ""}`);
+      });
+    });
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      toast({ title: "Ticker debug info copied to clipboard" });
+    } catch {
+      toast({ title: "Failed to copy debug text" });
+    }
+  }, [current, symbol, toast]);
+
+  // Compute watchlist status
+  const isWatchlisted = watchlist?.some(item => item.symbol === symbol);
+  const watchlistItem = watchlist?.find(item => item.symbol === symbol);
+
+  // Get saved trade plan from watchlist item - memoized to prevent infinite loops
+  const savedTradePlan = useMemo(() => {
+    if (!watchlistItem) return null;
+    const hasData = watchlistItem.targetEntry || watchlistItem.stopPlan || watchlistItem.targetPlan;
+    if (!hasData) return null;
+    return {
+      entry: watchlistItem.targetEntry,
+      stop: watchlistItem.stopPlan,
+      target: watchlistItem.targetPlan,
+    };
+  }, [watchlistItem?.targetEntry, watchlistItem?.stopPlan, watchlistItem?.targetPlan]);
+
+  // NOTE: Price lines loading is handled by AskIvyOverlay via savedTradePlan prop
+  // AskIvyOverlay calls onSelectionChange to update ivyEntryLevel/Stop/Target
+
+  // Handler to save trade plan to watchlist
+  const handleSaveTradePlan = useCallback((data: { entry?: number; stop?: number; target?: number }) => {
+    if (isWatchlisted && watchlistItem) {
+      updateWatchlist({ 
+        id: watchlistItem.id, 
+        data: { 
+          targetEntry: data.entry, 
+          stopPlan: data.stop, 
+          targetPlan: data.target 
+        } 
+      });
+      toast({ title: "Saved", description: "Trade plan saved to watchlist" });
+    } else {
+      addToWatchlistWithTradePlan({ 
+        symbol, 
+        targetEntry: data.entry, 
+        stopPlan: data.stop, 
+        targetPlan: data.target 
+      });
+    }
+  }, [isWatchlisted, watchlistItem, updateWatchlist, addToWatchlistWithTradePlan, symbol, toast]);
+
+  // Handler to clear trade plan
+  const handleClearTradePlan = useCallback(() => {
+    setIvyEntryLevel(null);
+    setIvyStopLevel(null);
+    setIvyTargetLevel(null);
+    if (isWatchlisted && watchlistItem) {
+      updateWatchlist({ 
+        id: watchlistItem.id, 
+        data: { 
+          targetEntry: null, 
+          stopPlan: null, 
+          targetPlan: null 
+        } 
+      });
+    }
+  }, [isWatchlisted, watchlistItem, updateWatchlist]);
+
+  const handleIvySelectionChange = useCallback((
+    entry: { price: number; label: string; type?: string } | null,
+    stop: { price: number; label: string; type?: string } | null,
+    target: { price: number; label: string } | null
+  ) => {
+    setIvyEntryLevel(entry);
+    setIvyStopLevel(stop);
+    setIvyTargetLevel(target);
+  }, []);
+
+  // NOW safe to return early - all hooks have been called
   if (!open) return null;
+  
+  // Safety check: if no symbol or no current result, close and return null
+  if (!symbol || !current) {
+    console.warn("[ScanChartViewer] No symbol or current result, closing viewer");
+    setTimeout(() => onOpenChange(false), 0);
+    return null;
+  }
 
   const scanNavExtra = (
     <div className="flex items-center gap-2 flex-shrink-0">
+      <Button
+        size="sm"
+        variant={activeNavigationMode === 'watchlist' ? 'default' : 'outline'}
+        onClick={() => {
+          const newMode = activeNavigationMode === 'watchlist' ? 'scan' : 'watchlist';
+          setActiveNavigationMode(newMode);
+          onNavigationModeChange?.(newMode);
+          if (currentIndex >= navigationList.length) {
+            onIndexChange(0);
+          }
+        }}
+        disabled={!watchlist || watchlist.length === 0}
+        data-testid="button-nav-mode-toggle"
+      >
+        {activeNavigationMode === 'watchlist' ? '⭐ Watchlist' : '🔍 Scan'}
+      </Button>
       <Button
         size="icon"
         variant="outline"
@@ -4748,12 +5454,13 @@ function ScanChartViewer({
         <ChevronLeft className="h-4 w-4" style={{ color: cssVariables.secondaryOverlayColor }} />
       </Button>
       <span className="text-sm" style={{ color: cssVariables.textColorSmall }} data-testid="text-chart-position">
-        {currentIndex + 1} of {results.length}
+        {currentIndex + 1} of {navigationList.length}
+        {activeNavigationMode === 'watchlist' && ' (Watchlist)'}
       </span>
       <Button
         size="icon"
         variant="outline"
-        disabled={currentIndex === results.length - 1}
+        disabled={currentIndex === navigationList.length - 1}
         onClick={() => onIndexChange(currentIndex + 1)}
         data-testid="button-chart-next"
       >
@@ -4809,18 +5516,20 @@ function ScanChartViewer({
             size="sm"
             variant="outline"
             className="gap-1.5"
-            onClick={() => {
-              const price = dayChange?.price ?? current?.price ?? 0;
-              window.location.href = `/sentinel/evaluate?symbol=${encodeURIComponent(symbol)}&price=${price.toFixed(2)}&from=bigidea`;
+            style={{
+              backgroundColor: askIvyOpen ? 'rgba(251, 191, 36, 0.2)' : undefined,
+              borderColor: askIvyOpen ? '#fbbf24' : undefined,
+              color: askIvyOpen ? '#fbbf24' : undefined,
             }}
+            onClick={() => setAskIvyOpen((v) => !v)}
             data-testid="button-chart-evaluate"
           >
-            <Music className="h-3.5 w-3.5" />
-            <span>Ivy AI</span>
+            <Sparkles className="h-3.5 w-3.5" style={{ color: '#fbbf24' }} />
+            <span>Trade Plan</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p className="text-sm">Open Trade Evaluator pre-filled with this ticker</p>
+          <p className="text-sm">Set entry, stop & target levels</p>
         </TooltipContent>
       </Tooltip>
       <Tooltip>
@@ -4829,16 +5538,60 @@ function ScanChartViewer({
             size="sm"
             variant="outline"
             className="gap-1.5"
-            onClick={() => { watchlistMutation.mutate({ symbol }); }}
-            disabled={watchlistMutation.isPending}
-            data-testid="button-chart-watchlist"
+            style={{
+              backgroundColor: newsOpen ? 'rgba(59, 130, 246, 0.2)' : undefined,
+              borderColor: newsOpen ? '#3b82f6' : undefined,
+              color: newsOpen ? '#3b82f6' : undefined,
+            }}
+            onClick={() => setNewsOpen((v) => !v)}
+            data-testid="button-chart-news"
           >
-            <Eye className="h-3.5 w-3.5" />
-            <span>Watchlist</span>
+            <Newspaper className="h-3.5 w-3.5" />
+            <span>News</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p className="text-sm">Add this ticker to your Watching list for tracking</p>
+          <p className="text-sm">View recent news for {symbol}</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div>
+            <WatchlistSelector 
+              symbol={symbol} 
+              storageKey="scanWatchlistId"
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="text-sm">Add/remove from watchlist</p>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant={msSyncEnabled ? "default" : "outline"}
+            className="gap-1.5"
+            onClick={() => {
+              const newState = !msSyncEnabled;
+              setMsSyncEnabled(newState);
+              if (newState && symbol) {
+                syncToMarketSurge(symbol, 'day');
+                toast({
+                  title: 'MarketSurge Sync Active',
+                  description: 'Navigate with arrow keys to sync'
+                });
+              }
+            }}
+            data-testid="button-chart-marketsurge"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span>MarketSurge</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="text-sm">Sync ticker changes to MarketSurge window</p>
         </TooltipContent>
       </Tooltip>
       {(() => {
@@ -4893,56 +5646,6 @@ function ScanChartViewer({
       ))}
     </div>
   );
-
-  const handleCopyChartWindow = useCallback(async () => {
-    const el = chartWindowRef.current;
-    if (!el) return;
-    try {
-      const html2canvas = (await import("html2canvas")).default;
-      const canvas = await html2canvas(el, {
-        backgroundColor: null,
-        useCORS: true,
-        scale: 2,
-        logging: false,
-      });
-      canvas.toBlob(async (blob) => {
-        if (!blob) { toast({ title: "Failed to capture image" }); return; }
-        try {
-          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-          toast({ title: "Chart copied to clipboard as image" });
-        } catch {
-          const link = document.createElement("a");
-          link.download = `${symbol}_chart.png`;
-          link.href = canvas.toDataURL("image/png");
-          link.click();
-          toast({ title: "Chart saved as image (clipboard not available)" });
-        }
-      }, "image/png");
-    } catch {
-      toast({ title: "Failed to capture chart" });
-    }
-  }, [symbol, toast]);
-
-  const handleCopyTickerDebugText = useCallback(async () => {
-    if (!current?.thoughtBreakdown) return;
-    const lines: string[] = [];
-    lines.push(`Ticker Debug: ${symbol}`);
-    current.thoughtBreakdown.forEach((thought) => {
-      const passCount = thought.criteriaResults.filter((c: any) => c.pass).length;
-      const totalCount = thought.criteriaResults.length;
-      lines.push(`\n${thought.pass ? "PASS" : "FAIL"} ${thought.thoughtName} (${passCount}/${totalCount})`);
-      thought.criteriaResults.forEach((cr: any) => {
-        const diag = cr.diagnostics;
-        lines.push(`  ${cr.pass ? "+" : "-"} ${cr.indicatorName}${cr.inverted ? " [INV]" : ""}${diag ? ` — val: ${diag.value}, thresh: ${diag.threshold}${diag.detail ? `, ${diag.detail}` : ""}` : ""}`);
-      });
-    });
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      toast({ title: "Ticker debug info copied to clipboard" });
-    } catch {
-      toast({ title: "Failed to copy debug text" });
-    }
-  }, [current, symbol, toast]);
 
   const scanLowerPane = current?.thoughtBreakdown && current.thoughtBreakdown.length > 0 ? (
     <div className="flex items-center gap-2 h-full overflow-x-auto overflow-y-hidden px-2 text-[10px] rounded-md border border-blue-800/40 bg-blue-950/15" data-testid="thought-breakdown-strip">
@@ -5075,31 +5778,183 @@ function ScanChartViewer({
           </div>
         </div>
       )}
+      {trainingMode && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none" data-testid="training-mode-banner">
+          <div className="bg-purple-950/95 border border-purple-500/50 rounded-lg px-6 py-3 shadow-2xl animate-in slide-in-from-top-2 duration-300">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-500/20">
+                <GraduationCap className="h-4 w-4 text-purple-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-purple-300">AI Training Mode</span>
+                  <Badge variant="outline" className="text-[10px] border-purple-500/50 text-purple-300">ADMIN</Badge>
+                </div>
+                {sourceSetupName && (
+                  <p className="text-xs text-purple-400/80">Validating setup: {sourceSetupName}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div ref={chartWindowRef} className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-4">
+        {/* Debug Status Panel */}
+        <div className="absolute top-2 right-2 bg-blue-950/90 border border-blue-500/50 rounded px-3 py-2 text-xs font-mono z-50 max-w-md">
+          <div className="font-bold text-blue-300 mb-1">Chart Debug Status</div>
+          <div className="space-y-0.5 text-blue-200/80">
+            <div>Symbol: <span className="text-white font-semibold">{symbol || "N/A"}</span></div>
+            <div>Daily: {dailyLoading ? "⏳ Loading..." : dailyError ? `❌ Error: ${dailyError}` : dailyData ? `✅ ${dailyData.candles?.length || 0} candles` : "❓ No data"}</div>
+            <div>Intraday: {intradayLoading ? "⏳ Loading..." : intradayError ? `❌ Error: ${intradayError}` : intradayData ? `✅ ${intradayData.candles?.length || 0} candles` : "❓ No data"}</div>
+            <div>Metrics: {metricsError ? `❌ Error: ${metricsError}` : chartMetrics ? `✅ Loaded` : "❓ No data"}</div>
+            {chartMetrics && (
+              <div className="mt-2 pt-2 border-t border-blue-500/30 text-[10px]">
+                <div>PE: {chartMetrics.pe ?? "null"}</div>
+                <div>Market Cap: {chartMetrics.marketCap ?? "null"}</div>
+                <div>Target: ${chartMetrics.targetPrice ?? "null"}</div>
+                <div>D/E: {chartMetrics.debtToEquity ?? "null"}</div>
+              </div>
+            )}
+            <div>Current Index: {currentIndex} / {results.length}</div>
+          </div>
+        </div>
+        
         <ChartErrorBoundary key={`scan-chart-viewer-${symbol}`} onClose={() => onOpenChange(false)}>
-        <DualChartGrid
-          symbol={symbol}
-          dailyData={dailyData}
-          dailyLoading={dailyLoading}
-          intradayData={intradayData}
-          intradayLoading={intradayLoading}
-          chartMetrics={chartMetrics ?? null}
-          intradayTimeframe={intradayTimeframe}
-          onIntradayTimeframeChange={setIntradayTimeframe}
-          showETH={showETH}
-          onShowETHChange={setShowETH}
-          upperPane={scanUpperPane}
-          navExtra={scanNavExtra}
-          lowerPane={scanLowerPane}
-          dailyChartProps={{
-            markers: cocAnnotations.markers,
-            diamondMarkers: cocAnnotations.diamondMarkers,
-            priceLines: cocAnnotations.priceLines,
-            resistanceLines: cocAnnotations.resistanceLines,
-            baseZones: cocAnnotations.baseZones,
-          }}
-          testIdPrefix="scan"
-        />
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <DualChartGrid
+            symbol={symbol}
+            dailyData={dailyData}
+            dailyLoading={dailyLoading}
+            intradayData={intradayData}
+            intradayLoading={intradayLoading}
+            chartMetrics={chartMetrics ?? null}
+            intradayTimeframe={intradayTimeframe}
+            onIntradayTimeframeChange={setIntradayTimeframe}
+            showETH={showETH}
+            onShowETHChange={setShowETH}
+            upperPane={scanUpperPane}
+            navExtra={scanNavExtra}
+            lowerPane={scanLowerPane}
+            dailyChartProps={{
+              markers: cocAnnotations.markers,
+              diamondMarkers: cocAnnotations.diamondMarkers,
+              priceLines: [
+                ...(cocAnnotations.priceLines || []),
+                ...(ivyEntryLevel ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }] : []),
+                ...(ivyStopLevel ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }] : []),
+                ...(ivyTargetLevel ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }] : []),
+              ],
+              resistanceLines: cocAnnotations.resistanceLines,
+              baseZones: cocAnnotations.baseZones,
+              onCandleClick: ivyActiveClickField ? (_candle: any, clickedPrice: number) => {
+                setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
+              } : undefined,
+            }}
+            intradayChartProps={{
+              priceLines: [
+                ...(ivyEntryLevel ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }] : []),
+                ...(ivyStopLevel ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }] : []),
+                ...(ivyTargetLevel ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }] : []),
+              ],
+              onCandleClick: ivyActiveClickField ? (_candle: any, clickedPrice: number) => {
+                setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
+              } : undefined,
+            }}
+            testIdPrefix="scan"
+          />
+          <AskIvyOverlay
+            open={askIvyOpen}
+            onOpenChange={setAskIvyOpen}
+            symbol={symbol}
+            currentPrice={dayChange?.price ?? current?.price ?? 0}
+            chartCandles={dailyData?.candles}
+            onSelectionChange={handleIvySelectionChange}
+            chartClickEvent={ivyChartClick}
+            onChartClickModeChange={(field) => {
+              setIvyActiveClickField(field);
+            }}
+            setupContext={setupConfig ? {
+              setupId: setupConfig.id,
+              setupName: setupConfig.name,
+              ivyEntryStrategy: setupConfig.ivyEntryStrategy,
+              ivyStopStrategy: setupConfig.ivyStopStrategy,
+              ivyTargetStrategy: setupConfig.ivyTargetStrategy,
+              ivyContextNotes: setupConfig.ivyContextNotes,
+              ivyApproved: setupConfig.ivyApproved,
+            } : undefined}
+            isWatchlisted={isWatchlisted}
+            watchlistItemId={watchlistItem?.id}
+            onSaveTradePlan={handleSaveTradePlan}
+            onClearTradePlan={handleClearTradePlan}
+            savedTradePlan={savedTradePlan}
+          />
+          
+          {/* News Panel */}
+          {newsOpen && (
+            <div 
+              className="fixed top-16 right-4 w-96 max-h-[70vh] rounded-lg border shadow-xl overflow-hidden z-50"
+              style={{ backgroundColor: cssVariables.overlayBg, borderColor: cssVariables.secondaryOverlayColor }}
+            >
+              <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: cssVariables.secondaryOverlayColor, backgroundColor: cssVariables.headerBg }}>
+                <div className="flex items-center gap-2">
+                  <Newspaper className="h-4 w-4 text-blue-400" />
+                  <span className="font-semibold" style={{ color: cssVariables.textColorHeader }}>News - {symbol}</span>
+                </div>
+                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setNewsOpen(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <ScrollArea className="h-[calc(70vh-48px)]">
+                <div className="p-3 space-y-3">
+                  {newsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : !newsData || newsData.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No recent news found for {symbol}
+                    </div>
+                  ) : (
+                    newsData.slice(0, 20).map((article) => (
+                      <a
+                        key={article.id}
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block p-3 rounded-md border hover:bg-slate-800/50 transition-colors"
+                        style={{ borderColor: `${cssVariables.secondaryOverlayColor}66` }}
+                      >
+                        <div className="flex gap-3">
+                          {article.image && (
+                            <img 
+                              src={article.image} 
+                              alt="" 
+                              className="w-16 h-16 object-cover rounded flex-shrink-0"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-medium line-clamp-2 mb-1" style={{ color: cssVariables.textColorNormal }}>
+                              {article.headline}
+                            </h4>
+                            <p className="text-xs line-clamp-2 mb-2" style={{ color: cssVariables.textColorSmall }}>
+                              {article.summary}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs" style={{ color: cssVariables.textColorTiny }}>
+                              <span>{article.source}</span>
+                              <span>•</span>
+                              <span>{new Date(article.datetime * 1000).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </a>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+        </div>
         </ChartErrorBoundary>
         {tickerDebugPanel}
       </div>

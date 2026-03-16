@@ -2,12 +2,77 @@ import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
   sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides, sentinelSystemSettings,
+  ivyEvalSettings, ivyEvalUsage, ivyEvalHistory,
+  askIvySettings,
+  watchlists,
   type SentinelUser, type SentinelTrade, type SentinelEvaluation, type SentinelEvent, type SentinelWatchlistItem, type SentinelRule,
   type SentinelRuleSuggestion, type SentinelRulePerformance, type SentinelRuleOverride, type SentinelSystemSettings,
+  type IvyEvalSettings, type IvyEvalUsage, type IvyEvalHistory, type InsertIvyEvalHistory,
+  type AskIvyOverlaySettings,
+  type Watchlist, type InsertWatchlist,
   type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule, type InsertSentinelRuleOverride, type InsertSentinelSystemSettings
 } from "@shared/schema";
 import { eq, desc, and, asc, or, isNull } from "drizzle-orm";
 import { STARTER_RULES } from "./starterRules";
+
+const DEFAULT_ASK_IVY_SETTINGS: AskIvyOverlaySettings = {
+  enableMinerviniCheatEntries: true,
+  enableEma620Entry: true,
+  ema620AllowedTimeframe: "5min_only",
+  entryBufferPct: 0.002,
+
+  // Qulmaggie Entry Rules
+  enableOrhEntry: true,
+  orhTimeframe: "both",
+  enableMaSurfEntry: true,
+  maSurfMaxDistancePct: 2,
+
+  include21EmaStop: true,
+  include50SmaStop: true,
+  includeAtrStop: true,
+  atrStopMultiple: 1.5,
+  stopMaOffsetDollars: 0.1,
+  stop21Label: "21 EMA",
+
+  // Qulmaggie Stop Rules
+  enforceAtrStopCap: true,
+  enforceAdrStopCap: true,
+
+  alwaysInclude8RTarget: true,
+  includeSwingHighTargets: true,
+  swingHighTargetCount: 8,
+  include52wTarget: true,
+  includeWeeklyTarget: true,
+  include5DayTarget: true,
+  include8xAdrTarget: true,
+  adr8TargetBreakoutOnly: true,
+  warnIfNoChartTargets: true,
+
+  // Target Display / Filtering
+  minRrThreshold: 2, // Only show 2:1+ R:R targets
+  targetDisplayLimit: 8, // Show up to 8 targets
+  prioritizeChartTargets: true, // Chart-based first
+  include8xAdrOver50Target: true, // 8x ADR above 50 SMA
+
+  // Risk Warnings
+  warn200DsmaBelow: true, // Warn on longs below 200 DSMA
+
+  // Qulmaggie Position Management
+  suggestPartialProfits: true,
+  partialProfitDays: 4, // 3-5 days, use 4 as middle
+  includeTrailMaCloseStop: true,
+  trailMaClosePeriod: 10, // 10-day MA trail (faster)
+
+  extendedThresholdAdr: 5,
+  profitTakingThresholdAdr: 8,
+  showExtendedWarning: true,
+
+  chartPriceScaleSide: "right",
+  overlayResizable: false,
+};
+
+const ASK_IVY_SETTINGS_CACHE_TTL_MS = 60_000;
+let askIvySettingsCache: { value: AskIvyOverlaySettings; fetchedAt: number } | null = null;
 
 export const sentinelModels = {
   async createUser(data: InsertSentinelUser): Promise<SentinelUser> {
@@ -110,13 +175,77 @@ export const sentinelModels = {
       .orderBy(desc(sentinelTrades.createdAt));
   },
 
-  // Watchlist methods
+  // Watchlist definitions (multiple watchlists per user)
+  async createWatchlist(data: InsertWatchlist): Promise<Watchlist> {
+    const [wl] = await db.insert(watchlists).values(data).returning();
+    return wl;
+  },
+
+  async getWatchlistsByUser(userId: number): Promise<Watchlist[]> {
+    return db.select().from(watchlists)
+      .where(eq(watchlists.userId, userId))
+      .orderBy(desc(watchlists.isDefault), asc(watchlists.name));
+  },
+
+  async getWatchlistById(id: number): Promise<Watchlist | undefined> {
+    const [wl] = await db.select().from(watchlists).where(eq(watchlists.id, id));
+    return wl;
+  },
+
+  async updateWatchlist(id: number, data: Partial<Watchlist>): Promise<Watchlist | undefined> {
+    const [wl] = await db.update(watchlists)
+      .set(data)
+      .where(eq(watchlists.id, id))
+      .returning();
+    return wl;
+  },
+
+  async deleteWatchlist(id: number): Promise<void> {
+    await db.delete(watchlists).where(eq(watchlists.id, id));
+  },
+
+  async setDefaultWatchlist(userId: number, watchlistId: number): Promise<void> {
+    // First, unset any existing default
+    await db.update(watchlists)
+      .set({ isDefault: false })
+      .where(and(eq(watchlists.userId, userId), eq(watchlists.isDefault, true)));
+    // Then set the new default
+    await db.update(watchlists)
+      .set({ isDefault: true })
+      .where(and(eq(watchlists.id, watchlistId), eq(watchlists.userId, userId)));
+  },
+
+  async getOrCreateDefaultWatchlist(userId: number): Promise<Watchlist> {
+    // Try to find existing default
+    const [existing] = await db.select().from(watchlists)
+      .where(and(eq(watchlists.userId, userId), eq(watchlists.isDefault, true)))
+      .limit(1);
+    if (existing) return existing;
+    
+    // Create default watchlist
+    const [created] = await db.insert(watchlists)
+      .values({ userId, name: 'Default', isDefault: true })
+      .returning();
+    return created;
+  },
+
+  // Watchlist items methods
   async createWatchlistItem(data: InsertSentinelWatchlistItem): Promise<SentinelWatchlistItem> {
     const [item] = await db.insert(sentinelWatchlist).values(data).returning();
     return item;
   },
 
-  async getWatchlistByUser(userId: number): Promise<SentinelWatchlistItem[]> {
+  async getWatchlistByUser(userId: number, watchlistId?: number): Promise<SentinelWatchlistItem[]> {
+    if (watchlistId) {
+      return db.select().from(sentinelWatchlist)
+        .where(and(
+          eq(sentinelWatchlist.userId, userId),
+          eq(sentinelWatchlist.watchlistId, watchlistId),
+          eq(sentinelWatchlist.status, 'watching')
+        ))
+        .orderBy(desc(sentinelWatchlist.createdAt));
+    }
+    // Return all watching items if no watchlistId specified
     return db.select().from(sentinelWatchlist)
       .where(and(eq(sentinelWatchlist.userId, userId), eq(sentinelWatchlist.status, 'watching')))
       .orderBy(desc(sentinelWatchlist.createdAt));
@@ -137,6 +266,12 @@ export const sentinelModels = {
 
   async deleteWatchlistItem(id: number): Promise<void> {
     await db.delete(sentinelWatchlist).where(eq(sentinelWatchlist.id, id));
+  },
+
+  async moveWatchlistItems(fromWatchlistId: number, toWatchlistId: number): Promise<void> {
+    await db.update(sentinelWatchlist)
+      .set({ watchlistId: toWatchlistId })
+      .where(eq(sentinelWatchlist.watchlistId, fromWatchlistId));
   },
 
   // Rules methods
@@ -465,5 +600,221 @@ export const sentinelModels = {
         .returning();
       return created;
     }
+  },
+
+  // === IVY STOCK EVAL FUNCTIONS ===
+
+  // Get or create the single settings row
+  async getIvyEvalSettings(): Promise<IvyEvalSettings> {
+    const [settings] = await db.select().from(ivyEvalSettings).limit(1);
+    if (settings) {
+      // If existing row has null OR zero values, update with defaults
+      // Using || instead of ?? to also replace 0 values
+      const needsUpdate = !settings.tierFreeLimit || !settings.tierPremiumLimit || !settings.tierProLimit;
+      if (needsUpdate) {
+        const [updated] = await db.update(ivyEvalSettings)
+          .set({
+            tierFreeLimit: settings.tierFreeLimit || 5,
+            tierFreeTrialDays: settings.tierFreeTrialDays || 7,
+            tierPremiumLimit: settings.tierPremiumLimit || 30,
+            tierProLimit: settings.tierProLimit || 100,
+            tierProCanBuyMore: settings.tierProCanBuyMore ?? true,
+            extraEvalPrice: settings.extraEvalPrice || 0.50,
+            updatedAt: new Date(),
+          })
+          .where(eq(ivyEvalSettings.id, settings.id))
+          .returning();
+        return updated;
+      }
+      return settings;
+    }
+    // Create default settings if none exist with explicit defaults
+    const [created] = await db.insert(ivyEvalSettings).values({
+      tierFreeLimit: 5,
+      tierFreeTrialDays: 7,
+      tierPremiumLimit: 30,
+      tierProLimit: 100,
+      tierProCanBuyMore: true,
+      extraEvalPrice: 0.50,
+    }).returning();
+    return created;
+  },
+
+  async updateIvyEvalSettings(data: Partial<IvyEvalSettings>): Promise<IvyEvalSettings> {
+    const settings = await this.getIvyEvalSettings();
+    const [updated] = await db.update(ivyEvalSettings)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(ivyEvalSettings.id, settings.id))
+      .returning();
+    return updated;
+  },
+
+  // === ASK IVY (OVERLAY) SETTINGS ===
+  async getAskIvySettings(): Promise<AskIvyOverlaySettings> {
+    const now = Date.now();
+    if (askIvySettingsCache && now - askIvySettingsCache.fetchedAt < ASK_IVY_SETTINGS_CACHE_TTL_MS) {
+      return askIvySettingsCache.value;
+    }
+
+    const [row] = await db.select().from(askIvySettings).limit(1);
+    if (!row) {
+      const [created] = await db.insert(askIvySettings).values({ settings: DEFAULT_ASK_IVY_SETTINGS }).returning();
+      const value = (created?.settings as AskIvyOverlaySettings) || DEFAULT_ASK_IVY_SETTINGS;
+      askIvySettingsCache = { value, fetchedAt: now };
+      return value;
+    }
+
+    const merged: AskIvyOverlaySettings = { ...DEFAULT_ASK_IVY_SETTINGS, ...(row.settings as any) };
+
+    // If schema evolved, persist defaults for missing keys
+    if (JSON.stringify(merged) !== JSON.stringify(row.settings || {})) {
+      await db.update(askIvySettings)
+        .set({ settings: merged, updatedAt: new Date() })
+        .where(eq(askIvySettings.id, row.id));
+    }
+
+    askIvySettingsCache = { value: merged, fetchedAt: now };
+    return merged;
+  },
+
+  async updateAskIvySettings(data: Partial<AskIvyOverlaySettings>): Promise<AskIvyOverlaySettings> {
+    const current = await this.getAskIvySettings();
+    const merged: AskIvyOverlaySettings = { ...current, ...data };
+
+    const [row] = await db.select().from(askIvySettings).limit(1);
+    if (!row) {
+      await db.insert(askIvySettings).values({ settings: merged });
+    } else {
+      await db.update(askIvySettings)
+        .set({ settings: merged, updatedAt: new Date() })
+        .where(eq(askIvySettings.id, row.id));
+    }
+
+    askIvySettingsCache = null;
+    return merged;
+  },
+
+  // Get current month's usage for a user
+  async getIvyEvalUsage(userId: number): Promise<IvyEvalUsage | undefined> {
+    const monthYear = new Date().toISOString().slice(0, 7); // "2026-02"
+    const [usage] = await db.select().from(ivyEvalUsage)
+      .where(and(
+        eq(ivyEvalUsage.userId, userId),
+        eq(ivyEvalUsage.monthYear, monthYear)
+      ));
+    return usage;
+  },
+
+  // Increment usage count for current month
+  async incrementIvyEvalUsage(userId: number): Promise<IvyEvalUsage> {
+    const monthYear = new Date().toISOString().slice(0, 7);
+    const existing = await this.getIvyEvalUsage(userId);
+    if (existing) {
+      const [updated] = await db.update(ivyEvalUsage)
+        .set({ evalsUsed: (existing.evalsUsed || 0) + 1, updatedAt: new Date() })
+        .where(eq(ivyEvalUsage.id, existing.id))
+        .returning();
+      return updated;
+    }
+    // Create new usage record for this month
+    const [created] = await db.insert(ivyEvalUsage)
+      .values({ userId, monthYear, evalsUsed: 1 })
+      .returning();
+    return created;
+  },
+
+  // Check if user can use an eval (within their tier limit)
+  async canUseIvyEval(userId: number): Promise<{ canUse: boolean; used: number; limit: number; tier: string }> {
+    const user = await this.getUserById(userId);
+    if (!user) return { canUse: false, used: 0, limit: 0, tier: 'free' };
+    
+    const settings = await this.getIvyEvalSettings();
+    const usage = await this.getIvyEvalUsage(userId);
+    const used = usage?.evalsUsed ?? 0;
+    const extraPurchased = usage?.extraEvalsPurchased ?? 0;
+    
+    // Admin has unlimited
+    if (user.tier === 'admin' || user.isAdmin) {
+      return { canUse: true, used, limit: -1, tier: 'admin' };
+    }
+    
+    // Use || to handle both null and 0 values (fallback to defaults)
+    let limit = settings.tierFreeLimit || 5;
+    if (user.tier === 'premium') limit = settings.tierPremiumLimit || 30;
+    if (user.tier === 'pro') limit = settings.tierProLimit || 100;
+    
+    const totalLimit = limit + extraPurchased;
+    return { canUse: used < totalLimit, used, limit: totalLimit, tier: user.tier || 'free' };
+  },
+
+  // Create an eval history record
+  async createIvyEvalHistory(data: InsertIvyEvalHistory): Promise<IvyEvalHistory> {
+    const [created] = await db.insert(ivyEvalHistory).values(data).returning();
+    return created;
+  },
+
+  // Get eval history by user (for analytics)
+  async getIvyEvalHistoryByUser(userId: number, limit: number = 50): Promise<IvyEvalHistory[]> {
+    return db.select().from(ivyEvalHistory)
+      .where(eq(ivyEvalHistory.userId, userId))
+      .orderBy(desc(ivyEvalHistory.createdAt))
+      .limit(limit);
+  },
+
+  // Update rating on an eval
+  async rateIvyEval(evalId: number, rating: 'up' | 'down'): Promise<IvyEvalHistory | undefined> {
+    const [updated] = await db.update(ivyEvalHistory)
+      .set({ userRating: rating, ratedAt: new Date() })
+      .where(eq(ivyEvalHistory.id, evalId))
+      .returning();
+    return updated;
+  },
+
+  // Update watchlist link on an eval
+  async linkIvyEvalToWatchlist(evalId: number, watchlistId: number): Promise<IvyEvalHistory | undefined> {
+    const [updated] = await db.update(ivyEvalHistory)
+      .set({ watchlistId })
+      .where(eq(ivyEvalHistory.id, evalId))
+      .returning();
+    return updated;
+  },
+
+  // === USER RISK PROFILE FUNCTIONS ===
+
+  async updateUserRiskProfile(userId: number, data: {
+    accountSize?: number;
+    maxAccountRiskPercent?: number;
+    avgPositionSize?: number;
+    riskProfileCompleted?: boolean;
+  }): Promise<SentinelUser | undefined> {
+    const [user] = await db.update(sentinelUsers)
+      .set(data)
+      .where(eq(sentinelUsers.id, userId))
+      .returning();
+    return user;
+  },
+
+  async skipRiskProfileSetup(userId: number): Promise<SentinelUser | undefined> {
+    const [user] = await db.update(sentinelUsers)
+      .set({ riskProfileSkippedAt: new Date() })
+      .where(eq(sentinelUsers.id, userId))
+      .returning();
+    return user;
+  },
+
+  // Update watchlist item with Ivy eval data
+  async updateWatchlistWithIvyEval(watchlistId: number, data: {
+    ivyEvalId?: number;
+    ivyEvalText?: string;
+    ivyRecommendedEntry?: number;
+    ivyRecommendedStop?: number;
+    ivyRecommendedTarget?: number;
+    ivyRiskAssessment?: string;
+  }): Promise<SentinelWatchlistItem | undefined> {
+    const [item] = await db.update(sentinelWatchlist)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(sentinelWatchlist.id, watchlistId))
+      .returning();
+    return item;
   }
 };

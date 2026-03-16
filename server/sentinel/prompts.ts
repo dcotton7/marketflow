@@ -568,7 +568,9 @@ All market data, sentiment, and technicals below are AS OF this date, not curren
       technicalData.swingHighs.forEach((sh, i) => {
         const aboveBelow = sh.price > technicalData.currentPrice ? 'above' : 'below';
         const dist = ((sh.price - technicalData.currentPrice) / technicalData.currentPrice * 100).toFixed(1);
-        prompt += `\n  ${i + 1}. $${sh.price.toFixed(2)} (${sh.daysAgo} trading days ago, ${dist}% ${aboveBelow} current price)`;
+        const monthsAgo = Math.max(0, Math.round(sh.daysAgo / 21));
+        const lastTouchedMonths = Math.max(0, Math.round(sh.lastTouchedDaysAgo / 21));
+        prompt += `\n  ${i + 1}. $${sh.price.toFixed(2)} (printed ${sh.date}, ~${monthsAgo}mo ago; last touched ~${lastTouchedMonths}mo ago; ${dist}% ${aboveBelow} current price)`;
       });
     }
     

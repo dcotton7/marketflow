@@ -1,37 +1,23 @@
+import { getConstituentsSync } from "../universe/constituents";
+
 export function getUniverseTickers(universe: string): string[] {
   switch (universe) {
-    case "dow30":
-      return DOW30;
-    case "nasdaq100":
-      return NASDAQ100;
-    case "sp500":
-      return SP500;
-    case "russell2000":
-      return RUSSELL2000;
+    case "sp500": {
+      const fromFile = getConstituentsSync("sp500");
+      return fromFile.length > 0 ? fromFile : SP500;
+    }
+    case "russell2000": {
+      const fromFile = getConstituentsSync("russell2000");
+      return fromFile.length > 0 ? fromFile : RUSSELL2000;
+    }
+    case "russell3000": {
+      const fromFile = getConstituentsSync("russell3000");
+      return fromFile;
+    }
     default:
       return [];
   }
 }
-
-const DOW30: string[] = [
-  "AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW",
-  "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM",
-  "MRK", "MSFT", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT",
-];
-
-const NASDAQ100: string[] = [
-  "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "AMAT", "AMGN", "AMZN",
-  "ANSS", "APP", "ARM", "ASML", "AVGO", "AZN", "BIIB", "BKNG", "BKR", "CCEP",
-  "CDNS", "CDW", "CEG", "CHTR", "CMCSA", "COST", "CPRT", "CRWD", "CSGP", "CSX",
-  "CTAS", "CTSH", "DASH", "DDOG", "DLTR", "DXCM", "EA", "EXC", "FANG", "FAST",
-  "FTNT", "GEHC", "GFS", "GILD", "GOOG", "GOOGL", "HON", "IDXX", "ILMN", "INTC",
-  "INTU", "ISRG", "KDP", "KHC", "KLAC", "LIN", "LRCX", "LULU", "MAR", "MCHP",
-  "MDB", "MDLZ", "MELI", "META", "MNST", "MRNA", "MRVL", "MSFT", "MU", "NFLX",
-  "NVDA", "NXPI", "ODFL", "ON", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP",
-  "PYPL", "QCOM", "REGN", "ROP", "ROST", "SBUX", "SMCI", "SNPS", "TEAM", "TMUS",
-  "TRGP", "TSLA", "TTD", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL",
-  "ZS",
-];
 
 const SP500: string[] = [
   "A", "AAPL", "ABBV", "ABNB", "ABT", "ACGL", "ACN", "ADBE", "ADI", "ADM",

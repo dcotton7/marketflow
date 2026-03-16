@@ -1,0 +1,22 @@
+CREATE TABLE "optimizer_display_settings" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"show_optimizer_overlay" boolean DEFAULT true NOT NULL,
+	"show_overall_improvement" boolean DEFAULT true NOT NULL,
+	"show_weekly_improvement" boolean DEFAULT true NOT NULL,
+	"show_confidence_level" boolean DEFAULT true NOT NULL,
+	"show_scan_stats" boolean DEFAULT true NOT NULL,
+	"show_live_optimization" boolean DEFAULT true NOT NULL,
+	"show_achievement_badges" boolean DEFAULT false NOT NULL,
+	"admin_override_enabled" boolean DEFAULT false NOT NULL,
+	"admin_show_overall_improvement" boolean DEFAULT true NOT NULL,
+	"admin_show_weekly_improvement" boolean DEFAULT true NOT NULL,
+	"admin_show_confidence_level" boolean DEFAULT true NOT NULL,
+	"admin_show_scan_stats" boolean DEFAULT true NOT NULL,
+	"admin_show_live_optimization" boolean DEFAULT true NOT NULL,
+	"admin_show_achievement_badges" boolean DEFAULT true NOT NULL,
+	"admin_show_debug_info" boolean DEFAULT true NOT NULL,
+	"overlay_position" text DEFAULT 'bottom-center' NOT NULL,
+	"overlay_style" text DEFAULT 'compact' NOT NULL,
+	"overlay_theme" text DEFAULT 'cyberpunk' NOT NULL,
+	"updated_at" timestamp DEFAULT now()
+);

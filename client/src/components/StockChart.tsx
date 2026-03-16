@@ -565,6 +565,7 @@ export function StockChart({
   const [interval, setIntervalState] = useState(getDefaultInterval());
   const [showChannels, setShowChannels] = useState(initialShowChannels);
   const [showPatternViz, setShowPatternViz] = useState(!!selectedPattern);
+  const [showGaps, setShowGaps] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('none');
   const [lineDefinitions, setLineDefinitions] = useState<HorizontalLineDefinition[]>([]);
   const [measureStart, setMeasureStart] = useState<{ price: number; barIndex: number } | null>(null);
@@ -629,7 +630,15 @@ export function StockChart({
   // Determine if we should show pattern visualization (for patterns with channel-like visualizations)
   const patternNeedsViz = selectedPattern && ['VCP', 'Weekly Tight', 'Monthly Tight', 'High Tight Flag', 'Cup and Handle'].includes(selectedPattern);
   
-  const { data: history, isLoading, error } = useStockHistory(symbol, interval);
+  const { data: history, isLoading, error, refetch } = useStockHistory(symbol, interval);
+  
+  // Force refetch intraday (5m/15m/30m/60m) every minute so chart gets new bars regardless of React Query timer
+  useEffect(() => {
+    const intraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
+    if (!intraday) return;
+    const id = setInterval(() => refetch(), 60_000);
+    return () => clearInterval(id);
+  }, [interval, refetch]);
   
   // Update showChannels when prop changes
   useEffect(() => {
@@ -1401,6 +1410,18 @@ export function StockChart({
             <Layers className="w-4 h-4" />
             Channels
           </Button>
+          {interval === '1d' && (
+            <Button
+              variant={showGaps ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowGaps(!showGaps)}
+              className="gap-1"
+              data-testid="button-toggle-gaps"
+            >
+              <span className="text-xs font-bold">S/R</span>
+              Gaps
+            </Button>
+          )}
           {patternNeedsViz && (
             <Button
               variant={showPatternViz ? "default" : "outline"}

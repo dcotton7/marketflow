@@ -8,20 +8,28 @@ import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } fr
 import { registerSentinelRoutes } from "./sentinel/routes";
 import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 import { registerBigIdeaRoutes } from "./bigidea/routes";
+import marketConditionRoutes from "./market-condition/routes";
+import marketflowAnalysisRoutes from "./market-condition/analysis/routes";
+import { registerUploadRoutes } from "./uploads/routes";
+import { initMarketCondition } from "./market-condition";
 
-import * as tiingo from "./tiingo";
+import * as alpaca from "./alpaca";
 
-// In-memory cache for stock history data (5 min TTL)
+// In-memory cache for stock history data
 interface CacheEntry {
   data: any;
   timestamp: number;
 }
 const stockHistoryCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const INTRADAY_CACHE_TTL_MS = 45 * 1000;  // 45s — under 60s client refetch so each poll gets fresh bars
+const DAILY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes for daily/weekly/monthly
 
-function getCachedHistory(key: string): any | null {
+const INTRADAY_INTERVALS_SERVER = new Set(['5m', '15m', '30m', '60m', '1h']);
+
+function getCachedHistory(key: string, interval: string): any | null {
   const entry = stockHistoryCache.get(key);
-  if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+  const ttl = INTRADAY_INTERVALS_SERVER.has(interval) ? INTRADAY_CACHE_TTL_MS : DAILY_CACHE_TTL_MS;
+  if (entry && Date.now() - entry.timestamp < ttl) {
     return entry.data;
   }
   stockHistoryCache.delete(key);
@@ -32,135 +40,18 @@ function setCachedHistory(key: string, data: any): void {
   stockHistoryCache.set(key, { data, timestamp: Date.now() });
 }
 
-import { getSectorAndIndustry } from "./fundamentals";
+import { getSectorAndIndustry, getFundamentals } from "./fundamentals";
+import { getQuotesBatch } from "./data-layer/quotes";
+import { getConstituents } from "./universe/constituents";
 
-// Stock index lists
-const DOW_30 = [
-  'AAPL', 'AMGN', 'AXP', 'BA', 'CAT', 'CRM', 'CSCO', 'CVX', 'DIS', 'DOW',
-  'GS', 'HD', 'HON', 'IBM', 'INTC', 'JNJ', 'JPM', 'KO', 'MCD', 'MMM',
-  'MRK', 'MSFT', 'NKE', 'PG', 'TRV', 'UNH', 'V', 'VZ', 'WBA', 'WMT'
-];
-
-const NASDAQ_100 = [
-  'AAPL', 'ABNB', 'ADBE', 'ADI', 'ADP', 'ADSK', 'AEP', 'AMAT', 'AMD', 'AMGN',
-  'AMZN', 'ANSS', 'ARM', 'ASML', 'AVGO', 'AZN', 'BIIB', 'BKNG', 'BKR', 'CCEP',
-  'CDNS', 'CDW', 'CEG', 'CHTR', 'CMCSA', 'COST', 'CPRT', 'CRWD', 'CSCO', 'CSGP',
-  'CSX', 'CTAS', 'CTSH', 'DDOG', 'DLTR', 'DXCM', 'EA', 'EXC', 'FANG', 'FAST',
-  'FTNT', 'GEHC', 'GFS', 'GILD', 'GOOG', 'GOOGL', 'HON', 'IDXX', 'ILMN', 'INTC',
-  'INTU', 'ISRG', 'KDP', 'KHC', 'KLAC', 'LIN', 'LRCX', 'LULU', 'MAR', 'MCHP',
-  'MDB', 'MDLZ', 'MELI', 'META', 'MNST', 'MRNA', 'MRVL', 'MSFT', 'MU', 'NFLX',
-  'NVDA', 'NXPI', 'ODFL', 'ON', 'ORLY', 'PANW', 'PAYX', 'PCAR', 'PDD', 'PEP',
-  'PYPL', 'QCOM', 'REGN', 'ROP', 'ROST', 'SBUX', 'SNPS', 'SPLK', 'TEAM', 'TMUS',
-  'TSLA', 'TTD', 'TTWO', 'TXN', 'VRSK', 'VRTX', 'WBD', 'WDAY', 'XEL', 'ZS'
-];
-
-const SP_100 = [
-  'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'UNH',
-  'XOM', 'JNJ', 'JPM', 'V', 'PG', 'MA', 'HD', 'CVX', 'MRK', 'LLY',
-  'ABBV', 'PEP', 'KO', 'AVGO', 'COST', 'TMO', 'MCD', 'WMT', 'CSCO', 'ABT',
-  'ACN', 'CRM', 'DHR', 'NEE', 'LIN', 'ADBE', 'TXN', 'AMD', 'PM', 'NFLX',
-  'WFC', 'RTX', 'CMCSA', 'HON', 'T', 'UNP', 'LOW', 'BA', 'ORCL', 'AMGN',
-  'IBM', 'SPGI', 'QCOM', 'GE', 'CAT', 'INTC', 'INTU', 'SBUX', 'PLD', 'MDLZ',
-  'GILD', 'GS', 'AXP', 'BLK', 'DE', 'ADI', 'CVS', 'ISRG', 'BKNG', 'SYK',
-  'REGN', 'MMC', 'VRTX', 'TJX', 'SCHW', 'CB', 'PGR', 'CI', 'MO', 'DUK',
-  'SO', 'LRCX', 'BDX', 'BSX', 'CME', 'COP', 'EOG', 'EQIX', 'FIS', 'ICE',
-  'MMM', 'MU', 'NSC', 'PNC', 'USB', 'SPY', 'QQQ', 'IWM', 'DIA', 'GLD'
-];
-
-// Full S&P 500 list (all ~500 stocks)
-const SP_500 = [
-  // S&P 100 (top 100)
-  ...SP_100,
-  // Additional S&P 500 stocks (remaining ~400)
-  'A', 'AAL', 'AAP', 'AFRM', 'AFL', 'AIG', 'AIZ', 'AJG', 'AKAM', 'ALB',
-  'ALGN', 'ALK', 'ALL', 'ALLE', 'AMAT', 'AMCR', 'AME', 'AMP', 'AMT', 'ANSS',
-  'AON', 'AOS', 'APA', 'APD', 'APH', 'APTV', 'ARE', 'ATO', 'ATVI', 'AVB',
-  'AVY', 'AWK', 'AZO', 'BAC', 'BALL', 'BAX', 'BBWI', 'BBY', 'BEN', 'BF.B',
-  'BG', 'BIO', 'BK', 'BKNG', 'BMY', 'BR', 'BRO', 'BWA', 'BXP', 'C',
-  'CAG', 'CAH', 'CARR', 'CCL', 'CDAY', 'CDNS', 'CDW', 'CE', 'CEG', 'CF',
-  'CFG', 'CHD', 'CHRW', 'CHTR', 'CINF', 'CL', 'CLX', 'CMA', 'CMCSA', 'CMG',
-  'CMI', 'CMS', 'CNC', 'CNP', 'COF', 'COO', 'CPAY', 'CPRT', 'CPT', 'CRL',
-  'CRM', 'CRWD', 'CSCO', 'CSGP', 'CSX', 'CTAS', 'CTLT', 'CTRA', 'CTSH', 'CTVA',
-  'D', 'DAL', 'DD', 'DECK', 'DFS', 'DG', 'DGX', 'DHI', 'DIS', 'DLR',
-  'DLTR', 'DOV', 'DOW', 'DPZ', 'DRI', 'DTE', 'DVA', 'DVN', 'DXCM', 'EA',
-  'EBAY', 'ECL', 'ED', 'EFX', 'EG', 'EIX', 'EL', 'ELV', 'EMN', 'EMR',
-  'ENPH', 'EPAM', 'EPD', 'ES', 'ESS', 'ETN', 'ETR', 'EVRG', 'EW', 'EXC',
-  'EXPD', 'EXPE', 'EXR', 'F', 'FANG', 'FAST', 'FCX', 'FDS', 'FDX', 'FE',
-  'FFIV', 'FI', 'FICO', 'FIS', 'FITB', 'FLT', 'FMC', 'FOX', 'FOXA', 'FRC',
-  'FRT', 'FSLR', 'FTNT', 'FTV', 'GD', 'GDDY', 'GEN', 'GILD', 'GIS', 'GL',
-  'GLW', 'GM', 'GNRC', 'GPC', 'GPN', 'GPS', 'GRMN', 'GWW', 'HAL', 'HAS',
-  'HBAN', 'HCA', 'HD', 'HES', 'HIG', 'HII', 'HLT', 'HOLX', 'HPE', 'HPQ',
-  'HRL', 'HSIC', 'HST', 'HSY', 'HUM', 'HWM', 'IDXX', 'IEX', 'IFF', 'ILMN',
-  'INCY', 'INTC', 'IP', 'IPG', 'IQV', 'IR', 'IRM', 'IT', 'ITW', 'IVZ',
-  'J', 'JBHT', 'JCI', 'JKHY', 'JNPR', 'K', 'KDP', 'KEY', 'KEYS', 'KHC',
-  'KIM', 'KLAC', 'KMB', 'KMI', 'KMX', 'KO', 'KR', 'L', 'LDOS', 'LEN',
-  'LH', 'LHX', 'LKQ', 'LMT', 'LNC', 'LNT', 'LUMN', 'LUV', 'LVS', 'LW',
-  'LYB', 'LYV', 'MAA', 'MAS', 'MCD', 'MCHP', 'MCK', 'MCO', 'MDLZ', 'MDT',
-  'MET', 'MGM', 'MHK', 'MKC', 'MKTX', 'MLM', 'MMM', 'MNST', 'MOS', 'MPC',
-  'MPWR', 'MRO', 'MS', 'MSCI', 'MSI', 'MTB', 'MTCH', 'MTD', 'NCLH', 'NDAQ',
-  'NDSN', 'NEM', 'NI', 'NKE', 'NOC', 'NOW', 'NRG', 'NUE', 'NVR', 'NWL',
-  'NWS', 'NWSA', 'NXPI', 'O', 'ODFL', 'OGN', 'OKE', 'OMC', 'ON', 'ORCL',
-  'ORLY', 'OTIS', 'OXY', 'PARA', 'PAYC', 'PAYX', 'PCAR', 'PCG', 'PEAK', 'PEG',
-  'PFE', 'PFG', 'PH', 'PHM', 'PKG', 'PKI', 'PLD', 'PNR', 'PNW', 'PODD',
-  'POOL', 'PPG', 'PPL', 'PRU', 'PSA', 'PSX', 'PTC', 'PVH', 'PWR', 'PYPL',
-  'QRVO', 'RCL', 'RE', 'REG', 'RF', 'RHI', 'RJF', 'RL', 'RMD', 'ROK',
-  'ROL', 'ROP', 'ROST', 'RSG', 'RTX', 'SBAC', 'SBNY', 'SBUX', 'SEE', 'SHW',
-  'SIVB', 'SJM', 'SLB', 'SNA', 'SNPS', 'SO', 'SPG', 'SRE', 'STE', 'STT',
-  'STX', 'STZ', 'SWK', 'SWKS', 'SYF', 'SYK', 'SYY', 'TAP', 'TDG', 'TDY',
-  'TECH', 'TEL', 'TER', 'TFC', 'TFX', 'TGT', 'TMO', 'TMUS', 'TPR', 'TRGP',
-  'TRMB', 'TROW', 'TRV', 'TSCO', 'TSN', 'TT', 'TTWO', 'TXN', 'TXT', 'TYL',
-  'UAL', 'UDR', 'UHS', 'ULTA', 'UNP', 'UPS', 'URI', 'USB', 'V', 'VFC',
-  'VICI', 'VLO', 'VMC', 'VNO', 'VRSK', 'VRSN', 'VRTX', 'VTR', 'VTRS', 'VZ',
-  'WAB', 'WAT', 'WBA', 'WBD', 'WDC', 'WEC', 'WELL', 'WFC', 'WHR', 'WM',
-  'WMB', 'WMT', 'WRB', 'WRK', 'WST', 'WTW', 'WY', 'WYNN', 'XEL', 'XOM',
-  'XRAY', 'XYL', 'YUM', 'ZBH', 'ZBRA', 'ZION', 'ZTS'
-];
-
-// Russell 2000 - Top 300 small cap stocks (representative sample)
-const RUSSELL_2000 = [
-  'SMCI', 'MARA', 'RIOT', 'CELH', 'CIEN', 'UPST', 'PLUG', 'LCID', 'RIVN', 'SOFI',
-  'HOOD', 'AFRM', 'COIN', 'RBLX', 'U', 'DKNG', 'CHWY', 'ETSY', 'PINS', 'SNAP',
-  'ROKU', 'SQ', 'TWLO', 'ZM', 'DOCU', 'CRSR', 'LMND', 'GOEV', 'OPEN', 'WISH',
-  'SPCE', 'PLTR', 'SKLZ', 'CLOV', 'WKHS', 'RIDE', 'NKLA', 'HYLN', 'LAZR', 'VLDR',
-  'ASTS', 'IONQ', 'DNA', 'MTTR', 'BBIG', 'AMC', 'GME', 'BB', 'NOK', 'SNDL',
-  'TLRY', 'ACB', 'CGC', 'CRON', 'HEXO', 'VFF', 'GRWG', 'CURLF', 'GTBIF', 'TCNNF',
-  'CRSP', 'BEAM', 'EDIT', 'NTLA', 'VERV', 'ARKG', 'PATH', 'CFLT', 'MDB', 'SNOW',
-  'NET', 'BILL', 'HUBS', 'VEEV', 'TTD', 'OKTA', 'ZS', 'CRWD', 'DDOG', 'SPLK',
-  'ESTC', 'NEWR', 'SUMO', 'PD', 'DT', 'RPD', 'TENB', 'QLYS', 'VRNS', 'CYBR',
-  'PANW', 'FTNT', 'S', 'SAIL', 'AI', 'BBAI', 'SOUN', 'GFAI', 'AGFY', 'BIGC',
-  'CLVT', 'RSKD', 'FLYW', 'RELY', 'DV', 'BRZE', 'DOCN', 'GTLB', 'MNDY', 'FROG',
-  'APP', 'IS', 'MGNI', 'PUBM', 'DSP', 'TBLA', 'ZETA', 'KARO', 'IRNT', 'CWAN',
-  'BLND', 'NOTV', 'VERA', 'VZIO', 'PLTK', 'BGFV', 'PRPL', 'LOVE', 'SNBR', 'LESL',
-  'RVLV', 'CURV', 'POSH', 'REAL', 'ACCD', 'OSH', 'BROS', 'SHAK', 'WING', 'CAVA',
-  'TXRH', 'PLAY', 'EAT', 'BJRI', 'BLMN', 'DIN', 'CAKE', 'CHUY', 'TACO', 'JACK',
-  'LOCO', 'RRGB', 'NDLS', 'HABT', 'FAT', 'ARKR', 'DENN', 'FRGI', 'PTLO', 'KRUS',
-  'KURA', 'PCYO', 'RICK', 'RCI', 'VSTO', 'SWBI', 'RGR', 'AOUT', 'AXON', 'DGII',
-  'VIAV', 'LITE', 'COHR', 'IIVI', 'LSCC', 'SLAB', 'MXIM', 'IDCC', 'POWI', 'DIOD',
-  'OLED', 'KOPN', 'EMAN', 'KLIC', 'UCTT', 'AEHR', 'ONTO', 'ACLS', 'BRKS', 'CRUS',
-  'SITM', 'PLAB', 'RMBS', 'AOSL', 'ALGM', 'NVTS', 'WOLF', 'AMBA', 'HIMX', 'SGH',
-  'PSTG', 'NTAP', 'NEOG', 'VRNT', 'CDXS', 'HLIT', 'MITK', 'PRGS', 'PING', 'JAMF',
-  'SMAR', 'FRSH', 'APPF', 'EGHT', 'TOST', 'NCNO', 'ALTR', 'SMTC', 'FORM', 'AMSC',
-  'SATS', 'MAXN', 'ARRY', 'SEDG', 'ENPH', 'RUN', 'NOVA', 'SHLS', 'CSIQ', 'JKS',
-  'DQ', 'SPWR', 'FSLR', 'FLNC', 'STEM', 'BLNK', 'CHPT', 'EVGO', 'VLTA', 'DCFC',
-  'ARVL', 'FSR', 'PTRA', 'XL', 'WKHS', 'GOEV', 'REE', 'SOLO', 'ELMS', 'CENN',
-  'MULN', 'FFIE', 'NKLA', 'RIDE', 'HYLN', 'LEV', 'HYZN', 'CLVR', 'NIO', 'XPEV',
-  'LI', 'BYDDF', 'TSLA', 'RIVN', 'LCID', 'F', 'GM', 'STLA', 'TM', 'HMC'
-];
-
-// Default stock universe (S&P 100)
-const STOCK_UNIVERSE = SP_100;
-
-// Helper function to get stock list by index
-function getStocksByIndex(index?: string, watchlistSymbols?: string[]): string[] {
+// Helper function to get stock list by index (uses pre-loaded constituent lists)
+async function getStocksByIndex(index?: string, watchlistSymbols?: string[]): Promise<string[]> {
   switch (index) {
-    case 'dow30': return DOW_30;
-    case 'nasdaq100': return NASDAQ_100;
-    case 'sp100': return SP_100;
-    case 'sp500': return [...new Set(SP_500)]; // Full S&P 500
-    case 'russell2000': return RUSSELL_2000;
+    case 'sp500': return getConstituents("sp500");
+    case 'russell2000': return getConstituents("russell2000");
+    case 'russell3000': return getConstituents("russell3000");
     case 'watchlist': return watchlistSymbols || [];
-    case 'all': return [...new Set([...SP_500, ...NASDAQ_100, ...DOW_30, ...RUSSELL_2000])];
-    default: return SP_100;
+    default: return getConstituents("sp500");
   }
 }
 
@@ -1031,19 +922,20 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  // Initialize database connection (non-blocking, app works without it)
-  console.log("Attempting database connection...");
-  await initializeDatabase();
-  
-  if (isDatabaseAvailable()) {
-    console.log("Database is available");
-  } else {
+  // Database should already be initialized by index.ts
+  if (!isDatabaseAvailable()) {
     console.warn("Database is not available - watchlist features will be limited");
   }
 
   registerSentinelRoutes(app);
   registerPatternLearningRoutes(app);
   registerBigIdeaRoutes(app);
+  registerUploadRoutes(app);
+  
+  // Register Market Condition routes and initialize module
+  app.use("/api/market-condition", marketConditionRoutes);
+  app.use("/api/marketflow", marketflowAnalysisRoutes);
+  await initMarketCondition();
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
@@ -1065,14 +957,31 @@ export async function registerRoutes(
     
     // Check cache first
     const cacheKey = `${symbol}:${period}:${interval}`;
-    const cached = getCachedHistory(cacheKey);
+    const cached = getCachedHistory(cacheKey, interval);
     if (cached) {
       res.json(cached);
       return;
     }
     
     try {
-      const history = await tiingo.getChartData(symbol, period, interval);
+      // Calculate date range based on period
+      const endDate = new Date();
+      const startDate = new Date();
+      const periodMap: Record<string, number> = {
+        '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, '2y': 730, '3y': 1095, '5y': 1825
+      };
+      const days = periodMap[period] || 365;
+      startDate.setDate(startDate.getDate() - days);
+
+      let history: any[];
+      const isIntraday = ['5m', '15m', '30m', '60m'].includes(interval);
+      
+      if (isIntraday) {
+        const alpacaInterval = interval === '5m' ? '5m' : interval === '15m' ? '15m' : interval === '30m' ? '30m' : '1h';
+        history = await alpaca.getAlpacaIntradayData(symbol, startDate, endDate, alpacaInterval, false);
+      } else {
+        history = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
+      }
       
       if (history.length === 0) {
         res.status(404).json({ message: `No data available for ${symbol}` });
@@ -1082,14 +991,8 @@ export async function registerRoutes(
       setCachedHistory(cacheKey, history);
       res.json(history);
     } catch (error: any) {
-      const isRateLimit = error.message?.includes('429');
       console.error(`Error fetching history for ${symbol}:`, error.message || error);
-      
-      if (isRateLimit) {
-        res.status(429).json({ message: `Rate limited - please try again in a few seconds` });
-      } else {
-        res.status(404).json({ message: `Symbol ${symbol} not found or data unavailable` });
-      }
+      res.status(404).json({ message: `Symbol ${symbol} not found or data unavailable` });
     }
   });
 
@@ -1097,29 +1000,24 @@ export async function registerRoutes(
   app.get(api.stocks.quote.path, async (req, res) => {
     const symbol = String(req.params.symbol);
     try {
-      const [quote, meta] = await Promise.all([
-        tiingo.fetchCurrentQuote(symbol),
-        tiingo.fetchTickerMeta(symbol),
+      const [quote, fundamentals] = await Promise.all([
+        alpaca.fetchAlpacaQuote(symbol),
+        getFundamentals(symbol.toUpperCase()),
       ]);
 
       if (!quote) {
         return res.status(404).json({ message: `Symbol ${symbol} not found` });
       }
 
-      const price = quote.tngoLast || 0;
+      const price = quote.lastPrice || 0;
       const prevClose = quote.prevClose || 0;
       const change = prevClose ? price - prevClose : 0;
       const changePercent = prevClose ? (change / prevClose) * 100 : 0;
 
-      const { sector, industry } = await getSectorAndIndustry(symbol.toUpperCase());
-      let description = meta?.description || '';
-      if (description) {
-        const sentences = description.match(/[^.!?]+[.!?]+/g) || [];
-        description = sentences.slice(0, 2).join(' ').trim();
-      }
-      if (!description) {
-        description = `${meta?.name || symbol} is a publicly traded company.`;
-      }
+      const sector = fundamentals.sector || 'Unknown';
+      const industry = fundamentals.industry || 'Unknown';
+      const companyName = fundamentals.companyName || symbol;
+      let description = `${companyName} is a publicly traded company.`;
 
       const sectorETFs = SECTOR_ETFS[sector] || [];
       const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
@@ -1153,9 +1051,9 @@ export async function registerRoutes(
         price,
         change: Math.round(change * 100) / 100,
         changePercent: Math.round(changePercent * 100) / 100,
-        volume: quote.volume,
-        companyName: meta?.name || symbol,
-        marketCap: undefined,
+        volume: 0,
+        companyName,
+        marketCap: fundamentals.marketCap || undefined,
         peRatio: undefined,
         sector,
         industry,
@@ -1204,13 +1102,13 @@ export async function registerRoutes(
       const quotes = await Promise.all(
         allSymbols.map(async (sym) => {
           try {
-            const q = await tiingo.fetchCurrentQuote(sym);
+            const q = await alpaca.fetchAlpacaQuote(sym);
             if (!q) return null;
-            const price = q.tngoLast || 0;
+            const price = q.lastPrice || 0;
             const prevClose = q.prevClose || 0;
             const change = prevClose ? price - prevClose : 0;
             const changePercent = prevClose ? (change / prevClose) * 100 : 0;
-            return { symbol: sym, price, change: Math.round(change * 100) / 100, changePercent: Math.round(changePercent * 100) / 100, volume: q.volume || 0 };
+            return { symbol: sym, price, change: Math.round(change * 100) / 100, changePercent: Math.round(changePercent * 100) / 100, volume: 0 };
           } catch { return null; }
         })
       );
@@ -1238,12 +1136,14 @@ export async function registerRoutes(
     }
   });
 
-  // --- News (for evaluator) ---
+  // --- News (Finnhub company news) ---
   app.get('/api/news/:symbol', async (req, res) => {
     const symbol = String(req.params.symbol).toUpperCase();
+    const daysBack = parseInt(String(req.query.days || '7'), 10);
     try {
-      const articles = await tiingo.fetchNews(symbol, 15);
-      res.json(articles);
+      const { fetchCompanyNews } = await import('./finnhub');
+      const news = await fetchCompanyNews(symbol, daysBack);
+      res.json(news);
     } catch (error) {
       console.error(`Error fetching news for ${symbol}:`, error);
       res.json([]);
@@ -1261,7 +1161,8 @@ export async function registerRoutes(
         const watchlistItems = await storage.getWatchlist();
         watchlistSymbols = watchlistItems.map(item => item.symbol);
       }
-      const universe = getStocksByIndex(input.scannerIndex, watchlistSymbols);
+      const universe = await getStocksByIndex(input.scannerIndex, watchlistSymbols);
+      console.log(`[Scanner] Universe: ${universe.length} tickers from ${input.scannerIndex || 'sp500'} (pre-loaded constituents)`);
       
       console.log('[Scanner] Running scan with filters:', {
         index: input.scannerIndex,
@@ -1277,11 +1178,11 @@ export async function registerRoutes(
 
       for (const symbol of universe) {
         try {
-          const quote = await tiingo.fetchCurrentQuote(symbol);
+          const quote = await alpaca.fetchAlpacaQuote(symbol);
           if (!quote) continue;
           
-          const price = quote.tngoLast || 0;
-          const volume = quote.volume || 0;
+          const price = quote.lastPrice || 0;
+          const volume = 0;
           const prevClose = quote.prevClose || 0;
           const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
           
@@ -1311,8 +1212,11 @@ export async function registerRoutes(
           const needsHistory = hasChartFilter || hasTechnicalSignal || hasSMAFilter || hasProximityFilter;
           
           if (needsHistory) {
-            const period = (hasSMAFilter || hasProximityFilter) ? '1y' : '3mo';
-            const candles = await tiingo.getChartData(symbol, period);
+            const days = (hasSMAFilter || hasProximityFilter) ? 365 : 90;
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+            const candles = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
             
             if (candles.length < 5) continue;
             
@@ -1437,9 +1341,9 @@ export async function registerRoutes(
       const results = await Promise.all(
         symbols.map(async ({ symbol, label }) => {
           try {
-            const quote = await tiingo.fetchCurrentQuote(symbol);
+            const quote = await alpaca.fetchAlpacaQuote(symbol);
             if (!quote) return { symbol, label, price: 0, changePercent: 0 };
-            const price = quote.tngoLast || 0;
+            const price = quote.lastPrice || 0;
             const prevClose = quote.prevClose || 0;
             const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
             return {
@@ -1469,9 +1373,11 @@ export async function registerRoutes(
   });
 
   // Watchlist quotes - get change percent for all watchlist symbols
+  // Uses snapshot cache (market condition) when available, falls back to Alpaca
   app.get('/api/watchlist/quotes', async (req, res) => {
     try {
       const symbols = (req.query.symbols as string || '').split(',').filter(Boolean);
+      const extended = req.query.extended === 'true';
       
       if (symbols.length === 0) {
         const watchlistItems = await storage.getWatchlist();
@@ -1482,24 +1388,27 @@ export async function registerRoutes(
         return res.json([]);
       }
 
-      const quotes = await Promise.all(
-        symbols.map(async (symbol) => {
-          try {
-            const quote = await tiingo.fetchCurrentQuote(symbol);
-            if (!quote) return { symbol, changePercent: 0, last: 0 };
-            const prevClose = quote.prevClose || 0;
-            const price = quote.tngoLast || 0;
-            const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
-            return {
-              symbol,
-              last: price,
-              changePercent: Math.round(changePercent * 100) / 100,
-            };
-          } catch (err) {
-            return { symbol, changePercent: 0 };
-          }
-        })
-      );
+      const upperSymbols = symbols.map(s => s.toUpperCase());
+      const [quotesMap, fundamentalsList] = await Promise.all([
+        getQuotesBatch(upperSymbols),
+        extended ? Promise.all(upperSymbols.map(s => getFundamentals(s).catch(() => null))) : Promise.resolve([] as (Awaited<ReturnType<typeof getFundamentals>> | null)[]),
+      ]);
+
+      const quotes = upperSymbols.map((symbol, i) => {
+        const q = quotesMap.get(symbol);
+        const fundamentals = extended && fundamentalsList[i] ? fundamentalsList[i] : null;
+        const price = q?.price ?? 0;
+        const change = q?.change ?? 0;
+        const changePercent = q?.changePct ?? 0;
+        return {
+          symbol,
+          price,
+          last: price,
+          change: Math.round(change * 100) / 100,
+          changePercent: Math.round(changePercent * 100) / 100,
+          companyName: (fundamentals as { companyName?: string } | null)?.companyName || '',
+        };
+      });
       res.json(quotes);
     } catch (error) {
       console.error('Failed to fetch watchlist quotes:', error);

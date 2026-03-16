@@ -1,5 +1,66 @@
-import * as tiingo from "../tiingo";
+import * as alpaca from "../alpaca";
 import { getSectorForSymbol } from "../fundamentals";
+import { getDailyBars } from "../data-layer";
+
+// Resample daily bars to weekly bars
+function resampleToWeekly(dailyBars: alpaca.AlpacaCandle[]): alpaca.AlpacaCandle[] {
+  if (dailyBars.length === 0) return [];
+  
+  const weeklyBars: alpaca.AlpacaCandle[] = [];
+  let weekStart: Date | null = null;
+  let weekOpen = 0;
+  let weekHigh = -Infinity;
+  let weekLow = Infinity;
+  let weekClose = 0;
+  let weekVolume = 0;
+  
+  for (const bar of dailyBars) {
+    const date = new Date(bar.date);
+    const dayOfWeek = date.getDay();
+    
+    // Start a new week on Monday (or first bar)
+    if (weekStart === null || dayOfWeek === 1 || date.getTime() - weekStart.getTime() > 7 * 24 * 60 * 60 * 1000) {
+      // Save previous week if exists
+      if (weekStart !== null) {
+        weeklyBars.push({
+          date: weekStart.toISOString(),
+          open: weekOpen,
+          high: weekHigh,
+          low: weekLow,
+          close: weekClose,
+          volume: weekVolume,
+        });
+      }
+      // Start new week
+      weekStart = date;
+      weekOpen = bar.open;
+      weekHigh = bar.high;
+      weekLow = bar.low;
+      weekClose = bar.close;
+      weekVolume = bar.volume;
+    } else {
+      // Continue current week
+      weekHigh = Math.max(weekHigh, bar.high);
+      weekLow = Math.min(weekLow, bar.low);
+      weekClose = bar.close;
+      weekVolume += bar.volume;
+    }
+  }
+  
+  // Save final week
+  if (weekStart !== null) {
+    weeklyBars.push({
+      date: weekStart.toISOString(),
+      open: weekOpen,
+      high: weekHigh,
+      low: weekLow,
+      close: weekClose,
+      volume: weekVolume,
+    });
+  }
+  
+  return weeklyBars;
+}
 
 export interface InstrumentTrend {
   symbol: string;
@@ -120,13 +181,16 @@ function calculateEMASlope(prices: number[], period: number): "rising" | "fallin
 
 async function fetchHistoricalPrices(symbol: string, days: number): Promise<number[]> {
   try {
+    const dataLayerBars = await getDailyBars(symbol, days + 10);
+    
+    if (dataLayerBars && dataLayerBars.length >= days * 0.5) {
+      return dataLayerBars.map((d) => d.close);
+    }
+    
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10);
-
-    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate);
-    
-    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    const result = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
     return result.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch ${symbol}:`, error);
@@ -136,14 +200,29 @@ async function fetchHistoricalPrices(symbol: string, days: number): Promise<numb
 
 async function fetchWeeklyPrices(symbol: string, weeks: number): Promise<number[]> {
   try {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - weeks * 7 - 30);
-
-    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate, "weekly");
+    const days = weeks * 7 + 30;
+    const dataLayerBars = await getDailyBars(symbol, days);
     
-    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
-    return result.map((d) => d.close).reverse();
+    let dailyBars: alpaca.AlpacaCandle[];
+    
+    if (dataLayerBars && dataLayerBars.length >= weeks * 5) {
+      dailyBars = dataLayerBars.map(b => ({
+        date: b.date,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      })).reverse();
+    } else {
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      dailyBars = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
+    }
+    
+    const weeklyBars = resampleToWeekly(dailyBars);
+    return weeklyBars.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch weekly ${symbol}:`, error);
     return [];
@@ -158,13 +237,16 @@ interface OHLCCandle {
 
 async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[]> {
   try {
+    const dataLayerBars = await getDailyBars(symbol, days + 10);
+    
+    if (dataLayerBars && dataLayerBars.length >= days * 0.5) {
+      return dataLayerBars.map(d => ({ high: d.high, low: d.low, close: d.close }));
+    }
+    
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days - 10);
-
-    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate);
-    
-    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    const result = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
     return result.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
   } catch (error) {
     console.error(`Failed to fetch OHLC for ${symbol}:`, error);
@@ -174,14 +256,29 @@ async function fetchDailyOHLC(symbol: string, days: number): Promise<OHLCCandle[
 
 async function fetchWeeklyOHLC(symbol: string, weeks: number): Promise<OHLCCandle[]> {
   try {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - weeks * 7 - 30);
-
-    const result = await tiingo.fetchEODPrices(symbol, startDate, endDate, "weekly");
+    const days = weeks * 7 + 30;
+    const dataLayerBars = await getDailyBars(symbol, days);
     
-    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
-    return result.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
+    let dailyBars: alpaca.AlpacaCandle[];
+    
+    if (dataLayerBars && dataLayerBars.length >= weeks * 5) {
+      dailyBars = dataLayerBars.map(b => ({
+        date: b.date,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      })).reverse();
+    } else {
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      dailyBars = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
+    }
+    
+    const weeklyBars = resampleToWeekly(dailyBars);
+    return weeklyBars.map(d => ({ high: d.high, low: d.low, close: d.close })).reverse();
   } catch (error) {
     console.error(`Failed to fetch weekly OHLC for ${symbol}:`, error);
     return [];
@@ -537,14 +634,26 @@ export function getSentimentCacheAge(): number {
 // Fetch historical prices ending on a specific date
 async function fetchHistoricalPricesAsOf(symbol: string, endDate: Date, days: number): Promise<number[]> {
   try {
+    const now = new Date();
+    const isRecentDate = (now.getTime() - endDate.getTime()) < 30 * 24 * 60 * 60 * 1000;
+    
+    if (isRecentDate) {
+      const dataLayerBars = await getDailyBars(symbol, days + 40);
+      if (dataLayerBars && dataLayerBars.length >= days) {
+        const endDateStr = endDate.toISOString().split("T")[0];
+        const filtered = dataLayerBars.filter(b => b.date <= endDateStr);
+        if (filtered.length >= days * 0.5) {
+          return filtered.slice(0, days + 10).map(d => d.close);
+        }
+      }
+    }
+    
     const end = new Date(endDate);
-    end.setDate(end.getDate() + 1); // Include the target date
+    end.setDate(end.getDate() + 1);
     const start = new Date(endDate);
     start.setDate(start.getDate() - days - 10);
 
-    const result = await tiingo.fetchEODPrices(symbol, start, end);
-    
-    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
+    const result = await alpaca.fetchAlpacaDailyBars(symbol, start, end);
     return result.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch historical ${symbol} as of ${endDate}:`, error);
@@ -555,15 +664,42 @@ async function fetchHistoricalPricesAsOf(symbol: string, endDate: Date, days: nu
 // Fetch weekly prices ending on a specific date
 async function fetchWeeklyPricesAsOf(symbol: string, endDate: Date, weeks: number): Promise<number[]> {
   try {
-    const end = new Date(endDate);
-    end.setDate(end.getDate() + 7); // Buffer to include the week
-    const start = new Date(endDate);
-    start.setDate(start.getDate() - weeks * 7 - 30);
-
-    const result = await tiingo.fetchEODPrices(symbol, start, end, "weekly");
+    const days = weeks * 7 + 30;
+    const now = new Date();
+    const isRecentDate = (now.getTime() - endDate.getTime()) < 30 * 24 * 60 * 60 * 1000;
     
-    // Tiingo returns data sorted ascending (oldest first), reverse to get descending (most recent first)
-    return result.map((d) => d.close).reverse();
+    let dailyBars: alpaca.AlpacaCandle[];
+    
+    if (isRecentDate) {
+      const dataLayerBars = await getDailyBars(symbol, days + 40);
+      if (dataLayerBars && dataLayerBars.length >= weeks * 5) {
+        const endDateStr = endDate.toISOString().split("T")[0];
+        const filtered = dataLayerBars.filter(b => b.date <= endDateStr);
+        dailyBars = filtered.map(b => ({
+          date: b.date,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: b.volume,
+        })).reverse();
+      } else {
+        const end = new Date(endDate);
+        end.setDate(end.getDate() + 7);
+        const start = new Date(endDate);
+        start.setDate(start.getDate() - days);
+        dailyBars = await alpaca.fetchAlpacaDailyBars(symbol, start, end);
+      }
+    } else {
+      const end = new Date(endDate);
+      end.setDate(end.getDate() + 7);
+      const start = new Date(endDate);
+      start.setDate(start.getDate() - days);
+      dailyBars = await alpaca.fetchAlpacaDailyBars(symbol, start, end);
+    }
+    
+    const weeklyBars = resampleToWeekly(dailyBars);
+    return weeklyBars.map((d) => d.close).reverse();
   } catch (error) {
     console.error(`Failed to fetch weekly historical ${symbol}:`, error);
     return [];

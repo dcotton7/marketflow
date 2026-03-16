@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import OpenAI from "openai";
 import { SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPT, PROMPT_VERSION, buildEvaluationPrompt, type MarketContext } from "./prompts";
 import { sentinelModels } from "./models";

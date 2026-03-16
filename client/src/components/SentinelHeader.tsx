@@ -1,11 +1,127 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3 } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Star, Clock } from "lucide-react";
+import { useState, useEffect } from "react";
+import { WatchlistModal } from "./WatchlistModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
+
+function MarketTimeDisplay() {
+  const [nyTime, setNyTime] = useState<Date | null>(null);
+  const [offsetMs, setOffsetMs] = useState<number>(0);
+  
+  // Fetch actual NYC time from external API on mount
+  useEffect(() => {
+    const fetchNYCTime = async () => {
+      try {
+        // Try timeapi.io first
+        const res = await fetch("https://timeapi.io/api/Time/current/zone?timeZone=America/New_York");
+        const data = await res.json();
+        // Returns { year, month, day, hour, minute, seconds, ... }
+        const nyDate = new Date(data.year, data.month - 1, data.day, data.hour, data.minute, data.seconds);
+        const localTime = new Date();
+        setOffsetMs(nyDate.getTime() - localTime.getTime());
+        setNyTime(nyDate);
+      } catch {
+        // Fallback: use system clock 
+        setNyTime(new Date());
+      }
+    };
+    fetchNYCTime();
+    // Re-sync every 5 minutes
+    const syncInterval = setInterval(fetchNYCTime, 5 * 60 * 1000);
+    return () => clearInterval(syncInterval);
+  }, []);
+  
+  // Update time every second using the calculated offset
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const correctedTime = new Date(Date.now() + offsetMs);
+      setNyTime(correctedTime);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [offsetMs]);
+  
+  if (!nyTime) {
+    return (
+      <div className="flex items-center gap-4 px-4 py-1.5 bg-slate-800/50 rounded-md border border-slate-700/50">
+        <span className="text-sm text-slate-400">Loading...</span>
+      </div>
+    );
+  }
+  
+  // Format as ET
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit", 
+    second: "2-digit",
+    hour12: true,
+  });
+  const currentTimeET = formatter.format(nyTime);
+  
+  // Get numeric hour/min for calculations
+  const etParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(nyTime);
+  
+  const currentHour = parseInt(etParts.find(p => p.type === "hour")?.value || "0", 10);
+  const currentMin = parseInt(etParts.find(p => p.type === "minute")?.value || "0", 10);
+  const currentMinutesFromMidnight = currentHour * 60 + currentMin;
+  
+  const marketOpenMinutes = 9 * 60 + 30; // 9:30 AM
+  const marketCloseMinutes = 16 * 60; // 4:00 PM
+  
+  const isMarketHours = currentMinutesFromMidnight >= marketOpenMinutes && currentMinutesFromMidnight < marketCloseMinutes;
+  const dayOfWeek = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(nyTime);
+  const isWeekday = !["Sat", "Sun"].includes(dayOfWeek);
+  const isMarketOpen = isMarketHours && isWeekday;
+  
+  const openForMinutes = Math.max(0, currentMinutesFromMidnight - marketOpenMinutes);
+  const openForHours = Math.floor(openForMinutes / 60);
+  const openForMins = openForMinutes % 60;
+  
+  const closeInMinutes = Math.max(0, marketCloseMinutes - currentMinutesFromMidnight);
+  const closeInHours = Math.floor(closeInMinutes / 60);
+  const closeInMins = closeInMinutes % 60;
+  
+  const formatDuration = (h: number, m: number) => `${h}:${m.toString().padStart(2, "0")}`;
+  
+  return (
+    <div className="flex items-center gap-4 px-4 py-1.5 bg-slate-800/50 rounded-md border border-slate-700/50">
+      <div className="flex items-center gap-2">
+        <Clock className="w-5 h-5 text-slate-400" />
+        <span className="text-sm text-slate-400">NY:</span>
+        <span className="text-sm font-medium text-white">{currentTimeET}</span>
+      </div>
+      {isMarketOpen ? (
+        <>
+          <div className="w-px h-5 bg-slate-600" />
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">Open:</span>
+            <span className="text-sm font-medium text-green-400">{formatDuration(openForHours, openForMins)}</span>
+          </div>
+          <div className="w-px h-5 bg-slate-600" />
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">Close:</span>
+            <span className="text-sm font-medium text-amber-400">{formatDuration(closeInHours, closeInMins)}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="w-px h-5 bg-slate-600" />
+          <span className="text-sm text-slate-500">Market Closed</span>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface MarketSentiment {
   weekly: {
@@ -85,10 +201,15 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const isPatternsPage = location === "/sentinel/patterns";
   const isAdminPage = location.startsWith("/sentinel/admin");
   const isBigIdeaPage = location === "/sentinel/bigidea";
+  const isMarketConditionPage = location === "/sentinel/market-condition";
   const isChartsPage = location === "/sentinel/charts";
   const isEvaluatePage = location === "/sentinel/evaluate";
 
+  const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
+
   return (
+    <>
+    <WatchlistModal open={watchlistModalOpen} onOpenChange={setWatchlistModalOpen} />
     <div
       className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3"
       style={{ backgroundColor: cssVariables.headerBg }}
@@ -162,6 +283,17 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Big Idea</span>
             </Button>
           </Link>
+          <Link href="/sentinel/market-condition">
+            <Button 
+              variant={isMarketConditionPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-market-condition"
+            >
+              <Layers className="w-4 h-4" />
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Flow</span>
+            </Button>
+          </Link>
           <Link href="/sentinel/charts">
             <Button 
               variant={isChartsPage ? "secondary" : "ghost"} 
@@ -173,6 +305,16 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Charts</span>
             </Button>
           </Link>
+          <Button 
+            variant="ghost" 
+            size="sm"
+            className="gap-2"
+            onClick={() => setWatchlistModalOpen(true)}
+            data-testid="nav-watchlists"
+          >
+            <Star className="w-4 h-4" />
+            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Watchlists</span>
+          </Button>
           <Link href="/sentinel/evaluate">
             <Button 
               variant={isEvaluatePage ? "secondary" : "ghost"} 
@@ -198,6 +340,8 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             </Link>
           )}
         </nav>
+        
+        <MarketTimeDisplay />
       </div>
 
       <div className="flex items-center gap-4">
@@ -307,6 +451,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
       {rightContent}
       </div>
     </div>
+    </>
   );
 }
 

@@ -1,0 +1,12 @@
+# Render Blueprint - deploy from repo root
+# After connecting this repo in Render Dashboard, add env vars from .env.example
+services:
+  - type: web
+    runtime: node
+    name: stock-pattern-stream
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production

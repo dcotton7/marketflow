@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, AlertTriangle, CheckCircle, Clock, TrendingUp, TrendingDown, Edit2, X, Check, Loader2, DollarSign } from "lucide-react";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { CopyScreenButton } from "@/components/CopyScreenButton";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 interface Trade {
@@ -233,6 +234,7 @@ export default function SentinelTradePage() {
       <SentinelHeader showSentiment={true} />
       <div className="flex items-center justify-between gap-3 px-4 py-2 border-b flex-wrap" style={{ backgroundColor: cssVariables.headerBg }}>
         <div className="flex items-center gap-2">
+          <CopyScreenButton />
           <Button variant="ghost" size="icon" onClick={() => setLocation("/sentinel")} data-testid="button-back">
             <ArrowLeft className="w-5 h-5" />
           </Button>

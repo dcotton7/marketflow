@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1771237313312,
+      "tag": "0000_add_extended_fundamentals",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771261848682,
+      "tag": "0001_add_query_optimizer_stats",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771262870672,
+      "tag": "0002_add_optimizer_display_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771291058329,
+      "tag": "0003_magenta_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771436922189,
+      "tag": "0004_theme_snapshots",
+      "breakpoints": true
+    }
+  ]
+}

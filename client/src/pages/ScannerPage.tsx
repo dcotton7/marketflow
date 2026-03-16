@@ -6,15 +6,16 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useLocation } from "wouter";
-import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Save } from "lucide-react";
+import { Loader2, Search, Filter, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, X, Save, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MiniChart } from "@/components/MiniChart";
 import { useScannerContext } from "@/context/ScannerContext";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
 
 const CHARTS_PER_PAGE = 10;
 
@@ -26,6 +27,8 @@ export default function ScannerPage() {
   const [scanName, setScanName] = useState("");
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { syncToMarketSurge, isMarketSurgeOpen } = useMarketSurgeSync();
+  const [msSyncEnabled, setMsSyncEnabled] = useState(false);
   
   const { 
     filters, 
@@ -58,13 +61,10 @@ export default function ScannerPage() {
     }
     if (filters.scannerIndex) {
       const indexNames: Record<string, string> = {
-        'dow30': 'Dow 30',
-        'nasdaq100': 'Nasdaq 100',
-        'sp100': 'S&P 100',
         'sp500': 'S&P 500',
         'russell2000': 'Russell 2000',
+        'russell3000': 'Russell 3000',
         'watchlist': 'My Watchlist',
-        'all': 'All Stocks',
       };
       parts.push(indexNames[filters.scannerIndex] || filters.scannerIndex);
     }
@@ -117,13 +117,10 @@ export default function ScannerPage() {
     
     // Stock Universe
     const indexLabels: Record<string, string> = {
-      'dow30': 'Dow 30',
-      'nasdaq100': 'Nasdaq 100', 
-      'sp100': 'S&P 100',
       'sp500': 'S&P 500',
       'russell2000': 'Russell 2000',
-      'watchlist': 'My Watchlist',
-      'all': 'All Stocks'
+      'russell3000': 'Russell 3000',
+      'watchlist': 'My Watchlist'
     };
     if (filters.scannerIndex) {
       criteria.push(indexLabels[filters.scannerIndex] || filters.scannerIndex);
@@ -209,6 +206,54 @@ export default function ScannerPage() {
 
   const chartPatterns = ["All", "VCP", "Weekly Tight", "Monthly Tight", "High Tight Flag", "Cup and Handle"];
   
+  // Keyboard navigation for MarketSurge sync
+  useEffect(() => {
+    if (!msSyncEnabled || !results || results.length === 0) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      const startIdx = (currentPage - 1) * CHARTS_PER_PAGE;
+      const endIdx = Math.min(startIdx + CHARTS_PER_PAGE, results.length);
+      const pageResults = results.slice(startIdx, endIdx);
+      
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault();
+        // Move to next stock on page, or first stock of next page
+        const currentIdx = startIdx;
+        if (currentIdx + 1 < results.length) {
+          if (currentIdx + 1 >= endIdx) {
+            // Move to next page
+            setCurrentPage(p => p + 1);
+            syncToMarketSurge(results[currentIdx + 1].symbol, 'day');
+          } else {
+            // Stay on same page
+            syncToMarketSurge(results[currentIdx + 1].symbol, 'day');
+          }
+        }
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault();
+        // Move to previous stock
+        const currentIdx = startIdx;
+        if (currentIdx > 0) {
+          if (currentIdx - 1 < startIdx) {
+            // Move to previous page
+            setCurrentPage(p => Math.max(1, p - 1));
+            syncToMarketSurge(results[currentIdx - 1].symbol, 'day');
+          } else {
+            syncToMarketSurge(results[currentIdx - 1].symbol, 'day');
+          }
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [msSyncEnabled, results, currentPage, syncToMarketSurge]);
+  
   const showChannelHeightFilter = ["VCP", "Weekly Tight", "Monthly Tight"].includes(filters.chartPattern || '');
   const showHTFFilter = filters.chartPattern === 'High Tight Flag';
   
@@ -270,15 +315,12 @@ export default function ScannerPage() {
     
     // Stock Universe
     const indexLabels: Record<string, { name: string; count: string }> = {
-      'dow30': { name: 'Dow Jones 30', count: '30 blue-chip stocks' },
-      'nasdaq100': { name: 'Nasdaq 100', count: '100 tech-heavy stocks' },
-      'sp100': { name: 'S&P 100', count: '100 mega-cap stocks' },
       'sp500': { name: 'S&P 500', count: '~500 large-cap stocks' },
-      'russell2000': { name: 'Russell 2000', count: '~300 small-cap stocks' },
-      'watchlist': { name: 'My Watchlist', count: 'your saved stocks' },
-      'all': { name: 'All Indices', count: '~900 unique stocks' }
+      'russell2000': { name: 'Russell 2000', count: '~2000 small-cap stocks' },
+      'russell3000': { name: 'Russell 3000', count: '~3000 US stocks' },
+      'watchlist': { name: 'My Watchlist', count: 'your saved stocks' }
     };
-    const indexInfo = indexLabels[filters.scannerIndex || 'sp100'] || { name: 'S&P 100', count: '100 stocks' };
+    const indexInfo = indexLabels[filters.scannerIndex || 'sp500'] || { name: 'S&P 500', count: '~500 stocks' };
     details.push({
       label: 'Stock Universe',
       value: indexInfo.name,
@@ -429,20 +471,17 @@ export default function ScannerPage() {
               <div className="space-y-2">
                 <Label>Stock Universe</Label>
                 <Select 
-                  value={filters.scannerIndex || "sp100"} 
+                  value={filters.scannerIndex || "sp500"} 
                   onValueChange={(val: any) => setFilters(prev => ({ ...prev, scannerIndex: val }))}
                 >
                   <SelectTrigger className="bg-background" data-testid="select-index">
                     <SelectValue placeholder="Select Index" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="dow30">Dow Jones 30</SelectItem>
-                    <SelectItem value="nasdaq100">Nasdaq 100</SelectItem>
-                    <SelectItem value="sp100">S&P 100 (default)</SelectItem>
                     <SelectItem value="sp500">S&P 500</SelectItem>
                     <SelectItem value="russell2000">Russell 2000</SelectItem>
+                    <SelectItem value="russell3000">Russell 3000</SelectItem>
                     <SelectItem value="watchlist">My Watchlist</SelectItem>
-                    <SelectItem value="all">All Stocks</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -948,6 +987,12 @@ export default function ScannerPage() {
                       key={stock.symbol}
                       className="cursor-pointer hover-elevate transition-all"
                       onClick={() => {
+                        // If MS sync is enabled, update MarketSurge window
+                        if (msSyncEnabled) {
+                          syncToMarketSurge(stock.symbol, 'day');
+                        }
+                        
+                        // Navigate to internal chart view
                         const params = new URLSearchParams();
                         params.set('fromScanner', 'true');
                         if (filters.chartPattern && filters.chartPattern !== 'All') {

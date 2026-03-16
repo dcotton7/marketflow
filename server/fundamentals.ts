@@ -1,10 +1,13 @@
 import { findSectorForSymbol as localLookup, STOCKS_BY_SECTOR } from "@shared/stocksBySector";
 import { db } from "./db";
-import { fundamentalsCache } from "@shared/schema";
+import { tickers } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import * as finnhub from "./finnhub";
+import { withRetry } from "./utils/dbRetry";
 
 const FMP_API_KEY = process.env.FMP_API_KEY;
 const FMP_BASE = "https://financialmodelingprep.com/stable";
+const FMP_BATCH_CHUNK = 100; // symbols per batch request to avoid URL length limits
 
 export interface FundamentalData {
   sector: string;
@@ -14,46 +17,166 @@ export interface FundamentalData {
   exchange?: string;
 }
 
-const CACHE_TTL = 24 * 60 * 60 * 1000;
-const pendingRequests = new Map<string, Promise<FundamentalData | null>>();
+// Cache rule: No data → run query. If we have data and not expired → use cache.
+const CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
+const pendingRequests = new Map<string, Promise<any>>();
 
-async function fetchFromFMP(symbol: string): Promise<FundamentalData | null> {
-  if (!FMP_API_KEY) {
-    return null;
+// Cap concurrent DB cache reads so scans don't exhaust the pool (BATCH_SIZE can be 12+).
+const CACHE_READ_CONCURRENCY = 8;
+let cacheReadsInFlight = 0;
+const cacheReadQueue: Array<() => void> = [];
+async function withCacheReadLimit<T>(fn: () => Promise<T>): Promise<T> {
+  while (cacheReadsInFlight >= CACHE_READ_CONCURRENCY) {
+    await new Promise<void>((r) => cacheReadQueue.push(r));
   }
-
+  cacheReadsInFlight++;
   try {
-    const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
+    return await fn();
+  } finally {
+    cacheReadsInFlight--;
+    const next = cacheReadQueue.shift();
+    if (next) next();
+  }
+}
 
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return null;
+// Limit concurrent Finnhub API calls to avoid rate limiting (e.g. 60/min free tier)
+const FINNHUB_CONCURRENCY = 5;
+let finnhubInFlight = 0;
+const finnhubQueue: Array<() => void> = [];
 
-    const profile = data[0];
+async function withFinnhubLimit<T>(fn: () => Promise<T>): Promise<T> {
+  while (finnhubInFlight >= FINNHUB_CONCURRENCY) {
+    await new Promise<void>((r) => finnhubQueue.push(r));
+  }
+  finnhubInFlight++;
+  try {
+    return await fn();
+  } finally {
+    finnhubInFlight--;
+    const next = finnhubQueue.shift();
+    if (next) next();
+  }
+}
+
+async function fetchFromFinnhub(symbol: string): Promise<FundamentalData | null> {
+  try {
+    const profile = await finnhub.fetchCompanyProfile(symbol);
+    if (!profile) {
+      console.warn(`[Finnhub] No profile returned for ${symbol}`);
+      return null;
+    }
+
+    // Map Finnhub industry to sector (Finnhub doesn't have separate sector field)
+    const industry = profile.finnhubIndustry || 'Unknown';
+    const sector = mapIndustryToSector(industry);
+
+    // Check if market cap is valid (not null, undefined, or 0)
+    const rawMarketCap = profile.marketCapitalization;
+    const marketCap = (rawMarketCap && rawMarketCap > 0)
+      ? rawMarketCap * 1000000 // Finnhub returns in millions
+      : 0;
+
     return {
-      sector: profile.sector || 'Unknown',
-      industry: profile.industry || 'Unknown',
-      marketCap: profile.marketCap || 0,
-      companyName: profile.companyName || undefined,
-      exchange: profile.exchangeShortName || undefined,
+      sector,
+      industry,
+      marketCap,
+      companyName: profile.name || undefined,
+      exchange: profile.exchange || undefined,
     };
   } catch (err) {
-    console.error(`[FMP] Failed to fetch fundamentals for ${symbol}:`, err);
+    console.error(`[Finnhub] Failed to fetch fundamentals for ${symbol}:`, err);
     return null;
   }
 }
 
+// Map Finnhub industry to broader sector categories
+function mapIndustryToSector(industry: string): string {
+  const lowerIndustry = industry.toLowerCase();
+  if (lowerIndustry.includes('software') || lowerIndustry.includes('technology') || lowerIndustry.includes('internet') || lowerIndustry.includes('semiconductor')) return 'Technology';
+  if (lowerIndustry.includes('healthcare') || lowerIndustry.includes('pharma') || lowerIndustry.includes('biotech') || lowerIndustry.includes('medical')) return 'Healthcare';
+  if (lowerIndustry.includes('bank') || lowerIndustry.includes('financial') || lowerIndustry.includes('insurance')) return 'Financials';
+  if (lowerIndustry.includes('consumer') || lowerIndustry.includes('retail')) return 'Consumer';
+  if (lowerIndustry.includes('energy') || lowerIndustry.includes('oil') || lowerIndustry.includes('gas')) return 'Energy';
+  if (lowerIndustry.includes('industrial') || lowerIndustry.includes('manufacturing')) return 'Industrials';
+  if (lowerIndustry.includes('real estate') || lowerIndustry.includes('reit')) return 'Real Estate';
+  if (lowerIndustry.includes('utility') || lowerIndustry.includes('utilities')) return 'Utilities';
+  if (lowerIndustry.includes('material') || lowerIndustry.includes('mining') || lowerIndustry.includes('chemical')) return 'Basic Materials';
+  if (lowerIndustry.includes('communication') || lowerIndustry.includes('telecom') || lowerIndustry.includes('media')) return 'Communication Services';
+  return industry; // Return as-is if no mapping
+}
+
+/**
+ * Fetch market caps for many symbols in one or a few FMP batch requests.
+ * Use when Finnhub is rate-limited or fails so FND-1 (Market Cap Filter) can still return results.
+ * Returns Map<symbol, marketCap in dollars>. Only includes symbols with valid marketCap > 0.
+ */
+export async function fetchMarketCapsBatchFromFMP(symbols: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!FMP_API_KEY || symbols.length === 0) return out;
+  const list = [...new Set(symbols.map((s) => s.toUpperCase()))];
+  for (let i = 0; i < list.length; i += FMP_BATCH_CHUNK) {
+    const chunk = list.slice(i, i + FMP_BATCH_CHUNK);
+    const symbolsParam = chunk.join(",");
+    const url = `${FMP_BASE}/market-capitalization-batch?symbols=${encodeURIComponent(symbolsParam)}&apikey=${FMP_API_KEY}`;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        console.warn(`[FMP] Batch market cap error ${resp.status} for chunk ${i / FMP_BATCH_CHUNK + 1}`);
+        continue;
+      }
+      const data = await resp.json();
+      if (!Array.isArray(data)) continue;
+      for (const row of data) {
+        const sym = (row.symbol ?? row.ticker) as string;
+        const cap = row.marketCap ?? row.market_cap ?? row.mktCap ?? 0;
+        if (sym && Number(cap) > 0) out.set(String(sym).toUpperCase(), Number(cap));
+      }
+    } catch (err) {
+      console.warn(`[FMP] Batch market cap fetch failed for chunk:`, err);
+    }
+  }
+  return out;
+}
+
+/** If we have data and not expired → use cache. No data or expired → return null (caller runs query). */
 async function getFromDbCache(symbol: string): Promise<FundamentalData | null> {
   if (!db) return null;
   try {
-    const rows = await db.select().from(fundamentalsCache).where(eq(fundamentalsCache.symbol, symbol)).limit(1);
+    const rows = await withCacheReadLimit(() =>
+      withRetry(() => db.select().from(tickers).where(eq(tickers.symbol, symbol)).limit(1))
+    );
     if (rows.length === 0) return null;
 
     const row = rows[0];
     const age = Date.now() - new Date(row.fetchedAt).getTime();
     if (age > CACHE_TTL) return null;
 
+    const marketCap = row.marketCap ?? 0;
+    if (!marketCap) return null; // no usable market cap in cache → run query
+
+    return {
+      sector: row.sector,
+      industry: row.industry,
+      marketCap,
+      companyName: row.companyName || undefined,
+      exchange: row.exchange || undefined,
+    };
+  } catch (err) {
+    console.error(`[Fundamentals] DB cache read failed for ${symbol} (after retries):`, err);
+    return null;
+  }
+}
+
+/** When provider fails or returns no data, use existing cached data if any (no expiry check). */
+async function getStaleFromDbCache(symbol: string): Promise<FundamentalData | null> {
+  if (!db) return null;
+  try {
+    const rows = await withCacheReadLimit(() =>
+      withRetry(() => db.select().from(tickers).where(eq(tickers.symbol, symbol)).limit(1))
+    );
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
     return {
       sector: row.sector,
       industry: row.industry,
@@ -62,34 +185,81 @@ async function getFromDbCache(symbol: string): Promise<FundamentalData | null> {
       exchange: row.exchange || undefined,
     };
   } catch (err) {
-    console.error(`[Fundamentals] DB cache read error for ${symbol}:`, err);
+    console.error(`[Fundamentals] DB stale cache read failed for ${symbol} (after retries):`, err);
     return null;
   }
 }
 
-async function saveToDbCache(symbol: string, data: FundamentalData): Promise<void> {
+async function getExtendedFromDbCache(symbol: string): Promise<ExtendedFundamentals | null> {
+  if (!db) return null;
+  try {
+    const rows = await withCacheReadLimit(() =>
+      withRetry(() => db.select().from(tickers).where(eq(tickers.symbol, symbol)).limit(1))
+    );
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
+    const age = Date.now() - new Date(row.fetchedAt).getTime();
+    if (age > CACHE_TTL) return null;
+
+    // Check if we have extended data (pe might be null but fetchedAt proves we tried)
+    if (row.pe === null && row.analystConsensus === null) {
+      return null; // No extended data cached yet
+    }
+
+    return {
+      marketCap: row.marketCap || 0,
+      pe: row.pe,
+      beta: row.beta,
+      debtToEquity: row.debtToEquity,
+      preTaxMargin: row.preTaxMargin,
+      analystConsensus: row.analystConsensus || "N/A",
+      targetPrice: row.targetPrice,
+      nextEarningsDate: row.nextEarningsDate || "N/A",
+      nextEarningsDays: row.nextEarningsDays || -1,
+      epsCurrentQYoY: row.epsCurrentQYoY || "N/A",
+      salesGrowth3QYoY: row.salesGrowth3QYoY || "N/A",
+      lastEpsSurprise: row.lastEpsSurprise || "N/A",
+    };
+  } catch (err) {
+    console.error(`[Fundamentals] Extended DB cache read failed for ${symbol} (after retries):`, err);
+    return null;
+  }
+}
+
+async function saveToDbCache(symbol: string, data: FundamentalData, extended?: ExtendedFundamentals): Promise<void> {
   if (!db) return;
   try {
-    await db.insert(fundamentalsCache)
-      .values({
-        symbol,
-        sector: data.sector,
-        industry: data.industry,
-        marketCap: data.marketCap || null,
-        companyName: data.companyName || null,
-        exchange: data.exchange || null,
-        fetchedAt: new Date(),
-      })
+    const values: any = {
+      symbol,
+      sector: data.sector,
+      industry: data.industry,
+      marketCap: data.marketCap || null,
+      companyName: data.companyName || null,
+      exchange: data.exchange || null,
+      fetchedAt: new Date(),
+    };
+
+    // If extended fundamentals are provided, include them
+    if (extended) {
+      values.pe = extended.pe;
+      values.beta = extended.beta;
+      values.debtToEquity = extended.debtToEquity;
+      values.preTaxMargin = extended.preTaxMargin;
+      values.analystConsensus = extended.analystConsensus;
+      values.targetPrice = extended.targetPrice;
+      values.nextEarningsDate = extended.nextEarningsDate;
+      values.nextEarningsDays = extended.nextEarningsDays;
+      values.epsCurrentQYoY = extended.epsCurrentQYoY;
+      values.salesGrowth3QYoY = extended.salesGrowth3QYoY;
+      values.lastEpsSurprise = extended.lastEpsSurprise;
+    }
+
+    await db.insert(tickers)
+      .values(values)
       .onConflictDoUpdate({
-        target: fundamentalsCache.symbol,
-        set: {
-          sector: data.sector,
-          industry: data.industry,
-          marketCap: data.marketCap || null,
-          companyName: data.companyName || null,
-          exchange: data.exchange || null,
-          fetchedAt: new Date(),
-        },
+        target: tickers.symbol,
+        set: values,
       });
   } catch (err) {
     console.error(`[Fundamentals] DB cache write error for ${symbol}:`, err);
@@ -99,36 +269,71 @@ async function saveToDbCache(symbol: string, data: FundamentalData): Promise<voi
 export async function getFundamentals(symbol: string): Promise<FundamentalData> {
   const upper = symbol.toUpperCase();
 
+  // Check DB cache first
+  const dbCached = await getFromDbCache(upper);
+  
   const local = localLookup(upper);
   if (local) {
     const stock = STOCKS_BY_SECTOR[local.sector]?.find(s => s.symbol === upper);
-    return {
-      sector: local.sector,
-      industry: local.industry,
-      marketCap: stock?.marketCap || 0,
-    };
+    const localCap = stock?.marketCap ?? 0;
+    if (localCap > 0) {
+      // If we have companyName cached, return immediately
+      if (dbCached?.companyName) {
+        return {
+          sector: local.sector,
+          industry: local.industry,
+          marketCap: localCap,
+          companyName: dbCached.companyName,
+          exchange: dbCached?.exchange || undefined,
+        };
+      }
+      // No companyName cached - fetch from Finnhub to get it
+      const finnhubData = await withFinnhubLimit(() => fetchFromFinnhub(upper)).catch(() => null);
+      if (finnhubData?.companyName) {
+        // Save to cache for next time
+        saveToDbCache(upper, { ...finnhubData, sector: local.sector, industry: local.industry, marketCap: localCap });
+        return {
+          sector: local.sector,
+          industry: local.industry,
+          marketCap: localCap,
+          companyName: finnhubData.companyName,
+          exchange: finnhubData.exchange || undefined,
+        };
+      }
+      // Couldn't get companyName, return without it
+      return {
+        sector: local.sector,
+        industry: local.industry,
+        marketCap: localCap,
+      };
+    }
+    // local has no usable marketCap, fall through to cache/Finnhub
   }
-
-  const dbCached = await getFromDbCache(upper);
+  
+  // If we already have valid cached data, return it
   if (dbCached) {
     return dbCached;
   }
 
+  // Not present or past expiry → query provider
   let pending = pendingRequests.get(upper);
   if (!pending) {
-    pending = fetchFromFMP(upper);
+    pending = withFinnhubLimit(() => fetchFromFinnhub(upper));
     pendingRequests.set(upper, pending);
   }
 
   try {
     const result = await pending;
-    const data = result || { sector: 'Unknown', industry: 'Unknown', marketCap: 0 };
-
     if (result) {
-      saveToDbCache(upper, data);
+      saveToDbCache(upper, result);
+      return result;
     }
-
-    return data;
+    // Unable to query or no results from Finnhub → use existing cached data only if it has usable market cap
+    const stale = await getStaleFromDbCache(upper);
+    if (stale && (stale.marketCap ?? 0) > 0) {
+      return stale;
+    }
+    return { sector: 'Unknown', industry: 'Unknown', marketCap: 0 };
   } finally {
     pendingRequests.delete(upper);
   }
@@ -159,221 +364,151 @@ export interface ExtendedFundamentals {
   lastEpsSurprise: string;
 }
 
-const extendedCache = new Map<string, { data: ExtendedFundamentals; ts: number }>();
-const EXTENDED_CACHE_TTL = 24 * 60 * 60 * 1000;
-
-async function fetchProfileData(symbol: string): Promise<{ marketCap: number; beta: number | null }> {
-  if (!FMP_API_KEY) return { marketCap: 0, beta: null };
-  try {
-    const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { marketCap: 0, beta: null };
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return { marketCap: 0, beta: null };
-    const profile = data[0];
-    return {
-      marketCap: profile.marketCap || 0,
-      beta: profile.beta ?? null,
-    };
-  } catch {
-    return { marketCap: 0, beta: null };
-  }
-}
-
-async function fetchRatiosTTM(symbol: string): Promise<{ pe: number | null; debtToEquity: number | null; preTaxMargin: number | null }> {
-  if (!FMP_API_KEY) return { pe: null, debtToEquity: null, preTaxMargin: null };
-  try {
-    const url = `${FMP_BASE}/ratios-ttm?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { pe: null, debtToEquity: null, preTaxMargin: null };
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return { pe: null, debtToEquity: null, preTaxMargin: null };
-    const r = data[0];
-    return {
-      pe: r.priceToEarningsRatioTTM != null ? Math.round(r.priceToEarningsRatioTTM * 100) / 100 : null,
-      debtToEquity: r.debtToEquityRatioTTM != null ? Math.round(r.debtToEquityRatioTTM * 100) / 100 : null,
-      preTaxMargin: r.pretaxProfitMarginTTM != null ? Math.round(r.pretaxProfitMarginTTM * 10000) / 100 : null,
-    };
-  } catch {
-    return { pe: null, debtToEquity: null, preTaxMargin: null };
-  }
-}
-
-async function fetchPriceTargetConsensus(symbol: string): Promise<{ consensus: string; targetPrice: number | null }> {
-  if (!FMP_API_KEY) return { consensus: "N/A", targetPrice: null };
-  try {
-    const url = `${FMP_BASE}/price-target-consensus?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { consensus: "N/A", targetPrice: null };
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return { consensus: "N/A", targetPrice: null };
-    const pt = data[0];
-    const targetPrice = pt.targetConsensus ?? pt.targetMedian ?? null;
-    let consensus = "N/A";
-    if (targetPrice != null && pt.targetHigh != null && pt.targetLow != null) {
-      const mid = (pt.targetHigh + pt.targetLow) / 2;
-      consensus = targetPrice >= mid ? "Buy" : "Hold";
-    }
-    return { consensus, targetPrice: targetPrice != null ? Math.round(targetPrice * 100) / 100 : null };
-  } catch {
-    return { consensus: "N/A", targetPrice: null };
-  }
-}
-
-interface IncomeQuarter {
-  date: string;
-  period: string;
-  fiscalYear: string;
-  epsDiluted: number | null;
-  revenue: number;
-}
-
-async function fetchQuarterlyIncomeStatements(symbol: string): Promise<IncomeQuarter[]> {
-  if (!FMP_API_KEY) return [];
-  try {
-    const url = `${FMP_BASE}/income-statement?symbol=${encodeURIComponent(symbol)}&period=quarter&limit=5&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data.map((d: any) => ({
-      date: d.date,
-      period: d.period,
-      fiscalYear: d.fiscalYear,
-      epsDiluted: d.epsDiluted ?? null,
-      revenue: d.revenue || 0,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-async function fetchAnalystEpsEstimates(symbol: string): Promise<{ epsAvg: number | null; date: string; numAnalysts: number } | null> {
-  if (!FMP_API_KEY) return null;
-  try {
-    const url = `${FMP_BASE}/analyst-estimates?symbol=${encodeURIComponent(symbol)}&period=annual&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return null;
-    const now = new Date();
-    const mostRecent = data.find((d: any) => {
-      const estDate = new Date(d.date);
-      return estDate <= now;
-    });
-    if (!mostRecent) return null;
-    return {
-      epsAvg: mostRecent.epsAvg ?? null,
-      date: mostRecent.date,
-      numAnalysts: mostRecent.numAnalystsEps ?? 0,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function computeEpsGrowthMetrics(quarters: IncomeQuarter[], analystEst: { epsAvg: number | null; date: string } | null): {
-  epsCurrentQYoY: string;
-  salesGrowth3QYoY: string;
-  lastEpsSurprise: string;
-  nextEarningsDate: string;
-  nextEarningsDays: number;
-} {
-  const result = {
-    epsCurrentQYoY: "N/A",
-    salesGrowth3QYoY: "N/A",
-    lastEpsSurprise: "N/A",
-    nextEarningsDate: "N/A",
-    nextEarningsDays: -1,
-  };
-
-  if (quarters.length === 0) return result;
-
-  const current = quarters[0];
-
-  if (quarters.length >= 2) {
-    const sameQLastYear = quarters.find(
-      (q) => q.period === current.period && q.fiscalYear !== current.fiscalYear
-    );
-    if (sameQLastYear && current.epsDiluted != null && sameQLastYear.epsDiluted != null && sameQLastYear.epsDiluted !== 0) {
-      const yoyPct = ((current.epsDiluted - sameQLastYear.epsDiluted) / Math.abs(sameQLastYear.epsDiluted)) * 100;
-      result.epsCurrentQYoY = `${yoyPct >= 0 ? "+" : ""}${Math.round(yoyPct)}%`;
-    } else if (current.epsDiluted != null) {
-      result.epsCurrentQYoY = `$${current.epsDiluted.toFixed(2)}`;
-    }
-  }
-
-  if (quarters.length >= 5) {
-    const recent3Rev = quarters.slice(0, 3).reduce((s, q) => s + q.revenue, 0);
-    const prior3Rev = quarters.slice(3, 5).reduce((s, q) => s + q.revenue, 0);
-    if (prior3Rev > 0 && quarters.length >= 5) {
-      const avgPrior = prior3Rev / 2;
-      const avgRecent = recent3Rev / 3;
-      const salesGrowth = ((avgRecent - avgPrior) / avgPrior) * 100;
-      result.salesGrowth3QYoY = `${salesGrowth >= 0 ? "+" : ""}${Math.round(salesGrowth)}%`;
-    }
-  }
-
-  if (analystEst && analystEst.epsAvg != null && quarters.length >= 4) {
-    const trailing4Eps = quarters.slice(0, 4).reduce((s, q) => s + (q.epsDiluted || 0), 0);
-    const annualEstEps = analystEst.epsAvg;
-    if (annualEstEps !== 0) {
-      const surprise = trailing4Eps - annualEstEps;
-      const surprisePct = ((surprise / Math.abs(annualEstEps)) * 100);
-      result.lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
-    }
-  }
-
-  if (current.date) {
-    const lastReportDate = new Date(current.date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let nextEstimate = new Date(lastReportDate);
-    nextEstimate.setMonth(nextEstimate.getMonth() + 3);
-    while (nextEstimate <= today) {
-      nextEstimate.setMonth(nextEstimate.getMonth() + 3);
-    }
-    const diffDays = Math.ceil((nextEstimate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    result.nextEarningsDate = nextEstimate.toISOString().split("T")[0];
-    result.nextEarningsDays = diffDays;
-  }
-
-  return result;
-}
+// Remove in-memory cache - now using DB cache only
+// All old FMP helper functions removed - now using Finnhub via server/finnhub.ts
 
 export async function getExtendedFundamentals(symbol: string): Promise<ExtendedFundamentals> {
   const upper = symbol.toUpperCase();
-  const cached = extendedCache.get(upper);
-  if (cached && Date.now() - cached.ts < EXTENDED_CACHE_TTL) {
-    return cached.data;
+
+  // Check DB cache first
+  const dbCached = await getExtendedFromDbCache(upper);
+  if (dbCached) {
+    console.log(`[Fundamentals] Using cached extended fundamentals for ${upper}`);
+    return dbCached;
   }
 
-  const [profile, ratios, priceTarget, incomeQuarters, analystEst] = await Promise.all([
-    fetchProfileData(upper),
-    fetchRatiosTTM(upper),
-    fetchPriceTargetConsensus(upper),
-    fetchQuarterlyIncomeStatements(upper),
-    fetchAnalystEpsEstimates(upper),
-  ]);
+  console.log(`[Fundamentals] Fetching extended fundamentals for ${upper} from Finnhub`);
 
-  const growth = computeEpsGrowthMetrics(incomeQuarters, analystEst);
+  // Fetch comprehensive data from Finnhub
+  const finnhubData = await finnhub.getComprehensiveFundamentals(upper);
+
+  const profile = finnhubData.profile;
+  const metrics = finnhubData.metrics?.metric;
+  const recommendations = finnhubData.recommendations;
+  const priceTarget = finnhubData.priceTarget;
+  const earningsSurprises = finnhubData.earningsSurprises;
+
+  // Calculate market cap (in dollars)
+  // Try profile first, then metrics, default to 0 if neither has valid data
+  let marketCap = 0;
+  if (profile?.marketCapitalization && profile.marketCapitalization > 0) {
+    marketCap = profile.marketCapitalization * 1000000; // Finnhub returns in millions
+  } else if (metrics?.marketCapitalization && metrics.marketCapitalization > 0) {
+    marketCap = metrics.marketCapitalization * 1000000; // Also in millions
+  }
+  // If both are null/0/undefined, marketCap stays 0 (meaning "no data")
+
+  // Get PE ratio
+  const pe = metrics?.peTTM ?? metrics?.peExclExtraTTM ?? null;
+
+  // Get beta
+  const beta = metrics?.beta ?? null;
+
+  // Get debt to equity
+  const debtToEquity = metrics?.totalDebtToEquity ?? null;
+
+  // Get pre-tax margin (using ROA as proxy if not available)
+  const preTaxMargin = metrics?.roaRfy ?? null;
+
+  // Calculate analyst consensus
+  let analystConsensus = "N/A";
+  if (recommendations.length > 0) {
+    const latest = recommendations[0];
+    const totalRecs = latest.buy + latest.hold + latest.sell + latest.strongBuy + latest.strongSell;
+    if (totalRecs > 0) {
+      const bullishScore = (latest.strongBuy * 2 + latest.buy) / totalRecs;
+      const bearishScore = (latest.strongSell * 2 + latest.sell) / totalRecs;
+      if (bullishScore > 1.0) analystConsensus = "Strong Buy";
+      else if (bullishScore > 0.5) analystConsensus = "Buy";
+      else if (bearishScore > 0.5) analystConsensus = "Sell";
+      else analystConsensus = "Hold";
+    }
+  }
+
+  // Get target price
+  const targetPrice = priceTarget?.targetMean ?? priceTarget?.targetMedian ?? null;
+
+  // Calculate next earnings date and days
+  let nextEarningsDate = "N/A";
+  let nextEarningsDays = -1;
+  
+  if (earningsSurprises.length > 0) {
+    // Find the most recent earnings date
+    const sortedEarnings = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
+    const lastEarnings = new Date(sortedEarnings[0].period);
+    
+    // Estimate next earnings (roughly 90 days later)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let nextEstimate = new Date(lastEarnings);
+    nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+    
+    while (nextEstimate <= today) {
+      nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+    }
+    
+    nextEarningsDate = nextEstimate.toISOString().split("T")[0];
+    nextEarningsDays = Math.ceil((nextEstimate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  // Calculate EPS growth
+  let epsCurrentQYoY = "N/A";
+  if (earningsSurprises.length >= 2) {
+    const sorted = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
+    const current = sorted[0];
+    const yearAgo = sorted.find((e, i) => i > 0 && i <= 4); // Look within last 4 quarters for YoY comparison
+    
+    if (current.actual != null && yearAgo?.actual != null && yearAgo.actual !== 0) {
+      const yoyPct = ((current.actual - yearAgo.actual) / Math.abs(yearAgo.actual)) * 100;
+      epsCurrentQYoY = `${yoyPct >= 0 ? "+" : ""}${Math.round(yoyPct)}%`;
+    } else if (current.actual != null) {
+      epsCurrentQYoY = `$${current.actual.toFixed(2)}`;
+    }
+  }
+
+  // Calculate sales growth (using revenue growth from metrics)
+  const salesGrowth3QYoY = metrics?.revenueGrowthTTMYoy 
+    ? `${metrics.revenueGrowthTTMYoy >= 0 ? "+" : ""}${Math.round(metrics.revenueGrowthTTMYoy)}%`
+    : (metrics?.revenueGrowth3Y ? `${metrics.revenueGrowth3Y >= 0 ? "+" : ""}${Math.round(metrics.revenueGrowth3Y)}%` : "N/A");
+
+  // Calculate last EPS surprise
+  let lastEpsSurprise = "N/A";
+  if (earningsSurprises.length > 0) {
+    const latest = earningsSurprises[0];
+    if (latest.actual != null && latest.estimate != null && latest.estimate !== 0) {
+      const surprise = latest.actual - latest.estimate;
+      const surprisePct = (surprise / Math.abs(latest.estimate)) * 100;
+      lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
+    }
+  }
 
   const result: ExtendedFundamentals = {
-    marketCap: profile.marketCap,
-    pe: ratios.pe,
-    beta: profile.beta,
-    debtToEquity: ratios.debtToEquity,
-    preTaxMargin: ratios.preTaxMargin,
-    analystConsensus: priceTarget.consensus,
-    targetPrice: priceTarget.targetPrice,
-    nextEarningsDate: growth.nextEarningsDate,
-    nextEarningsDays: growth.nextEarningsDays,
-    epsCurrentQYoY: growth.epsCurrentQYoY,
-    salesGrowth3QYoY: growth.salesGrowth3QYoY,
-    lastEpsSurprise: growth.lastEpsSurprise,
+    marketCap,
+    pe,
+    beta,
+    debtToEquity,
+    preTaxMargin,
+    analystConsensus,
+    targetPrice,
+    nextEarningsDate,
+    nextEarningsDays,
+    epsCurrentQYoY,
+    salesGrowth3QYoY,
+    lastEpsSurprise,
   };
 
-  extendedCache.set(upper, { data: result, ts: Date.now() });
+  // Save to DB cache - need basic fundamental data too
+  const basicData: FundamentalData = {
+    sector: profile?.finnhubIndustry ? mapIndustryToSector(profile.finnhubIndustry) : 'Unknown',
+    industry: profile?.finnhubIndustry || 'Unknown',
+    marketCap,
+    companyName: profile?.name,
+    exchange: profile?.exchange,
+  };
+
+  await saveToDbCache(upper, basicData, result);
+  console.log(`[Fundamentals] Saved extended fundamentals for ${upper} to DB cache`);
+
   return result;
 }
 

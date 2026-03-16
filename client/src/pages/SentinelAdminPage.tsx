@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { SentinelHeader } from "@/components/SentinelHeader";
-import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles } from "lucide-react";
+import { CopyScreenButton } from "@/components/CopyScreenButton";
+import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -673,6 +674,1654 @@ function TuningReviewCard({ review, showActions, onApprove, onReject, isPending 
   );
 }
 
+function QueryOptimizerPanel() {
+  const { toast } = useToast();
+  const [localSettings, setLocalSettings] = useState<any>(null);
+  
+  const { data: settings, isLoading: settingsLoading, refetch: refetchSettings } = useQuery<any>({
+    queryKey: ["/api/bigidea/optimizer-display-settings"],
+  });
+
+  const { data: stats, isLoading: statsLoading } = useQuery<any>({
+    queryKey: ["/api/bigidea/optimizer-stats"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (updates: any) => {
+      const res = await apiRequest("PATCH", "/api/admin/optimizer-display-settings", updates);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Settings updated", description: "Optimizer display settings saved successfully" });
+      refetchSettings();
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to update settings", variant: "destructive" });
+    },
+  });
+
+  useEffect(() => {
+    if (settings) {
+      setLocalSettings(settings);
+    }
+  }, [settings]);
+
+  if (settingsLoading || !localSettings) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  const handleSettingChange = (key: string, value: any) => {
+    const updated = { ...localSettings, [key]: value };
+    setLocalSettings(updated);
+  };
+
+  const handleMetricChange = (key: string, value: boolean) => {
+    const updated = {
+      ...localSettings,
+      metrics: { ...localSettings.metrics, [key]: value },
+    };
+    setLocalSettings(updated);
+  };
+
+  const handleSaveSettings = () => {
+    // Flatten the settings structure for the API
+    const updates: any = {
+      showOptimizerOverlay: localSettings.showOverlay,
+      showOverallImprovement: localSettings.metrics.overallImprovement,
+      showWeeklyImprovement: localSettings.metrics.weeklyImprovement,
+      showConfidenceLevel: localSettings.metrics.confidenceLevel,
+      showScanStats: localSettings.metrics.scanStats,
+      showLiveOptimization: localSettings.metrics.liveOptimization,
+      showAchievementBadges: localSettings.metrics.achievementBadges,
+      overlayPosition: localSettings.position,
+      overlayStyle: localSettings.style,
+      overlayTheme: localSettings.theme,
+    };
+
+    // If admin override is enabled, also save admin-specific settings
+    if (localSettings.adminOverrideEnabled) {
+      updates.adminShowOverallImprovement = localSettings.metrics.overallImprovement;
+      updates.adminShowWeeklyImprovement = localSettings.metrics.weeklyImprovement;
+      updates.adminShowConfidenceLevel = localSettings.metrics.confidenceLevel;
+      updates.adminShowScanStats = localSettings.metrics.scanStats;
+      updates.adminShowLiveOptimization = localSettings.metrics.liveOptimization;
+      updates.adminShowAchievementBadges = localSettings.metrics.achievementBadges;
+      updates.adminShowDebugInfo = localSettings.metrics.debugInfo;
+    }
+
+    updateSettingsMutation.mutate(updates);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Overview */}
+      {stats && !statsLoading && (
+        <Card className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-cyan-500/30">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Activity className="w-6 h-6 text-cyan-400" />
+              <div>
+                <CardTitle>Query Optimizer Performance</CardTitle>
+                <CardDescription>Real-time learning statistics from Big Idea Scanner</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Overall Improvement</div>
+                <div className="text-2xl font-semibold text-emerald-400">+{stats.overallImprovement}%</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">This Week</div>
+                <div className={`text-2xl font-semibold ${stats.weeklyImprovement >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {stats.weeklyImprovement >= 0 ? '+' : ''}{stats.weeklyImprovement}%
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Confidence</div>
+                <div className="text-2xl font-semibold text-cyan-400">{stats.avgConfidence}%</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Total Scans</div>
+                <div className="text-2xl font-semibold text-white">{stats.totalScans.toLocaleString()}</div>
+              </div>
+            </div>
+            {stats.topImprovedIndicator && (
+              <div className="mt-4 pt-4 border-t border-cyan-500/20">
+                <div className="text-xs text-muted-foreground mb-1">Top Performer</div>
+                <div className="flex items-center justify-between">
+                  <div className="font-medium text-cyan-300">{stats.topImprovedIndicator.name}</div>
+                  <Badge variant="outline" className="text-emerald-400 border-emerald-400/50">
+                    {stats.topImprovedIndicator.selectivity}% selectivity
+                  </Badge>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Display Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Display Settings</CardTitle>
+          <CardDescription>Control what metrics are shown on the Big Idea Scanner canvas</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Master Toggle */}
+          <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
+            <div>
+              <Label className="text-base font-semibold">Show Optimizer Overlay</Label>
+              <p className="text-sm text-muted-foreground mt-1">Master toggle for all optimizer metrics display</p>
+            </div>
+            <Switch
+              checked={localSettings.showOverlay}
+              onCheckedChange={(checked) => handleSettingChange('showOverlay', checked)}
+            />
+          </div>
+
+          {/* Admin Override */}
+          {localSettings.isAdmin && (
+            <div className="flex items-center justify-between p-4 border rounded-lg bg-purple-500/10 border-purple-500/30">
+              <div>
+                <Label className="text-base font-semibold">Admin Override Mode</Label>
+                <p className="text-sm text-muted-foreground mt-1">Use different settings for admin vs regular users</p>
+              </div>
+              <Switch
+                checked={localSettings.adminOverrideEnabled}
+                onCheckedChange={(checked) => handleSettingChange('adminOverrideEnabled', checked)}
+              />
+            </div>
+          )}
+
+          {/* Metric Toggles */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Visible Metrics</Label>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="overall-improvement" className="font-normal">Overall Improvement %</Label>
+                <Switch
+                  id="overall-improvement"
+                  checked={localSettings.metrics.overallImprovement}
+                  onCheckedChange={(checked) => handleMetricChange('overallImprovement', checked)}
+                  disabled={!localSettings.showOverlay}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="weekly-improvement" className="font-normal">Weekly Improvement %</Label>
+                <Switch
+                  id="weekly-improvement"
+                  checked={localSettings.metrics.weeklyImprovement}
+                  onCheckedChange={(checked) => handleMetricChange('weeklyImprovement', checked)}
+                  disabled={!localSettings.showOverlay}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="confidence-level" className="font-normal">Confidence Level</Label>
+                <Switch
+                  id="confidence-level"
+                  checked={localSettings.metrics.confidenceLevel}
+                  onCheckedChange={(checked) => handleMetricChange('confidenceLevel', checked)}
+                  disabled={!localSettings.showOverlay}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="scan-stats" className="font-normal">Scan Statistics</Label>
+                <Switch
+                  id="scan-stats"
+                  checked={localSettings.metrics.scanStats}
+                  onCheckedChange={(checked) => handleMetricChange('scanStats', checked)}
+                  disabled={!localSettings.showOverlay}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="live-optimization" className="font-normal">Live Optimization Messages</Label>
+                <Switch
+                  id="live-optimization"
+                  checked={localSettings.metrics.liveOptimization}
+                  onCheckedChange={(checked) => handleMetricChange('liveOptimization', checked)}
+                  disabled={!localSettings.showOverlay}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="achievement-badges" className="font-normal">Achievement Badges</Label>
+                <Switch
+                  id="achievement-badges"
+                  checked={localSettings.metrics.achievementBadges}
+                  onCheckedChange={(checked) => handleMetricChange('achievementBadges', checked)}
+                  disabled={!localSettings.showOverlay}
+                />
+              </div>
+              {localSettings.isAdmin && (
+                <div className="flex items-center justify-between p-2 rounded bg-purple-500/10">
+                  <Label htmlFor="debug-info" className="font-normal text-purple-300">Debug Info (Admin Only)</Label>
+                  <Switch
+                    id="debug-info"
+                    checked={localSettings.metrics.debugInfo}
+                    onCheckedChange={(checked) => handleMetricChange('debugInfo', checked)}
+                    disabled={!localSettings.showOverlay}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Display Style */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Display Style</Label>
+            <Select
+              value={localSettings.style}
+              onValueChange={(value) => handleSettingChange('style', value)}
+              disabled={!localSettings.showOverlay}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="minimal">Minimal (Single line)</SelectItem>
+                <SelectItem value="compact">Compact (3-4 lines)</SelectItem>
+                <SelectItem value="detailed">Detailed (Full stats)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Theme */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Theme</Label>
+            <Select
+              value={localSettings.theme}
+              onValueChange={(value) => handleSettingChange('theme', value)}
+              disabled={!localSettings.showOverlay}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="matrix">Matrix (Green)</SelectItem>
+                <SelectItem value="cyberpunk">Cyberpunk (Cyan)</SelectItem>
+                <SelectItem value="minimal">Minimal (Gray)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Position */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Position</Label>
+            <Select
+              value={localSettings.position}
+              onValueChange={(value) => handleSettingChange('position', value)}
+              disabled={!localSettings.showOverlay}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bottom-center">Bottom Center</SelectItem>
+                <SelectItem value="bottom-right">Bottom Right</SelectItem>
+                <SelectItem value="bottom-left">Bottom Left</SelectItem>
+                <SelectItem value="top-right">Top Right</SelectItem>
+                <SelectItem value="top-left">Top Left</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Save Button */}
+          <div className="pt-4 border-t">
+            <Button
+              onClick={handleSaveSettings}
+              disabled={updateSettingsMutation.isPending}
+              className="w-full"
+            >
+              {updateSettingsMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Save Settings
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Indicator Performance Table */}
+      {stats && stats.indicators && stats.indicators.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Indicator Performance</CardTitle>
+            <CardDescription>Detailed performance metrics for each indicator in the library</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-2 font-semibold">Indicator</th>
+                    <th className="text-left py-2 px-2 font-semibold">Category</th>
+                    <th className="text-right py-2 px-2 font-semibold">Pass Rate</th>
+                    <th className="text-right py-2 px-2 font-semibold">Selectivity</th>
+                    <th className="text-right py-2 px-2 font-semibold">Avg Time</th>
+                    <th className="text-right py-2 px-2 font-semibold">Evaluations</th>
+                    <th className="text-right py-2 px-2 font-semibold">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.indicators
+                    .sort((a: any, b: any) => b.selectivity - a.selectivity)
+                    .map((indicator: any) => (
+                    <tr key={indicator.id} className="border-b border-muted/30">
+                      <td className="py-2 px-2 font-mono text-xs">{indicator.name}</td>
+                      <td className="py-2 px-2">
+                        <Badge variant="outline" className="text-xs">{indicator.category}</Badge>
+                      </td>
+                      <td className="py-2 px-2 text-right font-mono">{indicator.passRate}%</td>
+                      <td className="py-2 px-2 text-right">
+                        <span className={`font-semibold ${
+                          indicator.selectivity >= 70 ? 'text-emerald-400' :
+                          indicator.selectivity >= 50 ? 'text-cyan-400' :
+                          'text-amber-400'
+                        }`}>
+                          {indicator.selectivity}%
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-right font-mono text-muted-foreground">{indicator.avgTimeMs}ms</td>
+                      <td className="py-2 px-2 text-right font-mono text-muted-foreground">{indicator.evaluations.toLocaleString()}</td>
+                      <td className="py-2 px-2 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-xs">{indicator.confidence}%</span>
+                          <div className="w-12 bg-muted rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full ${
+                                indicator.confidence >= 85 ? 'bg-emerald-500' :
+                                indicator.confidence >= 70 ? 'bg-cyan-500' :
+                                indicator.confidence >= 50 ? 'bg-blue-500' :
+                                'bg-amber-500'
+                              }`}
+                              style={{ width: `${indicator.confidence}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// === ASK IVY RULES PANEL ===
+// Interface matching the backend AskIvyOverlaySettings
+interface AskIvyRulesSettings {
+  enableMinerviniCheatEntries: boolean;
+  enableEma620Entry: boolean;
+  ema620AllowedTimeframe: "5min_only" | "all_intraday";
+  entryBufferPct: number;
+  // Qullaggie Entry Rules
+  enableOrhEntry: boolean;
+  orhTimeframe: "5min" | "60min" | "both";
+  enableMaSurfEntry: boolean;
+  maSurfMaxDistancePct: number;
+  // Stops
+  include21EmaStop: boolean;
+  include50SmaStop: boolean;
+  includeAtrStop: boolean;
+  atrStopMultiple: number;
+  stopMaOffsetDollars: number;
+  stop21Label: string;
+  // Qullaggie Stop Rules
+  enforceAtrStopCap: boolean;
+  enforceAdrStopCap: boolean;
+  // Targets
+  alwaysInclude8RTarget: boolean;
+  includeSwingHighTargets: boolean;
+  swingHighTargetCount: number;
+  include52wTarget: boolean;
+  includeWeeklyTarget: boolean;
+  include5DayTarget: boolean;
+  include8xAdrTarget: boolean;
+  adr8TargetBreakoutOnly: boolean;
+  warnIfNoChartTargets: boolean;
+  // Target Display / Filtering
+  minRrThreshold: number;
+  targetDisplayLimit: number;
+  prioritizeChartTargets: boolean;
+  include8xAdrOver50Target: boolean;
+  // Risk Warnings
+  warn200DsmaBelow: boolean;
+  // Qullaggie Position Management
+  suggestPartialProfits: boolean;
+  partialProfitDays: number;
+  includeTrailMaCloseStop: boolean;
+  trailMaClosePeriod: number;
+  // Extension
+  extendedThresholdAdr: number;
+  profitTakingThresholdAdr: number;
+  showExtendedWarning: boolean;
+  chartPriceScaleSide: "left" | "right";
+  overlayResizable: boolean;
+}
+
+function AskIvyRulesPanel() {
+  const { toast } = useToast();
+  const [localSettings, setLocalSettings] = useState<AskIvyRulesSettings | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  const { data: settings, isLoading, refetch } = useQuery<AskIvyRulesSettings>({
+    queryKey: ["/api/admin/ask-ivy-settings"],
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (updates: Partial<AskIvyRulesSettings>) => {
+      const res = await apiRequest("PATCH", "/api/admin/ask-ivy-settings", updates);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Settings saved", description: "Trade Plan rules have been updated successfully." });
+      setHasChanges(false);
+      refetch();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    },
+  });
+
+  useEffect(() => {
+    if (settings) {
+      setLocalSettings(settings);
+      setHasChanges(false);
+    }
+  }, [settings]);
+
+  if (isLoading || !localSettings) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  const handleChange = <K extends keyof AskIvyRulesSettings>(key: K, value: AskIvyRulesSettings[K]) => {
+    setLocalSettings((prev) => prev ? { ...prev, [key]: value } : prev);
+    setHasChanges(true);
+  };
+
+  const handleSave = () => {
+    if (localSettings) {
+      updateMutation.mutate(localSettings);
+    }
+  };
+
+  const handleCancel = () => {
+    if (settings) {
+      setLocalSettings(settings);
+      setHasChanges(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Overview Card */}
+      <Card className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-amber-500/30">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <Lightbulb className="w-6 h-6 text-amber-400" />
+            <div>
+              <CardTitle>Trade Plan Rules</CardTitle>
+              <CardDescription>Configure entry, stop, and target suggestion logic for the Trade Plan overlay</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0 text-sm text-muted-foreground space-y-1">
+          <p><span className="font-medium text-foreground">Affects:</span> all Trade Plan overlay suggestions on charts (entries, stops, profit targets, extension warnings).</p>
+          <p><span className="font-medium text-foreground">How:</span> toggle rules on/off, adjust thresholds and labels. Changes apply globally after save.</p>
+          <p><span className="font-medium text-foreground">Scope:</span> global (all users see the same suggestion logic).</p>
+        </CardContent>
+      </Card>
+
+      {/* Save/Cancel Bar */}
+      {hasChanges && (
+        <div className="sticky top-0 z-10 flex items-center justify-between p-3 bg-amber-500/20 border border-amber-500/40 rounded-lg">
+          <span className="text-sm font-medium text-amber-200">You have unsaved changes</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleCancel} disabled={updateMutation.isPending}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Save Changes
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Entry Rules */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-emerald-400" />
+            Entry Rules
+          </CardTitle>
+          <CardDescription>Configure how entry suggestions are generated</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Minervini Cheat Entries */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Enable Minervini Cheat Entries</Label>
+                <p className="text-xs text-muted-foreground mt-1">Include High/Mid/Low cheat entry suggestions</p>
+              </div>
+              <Switch
+                checked={localSettings.enableMinerviniCheatEntries}
+                onCheckedChange={(v) => handleChange("enableMinerviniCheatEntries", v)}
+              />
+            </div>
+
+            {/* 6/20 EMA Entry */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Enable 6/20 EMA Entry Tactic</Label>
+                <p className="text-xs text-muted-foreground mt-1">Suggest EMA cross-up as entry trigger</p>
+              </div>
+              <Switch
+                checked={localSettings.enableEma620Entry}
+                onCheckedChange={(v) => handleChange("enableEma620Entry", v)}
+              />
+            </div>
+          </div>
+
+          {/* 6/20 EMA Timeframe */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">6/20 EMA Timeframe Restriction</Label>
+              <p className="text-xs text-muted-foreground mt-1">When to show the 6/20 EMA entry tactic</p>
+            </div>
+            <Select
+              value={localSettings.ema620AllowedTimeframe}
+              onValueChange={(v) => handleChange("ema620AllowedTimeframe", v as "5min_only" | "all_intraday")}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5min_only">5-min only</SelectItem>
+                <SelectItem value="all_intraday">All intraday</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Entry Buffer */}
+          <div className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">Entry Buffer (breakout styles)</Label>
+                <p className="text-xs text-muted-foreground mt-1">Added to base high, prior day high, etc.</p>
+              </div>
+              <span className="font-mono text-sm">{(localSettings.entryBufferPct * 100).toFixed(2)}%</span>
+            </div>
+            <Slider
+              value={[localSettings.entryBufferPct * 100]}
+              onValueChange={([v]) => handleChange("entryBufferPct", v / 100)}
+              min={0}
+              max={1}
+              step={0.05}
+              className="w-full"
+            />
+          </div>
+
+          {/* Qullaggie Entry Rules Section */}
+          <div className="pt-4 border-t">
+            <h4 className="text-sm font-semibold text-amber-400 mb-3">Qullaggie Entry Rules</h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Opening Range High Entry */}
+              <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30">
+                <div>
+                  <Label className="font-medium">Enable ORH Entry</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Opening Range High breakout entries (Qullaggie)</p>
+                </div>
+                <Switch
+                  checked={localSettings.enableOrhEntry}
+                  onCheckedChange={(v) => handleChange("enableOrhEntry", v)}
+                />
+              </div>
+
+              {/* MA Surf Zone Entry */}
+              <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30">
+                <div>
+                  <Label className="font-medium">Enable MA Surf Entry</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Entry when price surfing rising 10/20 MAs</p>
+                </div>
+                <Switch
+                  checked={localSettings.enableMaSurfEntry}
+                  onCheckedChange={(v) => handleChange("enableMaSurfEntry", v)}
+                />
+              </div>
+            </div>
+
+            {/* ORH Timeframe */}
+            <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30 mt-4">
+              <div>
+                <Label className="font-medium">ORH Timeframe</Label>
+                <p className="text-xs text-muted-foreground mt-1">Which opening range high to suggest</p>
+              </div>
+              <Select
+                value={localSettings.orhTimeframe}
+                onValueChange={(v) => handleChange("orhTimeframe", v as "5min" | "60min" | "both")}
+              >
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5min">5-min</SelectItem>
+                  <SelectItem value="60min">60-min</SelectItem>
+                  <SelectItem value="both">Both</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* MA Surf Max Distance */}
+            <div className="p-3 border rounded-lg border-amber-500/30 space-y-2 mt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-medium">MA Surf Max Distance %</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Max distance from MA to be considered "surfing"</p>
+                </div>
+                <span className="font-mono text-sm">{localSettings.maSurfMaxDistancePct}%</span>
+              </div>
+              <Slider
+                value={[localSettings.maSurfMaxDistancePct]}
+                onValueChange={([v]) => handleChange("maSurfMaxDistancePct", v)}
+                min={0.5}
+                max={5}
+                step={0.5}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Stop Rules */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <XCircle className="w-5 h-5 text-red-400" />
+            Stop Rules
+          </CardTitle>
+          <CardDescription>Configure how stop-loss suggestions are generated</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 21 EMA Stop */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include 21 EMA Stop</Label>
+              </div>
+              <Switch
+                checked={localSettings.include21EmaStop}
+                onCheckedChange={(v) => handleChange("include21EmaStop", v)}
+              />
+            </div>
+
+            {/* 50 SMA Stop */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include 50 SMA Stop</Label>
+              </div>
+              <Switch
+                checked={localSettings.include50SmaStop}
+                onCheckedChange={(v) => handleChange("include50SmaStop", v)}
+              />
+            </div>
+
+            {/* ATR Stop */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include ATR Stop</Label>
+              </div>
+              <Switch
+                checked={localSettings.includeAtrStop}
+                onCheckedChange={(v) => handleChange("includeAtrStop", v)}
+              />
+            </div>
+          </div>
+
+          {/* ATR Multiple */}
+          <div className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">ATR Stop Multiple</Label>
+                <p className="text-xs text-muted-foreground mt-1">Stop = Entry - (ATR × multiple)</p>
+              </div>
+              <span className="font-mono text-sm">{localSettings.atrStopMultiple.toFixed(1)}×</span>
+            </div>
+            <Slider
+              value={[localSettings.atrStopMultiple]}
+              onValueChange={([v]) => handleChange("atrStopMultiple", v)}
+              min={0.5}
+              max={5}
+              step={0.1}
+              className="w-full"
+            />
+          </div>
+
+          {/* MA Offset */}
+          <div className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">Stop MA Offset (dollars)</Label>
+                <p className="text-xs text-muted-foreground mt-1">Buffer below MA for stop placement</p>
+              </div>
+              <span className="font-mono text-sm">${localSettings.stopMaOffsetDollars.toFixed(2)}</span>
+            </div>
+            <Slider
+              value={[localSettings.stopMaOffsetDollars]}
+              onValueChange={([v]) => handleChange("stopMaOffsetDollars", v)}
+              min={0}
+              max={2}
+              step={0.05}
+              className="w-full"
+            />
+          </div>
+
+          {/* 21 EMA Label */}
+          <div className="p-3 border rounded-lg">
+            <Label className="font-medium">21 EMA Stop Label</Label>
+            <p className="text-xs text-muted-foreground mt-1 mb-2">The label shown for the 21 EMA stop suggestion</p>
+            <Input
+              value={localSettings.stop21Label}
+              onChange={(e) => handleChange("stop21Label", e.target.value)}
+              placeholder="e.g., 21 EMA"
+              className="max-w-xs"
+            />
+          </div>
+
+          {/* Qullaggie Stop Rules Section */}
+          <div className="pt-4 border-t">
+            <h4 className="text-sm font-semibold text-amber-400 mb-3">Qullaggie Stop Rules</h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Enforce ATR Stop Cap */}
+              <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30">
+                <div>
+                  <Label className="font-medium">Enforce ATR Stop Cap</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Warn if stop exceeds 1× ATR (Qullaggie rule)</p>
+                </div>
+                <Switch
+                  checked={localSettings.enforceAtrStopCap}
+                  onCheckedChange={(v) => handleChange("enforceAtrStopCap", v)}
+                />
+              </div>
+
+              {/* Enforce ADR Stop Cap */}
+              <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30">
+                <div>
+                  <Label className="font-medium">Enforce ADR Stop Cap</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Warn if stop exceeds 1× ADR%</p>
+                </div>
+                <Switch
+                  checked={localSettings.enforceAdrStopCap}
+                  onCheckedChange={(v) => handleChange("enforceAdrStopCap", v)}
+                />
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground mt-3 px-3">
+              Qullaggie rule: "Stop should not be wider than the ATR or ADR% of the stock." These warnings help avoid trades where risk/reward mechanics get out of whack.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Target / Take Profit Rules */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-cyan-400" />
+            Take Profit / Target Rules
+          </CardTitle>
+          <CardDescription>Configure how profit target suggestions are generated</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Always include 8R */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Always Include 8R Target</Label>
+                <p className="text-xs text-muted-foreground mt-1">Target = Entry + 8×(Entry - Stop)</p>
+              </div>
+              <Switch
+                checked={localSettings.alwaysInclude8RTarget}
+                onCheckedChange={(v) => handleChange("alwaysInclude8RTarget", v)}
+              />
+            </div>
+
+            {/* Swing high targets */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include Swing High Targets</Label>
+                <p className="text-xs text-muted-foreground mt-1">Prior swing highs as TP levels</p>
+              </div>
+              <Switch
+                checked={localSettings.includeSwingHighTargets}
+                onCheckedChange={(v) => handleChange("includeSwingHighTargets", v)}
+              />
+            </div>
+
+            {/* 52-week high */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include 52-Week High</Label>
+              </div>
+              <Switch
+                checked={localSettings.include52wTarget}
+                onCheckedChange={(v) => handleChange("include52wTarget", v)}
+              />
+            </div>
+
+            {/* Weekly high */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include Weekly High</Label>
+              </div>
+              <Switch
+                checked={localSettings.includeWeeklyTarget}
+                onCheckedChange={(v) => handleChange("includeWeeklyTarget", v)}
+              />
+            </div>
+
+            {/* 5-day high */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include 5-Day High</Label>
+              </div>
+              <Switch
+                checked={localSettings.include5DayTarget}
+                onCheckedChange={(v) => handleChange("include5DayTarget", v)}
+              />
+            </div>
+
+            {/* 8x ADR target */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <Label className="font-medium">Include 8× ADR Target</Label>
+              </div>
+              <Switch
+                checked={localSettings.include8xAdrTarget}
+                onCheckedChange={(v) => handleChange("include8xAdrTarget", v)}
+              />
+            </div>
+          </div>
+
+          {/* Swing high count */}
+          <div className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">Max Swing High Targets</Label>
+                <p className="text-xs text-muted-foreground mt-1">Number of nearest swing highs to include</p>
+              </div>
+              <span className="font-mono text-sm">{localSettings.swingHighTargetCount}</span>
+            </div>
+            <Slider
+              value={[localSettings.swingHighTargetCount]}
+              onValueChange={([v]) => handleChange("swingHighTargetCount", v)}
+              min={0}
+              max={10}
+              step={1}
+              className="w-full"
+            />
+          </div>
+
+          {/* 8x ADR breakout only */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">8× ADR Target: Breakouts Only</Label>
+              <p className="text-xs text-muted-foreground mt-1">Only show 8× ADR for breakout setups, not pullbacks</p>
+            </div>
+            <Switch
+              checked={localSettings.adr8TargetBreakoutOnly}
+              onCheckedChange={(v) => handleChange("adr8TargetBreakoutOnly", v)}
+            />
+          </div>
+
+          {/* Warn if no chart targets */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Warn When No Chart-Based Targets Exist</Label>
+              <p className="text-xs text-muted-foreground mt-1">Show warning at/near ATH or when no swing highs above entry</p>
+            </div>
+            <Switch
+              checked={localSettings.warnIfNoChartTargets}
+              onCheckedChange={(v) => handleChange("warnIfNoChartTargets", v)}
+            />
+          </div>
+
+          {/* Target Display / Filtering Section */}
+          <div className="pt-4 border-t">
+            <h4 className="text-sm font-semibold text-cyan-400 mb-3">Target Display & Filtering</h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Prioritize Chart Targets */}
+              <div className="flex items-center justify-between p-3 border rounded-lg border-cyan-500/30">
+                <div>
+                  <Label className="font-medium">Prioritize Chart-Based Targets</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Show swing highs, 52W, etc. before R:R math targets</p>
+                </div>
+                <Switch
+                  checked={localSettings.prioritizeChartTargets}
+                  onCheckedChange={(v) => handleChange("prioritizeChartTargets", v)}
+                />
+              </div>
+
+              {/* 8x ADR > 50 Target */}
+              <div className="flex items-center justify-between p-3 border rounded-lg border-cyan-500/30">
+                <div>
+                  <Label className="font-medium">Include 8× ADR &gt; 50 SMA</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Profit-taking zone: 8× ADR above 50-day SMA</p>
+                </div>
+                <Switch
+                  checked={localSettings.include8xAdrOver50Target}
+                  onCheckedChange={(v) => handleChange("include8xAdrOver50Target", v)}
+                />
+              </div>
+            </div>
+
+            {/* Min R:R Threshold */}
+            <div className="p-3 border rounded-lg border-cyan-500/30 space-y-2 mt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-medium">Minimum R:R Threshold</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Only show targets at or above this R:R (hides small targets)</p>
+                </div>
+                <span className="font-mono text-sm">{localSettings.minRrThreshold}:1</span>
+              </div>
+              <Slider
+                value={[localSettings.minRrThreshold]}
+                onValueChange={([v]) => handleChange("minRrThreshold", v)}
+                min={1}
+                max={5}
+                step={0.5}
+                className="w-full"
+              />
+            </div>
+
+            {/* Target Display Limit */}
+            <div className="p-3 border rounded-lg border-cyan-500/30 space-y-2 mt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-medium">Target Display Limit</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Max number of targets to show in overlay</p>
+                </div>
+                <span className="font-mono text-sm">{localSettings.targetDisplayLimit}</span>
+              </div>
+              <Slider
+                value={[localSettings.targetDisplayLimit]}
+                onValueChange={([v]) => handleChange("targetDisplayLimit", v)}
+                min={3}
+                max={15}
+                step={1}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Risk Warnings Section */}
+      <Card className="border-yellow-500/30">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-yellow-400" />
+            Risk Warnings
+          </CardTitle>
+          <CardDescription>Configure when to warn about higher-risk setups</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 200 DSMA Warning */}
+          <div className="flex items-center justify-between p-3 border rounded-lg border-yellow-500/30">
+            <div>
+              <Label className="font-medium">Warn Below 200 DSMA</Label>
+              <p className="text-xs text-muted-foreground mt-1">Alert on longs trading below the 200-day SMA (higher risk)</p>
+            </div>
+            <Switch
+              checked={localSettings.warn200DsmaBelow}
+              onCheckedChange={(v) => handleChange("warn200DsmaBelow", v)}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground px-3">
+            Long setups below the 200 DSMA have lower odds. A breakthrough could signal opportunity, but watch for pullback &amp; bounce confirmation.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Qullaggie Position Management */}
+      <Card className="border-amber-500/30">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-amber-400" />
+            Qullaggie Position Management
+          </CardTitle>
+          <CardDescription>
+            Configure Qullaggie's exit rules: partial profit taking and trailing stop on MA close
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Partial Profits */}
+            <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30">
+              <div>
+                <Label className="font-medium">Suggest Partial Profits</Label>
+                <p className="text-xs text-muted-foreground mt-1">Remind to sell 1/3 to 1/2 after N days</p>
+              </div>
+              <Switch
+                checked={localSettings.suggestPartialProfits}
+                onCheckedChange={(v) => handleChange("suggestPartialProfits", v)}
+              />
+            </div>
+
+            {/* Trail MA Close Stop */}
+            <div className="flex items-center justify-between p-3 border rounded-lg border-amber-500/30">
+              <div>
+                <Label className="font-medium">Include Trail MA Close Stop</Label>
+                <p className="text-xs text-muted-foreground mt-1">Exit on first close below MA (not intraday breach)</p>
+              </div>
+              <Switch
+                checked={localSettings.includeTrailMaCloseStop}
+                onCheckedChange={(v) => handleChange("includeTrailMaCloseStop", v)}
+              />
+            </div>
+          </div>
+
+          {/* Partial Profit Days */}
+          <div className="p-3 border rounded-lg border-amber-500/30 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">Partial Profit Days</Label>
+                <p className="text-xs text-muted-foreground mt-1">Suggest partial profit after this many days (Qullaggie: 3-5 days)</p>
+              </div>
+              <span className="font-mono text-sm">{localSettings.partialProfitDays} days</span>
+            </div>
+            <Slider
+              value={[localSettings.partialProfitDays]}
+              onValueChange={([v]) => handleChange("partialProfitDays", v)}
+              min={2}
+              max={10}
+              step={1}
+              className="w-full"
+            />
+          </div>
+
+          {/* Trail MA Period */}
+          <div className="p-3 border rounded-lg border-amber-500/30">
+            <Label className="font-medium">Trail MA Period</Label>
+            <p className="text-xs text-muted-foreground mt-1 mb-2">Which MA to use for trailing stop (10=faster, 20=slower)</p>
+            <Select
+              value={String(localSettings.trailMaClosePeriod)}
+              onValueChange={(v) => handleChange("trailMaClosePeriod", parseInt(v))}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10-day</SelectItem>
+                <SelectItem value="20">20-day</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <p className="text-xs text-muted-foreground px-3">
+            Qullaggie's exit strategy: "Sell 1/3 to 1/2 after 3-5 days, move stop to break-even. Trail remainder with 10 or 20-day MA. Exit on first CLOSE below MA."
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Extension / Risk Flags */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Zap className="w-5 h-5 text-amber-400" />
+            Extension & Risk Flags
+          </CardTitle>
+          <CardDescription>Configure extended stock and profit-taking zone thresholds</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Extended threshold */}
+          <div className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">Extended Threshold (× ADR above 50DSMA)</Label>
+                <p className="text-xs text-muted-foreground mt-1">Stock is "extended" when this far above 50-day SMA</p>
+              </div>
+              <span className="font-mono text-sm">{localSettings.extendedThresholdAdr}× ADR</span>
+            </div>
+            <Slider
+              value={[localSettings.extendedThresholdAdr]}
+              onValueChange={([v]) => handleChange("extendedThresholdAdr", v)}
+              min={2}
+              max={10}
+              step={0.5}
+              className="w-full"
+            />
+          </div>
+
+          {/* Profit-taking threshold */}
+          <div className="p-3 border rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="font-medium">Profit-Taking Zone (× ADR)</Label>
+                <p className="text-xs text-muted-foreground mt-1">Consider taking profits when gain exceeds this multiple of ADR</p>
+              </div>
+              <span className="font-mono text-sm">{localSettings.profitTakingThresholdAdr}× ADR</span>
+            </div>
+            <Slider
+              value={[localSettings.profitTakingThresholdAdr]}
+              onValueChange={([v]) => handleChange("profitTakingThresholdAdr", v)}
+              min={3}
+              max={15}
+              step={0.5}
+              className="w-full"
+            />
+          </div>
+
+          {/* Show extended warning */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Always Show Extended Warning</Label>
+              <p className="text-xs text-muted-foreground mt-1">Display warning in overlay when stock is extended</p>
+            </div>
+            <Switch
+              checked={localSettings.showExtendedWarning}
+              onCheckedChange={(v) => handleChange("showExtendedWarning", v)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Display / UX Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Settings className="w-5 h-5 text-blue-400" />
+            Display / UX Settings
+          </CardTitle>
+          <CardDescription>Configure chart and overlay appearance for Trade Plan</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Chart price scale side */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Chart Price Scale Side</Label>
+              <p className="text-xs text-muted-foreground mt-1">Where to display price labels on the chart</p>
+            </div>
+            <Select
+              value={localSettings.chartPriceScaleSide}
+              onValueChange={(v) => handleChange("chartPriceScaleSide", v as "left" | "right")}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="left">Left</SelectItem>
+                <SelectItem value="right">Right</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Overlay resizable */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Overlay Resizable</Label>
+              <p className="text-xs text-muted-foreground mt-1">Allow users to resize the Trade Plan overlay with constraints</p>
+            </div>
+            <Switch
+              checked={localSettings.overlayResizable}
+              onCheckedChange={(v) => handleChange("overlayResizable", v)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Bottom Save Bar (sticky) */}
+      {hasChanges && (
+        <div className="sticky bottom-4 flex items-center justify-end gap-2 p-3 bg-background/95 border rounded-lg shadow-lg">
+          <Button variant="outline" onClick={handleCancel} disabled={updateMutation.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            Save Trade Plan Rules
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MarketConditionPanel() {
+  const { toast } = useToast();
+  const [settings, setSettings] = useState({
+    pollIntervalMs: 60000,
+    marketHoursPollIntervalMs: 60000,
+    offHoursPollIntervalMs: 300000,
+    enableStreaming: false,
+    showRaiInHeader: true,
+    autoStartPolling: true,
+    maBoldThresholdPct: 0.5,
+    clientThemesRefetchIntervalMs: 60000,
+    clientTickersRefetchIntervalMs: 60000,
+  });
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Fetch current settings
+  const { data: currentSettings, isLoading } = useQuery<{
+    pollIntervalMs?: number;
+    marketHoursPollIntervalMs?: number;
+    offHoursPollIntervalMs?: number;
+    enableStreaming: boolean;
+    showRaiInHeader: boolean;
+    autoStartPolling: boolean;
+    maBoldThresholdPct?: number;
+    clientThemesRefetchIntervalMs?: number;
+    clientTickersRefetchIntervalMs?: number;
+  }>({
+    queryKey: ["/api/market-condition/settings"],
+  });
+
+  // Fetch polling status
+  const { data: status, refetch: refetchStatus } = useQuery<{
+    isPolling: boolean;
+    intervalMs: number;
+    lastUpdate: string | null;
+    tickerCount: number;
+    themeCount: number;
+    universeSize: number;
+  }>({
+    queryKey: ["/api/market-condition/status"],
+    refetchInterval: 5000,
+  });
+
+  // Update settings mutation
+  const updateMutation = useMutation({
+    mutationFn: async (newSettings: Partial<typeof settings>) => {
+      const res = await apiRequest("PUT", "/api/market-condition/settings", newSettings);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/market-condition/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["market-condition", "settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/market-condition/status"] });
+      toast({ title: "Settings saved", description: "Market Condition settings updated" });
+      setHasChanges(false);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Start/stop polling mutations
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/market-condition/start");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchStatus();
+      toast({ title: "Polling started" });
+    },
+  });
+
+  const stopMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/market-condition/stop");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchStatus();
+      toast({ title: "Polling stopped" });
+    },
+  });
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/market-condition/refresh");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchStatus();
+      toast({ title: "Refresh complete" });
+    },
+  });
+
+  // Sync local state with fetched settings
+  useEffect(() => {
+    if (currentSettings) {
+      setSettings((prev) => ({
+        ...prev,
+        pollIntervalMs: currentSettings.pollIntervalMs ?? currentSettings.marketHoursPollIntervalMs ?? 60000,
+        marketHoursPollIntervalMs: currentSettings.marketHoursPollIntervalMs ?? currentSettings.pollIntervalMs ?? 60000,
+        offHoursPollIntervalMs: currentSettings.offHoursPollIntervalMs ?? 300000,
+        enableStreaming: currentSettings.enableStreaming ?? false,
+        showRaiInHeader: currentSettings.showRaiInHeader ?? true,
+        autoStartPolling: currentSettings.autoStartPolling ?? true,
+        maBoldThresholdPct: currentSettings.maBoldThresholdPct ?? 0.5,
+        clientThemesRefetchIntervalMs: currentSettings.clientThemesRefetchIntervalMs ?? 60000,
+        clientTickersRefetchIntervalMs: currentSettings.clientTickersRefetchIntervalMs ?? 60000,
+      }));
+    }
+  }, [currentSettings]);
+
+  const handleChange = (key: keyof typeof settings, value: any) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+    setHasChanges(true);
+  };
+
+  const handleSave = () => {
+    updateMutation.mutate(settings);
+  };
+
+  const handleCancel = () => {
+    if (currentSettings) {
+      setSettings(currentSettings);
+    }
+    setHasChanges(false);
+  };
+
+  const pollIntervalOptions = [
+    { value: 10000, label: "10 seconds" },
+    { value: 15000, label: "15 seconds" },
+    { value: 20000, label: "20 seconds" },
+    { value: 30000, label: "30 seconds" },
+    { value: 60000, label: "1 minute" },
+    { value: 120000, label: "2 minutes" },
+    { value: 300000, label: "5 minutes" },
+  ];
+  const clientRefetchOptions = [
+    { value: 15000, label: "15 seconds" },
+    { value: 30000, label: "30 seconds" },
+    { value: 60000, label: "1 minute" },
+    { value: 120000, label: "2 minutes" },
+    { value: 300000, label: "5 minutes" },
+  ];
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Overview Card */}
+      <Card className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-cyan-500/30">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <Activity className="w-6 h-6 text-cyan-400" />
+            <div>
+              <CardTitle>Market Condition Terminal</CardTitle>
+              <CardDescription>Capital narrative & risk engine settings</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0 text-sm text-muted-foreground space-y-1">
+          <p><span className="font-medium text-foreground">Affects:</span> Market Condition page data, RAI (Risk Appetite Index), theme scores, and Scanner regime indicators.</p>
+          <p><span className="font-medium text-foreground">How:</span> Polls Alpaca API for all 19 behavior clusters (~180 tickers) at the configured interval.</p>
+          <p><span className="font-medium text-foreground">Scope:</span> Global data feed - all users see the same market condition data.</p>
+        </CardContent>
+      </Card>
+
+      {/* Status Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <RefreshCw className="w-5 h-5" />
+            Polling Status
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-3 border rounded-lg">
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <p className={`font-medium ${status?.isPolling ? "text-green-400" : "text-yellow-400"}`}>
+                {status?.isPolling ? "Active" : "Stopped"}
+              </p>
+            </div>
+            <div className="p-3 border rounded-lg">
+              <Label className="text-xs text-muted-foreground">Interval</Label>
+              <p className="font-medium">{status?.intervalMs ? `${status.intervalMs / 1000}s` : "—"}</p>
+            </div>
+            <div className="p-3 border rounded-lg">
+              <Label className="text-xs text-muted-foreground">Tickers</Label>
+              <p className="font-medium">{status?.tickerCount || 0} / {status?.universeSize || 0}</p>
+            </div>
+            <div className="p-3 border rounded-lg">
+              <Label className="text-xs text-muted-foreground">Themes</Label>
+              <p className="font-medium">{status?.themeCount || 0}</p>
+            </div>
+          </div>
+
+          {status?.lastUpdate && (
+            <p className="text-xs text-muted-foreground">
+              Last update: {new Date(status.lastUpdate).toLocaleTimeString()}
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            {status?.isPolling ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => stopMutation.mutate()}
+                disabled={stopMutation.isPending}
+              >
+                Stop Polling
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => startMutation.mutate()}
+                disabled={startMutation.isPending}
+              >
+                Start Polling
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refreshMutation.mutate()}
+              disabled={refreshMutation.isPending}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
+              Force Refresh
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Settings Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Settings className="w-5 h-5" />
+            Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Market Hours Poll Interval */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Market Hours Poll Interval</Label>
+              <p className="text-xs text-muted-foreground mt-1">How often to fetch market data during market hours (9:30–16:00 ET)</p>
+            </div>
+            <Select
+              value={String(settings.marketHoursPollIntervalMs)}
+              onValueChange={(v) => handleChange("marketHoursPollIntervalMs", parseInt(v))}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {pollIntervalOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={String(opt.value)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Off Hours Poll Interval */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Off Hours Poll Interval</Label>
+              <p className="text-xs text-muted-foreground mt-1">How often to fetch when market is closed (pre/post/after hours)</p>
+            </div>
+            <Select
+              value={String(settings.offHoursPollIntervalMs)}
+              onValueChange={(v) => handleChange("offHoursPollIntervalMs", parseInt(v))}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {pollIntervalOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={String(opt.value)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* MA Highlight Threshold */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">MA Highlight Threshold (%)</Label>
+              <p className="text-xs text-muted-foreground mt-1">White box around % when price is within this % of the moving average (ticker table)</p>
+            </div>
+            <Input
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={settings.maBoldThresholdPct}
+              onChange={(e) => handleChange("maBoldThresholdPct", parseFloat(e.target.value) || 0.5)}
+              className="w-24"
+            />
+          </div>
+
+          {/* Client Themes Refetch */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Client Themes Refetch</Label>
+              <p className="text-xs text-muted-foreground mt-1">How often the client refetches theme list (Market Condition page)</p>
+            </div>
+            <Select
+              value={String(settings.clientThemesRefetchIntervalMs)}
+              onValueChange={(v) => handleChange("clientThemesRefetchIntervalMs", parseInt(v))}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {clientRefetchOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={String(opt.value)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Client Tickers Refetch */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Client Tickers Refetch</Label>
+              <p className="text-xs text-muted-foreground mt-1">How often the client refetches ticker members when viewing a theme</p>
+            </div>
+            <Select
+              value={String(settings.clientTickersRefetchIntervalMs)}
+              onValueChange={(v) => handleChange("clientTickersRefetchIntervalMs", parseInt(v))}
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {clientRefetchOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={String(opt.value)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Auto Start */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Auto-Start Polling</Label>
+              <p className="text-xs text-muted-foreground mt-1">Start polling automatically when server starts</p>
+            </div>
+            <Switch
+              checked={settings.autoStartPolling}
+              onCheckedChange={(v) => handleChange("autoStartPolling", v)}
+            />
+          </div>
+
+          {/* Show RAI in Header */}
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <Label className="font-medium">Show RAI in Header</Label>
+              <p className="text-xs text-muted-foreground mt-1">Display Risk Appetite Index in the Market Condition header bar</p>
+            </div>
+            <Switch
+              checked={settings.showRaiInHeader}
+              onCheckedChange={(v) => handleChange("showRaiInHeader", v)}
+            />
+          </div>
+
+          {/* Enable Streaming (future) */}
+          <div className="flex items-center justify-between p-3 border rounded-lg opacity-50">
+            <div>
+              <Label className="font-medium">Enable Leader Streaming</Label>
+              <p className="text-xs text-muted-foreground mt-1">Stream real-time updates for leader tickers (coming soon)</p>
+            </div>
+            <Switch
+              checked={settings.enableStreaming}
+              onCheckedChange={(v) => handleChange("enableStreaming", v)}
+              disabled
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Save Bar */}
+      {hasChanges && (
+        <div className="sticky bottom-4 flex items-center justify-end gap-2 p-3 bg-background/95 border rounded-lg shadow-lg">
+          <Button variant="outline" onClick={handleCancel} disabled={updateMutation.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            Save Settings
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TuningReviewPanel() {
   const { toast } = useToast();
   const [subTab, setSubTab] = useState("user-tunes");
@@ -1096,6 +2745,7 @@ export default function SentinelAdminPage() {
         <div className="flex items-center justify-between gap-3 mb-6" data-testid="container-admin-header">
           <div className="flex items-center gap-3">
             <Settings className="w-8 h-8 text-primary" />
+            <CopyScreenButton />
             <div>
               <h1 className="text-2xl font-bold" data-testid="text-admin-title">Admin</h1>
               <p className="text-muted-foreground" data-testid="text-admin-subtitle">System configuration and AI tuning</p>
@@ -1113,6 +2763,19 @@ export default function SentinelAdminPage() {
               Add Setup Types
             </Button>
           )}
+          <Button onClick={() => navigate("/sentinel/setup-library")} variant="outline" data-testid="button-setup-library">
+            <BookOpen className="w-4 h-4 mr-2" />
+            Setup Library
+          </Button>
+        </div>
+
+        <div
+          className="mb-6 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground space-y-1"
+          data-testid="help-admin-overview"
+        >
+          <p><span className="font-medium text-foreground">What this page does:</span> controls global AI tuning (TNN + Big Idea scoring/optimizer), plus per-user UI appearance and user utilities.</p>
+          <p><span className="font-medium text-foreground">Scope:</span> most TNN / scoring / optimizer settings affect <span className="font-medium">all users</span>; System Settings affects <span className="font-medium">your account’s UI theme</span>.</p>
+          <p><span className="font-medium text-foreground">Safety:</span> these do not “set price levels” — they tune how the system scores, selects, and displays outputs.</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1136,6 +2799,18 @@ export default function SentinelAdminPage() {
             <TabsTrigger value="tuning-reviews" className="gap-2" data-testid="tab-tuning-reviews">
               <Sparkles className="w-4 h-4" />
               Tuning Review
+            </TabsTrigger>
+            <TabsTrigger value="query-optimizer" className="gap-2" data-testid="tab-query-optimizer">
+              <Activity className="w-4 h-4" />
+              Query Optimizer
+            </TabsTrigger>
+            <TabsTrigger value="ask-ivy-rules" className="gap-2" data-testid="tab-ask-ivy-rules">
+              <Lightbulb className="w-4 h-4" />
+              Trade Plan Rules
+            </TabsTrigger>
+            <TabsTrigger value="market-condition" className="gap-2" data-testid="tab-market-condition">
+              <Activity className="w-4 h-4" />
+              Market Condition
             </TabsTrigger>
           </TabsList>
 
@@ -1162,6 +2837,11 @@ export default function SentinelAdminPage() {
                       </div>
                     </div>
                   </CardHeader>
+                  <CardContent className="pt-0 text-sm text-muted-foreground space-y-1" data-testid="help-tnn-overview">
+                    <p><span className="font-medium text-foreground">Affects:</span> how strongly different rule categories and setup types influence scoring/feedback loops.</p>
+                    <p><span className="font-medium text-foreground">How:</span> you set baselines; AI can optionally auto-adjust within limits; you approve/reject AI suggestions.</p>
+                    <p><span className="font-medium text-foreground">Scope:</span> global (applies across users and scans).</p>
+                  </CardContent>
                 </Card>
 
                 <Tabs value={tnnSubTab} onValueChange={setTnnSubTab}>
@@ -1185,7 +2865,13 @@ export default function SentinelAdminPage() {
                           <TrendingUp className="w-5 h-5" />
                           Discipline Factors ({disciplineFactors.length})
                         </CardTitle>
-                        <CardDescription>Rule category weights for process evaluation</CardDescription>
+                        <CardDescription>
+                          <div className="space-y-1">
+                            <p>Rule category weights for process evaluation (how “important” each discipline bucket is).</p>
+                            <p><span className="font-medium text-foreground">Affects:</span> trade/idea evaluation emphasis and learning attribution.</p>
+                            <p><span className="font-medium text-foreground">How:</span> Base Weight is your baseline; AI Weight is what the system currently uses; Auto lets AI adjust within limits.</p>
+                          </div>
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         {factorsLoading ? (
@@ -1356,7 +3042,13 @@ export default function SentinelAdminPage() {
                           <Zap className="w-5 h-5 text-purple-400" />
                           Setup Type Factors ({setupTypeFactors.length})
                         </CardTitle>
-                        <CardDescription>Weights for different trade setup patterns</CardDescription>
+                        <CardDescription>
+                          <div className="space-y-1">
+                            <p>Weights for different trade setup patterns (e.g., breakout vs pullback).</p>
+                            <p><span className="font-medium text-foreground">Affects:</span> how the system prioritizes outcomes by setup type when learning.</p>
+                            <p><span className="font-medium text-foreground">How:</span> same Base vs AI Weight concept as Discipline Factors.</p>
+                          </div>
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         {setupTypeFactors.map(factor => (
@@ -1472,7 +3164,13 @@ export default function SentinelAdminPage() {
                           <Zap className="w-5 h-5 text-rs-yellow" />
                           Contextual Modifiers ({modifiers?.length || 0})
                         </CardTitle>
-                        <CardDescription data-testid="text-modifiers-desc">Weight adjustments when setup types meet specific market conditions</CardDescription>
+                        <CardDescription data-testid="text-modifiers-desc">
+                          <div className="space-y-1">
+                            <p>Weight adjustments when setup types meet specific market conditions (regime-aware tuning).</p>
+                            <p><span className="font-medium text-foreground">Affects:</span> which setups are favored in choppy / risk-off / trending conditions.</p>
+                            <p><span className="font-medium text-foreground">How:</span> modifier adds +/- points to a setup factor when the condition is active.</p>
+                          </div>
+                        </CardDescription>
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-2">
@@ -1597,7 +3295,13 @@ export default function SentinelAdminPage() {
                           AI Suggestions
                           <Badge className="ml-2" data-testid="badge-suggestions-count">{pendingSuggestions.length}</Badge>
                         </CardTitle>
-                        <CardDescription data-testid="text-suggestions-desc">Pending weight adjustment proposals</CardDescription>
+                        <CardDescription data-testid="text-suggestions-desc">
+                          <div className="space-y-1">
+                            <p>Pending weight adjustment proposals generated from observed performance.</p>
+                            <p><span className="font-medium text-foreground">Affects:</span> whether AI can change weights (only approved suggestions become active).</p>
+                            <p><span className="font-medium text-foreground">How:</span> approve = apply now; reject = discard; “Run AI Analysis” generates new candidates.</p>
+                          </div>
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         {pendingSuggestions.length === 0 ? (
@@ -1685,6 +3389,12 @@ export default function SentinelAdminPage() {
                           <History className="w-5 h-5" />
                           Recent Changes
                         </CardTitle>
+                        <CardDescription>
+                          <div className="space-y-1">
+                            <p>Audit log of tuning changes (who changed what and when).</p>
+                            <p><span className="font-medium text-foreground">Affects:</span> nothing directly — this is for traceability.</p>
+                          </div>
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-2">
                         {recentHistory.length === 0 ? (
@@ -1755,7 +3465,13 @@ export default function SentinelAdminPage() {
                             <TrendingUp className="w-5 h-5" />
                             Thought Scoring Rules
                           </CardTitle>
-                          <CardDescription>Configure how thoughts earn or lose score points</CardDescription>
+                          <CardDescription>
+                            <div className="space-y-1">
+                              <p>Configure how thoughts earn or lose score points.</p>
+                              <p><span className="font-medium text-foreground">Affects:</span> Big Idea scan scoring + what gets rewarded by feedback (ratings/watchlist).</p>
+                              <p><span className="font-medium text-foreground">How:</span> enable/disable rules and set point values; higher points = stronger influence.</p>
+                            </div>
+                          </CardDescription>
                         </CardHeader>
                         <CardContent>
                           <div className="space-y-3">
@@ -1801,7 +3517,13 @@ export default function SentinelAdminPage() {
                             <Sparkles className="w-5 h-5 text-purple-400" />
                             AI Thought Selection Weights
                           </CardTitle>
-                          <CardDescription>How the AI chooses thoughts when generating ideas. Percentages should sum to 100%.</CardDescription>
+                          <CardDescription>
+                            <div className="space-y-1">
+                              <p>How the AI chooses thoughts when generating ideas. Percentages should sum to 100%.</p>
+                              <p><span className="font-medium text-foreground">Affects:</span> which thoughts make it into a scan and how diverse/strict results are.</p>
+                              <p><span className="font-medium text-foreground">How:</span> enable strategies and allocate % weight; some strategies have extra settings (e.g., top-N).</p>
+                            </div>
+                          </CardDescription>
                         </CardHeader>
                         <CardContent>
                           <div className="space-y-3">
@@ -1878,6 +3600,7 @@ export default function SentinelAdminPage() {
                             <div>
                               <p className="text-rs-normal font-medium">Retroactive Backfill</p>
                               <p className="text-rs-small text-muted-foreground">Apply current scoring rules to all existing chart ratings and scan sessions. Scores are additive — run once after initial setup.</p>
+                              <p className="text-xs text-muted-foreground mt-1"><span className="font-medium text-foreground">Note:</span> this is a bulk job; expect it to take time on large histories.</p>
                             </div>
                             <Button
                               variant="outline"
@@ -1904,7 +3627,12 @@ export default function SentinelAdminPage() {
                   <Tags className="w-5 h-5" />
                   Labels Management
                 </CardTitle>
-                <CardDescription data-testid="text-labels-desc">Create and manage trade labels</CardDescription>
+                <CardDescription data-testid="text-labels-desc">
+                  <div className="space-y-1">
+                    <p>Create and manage trade labels (tags) used across trades, watchlists, and analysis.</p>
+                    <p><span className="font-medium text-foreground">Affects:</span> organization and filtering — not scan results.</p>
+                  </div>
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground" data-testid="text-labels-coming-soon">Labels management coming soon...</p>
@@ -1922,6 +3650,17 @@ export default function SentinelAdminPage() {
 
           <TabsContent value="tuning-reviews" data-testid="content-tuning-reviews">
             <TuningReviewPanel />
+          </TabsContent>
+
+          <TabsContent value="query-optimizer" data-testid="content-query-optimizer">
+            <QueryOptimizerPanel />
+          </TabsContent>
+
+          <TabsContent value="ask-ivy-rules" data-testid="content-ask-ivy-rules">
+            <AskIvyRulesPanel />
+          </TabsContent>
+          <TabsContent value="market-condition" data-testid="content-market-condition">
+            <MarketConditionPanel />
           </TabsContent>
         </Tabs>
       </div>

@@ -18,27 +18,6 @@ import { Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 
-const etFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York",
-  year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", second: "2-digit",
-  hour12: false,
-});
-
-function shiftToEastern(utcTimestamp: number): number {
-  const d = new Date(utcTimestamp * 1000);
-  const parts = etFormatter.formatToParts(d);
-  const get = (t: string) => parseInt(parts.find(p => p.type === t)?.value || "0", 10);
-  const etYear = get("year");
-  const etMonth = get("month") - 1;
-  const etDay = get("day");
-  const etHour = get("hour") === 24 ? 0 : get("hour");
-  const etMin = get("minute");
-  const etSec = get("second");
-  const fakeUtc = Date.UTC(etYear, etMonth, etDay, etHour, etMin, etSec);
-  return Math.floor(fakeUtc / 1000);
-}
-
 function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];
   for (let i = 0; i < closes.length; i++) {
@@ -84,6 +63,20 @@ export interface ChartCandle {
   low: number;
   close: number;
   volume: number;
+}
+
+export interface Gap {
+  index: number;
+  isUp: boolean;
+  originalTop: number;
+  originalBottom: number;
+  currentTop: number;
+  currentBottom: number;
+  isTouched: boolean;
+  isFilled: boolean;
+  filledBarIndex: number | null;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export interface ChartIndicators {
@@ -152,6 +145,7 @@ export interface TradingChartProps {
   data: {
     candles: ChartCandle[];
     indicators: ChartIndicators;
+    gaps?: Gap[];
   };
   onCandleClick?: (candle: ChartCandle, clickedPrice: number) => void;
   markers?: ChartMarker[];
@@ -166,6 +160,7 @@ export interface TradingChartProps {
   maxBars?: number;
   measureMode?: boolean;
   trendLineMode?: boolean;
+  showGaps?: boolean;
   resistanceLines?: { startTime: number; startPrice: number; endTime: number; endPrice: number }[];
   baseZones?: BaseZone[];
   drawingToolActive?: string | null;
@@ -493,6 +488,7 @@ export function TradingChart({
   maxBars,
   measureMode = false,
   trendLineMode = false,
+  showGaps = false,
   resistanceLines,
   baseZones,
   drawingToolActive,
@@ -510,6 +506,7 @@ export function TradingChart({
   const markersHandleRef = useRef<any>(null);
   const diamondPrimitiveRef = useRef<any>(null);
   const priceLinesRef = useRef<any[]>([]);
+  const latestPriceLinesRef = useRef(priceLines); // Store latest priceLines for re-application after chart recreation
   const maLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const measurePrimitiveRef = useRef<MeasurePrimitive | null>(null);
   const measureStartRef = useRef<MeasurePoint | null>(null);
@@ -517,8 +514,16 @@ export function TradingChart({
   const measureModeRef = useRef(measureMode);
   const resistanceLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const baseZoneSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const gapSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
+  const [chartReady, setChartReady] = useState(false);
+  
+  // Debug log to see what priceLines are received
+  useEffect(() => {
+    console.log(`[TradingChart] Component rendered - timeframe: ${timeframe}, priceLines received:`, priceLines?.length ?? 0, priceLines);
+  }, [timeframe, priceLines]);
+  
   useEffect(() => {
     measureModeRef.current = measureMode;
     if (!measureMode) {
@@ -541,29 +546,9 @@ export function TradingChart({
   }, [data.candles]);
 
   const isIntraday = timeframe !== "daily";
-
-  const displayData = useMemo(() => {
-    if (!isIntraday) return data;
-    const shiftedCandles = data.candles.map(c => ({
-      ...c,
-      timestamp: shiftToEastern(c.timestamp),
-    }));
-    return { ...data, candles: shiftedCandles };
-  }, [data, isIntraday]);
-
-  const shiftedToOriginal = useMemo(() => {
-    if (!isIntraday) return null;
-    const map = new Map<number, ChartCandle>();
-    for (let i = 0; i < data.candles.length; i++) {
-      map.set(displayData.candles[i].timestamp, data.candles[i]);
-    }
-    return map;
-  }, [data.candles, displayData.candles, isIntraday]);
-
-  const shiftedToOriginalRef = useRef(shiftedToOriginal);
-  useEffect(() => {
-    shiftedToOriginalRef.current = shiftedToOriginal;
-  }, [shiftedToOriginal]);
+  // IMPORTANT: candle timestamps are UTC epoch seconds from the server.
+  // We do NOT shift timestamps to ET; we only format display labels in ET.
+  const displayData = data;
 
   const clearMeasure = useCallback(() => {
     measureStartRef.current = null;
@@ -680,47 +665,16 @@ export function TradingChart({
       }
 
       if (!onCandleClickRef.current) return;
-
-      const currentMap = shiftedToOriginalRef.current;
-
       let candle: ChartCandle | undefined;
-      if (currentMap) {
-        candle = currentMap.get(timestamp);
-        if (!candle) {
-          let closestKey = 0;
-          let minDiff = Infinity;
-          const clickedDay = new Date(timestamp * 1000).toISOString().slice(0, 10);
-          currentMap.forEach((_val, key) => {
-            const keyDay = new Date(key * 1000).toISOString().slice(0, 10);
-            if (keyDay !== clickedDay) return;
-            const diff = Math.abs(key - timestamp);
-            if (diff < minDiff) { minDiff = diff; closestKey = key; }
-          });
-          if (minDiff < 3600) candle = currentMap.get(closestKey);
+      candle = candlesRef.current.find((c) => c.timestamp === timestamp);
+      if (!candle && candlesRef.current.length > 0) {
+        let closest = candlesRef.current[0];
+        let minDiff = Math.abs(closest.timestamp - timestamp);
+        for (const c of candlesRef.current) {
+          const diff = Math.abs(c.timestamp - timestamp);
+          if (diff < minDiff) { minDiff = diff; closest = c; }
         }
-        if (candle) {
-          console.log("[ChartClick] shiftedToOriginal resolved:", {
-            clickedShifted: timestamp,
-            clickedShiftedDate: new Date(timestamp * 1000).toISOString(),
-            originalTimestamp: candle.timestamp,
-            originalDate: new Date(candle.timestamp * 1000).toISOString(),
-          });
-        }
-      } else {
-        candle = candlesRef.current.find((c) => c.timestamp === timestamp);
-        if (!candle && candlesRef.current.length > 0) {
-          let closest = candlesRef.current[0];
-          let minDiff = Math.abs(closest.timestamp - timestamp);
-          for (const c of candlesRef.current) {
-            const diff = Math.abs(c.timestamp - timestamp);
-            if (diff < minDiff) { minDiff = diff; closest = c; }
-          }
-          if (minDiff < 3600) candle = closest;
-        }
-        console.log("[ChartClick] no shiftedToOriginal map, direct lookup:", {
-          clickedTimestamp: timestamp,
-          foundCandle: candle ? candle.timestamp : "none",
-        });
+        if (minDiff < 3600) candle = closest;
       }
       if (candle) {
         let resolvedPrice = candle.close;
@@ -737,11 +691,13 @@ export function TradingChart({
     if (!containerRef.current || displayData.candles.length === 0) return;
 
     if (chartRef.current) {
+      console.log(`[TradingChart] Cleaning up chart - setting chartReady=false, timeframe: ${timeframe}`);
       chartRef.current.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       markersHandleRef.current = null;
       priceLinesRef.current = [];
+      setChartReady(false);
     }
 
     const containerHeight = height || containerRef.current.clientHeight || 500;
@@ -768,11 +724,15 @@ export function TradingChart({
           const d = new Date(ts * 1000);
           if (isIntraday) {
             const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-            let h = d.getUTCHours();
-            const m = d.getUTCMinutes();
-            const ampm = h >= 12 ? "PM" : "AM";
-            h = h % 12 || 12;
-            return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${h}:${m.toString().padStart(2, "0")} ${ampm}`;
+            // Alpaca data is already in UTC, need to display in ET
+            // Get locale time components in ET timezone
+            const etHour = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
+            const etMin = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }));
+            const etMonth = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric" })) - 1;
+            const etDay = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", day: "numeric" }));
+            const ampm = etHour >= 12 ? "PM" : "AM";
+            const displayHour = etHour % 12 || 12;
+            return `${months[etMonth]} ${etDay}, ${displayHour}:${etMin.toString().padStart(2, "0")} ${ampm}`;
           }
           const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
           return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
@@ -780,17 +740,18 @@ export function TradingChart({
       },
       timeScale: {
         borderColor: "rgba(148, 163, 184, 0.12)",
-        timeVisible: isIntraday,
+        timeVisible: true,
         secondsVisible: false,
         rightOffset: 7,
         tickMarkFormatter: (time: any) => {
           const d = new Date(time * 1000);
           if (isIntraday) {
-            let h = d.getUTCHours();
-            const m = d.getUTCMinutes();
-            const ampm = h >= 12 ? "PM" : "AM";
-            h = h % 12 || 12;
-            return m === 0 ? `${h} ${ampm}` : `${h}:${m.toString().padStart(2, "0")} ${ampm}`;
+            // Convert UTC to ET by parsing individual components
+            const etHour = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
+            const etMin = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }));
+            const ampm = etHour >= 12 ? "PM" : "AM";
+            const displayHour = etHour % 12 || 12;
+            return etMin === 0 ? `${displayHour} ${ampm}` : `${displayHour}:${etMin.toString().padStart(2, "0")} ${ampm}`;
           }
           const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
           return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
@@ -859,8 +820,18 @@ export function TradingChart({
       let prevDateStr = "";
       for (const c of displayData.candles) {
         const d = new Date(c.timestamp * 1000);
-        const dateStr = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
-        if (dateStr !== prevDateStr && prevDateStr !== "") {
+        // Get ET date components for proper day boundary detection
+        const etYear = d.toLocaleString("en-US", { timeZone: "America/New_York", year: "numeric" });
+        const etMonth = d.toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric" });
+        const etDay = d.toLocaleString("en-US", { timeZone: "America/New_York", day: "numeric" });
+        const etHour = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
+        const etMin = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }));
+        
+        const dateStr = `${etYear}-${etMonth}-${etDay}`;
+        const etTotalMin = etHour * 60 + etMin;
+        
+        // Mark boundary at first bar of each new trading day (at or after 9:30 AM ET = 570 min)
+        if (dateStr !== prevDateStr && prevDateStr !== "" && etTotalMin >= 570) {
           dayBoundaryTimestamps.push(c.timestamp);
         }
         prevDateStr = dateStr;
@@ -901,6 +872,9 @@ export function TradingChart({
     chart.subscribeCrosshairMove(crosshairHandler);
     chart.subscribeClick(handleChartClick);
 
+    console.log(`[TradingChart] Chart initialized - setting chartReady=true, timeframe: ${timeframe}, priceLines count: ${priceLines?.length ?? 0}`);
+    setChartReady(true);
+    
     if (onChartReady) {
       onChartReady(chart, candleSeries);
     }
@@ -966,6 +940,7 @@ export function TradingChart({
         candleSeriesRef.current = null;
         markersHandleRef.current = null;
         priceLinesRef.current = [];
+        setChartReady(false);
         maLineSeriesRef.current = [];
         for (const s of resistanceLineSeriesRef.current) {
           try { chart.removeSeries(s); } catch {}
@@ -1014,10 +989,7 @@ export function TradingChart({
     }
 
     if (markers && markers.length > 0) {
-      const displayMarkers = isIntraday
-        ? markers.map(m => ({ ...m, time: shiftToEastern(m.time) }))
-        : markers;
-      const sorted = [...displayMarkers].sort((a, b) => a.time - b.time);
+      const sorted = [...markers].sort((a, b) => a.time - b.time);
       markersHandleRef.current = createSeriesMarkers(
         candleSeriesRef.current,
         sorted.map((m) => ({
@@ -1046,9 +1018,7 @@ export function TradingChart({
     if (diamondMarkers && diamondMarkers.length > 0) {
       const series = candleSeriesRef.current;
       const chart = chartRef.current;
-      const displayDiamonds = isIntraday
-        ? diamondMarkers.map(d => ({ ...d, time: shiftToEastern(d.time) }))
-        : diamondMarkers;
+      const displayDiamonds = diamondMarkers;
 
       const primitive = {
         _markers: displayDiamonds,
@@ -1107,9 +1077,22 @@ export function TradingChart({
     }
   }, [diamondMarkers, isIntraday]);
 
+  // Keep latestPriceLinesRef in sync with priceLines prop
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
+    console.log(`[TradingChart] Updating latestPriceLinesRef - timeframe: ${timeframe}, count: ${priceLines?.length ?? 0}`);
+    latestPriceLinesRef.current = priceLines;
+  }, [priceLines, timeframe]);
 
+  // Apply price lines when chart is ready or priceLines change
+  useEffect(() => {
+    console.log(`[PriceLines] Effect triggered - chartReady: ${chartReady}, candleSeries: ${!!candleSeriesRef.current}, priceLines prop: ${priceLines?.length ?? 0}, latestPriceLinesRef: ${latestPriceLinesRef.current?.length ?? 0}, timeframe: ${timeframe}`);
+    
+    if (!candleSeriesRef.current || !chartReady) {
+      console.log(`[PriceLines] Skipping - chart not ready (chartReady=${chartReady}, candleSeries=${!!candleSeriesRef.current})`);
+      return;
+    }
+
+    // Clear existing price lines
     for (const pl of priceLinesRef.current) {
       try {
         candleSeriesRef.current.removePriceLine(pl);
@@ -1117,8 +1100,12 @@ export function TradingChart({
     }
     priceLinesRef.current = [];
 
-    if (priceLines && priceLines.length > 0) {
-      for (const pl of priceLines) {
+    // Use latestPriceLinesRef to ensure we get the most recent values
+    const linesToDraw = latestPriceLinesRef.current;
+    console.log(`[PriceLines] Drawing ${linesToDraw?.length ?? 0} lines from latestPriceLinesRef:`, linesToDraw);
+    
+    if (linesToDraw && linesToDraw.length > 0) {
+      for (const pl of linesToDraw) {
         const lwStyle = pl.lineStyle === "solid" ? LineStyle.Solid
           : pl.lineStyle === "dashed" ? LineStyle.Dashed
           : LineStyle.Dotted;
@@ -1131,9 +1118,10 @@ export function TradingChart({
           title: pl.label,
         });
         priceLinesRef.current.push(line);
+        console.log(`[PriceLines] Created line: ${pl.label} @ $${pl.price}`);
       }
     }
-  }, [priceLines]);
+  }, [priceLines, chartReady, timeframe]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1215,6 +1203,179 @@ export function TradingChart({
       console.warn("[TradingChart] baseZones render error:", e);
     }
   }, [baseZones, displayData]);
+
+  // Render Support/Resistance Gaps
+  useEffect(() => {
+    // Always clear previous gap series when deps change
+    if (chartRef.current && gapSeriesRef.current.length > 0) {
+      for (const s of gapSeriesRef.current) {
+        if (s == null) continue;
+        try { chartRef.current.removeSeries(s); } catch (e) {
+          console.warn('[TradingChart] Error removing gap series:', e);
+        }
+      }
+      gapSeriesRef.current = [];
+    }
+
+    // Early return if conditions not met
+    if (!chartRef.current || !showGaps || !data.gaps || data.gaps.length === 0) {
+      return;
+    }
+
+    console.log(`[TradingChart] Rendering ${data.gaps.length} gaps`);
+
+    try {
+      const candles = data.candles;
+      if (!candles || candles.length === 0) {
+        console.warn('[TradingChart] No candles available for gap rendering');
+        return;
+      }
+      
+      let renderedCount = 0;
+      
+      for (const gap of data.gaps) {
+        // Skip filled gaps
+        if (gap.isFilled) continue;
+        
+        // Validate gap index
+        if (typeof gap.index !== 'number' || gap.index < 0 || gap.index >= candles.length) {
+          console.warn(`[TradingChart] Invalid gap index: ${gap.index} (candles length: ${candles.length})`);
+          continue;
+        }
+        
+        const startCandle = candles[gap.index];
+        const endCandle = candles[candles.length - 1];
+        
+        if (!startCandle || !endCandle) {
+          console.warn(`[TradingChart] Missing candle data for gap at index ${gap.index}`);
+          continue;
+        }
+        
+        let startTime = startCandle.timestamp;
+        let endTime = endCandle.timestamp;
+        
+        if (!startTime || !endTime) {
+          console.warn(`[TradingChart] Missing timestamp for gap at index ${gap.index}`);
+          continue;
+        }
+        // lightweight-charts requires strictly ascending time; avoid duplicate timestamps
+        if (endTime <= startTime) endTime = startTime + 1;
+        
+        // CORRECT Drendel Gap Logic: GRAY until touched, then GREEN/RED
+        const isGapUp = gap.isUp;
+        
+        // Color based on touched status (matching TradingView)
+        let lineColor: string;
+        if (!gap.isTouched) {
+          lineColor = "rgb(128, 128, 128)"; // GRAY for untouched
+        } else if (isGapUp) {
+          lineColor = "rgb(0, 255, 0)"; // GREEN when touched (support confirmed)
+        } else {
+          lineColor = "rgb(255, 0, 0)"; // RED when touched (resistance confirmed)
+        }
+        
+        try {
+          console.log(`[Gap ${renderedCount}] ${isGapUp ? 'UP' : 'DOWN'} | ${gap.isTouched ? 'TOUCHED' : 'UNTOUCHED'} | Top: ${gap.currentTop.toFixed(2)}, Bottom: ${gap.currentBottom.toFixed(2)}`);
+          
+          // Create semi-transparent fill color (20% opacity)
+          const fillColor = !gap.isTouched 
+            ? "rgba(128, 128, 128, 0.2)" 
+            : isGapUp 
+              ? "rgba(0, 255, 0, 0.2)" 
+              : "rgba(255, 0, 0, 0.2)";
+          
+          // Calculate number of filler lines based on gap height
+          const gapHeight = gap.currentTop - gap.currentBottom;
+          const avgPrice = (gap.currentTop + gap.currentBottom) / 2;
+          const gapPercentage = (gapHeight / avgPrice) * 100; // Gap as % of price
+          
+          // More lines for larger gaps: 1% = 5 lines, 2% = 10 lines, etc (min 3, max 15)
+          const numFillerLines = Math.min(15, Math.max(3, Math.round(gapPercentage * 5)));
+          
+          // Draw filler lines between top and bottom to create filled effect
+          for (let i = 0; i < numFillerLines; i++) {
+            const fillLevel = gap.currentBottom + (gapHeight * (i + 1) / (numFillerLines + 1)); // Evenly spaced
+            const fillSeries = chartRef.current.addSeries(LineSeries, {
+              color: fillColor,
+              lineWidth: 3,
+              lineStyle: LineStyle.Solid,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+              priceScaleId: 'right',
+              autoscaleInfoProvider: () => null,
+            });
+            
+            fillSeries.setData([
+              { time: startTime as any, value: fillLevel },
+              { time: endTime as any, value: fillLevel },
+            ]);
+            
+            gapSeriesRef.current.push(fillSeries);
+          }
+          
+          // Create semi-transparent border color (60% opacity)
+          const borderColor = !gap.isTouched 
+            ? "rgba(128, 128, 128, 0.6)" 
+            : isGapUp 
+              ? "rgba(0, 255, 0, 0.6)" 
+              : "rgba(255, 0, 0, 0.6)";
+          
+          // Draw TOP border line (semi-transparent)
+          const topSeries = chartRef.current.addSeries(LineSeries, {
+            color: borderColor,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+            priceScaleId: 'right',
+            autoscaleInfoProvider: () => null,
+          });
+          
+          topSeries.setData([
+            { time: startTime as any, value: gap.currentTop },
+            { time: endTime as any, value: gap.currentTop },
+          ]);
+          
+          gapSeriesRef.current.push(topSeries);
+          
+          // Draw BOTTOM border line (semi-transparent)
+          const bottomSeries = chartRef.current.addSeries(LineSeries, {
+            color: borderColor,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+            priceScaleId: 'right',
+            autoscaleInfoProvider: () => null,
+          });
+          
+          bottomSeries.setData([
+            { time: startTime as any, value: gap.currentBottom },
+            { time: endTime as any, value: gap.currentBottom },
+          ]);
+          
+          gapSeriesRef.current.push(bottomSeries);
+          
+          renderedCount++;
+        } catch (e) {
+          console.error(`[TradingChart] Error rendering gap:`, e);
+        }
+      }
+      
+      console.log(`[TradingChart] Successfully rendered ${renderedCount} gaps`);
+    } catch (e) {
+      console.error("[TradingChart] Critical error in gaps rendering:", e);
+      // Clear any partially rendered gaps
+      for (const s of gapSeriesRef.current) {
+        if (s == null) continue;
+        try { chartRef.current?.removeSeries(s); } catch {}
+      }
+      gapSeriesRef.current = [];
+    }
+  }, [showGaps, data.gaps, data.candles]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;

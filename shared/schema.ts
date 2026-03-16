@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision, varchar, decimal, bigint, date, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -17,16 +17,86 @@ export const stockDataCache = pgTable("stock_data_cache", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Cache FMP fundamentals data to minimize API calls (250/day free tier limit)
-export const fundamentalsCache = pgTable("fundamentals_cache", {
+// Market condition themes - behavioral groups of stocks that trade together
+export const themes = pgTable("themes", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  tier: text("tier").notNull(), // 'Macro', 'Structural', 'Narrative'
+  leadersTarget: integer("leaders_target").default(5),
+  notes: text("notes"),
+  etfProxies: jsonb("etf_proxies").$type<Array<{ symbol: string; name: string; proxyType: string }>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Master ticker registry with current fundamentals (renamed from fundamentals_cache)
+export const tickers = pgTable("tickers", {
   id: serial("id").primaryKey(),
   symbol: text("symbol").notNull().unique(),
+  // Theme assignment (ONE theme per ticker)
+  themeId: text("theme_id").references(() => themes.id),
+  isCore: boolean("is_core").default(false), // Core member vs candidate
+  // Basic profile data
   sector: text("sector").notNull(),
   industry: text("industry").notNull(),
   marketCap: doublePrecision("market_cap"),
+  marketCapSize: text("market_cap_size"), // MEGA, LARGE, MID, SMALL, MICRO
   companyName: text("company_name"),
   exchange: text("exchange"),
+  // Extended fundamentals (from Finnhub)
+  pe: doublePrecision("pe"),
+  beta: doublePrecision("beta"),
+  debtToEquity: doublePrecision("debt_to_equity"),
+  preTaxMargin: doublePrecision("pre_tax_margin"),
+  analystConsensus: text("analyst_consensus"),
+  targetPrice: doublePrecision("target_price"),
+  nextEarningsDate: text("next_earnings_date"),
+  nextEarningsDays: integer("next_earnings_days"),
+  epsCurrentQYoY: text("eps_current_q_yoy"),
+  salesGrowth3QYoY: text("sales_growth_3q_yoy"),
+  lastEpsSurprise: text("last_eps_surprise"),
+  // Market condition metrics
+  accDistDays: integer("acc_dist_days").default(0), // Accumulation/Distribution streak (William O'Neal style)
+  // Cache metadata
   fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+});
+
+// Backward compatibility alias during migration
+export const fundamentalsCache = tickers;
+
+// Historical fundamental snapshots (quarterly earnings-based)
+export const fundamentalSnapshots = pgTable("fundamental_snapshots", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull().references(() => tickers.symbol),
+  snapshotDate: text("snapshot_date").notNull(), // DATE as text for consistency
+  // Market data
+  marketCap: doublePrecision("market_cap"),
+  marketCapSize: text("market_cap_size"),
+  // Fundamentals (from earnings)
+  pe: doublePrecision("pe"),
+  beta: doublePrecision("beta"),
+  debtToEquity: doublePrecision("debt_to_equity"),
+  preTaxMargin: doublePrecision("pre_tax_margin"),
+  revenue: doublePrecision("revenue"),
+  profit: doublePrecision("profit"),
+  // Classification
+  sector: text("sector"),
+  industry: text("industry"),
+  themeId: text("theme_id"),
+  // Analyst data
+  analystConsensus: text("analyst_consensus"),
+  targetPrice: doublePrecision("target_price"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Daily A/D change log for debugging (optional)
+export const accDistLog = pgTable("acc_dist_log", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull().references(() => tickers.symbol),
+  date: text("date").notNull(), // DATE as text
+  accDistDays: integer("acc_dist_days").notNull(),
+  priceChangePct: doublePrecision("price_change_pct"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Saved scans/screens (supports multi-user via userId for future expansion)
@@ -99,10 +169,15 @@ export const sentinelUsers = pgTable("sentinel_users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
-  accountSize: doublePrecision("account_size").default(1000000), // Default $1M
+  accountSize: doublePrecision("account_size").default(100000), // Default $100k
   isAdmin: boolean("is_admin").default(false),
-  tier: text("tier").default("standard").notNull(), // "standard" | "pro" | "admin"
+  tier: text("tier").default("free").notNull(), // "free" | "premium" | "pro" | "admin"
   communityOptIn: boolean("community_opt_in").default(false),
+  // Risk profile settings for Ivy Stock Eval personalization
+  maxAccountRiskPercent: doublePrecision("max_account_risk_percent").default(2), // Default 2%
+  avgPositionSize: doublePrecision("avg_position_size"), // Optional, user-defined typical position
+  riskProfileCompleted: boolean("risk_profile_completed").default(false), // Track if user has set up profile
+  riskProfileSkippedAt: timestamp("risk_profile_skipped_at"), // When user last skipped the setup modal
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -175,11 +250,22 @@ export const sentinelEvents = pgTable("sentinel_events", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// Watchlist - setups user is monitoring for entry
+// Watchlist definitions - users can have multiple named watchlists
+export const watchlists = pgTable("watchlists", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  isDefault: boolean("is_default").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Watchlist items - setups user is monitoring for entry
 export const sentinelWatchlist = pgTable("sentinel_watchlist", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
+  watchlistId: integer("watchlist_id"), // FK to watchlists table (nullable for migration)
   symbol: text("symbol").notNull(),
+  direction: text("direction").default("long"), // 'long' | 'short'
   targetEntry: doublePrecision("target_entry"), // desired entry price
   stopPlan: doublePrecision("stop_plan"), // planned stop if entered
   targetPlan: doublePrecision("target_plan"), // planned target if entered
@@ -188,6 +274,13 @@ export const sentinelWatchlist = pgTable("sentinel_watchlist", {
   priority: text("priority").default("medium"), // 'high' | 'medium' | 'low'
   status: text("status").default("watching"), // 'watching' | 'triggered' | 'expired' | 'entered'
   expiresAt: timestamp("expires_at"), // optional expiration
+  // Ivy Stock Eval fields - AI recommendations and analysis
+  ivyEvalId: integer("ivy_eval_id"), // Links to ivy_eval_history for post-mortem
+  ivyEvalText: text("ivy_eval_text"), // Cached AI evaluation synopsis
+  ivyRecommendedEntry: doublePrecision("ivy_recommended_entry"),
+  ivyRecommendedStop: doublePrecision("ivy_recommended_stop"),
+  ivyRecommendedTarget: doublePrecision("ivy_recommended_target"),
+  ivyRiskAssessment: text("ivy_risk_assessment"), // 'low' | 'medium' | 'high'
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -298,6 +391,7 @@ export const insertSentinelUserSchema = createInsertSchema(sentinelUsers).omit({
 export const insertSentinelTradeSchema = createInsertSchema(sentinelTrades).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertSentinelEvaluationSchema = createInsertSchema(sentinelEvaluations).omit({ id: true, createdAt: true });
 export const insertSentinelEventSchema = createInsertSchema(sentinelEvents).omit({ id: true, createdAt: true });
+export const insertWatchlistDefSchema = createInsertSchema(watchlists).omit({ id: true, createdAt: true });
 export const insertSentinelWatchlistSchema = createInsertSchema(sentinelWatchlist).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertSentinelRuleSchema = createInsertSchema(sentinelRules).omit({ id: true, createdAt: true });
 export const insertSentinelRuleOverrideSchema = createInsertSchema(sentinelRuleOverrides).omit({ id: true, createdAt: true, updatedAt: true });
@@ -311,6 +405,7 @@ export type SentinelUser = typeof sentinelUsers.$inferSelect;
 export type SentinelTrade = typeof sentinelTrades.$inferSelect;
 export type SentinelEvaluation = typeof sentinelEvaluations.$inferSelect;
 export type SentinelEvent = typeof sentinelEvents.$inferSelect;
+export type Watchlist = typeof watchlists.$inferSelect;
 export type SentinelWatchlistItem = typeof sentinelWatchlist.$inferSelect;
 export type SentinelRule = typeof sentinelRules.$inferSelect;
 export type SentinelRuleOverride = typeof sentinelRuleOverrides.$inferSelect;
@@ -323,6 +418,7 @@ export type InsertSentinelUser = z.infer<typeof insertSentinelUserSchema>;
 export type InsertSentinelTrade = z.infer<typeof insertSentinelTradeSchema>;
 export type InsertSentinelEvaluation = z.infer<typeof insertSentinelEvaluationSchema>;
 export type InsertSentinelEvent = z.infer<typeof insertSentinelEventSchema>;
+export type InsertWatchlist = z.infer<typeof insertWatchlistDefSchema>;
 export type InsertSentinelWatchlistItem = z.infer<typeof insertSentinelWatchlistSchema>;
 export type InsertSentinelRule = z.infer<typeof insertSentinelRuleSchema>;
 export type InsertSentinelRuleOverride = z.infer<typeof insertSentinelRuleOverrideSchema>;
@@ -1112,6 +1208,8 @@ export interface IdeaEdge {
   source: string;
   target: string;
   logicType: "AND" | "OR";
+  linkTolerance?: number;
+  linkToleranceType?: "bars" | "percent";
 }
 
 export const insertScannerThoughtSchema = createInsertSchema(scannerThoughts).omit({ id: true, score: true, lastUsedAt: true, createdAt: true, updatedAt: true });
@@ -1181,6 +1279,13 @@ export const scanChartRatings = pgTable("scan_chart_ratings", {
   scanConfig: jsonb("scan_config"),
   indicatorSnapshot: jsonb("indicator_snapshot"),
   price: doublePrecision("price"),
+  
+  // AI Training System fields (Phase 1)
+  ratingType: text("rating_type").default("user"), // "user" | "admin" - who made the rating
+  sourceSetupId: integer("source_setup_id"),       // FK to bigidea_setups if validating a setup
+  trainingMode: boolean("training_mode").default(false), // True if in AI Training Mode
+  applyFlag: boolean("apply_flag").default(true),  // Whether to use this rating for learning
+  
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1198,6 +1303,129 @@ export const indicatorLearningSummary = pgTable("indicator_learning_summary", {
   avoidParams: jsonb("avoid_params"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// Execution statistics for query optimization - tracks actual performance of each indicator
+export const indicatorExecutionStats = pgTable("indicator_execution_stats", {
+  id: serial("id").primaryKey(),
+  indicatorId: text("indicator_id").notNull().unique(),
+  indicatorName: text("indicator_name").notNull(),
+  category: text("category").notNull(), // "Momentum", "Fundamental", etc.
+  avgExecutionTimeMs: doublePrecision("avg_execution_time_ms").notNull().default(10),
+  avgPassRate: doublePrecision("avg_pass_rate").notNull().default(0.5),
+  totalEvaluations: integer("total_evaluations").notNull().default(0),
+  totalPasses: integer("total_passes").notNull().default(0),
+  // Performance breakdown by universe
+  universeStats: jsonb("universe_stats"), // { "sp500": { passRate: 0.15, avgTimeMs: 5.2 }, ... }
+  // Performance breakdown by market regime
+  regimeStats: jsonb("regime_stats"), // { "bull": { passRate: 0.18 }, "choppy": { passRate: 0.12 }, ... }
+  // Performance breakdown by timeframe
+  timeframeStats: jsonb("timeframe_stats"), // { "daily": { passRate: 0.2, avgTimeMs: 15 }, "5min": { ... } }
+  // Composite selectivity score (0-1, higher = more restrictive = run earlier)
+  selectivityScore: doublePrecision("selectivity_score").notNull().default(0.5),
+  // Last 10 execution times for variance tracking
+  recentExecutionTimes: jsonb("recent_execution_times"), // [5.2, 4.8, 5.5, ...]
+  lastUpdated: timestamp("last_updated").defaultNow().notNull(),
+});
+
+// Optimizer display settings - controls what metrics are shown on Big Idea Scanner canvas
+export const optimizerDisplaySettings = pgTable("optimizer_display_settings", {
+  id: serial("id").primaryKey(),
+  // Global settings (apply to all users)
+  showOptimizerOverlay: boolean("show_optimizer_overlay").notNull().default(true),
+  showOverallImprovement: boolean("show_overall_improvement").notNull().default(true),
+  showWeeklyImprovement: boolean("show_weekly_improvement").notNull().default(true),
+  showConfidenceLevel: boolean("show_confidence_level").notNull().default(true),
+  showScanStats: boolean("show_scan_stats").notNull().default(true),
+  showLiveOptimization: boolean("show_live_optimization").notNull().default(true),
+  showAchievementBadges: boolean("show_achievement_badges").notNull().default(false),
+  // Admin override settings
+  adminOverrideEnabled: boolean("admin_override_enabled").notNull().default(false),
+  adminShowOverallImprovement: boolean("admin_show_overall_improvement").notNull().default(true),
+  adminShowWeeklyImprovement: boolean("admin_show_weekly_improvement").notNull().default(true),
+  adminShowConfidenceLevel: boolean("admin_show_confidence_level").notNull().default(true),
+  adminShowScanStats: boolean("admin_show_scan_stats").notNull().default(true),
+  adminShowLiveOptimization: boolean("admin_show_live_optimization").notNull().default(true),
+  adminShowAchievementBadges: boolean("admin_show_achievement_badges").notNull().default(true),
+  adminShowDebugInfo: boolean("admin_show_debug_info").notNull().default(true),
+  // Display preferences
+  overlayPosition: text("overlay_position").notNull().default("bottom-center"), // bottom-center, bottom-right, bottom-left, top-right, top-left
+  overlayStyle: text("overlay_style").notNull().default("compact"), // minimal, compact, detailed
+  overlayTheme: text("overlay_theme").notNull().default("cyberpunk"), // matrix, cyberpunk, minimal
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type OptimizerDisplaySettings = typeof optimizerDisplaySettings.$inferSelect;
+
+// === ASK IVY (Overlay) RULE SETTINGS ===
+// Global (admin-managed) configuration for the Ask Ivy chart overlay suggestion engine.
+export interface AskIvyOverlaySettings {
+  // Entries
+  enableMinerviniCheatEntries: boolean;
+  enableEma620Entry: boolean;
+  ema620AllowedTimeframe: "5min_only" | "all_intraday";
+  entryBufferPct: number; // e.g. 0.002 = +0.2%
+
+  // Qulmaggie Entry Rules
+  enableOrhEntry: boolean; // Opening Range High entry
+  orhTimeframe: "5min" | "60min" | "both"; // Which ORH to show
+  enableMaSurfEntry: boolean; // Entry when price surfing rising 10/20 MA
+  maSurfMaxDistancePct: number; // Max % from MA to be "surfing" (e.g. 2%)
+
+  // Stops
+  include21EmaStop: boolean;
+  include50SmaStop: boolean;
+  includeAtrStop: boolean;
+  atrStopMultiple: number; // e.g. 1.5
+  stopMaOffsetDollars: number; // e.g. 0.10
+  stop21Label: string; // UI label (keep accurate)
+
+  // Qulmaggie Stop Rules
+  enforceAtrStopCap: boolean; // Warn if stop > 1× ATR
+  enforceAdrStopCap: boolean; // Warn if stop > 1× ADR%
+
+  // Targets / Take Profit
+  alwaysInclude8RTarget: boolean;
+  includeSwingHighTargets: boolean;
+  swingHighTargetCount: number; // nearest N
+  include52wTarget: boolean;
+  includeWeeklyTarget: boolean;
+  include5DayTarget: boolean;
+  include8xAdrTarget: boolean;
+  adr8TargetBreakoutOnly: boolean;
+  warnIfNoChartTargets: boolean;
+
+  // Target Display / Filtering
+  minRrThreshold: number; // Min R:R to display (e.g. 2 = only show 2:1+)
+  targetDisplayLimit: number; // Max targets to show in UI (default 8)
+  prioritizeChartTargets: boolean; // Chart-based targets before pure math
+  include8xAdrOver50Target: boolean; // 8x ADR above 50 SMA profit-taking rule
+
+  // Risk Warnings
+  warn200DsmaBelow: boolean; // Warn on longs below 200 DSMA
+
+  // Qulmaggie Position Management
+  suggestPartialProfits: boolean; // Remind to take 1/3-1/2 after N days
+  partialProfitDays: number; // Days before suggesting partial (default 3-5)
+  includeTrailMaCloseStop: boolean; // Trail on MA close (not intraday breach)
+  trailMaClosePeriod: number; // 10 or 20 day MA for trailing
+
+  // Extension / risk
+  extendedThresholdAdr: number; // e.g. 5
+  profitTakingThresholdAdr: number; // e.g. 8
+  showExtendedWarning: boolean;
+
+  // Display / UX
+  chartPriceScaleSide: "left" | "right";
+  overlayResizable: boolean;
+}
+
+export const askIvySettings = pgTable("ask_ivy_settings", {
+  id: serial("id").primaryKey(),
+  settings: jsonb("settings").$type<AskIvyOverlaySettings>().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type AskIvySettings = typeof askIvySettings.$inferSelect;
 
 export const thoughtScoreRules = pgTable("thought_score_rules", {
   id: serial("id").primaryKey(),
@@ -1240,3 +1468,465 @@ export const chartDrawings = pgTable("chart_drawings", {
 export const insertChartDrawingSchema = createInsertSchema(chartDrawings).omit({ id: true, createdAt: true, updatedAt: true });
 export type ChartDrawing = typeof chartDrawings.$inferSelect;
 export type InsertChartDrawing = z.infer<typeof insertChartDrawingSchema>;
+
+// === IVY STOCK EVAL TABLES ===
+
+// Admin-configurable limits for Ivy Stock Eval feature per tier
+export const ivyEvalSettings = pgTable("ivy_eval_settings", {
+  id: serial("id").primaryKey(),
+  tierFreeLimit: integer("tier_free_limit").default(5), // evals per month for free users
+  tierFreeTrialDays: integer("tier_free_trial_days").default(7), // trial period for new users
+  tierPremiumLimit: integer("tier_premium_limit").default(30), // evals per month for premium
+  tierProLimit: integer("tier_pro_limit").default(100), // evals per month for pro
+  tierProCanBuyMore: boolean("tier_pro_can_buy_more").default(true), // can pro users buy extra evals
+  extraEvalPrice: doublePrecision("extra_eval_price").default(0.50), // $ per extra eval
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Per-user monthly usage tracking for Ivy Stock Eval
+export const ivyEvalUsage = pgTable("ivy_eval_usage", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  monthYear: text("month_year").notNull(), // "2026-02" format for easy querying
+  evalsUsed: integer("evals_used").default(0),
+  extraEvalsPurchased: integer("extra_evals_purchased").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// History of all Ivy Stock Evals for ratings, post-mortem analysis, and AI improvement
+export const ivyEvalHistory = pgTable("ivy_eval_history", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  symbol: text("symbol").notNull(),
+  direction: text("direction").notNull(), // "long" | "short"
+  currentPriceAtEval: doublePrecision("current_price_at_eval"), // Price when eval was generated
+  // User's selections at time of eval
+  selectedEntry: doublePrecision("selected_entry"),
+  selectedStop: doublePrecision("selected_stop"),
+  selectedTarget: doublePrecision("selected_target"),
+  // Ivy's AI recommendations
+  recommendedEntry: doublePrecision("recommended_entry"),
+  recommendedStop: doublePrecision("recommended_stop"),
+  recommendedTarget: doublePrecision("recommended_target"),
+  // AI evaluation content
+  evaluationText: text("evaluation_text").notNull(),
+  riskAssessment: text("risk_assessment"), // "low" | "medium" | "high"
+  // User feedback for AI improvement
+  userRating: text("user_rating"), // "up" | "down" | null
+  ratedAt: timestamp("rated_at"),
+  // Technical snapshot for post-mortem agentic analysis
+  technicalSnapshot: jsonb("technical_snapshot"), // { sma21, sma50, atr14, etc. }
+  // Linking to watchlist if user saved it
+  watchlistId: integer("watchlist_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Types for Ivy Stock Eval
+export type IvyEvalSettings = typeof ivyEvalSettings.$inferSelect;
+export type IvyEvalUsage = typeof ivyEvalUsage.$inferSelect;
+export type IvyEvalHistory = typeof ivyEvalHistory.$inferSelect;
+
+export const insertIvyEvalHistorySchema = createInsertSchema(ivyEvalHistory).omit({ id: true, createdAt: true });
+export type InsertIvyEvalHistory = z.infer<typeof insertIvyEvalHistorySchema>;
+
+// =============================================================================
+// BigIdea AI Training System - Setup Library
+// =============================================================================
+
+// Main setup library table - stores trading setup definitions (Qullamaggie Breakout, VCP, etc.)
+export const bigideaSetups = pgTable("bigidea_setups", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),                    // "Qullamaggie Breakout"
+  slug: text("slug").notNull().unique(),           // "qullamaggie-breakout"
+  version: integer("version").notNull().default(1),
+  status: text("status").notNull().default("draft"), // "draft" | "active" | "archived"
+  
+  // Content
+  description: text("description"),                 // Methodology description (free-form)
+  exampleCharts: jsonb("example_charts"),          // Array of { url, ticker, caption }
+  
+  // AI-Extracted rules (generated from description, admin-editable)
+  extractedRules: jsonb("extracted_rules"),        // { priorMove: "30-100%", baseDuration: "3-8 weeks", ... }
+  
+  // Ivy AI Integration - Trade plan guidance for this setup type
+  ivyEntryStrategy: text("ivy_entry_strategy"),    // "breakout" | "rally_reclaim" | "ma_touch" | "pullback_bounce"
+  ivyStopStrategy: text("ivy_stop_strategy"),      // "below_base" | "below_undercut" | "below_ma" | "atr_based"
+  ivyTargetStrategy: text("ivy_target_strategy"),  // "swing_high" | "measured_move" | "rr_based" | "extension"
+  ivyContextNotes: text("ivy_context_notes"),      // Free-form guidance e.g. "Wait for PB under 21 EMA for U&R entry"
+  ivyApproved: boolean("ivy_approved").default(false), // Only approved setups feed Ivy suggestions
+  
+  // Metadata
+  createdBy: integer("created_by"),                // Admin user ID
+  previousVersionId: integer("previous_version_id"), // Link to prior version for rollback
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Indicator mappings for setups - defines which indicators + params to use
+export const bigideaSetupIndicators = pgTable("bigidea_setup_indicators", {
+  id: serial("id").primaryKey(),
+  setupId: integer("setup_id").notNull(),          // FK to bigidea_setups
+  indicatorId: text("indicator_id").notNull(),     // "PA-12", "FU-01", etc.
+  params: jsonb("params"),                         // { minGain: 30, lookbackBars: 60, ... }
+  required: boolean("required").notNull().default(true), // Must be included in scan
+  weight: doublePrecision("weight").default(1.0),  // Importance 0-1
+  notes: text("notes"),                            // Why this indicator for this setup
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Types for Setup Library
+export type BigideaSetup = typeof bigideaSetups.$inferSelect;
+export type InsertBigideaSetup = typeof bigideaSetups.$inferInsert;
+export type BigideaSetupIndicator = typeof bigideaSetupIndicators.$inferSelect;
+export type InsertBigideaSetupIndicator = typeof bigideaSetupIndicators.$inferInsert;
+
+export const insertBigideaSetupSchema = createInsertSchema(bigideaSetups).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBigideaSetupIndicatorSchema = createInsertSchema(bigideaSetupIndicators).omit({ id: true, createdAt: true });
+
+// Ivy Strategy Types - for Trade Plan integration
+export const IVY_ENTRY_STRATEGIES = [
+  { value: "breakout", label: "Breakout", description: "Entry above resistance/base top" },
+  { value: "rally_reclaim", label: "Rally Reclaim (U&R)", description: "Entry on rally back above MA after undercut" },
+  { value: "ma_touch", label: "MA Touch", description: "Entry at pullback to moving average" },
+  { value: "pullback_bounce", label: "Pullback Bounce", description: "Entry on bounce from support level" },
+  { value: "gap_fill", label: "Gap Fill", description: "Entry after gap fills to support" },
+] as const;
+
+export const IVY_STOP_STRATEGIES = [
+  { value: "below_base", label: "Below Base", description: "Stop below base/consolidation low" },
+  { value: "below_undercut", label: "Below Undercut", description: "Stop below the undercut low (U&R)" },
+  { value: "below_ma", label: "Below MA", description: "Stop below key moving average" },
+  { value: "atr_based", label: "ATR Based", description: "Stop at 1-2x ATR from entry" },
+  { value: "prior_day_low", label: "Prior Day Low", description: "Stop below previous day's low" },
+] as const;
+
+export const IVY_TARGET_STRATEGIES = [
+  { value: "swing_high", label: "Swing High", description: "Target at prior resistance/swing highs" },
+  { value: "measured_move", label: "Measured Move", description: "Target = base height projected from breakout" },
+  { value: "rr_based", label: "R:R Based", description: "Target at 2:1, 3:1 risk/reward multiples" },
+  { value: "extension", label: "Extension", description: "Target at Fibonacci or ADR extension levels" },
+  { value: "trailing", label: "Trailing Stop", description: "No fixed target, trail with MA close" },
+] as const;
+
+export type IvyEntryStrategy = typeof IVY_ENTRY_STRATEGIES[number]["value"];
+export type IvyStopStrategy = typeof IVY_STOP_STRATEGIES[number]["value"];
+export type IvyTargetStrategy = typeof IVY_TARGET_STRATEGIES[number]["value"];
+
+// =============================================================================
+// BigIdea AI Training System - Extracted Ideas (Phase 2)
+// =============================================================================
+
+// Thought definition for extracted Ideas
+export interface ExtractedThought {
+  id: string;                                        // UUID
+  name: string;                                      // "EMA Reclaim"
+  description?: string;
+  indicators: Array<{
+    id: string;                                      // Indicator ID from library
+    name: string;                                    // Display name
+    params: Record<string, any>;                     // Configured parameters
+  }>;
+}
+
+// Full Idea structure extracted from documents
+export interface ExtractedIdeaData {
+  name: string;                                      // "Wedge Pop"
+  description: string;                               // Pattern description
+  thoughts: ExtractedThought[];                      // 1+ thoughts (AND within, OR between)
+  sourceDocument?: string;                           // Which document it came from
+  confidence: number;                                // AI confidence 0-100
+}
+
+// Stores AI-extracted Ideas from setup documents
+export const bigideaExtractedIdeas = pgTable("bigidea_extracted_ideas", {
+  id: serial("id").primaryKey(),
+  setupId: integer("setup_id").notNull(),            // FK to bigidea_setups
+  
+  // Idea definition
+  name: text("name").notNull(),                      // "Wedge Pop"
+  description: text("description"),                  // Pattern description
+  thoughts: jsonb("thoughts").$type<ExtractedThought[]>().notNull(), // Array of thoughts
+  
+  // AI extraction metadata
+  confidence: doublePrecision("confidence"),         // AI confidence score 0-100
+  sourceDocumentId: integer("source_document_id"),   // FK to uploads
+  aiModel: text("ai_model"),                         // Which model extracted this
+  aiPromptVersion: text("ai_prompt_version"),        // Prompt version for reproducibility
+  
+  // Workflow status
+  status: text("status").notNull().default("draft"), // "draft" | "validating" | "approved" | "pushed" | "rejected"
+  
+  // Validation tracking (Training Mode)
+  validationSessionId: integer("validation_session_id"), // Links to scan session if validating
+  validationStats: jsonb("validation_stats").$type<{
+    totalRated: number;
+    thumbsUp: number;
+    thumbsDown: number;
+    hitRate: number;
+  }>(),
+  
+  // Push to scanner tracking
+  pushedToIdeaId: integer("pushed_to_idea_id"),      // FK to scanner_ideas if pushed
+  pushedAt: timestamp("pushed_at"),
+  pushedBy: integer("pushed_by"),                    // User who pushed
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow(),
+  approvedAt: timestamp("approved_at"),
+  approvedBy: integer("approved_by"),
+});
+
+// Training Mode ratings for extracted Ideas
+export const bigideaValidationRatings = pgTable("bigidea_validation_ratings", {
+  id: serial("id").primaryKey(),
+  extractedIdeaId: integer("extracted_idea_id").notNull(), // FK to bigidea_extracted_ideas
+  userId: integer("user_id").notNull(),
+  symbol: text("symbol").notNull(),
+  rating: text("rating").notNull(),                  // "up" | "down"
+  price: doublePrecision("price"),
+  indicatorSnapshot: jsonb("indicator_snapshot"),    // What values the indicators had
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Types for Extracted Ideas
+export type BigideaExtractedIdea = typeof bigideaExtractedIdeas.$inferSelect;
+export type InsertBigideaExtractedIdea = typeof bigideaExtractedIdeas.$inferInsert;
+export type BigideaValidationRating = typeof bigideaValidationRatings.$inferSelect;
+export type InsertBigideaValidationRating = typeof bigideaValidationRatings.$inferInsert;
+
+export const insertBigideaExtractedIdeaSchema = createInsertSchema(bigideaExtractedIdeas).omit({ id: true, createdAt: true });
+export const insertBigideaValidationRatingSchema = createInsertSchema(bigideaValidationRatings).omit({ id: true, createdAt: true });
+
+// =============================================================================
+// Custom Indicators System - User-created indicators with DSL logic
+// =============================================================================
+
+// User-created custom indicators
+export const userIndicators = pgTable("user_indicators", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  
+  // Identifier
+  customId: text("custom_id").notNull().unique(),
+  
+  // Definition
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  description: text("description").notNull(),
+  
+  // Parameters (JSON array of parameter definitions)
+  params: jsonb("params").$type<Array<{
+    name: string;
+    label: string;
+    type: "number" | "select" | "boolean";
+    defaultValue: number | string | boolean;
+    options?: string[];
+    min?: number;
+    max?: number;
+    step?: number;
+  }>>().notNull().default([]),
+  
+  // Evaluation logic (DSL-based)
+  logicType: text("logic_type").notNull().default("rule_based"),
+  logicDefinition: jsonb("logic_definition").$type<{
+    rules: Array<{
+      condition: string;
+      operator: string;
+      threshold?: number | string;
+      lookback?: number;
+    }>;
+    combineLogic: "AND" | "OR";
+  }>().notNull(),
+  
+  // Data linking (for chaining indicators)
+  provides: jsonb("provides").$type<Array<{
+    linkType: string;
+    paramName: string;
+  }>>().default([]),
+  consumes: jsonb("consumes").$type<Array<{
+    paramName: string;
+    dataKey: string;
+  }>>().default([]),
+  
+  // Approval workflow
+  isAdminApproved: boolean("is_admin_approved").default(false),
+  approvedByAdminId: integer("approved_by_admin_id"),
+  approvedAt: timestamp("approved_at"),
+  promotedToCoreId: text("promoted_to_core_id"),
+  
+  // Usage tracking
+  timesUsed: integer("times_used").default(0),
+  lastUsedAt: timestamp("last_used_at"),
+  totalPasses: integer("total_passes").default(0),
+  totalEvaluations: integer("total_evaluations").default(0),
+  avgPassRate: doublePrecision("avg_pass_rate"),
+  
+  // Auto-submit tracking
+  autoSubmittedAt: timestamp("auto_submitted_at"),
+  
+  // Metadata
+  aiGenerated: boolean("ai_generated").default(true),
+  aiModel: text("ai_model"),
+  aiPrompt: text("ai_prompt"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Approval queue for custom indicators
+export const indicatorApprovalQueue = pgTable("indicator_approval_queue", {
+  id: serial("id").primaryKey(),
+  indicatorId: integer("indicator_id").notNull(),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+  reviewNotes: text("review_notes"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: integer("reviewed_by"),
+  decision: text("decision"), // 'approved' | 'rejected' | 'needs_revision'
+  rejectionReason: text("rejection_reason"),
+});
+
+export type UserIndicator = typeof userIndicators.$inferSelect;
+export type InsertUserIndicator = typeof userIndicators.$inferInsert;
+export type IndicatorApprovalQueue = typeof indicatorApprovalQueue.$inferSelect;
+export type InsertIndicatorApprovalQueue = typeof indicatorApprovalQueue.$inferInsert;
+
+export const insertUserIndicatorSchema = createInsertSchema(userIndicators).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertIndicatorApprovalQueueSchema = createInsertSchema(indicatorApprovalQueue).omit({ id: true, submittedAt: true });
+
+// =============================================================================
+// Modular Upload System - Reusable file storage for PDFs, images, documents
+// =============================================================================
+
+export const uploads = pgTable("uploads", {
+  id: serial("id").primaryKey(),
+  filename: text("filename").notNull(),           // Original filename
+  storagePath: text("storage_path").notNull(),    // Path in uploads folder or S3 key
+  mimeType: text("mime_type").notNull(),          // "application/pdf", "image/png", etc.
+  sizeBytes: integer("size_bytes").notNull(),
+  
+  // Extracted content (for AI processing)
+  extractedText: text("extracted_text"),          // OCR/PDF text extraction
+  extractedImages: jsonb("extracted_images"),     // Array of { path, pageNum, caption }
+  
+  // Processing status
+  processingStatus: text("processing_status").default("pending"), // "pending" | "processing" | "completed" | "failed"
+  processingError: text("processing_error"),      // Error message if failed
+  
+  // Metadata
+  metadata: jsonb("metadata"),                    // { pageCount, dimensions, etc. }
+  createdBy: integer("created_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Junction table: link uploads to setups (many-to-many)
+export const setupUploads = pgTable("setup_uploads", {
+  id: serial("id").primaryKey(),
+  setupId: integer("setup_id").notNull(),         // FK to bigidea_setups
+  uploadId: integer("upload_id").notNull(),       // FK to uploads
+  purpose: text("purpose"),                       // "methodology", "example_chart", "reference"
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Types for Upload System
+export type Upload = typeof uploads.$inferSelect;
+export type InsertUpload = typeof uploads.$inferInsert;
+export type SetupUpload = typeof setupUploads.$inferSelect;
+export type InsertSetupUpload = typeof setupUploads.$inferInsert;
+
+export const insertUploadSchema = createInsertSchema(uploads).omit({ id: true, createdAt: true });
+export const insertSetupUploadSchema = createInsertSchema(setupUploads).omit({ id: true, createdAt: true });
+
+// =============================================================================
+// Theme Rotation Snapshots - Historical data for multi-timeframe comparison
+// =============================================================================
+
+export const themeSnapshots = pgTable("theme_snapshots", {
+  id: serial("id").primaryKey(),
+  themeId: text("theme_id").notNull(),            // ClusterId e.g. "SEMIS", "AI_INFRA"
+  
+  // Core metrics at snapshot time
+  rank: integer("rank").notNull(),                 // 1-25 rank at this time
+  score: doublePrecision("score").notNull(),       // ThemeScore 0-100
+  medianPct: doublePrecision("median_pct"),        // Median % change
+  rsVsBenchmark: doublePrecision("rs_vs_benchmark"), // RS vs SPY
+  breadthPct: doublePrecision("breadth_pct"),      // % of members green
+  
+  // Accumulation/Distribution tracking (William O'Neal style)
+  accDistDays: integer("acc_dist_days"),           // Consecutive days: positive=accumulation, negative=distribution
+  
+  // Snapshot metadata
+  snapshotType: text("snapshot_type").notNull(),   // "hourly" | "daily_close"
+  marketDate: text("market_date").notNull(),       // YYYY-MM-DD
+  snapshotHour: integer("snapshot_hour"),          // 0-23 for hourly snapshots
+  
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Types for Theme Snapshots
+export type ThemeSnapshot = typeof themeSnapshots.$inferSelect;
+export type InsertThemeSnapshot = typeof themeSnapshots.$inferInsert;
+
+export const insertThemeSnapshotSchema = createInsertSchema(themeSnapshots).omit({ id: true, createdAt: true });
+
+// =============================================================================
+// Data Layer - Historical Bars & Moving Averages Cache
+// =============================================================================
+
+// Historical daily bars cache - stores 250 days of OHLCV for all universe tickers
+export const historicalBars = pgTable("historical_bars", {
+  id: serial("id").primaryKey(),
+  symbol: varchar("symbol", { length: 20 }).notNull(),
+  barDate: date("bar_date").notNull(),
+  open: decimal("open", { precision: 12, scale: 4 }).notNull(),
+  high: decimal("high", { precision: 12, scale: 4 }).notNull(),
+  low: decimal("low", { precision: 12, scale: 4 }).notNull(),
+  close: decimal("close", { precision: 12, scale: 4 }).notNull(),
+  volume: bigint("volume", { mode: "number" }).notNull(),
+  vwap: decimal("vwap", { precision: 12, scale: 4 }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  symbolDateUnique: unique().on(table.symbol, table.barDate),
+}));
+
+// Pre-calculated moving averages per ticker - updated nightly
+export const tickerMa = pgTable("ticker_ma", {
+  id: serial("id").primaryKey(),
+  symbol: varchar("symbol", { length: 20 }).notNull().unique(),
+  ema10d: decimal("ema_10d", { precision: 12, scale: 4 }),
+  ema20d: decimal("ema_20d", { precision: 12, scale: 4 }),
+  sma50d: decimal("sma_50d", { precision: 12, scale: 4 }),
+  sma200d: decimal("sma_200d", { precision: 12, scale: 4 }),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Types for Data Layer
+export type HistoricalBar = typeof historicalBars.$inferSelect;
+export type InsertHistoricalBar = typeof historicalBars.$inferInsert;
+export type TickerMa = typeof tickerMa.$inferSelect;
+export type InsertTickerMa = typeof tickerMa.$inferInsert;
+
+export const insertHistoricalBarSchema = createInsertSchema(historicalBars).omit({ id: true, createdAt: true });
+export const insertTickerMaSchema = createInsertSchema(tickerMa).omit({ id: true, updatedAt: true });
+
+// =============================================================================
+// MarketFlow AI Analysis Cache - Full analysis payload for 3-day reuse
+// =============================================================================
+
+export const marketflowAnalysisCache = pgTable("marketflow_analysis_cache", {
+  id: serial("id").primaryKey(),
+  symbol: varchar("symbol", { length: 20 }).notNull(),
+  analysisJson: jsonb("analysis_json").notNull(),   // { moduleResponses, synthesis, ... }
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+  version: text("version").notNull().default("v1"),
+  modulesPresent: jsonb("modules_present").$type<string[]>().notNull(), // ["marketContext", "keyLevels", ...]
+  ttlDays: integer("ttl_days").notNull().default(3),
+  createdBy: integer("created_by"),                // nullable user id when auth is present
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  symbolUnique: unique().on(table.symbol),
+}));
+
+export type MarketflowAnalysisCache = typeof marketflowAnalysisCache.$inferSelect;
+export type InsertMarketflowAnalysisCache = typeof marketflowAnalysisCache.$inferInsert;
+export const insertMarketflowAnalysisCacheSchema = createInsertSchema(marketflowAnalysisCache).omit({ id: true, createdAt: true, generatedAt: true });

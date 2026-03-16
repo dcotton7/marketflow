@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp, Crosshair, Scissors, HelpCircle, Newspaper, Building2, ExternalLink, BarChart3, Activity } from "lucide-react";
+import { ArrowLeft, AlertTriangle, TrendingUp, TrendingDown, Minus, Loader2, DollarSign, Hash, Info, CheckCircle2, XCircle, Clock, Eye, ListPlus, ThumbsDown, Zap, Target, Shield, Lightbulb, ArrowUpCircle, AlertOctagon, X, ChevronDown, ChevronUp, Crosshair, Scissors, HelpCircle, Newspaper, Building2, ExternalLink, BarChart3, Activity, Sparkles } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SentinelHeader } from "@/components/SentinelHeader";
@@ -1661,8 +1661,8 @@ export default function SentinelEvaluatePage() {
                     </>
                   ) : (
                     <>
-                      <TrendingUp className="w-4 h-4 mr-2" />
-                      Ask Ivy
+                      <Sparkles className="w-4 h-4 mr-2" style={{ color: '#fbbf24' }} />
+                      Trade Plan
                     </>
                   )}
                 </Button>

@@ -19,7 +19,7 @@ interface ScannerContextType {
 
 // Initial filters with sensible defaults that show in the UI
 const blankFilters: ScannerRunInput = {
-  scannerIndex: "sp100",
+  scannerIndex: "sp500",
   minPrice: 7,
   maxPrice: undefined,
   minVolume: 500000,

@@ -31,9 +31,19 @@ export async function setupVite(server: Server, app: Express) {
 
   app.use(vite.middlewares);
 
-  app.use("/{*path}", async (req, res, next) => {
+  // SPA fallback: serve index.html only for GET requests that are SPA routes (not /api, /src, Vite internals, or static files)
+  app.use(async (req, res, next) => {
+    if (req.method !== "GET") return next();
+    const pathname = req.path || req.url?.split("?")[0] || "";
+    if (
+      pathname.startsWith("/api") ||
+      pathname.startsWith("/src") ||
+      pathname.startsWith("/@") ||
+      pathname.startsWith("/node_modules") ||
+      pathname.startsWith("/vite-hmr") ||
+      pathname.includes(".")
+    ) return next();
     const url = req.originalUrl;
-
     try {
       const clientTemplate = path.resolve(
         import.meta.dirname,
@@ -41,8 +51,6 @@ export async function setupVite(server: Server, app: Express) {
         "client",
         "index.html",
       );
-
-      // always reload the index.html file from disk incase it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,

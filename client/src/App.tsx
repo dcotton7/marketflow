@@ -18,7 +18,12 @@ import SentinelImportPage from "@/pages/SentinelImportPage";
 import PatternLearningPage from "@/pages/PatternLearningPage";
 import BigIdeaPage from "@/pages/BigIdeaPage";
 import SentinelChartsPage from "@/pages/SentinelChartsPage";
+import AnalysisPopoutPage from "@/pages/AnalysisPopoutPage";
+import SetupLibraryPage from "@/pages/SetupLibraryPage";
+import SentinelSettingsPage from "@/pages/SentinelSettingsPage";
 import SymbolPage from "@/pages/SymbolPage";
+import { lazy, Suspense } from "react";
+const MarketConditionPage = lazy(() => import("@/pages/MarketConditionPage"));
 
 function Router() {
   return (
@@ -71,9 +76,31 @@ function Router() {
           <BigIdeaPage />
         </SentinelProtectedRoute>
       </Route>
+      <Route path="/sentinel/setup-library">
+        <SentinelProtectedRoute>
+          <SetupLibraryPage />
+        </SentinelProtectedRoute>
+      </Route>
       <Route path="/sentinel/charts">
         <SentinelProtectedRoute>
           <SentinelChartsPage />
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/sentinel/analysis">
+        <SentinelProtectedRoute>
+          <AnalysisPopoutPage />
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/sentinel/settings">
+        <SentinelProtectedRoute>
+          <SentinelSettingsPage />
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/sentinel/market-condition">
+        <SentinelProtectedRoute>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
+            <MarketConditionPage />
+          </Suspense>
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel">

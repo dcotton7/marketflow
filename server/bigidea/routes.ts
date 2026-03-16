@@ -1,13 +1,18 @@
 import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
-import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights } from "@shared/schema";
+import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights, indicatorExecutionStats, optimizerDisplaySettings, bigideaSetups, bigideaSetupIndicators, bigideaExtractedIdeas, bigideaValidationRatings, uploads, setupUploads, userIndicators, indicatorApprovalQueue, type ExtractedThought } from "@shared/schema";
 import { fetchMarketSentiment } from "../sentinel/sentiment";
-import { eq, and, desc, sql } from "drizzle-orm";
-import { INDICATOR_LIBRARY, CandleData, normalizeResult } from "./indicators";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition } from "./indicators";
+import { evaluateDslIndicator, validateDslDefinition, DslLogicDefinition } from "./dsl-evaluator";
 import { evaluateScanQuality } from "./quality";
 import { getUniverseTickers } from "./universes";
 import OpenAI from "openai";
-import * as tiingo from "../tiingo";
+import * as alpaca from "../alpaca";
+import * as fundamentals from "../fundamentals";
+import { getDailyBars, getIntradayBars } from "../data-layer";
+import { shouldAutoOptimize, autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
+import { extractIdeasFromText, suggestIndicatorMappings } from "./extraction";
 
 function getOpenAI(): OpenAI | null {
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
@@ -19,6 +24,148 @@ function getOpenAI(): OpenAI | null {
 const ohlcvCache = new Map<string, { data: CandleData[]; timestamp: number }>();
 const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
+
+const INTRADAY_INDICATORS = ["ITD-1", "ITD-2", "ITD-3"];
+
+/**
+ * Check if criteria contain intraday-only indicators and validate/correct timeframe
+ */
+function validateIntradayIndicators(
+  criteria: any[],
+  timeframe: string
+): { correctedTimeframe: string; warning: string | null } {
+  if (!Array.isArray(criteria)) {
+    return { correctedTimeframe: timeframe, warning: null };
+  }
+  
+  const hasIntradayIndicator = criteria.some(
+    (c: any) => c.indicatorId && INTRADAY_INDICATORS.includes(c.indicatorId)
+  );
+  
+  const isIntradayTimeframe = ["5min", "15min", "30min"].includes(timeframe);
+  
+  if (hasIntradayIndicator && !isIntradayTimeframe) {
+    const intradayIndicatorNames = criteria
+      .filter((c: any) => INTRADAY_INDICATORS.includes(c.indicatorId))
+      .map((c: any) => c.label || c.indicatorId)
+      .join(", ");
+    
+    return {
+      correctedTimeframe: "5min",
+      warning: `Intraday indicators (${intradayIndicatorNames}) detected with daily timeframe. Auto-corrected to 5min. These indicators require intraday data (5min/15min/30min) to produce meaningful results.`
+    };
+  }
+  
+  return { correctedTimeframe: timeframe, warning: null };
+}
+
+/**
+ * Validate AI's indicator selection against user's actual intent
+ * Catches obvious mismatches before returning to user
+ */
+function validateAISelection(
+  userPrompt: string,
+  thoughts: any[]
+): { valid: boolean; errors: string[]; triggerCustomIndicator: boolean } {
+  const errors: string[] = [];
+  const promptLower = userPrompt.toLowerCase();
+  
+  // Keywords indicating user wants both directions
+  const wantsBothDirections = /\b(any direction|either direction|both ways|above or below|below or above|crosses? (either|any)|any cross)\b/i.test(promptLower);
+  
+  // Keywords indicating user wants intraday
+  const wantsIntraday = /\b(intraday|today|session|this session|5[ -]?min|15[ -]?min|30[ -]?min)\b/i.test(promptLower);
+  
+  // Keywords indicating user wants simple price change measurement
+  const wantsPriceChange = /\b(price (up|down|increased?|decreased?|gained?|lost|change[ds]?)|stock (up|down)|gained? \d+%|\d+% (gain|increase|rise|advance))\b/i.test(promptLower);
+  
+  // Indicator IDs that only support one direction
+  const DIRECTIONAL_INDICATORS: Record<string, string[]> = {
+    "MA-1": ["direction"],
+    "MA-2": ["direction"], 
+    "MA-9": ["crossType"],
+    "RS-5": ["condition"],
+  };
+  
+  // Indicators that should NOT be used for price change requests
+  const NOT_FOR_PRICE_CHANGE = ["PA-3", "PA-4", "PA-5", "PA-6", "PA-7", "PA-8"];
+  
+  for (const thought of thoughts) {
+    const timeframe = thought.timeframe || "daily";
+    const criteria = thought.criteria || [];
+    
+    for (const criterion of criteria) {
+      const indId = criterion.indicatorId;
+      const params = criterion.params || [];
+      
+      // Check 1: Direction mismatch
+      if (wantsBothDirections && DIRECTIONAL_INDICATORS[indId]) {
+        const dirParam = DIRECTIONAL_INDICATORS[indId];
+        for (const paramName of dirParam) {
+          const param = params.find((p: any) => p.name === paramName);
+          if (param && param.value && !["any", "both"].includes(String(param.value).toLowerCase())) {
+            errors.push(`User wanted "any direction" but ${indId} is set to "${param.value}" only. The indicator should support both directions or use a different indicator.`);
+          }
+        }
+      }
+      
+      // Check 2: Intraday indicator on daily timeframe
+      if (INTRADAY_INDICATORS.includes(indId) && timeframe === "daily") {
+        errors.push(`${indId} is an intraday indicator but timeframe is "daily". Intraday indicators (VWAP, ORB) need intraday timeframes (5min/15min/30min).`);
+      }
+      
+      // Check 3: User wants intraday but timeframe is daily
+      if (wantsIntraday && timeframe === "daily" && INTRADAY_INDICATORS.includes(indId)) {
+        errors.push(`User mentioned intraday context but timeframe is "daily". Should be 5min/15min/30min.`);
+      }
+      
+      // Check 4: Using wrong indicator for price change
+      if (wantsPriceChange && NOT_FOR_PRICE_CHANGE.includes(indId)) {
+        errors.push(`User wants to measure price change but ${indId} is for consolidation/base detection, not price change measurement. No existing indicator measures simple "price up X% over N days" - needs custom indicator.`);
+      }
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+    triggerCustomIndicator: errors.length > 0
+  };
+}
+
+/**
+ * Get merged indicator library (core + user's custom indicators)
+ */
+async function getMergedIndicatorLibrary(userId: number): Promise<IndicatorDefinition[]> {
+  if (!isDatabaseAvailable()) {
+    return INDICATOR_LIBRARY;
+  }
+
+  try {
+    const customIndicators = await db
+      .select()
+      .from(userIndicators)
+      .where(eq(userIndicators.userId, userId));
+
+    const customIndicatorDefs: IndicatorDefinition[] = customIndicators.map(ind => ({
+      id: ind.customId,
+      name: `${ind.name} (Custom)`,
+      category: ind.category as any,
+      description: ind.description,
+      params: ind.params as any[] || [],
+      provides: (ind as any).provides || [],
+      consumes: (ind as any).consumes || [],
+      evaluate: (candles: CandleData[], params: Record<string, any>, _benchmarkCandles?: CandleData[], upstreamData?: Record<string, any>) => {
+        return evaluateDslIndicator(ind.logicDefinition as any, candles, params, upstreamData);
+      },
+    }));
+
+    return [...INDICATOR_LIBRARY, ...customIndicatorDefs];
+  } catch (error) {
+    console.error('[getMergedIndicatorLibrary] Error loading custom indicators:', error);
+    return INDICATOR_LIBRARY;
+  }
+}
 
 const ARCHETYPE_KEYWORDS: [RegExp, string][] = [
   [/vcp|volatility\s*contraction/i, "vcp"],
@@ -88,18 +235,46 @@ async function fetchOHLCV(symbol: string, timeframe: string = "daily"): Promise<
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - lookbackDays);
 
-    const bars = await tiingo.getHistoricalBars(symbol, startDate, endDate, interval);
+    let candles: CandleData[] = [];
 
-    const candles: CandleData[] = bars
-      .map((b) => ({
-        date: b.date,
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-        volume: b.volume || 0,
-      }))
-      .reverse();
+    if (timeframe === "daily") {
+      const dataLayerBars = await getDailyBars(symbol, lookbackDays);
+      
+      if (dataLayerBars && dataLayerBars.length >= 50) {
+        candles = dataLayerBars.map((b) => ({
+          date: b.date,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: b.volume || 0,
+        }));
+      } else {
+        const bars = await alpaca.getAlpacaIntradayData(symbol, startDate, endDate, interval, true);
+        candles = bars
+          .map((b) => ({
+            date: b.date,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+            volume: b.volume || 0,
+          }))
+          .reverse();
+      }
+    } else {
+      const intradayBars = await getIntradayBars(symbol, interval, startDate, endDate, true);
+      candles = intradayBars
+        .map((b) => ({
+          date: b.timestamp,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: b.volume || 0,
+        }))
+        .reverse();
+    }
 
     ohlcvCache.set(cacheKey, { data: candles, timestamp: Date.now() });
     return candles;
@@ -188,13 +363,15 @@ function evaluateThoughtCriteria(
   candles: CandleData[],
   benchmarkCandles?: CandleData[],
   candlesByTimeframe?: Record<string, CandleData[]>,
-  upstreamData?: Record<string, any>
+  upstreamData?: Record<string, any>,
+  indicatorLibrary?: IndicatorDefinition[]
 ): ThoughtEvalResult {
   if (!criteria || criteria.length === 0) return { pass: false, allMuted: false, outputData: {}, criteriaResults: [] };
 
   const activeCriteria = criteria.filter((c: any) => !c.muted);
   if (activeCriteria.length === 0) return { pass: true, allMuted: true, outputData: {}, criteriaResults: [] };
 
+  const library = indicatorLibrary || INDICATOR_LIBRARY;
   const outputData: Record<string, any> = {};
   const criteriaResults: CriterionResult[] = [];
   let allPass = true;
@@ -203,7 +380,7 @@ function evaluateThoughtCriteria(
 
   for (const criterion of activeCriteria) {
     const repaired = repairCriterion(criterion);
-    const indicator = INDICATOR_LIBRARY.find((ind) => ind.id === repaired.indicatorId);
+    const indicator = library.find((ind) => ind.id === repaired.indicatorId);
     if (!indicator) continue;
 
     if (CONSUMER_IDS_EVAL.has(repaired.indicatorId) && (!upstreamData || Object.keys(upstreamData).length === 0)) {
@@ -422,12 +599,18 @@ export function registerBigIdeaRoutes(app: Express): void {
         return res.status(400).json({ error: "name, category, and criteria are required" });
       }
 
+      // Validate and auto-correct timeframe for intraday indicators
+      const { correctedTimeframe, warning } = validateIntradayIndicators(
+        criteria,
+        timeframe || "daily"
+      );
+
       const [thought] = await db
         .insert(scannerThoughts)
-        .values({ userId, name, category, description: description || null, aiPrompt: aiPrompt || null, criteria, timeframe: timeframe || "daily" })
+        .values({ userId, name, category, description: description || null, aiPrompt: aiPrompt || null, criteria, timeframe: correctedTimeframe })
         .returning();
 
-      res.status(201).json(thought);
+      res.status(201).json({ ...thought, timeframeWarning: warning });
     } catch (error) {
       console.error("Error creating thought:", error);
       res.status(500).json({ error: "Failed to create thought" });
@@ -463,13 +646,24 @@ export function registerBigIdeaRoutes(app: Express): void {
       if (req.body.timeframe !== undefined) updates.timeframe = req.body.timeframe;
       if (req.body.aiPrompt !== undefined) updates.aiPrompt = req.body.aiPrompt;
 
+      // Validate and auto-correct timeframe for intraday indicators
+      const criteriaToCheck = updates.criteria || existing[0].criteria;
+      const timeframeToCheck = updates.timeframe || existing[0].timeframe || "daily";
+      const { correctedTimeframe, warning } = validateIntradayIndicators(
+        criteriaToCheck as any[],
+        timeframeToCheck
+      );
+      if (correctedTimeframe !== timeframeToCheck) {
+        updates.timeframe = correctedTimeframe;
+      }
+
       const [updated] = await db
         .update(scannerThoughts)
         .set(updates)
         .where(and(eq(scannerThoughts.id, id), eq(scannerThoughts.userId, userId)))
         .returning();
 
-      res.json(updated);
+      res.json({ ...updated, timeframeWarning: warning });
     } catch (error) {
       console.error("Error updating thought:", error);
       res.status(500).json({ error: "Failed to update thought" });
@@ -701,9 +895,12 @@ export function registerBigIdeaRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/bigidea/indicators", (_req: Request, res: Response) => {
+  app.get("/api/bigidea/indicators", async (req: Request, res: Response) => {
     try {
-      const indicators = INDICATOR_LIBRARY.map((ind) => ({
+      const userId = (req.session as any)?.userId || 1;
+      const mergedLibrary = await getMergedIndicatorLibrary(userId);
+
+      const indicators = mergedLibrary.map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -732,7 +929,8 @@ export function registerBigIdeaRoutes(app: Express): void {
         return res.status(400).json({ error: "description is required" });
       }
 
-      const indicatorSummary = INDICATOR_LIBRARY.map((ind) => ({
+      const mergedLibrary = await getMergedIndicatorLibrary(userId);
+      const indicatorSummary = mergedLibrary.map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -866,7 +1064,36 @@ IMPORTANT GUIDELINES for indicator selection:
 - MA-1/MA-2 compare PRICE vs a single MA, not two MAs against each other.
 - When the user says "MA above/below another MA", always use MA-8 with direction "fast_above_slow" or "fast_below_slow".
 - For golden cross detection, use MA-8 with fastPeriod=50, slowPeriod=200, direction=fast_above_slow.
-- PA-17 (Wedge Pop Detection) is a comprehensive multi-phase pattern detector. Use it when the user mentions: "wedge pop", "money pattern", "Oliver Kell pattern", "reclaiming the 10/20 EMA on volume", "breaking back above moving averages after consolidation", "volatility contraction then breakout through EMAs", or "gap up through declining MAs". PA-17 handles the entire setup (wedge formation, range contraction, volume dry-up) AND trigger (EMA reclaim on volume surge) in a SINGLE criterion — do NOT decompose a wedge pop into multiple separate criteria. PA-17 returns rich diagnostic data (pop type, gap %, volume ratio, wedge duration, range contraction, position vs 200 DMA). It is a standalone indicator with no data-linking requirements.
+- PATTERN PRIORITY: When the user mentions BOTH a trader's name AND a specific pattern name, ALWAYS prioritize the specific pattern name. The pattern name tells you exactly what they want.
+
+- TRADER NAME → PATTERNS MAPPING: When a user mentions a trader's name WITHOUT a specific pattern, create multiple OR thoughts covering that trader's signature patterns. Use permissive parameters for each.
+
+  OLIVER KELL patterns:
+    - "EMA Crossback": MA-9 (crossType="above", maPeriod=21, maType="ema", lookbackBars=5)
+    - "Wedge Pop": PA-17 (minGapPct=1, minWedgeBars=5)
+  
+  QULLAMAGGIE / KRISTJAN KULLAMÄGI patterns:
+    - "Episodic Pivot": Use gap detection + volume surge (VOL-5 minMultiple=1.5) + price near highs (PA-6 maxDistance=10)
+    - "ORB Breakout": Flag as ORB pattern, note intraday timeframe needed
+    - "Tight Range Breakout": PA-3 (base detection, maxRange=10) + PA-14 (tightness)
+  
+  MARK MINERVINI patterns:
+    - "VCP": PA-3 (base) + PA-14 (tightness ratio, showing contractions)
+    - "Trend Template": MA-1 (above 50 & 200 SMA) + MA-8 (50 above 200) + MA-4 (rising 200 SMA) + PA-6 (within 25% of highs)
+  
+  WILLIAM O'NEIL / IBD / CAN SLIM patterns:
+    - "Cup and Handle": PA-1 (cup and handle detection)
+    - "Flat Base": PA-3 (maxRange=15, minPeriod=20)
+    - "Pocket Pivot": Volume surge (VOL-5) + price reclaiming prior pivot
+  
+  DAN ZANGER patterns:
+    - "Bull Flag": PA-2 (flag detection) + strong prior move
+    - "Channel Breakout": Breakout from ascending channel
+
+  When creating for a trader name alone, structure thoughts as OR (any pattern matches). In description note: "Combines [Trader]'s signature patterns: [list them]."
+
+- EMA CROSSBACK / MA RECLAIM: When user mentions "EMA crossback", "crossback", "cross back", "reclaim the EMA", "reclaim the 10/20/21", use MA-9 (Price Crosses MA) with crossType="above" and the appropriate MA period (typically 10, 20, or 21 EMA). This detects price crossing back above the EMA after a pullback. The core EMA Crossback pattern does NOT require a gap — it's simply price closing back above the EMA.
+- PA-17 (Wedge Pop Detection) is a comprehensive multi-phase pattern detector. Use it when the user SPECIFICALLY mentions: "wedge pop", "money pattern", "gap through EMAs", "volatility contraction then breakout through EMAs", or "gap up through declining MAs". PA-17 handles the entire setup (wedge formation, range contraction, volume dry-up) AND trigger (EMA reclaim on volume surge) in a SINGLE criterion — do NOT decompose a wedge pop into multiple separate criteria. PA-17 returns rich diagnostic data (pop type, gap %, volume ratio, wedge duration, range contraction, position vs 200 DMA). It is a standalone indicator with no data-linking requirements. NOTE: Do NOT automatically use PA-17 just because someone mentions "Oliver Kell" — he teaches multiple patterns. Only use PA-17 if the user explicitly mentions wedge pop or gap-related terminology.
 
 CRITICAL RULE FOR CRITERIA COUNT:
 Generate exactly as many criteria as the user's idea requires — no more, no less. If the user asks for something specific and narrow like "price within 1% of the 50 SMA", that is ONE criterion. Do NOT pad with extra filters the user didn't ask for. If the user describes something compound like "breakout with volume above rising 50 SMA", that naturally decomposes into multiple criteria. Only use indicatorId values from the indicator library provided above — never invent indicator IDs.
@@ -992,7 +1219,11 @@ You MUST detect intraday timeframe references from the user's description and se
 - "5-min", "5 min", "5-minute", "5m", "five minute" → timeframe: "5min"
 - "15-min", "15 min", "15-minute", "15m", "fifteen minute" → timeframe: "15min"
 - "30-min", "30 min", "30-minute", "30m", "thirty minute" → timeframe: "30min"
+- "intraday", "session", "today", "this session" (without specific timeframe) → timeframe: "5min"
 - "daily", "D1", "day", or no timeframe mentioned → timeframe: "daily"
+
+INTRADAY INDICATOR RULE — CRITICAL:
+When using ITD-* (Intraday category) indicators like ITD-1 (Opening Range Breakout), ITD-2 (VWAP Position), or ITD-3 (Gap Detection for intraday), the thought timeframe MUST be set to an intraday value ("5min", "15min", or "30min"). These indicators are designed for intraday candles and will produce meaningless results on daily data. If the user requests VWAP, ORB, or other ITD-* indicators without specifying a timeframe, default to "5min".
 When the user's description contains a combined/multi-part idea where SOME parts reference an intraday timeframe and others reference daily, split into separate thoughts with the appropriate timeframe on each.
 
 MULTI-TIMEFRAME PATTERN:
@@ -1064,7 +1295,31 @@ Use OR ONLY on edges targeting RESULTS when the user describes alternatives. Use
 
 When creating OR branches, keep each branch thought focused on ONE specific alternative (e.g., one MA period per thought). Don't combine multiple alternatives into one thought — that defeats the purpose of OR logic.
 
-Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").`;
+Select the most appropriate indicators and set parameters that match the user's description. Set inverted to true when the user wants the opposite of what the indicator normally checks (e.g., "price below the 50 SMA" when the indicator checks "above").
+
+MISSING INDICATOR HANDLING:
+If you cannot find ANY suitable indicator in the library above that reasonably matches the user's request, you MUST return a special response format to indicate that a custom indicator should be created:
+{
+  "needsCustomIndicator": true,
+  "requestDescription": "Brief description of what the user wants (1-2 sentences)",
+  "suggestedIndicatorName": "Suggested name for the new indicator",
+  "category": "Suggested category",
+  "reason": "Brief explanation of why no existing indicator matches"
+}
+
+ONLY use this format when NO indicator in the library can reasonably achieve what the user wants. Do not suggest custom indicators for requests that can be solved by combining existing indicators creatively. For example:
+- "3 consecutive up days" → NO existing indicator → needsCustomIndicator: true
+- "price up/down X% over last N days/bars" → NO existing indicator → needsCustomIndicator: true (PA-3 is for sideways consolidation, PA-12/PA-18 require upstream base context — neither measures simple price change over a period)
+- "price above 50 SMA" → MA-1 exists → use MA-1, do NOT suggest custom
+- "volume spike" → VOL-5 exists → use VOL-5, do NOT suggest custom
+
+CRITICAL — DO NOT USE THESE INDICATORS FOR PRICE CHANGE:
+- PA-3 (Consolidation/Base Detection) detects SIDEWAYS consolidation zones, NOT price increases/decreases
+- PA-12 (Prior Price Advance) measures advance BEFORE a base and requires PA-3 upstream
+- PA-18 (Price Change Over Period) measures change AFTER a pattern and requires upstream context
+If the user asks for simple "price increased/decreased by X% over the last N bars/days", return needsCustomIndicator: true.
+
+Be very strict about this — only suggest a custom indicator when it is genuinely impossible to fulfill the request with the available library.`;
 
       const openai = getOpenAI();
       if (!openai) {
@@ -1113,6 +1368,19 @@ ${summaries}`;
       }
 
       const parsed = JSON.parse(content);
+
+      // Check if AI indicates a custom indicator is needed
+      if (parsed.needsCustomIndicator) {
+        return res.json({
+          needsCustomIndicator: true,
+          requestDescription: parsed.requestDescription || description,
+          suggestedIndicatorName: parsed.suggestedIndicatorName || "Custom Indicator",
+          category: parsed.category || "Custom",
+          reason: parsed.reason || "No matching indicator found in library",
+          originalRequest: description,
+        });
+      }
+
       let result: any;
       if (parsed.thoughts && Array.isArray(parsed.thoughts)) {
         result = parsed;
@@ -1121,6 +1389,22 @@ ${summaries}`;
           thoughts: [{ thoughtKey: "A", ...parsed }],
           edges: [],
         };
+      }
+
+      // Validate AI selection against user's intent - catch obvious mismatches
+      const validation = validateAISelection(description, result.thoughts);
+      if (!validation.valid) {
+        console.warn(`[BigIdea AI] Validation failed for "${description}":`, validation.errors);
+        // Return as needing custom indicator with explanation
+        return res.json({
+          needsCustomIndicator: true,
+          requestDescription: description,
+          suggestedIndicatorName: "Custom Filter",
+          category: "Custom",
+          reason: validation.errors.join(" "),
+          originalRequest: description,
+          validationErrors: validation.errors,
+        });
       }
 
       // Resolve reused thoughts: replace reuseThoughtId references with full thought data from DB
@@ -1243,6 +1527,195 @@ ${summaries}`;
     }
   });
 
+  // Refine a proposal through iterative conversation
+  app.post("/api/bigidea/ai/refine-proposal", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not logged in. Please refresh the page and try again." });
+      }
+
+      const { currentProposal, message, conversationHistory, originalDescription } = req.body;
+      if (!currentProposal || !message) {
+        return res.status(400).json({ error: "currentProposal and message are required" });
+      }
+
+      const openai = getOpenAI();
+      if (!openai) {
+        return res.status(500).json({ error: "AI service not configured. Please ensure OpenAI API key is set." });
+      }
+
+      const mergedLibrary = await getMergedIndicatorLibrary(userId);
+      const indicatorSummary = mergedLibrary.map((ind) => ({
+        id: ind.id,
+        name: ind.name,
+        category: ind.category,
+        description: ind.description,
+        params: ind.params.map((p) => ({
+          name: p.name,
+          label: p.label,
+          type: p.type,
+          defaultValue: p.defaultValue,
+          options: p.options,
+          min: p.min,
+          max: p.max,
+          step: p.step,
+        })),
+      }));
+
+      const systemPrompt = `You are a helpful stock screening assistant refining scan criteria through conversation. Your job is to CLOSE THE LOOP — don't just silently apply changes, explain what they mean for the user's scan.
+
+CURRENT PROPOSAL:
+Original description: "${originalDescription || 'Not provided'}"
+${JSON.stringify(currentProposal, null, 2)}
+
+AVAILABLE INDICATORS:
+${JSON.stringify(indicatorSummary, null, 2)}
+
+RESPONSE GUIDELINES — ALWAYS CLOSE THE LOOP:
+Your response should be conversational and informative. After making changes, explain:
+1. What you changed (briefly)
+2. How it affects the scan (will it narrow/widen results? is it required or optional?)
+3. Any relevant tips or follow-up options
+
+EXAMPLES OF GOOD RESPONSES:
+- "Added Wedge Pop as an optional OR condition — your scan will now catch stocks that EITHER cross the 21 EMA OR gap through it with wedge characteristics. This broadens your net. Want me to make it required instead (AND logic)?"
+- "Removed the volume filter. This will return more results since we're no longer filtering by volume surge. If you're getting too many, we can add a different volume check."
+- "Tightened RSI from 30-70 to 50-70. This focuses on stocks with stronger momentum, which should reduce results but improve quality. The scan currently has 3 required conditions."
+- "Added minimum price > $20. Good call for avoiding penny stocks. Current setup: EMA crossback + price filter. Want to add anything else?"
+
+EXAMPLES OF BAD RESPONSES (don't do these):
+- "Done." (too terse, no context)
+- "Added wedge pop." (what does that mean for the scan?)
+- "Updated." (updated what? how?)
+
+LOGIC EXPLANATION:
+- Multiple thoughts with no explicit edges = AND logic (all must pass)
+- Thoughts connected to RESULTS with "logicType": "OR" = any one can pass
+- When user asks to make something "optional" or "nice to have", use OR edges to RESULTS
+- When user asks to make something "required", use AND (no explicit edges, or edge without logicType)
+
+WEIGHTING/PRIORITY:
+Our scan system uses binary pass/fail, not weighted scoring. BUT you can explain alternatives:
+- "Optional" = OR logic, broadens results
+- "Required" = AND logic, filters strictly
+- If user asks about weighting, explain: "The scanner uses pass/fail logic, but I can make this optional (OR) so it catches stocks with or without it. After the scan, you can sort results by which criteria they matched."
+
+RULES:
+- Return the FULL updated proposal structure (thoughts + edges) - don't return partial updates
+- Maintain the same JSON structure: { "thoughts": [...], "edges": [...] }
+- Each thought needs: thoughtKey, name, category, description, criteria, timeframe (optional)
+- Each criterion needs: indicatorId, label, params (array with name, label, type, value, min, max, step)
+- For number params, always include min, max, step from the indicator definition
+- When user says "remove X" or "drop X", remove that criterion or thought entirely
+- When user says "add X", add a new criterion or thought as appropriate
+- When user says "change X to Y" or "make X tighter/looser", modify the relevant parameter
+- When user says "yes", "looks good", "perfect", or similar, return proposal unchanged with an encouraging response like "Great, ready to scan!"
+- For OR logic: add edge { "from": "thoughtKey", "to": "RESULTS", "logicType": "OR" }
+
+Respond with valid JSON in this format:
+{
+  "response": "Your helpful, loop-closing message here",
+  "proposal": {
+    "thoughts": [...],
+    "edges": [...]
+  }
+}`;
+
+      // Build conversation context
+      const messages: any[] = [{ role: "system", content: systemPrompt }];
+      
+      // Add conversation history for context
+      if (conversationHistory && Array.isArray(conversationHistory)) {
+        for (const msg of conversationHistory.slice(-6)) { // Keep last 6 messages for context
+          messages.push({
+            role: msg.role === "user" ? "user" : "assistant",
+            content: msg.content,
+          });
+        }
+      }
+      
+      // Add current user message
+      messages.push({ role: "user", content: message });
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages,
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+      });
+
+      const content = completion.choices[0]?.message?.content;
+      if (!content) {
+        return res.status(500).json({ error: "AI returned empty response" });
+      }
+
+      const parsed = JSON.parse(content);
+      
+      // Validate the response structure
+      if (!parsed.proposal || !parsed.proposal.thoughts) {
+        return res.json({
+          response: parsed.response || "I couldn't process that request. Could you rephrase?",
+          proposal: currentProposal, // Return unchanged if parsing fails
+        });
+      }
+
+      // Validate and fix proposal structure (same fixes as create-thought)
+      const PROVIDER_IDS = new Set(["PA-3", "PA-7"]);
+      const CONSUMER_IDS = new Set(["PA-12", "PA-13", "PA-14", "PA-15", "PA-16"]);
+      const result = parsed.proposal;
+      const fixedThoughts: any[] = [];
+      const fixedEdges: any[] = [...(result.edges || [])];
+      const usedKeys = new Set(result.thoughts.map((t: any) => t.thoughtKey));
+
+      const nextUnusedKey = (): string => {
+        for (let i = 0; i < 26; i++) {
+          const key = String.fromCharCode(65 + i);
+          if (!usedKeys.has(key)) {
+            usedKeys.add(key);
+            return key;
+          }
+        }
+        return `X${usedKeys.size}`;
+      };
+
+      for (const thought of result.thoughts) {
+        const criteria = thought.criteria || [];
+        const hasProvider = criteria.some((c: any) => PROVIDER_IDS.has(c.indicatorId));
+        const hasConsumer = criteria.some((c: any) => CONSUMER_IDS.has(c.indicatorId));
+
+        if (hasProvider && hasConsumer) {
+          // Auto-split provider/consumer violations
+          const providerCriteria = criteria.filter((c: any) => PROVIDER_IDS.has(c.indicatorId) || !CONSUMER_IDS.has(c.indicatorId));
+          const consumerCriteria = criteria.filter((c: any) => CONSUMER_IDS.has(c.indicatorId));
+          const providerKey = thought.thoughtKey || nextUnusedKey();
+          const consumerKey = nextUnusedKey();
+
+          fixedThoughts.push({ ...thought, thoughtKey: providerKey, criteria: providerCriteria });
+          fixedThoughts.push({
+            thoughtKey: consumerKey,
+            name: consumerCriteria.map((c: any) => INDICATOR_LIBRARY.find(i => i.id === c.indicatorId)?.name || c.indicatorId).join(" + "),
+            category: thought.category || "Custom",
+            description: "Data-linked filters",
+            criteria: consumerCriteria,
+            timeframe: thought.timeframe,
+          });
+          fixedEdges.push({ from: providerKey, to: consumerKey });
+        } else {
+          fixedThoughts.push(thought);
+        }
+      }
+
+      res.json({
+        response: parsed.response || "Updated!",
+        proposal: { thoughts: fixedThoughts, edges: fixedEdges },
+      });
+    } catch (error: any) {
+      console.error("[BigIdea AI] Error refining proposal:", error?.message || error);
+      res.status(500).json({ error: "Failed to refine proposal. " + (error?.message || "") });
+    }
+  });
+
   app.post("/api/bigidea/ai/restate-thought", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
@@ -1255,7 +1728,8 @@ ${summaries}`;
         return res.status(400).json({ error: "instruction is required" });
       }
 
-      const indicatorSummary = INDICATOR_LIBRARY.map((ind) => ({
+      const mergedLibrary = await getMergedIndicatorLibrary(userId);
+      const indicatorSummary = mergedLibrary.map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -1358,6 +1832,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
     try {
       const userId = (req.session as any)?.userId;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const mergedIndicatorLibrary = await getMergedIndicatorLibrary(userId);
 
       const { nodes, edges, universe, ideaId, customTickers } = req.body;
       if (!nodes || !edges || (!universe && !customTickers)) {
@@ -1484,13 +1960,47 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         const tgtIsThought = thoughtNodes.some((n: any) => n.id === e.target);
         return srcIsThought && tgtIsThought;
       });
-      const evalOrder = topoSort(thoughtNodes, thoughtEdges);
-      const sortedThoughtNodes = evalOrder.map((id: string) => thoughtNodes.find((n: any) => n.id === id)!).filter(Boolean);
-      console.log(`[BigIdea Scan] Evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
+      let evalOrder = topoSort(thoughtNodes, thoughtEdges);
+      let sortedThoughtNodes = evalOrder.map((id: string) => thoughtNodes.find((n: any) => n.id === id)!).filter(Boolean);
+      let optimizedEdges = thoughtEdges;
+      
+      console.log(`[BigIdea Scan] Initial evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
+      
+      // AUTO-OPTIMIZATION: Check if we should reorder thoughts for efficiency
+      if (shouldAutoOptimize(thoughtNodes, edges)) {
+        try {
+          // Fetch market sentiment for optimization context
+          let marketRegime: any = undefined;
+          try {
+            const sentiment = await fetchMarketSentiment();
+            marketRegime = buildMarketRegimeSnapshot(sentiment);
+          } catch (e) {
+            console.warn(`[QueryOptimizer] Could not fetch market sentiment for optimization context`);
+          }
+          
+          const optimizationContext: OptimizationContext = {
+            universe: universe || 'unknown',
+            marketRegime,
+            timeframe: thoughtNodes[0]?.thoughtTimeframe || 'daily',
+          };
+          
+          const optimized = await autoOptimizeThoughtOrder(thoughtNodes, edges, optimizationContext);
+          
+          // Use optimized order and edges (keep all edges including connections to Results)
+          sortedThoughtNodes = optimized.nodes;
+          optimizedEdges = optimized.edges;
+          
+          console.log(`[BigIdea Scan] ✨ AUTO-OPTIMIZED evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
+        } catch (error) {
+          console.error(`[QueryOptimizer] Optimization failed, using topological order:`, error);
+        }
+      } else {
+        console.log(`[BigIdea Scan] Using graph-defined order (no optimization needed)`);
+      }
 
       const downstreamMap: Record<string, string[]> = {};
       for (const n of thoughtNodes) downstreamMap[n.id] = [];
-      for (const e of thoughtEdges) {
+      for (const e of optimizedEdges) {
         if (downstreamMap[e.source]) downstreamMap[e.source].push(e.target);
       }
       const getTransitiveDownstream = (nodeId: string): string[] => {
@@ -1562,10 +2072,46 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         thoughtCounts[node.id] = 0;
         funnelData.perThought[node.id] = { name: node.thoughtName || "Unnamed", passed: 0, failed: 0, evaluated: 0, skipped: 0, failedTickers: [] };
       }
+      
+      // Track execution performance for query optimizer learning
+      const indicatorPerformance: Record<string, { totalTimeMs: number; evaluations: number; passes: number }> = {};
+      for (const node of thoughtNodes) {
+        for (const criterion of (node.thoughtCriteria || [])) {
+          if (!criterion.muted && !indicatorPerformance[criterion.indicatorId]) {
+            indicatorPerformance[criterion.indicatorId] = { totalTimeMs: 0, evaluations: 0, passes: 0 };
+          }
+        }
+      }
 
       let fetchFailCount = 0;
       let tooFewCandlesCount = 0;
-      const BATCH_SIZE = 25;
+      // Batch size controls how many tickers we evaluate in parallel per batch.
+      // Lower this if you see DB / external API contention. 12 is a conservative default for upgraded DBs.
+      const BATCH_SIZE = 12;
+      
+      // Check if any FND-* indicators are used (needed for market cap stats)
+      const hasFundamentalIndicators = sortedThoughtNodes.some((node: any) => 
+        (node.thoughtCriteria || []).some((c: any) => 
+          !c.muted && c.indicatorId && c.indicatorId.startsWith("FND-")
+        )
+      );
+      
+      // Track market cap data availability for debugging
+      let marketCapStats = { total: 0, hasData: 0, missing: 0, sampleValues: [] as Array<{ symbol: string; marketCap: number }> };
+
+      // Pre-fetch market caps from FMP in one batch so FND-1 works even when Finnhub is rate-limited or fails
+      let fmpMarketCaps: Map<string, number> = new Map();
+      if (hasFundamentalIndicators) {
+        try {
+          fmpMarketCaps = await fundamentals.fetchMarketCapsBatchFromFMP(tickers);
+          if (fmpMarketCaps.size > 0) {
+            console.log(`[BigIdea Scan] FMP batch market cap: ${fmpMarketCaps.size}/${tickers.length} symbols`);
+          }
+        } catch (e) {
+          console.warn("[BigIdea Scan] FMP batch market cap failed:", e);
+        }
+      }
+
       for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
         const batch = tickers.slice(i, i + BATCH_SIZE);
         const batchResults = await Promise.all(
@@ -1592,6 +2138,45 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
               const nodeCriteriaResults: Record<string, CriterionResult[]> = {};
               const effectivelyMutedNodes = new Set<string>();
               const skippedNodes = new Set<string>();
+
+              // Fetch fundamental data if any FND-* indicators are used
+              let fundamentalData: any = null;
+              
+              if (hasFundamentalIndicators) {
+                try {
+                  // Use getFundamentals only: 1 API call per symbol (profile). Avoid getExtendedFundamentals
+                  // here to prevent rate limiting (it does 5 calls/symbol → 125+ concurrent for a batch).
+                  const basic = await fundamentals.getFundamentals(symbol);
+                  fundamentalData = {
+                    ...basic,
+                    daysToEarnings: undefined as number | undefined,
+                  };
+
+                  // If Finnhub/cache had no market cap, use FMP batch result so FND-1 can still pass
+                  const fmpCap = fmpMarketCaps.get(symbol) ?? fmpMarketCaps.get(symbol.toUpperCase());
+                  if ((!fundamentalData.marketCap || fundamentalData.marketCap === 0) && fmpCap && fmpCap > 0) {
+                    fundamentalData.marketCap = fmpCap;
+                  }
+
+                  marketCapStats.total++;
+                  if (fundamentalData.marketCap && fundamentalData.marketCap > 0) {
+                    marketCapStats.hasData++;
+                    if (marketCapStats.sampleValues.length < 5) {
+                      marketCapStats.sampleValues.push({ symbol, marketCap: fundamentalData.marketCap });
+                    }
+                  } else {
+                    marketCapStats.missing++;
+                    if (marketCapStats.missing <= 10) {
+                      console.warn(`[BigIdea Scan] ${symbol}: No market cap (got ${fundamentalData?.marketCap ?? 'undefined'})`);
+                    }
+                  }
+                } catch (error) {
+                  marketCapStats.total++;
+                  marketCapStats.missing++;
+                  console.warn(`[BigIdea Scan] Failed to fetch fundamental data for ${symbol}:`, error);
+                  fundamentalData = null;
+                }
+              }
 
               for (const node of sortedThoughtNodes) {
                 if (skippedNodes.has(node.id)) {
@@ -1622,22 +2207,58 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   }
                 }
 
-                const upstreamNodes = edges
+                // Use optimizedEdges to respect sequential dependencies from optimizer
+                const upstreamNodes = optimizedEdges
                   .filter((e: any) => e.target === node.id)
-                  .map((e: any) => e.source);
+                  .map((e: any) => e.source)
+                  .filter((srcId: string) => thoughtNodes.some((n: any) => n.id === srcId)); // Only thought nodes, not Results
+                
+                // If this node has upstream dependencies, check if all upstream nodes passed
+                // If any upstream node failed, skip this node (sequential filtering)
+                if (upstreamNodes.length > 0) {
+                  const allUpstreamPassed = upstreamNodes.every((srcId: string) => nodeResults[srcId] === true);
+                  if (!allUpstreamPassed) {
+                    // At least one upstream node failed, skip this node
+                    skippedNodes.add(node.id);
+                    nodeResults[node.id] = false;
+                    if (funnelData.perThought[node.id]) funnelData.perThought[node.id].skipped++;
+                    continue;
+                  }
+                }
+                
                 const mergedUpstream: Record<string, any> = {};
+                const incomingEdges = optimizedEdges.filter((e: any) => e.target === node.id);
+                
                 for (const srcId of upstreamNodes) {
                   const srcData = nodeOutputData[srcId];
-                  if (srcData) Object.assign(mergedUpstream, srcData);
+                  if (srcData) {
+                    Object.assign(mergedUpstream, srcData);
+                    
+                    // Apply link tolerance if specified on the edge
+                    const edge = incomingEdges.find((e: any) => e.source === srcId);
+                    if (edge?.linkTolerance !== undefined) {
+                      mergedUpstream._linkTolerance = edge.linkTolerance;
+                      mergedUpstream._linkToleranceType = edge.linkToleranceType || "bars";
+                    }
+                  }
+                }
+                
+                // Add fundamental data if available (always include if fetched, even if no upstream nodes)
+                if (fundamentalData) {
+                  mergedUpstream.fundamentalData = fundamentalData;
                 }
 
+                const evalStartTime = Date.now();
                 const evalResult = evaluateThoughtCriteria(
                   node.thoughtCriteria,
                   candles,
                   spyCandles.length > 0 ? spyCandles : undefined,
                   candlesByTimeframe,
-                  Object.keys(mergedUpstream).length > 0 ? mergedUpstream : undefined
+                  // Always pass mergedUpstream if it has any data (including fundamentalData), otherwise undefined
+                  Object.keys(mergedUpstream).length > 0 ? mergedUpstream : undefined,
+                  mergedIndicatorLibrary
                 );
+                const evalTimeMs = Date.now() - evalStartTime;
 
                 if (evalResult.allMuted) {
                   effectivelyMutedNodes.add(node.id);
@@ -1673,6 +2294,15 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                     indFunnel.failed++;
                     if (cr.diagnostics && indFunnel.diagnosticSamples.length < 5) {
                       indFunnel.diagnosticSamples.push({ symbol, value: cr.diagnostics.value, threshold: cr.diagnostics.threshold });
+                    }
+                  }
+                  
+                  // Track performance for query optimizer
+                  if (indicatorPerformance[cr.indicatorId]) {
+                    indicatorPerformance[cr.indicatorId].evaluations++;
+                    indicatorPerformance[cr.indicatorId].totalTimeMs += evalTimeMs / evalResult.criteriaResults.length; // Divide time among all indicators
+                    if (effectivePass) {
+                      indicatorPerformance[cr.indicatorId].passes++;
                     }
                   }
                 }
@@ -1903,6 +2533,18 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         }
       }
 
+      // Log market cap statistics if FND indicators were used
+      if (hasFundamentalIndicators && marketCapStats.total > 0) {
+        console.log(`[BigIdea Scan] Market Cap Data Summary: ${marketCapStats.hasData}/${marketCapStats.total} stocks have market cap data (${marketCapStats.missing} missing)`);
+        if (marketCapStats.sampleValues.length > 0) {
+          const sampleStr = marketCapStats.sampleValues.map(s => `${s.symbol}: $${(s.marketCap / 1e9).toFixed(1)}B`).join(', ');
+          console.log(`[BigIdea Scan] Sample market caps: ${sampleStr}`);
+        }
+        if (marketCapStats.missing > 0) {
+          console.warn(`[BigIdea Scan] ⚠️  ${marketCapStats.missing} stocks missing market cap data - FND-1 filter will exclude them`);
+        }
+      }
+
       const dynamicDataFlows: Array<{ provider: string; consumer: string; dataKey: string; description: string }> = [];
       for (const tn of thoughtNodes) {
         for (const c of (tn.thoughtCriteria || [])) {
@@ -1980,7 +2622,130 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         }
       }
 
-      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows, funnelData, sessionId });
+      // Record performance metrics for query optimizer learning (async, don't block response)
+      (async () => {
+        try {
+          let marketRegime: any = undefined;
+          try {
+            const sentiment = await fetchMarketSentiment();
+            marketRegime = buildMarketRegimeSnapshot(sentiment);
+          } catch (e) {
+            // Ignore sentiment fetch errors
+          }
+          
+          for (const [indicatorId, perf] of Object.entries(indicatorPerformance)) {
+            if (perf.evaluations > 0) {
+              await recordThoughtPerformance(indicatorId, {
+                executionTimeMs: perf.totalTimeMs / perf.evaluations,
+                passed: perf.passes,
+                evaluated: perf.evaluations,
+                universe: universe || 'unknown',
+                marketRegime,
+                timeframe: thoughtNodes[0]?.thoughtTimeframe || 'daily',
+              });
+            }
+          }
+        } catch (error) {
+          console.error('[QueryOptimizer] Failed to record performance metrics:', error);
+        }
+      })();
+
+      // Enhanced debug info for troubleshooting
+      // Fetch idea-level info (name, description)
+      let ideaInfo: { name: string; description: string | null } | null = null;
+      if (ideaId && isDatabaseAvailable() && db) {
+        try {
+          const [idea] = await db
+            .select({ name: scannerIdeas.name, description: scannerIdeas.description })
+            .from(scannerIdeas)
+            .where(eq(scannerIdeas.id, ideaId))
+            .limit(1);
+          if (idea) {
+            ideaInfo = { name: idea.name, description: idea.description };
+          }
+        } catch (err) {
+          console.error('[BigIdea Scan] Failed to fetch idea info:', err);
+        }
+      }
+      
+      // Fetch per-thought aiPrompt from scanner_thoughts (the original user prompts)
+      const thoughtPrompts: Map<number, { aiPrompt: string | null; description: string | null }> = new Map();
+      const thoughtIdsFromNodes = nodes
+        .filter((n: any) => n.type === "thought" && n.thoughtId)
+        .map((n: any) => n.thoughtId as number);
+      
+      if (thoughtIdsFromNodes.length > 0 && isDatabaseAvailable() && db) {
+        try {
+          const thoughts = await db
+            .select({ id: scannerThoughts.id, aiPrompt: scannerThoughts.aiPrompt, description: scannerThoughts.description })
+            .from(scannerThoughts)
+            .where(inArray(scannerThoughts.id, thoughtIdsFromNodes));
+          for (const t of thoughts) {
+            thoughtPrompts.set(t.id, { aiPrompt: t.aiPrompt, description: t.description });
+          }
+        } catch (err) {
+          console.error('[BigIdea Scan] Failed to fetch thought prompts:', err);
+        }
+      }
+
+      const enhancedDebugInfo = {
+        // Idea-level info
+        ideaName: ideaInfo?.name || null,
+        ideaDescription: ideaInfo?.description || null,
+        
+        // Canvas layout
+        thoughtNodes: sortedThoughtNodes.map((n: any) => {
+          const thoughtData = n.thoughtId ? thoughtPrompts.get(n.thoughtId) : null;
+          return {
+            id: n.id,
+            thoughtId: n.thoughtId || null,
+            name: n.thoughtName,
+            timeframe: n.thoughtTimeframe,
+            muted: n.isMuted,
+            aiPrompt: thoughtData?.aiPrompt || null,
+            description: thoughtData?.description || null,
+            criteria: (n.thoughtCriteria || []).map((c: any) => {
+              const ind = INDICATOR_LIBRARY.find((i) => i.id === c.indicatorId);
+              return {
+                indicatorId: c.indicatorId,
+                indicatorName: ind?.name || 'Unknown',
+                label: c.label,
+                muted: c.muted,
+                inverted: c.inverted,
+                params: c.params
+              };
+            })
+          };
+        }),
+        edges: optimizedEdges.map((e: any) => ({
+          source: e.source,
+          target: e.target,
+          logic: e.logicType
+        })),
+        evalOrder: sortedThoughtNodes.map((n: any) => n.thoughtName),
+        
+        // Full criteria with descriptions
+        fullCriteria: sortedThoughtNodes.map((n: any) => {
+          const thoughtData = n.thoughtId ? thoughtPrompts.get(n.thoughtId) : null;
+          return {
+            thought: n.thoughtName,
+            timeframe: n.thoughtTimeframe,
+            aiPrompt: thoughtData?.aiPrompt || null,
+            criteria: (n.thoughtCriteria || []).map((c: any) => {
+              const ind = INDICATOR_LIBRARY.find((i) => i.id === c.indicatorId);
+              return {
+                id: c.indicatorId,
+                name: ind?.name || 'Unknown',
+                description: ind?.description || '',
+                category: ind?.category || '',
+                params: c.params
+              };
+            })
+          };
+        })
+      };
+
+      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows, funnelData, sessionId, debugInfo: enhancedDebugInfo });
     } catch (error) {
       console.error("Error executing scan:", error);
       res.status(500).json({ error: "Failed to execute scan" });
@@ -2073,7 +2838,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
 
-      const { symbol, rating, ideaId, sessionId, scanConfig, indicatorSnapshot, price } = req.body;
+      const { symbol, rating, ideaId, sessionId, scanConfig, indicatorSnapshot, price, ratingType, trainingMode, sourceSetupId } = req.body;
       if (!symbol || !rating || !["up", "down"].includes(rating)) {
         return res.status(400).json({ error: "symbol and rating ('up'|'down') are required" });
       }
@@ -2089,6 +2854,9 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           scanConfig: scanConfig || null,
           indicatorSnapshot: indicatorSnapshot || null,
           price: price || null,
+          ratingType: ratingType || "user",
+          trainingMode: trainingMode || false,
+          sourceSetupId: sourceSetupId || null,
         })
         .returning();
 
@@ -2332,6 +3100,11 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 
       const systemPrompt = `You are a stock scanner tuning assistant. Analyze the scan configuration and failure funnel data to suggest parameter adjustments, criterion additions, or criterion removals that will improve scan results quality.
 
+CRITICAL CONSTRAINT — INDICATOR EXISTENCE:
+- "param_change" suggestions can ONLY reference indicators that exist in "Indicator metadata with current params" — these are the ONLY indicators currently on the canvas
+- Do NOT suggest param_change for indicators not in that list — the user doesn't have them on their canvas
+- If you want to suggest a new indicator, use "add_criterion" instead
+
 RULES:
 - Never suggest changing auto-linked parameters (marked autoLinked: true) — they are dynamically set per-stock
 - All suggested param values MUST be within the min/max bounds provided
@@ -2345,8 +3118,26 @@ RULES:
 - Pay special attention to CURRENT REGIME, CURRENT UNIVERSE, and ARCHETYPE sections — these show how parameters performed in conditions similar to right now
 - If a regime or archetype shows low retention, consider adjusting parameters differently than all-time averages suggest
 - AVOID suggesting parameter changes that were previously discarded by users or listed in AVOID PARAMS
-- For add_criterion: suggest an indicator from the available indicator library that would complement the existing scan. Include the indicatorId, indicatorName, and a full criterion object with default params
+- For add_criterion: suggest an indicator from the "Available indicators NOT currently on canvas" list that would complement the existing scan. Include the indicatorId, indicatorName, and a full criterion object with default params
 - For remove_criterion: suggest removing a criterion that is overly restrictive or redundant. Specify which thought/node contains it via thoughtId
+
+USER INSTRUCTION HANDLING:
+When the user provides a specific instruction, prioritize their request over generic funnel analysis.
+
+CRITICAL: If the user asks to ADD something or describes a filter that IS NOT in "Indicator metadata with current params", you MUST use "add_criterion" (not "param_change"). 
+- "param_change" = ONLY for adjusting existing params on indicators ALREADY on the canvas
+- "add_criterion" = for adding NEW indicators that aren't on the canvas yet
+
+Common add requests and their indicators:
+- "add price above/below X SMA" → add_criterion with MA-1 (SMA Value), direction: above/below, period: X
+- "add price above/below X EMA" → add_criterion with MA-2 (EMA Value), direction: above/below, period: X  
+- "add price crossed above/below X MA" → add_criterion with MA-9 (Price Crosses MA)
+- "add RSI above/below X" or "RSI filter" → add_criterion with RS-4 (RSI Range)
+- "add volume surge" or "high volume" → add_criterion with VOL-5 (Volume Spike)
+- "add near 52-week high" → add_criterion with PA-6 (Distance from 52-Week High)
+- "add MA slope" or "rising MA" → add_criterion with MA-4 (MA Slope)
+
+When creating add_criterion, include thoughtId (pick the first thought node) and a full criterion object with appropriate params.
 
 SUGGESTION TYPES:
 1. "param_change" — adjust a parameter value on an existing criterion
@@ -2455,9 +3246,16 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
             s.suggestedValue = val;
 
             const indMeta = indicatorMeta.find(m => m.id === s.indicatorId);
-            if (!indMeta) return false;
+            if (!indMeta) {
+              console.warn(`[Tuning] Filtered out param_change for ${s.indicatorId} - indicator not on canvas`);
+              return false;
+            }
             const param = indMeta.currentParams.find((p: any) => p.name === s.paramName);
-            if (param?.autoLinked) return false;
+            if (!param) {
+              console.warn(`[Tuning] Filtered out param_change for ${s.indicatorId}.${s.paramName} - param not found on this indicator`);
+              return false;
+            }
+            if (param.autoLinked) return false;
             const bound = indMeta.bounds.find((b: any) => b.name === s.paramName);
             if (bound) {
               s.suggestedValue = Math.max(bound.min, Math.min(bound.max, s.suggestedValue));
@@ -3289,6 +4087,196 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     }
   });
 
+  // Get query optimizer statistics
+  app.get("/api/bigidea/optimizer-stats", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const stats = await db.select().from(indicatorExecutionStats);
+      
+      const totalEvaluations = stats.reduce((sum, s) => sum + s.totalEvaluations, 0);
+      const avgConfidence = stats.length > 0 
+        ? stats.reduce((sum, s) => sum + Math.min(1.0, s.totalEvaluations / 1000), 0) / stats.length
+        : 0;
+      
+      // Calculate overall improvement (compare baseline vs current selectivity)
+      // Baseline assumption: all thoughts run on full universe (no optimization)
+      // Current: using learned selectivity to estimate actual evaluations
+      const baselineEvaluationsPerScan = stats.length * 500; // Assume 500 stock universe, all thoughts run on all stocks
+      const optimizedEvaluationsPerScan = stats.reduce((sum, s) => {
+        // Estimate how many stocks this indicator sees (cumulative selectivity)
+        const positionFactor = Math.max(0.1, 1 - s.selectivityScore * 0.7);
+        return sum + (500 * positionFactor);
+      }, 0);
+      
+      const overallImprovement = baselineEvaluationsPerScan > 0
+        ? ((baselineEvaluationsPerScan - optimizedEvaluationsPerScan) / baselineEvaluationsPerScan) * 100
+        : 0;
+      
+      // Calculate weekly improvement (compare last 7 days vs previous 7 days)
+      const now = new Date();
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - 7);
+      const twoWeeksStart = new Date(now);
+      twoWeeksStart.setDate(now.getDate() - 14);
+      
+      const recentSessions = await db.select()
+        .from(scanSessions)
+        .where(sql`${scanSessions.createdAt} >= ${weekStart}`)
+        .orderBy(desc(scanSessions.createdAt))
+        .limit(100);
+      
+      const previousSessions = await db.select()
+        .from(scanSessions)
+        .where(sql`${scanSessions.createdAt} >= ${twoWeeksStart} AND ${scanSessions.createdAt} < ${weekStart}`)
+        .orderBy(desc(scanSessions.createdAt))
+        .limit(100);
+      
+      const avgRecentEvals = recentSessions.length > 0
+        ? recentSessions.reduce((sum, s) => sum + (s.totalEvaluations || 0), 0) / recentSessions.length
+        : 0;
+      
+      const avgPreviousEvals = previousSessions.length > 0
+        ? previousSessions.reduce((sum, s) => sum + (s.totalEvaluations || 0), 0) / previousSessions.length
+        : avgRecentEvals;
+      
+      const weeklyImprovement = avgPreviousEvals > 0
+        ? ((avgPreviousEvals - avgRecentEvals) / avgPreviousEvals) * 100
+        : 0;
+      
+      // Find top improved indicator
+      const sortedBySelectivity = [...stats].sort((a, b) => b.selectivityScore - a.selectivityScore);
+      const topImproved = sortedBySelectivity[0];
+      
+      // Calculate total scans
+      const totalScans = await db.select({
+        count: sql<number>`count(*)`,
+      }).from(scanSessions);
+      
+      res.json({
+        totalScans: totalScans[0]?.count || 0,
+        totalEvaluations,
+        avgConfidence: Math.round(avgConfidence * 100),
+        overallImprovement: Math.round(overallImprovement * 100) / 100,
+        weeklyImprovement: Math.round(weeklyImprovement * 100) / 100,
+        topImprovedIndicator: topImproved ? {
+          id: topImproved.indicatorId,
+          name: topImproved.indicatorName,
+          selectivity: Math.round(topImproved.selectivityScore * 100),
+        } : null,
+        indicators: stats.map(s => ({
+          id: s.indicatorId,
+          name: s.indicatorName,
+          category: s.category,
+          avgTimeMs: Math.round(s.avgExecutionTimeMs * 10) / 10,
+          passRate: Math.round(s.avgPassRate * 100),
+          selectivity: Math.round(s.selectivityScore * 100),
+          evaluations: s.totalEvaluations,
+          confidence: Math.round(Math.min(1.0, s.totalEvaluations / 1000) * 100),
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching optimizer stats:", error);
+      res.status(500).json({ error: "Failed to fetch optimizer stats" });
+    }
+  });
+
+  // Get optimizer display settings (respects admin override)
+  app.get("/api/bigidea/optimizer-display-settings", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      // Get user info
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      const isAdmin = user[0]?.isAdmin || false;
+
+      // Get settings (create default if doesn't exist)
+      let settings = await db.select().from(optimizerDisplaySettings).limit(1);
+      if (settings.length === 0) {
+        await db.insert(optimizerDisplaySettings).values({});
+        settings = await db.select().from(optimizerDisplaySettings).limit(1);
+      }
+
+      const setting = settings[0];
+
+      // If admin and override is enabled, use admin-specific settings
+      if (isAdmin && setting.adminOverrideEnabled) {
+        return res.json({
+          showOverlay: setting.showOptimizerOverlay,
+          metrics: {
+            overallImprovement: setting.adminShowOverallImprovement,
+            weeklyImprovement: setting.adminShowWeeklyImprovement,
+            confidenceLevel: setting.adminShowConfidenceLevel,
+            scanStats: setting.adminShowScanStats,
+            liveOptimization: setting.adminShowLiveOptimization,
+            achievementBadges: setting.adminShowAchievementBadges,
+            debugInfo: setting.adminShowDebugInfo,
+          },
+          position: setting.overlayPosition,
+          style: setting.overlayStyle,
+          theme: setting.overlayTheme,
+          isAdmin: true,
+        });
+      }
+
+      // Otherwise, use global settings (for all regular users)
+      return res.json({
+        showOverlay: setting.showOptimizerOverlay,
+        metrics: {
+          overallImprovement: setting.showOverallImprovement,
+          weeklyImprovement: setting.showWeeklyImprovement,
+          confidenceLevel: setting.showConfidenceLevel,
+          scanStats: setting.showScanStats,
+          liveOptimization: setting.showLiveOptimization,
+          achievementBadges: setting.showAchievementBadges,
+          debugInfo: false, // Never show debug to non-admin
+        },
+        position: setting.overlayPosition,
+        style: setting.overlayStyle,
+        theme: setting.overlayTheme,
+        isAdmin: false,
+      });
+    } catch (error) {
+      console.error("Error fetching optimizer display settings:", error);
+      res.status(500).json({ error: "Failed to fetch display settings" });
+    }
+  });
+
+  // Update optimizer display settings (admin only)
+  app.patch("/api/admin/optimizer-display-settings", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) return res.status(500).json({ error: "Database not available" });
+
+      const user = await db.select().from(sentinelUsers).where(eq(sentinelUsers.id, userId)).limit(1);
+      if (!user[0]?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const updates = req.body;
+      
+      // Get or create settings
+      let settings = await db.select().from(optimizerDisplaySettings).limit(1);
+      if (settings.length === 0) {
+        await db.insert(optimizerDisplaySettings).values(updates);
+      } else {
+        await db.update(optimizerDisplaySettings)
+          .set({ ...updates, updatedAt: new Date() })
+          .where(eq(optimizerDisplaySettings.id, settings[0].id));
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating optimizer display settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
   // Helper: get score rules as a keyed map for use in scoring logic
   async function getScoreRulesMap(): Promise<Record<string, { scoreValue: number; enabled: boolean }>> {
     if (!isDatabaseAvailable() || !db) return {};
@@ -3420,4 +4408,1611 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     }
     return modified;
   }
+
+  // =============================================================================
+  // AI Training System - Setup Library Routes
+  // =============================================================================
+
+  // Get all setups (optionally filter by status)
+  app.get("/api/bigidea/setups", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const status = req.query.status as string | undefined;
+      
+      let query = db.select().from(bigideaSetups).orderBy(desc(bigideaSetups.updatedAt));
+      
+      if (status) {
+        const setups = await db.select().from(bigideaSetups)
+          .where(eq(bigideaSetups.status, status))
+          .orderBy(desc(bigideaSetups.updatedAt));
+        return res.json(setups);
+      }
+      
+      const setups = await query;
+      res.json(setups);
+    } catch (error) {
+      console.error("Error fetching setups:", error);
+      res.status(500).json({ error: "Failed to fetch setups" });
+    }
+  });
+
+  // Get single setup by ID (includes indicators)
+  app.get("/api/bigidea/setups/:id", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      const [setup] = await db.select().from(bigideaSetups).where(eq(bigideaSetups.id, id));
+      if (!setup) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      // Fetch associated indicators
+      const indicators = await db.select().from(bigideaSetupIndicators)
+        .where(eq(bigideaSetupIndicators.setupId, id));
+
+      res.json({ ...setup, indicators });
+    } catch (error) {
+      console.error("Error fetching setup:", error);
+      res.status(500).json({ error: "Failed to fetch setup" });
+    }
+  });
+
+  // Create new setup
+  app.post("/api/bigidea/setups", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const { name, description, exampleCharts, extractedRules, indicators } = req.body;
+      
+      if (!name) {
+        return res.status(400).json({ error: "Name is required" });
+      }
+
+      // Generate slug from name
+      const slug = name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      // Check for existing slug
+      const [existing] = await db.select().from(bigideaSetups)
+        .where(eq(bigideaSetups.slug, slug));
+      if (existing) {
+        return res.status(400).json({ error: "A setup with this name already exists" });
+      }
+
+      const [setup] = await db.insert(bigideaSetups).values({
+        name,
+        slug,
+        description,
+        exampleCharts,
+        extractedRules,
+        createdBy: userId,
+        status: "draft",
+        version: 1,
+      }).returning();
+
+      // Insert indicators if provided
+      if (indicators && Array.isArray(indicators)) {
+        for (const ind of indicators) {
+          await db.insert(bigideaSetupIndicators).values({
+            setupId: setup.id,
+            indicatorId: ind.indicatorId,
+            params: ind.params,
+            required: ind.required ?? true,
+            weight: ind.weight ?? 1.0,
+            notes: ind.notes,
+          });
+        }
+      }
+
+      // Fetch the full setup with indicators
+      const fullIndicators = await db.select().from(bigideaSetupIndicators)
+        .where(eq(bigideaSetupIndicators.setupId, setup.id));
+
+      res.status(201).json({ ...setup, indicators: fullIndicators });
+    } catch (error) {
+      console.error("Error creating setup:", error);
+      res.status(500).json({ error: "Failed to create setup" });
+    }
+  });
+
+  // Update setup
+  app.patch("/api/bigidea/setups/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      const { 
+        name, description, exampleCharts, extractedRules, status, indicators,
+        ivyEntryStrategy, ivyStopStrategy, ivyTargetStrategy, ivyContextNotes, ivyApproved
+      } = req.body;
+
+      // Build update object
+      const updates: any = { updatedAt: new Date() };
+      if (name !== undefined) {
+        updates.name = name;
+        updates.slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      }
+      if (description !== undefined) updates.description = description;
+      if (exampleCharts !== undefined) updates.exampleCharts = exampleCharts;
+      if (extractedRules !== undefined) updates.extractedRules = extractedRules;
+      if (status !== undefined) updates.status = status;
+      
+      // Ivy AI Integration fields
+      if (ivyEntryStrategy !== undefined) updates.ivyEntryStrategy = ivyEntryStrategy;
+      if (ivyStopStrategy !== undefined) updates.ivyStopStrategy = ivyStopStrategy;
+      if (ivyTargetStrategy !== undefined) updates.ivyTargetStrategy = ivyTargetStrategy;
+      if (ivyContextNotes !== undefined) updates.ivyContextNotes = ivyContextNotes;
+      if (ivyApproved !== undefined) updates.ivyApproved = ivyApproved;
+
+      const [setup] = await db.update(bigideaSetups)
+        .set(updates)
+        .where(eq(bigideaSetups.id, id))
+        .returning();
+
+      if (!setup) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      // Update indicators if provided
+      if (indicators !== undefined && Array.isArray(indicators)) {
+        // Delete existing indicators
+        await db.delete(bigideaSetupIndicators)
+          .where(eq(bigideaSetupIndicators.setupId, id));
+
+        // Insert new indicators
+        for (const ind of indicators) {
+          await db.insert(bigideaSetupIndicators).values({
+            setupId: id,
+            indicatorId: ind.indicatorId,
+            params: ind.params,
+            required: ind.required ?? true,
+            weight: ind.weight ?? 1.0,
+            notes: ind.notes,
+          });
+        }
+      }
+
+      // Fetch updated indicators
+      const updatedIndicators = await db.select().from(bigideaSetupIndicators)
+        .where(eq(bigideaSetupIndicators.setupId, id));
+
+      res.json({ ...setup, indicators: updatedIndicators });
+    } catch (error) {
+      console.error("Error updating setup:", error);
+      res.status(500).json({ error: "Failed to update setup" });
+    }
+  });
+
+  // Delete setup
+  app.delete("/api/bigidea/setups/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      // Delete associated indicators first
+      await db.delete(bigideaSetupIndicators)
+        .where(eq(bigideaSetupIndicators.setupId, id));
+
+      // Delete setup
+      const result = await db.delete(bigideaSetups)
+        .where(eq(bigideaSetups.id, id))
+        .returning();
+
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting setup:", error);
+      res.status(500).json({ error: "Failed to delete setup" });
+    }
+  });
+
+  // Activate setup (change status to "active")
+  app.post("/api/bigidea/setups/:id/activate", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      const [setup] = await db.update(bigideaSetups)
+        .set({ status: "active", updatedAt: new Date() })
+        .where(eq(bigideaSetups.id, id))
+        .returning();
+
+      if (!setup) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      res.json(setup);
+    } catch (error) {
+      console.error("Error activating setup:", error);
+      res.status(500).json({ error: "Failed to activate setup" });
+    }
+  });
+
+  // Archive setup
+  app.post("/api/bigidea/setups/:id/archive", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      const [setup] = await db.update(bigideaSetups)
+        .set({ status: "archived", updatedAt: new Date() })
+        .where(eq(bigideaSetups.id, id))
+        .returning();
+
+      if (!setup) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      res.json(setup);
+    } catch (error) {
+      console.error("Error archiving setup:", error);
+      res.status(500).json({ error: "Failed to archive setup" });
+    }
+  });
+
+  // Get indicator library (for selecting indicators when creating setups)
+  app.get("/api/bigidea/setup-indicators", (_req: Request, res: Response) => {
+    const library = Object.entries(INDICATOR_LIBRARY).map(([id, ind]) => ({
+      id,
+      name: ind.name,
+      category: ind.category,
+      defaultParams: ind.defaultParams,
+    }));
+    res.json(library);
+  });
+
+  // =============================================================================
+  // AI Extraction Endpoints (Phase 2)
+  // =============================================================================
+
+  // Preview analysis - returns AI understanding before creating Ideas
+  app.post("/api/bigidea/setups/:id/preview-analysis", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const setupId = parseInt(req.params.id);
+      if (isNaN(setupId)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      // Get the setup
+      const [setup] = await db.select().from(bigideaSetups).where(eq(bigideaSetups.id, setupId));
+      if (!setup) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      // Get all uploads linked to this setup that have extracted text
+      const links = await db.select().from(setupUploads).where(eq(setupUploads.setupId, setupId));
+      const linkedUploads = [];
+      for (const link of links) {
+        const [upload] = await db.select().from(uploads).where(and(
+          eq(uploads.id, link.uploadId),
+          eq(uploads.processingStatus, "completed")
+        ));
+        if (upload) linkedUploads.push(upload);
+      }
+
+      // Combine all extracted text
+      let allText = "";
+      if (setup.description) {
+        allText += `SETUP DESCRIPTION:\n${setup.description}\n\n`;
+      }
+      for (const upload of linkedUploads) {
+        if (upload.extractedText) {
+          allText += `DOCUMENT: ${upload.filename}\n${upload.extractedText}\n\n`;
+        }
+      }
+
+      if (!allText.trim()) {
+        return res.status(400).json({ error: "No content to analyze. Upload documents with extracted text first." });
+      }
+
+      const openai = getOpenAI();
+      if (!openai) {
+        return res.status(500).json({ error: "OpenAI not configured" });
+      }
+
+      // Build indicator library summary
+      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+        `- ${ind.id}: ${ind.name} (${ind.category})`
+      ).join("\n");
+
+      const systemPrompt = `You are an expert trading system architect. Analyze this trading methodology document and summarize your understanding.
+
+CRITICAL: First determine if this document describes:
+- ONE core pattern/setup with variations/examples
+- OR multiple DISTINCT patterns/setups
+
+Most trading articles describe ONE setup with examples. Don't create separate Ideas for each example.
+
+AVAILABLE INDICATORS:
+${indicatorSummary}
+
+Respond with JSON:
+{
+  "summary": "Your analysis summary explaining what you found. Start with 'I found [X] distinct pattern(s)...' Be clear about whether examples are variations of ONE idea or separate ideas.",
+  "proposedIdeas": [
+    {
+      "name": "Pattern Name",
+      "description": "What this scans for",
+      "thoughts": [
+        {
+          "name": "Thought Name",
+          "description": "What this checks",
+          "indicators": [
+            { "id": "indicator_id", "name": "Display Name", "params": {} }
+          ]
+        }
+      ],
+      "confidence": 85
+    }
+  ],
+  "documentContext": "Brief summary of source material"
+}`;
+
+      const userPrompt = `Analyze this trading methodology for "${setup.name}":
+
+${allText}
+
+Remember: Most articles describe ONE setup with examples. Be conservative - only propose multiple Ideas if they are truly different patterns.`;
+
+      console.log(`[Preview] Analyzing documents for "${setup.name}"...`);
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 3000,
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
+
+      const rawResponse = response.choices[0]?.message?.content || "";
+      
+      // Parse JSON
+      let jsonStr = rawResponse;
+      const jsonMatch = rawResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) jsonStr = jsonMatch[1].trim();
+
+      let preview;
+      try {
+        preview = JSON.parse(jsonStr);
+      } catch {
+        // If JSON parsing fails, return the raw response as summary
+        preview = {
+          summary: rawResponse,
+          proposedIdeas: [],
+          documentContext: setup.name,
+        };
+      }
+
+      // Validate indicator IDs
+      for (const idea of preview.proposedIdeas || []) {
+        for (const thought of idea.thoughts || []) {
+          thought.indicators = (thought.indicators || []).filter((ind: any) => {
+            const exists = INDICATOR_LIBRARY.some(lib => lib.id === ind.id);
+            if (!exists) console.warn(`[Preview] Unknown indicator: ${ind.id}`);
+            return exists;
+          });
+        }
+      }
+
+      console.log(`[Preview] Proposed ${preview.proposedIdeas?.length || 0} Ideas`);
+      res.json(preview);
+    } catch (error: any) {
+      console.error("Error in preview analysis:", error);
+      res.status(500).json({ error: error?.message || "Analysis failed" });
+    }
+  });
+
+  // Refine analysis based on user feedback
+  app.post("/api/bigidea/setups/:id/refine-analysis", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { message, currentPreview } = req.body;
+      if (!message || !currentPreview) {
+        return res.status(400).json({ error: "Message and currentPreview required" });
+      }
+
+      const openai = getOpenAI();
+      if (!openai) {
+        return res.status(500).json({ error: "OpenAI not configured" });
+      }
+
+      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+        `- ${ind.id}: ${ind.name} (${ind.category})`
+      ).join("\n");
+
+      const systemPrompt = `You are refining a trading scan definition based on user feedback.
+
+CURRENT PROPOSED IDEAS:
+${JSON.stringify(currentPreview.proposedIdeas, null, 2)}
+
+AVAILABLE INDICATORS:
+${indicatorSummary}
+
+Based on user feedback, update the proposed Ideas. Common requests:
+- "This is one idea, not three" → Combine into single Idea with multiple Thoughts
+- "Add [indicator]" → Add to appropriate Thought
+- "Change [param]" → Update parameter values
+- "Remove [idea/thought]" → Remove from list
+
+Respond with JSON:
+{
+  "response": "Brief explanation of changes made",
+  "updatedPreview": {
+    "summary": "Updated summary",
+    "proposedIdeas": [...updated ideas...],
+    "documentContext": "..."
+  }
+}
+
+If no changes needed, return response without updatedPreview.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 2500,
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message },
+        ],
+      });
+
+      const rawResponse = response.choices[0]?.message?.content || "";
+      
+      let jsonStr = rawResponse;
+      const jsonMatch = rawResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) jsonStr = jsonMatch[1].trim();
+
+      let result;
+      try {
+        result = JSON.parse(jsonStr);
+      } catch {
+        result = { response: rawResponse };
+      }
+
+      // Validate indicator IDs in updated preview
+      if (result.updatedPreview?.proposedIdeas) {
+        for (const idea of result.updatedPreview.proposedIdeas) {
+          for (const thought of idea.thoughts || []) {
+            thought.indicators = (thought.indicators || []).filter((ind: any) => {
+              return INDICATOR_LIBRARY.some(lib => lib.id === ind.id);
+            });
+          }
+        }
+      }
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error refining analysis:", error);
+      res.status(500).json({ error: error?.message || "Refinement failed" });
+    }
+  });
+
+  // Create Ideas from confirmed preview
+  app.post("/api/bigidea/setups/:id/create-from-preview", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const setupId = parseInt(req.params.id);
+      if (isNaN(setupId)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      const { preview, clearExisting } = req.body;
+      if (!preview || !preview.proposedIdeas) {
+        return res.status(400).json({ error: "Preview with proposedIdeas required" });
+      }
+
+      // Clear existing Ideas if requested
+      if (clearExisting) {
+        await db.delete(bigideaExtractedIdeas).where(eq(bigideaExtractedIdeas.setupId, setupId));
+        console.log(`[Create] Cleared existing Ideas for setup ${setupId}`);
+      }
+
+      // Create new Ideas
+      const createdIdeas = [];
+      for (const idea of preview.proposedIdeas) {
+        // Add UUIDs to thoughts if missing
+        const thoughts = (idea.thoughts || []).map((t: any, idx: number) => ({
+          id: t.id || `thought-${idx + 1}`,
+          name: t.name,
+          description: t.description,
+          indicators: t.indicators || [],
+        }));
+
+        const [created] = await db.insert(bigideaExtractedIdeas).values({
+          setupId,
+          name: idea.name,
+          description: idea.description,
+          thoughts: thoughts as ExtractedThought[],
+          confidence: idea.confidence || 80,
+          aiModel: "gpt-4o",
+          aiPromptVersion: "v2.0-preview",
+          status: "draft",
+        }).returning();
+
+        createdIdeas.push(created);
+      }
+
+      console.log(`[Create] Created ${createdIdeas.length} Ideas for setup ${setupId}`);
+      res.json({ created: createdIdeas.length, ideas: createdIdeas });
+    } catch (error: any) {
+      console.error("Error creating Ideas:", error);
+      res.status(500).json({ error: error?.message || "Creation failed" });
+    }
+  });
+
+  // Legacy: Analyze setup documents and extract Ideas (direct, no preview)
+  app.post("/api/bigidea/setups/:id/analyze", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const setupId = parseInt(req.params.id);
+      if (isNaN(setupId)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      // Get the setup
+      const [setup] = await db.select().from(bigideaSetups).where(eq(bigideaSetups.id, setupId));
+      if (!setup) {
+        return res.status(404).json({ error: "Setup not found" });
+      }
+
+      // Get all uploads linked to this setup that have extracted text
+      const links = await db.select()
+        .from(setupUploads)
+        .where(eq(setupUploads.setupId, setupId));
+      
+      const linkedUploads = [];
+      for (const link of links) {
+        const [upload] = await db.select()
+          .from(uploads)
+          .where(and(
+            eq(uploads.id, link.uploadId),
+            eq(uploads.processingStatus, "completed")
+          ));
+        if (upload) {
+          linkedUploads.push(upload);
+        }
+      }
+
+      // Combine all extracted text
+      let allText = "";
+      const uploadIds: number[] = [];
+      
+      // Add setup description
+      if (setup.description) {
+        allText += `SETUP DESCRIPTION:\n${setup.description}\n\n`;
+      }
+      
+      // Add extracted text from documents
+      for (const upload of linkedUploads) {
+        if (upload.extractedText) {
+          allText += `DOCUMENT: ${upload.filename}\n${upload.extractedText}\n\n`;
+          uploadIds.push(upload.id);
+        }
+      }
+      
+      if (!allText.trim()) {
+        return res.status(400).json({ 
+          error: "No content to analyze. Upload documents with extracted text first." 
+        });
+      }
+
+      console.log(`[Analyze] Processing ${uploadIds.length} documents for setup "${setup.name}"`);
+
+      // Run AI extraction
+      const extraction = await extractIdeasFromText(allText, setup.name);
+      
+      // Store extracted ideas in database
+      const createdIdeas = [];
+      for (const idea of extraction.ideas) {
+        const [created] = await db.insert(bigideaExtractedIdeas).values({
+          setupId,
+          name: idea.name,
+          description: idea.description,
+          thoughts: idea.thoughts as ExtractedThought[],
+          confidence: idea.confidence,
+          sourceDocumentId: uploadIds[0] || null,
+          aiModel: extraction.model,
+          aiPromptVersion: extraction.promptVersion,
+          status: "draft",
+        }).returning();
+        
+        createdIdeas.push(created);
+      }
+
+      res.json({
+        message: `Extracted ${createdIdeas.length} Ideas from ${uploadIds.length} documents`,
+        ideas: createdIdeas,
+        model: extraction.model,
+      });
+    } catch (error: any) {
+      console.error("Error analyzing setup:", error);
+      res.status(500).json({ error: error?.message || "Failed to analyze setup" });
+    }
+  });
+
+  // Get extracted ideas for a setup
+  app.get("/api/bigidea/setups/:id/extracted-ideas", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const setupId = parseInt(req.params.id);
+      if (isNaN(setupId)) {
+        return res.status(400).json({ error: "Invalid setup ID" });
+      }
+
+      const ideas = await db.select()
+        .from(bigideaExtractedIdeas)
+        .where(eq(bigideaExtractedIdeas.setupId, setupId))
+        .orderBy(desc(bigideaExtractedIdeas.createdAt));
+
+      res.json(ideas);
+    } catch (error) {
+      console.error("Error fetching extracted ideas:", error);
+      res.status(500).json({ error: "Failed to fetch extracted ideas" });
+    }
+  });
+
+  // Update an extracted idea (edit thoughts, name, etc.)
+  app.put("/api/bigidea/extracted-ideas/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      const { name, description, thoughts, status } = req.body;
+      
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (thoughts !== undefined) updateData.thoughts = thoughts;
+      if (status !== undefined) updateData.status = status;
+
+      const [updated] = await db.update(bigideaExtractedIdeas)
+        .set(updateData)
+        .where(eq(bigideaExtractedIdeas.id, ideaId))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "Idea not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating extracted idea:", error);
+      res.status(500).json({ error: "Failed to update idea" });
+    }
+  });
+
+  // Delete an extracted idea
+  app.delete("/api/bigidea/extracted-ideas/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      const [deleted] = await db.delete(bigideaExtractedIdeas)
+        .where(eq(bigideaExtractedIdeas.id, ideaId))
+        .returning();
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Idea not found" });
+      }
+
+      res.json({ success: true, deleted });
+    } catch (error) {
+      console.error("Error deleting extracted idea:", error);
+      res.status(500).json({ error: "Failed to delete idea" });
+    }
+  });
+
+  // Approve an extracted idea (ready for validation)
+  app.post("/api/bigidea/extracted-ideas/:id/approve", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      const [updated] = await db.update(bigideaExtractedIdeas)
+        .set({ 
+          status: "approved",
+          approvedAt: new Date(),
+          approvedBy: userId,
+        })
+        .where(eq(bigideaExtractedIdeas.id, ideaId))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "Idea not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error approving idea:", error);
+      res.status(500).json({ error: "Failed to approve idea" });
+    }
+  });
+
+  // Start validation session (Training Mode)
+  app.post("/api/bigidea/extracted-ideas/:id/start-validation", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      // Update status to validating
+      const [updated] = await db.update(bigideaExtractedIdeas)
+        .set({ status: "validating" })
+        .where(eq(bigideaExtractedIdeas.id, ideaId))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "Idea not found" });
+      }
+
+      res.json({
+        message: "Validation mode started",
+        idea: updated,
+      });
+    } catch (error) {
+      console.error("Error starting validation:", error);
+      res.status(500).json({ error: "Failed to start validation" });
+    }
+  });
+
+  // Record validation rating
+  app.post("/api/bigidea/extracted-ideas/:id/rate", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      const { symbol, rating, price, indicatorSnapshot, notes } = req.body;
+      if (!symbol || !rating || !["up", "down"].includes(rating)) {
+        return res.status(400).json({ error: "Invalid rating data" });
+      }
+
+      // Insert rating
+      const [created] = await db.insert(bigideaValidationRatings).values({
+        extractedIdeaId: ideaId,
+        userId,
+        symbol,
+        rating,
+        price,
+        indicatorSnapshot,
+        notes,
+      }).returning();
+
+      // Update validation stats on the idea
+      const allRatings = await db.select()
+        .from(bigideaValidationRatings)
+        .where(eq(bigideaValidationRatings.extractedIdeaId, ideaId));
+
+      const totalRated = allRatings.length;
+      const thumbsUp = allRatings.filter(r => r.rating === "up").length;
+      const thumbsDown = allRatings.filter(r => r.rating === "down").length;
+      const hitRate = totalRated > 0 ? (thumbsUp / totalRated) * 100 : 0;
+
+      await db.update(bigideaExtractedIdeas)
+        .set({
+          validationStats: { totalRated, thumbsUp, thumbsDown, hitRate },
+        })
+        .where(eq(bigideaExtractedIdeas.id, ideaId));
+
+      res.json({
+        rating: created,
+        stats: { totalRated, thumbsUp, thumbsDown, hitRate },
+      });
+    } catch (error) {
+      console.error("Error recording rating:", error);
+      res.status(500).json({ error: "Failed to record rating" });
+    }
+  });
+
+  // Get validation ratings for an idea
+  app.get("/api/bigidea/extracted-ideas/:id/ratings", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      const ratings = await db.select()
+        .from(bigideaValidationRatings)
+        .where(eq(bigideaValidationRatings.extractedIdeaId, ideaId))
+        .orderBy(desc(bigideaValidationRatings.createdAt));
+
+      res.json(ratings);
+    } catch (error) {
+      console.error("Error fetching ratings:", error);
+      res.status(500).json({ error: "Failed to fetch ratings" });
+    }
+  });
+
+  // Push approved idea to scanner as a runnable Idea
+  app.post("/api/bigidea/extracted-ideas/:id/push-to-scanner", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (!isDatabaseAvailable() || !db) {
+        return res.status(500).json({ error: "Database not available" });
+      }
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      // Get the extracted idea
+      const [extractedIdea] = await db.select()
+        .from(bigideaExtractedIdeas)
+        .where(eq(bigideaExtractedIdeas.id, ideaId));
+
+      if (!extractedIdea) {
+        return res.status(404).json({ error: "Idea not found" });
+      }
+
+      if (extractedIdea.status !== "approved" && extractedIdea.status !== "validating") {
+        return res.status(400).json({ error: "Idea must be approved or validated before pushing to scanner" });
+      }
+
+      // Convert extracted thoughts to scanner format
+      const thoughts = extractedIdea.thoughts as ExtractedThought[];
+      
+      // Create a Thought in the scanner for each thought in the idea
+      const createdThoughtIds: number[] = [];
+      
+      for (const thought of thoughts) {
+        // Convert indicators to scanner criteria format
+        const criteria = thought.indicators.map(ind => ({
+          indicatorId: ind.id,
+          label: ind.name,
+          inverted: false,
+          muted: false,
+          params: Object.entries(ind.params || {}).map(([name, value]) => ({
+            name,
+            label: name,
+            type: typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "select",
+            value,
+          })),
+        }));
+
+        // Validate and auto-correct timeframe for intraday indicators
+        const { correctedTimeframe } = validateIntradayIndicators(criteria, "daily");
+
+        // Create scanner thought
+        const [createdThought] = await db.insert(scannerThoughts).values({
+          userId,
+          name: thought.name,
+          category: "AI Extracted",
+          description: thought.description || `Extracted from ${extractedIdea.name}`,
+          criteria: criteria as any,
+          timeframe: correctedTimeframe,
+        }).returning();
+
+        createdThoughtIds.push(createdThought.id);
+      }
+
+      // Create scanner idea with all thoughts as nodes
+      const nodes = createdThoughtIds.map((thoughtId, idx) => ({
+        id: `node-${idx}`,
+        type: "thought" as const,
+        thoughtId,
+        thoughtName: thoughts[idx].name,
+        thoughtCategory: "AI Extracted",
+        thoughtDescription: thoughts[idx].description,
+        position: { x: 100 + idx * 250, y: 150 },
+      }));
+
+      // Add results node
+      nodes.push({
+        id: "results",
+        type: "results" as const,
+        thoughtId: 0,
+        thoughtName: "Results",
+        thoughtCategory: "",
+        thoughtDescription: "",
+        position: { x: 100 + thoughts.length * 125, y: 350 },
+      });
+
+      // Create edges - all thoughts connect to results with OR logic
+      const edges = thoughts.map((_, idx) => ({
+        id: `edge-${idx}`,
+        source: `node-${idx}`,
+        target: "results",
+        logicType: "OR" as const,
+      }));
+
+      const [scannerIdea] = await db.insert(scannerIdeas).values({
+        userId,
+        name: extractedIdea.name,
+        description: extractedIdea.description || `Extracted from setup library`,
+        universe: "sp500",
+        nodes: nodes as any,
+        edges: edges as any,
+      }).returning();
+
+      // Update extracted idea with push info
+      await db.update(bigideaExtractedIdeas)
+        .set({
+          status: "pushed",
+          pushedToIdeaId: scannerIdea.id,
+          pushedAt: new Date(),
+          pushedBy: userId,
+        })
+        .where(eq(bigideaExtractedIdeas.id, ideaId));
+
+      res.json({
+        message: `Successfully pushed "${extractedIdea.name}" to scanner`,
+        scannerIdeaId: scannerIdea.id,
+        thoughtsCreated: createdThoughtIds.length,
+      });
+    } catch (error) {
+      console.error("Error pushing to scanner:", error);
+      res.status(500).json({ error: "Failed to push to scanner" });
+    }
+  });
+
+  // Suggest indicator mappings for a concept
+  app.post("/api/bigidea/suggest-mappings", async (req: Request, res: Response) => {
+    try {
+      const { concept } = req.body;
+      if (!concept) {
+        return res.status(400).json({ error: "Concept description required" });
+      }
+
+      const mappings = await suggestIndicatorMappings(concept);
+      res.json({ mappings });
+    } catch (error: any) {
+      console.error("Error suggesting mappings:", error);
+      res.status(500).json({ error: error?.message || "Failed to suggest mappings" });
+    }
+  });
+
+  // Refine an extracted idea with AI assistance
+  app.post("/api/bigidea/extracted-ideas/:id/refine", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const ideaId = parseInt(req.params.id);
+      if (isNaN(ideaId)) {
+        return res.status(400).json({ error: "Invalid idea ID" });
+      }
+
+      const { message, currentIdea } = req.body;
+      if (!message || !currentIdea) {
+        return res.status(400).json({ error: "Message and currentIdea required" });
+      }
+
+      const openai = getOpenAI();
+      if (!openai) {
+        return res.status(500).json({ error: "OpenAI not configured" });
+      }
+
+      // Build indicator library summary for context
+      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+        `- ${ind.id}: ${ind.name} (${ind.category}) - ${ind.description}`
+      ).join("\n");
+
+      const systemPrompt = `You are an expert trading system architect helping refine scan definitions.
+
+CURRENT IDEA:
+Name: ${currentIdea.name}
+Description: ${currentIdea.description || "None"}
+Thoughts: ${JSON.stringify(currentIdea.thoughts, null, 2)}
+
+AVAILABLE INDICATORS:
+${indicatorSummary}
+
+RULES:
+1. Each Idea = 1+ Thoughts (OR logic between thoughts)
+2. Each Thought = 1+ Indicators (AND logic within thought)
+3. Only use indicator IDs from the library above
+4. Return the COMPLETE updated idea structure when making changes
+
+When the user asks to modify the idea, respond with:
+1. A brief explanation of the changes
+2. If changes were made, include the full updated idea as JSON in a code block
+
+Format for updates:
+\`\`\`json
+{
+  "name": "Idea Name",
+  "description": "Description",
+  "thoughts": [
+    {
+      "id": "uuid",
+      "name": "Thought Name",
+      "description": "What this checks",
+      "indicators": [
+        { "id": "indicator_id", "name": "Display Name", "params": {} }
+      ]
+    }
+  ]
+}
+\`\`\``;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 2048,
+        temperature: 0.3,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message },
+        ],
+      });
+
+      const aiResponse = response.choices[0]?.message?.content || "";
+      
+      // Try to extract updated idea from response
+      const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+      let updatedIdea = null;
+      
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          if (parsed.thoughts && Array.isArray(parsed.thoughts)) {
+            // Validate indicator IDs
+            for (const thought of parsed.thoughts) {
+              if (!thought.id) thought.id = crypto.randomUUID();
+              thought.indicators = (thought.indicators || []).filter((ind: any) => {
+                const exists = INDICATOR_LIBRARY.some(lib => lib.id === ind.id);
+                if (!exists) console.warn(`[Refine] Removing unknown indicator: ${ind.id}`);
+                return exists;
+              });
+            }
+            
+            updatedIdea = {
+              ...currentIdea,
+              name: parsed.name || currentIdea.name,
+              description: parsed.description || currentIdea.description,
+              thoughts: parsed.thoughts,
+            };
+          }
+        } catch (e) {
+          console.error("[Refine] Failed to parse JSON from response:", e);
+        }
+      }
+
+      // Clean response text (remove JSON block for display)
+      let responseText = aiResponse.replace(/```(?:json)?\s*[\s\S]*?```/g, "").trim();
+      if (!responseText) {
+        responseText = updatedIdea 
+          ? "I've updated the idea based on your request. Review the changes on the right."
+          : "I couldn't make changes based on that request. Could you be more specific?";
+      }
+
+      res.json({
+        response: responseText,
+        updatedIdea,
+      });
+    } catch (error: any) {
+      console.error("Error refining idea:", error);
+      res.status(500).json({ error: error?.message || "Failed to refine idea" });
+    }
+  });
+
+  // =============================================================================
+  // Custom Indicators API
+  // =============================================================================
+
+  // Create a new custom indicator
+  app.post("/api/bigidea/custom-indicators", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable()) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { name, category, description, params, logicDefinition, aiPrompt, aiModel, provides, consumes } = req.body;
+      const userId = (req.user as any)?.id || 1;
+
+      if (!name || !category || !description || !logicDefinition) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const validation = validateDslDefinition(logicDefinition);
+      if (!validation.valid) {
+        return res.status(400).json({ 
+          error: "Invalid logic definition", 
+          details: validation.errors 
+        });
+      }
+
+      const customId = `CUSTOM-${userId}-${Date.now()}`;
+
+      const [indicator] = await db.insert(userIndicators).values({
+        userId,
+        customId,
+        name,
+        category,
+        description,
+        params: params || [],
+        logicType: "rule_based",
+        logicDefinition,
+        provides: provides || [],
+        consumes: consumes || [],
+        aiGenerated: true,
+        aiModel: aiModel || "gpt-4o",
+        aiPrompt,
+        timesUsed: 0,
+      }).returning();
+
+      res.json({ 
+        success: true, 
+        indicator,
+      });
+    } catch (error: any) {
+      console.error("Error creating custom indicator:", error);
+      res.status(500).json({ error: error?.message || "Failed to create custom indicator" });
+    }
+  });
+
+  // List user's custom indicators
+  app.get("/api/bigidea/custom-indicators", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable()) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const userId = (req.user as any)?.id || 1;
+
+      const indicators = await db
+        .select()
+        .from(userIndicators)
+        .where(eq(userIndicators.userId, userId))
+        .orderBy(desc(userIndicators.createdAt));
+
+      res.json({ indicators });
+    } catch (error: any) {
+      console.error("Error fetching custom indicators:", error);
+      res.status(500).json({ error: error?.message || "Failed to fetch custom indicators" });
+    }
+  });
+
+  // Test/preview a custom indicator on a specific symbol
+  app.post("/api/bigidea/custom-indicators/test", async (req: Request, res: Response) => {
+    try {
+      const { symbol, logicDefinition, params, timeframe } = req.body;
+
+      if (!symbol || !logicDefinition) {
+        return res.status(400).json({ error: "Missing symbol or logicDefinition" });
+      }
+
+      const validation = validateDslDefinition(logicDefinition);
+      if (!validation.valid) {
+        return res.status(400).json({ 
+          error: "Invalid logic definition", 
+          details: validation.errors 
+        });
+      }
+
+      const candles = await fetchOHLCV(symbol, timeframe || "daily");
+      const result = evaluateDslIndicator(logicDefinition, candles, params || {});
+
+      res.json({ 
+        success: true, 
+        pass: result.pass,
+        data: result.data,
+        symbol,
+        dataPoints: candles.length,
+      });
+    } catch (error: any) {
+      console.error("Error testing custom indicator:", error);
+      res.status(500).json({ error: error?.message || "Failed to test custom indicator" });
+    }
+  });
+
+  // Generate a custom indicator using AI
+  app.post("/api/bigidea/custom-indicators/generate", async (req: Request, res: Response) => {
+    console.log("[CustomIndicator] Generate endpoint called with:", JSON.stringify(req.body, null, 2));
+    try {
+      const { requestText, existingIndicators } = req.body;
+      const openai = getOpenAI();
+
+      if (!openai) {
+        console.error("[CustomIndicator] OpenAI not configured");
+        return res.status(503).json({ error: "AI integration not configured" });
+      }
+
+      if (!requestText) {
+        console.error("[CustomIndicator] Missing requestText");
+        return res.status(400).json({ error: "Missing requestText" });
+      }
+
+      const systemPrompt = `You are an expert in technical analysis and indicator design. Your task is to create a custom indicator definition based on the user's request.
+
+Available DSL Conditions:
+- PRICE_ABOVE, PRICE_BELOW, PRICE_BETWEEN
+- CLOSE_ABOVE_OPEN, CLOSE_BELOW_OPEN
+- VOLUME_ABOVE_AVG, VOLUME_ABOVE_THRESHOLD
+- CONSECUTIVE_UP_DAYS, CONSECUTIVE_DOWN_DAYS
+- SMA_CROSS_ABOVE, SMA_CROSS_BELOW, EMA_CROSS_ABOVE, EMA_CROSS_BELOW
+- PRICE_ABOVE_SMA, PRICE_BELOW_SMA, PRICE_ABOVE_EMA, PRICE_BELOW_EMA
+- GAP_UP, GAP_DOWN, GAP_UP_PCT, GAP_DOWN_PCT
+- HIGHER_HIGH, LOWER_LOW, HIGHER_LOW, LOWER_HIGH
+- RANGE_EXPANSION, RANGE_CONTRACTION
+- BREAKOUT_NEW_HIGH, BREAKDOWN_NEW_LOW
+- INSIDE_BAR, OUTSIDE_BAR, DOJI, HAMMER, SHOOTING_STAR
+- ENGULFING_BULL, ENGULFING_BEAR
+- MOMENTUM_INCREASING, MOMENTUM_DECREASING
+- PRICE_CHANGE_PCT (computes % change from N bars ago to current close)
+
+Parameters you can use in rules:
+- lookback: number of bars to look back
+- period: MA period or window size
+- period2: secondary MA period
+- consecutiveDays: number of consecutive days
+- minGapPct: minimum gap percentage
+- threshold: generic numeric threshold
+- minChangePct: minimum price change percentage
+- maxChangePct: maximum price change percentage
+
+CRITICAL PARAMETER RULES:
+1. ALL numeric parameters MUST have WIDE, FLEXIBLE ranges:
+   - min should be 0.01 or lower (never higher than 1 unless meaningless)
+   - max should be at least 1000 (use 10000 for percentages, 500 for periods)
+   - step should be small (0.01 for percentages, 1 for integers)
+2. Every parameter should be fully adjustable by the user.
+3. Include a reasonable defaultValue that makes sense for the user's request.
+
+DATA LINKING (REQUIRED - for chaining with other indicators):
+ALWAYS include both provides and consumes arrays - this makes indicators chain-ready:
+- "provides": Array of outputs this indicator passes to downstream indicators
+  Format: [{ "linkType": "sequenceOffset", "paramName": "period" }]
+  Common linkTypes: "basePeriod", "sequenceOffset", "priceChange", "patternBar"
+  ALWAYS include at least one output using the main period/lookback/window param
+- "consumes": Array of inputs this indicator can receive from upstream indicators
+  Format: [{ "paramName": "skipBars", "dataKey": "detectedPeriod" }]
+  Common dataKeys: "detectedPeriod", "baseStartBar", "baseEndBar", "patternEndBar"
+  ALWAYS include at least one input - add a "skipBars" param if needed to receive upstream data
+- Even simple indicators should have provides/consumes so they can be used in sequences later.
+
+Return ONLY a JSON object with this structure (no markdown, no explanation):
+{
+  "name": "Indicator name",
+  "category": "Price Action" | "Volume" | "Momentum" | "Consolidation",
+  "description": "Brief description",
+  "params": [
+    {
+      "name": "skipBars",
+      "label": "Skip Recent Bars",
+      "type": "number",
+      "defaultValue": 0,
+      "min": 0,
+      "max": 500,
+      "step": 1
+    },
+    {
+      "name": "minChangePct",
+      "label": "Min Change %",
+      "type": "number",
+      "defaultValue": 15,
+      "min": 0.01,
+      "max": 10000,
+      "step": 0.1
+    },
+    {
+      "name": "period",
+      "label": "Period (bars)",
+      "type": "number",
+      "defaultValue": 20,
+      "min": 1,
+      "max": 500,
+      "step": 1
+    }
+  ],
+  "logicDefinition": {
+    "rules": [
+      {
+        "condition": "PRICE_CHANGE_PCT",
+        "lookback": "{period}",
+        "threshold": "{minChangePct}"
+      }
+    ],
+    "combineLogic": "AND"
+  },
+  "provides": [{ "linkType": "sequenceOffset", "paramName": "period" }],
+  "consumes": [{ "paramName": "skipBars", "dataKey": "detectedPeriod" }]
+}`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { 
+            role: "user", 
+            content: `User request: "${requestText}"\n\nExisting indicators (DO NOT recreate these):\n${existingIndicators?.map((ind: any) => `- ${ind.name}: ${ind.description}`).join('\n') || 'None'}` 
+          },
+        ],
+        temperature: 0.2,
+      });
+
+      const aiResponse = completion.choices[0]?.message?.content || "";
+      
+      const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/) || aiResponse.match(/(\{[\s\S]*\})/);
+      if (!jsonMatch) {
+        return res.status(500).json({ error: "AI did not return valid JSON" });
+      }
+
+      const indicatorDef = JSON.parse(jsonMatch[1].trim());
+
+      const validation = validateDslDefinition(indicatorDef.logicDefinition);
+      if (!validation.valid) {
+        return res.status(400).json({ 
+          error: "Generated indicator has invalid logic", 
+          details: validation.errors 
+        });
+      }
+
+      console.log("[CustomIndicator] Successfully generated:", indicatorDef.name);
+      res.json({
+        success: true,
+        indicator: indicatorDef,
+        aiModel: "gpt-4o",
+      });
+    } catch (error: any) {
+      console.error("[CustomIndicator] Error generating custom indicator:", error);
+      console.error("[CustomIndicator] Stack:", error.stack);
+      res.status(500).json({ error: error?.message || "Failed to generate custom indicator" });
+    }
+  });
+
+  // Increment usage counter for a custom indicator
+  app.post("/api/bigidea/custom-indicators/:id/use", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable()) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const indicatorId = parseInt(req.params.id);
+      const { passed } = req.body;
+
+      const [indicator] = await db
+        .select()
+        .from(userIndicators)
+        .where(eq(userIndicators.id, indicatorId));
+
+      if (!indicator) {
+        return res.status(404).json({ error: "Indicator not found" });
+      }
+
+      const timesUsed = (indicator.timesUsed || 0) + 1;
+      const totalEvaluations = (indicator.totalEvaluations || 0) + 1;
+      const totalPasses = (indicator.totalPasses || 0) + (passed ? 1 : 0);
+      const avgPassRate = totalPasses / totalEvaluations;
+
+      const updates: any = {
+        timesUsed,
+        totalEvaluations,
+        totalPasses,
+        avgPassRate,
+        lastUsedAt: new Date(),
+      };
+
+      // Auto-submit to approval queue after 5 uses
+      if (timesUsed === 5 && !indicator.autoSubmittedAt && !indicator.isAdminApproved) {
+        updates.autoSubmittedAt = new Date();
+        
+        await db.insert(indicatorApprovalQueue).values({
+          indicatorId: indicator.id,
+          submittedAt: new Date(),
+        });
+
+        console.log(`[Custom Indicator] Auto-submitted indicator ${indicator.customId} to approval queue after 5 uses`);
+      }
+
+      await db
+        .update(userIndicators)
+        .set(updates)
+        .where(eq(userIndicators.id, indicatorId));
+
+      res.json({ success: true, timesUsed, autoSubmitted: timesUsed === 5 });
+    } catch (error: any) {
+      console.error("Error incrementing indicator usage:", error);
+      res.status(500).json({ error: error?.message || "Failed to update indicator usage" });
+    }
+  });
+
+  // Get approval queue (admin only)
+  app.get("/api/bigidea/custom-indicators/approval-queue", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable()) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const user = req.user as any;
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const queue = await db
+        .select({
+          queueItem: indicatorApprovalQueue,
+          indicator: userIndicators,
+          creator: {
+            id: sentinelUsers.id,
+            username: sentinelUsers.username,
+            email: sentinelUsers.email,
+          },
+        })
+        .from(indicatorApprovalQueue)
+        .leftJoin(userIndicators, eq(indicatorApprovalQueue.indicatorId, userIndicators.id))
+        .leftJoin(sentinelUsers, eq(userIndicators.userId, sentinelUsers.id))
+        .where(sql`${indicatorApprovalQueue.decision} IS NULL`)
+        .orderBy(desc(indicatorApprovalQueue.submittedAt));
+
+      res.json({ queue });
+    } catch (error: any) {
+      console.error("Error fetching approval queue:", error);
+      res.status(500).json({ error: error?.message || "Failed to fetch approval queue" });
+    }
+  });
+
+  // Approve/reject a custom indicator (admin only)
+  app.post("/api/bigidea/custom-indicators/review/:queueId", async (req: Request, res: Response) => {
+    try {
+      if (!isDatabaseAvailable()) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const user = req.user as any;
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const queueId = parseInt(req.params.queueId);
+      const { decision, reviewNotes, rejectionReason } = req.body;
+
+      if (!["approved", "rejected", "needs_revision"].includes(decision)) {
+        return res.status(400).json({ error: "Invalid decision" });
+      }
+
+      const [queueItem] = await db
+        .select()
+        .from(indicatorApprovalQueue)
+        .where(eq(indicatorApprovalQueue.id, queueId));
+
+      if (!queueItem) {
+        return res.status(404).json({ error: "Queue item not found" });
+      }
+
+      await db
+        .update(indicatorApprovalQueue)
+        .set({
+          decision,
+          reviewNotes,
+          rejectionReason,
+          reviewedAt: new Date(),
+          reviewedBy: user.id,
+        })
+        .where(eq(indicatorApprovalQueue.id, queueId));
+
+      if (decision === "approved") {
+        await db
+          .update(userIndicators)
+          .set({
+            isAdminApproved: true,
+            approvedByAdminId: user.id,
+            approvedAt: new Date(),
+          })
+          .where(eq(userIndicators.id, queueItem.indicatorId));
+      }
+
+      res.json({ success: true, decision });
+    } catch (error: any) {
+      console.error("Error reviewing custom indicator:", error);
+      res.status(500).json({ error: error?.message || "Failed to review indicator" });
+    }
+  });
 }

@@ -16,9 +16,9 @@ import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUse
 import { fetchChartData } from "./chartDataEngine";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
-import * as tiingo from "../tiingo";
+import * as alpaca from "../alpaca";
 import { STOCKS_BY_SECTOR } from "@shared/stocksBySector";
-import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP } from "../fundamentals";
+import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals } from "../fundamentals";
 
 declare module "express-session" {
   interface SessionData {
@@ -89,20 +89,40 @@ const closeTradeSchema = z.object({
   notes: z.string().optional(),
 });
 
+const setupContextSchema = z.object({
+  setupId: z.number().optional(),
+  setupName: z.string().optional(),
+  ivyEntryStrategy: z.string().nullable().optional(),
+  ivyStopStrategy: z.string().nullable().optional(),
+  ivyTargetStrategy: z.string().nullable().optional(),
+  ivyContextNotes: z.string().nullable().optional(),
+  ivyApproved: z.boolean().optional(),
+  indicatorResults: z.object({
+    maUsed: z.number().optional(),
+    undercutPrice: z.number().optional(),
+    rallyPrice: z.number().optional(),
+    touchPrice: z.number().optional(),
+    patternType: z.string().optional(),
+  }).optional(),
+}).optional();
+
 const suggestSchema = z.object({
   symbol: z.string().min(1).max(10),
   direction: z.enum(["long", "short"]),
   entryPrice: z.number().positive(),
   setupType: z.string().optional(),
+  timeframe: z.string().optional(), // "daily" | "5min" | "15min" | "30min"
+  setupContext: setupContextSchema,
 });
 
 const watchlistSchema = z.object({
   symbol: z.string().min(1).max(10),
-  targetEntry: z.number().positive().optional(),
-  stopPlan: z.number().positive().optional(),
-  targetPlan: z.number().positive().optional(),
-  alertPrice: z.number().positive().optional(),
-  thesis: z.string().optional(),
+  watchlistId: z.number().int().positive().optional(),
+  targetEntry: z.number().positive().nullable().optional(),
+  stopPlan: z.number().positive().nullable().optional(),
+  targetPlan: z.number().positive().nullable().optional(),
+  alertPrice: z.number().positive().nullable().optional(),
+  thesis: z.string().nullable().optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
 });
 
@@ -261,22 +281,97 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  // Get current authenticated user
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      // If database is available, fetch real user
+      if (db) {
+        const user = await sentinelModels.getUserById(req.session.userId);
+        if (user) {
+          return res.json({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            tier: user.tier || "pro",
+            isAdmin: user.isAdmin ?? false,
+            accountSize: user.accountSize,
+          });
+        }
+      }
+
+      // Fallback for mock session (database unavailable)
+      return res.json({
+        id: req.session.userId,
+        username: req.session.username || "DonaldCotton",
+        email: "local@example.com",
+        tier: "pro",
+        isAdmin: true,
+      });
+    } catch (error) {
+      console.error("Get current user error:", error);
+      res.status(500).json({ error: "Failed to get user info" });
+    }
+  });
+
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      // Simplified login: username only (password not required for now)
       const { username } = req.body;
       
       if (!username || typeof username !== 'string') {
         return res.status(400).json({ error: "Username is required" });
       }
 
-      const user = await sentinelModels.getUserByUsername(username);
-      if (!user) {
-        return res.status(401).json({ error: "User not found" });
+      let user = null;
+
+      // Only try to query database if it's available
+      if (db) {
+        user = await sentinelModels.getUserByUsername(username);
       }
 
-      // Skip password validation for simplified development login
-      // Password check removed for now - just validate username exists
+      // --- LOCAL BYPASS START ---
+      // If user is not found or DB is unavailable, automatically create/log in a default local user
+      if (!user) {
+        console.log(`[Local Auth] User '${username}' not found or DB unavailable. Creating local session bypass...`);
+        
+        // Try to get the first user in the DB regardless of name (only if DB is available)
+        if (db) {
+          const allUsers = await db.select().from(sentinelUsers).limit(1);
+          
+          if (allUsers.length > 0) {
+            user = allUsers[0];
+          }
+        }
+        
+        // If DB is unavailable or empty, create a mock user and set session
+        if (!user) {
+          console.log('[Local Auth] No database or no users found. Creating mock session for local development.');
+          const mockUser = { 
+            id: 1, 
+            username: username || "DonaldCotton", 
+            email: "local@example.com", 
+            tier: "pro", 
+            isAdmin: true 
+          };
+          
+          // Set the session for the mock user
+          req.session.userId = mockUser.id;
+          req.session.username = mockUser.username;
+          
+          return req.session.save((err) => {
+            if (err) {
+              console.error("Session save error:", err);
+              return res.status(500).json({ error: "Login failed" });
+            }
+            console.log("[Sentinel Auth] Mock user session created:", { userId: req.session.userId });
+            res.json(mockUser);
+          });
+        }
+      }
+      // --- LOCAL BYPASS END ---
 
       req.session.userId = user.id;
       req.session.username = user.username;
@@ -286,65 +381,18 @@ export function registerSentinelRoutes(app: Express): void {
           console.error("Session save error:", err);
           return res.status(500).json({ error: "Login failed" });
         }
-        console.log("[Sentinel Auth] Session saved:", { userId: req.session.userId, sessionID: req.sessionID });
+        console.log("[Sentinel Auth] Local Session bypass active:", { userId: req.session.userId });
         res.json({ 
           id: user.id, 
           username: user.username, 
           email: user.email,
-          tier: user.tier || "standard",
-          isAdmin: user.isAdmin || false,
+          tier: user.tier || "pro",
+          isAdmin: true, // Force admin for local dev
         });
       });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0].message });
-      }
       console.error("Login error:", error);
       res.status(500).json({ error: "Login failed" });
-    }
-  });
-
-  app.post("/api/auth/logout", (req: Request, res: Response) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ error: "Logout failed" });
-      }
-      res.json({ message: "Logged out" });
-    });
-  });
-
-  app.get("/api/auth/me", requireAuth, async (req: Request, res: Response) => {
-    const user = await sentinelModels.getUserById(req.session.userId!);
-    if (!user) {
-      return res.status(401).json({ error: "User not found" });
-    }
-    res.json({ id: user.id, username: user.username, email: user.email, tier: user.tier || "standard", isAdmin: user.isAdmin || false });
-  });
-
-  app.post("/api/sentinel/suggest", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const data = suggestSchema.parse(req.body);
-      console.log("[Sentinel] Suggest request:", data.symbol, data.direction, "entry:", data.entryPrice);
-      
-      const user = await sentinelModels.getUserById(req.session.userId!);
-      const accountSize = user?.accountSize || 100000;
-      
-      const request: SuggestRequest = {
-        symbol: data.symbol.toUpperCase(),
-        direction: data.direction,
-        entryPrice: data.entryPrice,
-        setupType: data.setupType,
-      };
-
-      const suggestions = await generateSuggestions(request, accountSize);
-      console.log("[Sentinel] Suggestions generated:", suggestions.stopSuggestions.length, "stops,", suggestions.targetSuggestions.length, "targets");
-      res.json(suggestions);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0].message });
-      }
-      console.error("[Sentinel] Suggest error:", error);
-      res.status(500).json({ error: "Failed to generate suggestions" });
     }
   });
 
@@ -384,6 +432,34 @@ export function registerSentinelRoutes(app: Express): void {
       console.error("Evaluate error:", errorMessage);
       console.error("Evaluate error stack:", error?.stack);
       res.status(500).json({ error: `Evaluation failed: ${errorMessage}` });
+    }
+  });
+
+  app.post("/api/sentinel/suggest", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const data = suggestSchema.parse(req.body);
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      const accountSize = user?.accountSize || 100000;
+      const askIvyRules = await sentinelModels.getAskIvySettings();
+      const result = await generateSuggestions(
+        { 
+          symbol: data.symbol, 
+          direction: data.direction, 
+          entryPrice: data.entryPrice, 
+          setupType: data.setupType,
+          timeframe: data.timeframe,
+          setupContext: data.setupContext,
+        },
+        accountSize,
+        askIvyRules
+      );
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Suggest error:", error);
+      res.status(500).json({ error: "Failed to generate suggestions" });
     }
   });
 
@@ -1098,10 +1174,130 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
-  // Watchlist routes
+  // Watchlist definitions routes (multiple watchlists per user)
+  app.get("/api/sentinel/watchlists", requireAuth, async (req: Request, res: Response) => {
+    try {
+      let lists = await sentinelModels.getWatchlistsByUser(req.session.userId!);
+      // Auto-create default watchlist if none exist
+      if (lists.length === 0) {
+        await sentinelModels.getOrCreateDefaultWatchlist(req.session.userId!);
+        lists = await sentinelModels.getWatchlistsByUser(req.session.userId!);
+      }
+      // Add item counts to each watchlist
+      const listsWithCounts = await Promise.all(
+        lists.map(async (wl) => {
+          const items = await sentinelModels.getWatchlistByUser(req.session.userId!, wl.id);
+          return { ...wl, itemCount: items.length };
+        })
+      );
+      res.json(listsWithCounts);
+    } catch (error) {
+      console.error("Get watchlists error:", error);
+      res.status(500).json({ error: "Failed to load watchlists" });
+    }
+  });
+
+  app.post("/api/sentinel/watchlists", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { name } = req.body;
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Name is required" });
+      }
+      const wl = await sentinelModels.createWatchlist({
+        userId: req.session.userId!,
+        name: name.trim(),
+        isDefault: false,
+      });
+      res.status(201).json(wl);
+    } catch (error: any) {
+      if (error?.code === '23505') { // unique violation
+        return res.status(409).json({ error: "A watchlist with this name already exists" });
+      }
+      console.error("Create watchlist error:", error);
+      res.status(500).json({ error: "Failed to create watchlist" });
+    }
+  });
+
+  app.patch("/api/sentinel/watchlists/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const wl = await sentinelModels.getWatchlistById(id);
+      
+      if (!wl) {
+        return res.status(404).json({ error: "Watchlist not found" });
+      }
+      if (wl.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const { name } = req.body;
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Name is required" });
+      }
+
+      const updated = await sentinelModels.updateWatchlist(id, { name: name.trim() });
+      res.json(updated);
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        return res.status(409).json({ error: "A watchlist with this name already exists" });
+      }
+      console.error("Update watchlist error:", error);
+      res.status(500).json({ error: "Failed to update watchlist" });
+    }
+  });
+
+  app.delete("/api/sentinel/watchlists/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const wl = await sentinelModels.getWatchlistById(id);
+      
+      if (!wl) {
+        return res.status(404).json({ error: "Watchlist not found" });
+      }
+      if (wl.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      if (wl.isDefault) {
+        return res.status(400).json({ error: "Cannot delete the default watchlist" });
+      }
+
+      // Move items to default watchlist before deleting
+      const defaultWl = await sentinelModels.getOrCreateDefaultWatchlist(req.session.userId!);
+      await sentinelModels.moveWatchlistItems(id, defaultWl.id);
+      await sentinelModels.deleteWatchlist(id);
+      
+      res.json({ message: "Deleted", movedTo: defaultWl.id });
+    } catch (error) {
+      console.error("Delete watchlist error:", error);
+      res.status(500).json({ error: "Failed to delete watchlist" });
+    }
+  });
+
+  app.post("/api/sentinel/watchlists/:id/set-default", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const wl = await sentinelModels.getWatchlistById(id);
+      
+      if (!wl) {
+        return res.status(404).json({ error: "Watchlist not found" });
+      }
+      if (wl.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      await sentinelModels.setDefaultWatchlist(req.session.userId!, id);
+      res.json({ message: "Default watchlist updated" });
+    } catch (error) {
+      console.error("Set default watchlist error:", error);
+      res.status(500).json({ error: "Failed to set default watchlist" });
+    }
+  });
+
+  // Watchlist items routes
   app.get("/api/sentinel/watchlist", requireAuth, async (req: Request, res: Response) => {
     try {
-      const items = await sentinelModels.getWatchlistByUser(req.session.userId!);
+      const watchlistId = req.query.watchlistId ? parseInt(req.query.watchlistId as string) : undefined;
+      const items = await sentinelModels.getWatchlistByUser(req.session.userId!, watchlistId);
       res.json(items);
     } catch (error) {
       console.error("Watchlist error:", error);
@@ -1112,8 +1308,17 @@ export function registerSentinelRoutes(app: Express): void {
   app.post("/api/sentinel/watchlist", requireAuth, async (req: Request, res: Response) => {
     try {
       const data = watchlistSchema.parse(req.body);
+      
+      // Get watchlistId - use provided, or get/create default
+      let watchlistId = data.watchlistId;
+      if (!watchlistId) {
+        const defaultWl = await sentinelModels.getOrCreateDefaultWatchlist(req.session.userId!);
+        watchlistId = defaultWl.id;
+      }
+      
       const item = await sentinelModels.createWatchlistItem({
         userId: req.session.userId!,
+        watchlistId,
         symbol: data.symbol.toUpperCase(),
         targetEntry: data.targetEntry,
         stopPlan: data.stopPlan,
@@ -2810,10 +3015,7 @@ Only group trades with 2+ members. Ungrouped trades can be suggested individuall
     }
 
     try {
-      const [quote, meta] = await Promise.all([
-        tiingo.fetchCurrentQuote(symbol),
-        tiingo.fetchTickerMeta(symbol),
-      ]);
+      const quote = await alpaca.fetchAlpacaQuote(symbol);
 
       if (!quote) {
         return res.status(404).json({ error: `Symbol ${symbol} not found` });
@@ -2821,20 +3023,14 @@ Only group trades with 2+ members. Ungrouped trades can be suggested individuall
 
       const sectorInfo = await getSectorAndIndustry(symbol);
 
-      let description = '';
-      if (meta?.description) {
-        const sentences = meta.description.match(/[^.!?]+[.!?]+/g) || [];
-        description = sentences.slice(0, 2).join(' ').trim();
-      }
-
       res.json({
         symbol,
-        name: meta?.name || symbol,
-        currentPrice: quote.tngoLast,
+        name: symbol,
+        currentPrice: quote.lastPrice,
         previousClose: quote.prevClose,
         sector: sectorInfo.sector,
         industry: sectorInfo.industry,
-        description
+        description: ""
       });
     } catch (error) {
       console.error(`Ticker lookup failed for ${symbol}:`, error);
@@ -6608,6 +6804,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const ticker = String(req.query.ticker || "").toUpperCase();
       const timeframe = String(req.query.timeframe || "daily");
+      const includeETH = String(req.query.includeETH || "false") === "true";
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
 
       const endDate = new Date();
@@ -6624,7 +6821,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       };
 
       const isIntraday = timeframe === "5min" || timeframe === "15min" || timeframe === "30min";
-      const tiingoInterval = isIntraday
+      const alpacaInterval = isIntraday
         ? (timeframe === "5min" ? "5m" : timeframe === "15min" ? "15m" : "30m")
         : "1d";
       const intradayStart = new Date();
@@ -6632,21 +6829,38 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         intradayStart.setDate(intradayStart.getDate() - (timeframe === "5min" ? 25 : timeframe === "15min" ? 40 : 55));
       }
 
-      const [dailyQuotes, intradayQuotes, quoteData, tickerMeta] = await Promise.all([
-        tiingo.fetchEODPrices(ticker, startDate, endDate).catch(() => []),
+      const [dailyBars, intradayBars, quoteData] = await Promise.all([
+        alpaca.fetchAlpacaDailyBars(ticker, startDate, endDate).catch(() => []),
         isIntraday
-          ? tiingo.getHistoricalBars(ticker, intradayStart, endDate, tiingoInterval).catch(() => [])
-          : Promise.resolve([] as tiingo.TiingoCandle[]),
-        tiingo.fetchCurrentQuote(ticker),
-        tiingo.fetchTickerMeta(ticker).catch(() => null),
+          ? alpaca.getAlpacaIntradayData(ticker, intradayStart, endDate, alpacaInterval, includeETH).catch(() => [])
+          : Promise.resolve([] as alpaca.AlpacaCandle[]),
+        alpaca.fetchAlpacaQuote(ticker).catch(() => null),
       ]);
 
-      if (!dailyQuotes.length) {
+      if (!dailyBars.length) {
         return res.status(404).json({ error: `No data found for ${ticker}` });
       }
 
+      const dailyQuotes = dailyBars.map(b => ({
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+        date: b.date
+      }));
+      
+      const intradayQuotes = intradayBars.map(b => ({
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+        date: b.date
+      }));
+
       const validDaily = dailyQuotes.filter((q) => q.open != null && q.close != null && q.high != null && q.low != null);
-      const currentPrice = validDaily[validDaily.length - 1]?.close || 0;
+      const currentPrice = quoteData?.lastPrice || validDaily[validDaily.length - 1]?.close || 0;
 
       let adr20 = 0;
       if (validDaily.length >= 20) {
@@ -6692,15 +6906,30 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       let sectorEtf = "";
       let sectorEtfChange = 0;
-      let sectorInfo = { sector: "Unknown", industry: "Unknown" };
+      let fundamentalData = { sector: "Unknown", industry: "Unknown", companyName: "", marketCap: 0 };
+      let companyDescription = "";
       try {
-        sectorInfo = await getSectorAndIndustry(ticker);
-        const sector = sectorInfo.sector;
+        // Fetch fundamentals (includes company name)
+        const fundData = await getFundamentals(ticker);
+        
+        fundamentalData = {
+          sector: fundData.sector,
+          industry: fundData.industry,
+          companyName: fundData.companyName || "",
+          marketCap: fundData.marketCap || 0,
+        };
+        
+        // Generate description from fundamentals
+        if (fundamentalData.companyName) {
+          companyDescription = `${fundamentalData.companyName} is a publicly traded company in the ${fundamentalData.industry !== 'Unknown' ? fundamentalData.industry : fundamentalData.sector} sector.`;
+        }
+        
+        const sector = fundamentalData.sector;
         sectorEtf = SECTOR_ETF_MAP[sector] || "";
         if (sectorEtf) {
-          const etfQuote = await tiingo.fetchCurrentQuote(sectorEtf);
-          if (etfQuote && etfQuote.prevClose > 0) {
-            sectorEtfChange = Math.round(((etfQuote.tngoLast - etfQuote.prevClose) / etfQuote.prevClose * 100) * 100) / 100;
+          const etfQuote = await alpaca.fetchAlpacaQuote(sectorEtf).catch(() => null);
+          if (etfQuote && etfQuote.prevClose && etfQuote.prevClose > 0) {
+            sectorEtfChange = Math.round(((etfQuote.lastPrice - etfQuote.prevClose) / etfQuote.prevClose * 100) * 100) / 100;
           }
         } else {
           sectorEtf = "N/A";
@@ -6724,7 +6953,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         if (validDaily.length >= 63) {
           const spyStart = new Date();
           spyStart.setDate(spyStart.getDate() - 400);
-          const spyDaily = await tiingo.fetchEODPrices("SPY", spyStart, new Date()).catch(() => []);
+          const spyBars = await alpaca.fetchAlpacaDailyBars("SPY", spyStart, new Date()).catch(() => []);
+          const spyDaily = spyBars.map(b => ({ close: b.close, open: b.open, high: b.high, low: b.low }));
           const spyValid = spyDaily.filter((q: any) => q.close != null);
           if (spyValid.length >= 63) {
             const stockNow = validDaily[validDaily.length - 1].close;
@@ -6746,13 +6976,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         epsCurrentQYoY: "N/A", salesGrowth3QYoY: "N/A", lastEpsSurprise: "N/A",
       };
       let industryPeers: { symbol: string; name: string }[] = [];
-      let industryName = sectorInfo.industry;
+      let industryName = fundamentalData.industry;
 
       try {
         const [ef, peers] = await Promise.all([
           getExtendedFundamentals(ticker),
-          sectorInfo.industry !== "Unknown" && sectorInfo.sector !== "Unknown"
-            ? fetchIndustryPeersFromFMP(sectorInfo.industry, sectorInfo.sector, ticker, 5)
+          fundamentalData.industry !== "Unknown" && fundamentalData.sector !== "Unknown"
+            ? fetchIndustryPeersFromFMP(fundamentalData.industry, fundamentalData.sector, ticker, 5)
             : Promise.resolve([]),
         ]);
         extFundamentals = ef;
@@ -6773,9 +7003,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf,
         sectorEtfChange,
         rsMomentum,
-        companyName: tickerMeta?.name || "",
-        companyDescription: tickerMeta?.description || "",
-        sectorName: sectorInfo.sector !== "Unknown" ? sectorInfo.sector : "",
+        companyName: fundamentalData.companyName || ticker,
+        companyDescription,
+        sectorName: fundamentalData.sector !== "Unknown" ? fundamentalData.sector : "",
         marketCap: extFundamentals.marketCap,
         pe: extFundamentals.pe,
         beta: extFundamentals.beta,
@@ -6912,6 +7142,498 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     } catch (error) {
       console.error("Save chart preferences error:", error);
       res.status(500).json({ error: "Failed to save chart preferences" });
+    }
+  });
+
+  // === IVY STOCK EVAL ENDPOINTS ===
+
+  const ivyEvalRequestSchema = z.object({
+    symbol: z.string().min(1).max(10),
+    direction: z.enum(["long", "short"]),
+    currentPrice: z.number().positive(),
+    selectedEntry: z.number().positive().optional(),
+    selectedStop: z.number().positive().optional(),
+    selectedTarget: z.number().positive().optional(),
+    recommendedEntry: z.number().positive().optional(),
+    recommendedStop: z.number().positive().optional(),
+    recommendedTarget: z.number().positive().optional(),
+    technicalSnapshot: z.string().optional(),
+  });
+
+  // Main Ivy Stock Eval endpoint - generates AI synopsis
+  app.post("/api/sentinel/ivy-eval", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      
+      // Check usage limits
+      const { canUse, used, limit, tier } = await sentinelModels.canUseIvyEval(userId);
+      if (!canUse) {
+        return res.status(429).json({ 
+          error: "Monthly evaluation limit reached",
+          used,
+          limit,
+          tier,
+          upgradeMessage: tier === 'free' ? "Upgrade to Premium for more evaluations" :
+                          tier === 'premium' ? "Upgrade to Pro for more evaluations" :
+                          "Purchase additional evaluations"
+        });
+      }
+
+      const data = ivyEvalRequestSchema.parse(req.body);
+      const user = await sentinelModels.getUserById(userId);
+      
+      // Build personalized risk context
+      const accountSize = user?.accountSize || 100000;
+      const maxRiskPercent = user?.maxAccountRiskPercent || 2;
+      const avgPositionSize = user?.avgPositionSize;
+      
+      // Calculate risk metrics
+      const entryPrice = data.selectedEntry || data.recommendedEntry || data.currentPrice;
+      const stopPrice = data.selectedStop || data.recommendedStop;
+      const targetPrice = data.selectedTarget || data.recommendedTarget;
+      
+      let riskPerShare = 0;
+      let rewardPerShare = 0;
+      let riskRewardRatio = 0;
+      let positionSizeByRisk = 0;
+      let dollarRisk = 0;
+      let dollarProfit = 0;
+
+      if (stopPrice && entryPrice) {
+        riskPerShare = Math.abs(entryPrice - stopPrice);
+        const maxDollarRisk = accountSize * (maxRiskPercent / 100);
+        positionSizeByRisk = Math.floor(maxDollarRisk / riskPerShare);
+        const actualShares = avgPositionSize ? Math.floor(avgPositionSize / entryPrice) : positionSizeByRisk;
+        dollarRisk = actualShares * riskPerShare;
+      }
+      
+      if (targetPrice && entryPrice) {
+        rewardPerShare = Math.abs(targetPrice - entryPrice);
+        const actualShares = avgPositionSize ? Math.floor(avgPositionSize / entryPrice) : positionSizeByRisk;
+        dollarProfit = actualShares * rewardPerShare;
+      }
+      
+      if (riskPerShare > 0 && rewardPerShare > 0) {
+        riskRewardRatio = rewardPerShare / riskPerShare;
+      }
+
+      // Determine risk assessment
+      let riskAssessment = 'medium';
+      if (riskRewardRatio >= 3) riskAssessment = 'low';
+      else if (riskRewardRatio < 1.5) riskAssessment = 'high';
+      if (dollarRisk > accountSize * 0.03) riskAssessment = 'high';
+
+      // Generate AI synopsis using OpenAI
+      const openai = new OpenAI();
+      
+      const hasUserSelections = data.selectedEntry || data.selectedStop || data.selectedTarget;
+      const hasIvyRecommendations = data.recommendedEntry || data.recommendedStop || data.recommendedTarget;
+      
+      const prompt = `You are a trading assistant named Ivy. Write a brief (2-4 sentences) analysis in FIRST PERSON perspective as if you are speaking directly to the trader.
+
+Symbol: ${data.symbol}
+Direction: ${data.direction.toUpperCase()}
+Current Price: $${data.currentPrice.toFixed(2)}
+
+${hasUserSelections ? `Trader's Plan:
+- Entry: ${data.selectedEntry ? `$${data.selectedEntry.toFixed(2)}` : 'Not set'}
+- Stop: ${data.selectedStop ? `$${data.selectedStop.toFixed(2)}` : 'Not set'}
+- Target: ${data.selectedTarget ? `$${data.selectedTarget.toFixed(2)}` : 'Not set'}` : ''}
+
+${hasIvyRecommendations ? `My Recommendations:
+- Entry: ${data.recommendedEntry ? `$${data.recommendedEntry.toFixed(2)}` : 'N/A'}
+- Stop: ${data.recommendedStop ? `$${data.recommendedStop.toFixed(2)}` : 'N/A'}
+- Target: ${data.recommendedTarget ? `$${data.recommendedTarget.toFixed(2)}` : 'N/A'}` : ''}
+
+Risk Metrics:
+- Risk/Reward: ${riskRewardRatio.toFixed(2)}:1
+- Dollar Risk: $${dollarRisk.toFixed(0)} (${((dollarRisk/accountSize)*100).toFixed(2)}% of account)
+- Potential Profit: $${dollarProfit.toFixed(0)}
+- Risk Assessment: ${riskAssessment.toUpperCase()}
+
+${data.technicalSnapshot ? `Technical Context: ${data.technicalSnapshot}` : ''}
+
+Write your response in first person (I/my, not Ivy). Include:
+1. Brief assessment of the setup quality  
+2. Any discrepancies between the trader's plan and my recommendations
+3. Key risk consideration
+Be concise and actionable.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 300,
+        temperature: 0.7,
+      });
+
+      const evaluationText = completion.choices[0]?.message?.content || "Unable to generate evaluation.";
+
+      // Save to history
+      const evalRecord = await sentinelModels.createIvyEvalHistory({
+        userId,
+        symbol: data.symbol.toUpperCase(),
+        direction: data.direction,
+        currentPriceAtEval: data.currentPrice,
+        selectedEntry: data.selectedEntry,
+        selectedStop: data.selectedStop,
+        selectedTarget: data.selectedTarget,
+        recommendedEntry: data.recommendedEntry,
+        recommendedStop: data.recommendedStop,
+        recommendedTarget: data.recommendedTarget,
+        evaluationText,
+        riskAssessment,
+        technicalSnapshot: data.technicalSnapshot,
+      });
+
+      // Increment usage
+      await sentinelModels.incrementIvyEvalUsage(userId);
+
+      res.json({
+        id: evalRecord.id,
+        evaluationText,
+        riskAssessment,
+        riskMetrics: {
+          riskRewardRatio: riskRewardRatio.toFixed(2),
+          dollarRisk: dollarRisk.toFixed(0),
+          dollarProfit: dollarProfit.toFixed(0),
+          percentOfAccount: ((dollarRisk/accountSize)*100).toFixed(2),
+          positionSizeByRisk,
+        },
+        usage: {
+          used: used + 1,
+          limit,
+          tier,
+        }
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Ivy eval error:", error);
+      res.status(500).json({ error: "Failed to generate evaluation" });
+    }
+  });
+
+  // Rate an evaluation (thumbs up/down)
+  app.post("/api/sentinel/ivy-eval/:id/rate", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const evalId = parseInt(req.params.id);
+      const { rating } = req.body;
+      
+      if (!rating || !['up', 'down'].includes(rating)) {
+        return res.status(400).json({ error: "Rating must be 'up' or 'down'" });
+      }
+
+      const updated = await sentinelModels.rateIvyEval(evalId, rating);
+      if (!updated) {
+        return res.status(404).json({ error: "Evaluation not found" });
+      }
+
+      res.json({ success: true, rating: updated.userRating });
+    } catch (error) {
+      console.error("Rate eval error:", error);
+      res.status(500).json({ error: "Failed to rate evaluation" });
+    }
+  });
+
+  // Get user's eval usage for current month
+  app.get("/api/sentinel/ivy-eval/usage", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const { canUse, used, limit, tier } = await sentinelModels.canUseIvyEval(userId);
+      res.json({ canUse, used, limit, tier });
+    } catch (error) {
+      console.error("Usage check error:", error);
+      res.status(500).json({ error: "Failed to check usage" });
+    }
+  });
+
+  // Get eval history for current user
+  app.get("/api/sentinel/ivy-eval/history", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const history = await sentinelModels.getIvyEvalHistoryByUser(userId, limit);
+      res.json(history);
+    } catch (error) {
+      console.error("Eval history error:", error);
+      res.status(500).json({ error: "Failed to fetch history" });
+    }
+  });
+
+  // === USER RISK PROFILE ENDPOINTS ===
+
+  const riskProfileSchema = z.object({
+    accountSize: z.number().positive().optional(),
+    maxAccountRiskPercent: z.number().min(0.1).max(10).optional(),
+    avgPositionSize: z.number().positive().optional(),
+    riskProfileCompleted: z.boolean().optional(),
+  });
+
+  // Get current user's risk profile
+  app.get("/api/sentinel/user-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({
+        accountSize: user.accountSize,
+        maxAccountRiskPercent: user.maxAccountRiskPercent,
+        avgPositionSize: user.avgPositionSize,
+        riskProfileCompleted: user.riskProfileCompleted,
+        riskProfileSkippedAt: user.riskProfileSkippedAt,
+        tier: user.tier,
+      });
+    } catch (error) {
+      console.error("Get user settings error:", error);
+      res.status(500).json({ error: "Failed to get user settings" });
+    }
+  });
+
+  // Update user's risk profile
+  app.patch("/api/sentinel/user-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const data = riskProfileSchema.parse(req.body);
+      const updated = await sentinelModels.updateUserRiskProfile(req.session.userId!, {
+        ...data,
+        riskProfileCompleted: data.riskProfileCompleted ?? (data.accountSize !== undefined || data.maxAccountRiskPercent !== undefined),
+      });
+      if (!updated) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({
+        accountSize: updated.accountSize,
+        maxAccountRiskPercent: updated.maxAccountRiskPercent,
+        avgPositionSize: updated.avgPositionSize,
+        riskProfileCompleted: updated.riskProfileCompleted,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Update user settings error:", error);
+      res.status(500).json({ error: "Failed to update user settings" });
+    }
+  });
+
+  // === ASK IVY (OVERLAY) SETTINGS ===
+  // Public (auth-required) read: allows the client to adapt UI (resize, chart label side, etc.)
+  app.get("/api/sentinel/ask-ivy-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const settings = await sentinelModels.getAskIvySettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Get Ask Ivy settings error:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+
+  // Admin read
+  app.get("/api/admin/ask-ivy-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const settings = await sentinelModels.getAskIvySettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Get Ask Ivy settings (admin) error:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+
+  const askIvySettingsSchema = z.object({
+    enableMinerviniCheatEntries: z.boolean().optional(),
+    enableEma620Entry: z.boolean().optional(),
+    ema620AllowedTimeframe: z.enum(["5min_only", "all_intraday"]).optional(),
+    entryBufferPct: z.number().min(0).max(0.02).optional(),
+
+    // Qullaggie Entry Rules
+    enableOrhEntry: z.boolean().optional(),
+    orhTimeframe: z.enum(["5min", "60min", "both"]).optional(),
+    enableMaSurfEntry: z.boolean().optional(),
+    maSurfMaxDistancePct: z.number().min(0.5).max(10).optional(),
+
+    include21EmaStop: z.boolean().optional(),
+    include50SmaStop: z.boolean().optional(),
+    includeAtrStop: z.boolean().optional(),
+    atrStopMultiple: z.number().min(0.5).max(5).optional(),
+    stopMaOffsetDollars: z.number().min(0).max(5).optional(),
+    stop21Label: z.string().min(1).max(64).optional(),
+
+    // Qullaggie Stop Rules
+    enforceAtrStopCap: z.boolean().optional(),
+    enforceAdrStopCap: z.boolean().optional(),
+
+    alwaysInclude8RTarget: z.boolean().optional(),
+    includeSwingHighTargets: z.boolean().optional(),
+    swingHighTargetCount: z.number().int().min(0).max(10).optional(),
+    include52wTarget: z.boolean().optional(),
+    includeWeeklyTarget: z.boolean().optional(),
+    include5DayTarget: z.boolean().optional(),
+    include8xAdrTarget: z.boolean().optional(),
+    adr8TargetBreakoutOnly: z.boolean().optional(),
+    warnIfNoChartTargets: z.boolean().optional(),
+
+    // Target Display / Filtering
+    minRrThreshold: z.number().min(1).max(5).optional(),
+    targetDisplayLimit: z.number().int().min(3).max(20).optional(),
+    prioritizeChartTargets: z.boolean().optional(),
+    include8xAdrOver50Target: z.boolean().optional(),
+
+    // Risk Warnings
+    warn200DsmaBelow: z.boolean().optional(),
+
+    // Qullaggie Position Management
+    suggestPartialProfits: z.boolean().optional(),
+    partialProfitDays: z.number().int().min(1).max(20).optional(),
+    includeTrailMaCloseStop: z.boolean().optional(),
+    trailMaClosePeriod: z.number().int().min(5).max(50).optional(),
+
+    extendedThresholdAdr: z.number().min(0).max(20).optional(),
+    profitTakingThresholdAdr: z.number().min(0).max(50).optional(),
+    showExtendedWarning: z.boolean().optional(),
+
+    chartPriceScaleSide: z.enum(["left", "right"]).optional(),
+    overlayResizable: z.boolean().optional(),
+  });
+
+  // Admin update
+  app.patch("/api/admin/ask-ivy-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const data = askIvySettingsSchema.parse(req.body);
+      const updated = await sentinelModels.updateAskIvySettings(data);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Update Ask Ivy settings error:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // Skip risk profile setup (user chose "later")
+  app.post("/api/sentinel/user-settings/skip", requireAuth, async (req: Request, res: Response) => {
+    try {
+      await sentinelModels.skipRiskProfileSetup(req.session.userId!);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Skip risk profile error:", error);
+      res.status(500).json({ error: "Failed to skip setup" });
+    }
+  });
+
+  // === ADMIN IVY EVAL SETTINGS ===
+
+  // Get admin settings for Ivy eval limits
+  app.get("/api/admin/ivy-eval-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const settings = await sentinelModels.getIvyEvalSettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Get ivy eval settings error:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+
+  const ivyEvalSettingsSchema = z.object({
+    tierFreeLimit: z.number().int().min(0).optional(),
+    tierFreeTrialDays: z.number().int().min(0).optional(),
+    tierPremiumLimit: z.number().int().min(0).optional(),
+    tierProLimit: z.number().int().min(0).optional(),
+    tierProCanBuyMore: z.boolean().optional(),
+    extraEvalPrice: z.number().min(0).optional(),
+  });
+
+  // Update admin settings for Ivy eval limits
+  app.patch("/api/admin/ivy-eval-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const data = ivyEvalSettingsSchema.parse(req.body);
+      const updated = await sentinelModels.updateIvyEvalSettings(data);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Update ivy eval settings error:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // === WATCHLIST WITH IVY EVAL ===
+
+  // Add to watchlist with Ivy eval data
+  app.post("/api/sentinel/watchlist/with-ivy-eval", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { 
+        symbol, direction, targetEntry, stopPlan, targetPlan, thesis, priority, watchlistId,
+        ivyEvalId, ivyEvalText, ivyRecommendedEntry, ivyRecommendedStop, ivyRecommendedTarget, ivyRiskAssessment
+      } = req.body;
+
+      if (!symbol) {
+        return res.status(400).json({ error: "Symbol is required" });
+      }
+
+      const userId = req.session.userId!;
+
+      // Get watchlistId - use provided, or get/create default
+      let finalWatchlistId = watchlistId;
+      if (!finalWatchlistId) {
+        const defaultWl = await sentinelModels.getOrCreateDefaultWatchlist(userId);
+        finalWatchlistId = defaultWl.id;
+      }
+
+      // Create watchlist item with all Ivy eval data
+      const item = await sentinelModels.createWatchlistItem({
+        userId,
+        watchlistId: finalWatchlistId,
+        symbol: symbol.toUpperCase(),
+        direction: direction || 'long',
+        targetEntry,
+        stopPlan,
+        targetPlan,
+        thesis,
+        priority: priority || 'medium',
+      });
+
+      // Update with Ivy eval data if provided
+      if (ivyEvalId || ivyEvalText) {
+        await sentinelModels.updateWatchlistWithIvyEval(item.id, {
+          ivyEvalId,
+          ivyEvalText,
+          ivyRecommendedEntry,
+          ivyRecommendedStop,
+          ivyRecommendedTarget,
+          ivyRiskAssessment,
+        });
+
+        // Link the eval history to this watchlist item
+        if (ivyEvalId) {
+          await sentinelModels.linkIvyEvalToWatchlist(ivyEvalId, item.id);
+        }
+      }
+
+      // Return updated item
+      const updated = await sentinelModels.getWatchlistItem(item.id);
+      res.status(201).json(updated);
+    } catch (error) {
+      console.error("Create watchlist with ivy eval error:", error);
+      res.status(500).json({ error: "Failed to create watchlist item" });
     }
   });
 
