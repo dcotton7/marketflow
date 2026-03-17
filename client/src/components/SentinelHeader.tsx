@@ -448,7 +448,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
       )}
       {rightContent}
       <div className="flex items-center gap-1 ml-2 select-none shrink-0">
-        <span className="text-xs text-slate-500 font-mono">
+        <span className="text-xs font-bold font-mono text-amber-400">
           v{import.meta.env.VITE_APP_VERSION ?? "0.0.0"}
         </span>
         <span className="text-xs text-slate-600">·</span>
