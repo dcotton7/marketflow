@@ -17,15 +17,12 @@ function MarketTimeDisplay() {
   useEffect(() => {
     const syncNYCTime = async () => {
       try {
-        const res = await fetch("https://timeapi.io/api/Time/current/zone?timeZone=America/New_York");
+        // Fetch UTC time — no DST ambiguity, Intl handles NY conversion
+        const res = await fetch("https://timeapi.io/api/Time/current/zone?timeZone=UTC");
         const data = await res.json();
-        // Build a proper ISO string using dstActive so the UTC offset is correct
-        // dstActive=true → EDT (UTC-4), dstActive=false → EST (UTC-5)
-        const utcOffset = data.dstActive ? "-04:00" : "-05:00";
-        const pad = (n: number) => String(n).padStart(2, "0");
-        const isoStr = `${data.year}-${pad(data.month)}-${pad(data.day)}T${pad(data.hour)}:${pad(data.minute)}:${pad(data.seconds)}${utcOffset}`;
-        const nyUtc = new Date(isoStr); // accurate UTC from NYC time
-        setOffsetMs(nyUtc.getTime() - Date.now());
+        // dateTime is UTC e.g. "2026-03-17T16:37:00" — append Z to parse as UTC
+        const utcDate = new Date(`${data.dateTime}Z`);
+        setOffsetMs(utcDate.getTime() - Date.now()); // correct local clock drift
       } catch {
         // If API fails keep existing offset (or 0 = local clock)
       }
