@@ -500,11 +500,19 @@ function resetSleepTimer(): void {
 
 /**
  * Enter sleep mode - stop polling to save API quota
+ * Only sleeps during off-hours; during market hours polling always continues.
  */
 function enterSleepMode(): void {
   if (isSleeping) return;
-  
-  console.log("[MC-Snapshot] No activity for 15 min - entering SLEEP mode to save API quota");
+
+  if (isMarketHours()) {
+    // Never sleep during market hours - reschedule check for after close
+    console.log("[MC-Snapshot] Inactivity detected but market is OPEN - not sleeping, resetting timer");
+    resetSleepTimer();
+    return;
+  }
+
+  console.log("[MC-Snapshot] No activity for 15 min (off-hours) - entering SLEEP mode to save API quota");
   isSleeping = true;
   stopPolling();
 }
