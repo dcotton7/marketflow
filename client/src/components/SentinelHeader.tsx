@@ -228,28 +228,26 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
         </Link>
         
         <nav className="flex items-center gap-1">
-          <Link href="/sentinel/dashboard">
-            <Button 
-              variant={isDashboardPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-dashboard"
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
-            </Button>
-          </Link>
-          <Link href="/sentinel/rules">
-            <Button 
-              variant={isRulesPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-rules"
-            >
-              <BookOpen className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
-            </Button>
-          </Link>
+          <Button 
+            variant="ghost"
+            size="sm"
+            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
+            disabled
+            data-testid="nav-dashboard"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
+          </Button>
+          <Button 
+            variant="ghost"
+            size="sm"
+            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
+            disabled
+            data-testid="nav-rules"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
+          </Button>
           <Link href="/sentinel/import">
             <Button 
               variant={isImportPage ? "secondary" : "ghost"} 

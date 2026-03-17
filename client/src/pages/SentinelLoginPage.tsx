@@ -18,7 +18,7 @@ export default function SentinelLoginPage() {
   // Redirect if already logged in - handles the case where login succeeds but navigation didn't work
   useEffect(() => {
     if (!authLoading && user) {
-      setLocation("/sentinel");
+      setLocation("/sentinel/market-condition");
     }
   }, [user, authLoading, setLocation]);
 
@@ -41,7 +41,7 @@ export default function SentinelLoginPage() {
         await login(username, password);
         toast({ title: "Welcome back", description: "Logged in successfully" });
       }
-      setLocation("/sentinel");
+      setLocation("/sentinel/market-condition");
     } catch (error: any) {
       toast({
         title: "Error",
