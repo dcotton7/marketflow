@@ -447,6 +447,21 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
         </div>
       )}
       {rightContent}
+      <div className="flex items-center gap-1 ml-2 select-none shrink-0">
+        <span className="text-xs text-slate-500 font-mono">
+          v{import.meta.env.VITE_APP_VERSION ?? "0.0.0"}
+        </span>
+        <span className="text-xs text-slate-600">·</span>
+        {import.meta.env.PROD ? (
+          <span className="text-xs font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/30 px-1.5 py-0.5 rounded">
+            LIVE
+          </span>
+        ) : (
+          <span className="text-xs font-semibold text-amber-400 bg-amber-400/10 border border-amber-400/30 px-1.5 py-0.5 rounded">
+            DEV
+          </span>
+        )}
+      </div>
       </div>
     </div>
     </>
