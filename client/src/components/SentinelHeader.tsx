@@ -10,67 +10,55 @@ import { useSystemSettings } from "@/context/SystemSettingsContext";
 import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
 
 function MarketTimeDisplay() {
-  const [nyTime, setNyTime] = useState<Date | null>(null);
+  // offsetMs corrects local clock drift using authoritative NYC time from API
   const [offsetMs, setOffsetMs] = useState<number>(0);
-  
-  // Fetch actual NYC time from external API on mount
+  const [now, setNow] = useState<Date>(() => new Date());
+
   useEffect(() => {
-    const fetchNYCTime = async () => {
+    const syncNYCTime = async () => {
       try {
-        // Try timeapi.io first
         const res = await fetch("https://timeapi.io/api/Time/current/zone?timeZone=America/New_York");
         const data = await res.json();
-        // Returns { year, month, day, hour, minute, seconds, ... }
-        const nyDate = new Date(data.year, data.month - 1, data.day, data.hour, data.minute, data.seconds);
-        const localTime = new Date();
-        setOffsetMs(nyDate.getTime() - localTime.getTime());
-        setNyTime(nyDate);
+        // Build a proper ISO string using dstActive so the UTC offset is correct
+        // dstActive=true → EDT (UTC-4), dstActive=false → EST (UTC-5)
+        const utcOffset = data.dstActive ? "-04:00" : "-05:00";
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const isoStr = `${data.year}-${pad(data.month)}-${pad(data.day)}T${pad(data.hour)}:${pad(data.minute)}:${pad(data.seconds)}${utcOffset}`;
+        const nyUtc = new Date(isoStr); // accurate UTC from NYC time
+        setOffsetMs(nyUtc.getTime() - Date.now());
       } catch {
-        // Fallback: use system clock 
-        setNyTime(new Date());
+        // If API fails keep existing offset (or 0 = local clock)
       }
     };
-    fetchNYCTime();
-    // Re-sync every 5 minutes
-    const syncInterval = setInterval(fetchNYCTime, 5 * 60 * 1000);
+    syncNYCTime();
+    const syncInterval = setInterval(syncNYCTime, 5 * 60 * 1000); // re-sync every 5 min
     return () => clearInterval(syncInterval);
   }, []);
-  
-  // Update time every second using the calculated offset
+
+  // Tick every second using the corrected UTC time
   useEffect(() => {
-    const interval = setInterval(() => {
-      const correctedTime = new Date(Date.now() + offsetMs);
-      setNyTime(correctedTime);
-    }, 1000);
+    const interval = setInterval(() => setNow(new Date(Date.now() + offsetMs)), 1000);
     return () => clearInterval(interval);
   }, [offsetMs]);
-  
-  if (!nyTime) {
-    return (
-      <div className="flex items-center gap-4 px-4 py-1.5 bg-slate-800/50 rounded-md border border-slate-700/50">
-        <span className="text-sm text-slate-400">Loading...</span>
-      </div>
-    );
-  }
-  
-  // Format as ET
+
+  // Format as ET (browser/server UTC → America/New_York handles DST correctly)
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     hour: "numeric",
-    minute: "2-digit", 
+    minute: "2-digit",
     second: "2-digit",
     hour12: true,
   });
-  const currentTimeET = formatter.format(nyTime);
-  
-  // Get numeric hour/min for calculations
+  const currentTimeET = formatter.format(now);
+
+  // Get numeric hour/min for market hours display
   const etParts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     hour: "numeric",
     minute: "2-digit",
     hour12: false,
-  }).formatToParts(nyTime);
-  
+  }).formatToParts(now);
+
   const currentHour = parseInt(etParts.find(p => p.type === "hour")?.value || "0", 10);
   const currentMin = parseInt(etParts.find(p => p.type === "minute")?.value || "0", 10);
   const currentMinutesFromMidnight = currentHour * 60 + currentMin;
@@ -78,10 +66,10 @@ function MarketTimeDisplay() {
   const marketOpenMinutes = 9 * 60 + 30; // 9:30 AM
   const marketCloseMinutes = 16 * 60; // 4:00 PM
   
-  const isMarketHours = currentMinutesFromMidnight >= marketOpenMinutes && currentMinutesFromMidnight < marketCloseMinutes;
-  const dayOfWeek = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(nyTime);
+  const isMarketHoursNow = currentMinutesFromMidnight >= marketOpenMinutes && currentMinutesFromMidnight < marketCloseMinutes;
+  const dayOfWeek = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(now);
   const isWeekday = !["Sat", "Sun"].includes(dayOfWeek);
-  const isMarketOpen = isMarketHours && isWeekday;
+  const isMarketOpen = isMarketHoursNow && isWeekday;
   
   const openForMinutes = Math.max(0, currentMinutesFromMidnight - marketOpenMinutes);
   const openForHours = Math.floor(openForMinutes / 60);
