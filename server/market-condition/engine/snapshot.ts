@@ -14,6 +14,7 @@ import { LeaderCandidate, buildClusterLeaderCandidates, processClusterLeaders, r
 import {
   saveThemeSnapshots,
   cleanupOldHourlySnapshots,
+  clearTodayHourlySnapshots,
   shouldSaveHourlySnapshot,
   shouldSaveDailySnapshot,
   markHourlySnapshotSaved,
@@ -383,6 +384,10 @@ export function startPolling(intervalMs?: number): void {
   // Reset sleep state when starting
   isSleeping = false;
   lastActivityTime = new Date();
+  
+  // Wipe today's hourly snapshots so any records saved with a drifted system clock
+  // are replaced by fresh, correctly-timestamped ones on the first poll.
+  clearTodayHourlySnapshots().catch(console.error);
   
   // If a specific interval is provided, use it for market hours
   if (intervalMs) {

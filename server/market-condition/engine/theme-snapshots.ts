@@ -638,6 +638,32 @@ export function markDailySnapshotSaved(date: string): void {
 }
 
 /**
+ * Delete all hourly snapshots for today and reset the in-memory tracker.
+ * Called on server startup so any snapshots saved with a drifted system clock
+ * are wiped before fresh, correctly-timestamped records are written.
+ */
+export async function clearTodayHourlySnapshots(): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const { date } = getMarketDateTime();
+  try {
+    await db
+      .delete(themeSnapshots)
+      .where(
+        and(
+          eq(themeSnapshots.snapshotType, "hourly"),
+          eq(themeSnapshots.marketDate, date)
+        )
+      );
+    // Reset in-memory tracker so the next poll immediately writes a fresh snapshot
+    lastIntradaySnapshot = null;
+    console.log(`[ThemeSnapshots] Cleared today's (${date}) hourly snapshots — fresh timestamps will be written on next poll`);
+  } catch (error) {
+    console.error("[ThemeSnapshots] Failed to clear today's hourly snapshots:", error);
+  }
+}
+
+/**
  * Get current market date, hour, and minute in Eastern Time
  */
 export function getMarketDateTime(): { date: string; hour: number; minute: number; slot: number } {
