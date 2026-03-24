@@ -222,7 +222,8 @@ export default function MarketConditionPage() {
   const { data: pollingStatus } = usePollingStatus();
   const { data: marketCondition, isLoading: themesLoading, isFetching: themesFetching, error: themesError, refetch: refetchThemes } = useMarketCondition({ 
     timeSlice, 
-    sizeFilter
+    sizeFilter,
+    rotationBaseline: lensMode === "rotation" && timeSlice === "TODAY" ? "open930" : undefined,
   });
   const { data: rai, isLoading: raiLoading, isFetching: raiFetching } = useRAI();
   const { data: themeMembers, refetch: refetchMembers } = useThemeMembers(selectedTheme as ClusterId | null, timeSlice);
@@ -556,6 +557,13 @@ export default function MarketConditionPage() {
     const label = isStale ? `vs ${timeStr} (stale)` : `vs ${timeStr}`;
     return { comparisonTimeLabel: label, isComparisonStale: isStale };
   }, [marketCondition?.comparisonTime, timeSlice]);
+  const comparisonUnavailable = marketCondition?.comparisonUnavailable ?? null;
+  const canUseHistoricalComparison = timeSlice !== "TODAY" && !!marketCondition?.comparisonTime;
+  useEffect(() => {
+    if (timeSlice !== "TODAY" && !canUseHistoricalComparison && heatmapSort === "historical") {
+      setHeatmapSort("current");
+    }
+  }, [timeSlice, canUseHistoricalComparison, heatmapSort]);
 
   return (
     <div className={cn("h-screen flex flex-col bg-slate-950", isFullscreen && "fixed inset-0 z-50")}>
@@ -590,6 +598,14 @@ export default function MarketConditionPage() {
             <RefreshCw className={cn("w-3 h-3", isRetrying && "animate-spin")} />
             {isRetrying ? "Retrying..." : "Retry"}
           </Button>
+        </div>
+      )}
+
+      {/* Comparison availability banner */}
+      {!themesError && comparisonUnavailable && (
+        <div className="px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/30 flex items-center gap-2 shrink-0">
+          <AlertCircle className="w-4 h-4 text-yellow-400" />
+          <span className="text-xs text-yellow-300">{comparisonUnavailable}</span>
         </div>
       )}
 
@@ -1096,20 +1112,29 @@ export default function MarketConditionPage() {
                                         : "text-slate-500 hover:text-slate-300"
                                     )}
                                   >
-                                    {lastMarketDateLabel ?? "Today"}
+                                    {lensMode === "rotation" && timeSlice === "TODAY"
+                                      ? "Today (vs 9:30am open)"
+                                      : (lastMarketDateLabel ?? "Today")}
                                   </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="text-xs">
-                                  {lensMode === "flow" ? "Sort by today's live ThemeScore" : "Sort by rank position change (Δ Rank)"}
+                                  {lensMode === "flow"
+                                    ? "Sort by today's live ThemeScore"
+                                    : timeSlice === "TODAY"
+                                      ? "Sort by rank position change (Δ Rank) vs 9:30am open"
+                                      : "Sort by rank position change (Δ Rank)"}
                                 </TooltipContent>
                               </Tooltip>
                               {timeSlice !== "TODAY" && (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <button
-                                      onClick={() => setHeatmapSort("historical")}
+                                      onClick={() => {
+                                        if (canUseHistoricalComparison) setHeatmapSort("historical");
+                                      }}
                                       className={cn(
                                         "text-[15px] font-medium px-2 py-0.5 rounded transition-colors",
+                                        !canUseHistoricalComparison && "opacity-40 cursor-not-allowed",
                                         heatmapSort === "historical"
                                           ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
                                           : "text-slate-500 hover:text-slate-300"
@@ -1127,9 +1152,11 @@ export default function MarketConditionPage() {
                                     </button>
                                   </TooltipTrigger>
                                   <TooltipContent className="text-xs">
-                                    {lensMode === "flow"
-                                      ? `Sort by ThemeScore as of ${TIME_SLICE_LABELS[timeSlice]}`
-                                      : `Sort by score improvement since ${TIME_SLICE_LABELS[timeSlice]}`}
+                                    {!canUseHistoricalComparison
+                                      ? `No ${timeSlice} baseline available yet`
+                                      : (lensMode === "flow"
+                                        ? `Sort by ThemeScore as of ${TIME_SLICE_LABELS[timeSlice]}`
+                                        : `Sort by score improvement since ${TIME_SLICE_LABELS[timeSlice]}`)}
                                   </TooltipContent>
                                 </Tooltip>
                               )}

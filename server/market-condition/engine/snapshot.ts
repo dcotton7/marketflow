@@ -21,6 +21,7 @@ import {
   markDailySnapshotSaved,
   getMarketDateTime,
   calculateDeltaRanks,
+  calculateDeltaRanksFromOpen,
   getLatestDailySnapshot,
 } from "./theme-snapshots";
 import { getMADataForThemes } from "../../data-layer";
@@ -40,6 +41,7 @@ export interface MarketConditionSnapshot {
   lastUpdated: Date;
   isStale: boolean;
   comparisonTime?: string | null; // ISO timestamp of the baseline snapshot for deltaRank
+  comparisonUnavailable?: string | null;
 }
 
 export interface SnapshotState {
@@ -265,7 +267,7 @@ async function saveHistoricalSnapshotsIfNeeded(themes: ThemeMetrics[]): Promise<
   console.log(`[MC-Snapshot] Checking 15-min save: date=${date} hour=${hour} slot=${slot} shouldSave=${shouldSave}`);
   
   if (shouldSave) {
-    const saved = await saveThemeSnapshots(themes, "hourly", date, hour);
+    const saved = await saveThemeSnapshots(themes, "hourly", date, hour, slot);
     if (saved) {
       markHourlySnapshotSaved(date, hour, slot);
       console.log(`[MC-Snapshot] Saved 15-min snapshot for ${date} ${hour}:${slot.toString().padStart(2, '0')}`);
@@ -604,6 +606,7 @@ export async function getMarketConditionWithTimeSlice(timeSlice: TimeSlice): Pro
   // Get the current themes
   let themes = [...state.themeMetrics];
   let comparisonTime: string | null = null;
+  let comparisonUnavailable: string | null = null;
   
   // If not the default time slice, recalculate deltaRank from historical data
   if (timeSlice !== "TODAY" && themes.length > 0) {
@@ -618,6 +621,9 @@ export async function getMarketConditionWithTimeSlice(timeSlice: TimeSlice): Pro
     }));
     
     comparisonTime = deltaResult.comparisonTime;
+    if (!comparisonTime && (timeSlice === "15M" || timeSlice === "30M" || timeSlice === "1H" || timeSlice === "4H")) {
+      comparisonUnavailable = `No ${timeSlice} baseline yet. First eligible comparison appears after enough regular-hours snapshots accumulate.`;
+    }
   }
   
   return {
@@ -634,6 +640,50 @@ export async function getMarketConditionWithTimeSlice(timeSlice: TimeSlice): Pro
     lastUpdated: state.lastSnapshotTime || new Date(),
     isStale,
     comparisonTime,
+    comparisonUnavailable,
+  };
+}
+
+/**
+ * Get market condition where TODAY rotation is anchored to open baseline (>= 9:30 ET snapshot).
+ */
+export async function getMarketConditionWithOpenBaseline(): Promise<MarketConditionSnapshot> {
+  const isStale = !state.lastSnapshotTime ||
+    Date.now() - state.lastSnapshotTime.getTime() > STALE_THRESHOLD_MS;
+
+  let themes = [...state.themeMetrics];
+  let comparisonTime: string | null = null;
+  let comparisonUnavailable: string | null = null;
+
+  if (themes.length > 0) {
+    const { date } = getMarketDateTime();
+    const deltaResult = await calculateDeltaRanksFromOpen(themes, date);
+    themes = themes.map((theme) => ({
+      ...theme,
+      deltaRank: deltaResult.deltas.get(theme.id) ?? 0,
+      historicalMetrics: deltaResult.historicalMetrics?.get(theme.id),
+    }));
+    comparisonTime = deltaResult.comparisonTime;
+    if (!comparisonTime) {
+      comparisonUnavailable = "Open baseline not available yet. Waiting for first regular-hours snapshot (>= 9:30 ET).";
+    }
+  }
+
+  return {
+    themes,
+    spyBenchmark: state.spyBenchmark || {
+      symbol: "SPY",
+      price: 0,
+      prevClose: 0,
+      changePct: 0,
+      volume: 0,
+      timestamp: new Date(),
+    },
+    benchmarks: getBenchmarksRecord(),
+    lastUpdated: state.lastSnapshotTime || new Date(),
+    isStale,
+    comparisonTime,
+    comparisonUnavailable,
   };
 }
 

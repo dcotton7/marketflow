@@ -17,6 +17,7 @@ import type { ThemeMetrics } from "./theme-score";
 // =============================================================================
 
 export type SnapshotType = "hourly" | "daily_close";
+const MIN_COMPLETE_BATCH_ROWS = 20;
 
 export interface HistoricalRankings {
   themeId: ClusterId;
@@ -139,7 +140,8 @@ export async function saveThemeSnapshots(
   themes: ThemeMetrics[],
   snapshotType: SnapshotType,
   marketDate: string,
-  hour?: number
+  hour?: number,
+  slot?: number
 ): Promise<boolean> {
   const db = getDb();
   if (!db) {
@@ -148,6 +150,33 @@ export async function saveThemeSnapshots(
   }
 
   try {
+    // For hourly snapshots, enforce one batch per date/hour/slot in ET.
+    // This prevents duplicate writes caused by near-simultaneous refreshes.
+    if (snapshotType === "hourly" && hour !== undefined && slot !== undefined) {
+      const existing = await db
+        .select({ id: themeSnapshots.id })
+        .from(themeSnapshots)
+        .where(
+          and(
+            eq(themeSnapshots.snapshotType, "hourly"),
+            eq(themeSnapshots.marketDate, marketDate),
+            eq(themeSnapshots.snapshotHour, hour),
+            sql`(floor(extract(minute from ${themeSnapshots.createdAt}) / 15) * 15) = ${slot}`
+          )
+        );
+
+      if (existing.length > 0) {
+        await db
+          .delete(themeSnapshots)
+          .where(inArray(themeSnapshots.id, existing.map((r) => r.id)));
+        console.log(
+          `[ThemeSnapshots] Deduped ${existing.length} existing hourly rows for ${marketDate} ${hour}:${slot
+            .toString()
+            .padStart(2, "0")} ET`
+        );
+      }
+    }
+
     // Calculate A/D streaks only for daily_close snapshots
     let accDistStreaks: Map<ClusterId, number> | undefined;
     if (snapshotType === "daily_close") {
@@ -443,6 +472,111 @@ export interface DeltaRankResult {
 }
 
 /**
+ * Get the first complete intraday snapshot batch for current market date
+ * at/after 9:30 ET (open baseline for Rotation+TODAY).
+ */
+export async function getOpenBaselineSnapshot(
+  currentDate: string
+): Promise<HistoricalSnapshotResult | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  try {
+    const rows = await db
+      .select()
+      .from(themeSnapshots)
+      .where(
+        and(
+          eq(themeSnapshots.snapshotType, "hourly"),
+          eq(themeSnapshots.marketDate, currentDate),
+          sql`(
+            ${themeSnapshots.snapshotHour} > 9
+            or (
+              ${themeSnapshots.snapshotHour} = 9
+              and extract(minute from ${themeSnapshots.createdAt}) >= 30
+            )
+          )`,
+          sql`${themeSnapshots.snapshotHour} < 16`
+        )
+      )
+      .orderBy(themeSnapshots.createdAt);
+
+    if (!rows.length) return null;
+
+    const byBatch = new Map<string, ThemeSnapshot[]>();
+    for (const row of rows) {
+      const key =
+        row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt);
+      if (!byBatch.has(key)) byBatch.set(key, []);
+      byBatch.get(key)!.push(row);
+    }
+
+    // Prefer earliest complete batch; fallback to earliest non-empty.
+    let selectedKey: string | null = null;
+    for (const [key, batch] of byBatch) {
+      if (batch.length >= MIN_COMPLETE_BATCH_ROWS) {
+        selectedKey = key;
+        break;
+      }
+      if (!selectedKey) selectedKey = key;
+    }
+    if (!selectedKey) return null;
+
+    const selectedRows = byBatch.get(selectedKey) || [];
+    const ranks = new Map<ClusterId, number>();
+    const metrics = new Map<ClusterId, HistoricalThemeMetrics>();
+
+    for (const s of selectedRows) {
+      const id = s.themeId as ClusterId;
+      ranks.set(id, s.rank);
+      metrics.set(id, {
+        rank: s.rank,
+        score: s.score ?? 0,
+        medianPct: s.medianPct ?? 0,
+        rsVsBenchmark: s.rsVsBenchmark ?? 0,
+        breadthPct: s.breadthPct ?? 0,
+      });
+    }
+
+    return { ranks, metrics, comparisonTime: selectedKey };
+  } catch (error) {
+    console.error("[ThemeSnapshots] Failed to get open baseline snapshot:", error);
+    return null;
+  }
+}
+
+/**
+ * Calculate delta ranks vs today's open baseline (>=9:30 ET).
+ */
+export async function calculateDeltaRanksFromOpen(
+  currentThemes: ThemeMetrics[],
+  currentDate: string
+): Promise<DeltaRankResult> {
+  const deltaMap = new Map<ClusterId, number>();
+  const emptyMetrics = new Map<ClusterId, HistoricalThemeMetrics>();
+
+  const openBaseline = await getOpenBaselineSnapshot(currentDate);
+  if (!openBaseline) {
+    for (const theme of currentThemes) {
+      deltaMap.set(theme.id, 0);
+    }
+    return { deltas: deltaMap, historicalMetrics: emptyMetrics, comparisonTime: null };
+  }
+
+  const { ranks: baselineRanks, metrics: baselineMetrics, comparisonTime } = openBaseline;
+  for (const theme of currentThemes) {
+    const baselineRank = baselineRanks.get(theme.id);
+    if (baselineRank !== undefined) {
+      deltaMap.set(theme.id, baselineRank - theme.rank);
+    } else {
+      deltaMap.set(theme.id, 0);
+    }
+  }
+
+  return { deltas: deltaMap, historicalMetrics: baselineMetrics, comparisonTime };
+}
+
+/**
  * Calculate deltaRank values based on time slice selection
  * Returns both the delta values and the comparison timestamp
  */
@@ -564,11 +698,17 @@ let lastDailySnapshot: string | null = null;
  * Returns true if a new snapshot should be saved
  */
 export function shouldSaveHourlySnapshot(currentDate: string, currentHour: number, currentSlot?: number): boolean {
-  // Only save during market hours (9am - 4pm ET)
-  if (currentHour < 9 || currentHour > 16) return false;
+  // Weekdays only
+  const d = new Date(currentDate + "T12:00:00Z");
+  const dayOfWeek = d.getUTCDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+
+  // Only save during regular market hours (9:30am - 4:00pm ET)
+  if (currentHour < 9 || currentHour > 15) return false;
   
   // Default slot to 0 if not provided (backward compatibility)
   const slot = currentSlot ?? 0;
+  if (currentHour === 9 && slot < 30) return false;
   
   if (!lastIntradaySnapshot) {
     console.log(`[ThemeSnapshots] No previous snapshot, will save`);
@@ -604,7 +744,7 @@ export async function forceSaveIntradaySnapshot(themes: ThemeMetrics[]): Promise
   
   console.log(`[ThemeSnapshots] Force saving 15-min snapshot at ${date} ${hour}:${slot.toString().padStart(2, '0')}`);
   
-  const saved = await saveThemeSnapshots(themes, "hourly", date, hour);
+  const saved = await saveThemeSnapshots(themes, "hourly", date, hour, slot);
   if (saved) {
     markHourlySnapshotSaved(date, hour, slot);
     console.log(`[ThemeSnapshots] Force saved snapshot successfully`);

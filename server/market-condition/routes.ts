@@ -17,6 +17,7 @@ import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, Time
 import {
   getMarketCondition,
   getMarketConditionWithTimeSlice,
+  getMarketConditionWithOpenBaseline,
   getThemeById,
   getAllThemes,
   getClusterMembers,
@@ -60,6 +61,7 @@ router.get("/themes", async (req: Request, res: Response) => {
     const timeSlice = (req.query.timeSlice as TimeSlice) || "TODAY";
     const sizeFilter = (req.query.sizeFilter as string || "ALL") as any;
     const useIntradayBaseline = req.query.useIntradayBaseline === "true";
+    const rotationBaseline = (req.query.rotationBaseline as string) || "";
     
     // Validate timeSlice
     const validTimeSlices: TimeSlice[] = ["TODAY", "15M", "30M", "1H", "4H", "1D", "5D", "1W", "1M", "3M", "6M", "YTD"];
@@ -68,6 +70,7 @@ router.get("/themes", async (req: Request, res: Response) => {
     // Validate sizeFilter
     const validSizeFilters = ["ALL", "MEGA", "LARGE", "MID", "SMALL", "MICRO"];
     const validatedSizeFilter = validSizeFilters.includes(sizeFilter) ? sizeFilter : "ALL";
+    const useOpenBaselineForToday = validatedTimeSlice === "TODAY" && rotationBaseline === "open930";
     
     // Get condition with appropriate deltaRank calculation
     // ALWAYS force fresh calculation for ANY size filter to prevent cache poisoning
@@ -75,7 +78,9 @@ router.get("/themes", async (req: Request, res: Response) => {
     if (useIntradayBaseline || validatedSizeFilter !== "ALL") {
       // Force fresh snapshot with filters
       await refreshSnapshot(useIntradayBaseline, validatedSizeFilter as any);
-      condition = getMarketCondition();
+      condition = useOpenBaselineForToday
+        ? await getMarketConditionWithOpenBaseline()
+        : getMarketCondition();
     } else if (validatedTimeSlice !== "TODAY") {
       // Use historical comparison for non-default time slices
       console.log(`[MC-API] Themes requested with timeSlice=${validatedTimeSlice} (historical comparison)`);
@@ -83,7 +88,9 @@ router.get("/themes", async (req: Request, res: Response) => {
     } else {
       // ALWAYS refresh for "ALL" to clear any previous filter cache
       await refreshSnapshot(useIntradayBaseline, "ALL");
-      condition = getMarketCondition();
+      condition = useOpenBaselineForToday
+        ? await getMarketConditionWithOpenBaseline()
+        : getMarketCondition();
     }
     
     res.json({
@@ -97,6 +104,7 @@ router.get("/themes", async (req: Request, res: Response) => {
       sizeFilter: validatedSizeFilter,
       // Comparison timestamp for deltaRank calculations
       comparisonTime: condition.comparisonTime || null,
+      comparisonUnavailable: condition.comparisonUnavailable || null,
     });
   } catch (error) {
     console.error("[MC-API] Failed to get themes:", error);

@@ -178,6 +178,7 @@ export interface MarketConditionData {
   lastUpdated: string;
   isStale: boolean;
   comparisonTime?: string | null; // ISO timestamp of baseline for deltaRank
+  comparisonUnavailable?: string | null;
 }
 
 export interface MarketRegimeData {
@@ -283,6 +284,7 @@ export function useMarketCondition(options?: {
   timeSlice?: TimeSlice;
   sizeFilter?: SizeFilter;
   useIntradayBaseline?: boolean;
+  rotationBaseline?: "open930";
 }) {
   const { data: settings } = useQuery<MarketConditionSettings>({
     queryKey: ["market-condition", "settings"],
@@ -295,17 +297,16 @@ export function useMarketCondition(options?: {
   if (options?.timeSlice) params.set("timeSlice", options.timeSlice);
   if (options?.sizeFilter) params.set("sizeFilter", options.sizeFilter);
   if (options?.useIntradayBaseline) params.set("useIntradayBaseline", "true");
+  if (options?.rotationBaseline) params.set("rotationBaseline", options.rotationBaseline);
   const queryString = params.toString();
   const url = queryString ? `${API_BASE}/themes?${queryString}` : `${API_BASE}/themes`;
   
   return useQuery<MarketConditionData>({
-    queryKey: ["market-condition", "themes", options?.timeSlice, options?.sizeFilter, options?.useIntradayBaseline],
+    queryKey: ["market-condition", "themes", options?.timeSlice, options?.sizeFilter, options?.useIntradayBaseline, options?.rotationBaseline],
     queryFn: () => fetchJson(url),
     staleTime: 2 * 60 * 1000,
     gcTime: 5000,
-    refetchInterval: (options?.sizeFilter === "ALL" && options?.timeSlice === "TODAY") 
-      ? themesInterval
-      : false,
+    refetchInterval: options?.timeSlice === "TODAY" ? themesInterval : false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });
