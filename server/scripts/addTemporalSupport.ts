@@ -61,7 +61,7 @@ for (const match of matches) {
 }
 
 console.log(`\n✅ Modified ${modCount} indicators`);
-console.log('⚠️  Note: This script adds skipBars params but does NOT update evaluate logic to use them.`);
+console.log('⚠️  Note: This script adds skipBars params but does NOT update evaluate logic to use them.');
 console.log('    You must manually update each evaluate() function to:');
 console.log('    1. Extract skip from upstreamData');
 console.log('    2. Slice candles array');

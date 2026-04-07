@@ -95,6 +95,32 @@ export interface AlpacaCandle {
   volume: number;
 }
 
+export interface AlpacaTradingCalendarDay {
+  date: string;
+  open?: string;
+  close?: string;
+  session_open?: string;
+  session_close?: string;
+}
+
+export async function fetchAlpacaTradingCalendar(
+  startDate: string,
+  endDate: string
+): Promise<AlpacaTradingCalendarDay[]> {
+  try {
+    const params = new URLSearchParams({
+      start: startDate,
+      end: endDate,
+    });
+    const url = `${ALPACA_BASE_URL}/v2/calendar?${params}`;
+    const data = await alpacaFetchWithRetry(url);
+    return Array.isArray(data) ? (data as AlpacaTradingCalendarDay[]) : [];
+  } catch (error) {
+    console.error(`[Alpaca] Failed to fetch trading calendar ${startDate}..${endDate}:`, error);
+    return [];
+  }
+}
+
 /**
  * Fetch intraday bars from Alpaca Market Data API v2
  * Supports extended hours (pre-market + after-hours)
@@ -205,6 +231,7 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
   askPrice: number;
   bidPrice: number;
   prevClose: number;
+  volume: number;
   timestamp: string;
 } | null> {
   try {
@@ -218,12 +245,14 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
       return [];
     });
     
-    // Try to get latest quote (may fail when market closed)
-    let quoteData: any = null;
+    // Try to get a live snapshot first so lastPrice can use the latest trade
+    let snapshotData: any = null;
     try {
-      quoteData = await alpacaFetchWithRetry(`${ALPACA_DATA_URL}/v2/stocks/${encodeURIComponent(ticker)}/quotes/latest`);
+      snapshotData = await alpacaFetchWithRetry(
+        `${ALPACA_DATA_URL}/v2/stocks/snapshots?symbols=${encodeURIComponent(ticker)}&feed=sip`
+      );
     } catch {
-      // Quote API often fails after hours - that's ok, use daily bars
+      // Snapshot API may fail after hours or on entitlement gaps - daily bars still provide a fallback
     }
     
     if (dailyBars.length === 0) {
@@ -231,21 +260,30 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
       return null;
     }
     
-    // Use last daily bar close - most reliable
+    // Use the most recent regular-session close as the fallback baseline.
     const lastBarClose = dailyBars[dailyBars.length - 1].close;
     const prevBarClose = dailyBars.length >= 2 ? dailyBars[dailyBars.length - 2].close : lastBarClose;
-    
-    // Quote prices for reference (may be 0 after hours)
-    const quoteAsk = quoteData?.quote?.ap || 0;
-    const quoteBid = quoteData?.quote?.bp || 0;
+
+    const snapshot = snapshotData?.[ticker] ?? snapshotData?.snapshots?.[ticker] ?? null;
+    const latestTradePrice = snapshot?.latestTrade?.p;
+    const quoteAsk = snapshot?.latestQuote?.ap || 0;
+    const quoteBid = snapshot?.latestQuote?.bp || 0;
+    const midPrice = quoteAsk > 0 && quoteBid > 0 ? (quoteAsk + quoteBid) / 2 : 0;
+    const lastPrice = latestTradePrice || midPrice || lastBarClose;
+    const volume = snapshot?.minuteBar?.v || dailyBars[dailyBars.length - 1]?.volume || 0;
+    const timestamp =
+      snapshot?.latestTrade?.t ||
+      snapshot?.latestQuote?.t ||
+      new Date().toISOString();
     
     return {
       ticker,
-      lastPrice: lastBarClose,
+      lastPrice,
       askPrice: quoteAsk,
       bidPrice: quoteBid,
       prevClose: prevBarClose,
-      timestamp: quoteData?.quote?.t || new Date().toISOString(),
+      volume,
+      timestamp,
     };
   } catch (error) {
     console.error(`[Alpaca] Failed to fetch quote for ${ticker}:`, error);

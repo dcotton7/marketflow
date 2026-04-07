@@ -1,10 +1,13 @@
 // Theme Detail Panel - Shows detailed metrics for a selected theme
+import { useState } from "react";
 import { ThemeRow, ReasonCode, ThemeTier, TickerRow, ETFProxy, TrendState } from "@/data/mockThemeData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertBuilderDialog } from "@/components/alerts/AlertBuilderDialog";
 import { useLocation } from "wouter";
 import {
   TrendingUp,
@@ -20,6 +23,7 @@ import {
   Layers,
   CircleDot,
   ExternalLink,
+  Bell,
 } from "lucide-react";
 
 // ETF Proxy type colors
@@ -111,6 +115,7 @@ export function ThemeDetailPanel({ theme, members = [], totalThemes = 17, accDis
   const isHistorical = timeSlice !== "TODAY";
   const h = theme?.historicalMetrics;
   const [, setLocation] = useLocation();
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   
   if (!theme) {
     return (
@@ -145,9 +150,21 @@ export function ThemeDetailPanel({ theme, members = [], totalThemes = 17, accDis
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-lg font-bold text-foreground">{theme.name}</h2>
-          <Badge variant="outline" className={tierColors[theme.tier]}>
-            {theme.tier}
-          </Badge>
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
+            <Badge variant="outline" className={tierColors[theme.tier]}>
+              {theme.tier}
+            </Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => setAlertDialogOpen(true)}
+            >
+              <Bell className="w-3.5 h-3.5" />
+              Alert Theme Group
+            </Button>
+          </div>
         </div>
         <Tooltip>
           <TooltipTrigger>
@@ -202,6 +219,22 @@ export function ThemeDetailPanel({ theme, members = [], totalThemes = 17, accDis
           <p>Rotation Delta shows how many rank positions this theme moved vs the prior lookback period. Positive = emerging narrative. Negative = fading theme.</p>
         </TooltipContent>
       </Tooltip>
+
+      <AlertBuilderDialog
+        open={alertDialogOpen}
+        onOpenChange={setAlertDialogOpen}
+        suggestedName={`${theme.name} group alert`}
+        targetScope={{
+          mode: "group",
+          targetType: "theme",
+          sourceClient: "market_flow",
+          label: theme.name,
+          themeId: theme.id,
+          themeName: theme.name,
+          symbols: members.map((member) => member.symbol),
+          memberCount: members.length,
+        }}
+      />
 
       {/* Leader Concentration */}
       <Tooltip>

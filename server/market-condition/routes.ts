@@ -38,6 +38,7 @@ import { db } from "../db";
 import { tnnSettings, tickers, themes } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { refreshThemeMembersCache } from "./utils/theme-db-loader";
+import { getRaceTimeline } from "./engine/theme-snapshots";
 
 const router = Router();
 
@@ -411,6 +412,29 @@ router.get("/regime", async (req: Request, res: Response) => {
  * GET /api/market-condition/status
  * Returns polling status and health info
  */
+/**
+ * GET /api/market-condition/race-timeline
+ * Query: range=1d|2d|...|1y
+ * Returns ordered frames of per-theme metrics from theme_snapshots, plus the
+ * effective lookback boundary, terminal session state, and whether the window
+ * used trading-day or calendar semantics.
+ */
+router.get("/race-timeline", async (req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const rangeRaw = (req.query.range as string) || "5d";
+    const validRanges = new Set([
+      "1d", "2d", "3d", "4d", "5d", "2w", "3w", "1mo", "3mo", "6mo", "1y",
+    ]);
+    const range = validRanges.has(rangeRaw) ? rangeRaw : "5d";
+    const timeline = await getRaceTimeline(range);
+    res.json({ range, resolution: "intraday", ...timeline });
+  } catch (error) {
+    console.error("[MC-API] race-timeline failed:", error);
+    res.status(500).json({ error: "Failed to load race timeline" });
+  }
+});
+
 router.get("/status", async (req: Request, res: Response) => {
   try {
     touchActivity(); // Keep server awake - status is polled every 5s when page is open

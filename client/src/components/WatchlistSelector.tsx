@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Star, Plus, ChevronDown, Check, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,11 +20,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   useWatchlists,
-  useWatchlist,
+  useNamedWatchlistItems,
   useAddToWatchlist,
   useRemoveFromWatchlist,
   useCreateWatchlist,
   useSelectedWatchlistId,
+  WATCHLIST_MANAGER_STORAGE_KEY,
   type Watchlist,
 } from "@/hooks/use-watchlist";
 import { cn } from "@/lib/utils";
@@ -38,13 +39,12 @@ interface WatchlistSelectorProps {
 
 export function WatchlistSelector({ 
   symbol, 
-  storageKey = "selectedWatchlistId",
+  storageKey = WATCHLIST_MANAGER_STORAGE_KEY,
   className,
   compact = false,
 }: WatchlistSelectorProps) {
   const { data: watchlists, isLoading: listsLoading } = useWatchlists();
   const [selectedWatchlistId, setSelectedWatchlistId] = useSelectedWatchlistId(storageKey);
-  const { data: watchlistItems } = useWatchlist();
   const addToWatchlist = useAddToWatchlist();
   const removeFromWatchlist = useRemoveFromWatchlist();
   const createWatchlist = useCreateWatchlist();
@@ -54,23 +54,26 @@ export function WatchlistSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [addSuccess, setAddSuccess] = useState<string | null>(null);
 
-  // Find the currently selected watchlist, or default to the first/default one
-  const selectedWatchlist = watchlists?.find(wl => wl.id === selectedWatchlistId) 
-    || watchlists?.find(wl => wl.isDefault)
-    || watchlists?.[0];
+  const effectiveListId = useMemo(() => {
+    if (selectedWatchlistId != null && watchlists?.some((w) => w.id === selectedWatchlistId)) {
+      return selectedWatchlistId;
+    }
+    return watchlists?.find((wl) => wl.isDefault)?.id ?? watchlists?.[0]?.id ?? null;
+  }, [selectedWatchlistId, watchlists]);
+
+  const { data: watchlistItems } = useNamedWatchlistItems(effectiveListId);
+
+  const selectedWatchlist = watchlists?.find((wl) => wl.id === effectiveListId) ?? null;
 
   // Auto-select default watchlist if nothing selected
   useEffect(() => {
-    if (!selectedWatchlistId && selectedWatchlist) {
-      setSelectedWatchlistId(selectedWatchlist.id);
+    if (selectedWatchlistId == null && effectiveListId != null) {
+      setSelectedWatchlistId(effectiveListId);
     }
-  }, [selectedWatchlistId, selectedWatchlist, setSelectedWatchlistId]);
+  }, [selectedWatchlistId, effectiveListId, setSelectedWatchlistId]);
 
   // Check if symbol is already in the selected watchlist
-  const watchlistItem = watchlistItems?.find(item => 
-    item.symbol === symbol && 
-    (item.watchlistId === selectedWatchlistId || (!item.watchlistId && selectedWatchlist?.isDefault))
-  );
+  const watchlistItem = watchlistItems?.find(item => item.symbol === symbol);
   const isWatchlisted = !!watchlistItem;
 
   const handleSelect = (watchlist: Watchlist) => {

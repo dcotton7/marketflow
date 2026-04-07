@@ -8,9 +8,10 @@
 
 import { getDb } from "../../db";
 import { themeSnapshots, InsertThemeSnapshot, ThemeSnapshot } from "@shared/schema";
-import { eq, and, desc, sql, lt, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, asc, desc, gte, sql, lt, inArray, isNotNull } from "drizzle-orm";
 import { ClusterId, TimeSlice } from "../universe";
 import type { ThemeMetrics } from "./theme-score";
+import { getRaceTimelineWindow, type RaceTerminalState } from "../utils/theme-tracker-time";
 
 // =============================================================================
 // Types
@@ -623,26 +624,33 @@ export async function calculateDeltaRanks(
 // =============================================================================
 
 /**
- * Delete hourly snapshots from previous days (keep today's hourly data)
+ * Delete hourly snapshots older than the configured retention window.
+ * Keep enough 15-minute history for long Race lookbacks and historical replay.
  */
-export async function cleanupOldHourlySnapshots(currentDate: string): Promise<number> {
+export async function cleanupOldHourlySnapshots(currentDate: string, daysToKeep: number = 400): Promise<number> {
   const db = getDb();
   if (!db) return 0;
 
   try {
+    const cutoffDate = new Date(`${currentDate}T12:00:00Z`);
+    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - daysToKeep);
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+
     const result = await db
       .delete(themeSnapshots)
       .where(
         and(
           eq(themeSnapshots.snapshotType, "hourly"),
-          lt(themeSnapshots.marketDate, currentDate)
+          lt(themeSnapshots.marketDate, cutoffStr)
         )
       );
 
     const deletedCount = (result as any)?.rowCount ?? 0;
     
     if (deletedCount > 0) {
-      console.log(`[ThemeSnapshots] Cleaned up ${deletedCount} old hourly snapshots`);
+      console.log(
+        `[ThemeSnapshots] Cleaned up ${deletedCount} hourly snapshots older than ${cutoffStr} (${daysToKeep}d retention)`
+      );
     }
     
     return deletedCount;
@@ -778,11 +786,19 @@ export function markDailySnapshotSaved(date: string): void {
 }
 
 /**
- * Delete all hourly snapshots for today and reset the in-memory tracker.
- * Called on server startup so any snapshots saved with a drifted system clock
- * are wiped before fresh, correctly-timestamped records are written.
+ * @deprecated NEVER USE THIS FUNCTION!
+ * Historical 15-minute snapshots are critical for Theme Tracker and Race timeline.
+ * Deleting them breaks intraday comparisons and visualization.
+ * 
+ * This function is kept only for reference. Cleanup of old snapshots happens
+ * automatically via `cleanupOldHourlySnapshots()` when saving new data.
  */
 export async function clearTodayHourlySnapshots(): Promise<void> {
+  console.warn("⚠️ clearTodayHourlySnapshots() is DEPRECATED and should NEVER be called!");
+  return; // No-op to prevent accidental deletion
+  
+  // Original implementation commented out below:
+  /*
   const db = getDb();
   if (!db) return;
   const { date } = getMarketDateTime();
@@ -801,6 +817,7 @@ export async function clearTodayHourlySnapshots(): Promise<void> {
   } catch (error) {
     console.error("[ThemeSnapshots] Failed to clear today's hourly snapshots:", error);
   }
+  */
 }
 
 /**
@@ -856,4 +873,114 @@ export function isMarketOpen(): boolean {
   // Market hours: 9:30 AM - 4:00 PM ET
   // We use 9 and 16 for simplicity
   return hour >= 9 && hour < 16;
+}
+
+/** Per-theme metrics stored in each race timeline frame */
+export interface RaceFrameThemeSlice {
+  rank: number;
+  score: number;
+  medianPct: number | null;
+  rsVsBenchmark: number | null;
+  breadthPct: number | null;
+}
+
+export interface RaceTimelineFrame {
+  at: string;
+  label: string;
+  themes: Record<string, RaceFrameThemeSlice>;
+}
+
+export interface RaceTimelinePayload {
+  frames: RaceTimelineFrame[];
+  fromBoundary: string;
+  interpretation: "trading" | "calendar";
+  terminalState: RaceTerminalState;
+}
+
+/**
+ * Load theme snapshot batches for the acceleration race UI.
+ * Race is intraday-only: one frame per stored 15-minute market snapshot.
+ * 
+ * Uses market-session-aligned date boundaries (exchange calendar for short ranges).
+ * See docs/market-condition-and-marketflow-data-rules.md and docs/spec-next-build-theme-tracker-unified-dates.md.
+ */
+export async function getRaceTimeline(range: string): Promise<RaceTimelinePayload> {
+  const db = getDb();
+
+  const { fromInstant, fromDateStr, interpretation, terminalState } = await getRaceTimelineWindow(range);
+  const payloadBase = {
+    fromBoundary: fromInstant.toISOString(),
+    interpretation,
+    terminalState,
+  } as const;
+
+  if (!db) {
+    return {
+      ...payloadBase,
+      frames: [],
+    };
+  }
+
+  console.log(
+    `[ThemeSnapshots] getRaceTimeline: range=${range}, from=${fromDateStr}, interpretation=${interpretation}, terminalState=${terminalState}`
+  );
+
+  try {
+    const rows = await db
+      .select()
+      .from(themeSnapshots)
+      .where(and(eq(themeSnapshots.snapshotType, "hourly"), gte(themeSnapshots.createdAt, fromInstant)))
+      .orderBy(asc(themeSnapshots.createdAt), asc(themeSnapshots.themeId));
+
+    const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+    const byBucket = new Map<number, ThemeSnapshot[]>();
+    for (const row of rows) {
+      if (!row.createdAt) continue;
+      const ms = new Date(row.createdAt).getTime();
+      const bucket = Math.floor(ms / FIFTEEN_MIN_MS) * FIFTEEN_MIN_MS;
+      if (!byBucket.has(bucket)) byBucket.set(bucket, []);
+      byBucket.get(bucket)!.push(row);
+    }
+
+    const sorted = [...byBucket.keys()].sort((a, b) => a - b);
+    const frames: RaceTimelineFrame[] = [];
+    for (const bucket of sorted) {
+      const batch = byBucket.get(bucket)!;
+      const themes: Record<string, RaceFrameThemeSlice> = {};
+      for (const row of batch) {
+        themes[row.themeId] = {
+          rank: row.rank,
+          score: row.score,
+          medianPct: row.medianPct,
+          rsVsBenchmark: row.rsVsBenchmark,
+          breadthPct: row.breadthPct,
+        };
+      }
+      const d = new Date(bucket);
+      const label = d.toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      });
+      frames.push({
+        at: d.toISOString(),
+        label,
+        themes,
+      });
+    }
+    return {
+      ...payloadBase,
+      frames,
+    };
+  } catch (e) {
+    console.error("[ThemeSnapshots] getRaceTimeline failed:", e);
+    return {
+      ...payloadBase,
+      frames: [],
+    };
+  }
 }

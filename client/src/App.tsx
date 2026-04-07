@@ -22,6 +22,7 @@ import AnalysisPopoutPage from "@/pages/AnalysisPopoutPage";
 import SetupLibraryPage from "@/pages/SetupLibraryPage";
 import SentinelSettingsPage from "@/pages/SentinelSettingsPage";
 import SymbolPage from "@/pages/SymbolPage";
+import StartHerePage from "@/pages/StartHerePage";
 import { lazy, Suspense } from "react";
 const MarketConditionPage = lazy(() => import("@/pages/MarketConditionPage"));
 
@@ -84,6 +85,11 @@ function Router() {
       <Route path="/sentinel/charts">
         <SentinelProtectedRoute>
           <SentinelChartsPage />
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/sentinel/start-here">
+        <SentinelProtectedRoute>
+          <StartHerePage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/analysis">

@@ -451,7 +451,7 @@ function ValidationChartViewer({
 }: ValidationChartViewerProps) {
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
-  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
+  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
   const [showETH, setShowETH] = useState(false);
 
   const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
@@ -473,7 +473,9 @@ function ValidationChartViewer({
     queryKey: ["/api/sentinel/chart-data", symbol, intradayTimeframe],
     enabled: !!symbol,
     refetchOnMount: "always",
-    refetchInterval: 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30 * 1000,
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       const res = await fetch(`/api/sentinel/chart-data?ticker=${symbol}&timeframe=${intradayTimeframe}&_=${Date.now()}`, {
         credentials: "include",
@@ -482,6 +484,7 @@ function ValidationChartViewer({
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
+    staleTime: 0,
   });
 
   const { data: chartMetrics } = useQuery<ChartMetrics>({

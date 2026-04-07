@@ -8,11 +8,11 @@ import {
   XAxis,
   YAxis,
   ResponsiveContainer,
-  Cell,
   ReferenceArea,
-  ReferenceLine
 } from "recharts";
 // Cup and Handle detection removed - thumbnails just show candlesticks
+
+export type StartHereInterval = "1d" | "5m" | "15m";
 
 interface MiniChartProps {
   symbol: string;
@@ -20,6 +20,106 @@ interface MiniChartProps {
   technicalSignal?: string;
   crossDirection?: string;
   chartPattern?: string;
+  /** Daily 21 / 50 / 200 SMA overlay (e.g. Start Here chart preview). */
+  movingAverages2150200?: boolean;
+  /**
+   * With `movingAverages2150200`: `1d` = daily candles + SMAs; `5m` / `15m` = intraday + session VWAP (no MAs).
+   */
+  startHereInterval?: StartHereInterval;
+  /** Stretch to parent height (resizable grid cells); chart area uses flex-1. */
+  fillContainer?: boolean;
+}
+
+type MiniChartOhlcPayload = {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  color?: string;
+};
+
+/**
+ * Recharts range-bar shape: OHLC body (open–close) plus vertical wick (high–low).
+ * Maps wick extremes using the same price scale as the computed body rectangle.
+ */
+function MiniChartCandleShape(props: {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  payload?: MiniChartOhlcPayload;
+  fill?: string;
+}) {
+  const x = Number(props.x);
+  const y = Number(props.y);
+  const width = Number(props.width);
+  const rawH = Number(props.height);
+  const topPx = Math.min(y, y + rawH);
+  const botPx = Math.max(y, y + rawH);
+  const bodyHeightPx = Math.max(botPx - topPx, 1);
+  const payload = props.payload;
+  const fill = payload?.color ?? props.fill ?? "#94a3b8";
+  if (!payload || ![payload.open, payload.high, payload.low, payload.close].every(Number.isFinite)) {
+    return null;
+  }
+  const { open, high, low, close } = payload;
+  const bodyTopPrice = Math.max(open, close);
+  const bodyBotPrice = Math.min(open, close);
+  const cx = x + width / 2;
+  const priceBodySpan = bodyTopPrice - bodyBotPrice;
+
+  let yHigh: number;
+  let yLow: number;
+
+  if (priceBodySpan < 1e-10) {
+    const wickSpan = Math.max(high - low, 1e-9);
+    const mapWick = (p: number) => topPx + ((high - p) / wickSpan) * bodyHeightPx;
+    yHigh = mapWick(high);
+    yLow = mapWick(low);
+    const yMid = mapWick(open);
+    return (
+      <g>
+        <line
+          x1={cx}
+          y1={yHigh}
+          x2={cx}
+          y2={yLow}
+          stroke={fill}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+        <line
+          x1={x}
+          y1={yMid}
+          x2={x + width}
+          y2={yMid}
+          stroke={fill}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      </g>
+    );
+  }
+
+  const priceToY = (p: number) =>
+    topPx + ((bodyTopPrice - p) / priceBodySpan) * (botPx - topPx);
+  yHigh = priceToY(high);
+  yLow = priceToY(low);
+
+  return (
+    <g>
+      <line
+        x1={cx}
+        y1={yHigh}
+        x2={cx}
+        y2={yLow}
+        stroke={fill}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      <rect x={x} y={topPx} width={width} height={botPx - topPx} fill={fill} />
+    </g>
+  );
 }
 
 function calculateSMA(data: { close: number }[], period: number): (number | null)[] {
@@ -33,6 +133,55 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
     }
   }
   return sma;
+}
+
+function sessionDateKeyEt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+type VwapBar = { date: string; open: number; high: number; low: number; close: number; volume: number };
+
+/** Cumulative session VWAP (typical price × volume); resets each ET session. */
+function calculateSessionVwap(bars: VwapBar[]): (number | null)[] {
+  let cumPv = 0;
+  let cumVol = 0;
+  let sessionKey: string | null = null;
+  const out: (number | null)[] = [];
+  for (const bar of bars) {
+    const key = sessionDateKeyEt(bar.date);
+    if (key !== sessionKey) {
+      sessionKey = key;
+      cumPv = 0;
+      cumVol = 0;
+    }
+    const h = Number(bar.high);
+    const l = Number(bar.low);
+    const c = Number(bar.close);
+    const tp = (h + l + c) / 3;
+    const v = Math.max(Number(bar.volume) || 0, 0);
+    cumPv += tp * v;
+    cumVol += v;
+    out.push(cumVol > 0 ? cumPv / cumVol : null);
+  }
+  return out;
+}
+
+/** % change for the most recent session in the slice (last close vs that session’s first open). */
+function sessionChangePct(bars: VwapBar[]): number {
+  if (bars.length < 1) return 0;
+  const lastKey = sessionDateKeyEt(bars[bars.length - 1].date);
+  let i = bars.length - 1;
+  while (i > 0 && sessionDateKeyEt(bars[i - 1].date) === lastKey) i--;
+  const open = bars[i].open;
+  const lastClose = bars[bars.length - 1].close;
+  return open > 0 ? ((lastClose - open) / open) * 100 : 0;
 }
 
 function calculateEMA(data: { close: number }[], period: number): (number | null)[] {
@@ -150,15 +299,26 @@ function detectConsolidationChannels(
   return channels;
 }
 
-export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDirection, chartPattern }: MiniChartProps) {
-  const { data: history, isLoading, error } = useStockHistory(symbol);
+export function MiniChart({
+  symbol,
+  timeframe = '30D',
+  technicalSignal,
+  crossDirection,
+  chartPattern,
+  movingAverages2150200,
+  startHereInterval = '1d',
+  fillContainer,
+}: MiniChartProps) {
+  const historyInterval = movingAverages2150200 ? startHereInterval : '1d';
+  const { data: history, isLoading, error } = useStockHistory(symbol, historyInterval);
+
+  const loadingShell = fillContainer
+    ? "flex min-h-[120px] w-full flex-1 items-center justify-center rounded-md bg-card/50"
+    : "h-[180px] w-full flex items-center justify-center bg-card rounded-lg border border-border";
 
   if (isLoading) {
     return (
-      <div 
-        className="h-[180px] w-full flex items-center justify-center bg-card rounded-lg border border-border"
-        data-testid={`chart-loading-${symbol}`}
-      >
+      <div className={loadingShell} data-testid={`chart-loading-${symbol}`}>
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
       </div>
     );
@@ -166,11 +326,206 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
 
   if (error || !history || history.length === 0) {
     return (
-      <div 
-        className="h-[180px] w-full flex items-center justify-center bg-card rounded-lg border border-border text-muted-foreground text-sm"
+      <div
+        className={`${loadingShell} text-muted-foreground text-sm`}
         data-testid={`chart-error-${symbol}`}
       >
         No data
+      </div>
+    );
+  }
+
+  if (movingAverages2150200 && startHereInterval !== '1d') {
+    const maxBars = startHereInterval === '5m' ? 160 : 120;
+    const sliced = history.slice(-Math.min(history.length, maxBars));
+    const vwapSeries = calculateSessionVwap(sliced);
+    const intraChartData = sliced.map((item, index) => {
+      const key = sessionDateKeyEt(item.date);
+      const prevKey = index > 0 ? sessionDateKeyEt(sliced[index - 1].date) : key;
+      const sessionStart = index > 0 && key !== prevKey;
+      return {
+        ...item,
+        color: item.close >= item.open ? '#22c55e' : '#ef4444',
+        vwap: vwapSeries[index],
+        vwapLine: sessionStart ? null : vwapSeries[index],
+      };
+    });
+    const allPx = intraChartData.flatMap((d) => [d.high, d.low]);
+    const vwapVals = vwapSeries.filter((v): v is number => v != null);
+    let minP = Math.min(...allPx);
+    let maxP = Math.max(...allPx);
+    for (const v of vwapVals) {
+      minP = Math.min(minP, v);
+      maxP = Math.max(maxP, v);
+    }
+    if (!Number.isFinite(minP) || !Number.isFinite(maxP)) {
+      minP = 0;
+      maxP = 1;
+    }
+    const pad = (maxP - minP) * 0.05 || 0.01;
+    const changePct = sessionChangePct(sliced);
+
+    const outerIv = fillContainer
+      ? "flex h-full w-full min-h-0 flex-1 flex-col bg-transparent p-1"
+      : "w-full bg-card rounded-lg border border-border p-2";
+    const plotIv = fillContainer ? "min-h-0 flex-1" : "h-[160px]";
+    const intervalLabel = startHereInterval === '5m' ? '5 min' : '15 min';
+
+    return (
+      <div className={outerIv} data-testid={`chart-${symbol}`}>
+        <div className={`relative w-full ${plotIv}`}>
+          <div
+            className="pointer-events-none absolute left-2 top-1 z-10 rounded border border-white/15 bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase leading-tight tracking-wide text-white/95 shadow-sm backdrop-blur-sm"
+            aria-hidden
+          >
+            <span className="block">{intervalLabel}</span>
+            <span className="block font-normal normal-case text-white/80">
+              Session VWAP (resets daily · ET)
+            </span>
+          </div>
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minHeight={fillContainer ? 160 : undefined}
+            debounce={50}
+          >
+            <ComposedChart data={intraChartData} margin={{ top: 8, right: 6, left: 4, bottom: 4 }}>
+              <XAxis dataKey="date" hide />
+              <YAxis domain={[minP - pad, maxP + pad]} hide />
+              <Bar
+                dataKey={(item: MiniChartOhlcPayload) => [item.open, item.close]}
+                shape={MiniChartCandleShape}
+                isAnimationActive={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="vwapLine"
+                stroke="#38bdf8"
+                strokeWidth={1.75}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <div className={`text-center ${fillContainer ? 'flex-shrink-0 pt-1' : 'pt-1'}`}>
+          <span
+            className={`text-sm font-mono font-semibold ${changePct >= 0 ? 'text-rs-green' : 'text-rs-red'}`}
+            data-testid={`change-${symbol}`}
+          >
+            {changePct >= 0 ? '+' : ''}
+            {changePct.toFixed(2)}%
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (movingAverages2150200 && startHereInterval === '1d') {
+    /** Visible daily bars; SMAs still computed on a longer tail so 200d is valid. */
+    const maViewDays = 50;
+    const maCalcDays = Math.min(
+      history.length,
+      Math.max(280, maViewDays + 199)
+    );
+    const calcHistory = history.slice(-maCalcDays);
+    const sma21Series = calculateSMA(calcHistory, 21);
+    const sma50Series = calculateSMA(calcHistory, 50);
+    const sma200Series = calculateSMA(calcHistory, 200);
+    const fullMaData = calcHistory.map((item, index) => ({
+      ...item,
+      color: item.close >= item.open ? "#22c55e" : "#ef4444",
+      sma21d: sma21Series[index],
+      sma50d: sma50Series[index],
+      sma200d: sma200Series[index],
+    }));
+    const maChartData = fullMaData.slice(-Math.min(maViewDays, fullMaData.length));
+    const allPricesMa = maChartData.flatMap((d) => [d.high, d.low]);
+    let minPriceMa = Math.min(...allPricesMa);
+    let maxPriceMa = Math.max(...allPricesMa);
+    if (!Number.isFinite(minPriceMa) || !Number.isFinite(maxPriceMa)) {
+      minPriceMa = 0;
+      maxPriceMa = 1;
+    }
+    const priceRangeMa = maxPriceMa - minPriceMa;
+    const pricePaddingMa = priceRangeMa * 0.05;
+    const lastCandleMa = calcHistory[calcHistory.length - 1];
+    const prevCandleMa = calcHistory[calcHistory.length - 2];
+    const dailyChangeMa = prevCandleMa
+      ? ((lastCandleMa.close - prevCandleMa.close) / prevCandleMa.close) * 100
+      : 0;
+
+    const outerMa = fillContainer
+      ? "flex h-full w-full min-h-0 flex-1 flex-col bg-transparent p-1"
+      : "w-full bg-card rounded-lg border border-border p-2";
+    const plotMa = fillContainer ? "min-h-0 flex-1" : "h-[160px]";
+
+    return (
+      <div className={outerMa} data-testid={`chart-${symbol}`}>
+        <div className={`relative w-full ${plotMa}`}>
+          <div
+            className="pointer-events-none absolute left-2 top-1 z-10 rounded border border-white/15 bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase leading-tight tracking-wide text-white/95 shadow-sm backdrop-blur-sm"
+            aria-hidden
+          >
+            <span className="block">Daily</span>
+            <span className="block font-normal normal-case text-white/80">
+              Last {maViewDays} sessions · 1D interval
+            </span>
+          </div>
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minHeight={fillContainer ? 160 : undefined}
+            debounce={50}
+          >
+            <ComposedChart data={maChartData} margin={{ top: 8, right: 6, left: 4, bottom: 4 }}>
+              <XAxis dataKey="date" hide />
+              <YAxis domain={[minPriceMa - pricePaddingMa, maxPriceMa + pricePaddingMa]} hide />
+              <Bar
+                dataKey={(item: MiniChartOhlcPayload) => [item.open, item.close]}
+                shape={MiniChartCandleShape}
+                isAnimationActive={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="sma200d"
+                stroke="#ffffff"
+                strokeWidth={1.75}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="sma50d"
+                stroke="#ef4444"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="sma21d"
+                stroke="#f472b6"
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <div className={`text-center ${fillContainer ? "flex-shrink-0 pt-1" : "pt-1"}`}>
+          <span
+            className={`text-sm font-mono font-semibold ${dailyChangeMa >= 0 ? "text-rs-green" : "text-rs-red"}`}
+            data-testid={`change-${symbol}`}
+          >
+            {dailyChangeMa >= 0 ? "+" : ""}
+            {dailyChangeMa.toFixed(2)}%
+          </span>
+        </div>
       </div>
     );
   }
@@ -325,16 +680,12 @@ export function MiniChart({ symbol, timeframe = '30D', technicalSignal, crossDir
               />
             )}
             
-            {/* Candlestick bars */}
-            <Bar 
-              dataKey={(item) => [item.open, item.close]} 
-              fill="currentColor"
+            {/* Candlestick bars (OHLC wicks + open–close body) */}
+            <Bar
+              dataKey={(item: MiniChartOhlcPayload) => [item.open, item.close]}
+              shape={MiniChartCandleShape}
               isAnimationActive={false}
-            >
-              {chartData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Bar>
+            />
             
             {/* 6/20 Cross indicators */}
             {is620Cross && (

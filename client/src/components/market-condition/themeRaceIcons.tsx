@@ -1,0 +1,61 @@
+import type { LucideIcon } from "lucide-react";
+import {
+  Activity,
+  Atom,
+  Banknote,
+  Bitcoin,
+  Box,
+  Building2,
+  Car,
+  CircleDollarSign,
+  Cpu,
+  Factory,
+  Globe,
+  HardDrive,
+  HeartPulse,
+  Landmark,
+  Microscope,
+  Orbit,
+  Radar,
+  Radio,
+  Rocket,
+  Shield,
+  ShoppingBag,
+  ShoppingCart,
+  Sun,
+  Train,
+  Zap,
+} from "lucide-react";
+import type { ThemeId } from "@/data/mockThemeData";
+
+const THEME_RACE_ICONS: Record<ThemeId, LucideIcon> = {
+  SEMIS: Cpu,
+  AI_INFRA: Zap,
+  STORAGE: HardDrive,
+  ENTERPRISE_SOFT: Box,
+  CYBER: Shield,
+  FIBER_OPTICAL: Radio,
+  DATA_CENTER_REITS: Building2,
+  INDUSTRIAL_INFRA: Factory,
+  DEFENSE: Radar,
+  FINANCIAL_CORE: Landmark,
+  PAYMENTS_FINTECH: Banknote,
+  ENERGY: Activity,
+  CONSUMER_DISC: ShoppingBag,
+  CONSUMER_STAPLES: ShoppingCart,
+  HEALTHCARE: HeartPulse,
+  MATERIALS_METALS: Factory,
+  TRANSPORTS: Train,
+  CRYPTO_EQ: Bitcoin,
+  NUCLEAR_URANIUM: Atom,
+  SPACE_FRONTIER: Rocket,
+  QUANTUM: Orbit,
+  RARE_EARTH: Globe,
+  PRECIOUS_METALS: CircleDollarSign,
+  BIOTECH: Microscope,
+  SOLAR: Sun,
+};
+
+export function getThemeRaceIcon(id: ThemeId): LucideIcon {
+  return THEME_RACE_ICONS[id] ?? Car;
+}

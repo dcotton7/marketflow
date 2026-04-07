@@ -1356,7 +1356,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
+  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
   const [refiningLotId, setRefiningLotId] = useState<string | null>(null);
   const [showStops, setShowStops] = useState(true);
   const [showTargets, setShowTargets] = useState(true);
@@ -1457,7 +1457,9 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
     queryKey: ["/api/sentinel/chart-data", trade.symbol, "daily"],
     enabled: open,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/chart-data?ticker=${trade.symbol}&timeframe=daily`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${trade.symbol}&timeframe=daily&_=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to fetch daily chart data");
       return res.json();
     },
@@ -1469,12 +1471,16 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
     queryKey: ["/api/sentinel/chart-data", trade.symbol, intradayTimeframe],
     enabled: open,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/chart-data?ticker=${trade.symbol}&timeframe=${intradayTimeframe}`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${trade.symbol}&timeframe=${intradayTimeframe}&_=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
-    staleTime: 60 * 1000,
-    refetchInterval: 60 * 1000, // Auto-refresh every 1 minute
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
+    refetchIntervalInBackground: true,
   });
 
   interface TradeChartMetrics {

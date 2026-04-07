@@ -1,6 +1,7 @@
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision, varchar, decimal, bigint, date, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import type { AlertDeliveryConfig, AlertEvaluationConfig, AlertRuleGroup, AlertTargetScope } from "./alerts";
 
 // === TABLE DEFINITIONS ===
 
@@ -1125,6 +1126,107 @@ export const userChartPreferences = pgTable("user_chart_preferences", {
 });
 
 export type UserChartPreference = typeof userChartPreferences.$inferSelect;
+
+// Alert subsystem - canonical alert definitions used by charts, Market Flow, watchlists, and scanners
+export const userAlerts = pgTable("user_alerts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  sourceClient: text("source_client").notNull(),
+  targetScope: jsonb("target_scope").$type<AlertTargetScope>().notNull(),
+  ruleTree: jsonb("rule_tree").$type<AlertRuleGroup>().notNull(),
+  evaluationConfig: jsonb("evaluation_config").$type<AlertEvaluationConfig>().notNull(),
+  deliveryConfig: jsonb("delivery_config").$type<AlertDeliveryConfig>().notNull(),
+  expirationAt: timestamp("expiration_at"),
+  enabled: boolean("enabled").notNull().default(true),
+  isPaused: boolean("is_paused").notNull().default(false),
+  lastTriggeredAt: timestamp("last_triggered_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const alertEvents = pgTable("alert_events", {
+  id: serial("id").primaryKey(),
+  alertId: integer("alert_id").notNull(),
+  userId: integer("user_id").notNull(),
+  matchedSymbols: text("matched_symbols").array().notNull().default([]),
+  matchedCount: integer("matched_count").notNull().default(0),
+  summary: text("summary"),
+  triggerReason: text("trigger_reason"),
+  sourceGroupLabel: text("source_group_label"),
+  deliveryMode: text("delivery_mode").notNull(),
+  deliveryChannels: text("delivery_channels").array().notNull().default([]),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const alertDeliveries = pgTable("alert_deliveries", {
+  id: serial("id").primaryKey(),
+  alertId: integer("alert_id").notNull(),
+  alertEventId: integer("alert_event_id").notNull(),
+  channel: text("channel").notNull(),
+  status: text("status").notNull().default("pending"),
+  batchKey: text("batch_key"),
+  providerMessageId: text("provider_message_id"),
+  providerStatus: text("provider_status"),
+  providerErrorCode: text("provider_error_code"),
+  providerPayload: jsonb("provider_payload"),
+  errorMessage: text("error_message"),
+  attemptedAt: timestamp("attempted_at").defaultNow(),
+  deliveredAt: timestamp("delivered_at"),
+  providerStatusAt: timestamp("provider_status_at"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const alertSymbolStates = pgTable("alert_symbol_states", {
+  id: serial("id").primaryKey(),
+  alertId: integer("alert_id").notNull(),
+  userId: integer("user_id").notNull(),
+  symbol: text("symbol").notNull(),
+  status: text("status").notNull().default("idle"), // idle | armed | completed | expired
+  nextStageIndex: integer("next_stage_index").notNull().default(0),
+  armedAt: timestamp("armed_at"),
+  expiresAt: timestamp("expires_at"),
+  lastMatchedAt: timestamp("last_matched_at"),
+  lastEvaluatedAt: timestamp("last_evaluated_at").defaultNow(),
+  statePayload: jsonb("state_payload"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertUserAlertSchema = createInsertSchema(userAlerts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastTriggeredAt: true,
+});
+export const insertAlertEventSchema = createInsertSchema(alertEvents).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertAlertDeliverySchema = createInsertSchema(alertDeliveries).omit({
+  id: true,
+  attemptedAt: true,
+  deliveredAt: true,
+  providerStatusAt: true,
+  updatedAt: true,
+});
+export const insertAlertSymbolStateSchema = createInsertSchema(alertSymbolStates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastEvaluatedAt: true,
+});
+
+export type UserAlert = typeof userAlerts.$inferSelect;
+export type AlertEvent = typeof alertEvents.$inferSelect;
+export type AlertDelivery = typeof alertDeliveries.$inferSelect;
+export type AlertSymbolState = typeof alertSymbolStates.$inferSelect;
+
+export type InsertUserAlert = z.infer<typeof insertUserAlertSchema>;
+export type InsertAlertEvent = z.infer<typeof insertAlertEventSchema>;
+export type InsertAlertDelivery = z.infer<typeof insertAlertDeliverySchema>;
+export type InsertAlertSymbolState = z.infer<typeof insertAlertSymbolStateSchema>;
 
 
 // === BIG IDEA SCANNER ===

@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Star, Clock } from "lucide-react";
-import { useState, useEffect } from "react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Star, Clock, Bell, House } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
 import { WatchlistModal } from "./WatchlistModal";
+import { AlertCenterDialog } from "@/components/alerts/AlertCenterDialog";
+import { useAlerts, useAlertEvents, type AlertDeliveryConfigRecord } from "@/hooks/use-alerts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
+import { playAlertChime } from "@/lib/alert-sound";
 import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
 
 function MarketTimeDisplay() {
@@ -166,6 +169,12 @@ interface SentinelHeaderProps {
   rightContent?: React.ReactNode;
 }
 
+function supportsInAppSound(deliveryConfig: unknown): boolean {
+  if (!deliveryConfig || typeof deliveryConfig !== "object") return false;
+  const config = deliveryConfig as AlertDeliveryConfigRecord;
+  return config.soundEnabled === true && Array.isArray(config.channels) && config.channels.includes("in_app");
+}
+
 export function SentinelHeader({ showSentiment = true, rightContent }: SentinelHeaderProps) {
   const [location] = useLocation();
   const { cssVariables } = useSystemSettings();
@@ -179,6 +188,9 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const { data: userInfo } = useQuery<{ id: number; username: string; isAdmin: boolean }>({
     queryKey: ["/api/sentinel/me"],
   });
+  const { data: alerts } = useAlerts();
+  const { data: alertEvents } = useAlertEvents(25);
+  const lastSeenAlertEventIdRef = useRef<number | null>(null);
 
   const isRulesPage = location === "/sentinel/rules";
   const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
@@ -188,13 +200,51 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const isBigIdeaPage = location === "/sentinel/bigidea";
   const isMarketConditionPage = location === "/sentinel/market-condition";
   const isChartsPage = location === "/sentinel/charts";
+  const isStartHerePage = location === "/sentinel/start-here";
   const isEvaluatePage = location === "/sentinel/evaluate";
 
   const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
+  const [alertCenterOpen, setAlertCenterOpen] = useState(false);
+
+  useEffect(() => {
+    if (!alertEvents?.length) {
+      if (lastSeenAlertEventIdRef.current == null) {
+        lastSeenAlertEventIdRef.current = 0;
+      }
+      return;
+    }
+
+    const sortedIds = alertEvents.map((event) => event.id).sort((a, b) => a - b);
+    const maxEventId = sortedIds[sortedIds.length - 1];
+
+    if (lastSeenAlertEventIdRef.current == null) {
+      lastSeenAlertEventIdRef.current = maxEventId;
+      return;
+    }
+
+    const newEvents = alertEvents.filter((event) => event.id > (lastSeenAlertEventIdRef.current ?? 0));
+    if (newEvents.length === 0) {
+      lastSeenAlertEventIdRef.current = Math.max(lastSeenAlertEventIdRef.current, maxEventId);
+      return;
+    }
+
+    const soundEnabledAlertIds = new Set(
+      (alerts ?? [])
+        .filter((alert) => supportsInAppSound(alert.deliveryConfig))
+        .map((alert) => alert.id)
+    );
+
+    if (newEvents.some((event) => soundEnabledAlertIds.has(event.alertId))) {
+      void playAlertChime();
+    }
+
+    lastSeenAlertEventIdRef.current = Math.max(lastSeenAlertEventIdRef.current, maxEventId);
+  }, [alerts, alertEvents]);
 
   return (
     <>
     <WatchlistModal open={watchlistModalOpen} onOpenChange={setWatchlistModalOpen} />
+    <AlertCenterDialog open={alertCenterOpen} onOpenChange={setAlertCenterOpen} />
     <div
       className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3"
       style={{ backgroundColor: cssVariables.headerBg }}
@@ -213,6 +263,17 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
         </Link>
         
         <nav className="flex items-center gap-1">
+          <Link href="/sentinel/start-here">
+            <Button
+              variant={isStartHerePage ? "secondary" : "ghost"}
+              size="sm"
+              className="gap-2"
+              data-testid="nav-start-here"
+            >
+              <House className="w-4 h-4" />
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Start</span>
+            </Button>
+          </Link>
           <Button 
             variant="ghost"
             size="sm"
@@ -290,6 +351,16 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
           </Link>
           <Button 
             variant="ghost" 
+            size="sm"
+            className="gap-2"
+            onClick={() => setAlertCenterOpen(true)}
+            data-testid="nav-alerts"
+          >
+            <Bell className="w-4 h-4" />
+            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Alerts</span>
+          </Button>
+          <Button 
+            variant="ghost"
             size="sm"
             className="gap-2"
             onClick={() => setWatchlistModalOpen(true)}

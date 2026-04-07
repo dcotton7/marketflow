@@ -258,6 +258,8 @@ async function loadAccDistStreaks(themes: ThemeMetrics[]): Promise<void> {
 
 /**
  * Save intraday snapshots (every 15 minutes) and daily snapshots to database if it's time
+ * (ET session rules in theme-snapshots.shouldSaveHourlySnapshot / shouldSaveDailySnapshot).
+ * See docs/market-condition-and-marketflow-data-rules.md.
  */
 async function saveHistoricalSnapshotsIfNeeded(themes: ThemeMetrics[]): Promise<void> {
   const { date, hour, slot } = getMarketDateTime();
@@ -272,8 +274,8 @@ async function saveHistoricalSnapshotsIfNeeded(themes: ThemeMetrics[]): Promise<
       markHourlySnapshotSaved(date, hour, slot);
       console.log(`[MC-Snapshot] Saved 15-min snapshot for ${date} ${hour}:${slot.toString().padStart(2, '0')}`);
       
-      // Also clean up old hourly snapshots from previous days
-      await cleanupOldHourlySnapshots(date);
+      // Keep a long retention window so Race and historical comparisons can span many sessions.
+      await cleanupOldHourlySnapshots(date, 400);
     }
   }
   
@@ -387,9 +389,9 @@ export function startPolling(intervalMs?: number): void {
   isSleeping = false;
   lastActivityTime = new Date();
   
-  // Wipe today's hourly snapshots so any records saved with a drifted system clock
-  // are replaced by fresh, correctly-timestamped ones on the first poll.
-  clearTodayHourlySnapshots().catch(console.error);
+  // RULE: NEVER delete historical 15-minute snapshots on server restart.
+  // These are critical for Theme Tracker intraday comparisons and Race timeline visualization.
+  // Snapshots are automatically cleaned up by `cleanupOldHourlySnapshots()` when saving new data.
   
   // If a specific interval is provided, use it for market hours
   if (intervalMs) {

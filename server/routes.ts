@@ -8,6 +8,7 @@ import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } fr
 import { registerSentinelRoutes } from "./sentinel/routes";
 import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 import { registerBigIdeaRoutes } from "./bigidea/routes";
+import { registerAlertRoutes } from "./alerts/routes";
 import marketConditionRoutes from "./market-condition/routes";
 import marketflowAnalysisRoutes from "./market-condition/analysis/routes";
 import { registerUploadRoutes } from "./uploads/routes";
@@ -41,7 +42,8 @@ function setCachedHistory(key: string, data: any): void {
 }
 
 import { getSectorAndIndustry, getFundamentals } from "./fundamentals";
-import { getQuotesBatch } from "./data-layer/quotes";
+import { getQuote, getQuotesBatch } from "./data-layer/quotes";
+import { getIntradayBars } from "./data-layer/intraday-bars";
 import { getConstituents } from "./universe/constituents";
 
 // Helper function to get stock list by index (uses pre-loaded constituent lists)
@@ -928,6 +930,7 @@ export async function registerRoutes(
   }
 
   registerSentinelRoutes(app);
+  registerAlertRoutes(app);
   registerPatternLearningRoutes(app);
   registerBigIdeaRoutes(app);
   registerUploadRoutes(app);
@@ -977,8 +980,15 @@ export async function registerRoutes(
       const isIntraday = ['5m', '15m', '30m', '60m'].includes(interval);
       
       if (isIntraday) {
-        const alpacaInterval = interval === '5m' ? '5m' : interval === '15m' ? '15m' : interval === '30m' ? '30m' : '1h';
-        history = await alpaca.getAlpacaIntradayData(symbol, startDate, endDate, alpacaInterval, false);
+        const intradayBars = await getIntradayBars(symbol, interval, startDate, endDate, false);
+        history = intradayBars.map((bar) => ({
+          date: bar.timestamp,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume,
+        }));
       } else {
         history = await alpaca.fetchAlpacaDailyBars(symbol, startDate, endDate);
       }
@@ -998,11 +1008,11 @@ export async function registerRoutes(
 
   // --- Stock Quote ---
   app.get(api.stocks.quote.path, async (req, res) => {
-    const symbol = String(req.params.symbol);
+    const symbol = String(req.params.symbol).toUpperCase();
     try {
       const [quote, fundamentals] = await Promise.all([
-        alpaca.fetchAlpacaQuote(symbol),
-        getFundamentals(symbol.toUpperCase()),
+        getQuote(symbol),
+        getFundamentals(symbol),
       ]);
 
       if (!quote) {
@@ -1047,11 +1057,11 @@ export async function registerRoutes(
       })) : undefined;
 
       res.json({
-        symbol: symbol.toUpperCase(),
+        symbol,
         price,
         change: Math.round(change * 100) / 100,
         changePercent: Math.round(changePercent * 100) / 100,
-        volume: 0,
+        volume: quote.volume || 0,
         companyName,
         marketCap: fundamentals.marketCap || undefined,
         peRatio: undefined,
@@ -1136,7 +1146,18 @@ export async function registerRoutes(
     }
   });
 
-  // --- News (Finnhub company news) ---
+  // --- News (Finnhub) — register /top before /:symbol so "top" is not captured as a ticker ---
+  app.get('/api/news/top', async (_req, res) => {
+    try {
+      const { fetchGeneralNews } = await import('./finnhub');
+      const news = await fetchGeneralNews();
+      res.json(news);
+    } catch (error) {
+      console.error('Error fetching top/general news:', error);
+      res.json([]);
+    }
+  });
+
   app.get('/api/news/:symbol', async (req, res) => {
     const symbol = String(req.params.symbol).toUpperCase();
     const daysBack = parseInt(String(req.query.days || '7'), 10);

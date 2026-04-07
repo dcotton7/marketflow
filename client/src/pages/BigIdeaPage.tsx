@@ -4823,7 +4823,7 @@ function ScanChartViewer({
   navigationMode?: 'scan' | 'watchlist';
   onNavigationModeChange?: (mode: 'scan' | 'watchlist') => void;
 }) {
-  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
+  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
   const [showETH, setShowETH] = useState(false);
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
   const [newsOpen, setNewsOpen] = useState(false);
@@ -4978,8 +4978,9 @@ function ScanChartViewer({
     queryKey: ["/api/sentinel/chart-data", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
-    refetchInterval: 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30 * 1000,
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       const params = new URLSearchParams({ ticker: symbol!, timeframe: intradayTimeframe, _: Date.now().toString() });
       if (showETH) params.set('includeETH', 'true');
@@ -5409,11 +5410,11 @@ function ScanChartViewer({
   const handleIvySelectionChange = useCallback((
     entry: { price: number; label: string; type?: string } | null,
     stop: { price: number; label: string; type?: string } | null,
-    target: { price: number; label: string } | null
+    target?: { price: number; label: string } | null
   ) => {
     setIvyEntryLevel(entry);
     setIvyStopLevel(stop);
-    setIvyTargetLevel(target);
+    setIvyTargetLevel(target ?? null);
   }, []);
 
   // NOW safe to return early - all hooks have been called
@@ -5835,6 +5836,8 @@ function ScanChartViewer({
             upperPane={scanUpperPane}
             navExtra={scanNavExtra}
             lowerPane={scanLowerPane}
+            alertTradePlanPreview={savedTradePlan ? { mode: "single", ...savedTradePlan } : null}
+            alertWatchlistId={watchlistItem?.watchlistId ?? null}
             dailyChartProps={{
               markers: cocAnnotations.markers,
               diamondMarkers: cocAnnotations.diamondMarkers,

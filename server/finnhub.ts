@@ -259,6 +259,30 @@ export async function fetchCompanyNews(symbol: string, daysBack = 7): Promise<Fi
 }
 
 /**
+ * General / market news (not symbol-specific). Finnhub category=general.
+ */
+export async function fetchGeneralNews(): Promise<FinnhubNewsArticle[]> {
+  try {
+    const data = await finnhubFetchWithRetry("/news?category=general");
+    if (!Array.isArray(data)) return [];
+    return data.map((article: any) => ({
+      id: article.id || 0,
+      category: article.category || "",
+      datetime: article.datetime || 0,
+      headline: article.headline || "",
+      image: article.image || "",
+      related: article.related || "",
+      source: article.source || "",
+      summary: article.summary || "",
+      url: article.url || "",
+    }));
+  } catch (error) {
+    console.error("[Finnhub] Failed to fetch general news:", error);
+    return [];
+  }
+}
+
+/**
  * Get comprehensive fundamental data for a symbol
  */
 export async function getComprehensiveFundamentals(symbol: string): Promise<{

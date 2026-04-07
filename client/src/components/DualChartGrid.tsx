@@ -2,13 +2,14 @@ import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } fro
 import { IChartApi, ISeriesApi } from "lightweight-charts";
 import { TradingChart, ChartCandle, ChartIndicators, Gap } from "@/components/TradingChart";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
+import { AlertBuilderDialog } from "@/components/alerts/AlertBuilderDialog";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useQuery } from "@tanstack/react-query";
 import { useChartDrawings, DrawingToolType } from "@/hooks/useChartDrawings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Settings2, Ruler, Minus, Trash2 } from "lucide-react";
+import { Loader2, Settings2, Ruler, Minus, Trash2, Bell } from "lucide-react";
 
 export type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; gaps?: Gap[]; ticker: string; timeframe: string };
 
@@ -77,6 +78,13 @@ interface DualChartGridProps {
   upperPane?: ReactNode;
   navExtra?: ReactNode;
   lowerPane?: ReactNode;
+  alertTradePlanPreview?: {
+    mode?: "single" | "per_symbol";
+    entry?: number | null;
+    stop?: number | null;
+    target?: number | null;
+  } | null;
+  alertWatchlistId?: number | null;
 }
 
 const TrendLineIcon = () => (
@@ -105,6 +113,8 @@ export function DualChartGrid({
   upperPane,
   navExtra,
   lowerPane,
+  alertTradePlanPreview = null,
+  alertWatchlistId = null,
 }: DualChartGridProps) {
   // ETH/extended-hours mode is intentionally disabled for now.
   // We keep the backend plumbing (`includeETH`) but prevent toggling in UI
@@ -117,6 +127,7 @@ export function DualChartGrid({
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
   const [showGaps, setShowGaps] = useState(false);
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
 
   const dailyChartRef = useRef<IChartApi | null>(null);
   const dailySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -256,6 +267,17 @@ export function DualChartGrid({
               <span className="font-mono text-lg text-muted-foreground animate-pulse">—</span>
             )}
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 flex-shrink-0"
+            onClick={() => setAlertDialogOpen(true)}
+            disabled={!symbol}
+            data-testid={`${pid}button-chart-alert`}
+          >
+            <Bell className="w-4 h-4" />
+            Chart Alert
+          </Button>
           {navExtra}
         </div>
 
@@ -548,6 +570,22 @@ export function DualChartGrid({
       )}
 
       <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
+      {symbol && (
+        <AlertBuilderDialog
+          open={alertDialogOpen}
+          onOpenChange={setAlertDialogOpen}
+          suggestedName={`${symbol} chart alert`}
+          tradePlanPreview={alertTradePlanPreview}
+          targetScope={{
+            mode: "single_symbol",
+            targetType: "symbol",
+            sourceClient: "chart",
+            label: symbol,
+            symbol,
+            watchlistId: alertWatchlistId ?? undefined,
+          }}
+        />
+      )}
     </div>
   );
 }

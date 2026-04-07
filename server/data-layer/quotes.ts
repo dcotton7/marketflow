@@ -60,7 +60,7 @@ export async function getQuote(symbol: string): Promise<Quote | null> {
       low: price,
       change,
       changePct,
-      volume: 0,
+      volume: alpacaQuote.volume ?? 0,
       vwap: price,
       timestamp: new Date(alpacaQuote.timestamp || Date.now()),
     };
@@ -124,7 +124,7 @@ export async function getQuotesBatch(
             low: price,
             change,
             changePct,
-            volume: 0,
+            volume: alpacaQuote.volume ?? 0,
             vwap: price,
             timestamp: new Date(alpacaQuote.timestamp || Date.now()),
           });

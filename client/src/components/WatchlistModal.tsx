@@ -1,15 +1,18 @@
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
+import { AlertBuilderDialog } from "@/components/alerts/AlertBuilderDialog";
 import { 
   useWatchlists, 
-  useWatchlist, 
   useCreateWatchlist, 
   useRenameWatchlist, 
   useDeleteWatchlist, 
   useSetDefaultWatchlist,
   useAddToWatchlist,
   useRemoveFromWatchlist,
+  useUpdateWatchlist,
   useSelectedWatchlistId,
+  WATCHLIST_MANAGER_STORAGE_KEY,
+  useNamedWatchlistItems,
   type Watchlist,
   type SentinelWatchlistItem,
 } from "@/hooks/use-watchlist";
@@ -25,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WatchlistInlinePriceCell } from "@/components/WatchlistInlinePriceCell";
 import {
   Star,
   Pencil,
@@ -38,6 +42,7 @@ import {
   ArrowDown,
   Loader2,
   List,
+  Bell,
 } from "lucide-react";
 
 interface WatchlistModalProps {
@@ -53,7 +58,15 @@ interface TickerQuote {
   changePercent: number;
 }
 
-type SortField = "symbol" | "companyName" | "change" | "changePercent" | "entry" | "entryPct";
+type SortField =
+  | "symbol"
+  | "companyName"
+  | "change"
+  | "changePercent"
+  | "entry"
+  | "entryPct"
+  | "stop"
+  | "stopPct";
 type SortDir = "asc" | "desc";
 
 export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
@@ -62,11 +75,12 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const { toast } = useToast();
 
   // Watchlist state - persisted to localStorage
-  const [selectedWatchlistId, setSelectedWatchlistId] = useSelectedWatchlistId("watchlistModalSelectedId");
+  const [selectedWatchlistId, setSelectedWatchlistId] = useSelectedWatchlistId(WATCHLIST_MANAGER_STORAGE_KEY);
   const [editingWatchlistId, setEditingWatchlistId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [newWatchlistName, setNewWatchlistName] = useState("");
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   
   // Ticker add state
   const [tickerInput, setTickerInput] = useState("");
@@ -84,6 +98,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const setDefaultWatchlist = useSetDefaultWatchlist();
   const addToWatchlist = useAddToWatchlist();
   const removeFromWatchlist = useRemoveFromWatchlist();
+  const updateWatchlist = useUpdateWatchlist();
 
   // Auto-select default watchlist on first load
   const effectiveWatchlistId = useMemo(() => {
@@ -93,7 +108,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   }, [selectedWatchlistId, watchlists]);
 
   // Fetch items for selected watchlist
-  const { data: watchlistItems, isLoading: itemsLoading } = useWatchlist(effectiveWatchlistId ?? undefined);
+  const { data: watchlistItems, isLoading: itemsLoading } = useNamedWatchlistItems(effectiveWatchlistId);
 
   // Fetch quotes for all tickers in selected watchlist
   const symbols = watchlistItems?.map(item => item.symbol) || [];
@@ -115,8 +130,10 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     return watchlistItems.map(item => {
       const quote = quotes?.find(q => q.symbol === item.symbol);
       const price = quote?.price || 0;
-      const entry = item.targetEntry || null;
+      const entry = item.targetEntry ?? null;
+      const stop = item.stopPlan ?? null;
       const entryPct = entry && price > 0 ? ((price - entry) / entry) * 100 : null;
+      const stopPct = stop && price > 0 ? ((price - stop) / stop) * 100 : null;
       return {
         id: item.id,
         symbol: item.symbol,
@@ -126,6 +143,8 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
         changePercent: quote?.changePercent || 0,
         entry,
         entryPct,
+        stop,
+        stopPct,
       };
     });
   }, [watchlistItems, quotes]);
@@ -153,6 +172,12 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           break;
         case "entryPct":
           cmp = (a.entryPct || 0) - (b.entryPct || 0);
+          break;
+        case "stop":
+          cmp = (a.stop || 0) - (b.stop || 0);
+          break;
+        case "stopPct":
+          cmp = (a.stopPct || 0) - (b.stopPct || 0);
           break;
       }
       return sortDir === "asc" ? cmp : -cmp;
@@ -249,11 +274,17 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     } catch {}
   };
 
-  const handleLoadInCharts = () => {
-    if (!effectiveWatchlistId || sortedTickers.length === 0) return;
-    const firstSymbol = sortedTickers[0].symbol;
+  const openChartsWithWatchlistNav = (symbol: string) => {
+    if (!effectiveWatchlistId || !sortedTickers.length) return;
+    const symOrder = sortedTickers.map((t) => t.symbol).join(",");
     onOpenChange(false);
-    navigate(`/sentinel/charts?source=watchlist&watchlistId=${effectiveWatchlistId}&symbol=${firstSymbol}`);
+    navigate(
+      `/sentinel/charts?source=watchlist&watchlistId=${effectiveWatchlistId}&symbol=${encodeURIComponent(symbol)}&symOrder=${encodeURIComponent(symOrder)}`
+    );
+  };
+
+  const handleLoadInCharts = () => {
+    openChartsWithWatchlistNav(sortedTickers[0].symbol);
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -403,6 +434,17 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                 Load in Charts
               </Button>
 
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setAlertDialogOpen(true)}
+                disabled={!selectedWatchlist || sortedTickers.length === 0}
+              >
+                <Bell className="w-4 h-4" />
+                Alert This Watchlist
+              </Button>
+
               {selectedWatchlist && !selectedWatchlist.isDefault && (
                 <Button
                   variant="outline"
@@ -500,6 +542,22 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                           % from Entry <SortIcon field="entryPct" />
                         </div>
                       </th>
+                      <th
+                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
+                        onClick={() => handleSort("stop")}
+                      >
+                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
+                          Stop <SortIcon field="stop" />
+                        </div>
+                      </th>
+                      <th
+                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
+                        onClick={() => handleSort("stopPct")}
+                      >
+                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
+                          % from Stop <SortIcon field="stopPct" />
+                        </div>
+                      </th>
                       <th className="w-12 px-2"></th>
                     </tr>
                   </thead>
@@ -508,7 +566,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                       <tr
                         key={ticker.id}
                         className="border-b hover:bg-muted/30 cursor-pointer"
-                        onClick={() => { onOpenChange(false); navigate(`/sentinel/charts?source=watchlist&watchlistId=${effectiveWatchlistId}&symbol=${ticker.symbol}`); }}
+                        onClick={() => openChartsWithWatchlistNav(ticker.symbol)}
                       >
                         <td className="px-4 py-2">
                           <span className="font-mono font-bold" style={{ color: cssVariables.textColorHeader }}>
@@ -524,14 +582,35 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                         <td className={`px-4 py-2 text-right font-mono text-sm ${ticker.changePercent >= 0 ? "text-green-500" : "text-red-500"}`}>
                           {ticker.changePercent >= 0 ? "+" : ""}{ticker.changePercent.toFixed(2)}%
                         </td>
-                        <td className="px-4 py-2 text-right font-mono text-sm">
-                          {ticker.entry ? `$${ticker.entry.toFixed(2)}` : "—"}
+                        <td className="px-2 py-2 text-right align-middle">
+                          <WatchlistInlinePriceCell
+                            value={ticker.entry ?? undefined}
+                            onSave={(v) =>
+                              updateWatchlist.mutate({ id: ticker.id, data: { targetEntry: v } })
+                            }
+                            data-testid={`watchlist-entry-${ticker.id}`}
+                          />
                         </td>
                         <td className={`px-4 py-2 text-right font-mono text-sm ${
                           ticker.entryPct === null ? "text-muted-foreground" :
                           ticker.entryPct >= 0 ? "text-green-500" : "text-red-500"
                         }`}>
                           {ticker.entryPct !== null ? `${ticker.entryPct >= 0 ? "+" : ""}${ticker.entryPct.toFixed(2)}%` : "—"}
+                        </td>
+                        <td className="px-2 py-2 text-right align-middle">
+                          <WatchlistInlinePriceCell
+                            value={ticker.stop ?? undefined}
+                            onSave={(v) =>
+                              updateWatchlist.mutate({ id: ticker.id, data: { stopPlan: v } })
+                            }
+                            data-testid={`watchlist-stop-${ticker.id}`}
+                          />
+                        </td>
+                        <td className={`px-4 py-2 text-right font-mono text-sm ${
+                          ticker.stopPct === null ? "text-muted-foreground" :
+                          ticker.stopPct >= 0 ? "text-green-500" : "text-red-500"
+                        }`}>
+                          {ticker.stopPct !== null ? `${ticker.stopPct >= 0 ? "+" : ""}${ticker.stopPct.toFixed(2)}%` : "—"}
                         </td>
                         <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
                           <Button
@@ -552,6 +631,25 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           </div>
         </div>
       </DialogContent>
+
+      {selectedWatchlist && (
+        <AlertBuilderDialog
+          open={alertDialogOpen}
+          onOpenChange={setAlertDialogOpen}
+          suggestedName={`${selectedWatchlist.name} watchlist alert`}
+          tradePlanPreview={{ mode: "per_symbol" }}
+          targetScope={{
+            mode: "group",
+            targetType: "watchlist",
+            sourceClient: "watchlist",
+            label: selectedWatchlist.name,
+            watchlistId: selectedWatchlist.id,
+            watchlistName: selectedWatchlist.name,
+            symbols: sortedTickers.map((ticker) => ticker.symbol),
+            memberCount: sortedTickers.length,
+          }}
+        />
+      )}
     </Dialog>
   );
 }

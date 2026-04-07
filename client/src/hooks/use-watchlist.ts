@@ -35,6 +35,9 @@ export interface SentinelWatchlistItem {
   ivyRiskAssessment?: string;
 }
 
+/** Shared with Watchlist Manager, charts, and Big Idea so the same named list is active everywhere */
+export const WATCHLIST_MANAGER_STORAGE_KEY = "watchlistModalSelectedId";
+
 // Hook to manage selected watchlist ID with localStorage persistence
 export function useSelectedWatchlistId(storageKey: string = "selectedWatchlistId") {
   const [selectedId, setSelectedId] = useState<number | null>(() => {
@@ -180,18 +183,31 @@ export function useSetDefaultWatchlist() {
   });
 }
 
-// Fetch watchlist items (optionally filtered by watchlistId)
+// Fetch watchlist items (optionally filtered by watchlistId). Omit id to load all items (legacy / full merge).
 export function useWatchlist(watchlistId?: number | null) {
   return useQuery<SentinelWatchlistItem[]>({
-    queryKey: ["/api/sentinel/watchlist", watchlistId],
+    queryKey: ["/api/sentinel/watchlist", watchlistId ?? "all"],
     queryFn: async () => {
-      const url = watchlistId 
+      const url = watchlistId != null
         ? `/api/sentinel/watchlist?watchlistId=${watchlistId}`
         : "/api/sentinel/watchlist";
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch watchlist");
       return res.json();
     },
+  });
+}
+
+/** One named list only; skips fetch until watchlistId is set (avoids merged “all lists” payload). */
+export function useNamedWatchlistItems(watchlistId: number | null | undefined) {
+  return useQuery<SentinelWatchlistItem[]>({
+    queryKey: ["/api/sentinel/watchlist", watchlistId],
+    queryFn: async () => {
+      const res = await fetch(`/api/sentinel/watchlist?watchlistId=${watchlistId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch watchlist");
+      return res.json();
+    },
+    enabled: typeof watchlistId === "number" && !Number.isNaN(watchlistId),
   });
 }
 

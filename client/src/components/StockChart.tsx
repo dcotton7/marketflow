@@ -1,3 +1,6 @@
+// LEGACY CHART PATH:
+// Do not use this component for new chart work unless explicitly requested.
+// Prefer the shared side-by-side chart system built on `DualChartGrid` and `TradingChart`.
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useStockHistory } from "@/hooks/use-stocks";
@@ -600,7 +603,7 @@ export function StockChart({
   };
   
   // Wrapper to track user manual interval changes AND sync to global context
-  const setInterval = (newInterval: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo') => {
+  const handleIntervalChange = (newInterval: '5m' | '15m' | '30m' | '60m' | '1d' | '1wk' | '1mo') => {
     setUserSelectedInterval(true);
     setIntervalState(newInterval);
     setGlobalTimeframe(newInterval); // Sync to global context
@@ -636,8 +639,8 @@ export function StockChart({
   useEffect(() => {
     const intraday = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
     if (!intraday) return;
-    const id = setInterval(() => refetch(), 60_000);
-    return () => clearInterval(id);
+    const id = window.setInterval(() => refetch(), 60_000);
+    return () => window.clearInterval(id);
   }, [interval, refetch]);
   
   // Update showChannels when prop changes
@@ -1385,7 +1388,7 @@ export function StockChart({
                     key={tf.value}
                     variant={interval === tf.value ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setInterval(tf.value)}
+                    onClick={() => handleIntervalChange(tf.value)}
                     className="h-7 px-2"
                     data-testid={`button-timeframe-${tf.value}`}
                   >

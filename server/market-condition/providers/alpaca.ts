@@ -349,6 +349,7 @@ export class AlpacaProvider implements MarketDataProvider {
   private parseSnapshot(symbol: string, snapshot: AlpacaSnapshot): TickerSnapshot | null {
     if (!snapshot) return null;
     
+    const minuteBar = snapshot.minuteBar;
     const dailyBar = snapshot.dailyBar;
     const prevBar = snapshot.prevDailyBar;
     const trade = snapshot.latestTrade;
@@ -369,15 +370,15 @@ export class AlpacaProvider implements MarketDataProvider {
       symbol,
       price,
       prevClose,
-      open: dailyBar?.o || price,
-      high: dailyBar?.h || price,
-      low: dailyBar?.l || price,
-      volume: dailyBar?.v || 0,
+      open: minuteBar?.o || dailyBar?.o || price,
+      high: minuteBar?.h || dailyBar?.h || price,
+      low: minuteBar?.l || dailyBar?.l || price,
+      volume: minuteBar?.v || dailyBar?.v || 0,
       prevDayVolume: prevBar?.v || 0,  // Previous full session volume for D-Close split
-      vwap: dailyBar?.vw || price,
+      vwap: minuteBar?.vw || dailyBar?.vw || price,
       change,
       changePct,
-      timestamp: new Date(trade?.t || quote?.t || dailyBar?.t || Date.now()),
+      timestamp: new Date(trade?.t || quote?.t || minuteBar?.t || dailyBar?.t || Date.now()),
     };
   }
 

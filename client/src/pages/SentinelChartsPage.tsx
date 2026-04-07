@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
-import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useSelectedWatchlistId, useWatchlists } from "@/hooks/use-watchlist";
+import { useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useSelectedWatchlistId, useWatchlists, WATCHLIST_MANAGER_STORAGE_KEY, useNamedWatchlistItems, type SentinelWatchlistItem } from "@/hooks/use-watchlist";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
@@ -14,8 +14,14 @@ import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Search, Sparkles, Eye, X, ExternalLink, Star, ChevronLeft, ChevronRight, Newspaper, Loader2 } from "lucide-react";
+import { Search, Sparkles, Eye, X, ExternalLink, Star, ChevronLeft, ChevronRight, ChevronDown, Newspaper, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 
 export default function SentinelChartsPage() {
@@ -29,7 +35,7 @@ export default function SentinelChartsPage() {
 
   const [tickerInput, setTickerInput] = useState(initialSymbol);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol.toUpperCase());
-  const [intradayTimeframe, setIntradayTimeframe] = useState("15min");
+  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
   const [showETH, setShowETH] = useState(false);
   const [msSyncEnabled, setMsSyncEnabled] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
@@ -62,17 +68,49 @@ export default function SentinelChartsPage() {
     return wlId ? parseInt(wlId, 10) : null;
   });
 
-  // Watchlist hooks - separate hooks for navigation vs. status checking
-  const { data: allWatchlistItems } = useWatchlist(); // All items for checking if symbol is watchlisted
-  const { data: navigationWatchlist } = useWatchlist(navigationWatchlistId); // Specific watchlist for navigation
+  /** Symbol order from Watchlist Manager table when opening via Load in Charts (matches overlay top→bottom) */
+  const [chartWatchlistSymOrder, setChartWatchlistSymOrder] = useState<string[] | null>(null);
+
+  const [watchlistManagerSelectedId] = useSelectedWatchlistId(WATCHLIST_MANAGER_STORAGE_KEY);
+  const { data: watchlistsForManager } = useWatchlists();
+  const effectiveManagerWatchlistId = useMemo(() => {
+    if (watchlistManagerSelectedId != null && watchlistsForManager?.some((w) => w.id === watchlistManagerSelectedId)) {
+      return watchlistManagerSelectedId;
+    }
+    const defaultWl = watchlistsForManager?.find((wl) => wl.isDefault);
+    return defaultWl?.id ?? watchlistsForManager?.[0]?.id ?? null;
+  }, [watchlistManagerSelectedId, watchlistsForManager]);
+
+  const { data: managerScopeItems } = useNamedWatchlistItems(effectiveManagerWatchlistId);
+  const { data: navigationWatchlist } = useNamedWatchlistItems(navigationWatchlistId);
+
+  const watchlistNavOrdered = useMemo(() => {
+    if (!navigationWatchlist?.length) return [];
+    if (chartWatchlistSymOrder?.length) {
+      const bySym = new Map(navigationWatchlist.map((w) => [w.symbol.toUpperCase(), w]));
+      return chartWatchlistSymOrder
+        .map((s) => bySym.get(s.toUpperCase()))
+        .filter((x): x is SentinelWatchlistItem => x != null);
+    }
+    return [...navigationWatchlist].sort((a, b) =>
+      a.symbol.localeCompare(b.symbol, undefined, { sensitivity: "base" })
+    );
+  }, [navigationWatchlist, chartWatchlistSymOrder]);
+
   const { mutate: addToWatchlist, isPending: isAddingToWatchlist } = useAddToWatchlist();
   const { mutate: removeFromWatchlist, isPending: isRemovingFromWatchlist } = useRemoveFromWatchlist();
   const { mutate: updateWatchlist } = useUpdateWatchlist();
   const { mutate: addToWatchlistWithTradePlan } = useAddToWatchlistWithTradePlan();
 
-  // Compute watchlist status (from ALL items, not just navigation list)
-  const isWatchlisted = allWatchlistItems?.some(item => item.symbol === activeSymbol);
-  const watchlistItem = allWatchlistItems?.find(item => item.symbol === activeSymbol);
+  const watchlistItem = useMemo(() => {
+    const sym = activeSymbol.toUpperCase();
+    if (navigationMode === "watchlist" && navigationWatchlist?.length) {
+      return navigationWatchlist.find((item) => item.symbol.toUpperCase() === sym);
+    }
+    return managerScopeItems?.find((item) => item.symbol.toUpperCase() === sym);
+  }, [navigationMode, navigationWatchlist, managerScopeItems, activeSymbol]);
+
+  const isWatchlisted = !!watchlistItem;
 
   // Get saved trade plan from watchlist item - memoized to prevent infinite loops
   const savedTradePlan = useMemo(() => {
@@ -161,10 +199,11 @@ export default function SentinelChartsPage() {
         symbol: targetSymbol, 
         targetEntry: data.entry, 
         stopPlan: data.stop, 
-        targetPlan: data.target 
+        targetPlan: data.target,
+        watchlistId: navigationWatchlistId ?? effectiveManagerWatchlistId ?? undefined,
       });
     }
-  }, [watchlistItem, updateWatchlist, addToWatchlistWithTradePlan, activeSymbol]);
+  }, [watchlistItem, updateWatchlist, addToWatchlistWithTradePlan, activeSymbol, navigationWatchlistId, effectiveManagerWatchlistId]);
 
   // Handler to clear trade plan
   const handleClearTradePlan = useCallback(() => {
@@ -186,11 +225,11 @@ export default function SentinelChartsPage() {
   const handleIvySelectionChange = useCallback((
     entry: { price: number; label: string; type?: string } | null,
     stop: { price: number; label: string; type?: string } | null,
-    target: { price: number; label: string } | null
+    target?: { price: number; label: string } | null
   ) => {
     setIvyEntryLevel(entry);
     setIvyStopLevel(stop);
-    setIvyTargetLevel(target);
+    setIvyTargetLevel(target ?? null);
   }, []);
 
   // Auto-save trade plan when levels change (debounced)
@@ -297,7 +336,9 @@ export default function SentinelChartsPage() {
     queryKey: ["/api/sentinel/chart-data", activeSymbol, "daily"],
     enabled: !!activeSymbol,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/chart-data?ticker=${activeSymbol}&timeframe=daily`);
+      const res = await fetch(`/api/sentinel/chart-data?ticker=${activeSymbol}&timeframe=daily&_=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to fetch daily chart data");
       return res.json();
     },
@@ -311,12 +352,17 @@ export default function SentinelChartsPage() {
     queryFn: async () => {
       const params = new URLSearchParams({ ticker: activeSymbol!, timeframe: intradayTimeframe });
       if (showETH) params.set('includeETH', 'true');
-      const res = await fetch(`/api/sentinel/chart-data?${params}`);
+      params.set("_", Date.now().toString());
+      const res = await fetch(`/api/sentinel/chart-data?${params}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to fetch intraday chart data");
       return res.json();
     },
-    staleTime: 60 * 1000,
-    refetchInterval: 60 * 1000, // Auto-refresh every 1 minute
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
+    refetchIntervalInBackground: true,
   });
 
   const { data: chartMetrics } = useQuery<ChartMetrics>({
@@ -364,68 +410,89 @@ export default function SentinelChartsPage() {
     }
   }, [msSyncEnabled, activeSymbol, syncToMarketSurge]);
 
-  // Detect watchlist navigation mode from URL
+  // Open watchlist navigation from URL (Load in Charts); symOrder matches overlay table order
   useEffect(() => {
-    const source = urlParams.get("source");
-    const symbol = urlParams.get("symbol");
-    const wlId = urlParams.get("watchlistId");
-    
-    // Set the navigation watchlist ID from URL
-    if (wlId) {
-      setNavigationWatchlistId(parseInt(wlId, 10));
+    const p = new URLSearchParams(searchString);
+    const source = p.get("source");
+    if (source !== "watchlist") return;
+
+    const wlId = p.get("watchlistId");
+    if (wlId) setNavigationWatchlistId(parseInt(wlId, 10));
+
+    if (!navigationWatchlist?.length) return;
+
+    const symOrderRaw = p.get("symOrder");
+    const parsedSymOrder = symOrderRaw
+      ? symOrderRaw.split(",").map((s) => s.trim()).filter(Boolean)
+      : null;
+
+    if (parsedSymOrder?.length) setChartWatchlistSymOrder(parsedSymOrder);
+    else setChartWatchlistSymOrder(null);
+
+    let ordered: SentinelWatchlistItem[];
+    if (parsedSymOrder?.length) {
+      const bySym = new Map(navigationWatchlist.map((w) => [w.symbol.toUpperCase(), w]));
+      ordered = parsedSymOrder
+        .map((s) => bySym.get(s.toUpperCase()))
+        .filter((x): x is SentinelWatchlistItem => x != null);
+    } else {
+      ordered = [...navigationWatchlist].sort((a, b) =>
+        a.symbol.localeCompare(b.symbol, undefined, { sensitivity: "base" })
+      );
     }
-    
-    if (source === "watchlist" && navigationWatchlist && navigationWatchlist.length > 0) {
-      setNavigationMode('watchlist');
-      
-      if (symbol) {
-        const index = navigationWatchlist.findIndex(w => w.symbol === symbol);
-        if (index >= 0) {
-          setCurrentWatchlistIndex(index);
-          setActiveSymbol(symbol);
-          setTickerInput(symbol);
-        } else {
-          setCurrentWatchlistIndex(0);
-          setActiveSymbol(navigationWatchlist[0].symbol);
-          setTickerInput(navigationWatchlist[0].symbol);
-        }
+
+    if (!ordered.length) return;
+
+    setNavigationMode("watchlist");
+    const symbol = p.get("symbol");
+    if (symbol) {
+      const symUp = symbol.toUpperCase();
+      const index = ordered.findIndex((w) => w.symbol.toUpperCase() === symUp);
+      if (index >= 0) {
+        setCurrentWatchlistIndex(index);
+        const resolved = ordered[index].symbol;
+        setActiveSymbol(resolved);
+        setTickerInput(resolved);
       } else {
         setCurrentWatchlistIndex(0);
-        setActiveSymbol(navigationWatchlist[0].symbol);
-        setTickerInput(navigationWatchlist[0].symbol);
+        setActiveSymbol(ordered[0].symbol);
+        setTickerInput(ordered[0].symbol);
       }
-      
-      // Clear URL params after handling to keep URL clean
-      window.history.replaceState({}, '', '/sentinel/charts');
+    } else {
+      setCurrentWatchlistIndex(0);
+      setActiveSymbol(ordered[0].symbol);
+      setTickerInput(ordered[0].symbol);
     }
-  }, [navigationWatchlist, urlParams]);
+
+    window.history.replaceState({}, "", "/sentinel/charts");
+  }, [searchString, navigationWatchlist]);
 
   // Navigation handlers
   const handleNavigatePrev = useCallback(() => {
-    if (navigationMode === 'watchlist' && navigationWatchlist) {
+    if (navigationMode === 'watchlist' && watchlistNavOrdered.length) {
       const newIndex = Math.max(0, currentWatchlistIndex - 1);
       setCurrentWatchlistIndex(newIndex);
-      const symbol = navigationWatchlist[newIndex].symbol;
-      setActiveSymbol(symbol);
-      setTickerInput(symbol);
+      const sym = watchlistNavOrdered[newIndex].symbol;
+      setActiveSymbol(sym);
+      setTickerInput(sym);
       if (msSyncEnabled) {
-        syncToMarketSurge(symbol, 'day');
+        syncToMarketSurge(sym, 'day');
       }
     }
-  }, [navigationMode, navigationWatchlist, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
+  }, [navigationMode, watchlistNavOrdered, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
 
   const handleNavigateNext = useCallback(() => {
-    if (navigationMode === 'watchlist' && navigationWatchlist) {
-      const newIndex = Math.min(navigationWatchlist.length - 1, currentWatchlistIndex + 1);
+    if (navigationMode === 'watchlist' && watchlistNavOrdered.length) {
+      const newIndex = Math.min(watchlistNavOrdered.length - 1, currentWatchlistIndex + 1);
       setCurrentWatchlistIndex(newIndex);
-      const symbol = navigationWatchlist[newIndex].symbol;
-      setActiveSymbol(symbol);
-      setTickerInput(symbol);
+      const sym = watchlistNavOrdered[newIndex].symbol;
+      setActiveSymbol(sym);
+      setTickerInput(sym);
       if (msSyncEnabled) {
-        syncToMarketSurge(symbol, 'day');
+        syncToMarketSurge(sym, 'day');
       }
     }
-  }, [navigationMode, navigationWatchlist, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
+  }, [navigationMode, watchlistNavOrdered, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -449,7 +516,7 @@ export default function SentinelChartsPage() {
   const chartsNavExtra = activeSymbol ? (
     <div className="flex items-center gap-1.5">
       {/* Watchlist navigation controls */}
-      {navigationMode === 'watchlist' && navigationWatchlist && navigationWatchlist.length > 0 && (
+      {navigationMode === 'watchlist' && watchlistNavOrdered.length > 0 && (
         <>
           <Button
             size="icon"
@@ -461,12 +528,12 @@ export default function SentinelChartsPage() {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm text-muted-foreground px-2" data-testid="text-watchlist-position">
-            {currentWatchlistIndex + 1} of {navigationWatchlist.length}
+            {currentWatchlistIndex + 1} of {watchlistNavOrdered.length}
           </span>
           <Button
             size="icon"
             variant="outline"
-            disabled={currentWatchlistIndex === navigationWatchlist.length - 1}
+            disabled={currentWatchlistIndex === watchlistNavOrdered.length - 1}
             onClick={handleNavigateNext}
             data-testid="button-watchlist-next"
           >
@@ -662,6 +729,8 @@ export default function SentinelChartsPage() {
                 } : undefined,
               }}
               testIdPrefix="chart"
+              alertTradePlanPreview={savedTradePlan ? { mode: "single", ...savedTradePlan } : null}
+              alertWatchlistId={watchlistItem?.watchlistId ?? navigationWatchlistId}
             />
             <AskIvyOverlay
               open={askIvyOpen}

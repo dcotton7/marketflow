@@ -1,30 +1,17 @@
 /**
  * MarketFlow Analysis Cache Service
  * CRUD for marketflow_analysis_cache table (3 market-day reuse: current day = day 1).
+ *
+ * See docs/market-condition-and-marketflow-data-rules.md for TTL vs theme snapshots / race range.
  */
 
 import { getDb } from "../../db";
 import { marketflowAnalysisCache } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { subtractTradingDays } from "../utils/theme-tracker-time";
 
 const DEFAULT_TTL_MARKET_DAYS = 3; // current day = day 1, so valid for today + 2 more trading days
 const VERSION = "v1";
-
-/**
- * Start of day (00:00:00.000) for the date that is N trading days before the given date.
- * Trading days = Mon–Fri (weekends excluded). Used so "last 3 market days" = today + 2 trading days back.
- */
-function startOfTradingDayNDaysAgo(from: Date, tradingDaysBack: number): Date {
-  const d = new Date(from);
-  d.setUTCHours(0, 0, 0, 0);
-  let remaining = tradingDaysBack;
-  while (remaining > 0) {
-    d.setUTCDate(d.getUTCDate() - 1);
-    const day = d.getUTCDay();
-    if (day !== 0 && day !== 6) remaining--;
-  }
-  return d;
-}
 
 export interface AnalysisCacheMeta {
   exists: boolean;
@@ -66,7 +53,8 @@ export async function getCacheMeta(symbol: string): Promise<AnalysisCacheMeta> {
 
   const generatedAt = row.generatedAt instanceof Date ? row.generatedAt.toISOString() : String(row.generatedAt);
   // Current day = day 1 of 3; valid if generated on today or within previous 2 trading days
-  const cutoff = startOfTradingDayNDaysAgo(new Date(), DEFAULT_TTL_MARKET_DAYS - 1);
+  // TTL matches "3 trading sessions" same helper as race/theme bounds.
+  const cutoff = subtractTradingDays(new Date(), DEFAULT_TTL_MARKET_DAYS - 1);
   const isWithinTtl = row.generatedAt instanceof Date && row.generatedAt >= cutoff;
 
   return {
@@ -96,7 +84,7 @@ export async function getCached(symbol: string): Promise<AnalysisCachePayload | 
 
   const generatedAt = row.generatedAt instanceof Date ? row.generatedAt.toISOString() : String(row.generatedAt);
   const ttlDays = row.ttlDays ?? DEFAULT_TTL_MARKET_DAYS;
-  const cutoff = startOfTradingDayNDaysAgo(new Date(), ttlDays - 1);
+  const cutoff = subtractTradingDays(new Date(), ttlDays - 1);
   if (row.generatedAt instanceof Date && row.generatedAt < cutoff) {
     return null;
   }

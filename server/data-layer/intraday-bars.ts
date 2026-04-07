@@ -5,21 +5,22 @@
  * with an in-memory LRU cache and adaptive TTL.
  * 
  * Cache Strategy:
- * - Market hours: 1 minute TTL (bars updating)
- * - Pre/post market: 5 minutes TTL (slower activity)
- * - Market closed: 30 minutes TTL (data won't change)
+ * - Historical base cache stays warm longer for fast chart loads
+ * - The trailing bars are refreshed from Alpaca on live requests
+ * - The current last bar is still snapshot-patched between bar closes
  * 
  * Memory Budget: ~100MB for 50 hot tickers × 3 timeframes
  */
 
 import { getAlpacaIntradayData } from "../alpaca";
 import { getTickerSnapshot } from "../market-condition/engine/snapshot";
-import { isMarketHours, getMarketSession } from "../market-condition/universe";
-import { IntradayBar, CacheEntry } from "./types";
+import { getMarketSession } from "../market-condition/universe";
+import { IntradayBar } from "./types";
 
 interface IntradayCacheValue {
   bars: IntradayBar[];
   fetchedAt: Date;
+  lastTailRefreshAt: Date;
   interval: string;
 }
 
@@ -29,13 +30,18 @@ const MAX_CACHE_ENTRIES = 150;
 function getTTLMs(): number {
   const session = getMarketSession();
   
-  if (session === "market") {
-    return 60_000; // 1 minute during market hours
-  } else if (session === "pre-market" || session === "post-market") {
-    return 300_000; // 5 minutes pre/post
+  if (session === "MARKET_HOURS") {
+    return 15 * 60_000; // keep the full history warm, refresh the tail separately
+  } else if (session === "AFTER_HOURS") {
+    return 30 * 60_000;
   } else {
-    return 1800_000; // 30 minutes when closed
+    return 2 * 60 * 60_000;
   }
+}
+
+function shouldRefreshTail(): boolean {
+  const session = getMarketSession();
+  return session === "MARKET_HOURS" || session === "AFTER_HOURS";
 }
 
 function evictOldest(): void {
@@ -43,9 +49,13 @@ function evictOldest(): void {
     let oldestKey: string | null = null;
     let oldestTime = Date.now();
 
-    for (const [key, value] of intradayCache) {
-      if (value.fetchedAt.getTime() < oldestTime) {
-        oldestTime = value.fetchedAt.getTime();
+    for (const [key, value] of Array.from(intradayCache.entries())) {
+      const activityTime = Math.max(
+        value.fetchedAt.getTime(),
+        value.lastTailRefreshAt.getTime()
+      );
+      if (activityTime < oldestTime) {
+        oldestTime = activityTime;
         oldestKey = key;
       }
     }
@@ -68,10 +78,31 @@ function mergeCurrentBar(
   
   const lastBar = bars[bars.length - 1];
   const lastBarTime = new Date(lastBar.timestamp).getTime();
+  const snapshotTime = snapshot.timestamp instanceof Date
+    ? snapshot.timestamp.getTime()
+    : new Date(snapshot.timestamp).getTime();
   const intervalMs = parseIntervalMs(interval);
   const now = Date.now();
+  const currentBucketStart = Math.floor(snapshotTime / intervalMs) * intervalMs;
+
+  if (!Number.isFinite(snapshotTime) || !Number.isFinite(currentBucketStart)) {
+    return bars;
+  }
+
+  if (currentBucketStart > lastBarTime) {
+    bars.push({
+      timestamp: new Date(currentBucketStart).toISOString(),
+      open: lastBar.close,
+      high: Math.max(lastBar.close, snapshot.price, snapshot.high),
+      low: Math.min(lastBar.close, snapshot.price, snapshot.low),
+      close: snapshot.price,
+      volume: snapshot.volume,
+      vwap: snapshot.vwap,
+    });
+    return bars;
+  }
   
-  if (now - lastBarTime < intervalMs * 2) {
+  if (currentBucketStart === lastBarTime || now - lastBarTime < intervalMs * 2) {
     bars[bars.length - 1] = {
       ...lastBar,
       close: snapshot.price,
@@ -97,6 +128,75 @@ function parseIntervalMs(interval: string): number {
   return num * 60 * 1000;
 }
 
+function normalizeBars(bars: Array<{
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  vwap?: number;
+}>): IntradayBar[] {
+  return bars.map((b) => ({
+    timestamp: b.date,
+    open: b.open,
+    high: b.high,
+    low: b.low,
+    close: b.close,
+    volume: b.volume,
+    vwap: b.vwap,
+  }));
+}
+
+function mergeBarsByTimestamp(existingBars: IntradayBar[], freshBars: IntradayBar[]): IntradayBar[] {
+  const byTimestamp = new Map<string, IntradayBar>();
+
+  for (const bar of existingBars) {
+    byTimestamp.set(bar.timestamp, bar);
+  }
+  for (const bar of freshBars) {
+    byTimestamp.set(bar.timestamp, bar);
+  }
+
+  return Array.from(byTimestamp.values()).sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+}
+
+function getTailLookbackMs(interval: string): number {
+  const intervalMs = parseIntervalMs(interval);
+  return Math.max(60 * 60 * 1000, Math.min(6 * 60 * 60 * 1000, intervalMs * 12));
+}
+
+async function fetchFreshTailBars(
+  symbol: string,
+  interval: string,
+  startDate: Date,
+  endDate: Date,
+  includeExtendedHours: boolean,
+  cachedBars: IntradayBar[]
+): Promise<IntradayBar[]> {
+  const intervalMs = parseIntervalMs(interval);
+  const tailLookbackMs = getTailLookbackMs(interval);
+  const lastCachedBar = cachedBars[cachedBars.length - 1];
+  const lastCachedMs = lastCachedBar ? new Date(lastCachedBar.timestamp).getTime() : endDate.getTime();
+  const tailStartMs = Math.max(
+    startDate.getTime(),
+    Math.min(endDate.getTime(), lastCachedMs - intervalMs * 2, endDate.getTime() - tailLookbackMs)
+  );
+  const tailStart = new Date(tailStartMs);
+
+  const freshTail = await getAlpacaIntradayData(
+    symbol,
+    tailStart,
+    endDate,
+    interval,
+    includeExtendedHours
+  );
+
+  return normalizeBars(freshTail);
+}
+
 /**
  * Get intraday bars with LRU caching.
  * 
@@ -119,11 +219,42 @@ export async function getIntradayBars(
   
   const cached = intradayCache.get(cacheKey);
   const ttlMs = getTTLMs();
+  const now = new Date();
   
   if (cached) {
     const ageMs = Date.now() - cached.fetchedAt.getTime();
     
     if (ageMs < ttlMs) {
+      if (!shouldRefreshTail()) {
+        return mergeCurrentBar([...cached.bars], upperSymbol, interval);
+      }
+
+      try {
+        const freshTailBars = await fetchFreshTailBars(
+          upperSymbol,
+          interval,
+          startDate,
+          endDate,
+          includeExtendedHours,
+          cached.bars
+        );
+
+        if (freshTailBars.length > 0) {
+          const mergedBars = mergeBarsByTimestamp(cached.bars, freshTailBars);
+          intradayCache.set(cacheKey, {
+            ...cached,
+            bars: mergedBars,
+            lastTailRefreshAt: now,
+          });
+          return mergeCurrentBar([...mergedBars], upperSymbol, interval);
+        }
+      } catch (error) {
+        console.warn(
+          `[DataLayer] tail refresh failed for ${upperSymbol} ${interval}, using cached bars`,
+          error
+        );
+      }
+
       return mergeCurrentBar([...cached.bars], upperSymbol, interval);
     }
   }
@@ -137,21 +268,14 @@ export async function getIntradayBars(
       includeExtendedHours
     );
 
-    const bars: IntradayBar[] = alpacaBars.map((b) => ({
-      timestamp: b.date,
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-      volume: b.volume,
-      vwap: b.vwap,
-    }));
+    const bars = normalizeBars(alpacaBars);
 
     evictOldest();
 
     intradayCache.set(cacheKey, {
       bars,
-      fetchedAt: new Date(),
+      fetchedAt: now,
+      lastTailRefreshAt: now,
       interval,
     });
 
@@ -183,7 +307,7 @@ export function getIntradayCacheStats(): {
   const symbols = new Set<string>();
   let totalBars = 0;
 
-  for (const [key, value] of intradayCache) {
+  for (const [key, value] of Array.from(intradayCache.entries())) {
     const symbol = key.split(":")[0];
     symbols.add(symbol);
     totalBars += value.bars.length;
@@ -215,7 +339,7 @@ export function invalidateIntradayCache(symbol: string): void {
   const upperSymbol = symbol.toUpperCase();
   const keysToDelete: string[] = [];
 
-  for (const key of intradayCache.keys()) {
+  for (const key of Array.from(intradayCache.keys())) {
     if (key.startsWith(`${upperSymbol}:`)) {
       keysToDelete.push(key);
     }

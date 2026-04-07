@@ -13,6 +13,7 @@ import {
   ThemeDetailPanel,
   RotationTable,
   TickerWorkbench,
+  ThemeRaceLanes,
 } from "@/components/market-condition";
 import { AnalysisPanel } from "@/features/marketflow-analysis";
 import {
@@ -29,9 +30,16 @@ import {
 } from "@/data/mockThemeData";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { useLocation } from "wouter";
-import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search } from "lucide-react";
+import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search, Car } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -67,7 +75,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
 type ViewMode = "grid" | "table" | "split";
-type LensMode = "flow" | "rotation" | "concentration" | "accumulation";
+type LensMode = "flow" | "rotation" | "concentration" | "accumulation" | "race";
 
 // Time slice label mapping
 const TIME_SLICE_LABELS: Record<TimeSlice, string> = {
@@ -184,7 +192,7 @@ export default function MarketConditionPage() {
   const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [lensMode, setLensMode] = useState<LensMode>("flow");
-  const timeSliceDisabledModes = new Set<LensMode>(["concentration", "accumulation"]);
+  const timeSliceDisabledModes = new Set<LensMode>(["concentration", "accumulation", "race"]);
   const handleLensMode = (mode: LensMode) => {
     if (timeSliceDisabledModes.has(mode) && timeSlice !== "TODAY") {
       setTimeSlice("TODAY");
@@ -198,6 +206,8 @@ export default function MarketConditionPage() {
     if (slice === "TODAY") setHeatmapSort("current");
   };
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isRacePopoutOpen, setIsRacePopoutOpen] = useState(false);
+  const [isRacePopoutMaximized, setIsRacePopoutMaximized] = useState(false);
   const [useLiveData, setUseLiveData] = useState(true);
   const [timeSlice, setTimeSlice] = useState<TimeSlice>("TODAY");
   const [heatmapSort, setHeatmapSort] = useState<"current" | "historical">("current");
@@ -223,7 +233,10 @@ export default function MarketConditionPage() {
   const { data: marketCondition, isLoading: themesLoading, isFetching: themesFetching, error: themesError, refetch: refetchThemes } = useMarketCondition({ 
     timeSlice, 
     sizeFilter,
-    rotationBaseline: lensMode === "rotation" && timeSlice === "TODAY" ? "open930" : undefined,
+    rotationBaseline:
+      (lensMode === "rotation" || lensMode === "race") && timeSlice === "TODAY"
+        ? "open930"
+        : undefined,
   });
   const { data: rai, isLoading: raiLoading, isFetching: raiFetching } = useRAI();
   const { data: themeMembers, refetch: refetchMembers } = useThemeMembers(selectedTheme as ClusterId | null, timeSlice);
@@ -442,7 +455,13 @@ export default function MarketConditionPage() {
           if (adB !== adA) return adB - adA;
           return b.score - a.score;
         });
-      
+
+      case "race":
+        return themesCopy.sort((a, b) => {
+          if (b.acceleration !== a.acceleration) return b.acceleration - a.acceleration;
+          return b.score - a.score;
+        });
+
       default:
         return themesCopy;
     }
@@ -564,6 +583,34 @@ export default function MarketConditionPage() {
       setHeatmapSort("current");
     }
   }, [timeSlice, canUseHistoricalComparison, heatmapSort]);
+
+  const racePopoutStyle = isRacePopoutMaximized
+    ? {
+        width: "calc(100vw - 1rem)",
+        height: "calc(100dvh - 1rem)",
+        maxWidth: "calc(100vw - 1rem)",
+        maxHeight: "calc(100dvh - 1rem)",
+      }
+    : {
+        width: "min(1180px, calc(100vw - 2rem))",
+        height: "min(860px, calc(100dvh - 2rem))",
+        minWidth: "min(680px, calc(100vw - 2rem))",
+        minHeight: "min(520px, calc(100dvh - 2rem))",
+        maxWidth: "calc(100vw - 1rem)",
+        maxHeight: "calc(100dvh - 1rem)",
+        resize: "both" as const,
+      };
+
+  const renderThemeRaceLanes = () => (
+    <ThemeRaceLanes
+      themes={sortedThemes}
+      selectedTheme={selectedTheme}
+      onThemeSelect={handleThemeSelect}
+      totalThemes={themes.length}
+      isFetching={themesFetching}
+      tooltipTimeSlice={timeSlice}
+    />
+  );
 
   return (
     <div className={cn("h-screen flex flex-col bg-slate-950", isFullscreen && "fixed inset-0 z-50")}>
@@ -779,19 +826,43 @@ export default function MarketConditionPage() {
                 <p className="text-xs">Sort by consecutive accumulation/distribution days. Shows institutional commitment (William O'Neal style). High accumulation = sustained buying.</p>
               </TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 px-3 text-xs gap-1.5",
+                    lensMode === "race" && "bg-slate-700 text-amber-400"
+                  )}
+                  onClick={() => handleLensMode("race")}
+                >
+                  <Car className="w-3 h-3" />
+                  RACE
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p className="font-semibold">Race view</p>
+                <p className="text-xs">
+                  Timeline from stored snapshots when available; otherwise live metrics. Lanes use RS momentum between frames; live edge highlights the current acceleration leader.
+                </p>
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           {/* A/D Filter */}
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
+                <DropdownMenuTrigger asChild disabled={lensMode === "race"}>
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={lensMode === "race"}
                     className={cn(
                       "h-7 px-3 text-xs gap-1.5 border-slate-600/50 bg-slate-800/30",
-                      accDistFilter !== null && "bg-green-500/20 border-green-500/40 text-green-300"
+                      accDistFilter !== null && "bg-green-500/20 border-green-500/40 text-green-300",
+                      lensMode === "race" && "opacity-40 cursor-not-allowed"
                     )}
                   >
                     <Filter className="w-3 h-3" />
@@ -800,7 +871,11 @@ export default function MarketConditionPage() {
                   </Button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>Filter themes by accumulation/distribution streak</TooltipContent>
+              <TooltipContent>
+                {lensMode === "race" 
+                  ? "Not available in Race mode"
+                  : "Filter themes by accumulation/distribution streak"}
+              </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setAccDistFilter(null)}>
@@ -842,7 +917,11 @@ export default function MarketConditionPage() {
                 {timeSliceDisabledModes.has(lensMode) ? (
                   <>
                     <p className="font-semibold">Not available in this mode</p>
-                    <p className="text-xs">Concentration and A/D data are not stored historically. Switch to Flow or Rotation to use time slices.</p>
+                    <p className="text-xs">
+                      {lensMode === "race" 
+                        ? "Race mode has its own timeline controls below the visualization."
+                        : "Concentration and A/D data are not stored historically. Switch to Flow or Rotation to use time slices."}
+                    </p>
                   </>
                 ) : (
                   <>
@@ -952,11 +1031,15 @@ export default function MarketConditionPage() {
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
+                <DropdownMenuTrigger asChild disabled={lensMode === "race"}>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-7 px-3 text-xs gap-1.5 border-slate-600/50 bg-slate-800/30"
+                    disabled={lensMode === "race"}
+                    className={cn(
+                      "h-7 px-3 text-xs gap-1.5 border-slate-600/50 bg-slate-800/30",
+                      lensMode === "race" && "opacity-40 cursor-not-allowed"
+                    )}
                   >
                     <Filter className="w-3 h-3" />
                     {sizeFilter}
@@ -965,8 +1048,17 @@ export default function MarketConditionPage() {
                 </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent>
-                <p className="font-semibold">Size Filter</p>
-                <p className="text-xs">Filter themes by market cap benchmark</p>
+                {lensMode === "race" ? (
+                  <>
+                    <p className="font-semibold">Not available in Race mode</p>
+                    <p className="text-xs">Race displays all themes</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold">Size Filter</p>
+                    <p className="text-xs">Filter themes by market cap benchmark</p>
+                  </>
+                )}
               </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start" className="min-w-[160px]">
@@ -1085,9 +1177,13 @@ export default function MarketConditionPage() {
                 <Panel defaultSize={45} minSize={25}>
                   <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
                     <PanelHeader
-                      title="Theme Heatmap"
-                      tooltip="Visual grid of all 19 themes. Color = FlowScore (green=strong, red=weak). Click to select. Drag edges to resize panels."
-                      subtitle={comparisonTimeLabel || undefined}
+                      title={lensMode === "race" ? "Theme race" : "Theme Heatmap"}
+                      tooltip={
+                        lensMode === "race"
+                          ? "Theme race: scrub hourly or daily snapshot history, or use live data when history is empty. Click a lane to select a theme."
+                          : "Visual grid of all 19 themes. Color = FlowScore (green=strong, red=weak). Click to select. Drag edges to resize panels."
+                      }
+                      subtitle={lensMode === "race" ? undefined : comparisonTimeLabel || undefined}
                       action={
                         <div className="flex items-center gap-2">
                           {/* Sort toggle — shown in Flow and Rotation modes */}
@@ -1178,17 +1274,37 @@ export default function MarketConditionPage() {
                               <TooltipContent>Force save snapshot (admin)</TooltipContent>
                             </Tooltip>
                           )}
+                          {lensMode === "race" && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-200"
+                                  onClick={() => setIsRacePopoutOpen(true)}
+                                >
+                                  <Maximize2 className="mr-1 h-3.5 w-3.5" />
+                                  Expand
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Open Theme Race in a resizable pop-out</TooltipContent>
+                            </Tooltip>
+                          )}
                         </div>
                       }
                     />
-                    <div className="flex-1 overflow-auto">
-                      <ThemeHeatmapGrid
-                        themes={sortedThemes}
-                        selectedTheme={selectedTheme}
-                        onThemeSelect={handleThemeSelect}
-                        totalThemes={themes.length}
-                        timeSlice={timeSlice}
-                      />
+                    <div className="flex-1 overflow-auto min-h-0">
+                      {lensMode === "race" ? (
+                        renderThemeRaceLanes()
+                      ) : (
+                        <ThemeHeatmapGrid
+                          themes={sortedThemes}
+                          selectedTheme={selectedTheme}
+                          onThemeSelect={handleThemeSelect}
+                          totalThemes={themes.length}
+                          timeSlice={timeSlice}
+                        />
+                      )}
                     </div>
                   </div>
                 </Panel>
@@ -1290,6 +1406,64 @@ export default function MarketConditionPage() {
           </div>
         )}
       </div>
+      <Dialog
+        open={isRacePopoutOpen}
+        onOpenChange={(open) => {
+          setIsRacePopoutOpen(open);
+          if (!open) setIsRacePopoutMaximized(false);
+        }}
+      >
+        <DialogContent
+          className={cn(
+            "flex max-w-none flex-col gap-0 overflow-hidden border border-slate-700/70 bg-slate-950/95 p-0 shadow-2xl",
+            isRacePopoutMaximized
+              ? "h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)]"
+              : "w-auto"
+          )}
+          style={racePopoutStyle}
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Theme Race pop-out</DialogTitle>
+            <DialogDescription>
+              Resizable Theme Race view with vertical scrolling and maximize or restore controls.
+            </DialogDescription>
+          </DialogHeader>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-14 top-3 z-20 h-8 w-8 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                onClick={() => setIsRacePopoutMaximized((value) => !value)}
+              >
+                {isRacePopoutMaximized ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isRacePopoutMaximized ? "Restore pop-out size" : "Maximize pop-out"}
+            </TooltipContent>
+          </Tooltip>
+          <div className="flex items-start justify-between gap-3 border-b border-slate-700/60 bg-slate-900/80 px-4 py-3 pr-24">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-100">Theme Race</h2>
+              <p className="text-xs text-slate-400">
+                Pop-out view for the full race tool. Resize the window and scroll vertically through all themes.
+              </p>
+            </div>
+            <div className="shrink-0 text-[11px] text-slate-500">
+              {isRacePopoutMaximized ? "Maximized" : "Resizable"}
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {renderThemeRaceLanes()}
+          </div>
+        </DialogContent>
+      </Dialog>
       <AnalysisPanel
         variant="floating"
         symbol={analysisSheetSymbol}
