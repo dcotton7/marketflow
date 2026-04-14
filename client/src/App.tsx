@@ -7,6 +7,7 @@ import { TimeframeProvider } from "@/context/TimeframeContext";
 import { SentinelAuthProvider } from "@/context/SentinelAuthContext";
 import { SentinelProtectedRoute } from "@/components/SentinelProtectedRoute";
 import { SystemSettingsProvider } from "@/context/SystemSettingsContext";
+import { WorkspacePaletteProvider } from "@/context/WorkspacePaletteContext";
 import NotFound from "@/pages/not-found";
 import SentinelLoginPage from "@/pages/SentinelLoginPage";
 import SentinelDashboardPage from "@/pages/SentinelDashboardPage";
@@ -135,12 +136,14 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <SentinelAuthProvider>
-          <SystemSettingsProvider>
-            <TimeframeProvider>
-              <Toaster />
-              <Router />
-            </TimeframeProvider>
-          </SystemSettingsProvider>
+          <WorkspacePaletteProvider>
+            <SystemSettingsProvider>
+              <TimeframeProvider>
+                <Toaster />
+                <Router />
+              </TimeframeProvider>
+            </SystemSettingsProvider>
+          </WorkspacePaletteProvider>
         </SentinelAuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

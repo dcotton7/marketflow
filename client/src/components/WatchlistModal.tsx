@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { AlertBuilderDialog } from "@/components/alerts/AlertBuilderDialog";
 import { 
   useWatchlists, 
@@ -28,7 +29,17 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { WatchlistInlinePriceCell } from "@/components/WatchlistInlinePriceCell";
+import { WatchlistColumnPicker } from "@/components/WatchlistColumnPicker";
+import {
+  WatchlistConfigurableTable,
+  type WatchlistConfigurableSortField,
+} from "@/components/WatchlistConfigurableTable";
+import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
+import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
+import {
+  watchlistModalColumnWidthsStorageKey,
+  watchlistModalSizeStorageKey,
+} from "@/components/start-here/dashboard-persistence";
 import {
   Star,
   Pencil,
@@ -43,6 +54,7 @@ import {
   Loader2,
   List,
   Bell,
+  BriefcaseBusiness,
 } from "lucide-react";
 
 interface WatchlistModalProps {
@@ -53,26 +65,272 @@ interface WatchlistModalProps {
 interface TickerQuote {
   symbol: string;
   companyName: string;
+  themeLabel?: string;
   price: number;
   change: number;
   changePercent: number;
 }
 
-type SortField =
-  | "symbol"
-  | "companyName"
-  | "change"
-  | "changePercent"
-  | "entry"
-  | "entryPct"
-  | "stop"
-  | "stopPct";
+type SortField = WatchlistConfigurableSortField;
 type SortDir = "asc" | "desc";
+
+const MODAL_MIN_W = 760;
+const MODAL_MIN_H = 420;
+const MODAL_DEFAULT_W = 1030;
+const MODAL_MARGIN = 8;
+
+type WatchlistModalLayout = {
+  w: number;
+  h: number;
+  left: number;
+  top: number;
+};
+
+function clampModalSize(w: number, h: number): { w: number; h: number } {
+  if (typeof window === "undefined") {
+    return { w, h };
+  }
+  const maxW = Math.floor(window.innerWidth * 0.96);
+  const maxH = Math.floor(window.innerHeight * 0.96);
+  return {
+    w: Math.min(maxW, Math.max(MODAL_MIN_W, Math.round(w))),
+    h: Math.min(maxH, Math.max(MODAL_MIN_H, Math.round(h))),
+  };
+}
+
+function clampModalPosition(
+  left: number,
+  top: number,
+  w: number,
+  h: number
+): { left: number; top: number } {
+  if (typeof window === "undefined") {
+    return { left, top };
+  }
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const maxL = Math.max(MODAL_MARGIN, vw - w - MODAL_MARGIN);
+  const maxT = Math.max(MODAL_MARGIN, vh - h - MODAL_MARGIN);
+  return {
+    left: Math.min(maxL, Math.max(MODAL_MARGIN, Math.round(left))),
+    top: Math.min(maxT, Math.max(MODAL_MARGIN, Math.round(top))),
+  };
+}
+
+function defaultModalPosition(w: number, h: number): { left: number; top: number } {
+  if (typeof window === "undefined") {
+    return { left: MODAL_MARGIN, top: MODAL_MARGIN };
+  }
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const left = Math.round((vw - w) / 2);
+  const top = Math.round((vh - h) / 2);
+  return clampModalPosition(left, top, w, h);
+}
+
+function clampModalLayout(layout: WatchlistModalLayout): WatchlistModalLayout {
+  const { w, h } = clampModalSize(layout.w, layout.h);
+  const { left, top } = clampModalPosition(layout.left, layout.top, w, h);
+  return { w, h, left, top };
+}
+
+function loadModalLayout(userId: number): WatchlistModalLayout {
+  const defH =
+    typeof window !== "undefined"
+      ? Math.round(window.innerHeight * 0.92)
+      : 640;
+  const size0 = clampModalSize(MODAL_DEFAULT_W, defH);
+  const pos0 = defaultModalPosition(size0.w, size0.h);
+  const defaults: WatchlistModalLayout = { ...size0, ...pos0 };
+
+  if (!userId) return clampModalLayout(defaults);
+
+  try {
+    const raw = localStorage.getItem(watchlistModalSizeStorageKey(userId));
+    if (raw) {
+      const j = JSON.parse(raw) as {
+        w?: unknown;
+        h?: unknown;
+        left?: unknown;
+        top?: unknown;
+      };
+      if (typeof j.w === "number" && typeof j.h === "number") {
+        const wh = clampModalSize(j.w, j.h);
+        if (typeof j.left === "number" && typeof j.top === "number") {
+          return clampModalLayout({
+            ...wh,
+            left: j.left,
+            top: j.top,
+          });
+        }
+        return clampModalLayout({ ...wh, ...defaultModalPosition(wh.w, wh.h) });
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return clampModalLayout(defaults);
+}
+
+function persistModalLayout(userId: number, layout: WatchlistModalLayout) {
+  if (!userId) return;
+  try {
+    const c = clampModalLayout(layout);
+    localStorage.setItem(watchlistModalSizeStorageKey(userId), JSON.stringify(c));
+  } catch {
+    /* ignore */
+  }
+}
 
 export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [, navigate] = useLocation();
   const { cssVariables } = useSystemSettings();
+  const { user } = useSentinelAuth();
   const { toast } = useToast();
+
+  const uid = user?.id ?? 0;
+  const colStorageKey = watchlistModalColumnWidthsStorageKey(uid);
+  const { columns, beginResize, addColumn, removeColumn, availableToAdd, applyColumnPreset } =
+    useWatchlistColumnProfile(colStorageKey, "modal");
+
+  const contentRef = useRef<HTMLDivElement>(null);
+  const resizeDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+  } | null>(null);
+
+  const moveDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+  } | null>(null);
+
+  const [modalLayout, setModalLayout] = useState(() => loadModalLayout(uid));
+
+  useEffect(() => {
+    setModalLayout(loadModalLayout(uid));
+  }, [uid]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onWinResize = () => {
+      setModalLayout((prev) => {
+        const c = clampModalLayout(prev);
+        if (c.w !== prev.w || c.h !== prev.h || c.left !== prev.left || c.top !== prev.top) {
+          persistModalLayout(uid, c);
+        }
+        return c;
+      });
+    };
+    window.addEventListener("resize", onWinResize);
+    return () => window.removeEventListener("resize", onWinResize);
+  }, [open, uid]);
+
+  const onResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = contentRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    resizeDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: rect.width,
+      startH: rect.height,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const onResizePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const d = resizeDragRef.current;
+    if (!d) return;
+    const dw = e.clientX - d.startX;
+    const dh = e.clientY - d.startY;
+    setModalLayout((prev) =>
+      clampModalLayout({
+        ...prev,
+        w: d.startW + dw,
+        h: d.startH + dh,
+      })
+    );
+  }, []);
+
+  const endResizeDrag = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!resizeDragRef.current) return;
+      resizeDragRef.current = null;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      const el = contentRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        setModalLayout((prev) => {
+          const next = clampModalLayout({
+            ...prev,
+            w: rect.width,
+            h: rect.height,
+            left: rect.left,
+            top: rect.top,
+          });
+          persistModalLayout(uid, next);
+          return next;
+        });
+      }
+    },
+    [uid]
+  );
+
+  const onMovePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = contentRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    moveDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: r.left,
+      startTop: r.top,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const onMovePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const d = moveDragRef.current;
+    if (!d) return;
+    const dl = e.clientX - d.startX;
+    const dt = e.clientY - d.startY;
+    setModalLayout((prev) =>
+      clampModalLayout({
+        ...prev,
+        left: d.startLeft + dl,
+        top: d.startTop + dt,
+      })
+    );
+  }, []);
+
+  const endMoveDrag = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!moveDragRef.current) return;
+      moveDragRef.current = null;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      setModalLayout((prev) => {
+        persistModalLayout(uid, prev);
+        return prev;
+      });
+    },
+    [uid]
+  );
 
   // Watchlist state - persisted to localStorage
   const [selectedWatchlistId, setSelectedWatchlistId] = useSelectedWatchlistId(WATCHLIST_MANAGER_STORAGE_KEY);
@@ -91,7 +349,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   // Hooks
-  const { data: watchlists, isLoading: watchlistsLoading } = useWatchlists();
+  const { data: watchlists, isLoading: watchlistsLoading, error: watchlistsError } = useWatchlists();
   const createWatchlist = useCreateWatchlist();
   const renameWatchlist = useRenameWatchlist();
   const deleteWatchlist = useDeleteWatchlist();
@@ -111,14 +369,43 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const { data: watchlistItems, isLoading: itemsLoading } = useNamedWatchlistItems(effectiveWatchlistId);
 
   // Fetch quotes for all tickers in selected watchlist
-  const symbols = watchlistItems?.map(item => item.symbol) || [];
+  const symbols = watchlistItems?.map((item) => item.symbol.trim().toUpperCase()) || [];
   const { data: quotes, isLoading: quotesLoading } = useQuery<TickerQuote[]>({
-    queryKey: ["/api/watchlist/quotes/extended", symbols.join(",")],
+    queryKey: ["namedWatchlistQuotesExtended", { symbolsKey: symbols.join(","), schema: 3 }],
     queryFn: async () => {
       if (symbols.length === 0) return [];
-      const res = await fetch(`/api/watchlist/quotes?symbols=${symbols.join(",")}&extended=true`, { credentials: "include" });
-      if (!res.ok) return symbols.map(s => ({ symbol: s, companyName: "", price: 0, change: 0, changePercent: 0 }));
-      return res.json();
+      const res = await fetch(
+        `/api/watchlist/quotes?symbols=${encodeURIComponent(symbols.join(","))}&extended=true`,
+        { credentials: "include" }
+      );
+      if (!res.ok)
+        return symbols.map((s) => ({
+          symbol: s,
+          companyName: "",
+          themeLabel: sectorSpdrThemeLabel(s),
+          price: 0,
+          change: 0,
+          changePercent: 0,
+        }));
+      const raw = (await res.json()) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((row) => {
+        const r = row as Record<string, unknown>;
+        const themeRaw =
+          r.themeLabel ??
+          r["theme_label"] ??
+          (typeof r.theme === "string" ? r.theme : "");
+        const sym = String(r.symbol ?? "");
+        return {
+          symbol: sym,
+          companyName: String(r.companyName ?? "").trim(),
+          themeLabel:
+            String(themeRaw ?? "").trim() || sectorSpdrThemeLabel(sym),
+          price: Number(r.price ?? r.last ?? 0) || 0,
+          change: Number(r.change ?? 0) || 0,
+          changePercent: Number(r.changePercent ?? r.change_pct ?? 0) || 0,
+        };
+      });
     },
     enabled: symbols.length > 0,
     staleTime: 60000,
@@ -127,8 +414,11 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   // Merge items with quotes
   const tickersWithQuotes = useMemo(() => {
     if (!watchlistItems) return [];
-    return watchlistItems.map(item => {
-      const quote = quotes?.find(q => q.symbol === item.symbol);
+    return watchlistItems.map((item) => {
+      const symU = item.symbol.trim().toUpperCase();
+      const quote = quotes?.find(
+        (q) => (q.symbol ?? "").trim().toUpperCase() === symU
+      );
       const price = quote?.price || 0;
       const entry = item.targetEntry ?? null;
       const stop = item.stopPlan ?? null;
@@ -137,7 +427,9 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
       return {
         id: item.id,
         symbol: item.symbol,
-        companyName: quote?.companyName || "",
+        companyName: (quote?.companyName ?? "").trim(),
+        themeLabel:
+          (quote?.themeLabel ?? "").trim() || sectorSpdrThemeLabel(item.symbol),
         price,
         change: quote?.change || 0,
         changePercent: quote?.changePercent || 0,
@@ -158,9 +450,16 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
         case "symbol":
           cmp = a.symbol.localeCompare(b.symbol);
           break;
-        case "companyName":
-          cmp = a.companyName.localeCompare(b.companyName);
+        case "companyName": {
+          const an = (a.companyName || a.themeLabel || "").trim();
+          const bn = (b.companyName || b.themeLabel || "").trim();
+          cmp = an.localeCompare(bn);
           break;
+        }
+        case "themeLabel": {
+          cmp = (a.themeLabel || "").localeCompare(b.themeLabel || "");
+          break;
+        }
         case "change":
           cmp = a.change - b.change;
           break;
@@ -233,6 +532,15 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     } catch {}
   };
 
+  const handleTogglePortfolio = async (wl: Watchlist) => {
+    try {
+      await renameWatchlist.mutateAsync({
+        id: wl.id,
+        isPortfolio: !wl.isPortfolio,
+      });
+    } catch {}
+  };
+
   const handleAddTickers = async () => {
     if (!tickerInput.trim() || !effectiveWatchlistId) return;
     setIsAddingTickers(true);
@@ -294,10 +602,26 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[64.4rem] h-[92vh] flex flex-col p-0 gap-0">
+      <DialogContent
+        ref={contentRef}
+        className="fixed z-[100] flex max-h-[96vh] max-w-[96vw] flex-col gap-0 overflow-hidden p-0 !max-w-none !translate-x-0 !translate-y-0 !opacity-100 sm:!max-w-none"
+        style={{
+          width: modalLayout.w,
+          height: modalLayout.h,
+          left: modalLayout.left,
+          top: modalLayout.top,
+          transform: "none",
+        }}
+      >
         <DialogDescription className="sr-only">Watchlist Manager</DialogDescription>
-        <DialogHeader className="px-4 py-3 border-b flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
+        <DialogHeader
+          className="flex-shrink-0 cursor-move touch-none select-none border-b px-4 py-3 pr-12"
+          onPointerDown={onMovePointerDown}
+          onPointerMove={onMovePointerMove}
+          onPointerUp={endMoveDrag}
+          onPointerCancel={endMoveDrag}
+        >
+          <DialogTitle className="flex items-center gap-2 pointer-events-none">
             <List className="w-5 h-5" />
             Watchlist Manager
           </DialogTitle>
@@ -345,6 +669,10 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="w-5 h-5 animate-spin" />
                 </div>
+              ) : watchlistsError ? (
+                <div className="text-center py-8 text-destructive text-sm">
+                  Failed to load watchlists
+                </div>
               ) : watchlists?.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground text-sm">
                   No watchlists yet
@@ -354,7 +682,9 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   <div
                     key={wl.id}
                     className={`flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer transition-colors ${
-                      effectiveWatchlistId === wl.id ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                      effectiveWatchlistId === wl.id
+                        ? "border border-primary/40 bg-primary/20 text-white"
+                        : "text-white/90 hover:bg-muted/70"
                     }`}
                     onClick={() => setSelectedWatchlistId(wl.id)}
                   >
@@ -387,10 +717,29 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                       </div>
                     ) : (
                       <>
-                        <span className="flex-1 truncate text-sm">
+                        <span className="flex-1 truncate text-sm font-medium text-white">
                           {wl.name}
-                          <span className="ml-1 text-muted-foreground text-xs">({(wl as any).itemCount ?? 0})</span>
+                          <span className="ml-1 text-white/60 text-xs">({wl.itemCount ?? 0})</span>
+                          {wl.isPortfolio ? (
+                            <span className="ml-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1 py-0.5 text-[10px] text-emerald-500">
+                              Portfolio
+                            </span>
+                          ) : null}
                         </span>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className={`h-6 w-6 flex-shrink-0 opacity-70 hover:opacity-100 ${
+                            wl.isPortfolio ? "text-emerald-500" : "text-muted-foreground"
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleTogglePortfolio(wl);
+                          }}
+                          title={wl.isPortfolio ? "Portfolio watchlist (on)" : "Mark as portfolio watchlist"}
+                        >
+                          <BriefcaseBusiness className="w-3.5 h-3.5" />
+                        </Button>
                         <Button
                           size="icon"
                           variant="ghost"
@@ -445,6 +794,14 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                 Alert This Watchlist
               </Button>
 
+              <WatchlistColumnPicker
+                columns={columns}
+                availableToAdd={availableToAdd}
+                addColumn={addColumn}
+                removeColumn={removeColumn}
+                applyColumnPreset={applyColumnPreset}
+              />
+
               {selectedWatchlist && !selectedWatchlist.isDefault && (
                 <Button
                   variant="outline"
@@ -491,144 +848,38 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   <p className="text-sm">Add tickers using the input above</p>
                 </div>
               ) : (
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-background border-b">
-                    <tr>
-                      <th
-                        className="text-left px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("symbol")}
-                      >
-                        <div className="flex items-center gap-1 text-sm font-medium">
-                          Ticker <SortIcon field="symbol" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-left px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("companyName")}
-                      >
-                        <div className="flex items-center gap-1 text-sm font-medium">
-                          Company <SortIcon field="companyName" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("change")}
-                      >
-                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                          $ Change <SortIcon field="change" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("changePercent")}
-                      >
-                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                          % Change <SortIcon field="changePercent" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("entry")}
-                      >
-                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                          Entry <SortIcon field="entry" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("entryPct")}
-                      >
-                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                          % from Entry <SortIcon field="entryPct" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("stop")}
-                      >
-                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                          Stop <SortIcon field="stop" />
-                        </div>
-                      </th>
-                      <th
-                        className="text-right px-4 py-2 cursor-pointer hover:bg-muted/50 select-none"
-                        onClick={() => handleSort("stopPct")}
-                      >
-                        <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                          % from Stop <SortIcon field="stopPct" />
-                        </div>
-                      </th>
-                      <th className="w-12 px-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedTickers.map(ticker => (
-                      <tr
-                        key={ticker.id}
-                        className="border-b hover:bg-muted/30 cursor-pointer"
-                        onClick={() => openChartsWithWatchlistNav(ticker.symbol)}
-                      >
-                        <td className="px-4 py-2">
-                          <span className="font-mono font-bold" style={{ color: cssVariables.textColorHeader }}>
-                            {ticker.symbol}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2 text-sm text-muted-foreground truncate max-w-[200px]">
-                          {ticker.companyName || "—"}
-                        </td>
-                        <td className={`px-4 py-2 text-right font-mono text-sm ${ticker.change >= 0 ? "text-green-500" : "text-red-500"}`}>
-                          {ticker.change >= 0 ? "+" : ""}{ticker.change.toFixed(2)}
-                        </td>
-                        <td className={`px-4 py-2 text-right font-mono text-sm ${ticker.changePercent >= 0 ? "text-green-500" : "text-red-500"}`}>
-                          {ticker.changePercent >= 0 ? "+" : ""}{ticker.changePercent.toFixed(2)}%
-                        </td>
-                        <td className="px-2 py-2 text-right align-middle">
-                          <WatchlistInlinePriceCell
-                            value={ticker.entry ?? undefined}
-                            onSave={(v) =>
-                              updateWatchlist.mutate({ id: ticker.id, data: { targetEntry: v } })
-                            }
-                            data-testid={`watchlist-entry-${ticker.id}`}
-                          />
-                        </td>
-                        <td className={`px-4 py-2 text-right font-mono text-sm ${
-                          ticker.entryPct === null ? "text-muted-foreground" :
-                          ticker.entryPct >= 0 ? "text-green-500" : "text-red-500"
-                        }`}>
-                          {ticker.entryPct !== null ? `${ticker.entryPct >= 0 ? "+" : ""}${ticker.entryPct.toFixed(2)}%` : "—"}
-                        </td>
-                        <td className="px-2 py-2 text-right align-middle">
-                          <WatchlistInlinePriceCell
-                            value={ticker.stop ?? undefined}
-                            onSave={(v) =>
-                              updateWatchlist.mutate({ id: ticker.id, data: { stopPlan: v } })
-                            }
-                            data-testid={`watchlist-stop-${ticker.id}`}
-                          />
-                        </td>
-                        <td className={`px-4 py-2 text-right font-mono text-sm ${
-                          ticker.stopPct === null ? "text-muted-foreground" :
-                          ticker.stopPct >= 0 ? "text-green-500" : "text-red-500"
-                        }`}>
-                          {ticker.stopPct !== null ? `${ticker.stopPct >= 0 ? "+" : ""}${ticker.stopPct.toFixed(2)}%` : "—"}
-                        </td>
-                        <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => handleRemoveTicker(ticker.id)}
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <WatchlistConfigurableTable
+                  variant="modal"
+                  columns={columns}
+                  beginResize={beginResize}
+                  sortedTickers={sortedTickers}
+                  sortField={sortField}
+                  onSort={handleSort}
+                  renderSortIcon={(f) => <SortIcon field={f} />}
+                  cssVariables={cssVariables}
+                  updateWatchlist={{ mutate: updateWatchlist.mutate }}
+                  onRemoveTicker={handleRemoveTicker}
+                  onRowClick={openChartsWithWatchlistNav}
+                />
               )}
             </div>
           </div>
+        </div>
+
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize watchlist dialog"
+          className="absolute bottom-0 right-0 z-[60] h-6 w-6 cursor-nwse-resize touch-none rounded-br-lg opacity-50 hover:opacity-100"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={endResizeDrag}
+          onPointerCancel={endResizeDrag}
+        >
+          <span
+            className="pointer-events-none absolute bottom-1 right-1 block h-3 w-3 border-b-2 border-r-2 border-muted-foreground/80"
+            aria-hidden
+          />
         </div>
       </DialogContent>
 

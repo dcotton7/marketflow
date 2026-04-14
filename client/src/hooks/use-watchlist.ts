@@ -8,6 +8,8 @@ export interface Watchlist {
   userId: number;
   name: string;
   isDefault: boolean;
+  isPortfolio?: boolean;
+  itemCount?: number;
   createdAt: string;
 }
 
@@ -105,12 +107,23 @@ export function useRenameWatchlist() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ id, name }: { id: number; name: string }) => {
+    mutationFn: async ({
+      id,
+      name,
+      isPortfolio,
+    }: {
+      id: number;
+      name?: string;
+      isPortfolio?: boolean;
+    }) => {
+      const payload: { name?: string; isPortfolio?: boolean } = {};
+      if (name != null) payload.name = name;
+      if (isPortfolio != null) payload.isPortfolio = isPortfolio;
       const res = await fetch(`/api/sentinel/watchlists/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: "Failed to rename watchlist" }));
@@ -120,7 +133,7 @@ export function useRenameWatchlist() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
-      toast({ title: "Watchlist Renamed" });
+      toast({ title: "Watchlist Updated" });
     },
     onError: (err) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });

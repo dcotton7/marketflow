@@ -10,6 +10,8 @@
  * - 26 Primary Behavior Clusters + 5 Overlays
  */
 
+import { normalizeWatchlistSymbol, sectorSpdrThemeLabel } from "@shared/watchlist-theme";
+
 // =============================================================================
 // Type Definitions
 // =============================================================================
@@ -57,7 +59,7 @@ export type OverlayId =
   | "SMALL_CAP_OVERLAY";
 
 // Time slice options for multi-timeframe analysis
-export type TimeSlice = "TODAY" | "15M" | "30M" | "1H" | "1D" | "5D" | "1M" | "3M" | "6M" | "YTD";
+export type TimeSlice = "TODAY" | "15M" | "30M" | "1H" | "4H" | "1D" | "5D" | "10D" | "1W" | "1M" | "3M" | "6M" | "YTD";
 
 // Size filter options with ETF benchmarks
 export type SizeFilter = "ALL" | "MEGA" | "LARGE" | "MID" | "SMALL" | "MICRO";
@@ -105,8 +107,11 @@ export const TIME_SLICE_CONFIG: Record<TimeSlice, { days: number; label: string 
   "15M": { days: 0, label: "15 Minutes" },
   "30M": { days: 0, label: "30 Minutes" },
   "1H": { days: 0, label: "1 Hour" },
+  "4H": { days: 0, label: "4 Hours" },
   "1D": { days: 1, label: "vs Yesterday" },
   "5D": { days: 5, label: "5 Days" },
+  "10D": { days: 10, label: "10 Days" },
+  "1W": { days: 5, label: "1 Week" },
   "1M": { days: 21, label: "1 Month" },
   "3M": { days: 63, label: "3 Months" },
   "6M": { days: 126, label: "6 Months" },
@@ -892,19 +897,60 @@ export function getClusterTickers(id: ClusterId): string[] {
  * Returns the first cluster where ticker is in core, then candidates
  */
 export function getTickerPrimaryCluster(symbol: string): ClusterId | null {
+  const upper = symbol.toUpperCase();
   // First check core lists (higher priority)
   for (const cluster of CLUSTERS) {
-    if (cluster.core.includes(symbol)) {
+    if (cluster.core.includes(upper)) {
       return cluster.id;
     }
   }
   // Then check candidate lists
   for (const cluster of CLUSTERS) {
-    if (cluster.candidates.includes(symbol)) {
+    if (cluster.candidates.includes(upper)) {
       return cluster.id;
     }
   }
   return null;
+}
+
+/** Prefer lower numbers (tighter theme link) when the same ETF appears under multiple clusters. */
+const ETF_PROXY_TYPE_RANK: Record<ETFProxyType, number> = {
+  direct: 0,
+  adjacent: 1,
+  macro: 2,
+  hedge: 3,
+  inverse: 4,
+  leveraged: 5,
+};
+
+/**
+ * Human theme name for a symbol: core/candidate membership first, else best ETF proxy match.
+ * Used by watchlist extended quotes when company/ETF display name is missing.
+ */
+export function getThemeLabelForSymbol(symbol: string): string | null {
+  const upper = normalizeWatchlistSymbol(symbol);
+  const primaryId = getTickerPrimaryCluster(upper);
+  if (primaryId) {
+    const c = getClusterById(primaryId);
+    if (c?.name) return c.name;
+  }
+
+  let best: { rank: number; clusterIndex: number; name: string } | null = null;
+  CLUSTERS.forEach((cluster, clusterIndex) => {
+    const hit = cluster.etfProxies.find((p) => p.symbol.toUpperCase() === upper);
+    if (!hit) return;
+    const rank = ETF_PROXY_TYPE_RANK[hit.proxyType] ?? 99;
+    if (
+      !best ||
+      rank < best.rank ||
+      (rank === best.rank && clusterIndex < best.clusterIndex)
+    ) {
+      best = { rank, clusterIndex, name: cluster.name };
+    }
+  });
+
+  const sector = sectorSpdrThemeLabel(upper);
+  return best?.name ?? (sector || null);
 }
 
 /**

@@ -12,12 +12,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
-import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen } from "lucide-react";
+import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen, LayoutGrid } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkspacePaletteAdminPanel } from "@/components/admin/WorkspacePaletteAdminPanel";
 
 interface TnnFactor {
   id: number;
@@ -2774,7 +2775,7 @@ export default function SentinelAdminPage() {
           data-testid="help-admin-overview"
         >
           <p><span className="font-medium text-foreground">What this page does:</span> controls global AI tuning (TNN + Big Idea scoring/optimizer), plus per-user UI appearance and user utilities.</p>
-          <p><span className="font-medium text-foreground">Scope:</span> most TNN / scoring / optimizer settings affect <span className="font-medium">all users</span>; System Settings affects <span className="font-medium">your account’s UI theme</span>.</p>
+          <p><span className="font-medium text-foreground">Scope:</span> most TNN / scoring / optimizer settings affect <span className="font-medium">all users</span>; <span className="font-medium">Workspace colors</span> sets Start Here link-lane colors for everyone; System Settings affects <span className="font-medium">your account’s UI theme</span>.</p>
           <p><span className="font-medium text-foreground">Safety:</span> these do not “set price levels” — they tune how the system scores, selects, and displays outputs.</p>
         </div>
 
@@ -2811,6 +2812,10 @@ export default function SentinelAdminPage() {
             <TabsTrigger value="market-condition" className="gap-2" data-testid="tab-market-condition">
               <Activity className="w-4 h-4" />
               Market Condition
+            </TabsTrigger>
+            <TabsTrigger value="workspace-colors" className="gap-2" data-testid="tab-workspace-colors">
+              <LayoutGrid className="w-4 h-4" />
+              Workspace colors
             </TabsTrigger>
           </TabsList>
 
@@ -3661,6 +3666,10 @@ export default function SentinelAdminPage() {
           </TabsContent>
           <TabsContent value="market-condition" data-testid="content-market-condition">
             <MarketConditionPanel />
+          </TabsContent>
+
+          <TabsContent value="workspace-colors" data-testid="content-workspace-colors">
+            <WorkspacePaletteAdminPanel />
           </TabsContent>
         </Tabs>
       </div>

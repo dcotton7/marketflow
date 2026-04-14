@@ -41,7 +41,7 @@ export type ClusterId =
   | "BIOTECH"
   | "SOLAR";
 
-export type TimeSlice = "TODAY" | "15M" | "30M" | "1H" | "1D" | "1W" | "1M" | "3M" | "6M" | "YTD";
+export type TimeSlice = "TODAY" | "15M" | "30M" | "1H" | "4H" | "1D" | "5D" | "10D" | "1W" | "1M" | "3M" | "6M" | "YTD";
 export type SizeFilter = "ALL" | "MEGA" | "LARGE" | "MID" | "SMALL" | "MICRO";
 export type TrendState = "Bull" | "Transition" | "Bear";
 export type MarketSession = "MARKET_HOURS" | "AFTER_HOURS" | "CLOSED";

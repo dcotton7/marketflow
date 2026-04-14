@@ -6,6 +6,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { detectCupAndHandle as sharedDetectCupAndHandle, CupAndHandleResult } from "@shared/patternDetection";
 import { registerSentinelRoutes } from "./sentinel/routes";
+import { registerStartHereRoutes } from "./start-here/routes";
 import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 import { registerBigIdeaRoutes } from "./bigidea/routes";
 import { registerAlertRoutes } from "./alerts/routes";
@@ -42,6 +43,8 @@ function setCachedHistory(key: string, data: any): void {
 }
 
 import { getSectorAndIndustry, getFundamentals } from "./fundamentals";
+import { normalizeWatchlistSymbol } from "@shared/watchlist-theme";
+import { getThemeLabelForSymbol } from "./market-condition/universe";
 import { getQuote, getQuotesBatch } from "./data-layer/quotes";
 import { getIntradayBars } from "./data-layer/intraday-bars";
 import { getConstituents } from "./universe/constituents";
@@ -930,6 +933,7 @@ export async function registerRoutes(
   }
 
   registerSentinelRoutes(app);
+  registerStartHereRoutes(app);
   registerAlertRoutes(app);
   registerPatternLearningRoutes(app);
   registerBigIdeaRoutes(app);
@@ -1397,39 +1401,70 @@ export async function registerRoutes(
   // Uses snapshot cache (market condition) when available, falls back to Alpaca
   app.get('/api/watchlist/quotes', async (req, res) => {
     try {
-      const symbols = (req.query.symbols as string || '').split(',').filter(Boolean);
-      const extended = req.query.extended === 'true';
-      
+      const parseSymbolsQueryParam = (raw: unknown): string[] => {
+        if (raw == null || raw === "") return [];
+        const joined = Array.isArray(raw) ? raw.map(String).join(",") : String(raw);
+        return joined.split(",").map((s) => s.trim()).filter(Boolean);
+      };
+      const parseQueryBool = (raw: unknown): boolean => {
+        if (raw === true || raw === 1) return true;
+        if (typeof raw === "string") {
+          const s = raw.trim().toLowerCase();
+          return s === "true" || s === "1" || s === "yes";
+        }
+        if (Array.isArray(raw) && raw.length > 0) return parseQueryBool(raw[0]);
+        return false;
+      };
+
+      let symbols = parseSymbolsQueryParam(req.query.symbols).map(normalizeWatchlistSymbol).filter(Boolean);
+      const extended = parseQueryBool(req.query.extended);
+
       if (symbols.length === 0) {
         const watchlistItems = await storage.getWatchlist();
-        symbols.push(...watchlistItems.map(item => item.symbol));
+        symbols.push(
+          ...watchlistItems.map((item) => normalizeWatchlistSymbol(item.symbol)).filter(Boolean)
+        );
       }
-      
+
       if (symbols.length === 0) {
         return res.json([]);
       }
 
-      const upperSymbols = symbols.map(s => s.toUpperCase());
+      const upperSymbols = symbols.map((s) => normalizeWatchlistSymbol(s));
       const [quotesMap, fundamentalsList] = await Promise.all([
         getQuotesBatch(upperSymbols),
         extended ? Promise.all(upperSymbols.map(s => getFundamentals(s).catch(() => null))) : Promise.resolve([] as (Awaited<ReturnType<typeof getFundamentals>> | null)[]),
       ]);
 
-      const quotes = upperSymbols.map((symbol, i) => {
-        const q = quotesMap.get(symbol);
-        const fundamentals = extended && fundamentalsList[i] ? fundamentalsList[i] : null;
-        const price = q?.price ?? 0;
-        const change = q?.change ?? 0;
-        const changePercent = q?.changePct ?? 0;
-        return {
-          symbol,
-          price,
-          last: price,
-          change: Math.round(change * 100) / 100,
-          changePercent: Math.round(changePercent * 100) / 100,
-          companyName: (fundamentals as { companyName?: string } | null)?.companyName || '',
-        };
-      });
+      const quotes = await Promise.all(
+        upperSymbols.map(async (symbol, i) => {
+          const q = quotesMap.get(symbol);
+          const fundamentals = extended && fundamentalsList[i] ? fundamentalsList[i] : null;
+          const price = q?.price ?? 0;
+          const change = q?.change ?? 0;
+          const changePercent = q?.changePct ?? 0;
+          let companyName =
+            ((fundamentals as { companyName?: string } | null)?.companyName || "").trim();
+          if (extended && !companyName) {
+            const fromAlpaca = await alpaca.fetchAlpacaAssetName(symbol);
+            if (fromAlpaca) companyName = fromAlpaca;
+          }
+          const themeLabel = extended ? getThemeLabelForSymbol(symbol) ?? "" : "";
+          if (extended && !companyName && themeLabel) {
+            companyName = themeLabel;
+          }
+          const base = {
+            symbol,
+            price,
+            last: price,
+            change: Math.round(change * 100) / 100,
+            changePercent: Math.round(changePercent * 100) / 100,
+            companyName,
+          };
+          return extended ? { ...base, themeLabel } : base;
+        })
+      );
+      res.set("Cache-Control", "no-store, max-age=0");
       res.json(quotes);
     } catch (error) {
       console.error('Failed to fetch watchlist quotes:', error);

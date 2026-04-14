@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Map Mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --panel: #0f172a;
+      --panel-soft: #111827;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #4ade80;
+      --red: #f87171;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }
+
+    .wrap {
+      max-width: 1560px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .top {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .tf-btn {
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      color: var(--text);
+      border-radius: 7px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .tf-btn.active {
+      border-color: #22d3ee;
+      color: #22d3ee;
+      background: rgba(34, 211, 238, 0.12);
+      font-weight: 700;
+    }
+
+    .comp-select {
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      color: var(--text);
+      border-radius: 7px;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+
+    .line {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .control-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    details.config {
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    details.config summary {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .checks {
+      margin-top: 8px;
+      display: grid;
+      gap: 4px;
+      grid-template-columns: repeat(4, minmax(92px, 1fr));
+    }
+
+    .checks label {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .main {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(930px, 1fr) 360px;
+      align-items: start;
+    }
+
+    .matrix-wrap {
+      overflow: auto;
+      max-height: 72vh;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1320px;
+    }
+
+    th, td {
+      border: 1px solid #1f2937;
+      padding: 8px;
+      text-align: center;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #0b1220;
+      font-weight: 700;
+    }
+
+    .sticky1, .sticky2 {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      text-align: left;
+      background: #0b1220;
+      font-weight: 700;
+    }
+
+    .sticky2 {
+      left: 180px;
+      text-align: center;
+      min-width: 90px;
+      z-index: 4;
+    }
+
+    .col-theme {
+      min-width: 180px;
+      max-width: 180px;
+    }
+
+    .diag {
+      color: #64748b;
+      background: rgba(148, 163, 184, 0.08);
+    }
+
+    .clickable {
+      cursor: pointer;
+    }
+
+    .clickable:hover {
+      outline: 1px solid #64748b;
+      outline-offset: -1px;
+    }
+
+    .sortable {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .sortable.active-sort {
+      color: #22d3ee;
+      background: #0c1526;
+    }
+
+    .active-theme {
+      color: #22d3ee;
+      background: #0c1526;
+    }
+
+    .selected-cell {
+      outline: 2px solid #22d3ee;
+      outline-offset: -2px;
+    }
+
+    .price-col {
+      min-width: 78px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .price-col.active {
+      background: rgba(34, 211, 238, 0.12);
+      color: #22d3ee;
+    }
+
+    .score-up { color: var(--green); }
+    .score-down { color: var(--red); }
+
+    .side {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      position: sticky;
+      top: 12px;
+    }
+
+    .k {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .h {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .list-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      border-bottom: 1px solid #1f2937;
+      padding: 4px 0;
+      font-size: 12px;
+    }
+
+    .help {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    @media (max-width: 1300px) {
+      .main { grid-template-columns: 1fr; }
+      .side { position: static; }
+      .checks { grid-template-columns: repeat(2, minmax(92px, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel top">
+      <div class="row">
+        <strong>Flow Map Mockup (Timeframe + Price Columns)</strong>
+        <span class="pill">Active Snapshot: <span id="activeTfLabel" style="color:#22d3ee;font-weight:700">Current</span></span>
+        <span class="pill">Confidence: <span id="confidence" style="color:#facc15;font-weight:700">MEDIUM</span></span>
+      </div>
+
+      <div class="control-group" id="tfButtons"></div>
+
+      <div class="control-group">
+        <span class="pill">Comp vs</span>
+        <select id="compSelect" class="comp-select"></select>
+        <span id="compSummary" class="line"></span>
+      </div>
+
+      <div class="control-group">
+        <label class="pill"><input id="showPrices" type="checkbox" checked /> Show Price Columns</label>
+        <details class="config">
+          <summary>Configure Price Columns</summary>
+          <div class="checks" id="priceChecks"></div>
+        </details>
+      </div>
+
+      <div id="narrative" class="line"></div>
+    </div>
+
+    <div class="main">
+      <div class="panel matrix-wrap">
+        <table id="matrix"></table>
+      </div>
+      <div class="panel side">
+        <div>
+          <div class="k">Focused Theme</div>
+          <div class="h" id="focusTheme">QUANTUM</div>
+        </div>
+        <div>
+          <div class="k">Top Inflows To Focus</div>
+          <div id="inflows"></div>
+        </div>
+        <div>
+          <div class="k">Top Outflows From Focus</div>
+          <div id="outflows"></div>
+        </div>
+        <div>
+          <div class="k">Selected Route</div>
+          <div id="routeDetails" class="help">Click a matrix cell to inspect route details.</div>
+        </div>
+        <div class="help">
+          Timeframe toggle drives matrix values from that snapshot period.<br />
+          Price columns can be shown/hidden and individually configured.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TIMEFRAMES = [
+      { key: "current", label: "Current" },
+      { key: "m15", label: "15m" },
+      { key: "h1", label: "1h" },
+      { key: "h4", label: "4h" },
+      { key: "d1", label: "1d" },
+      { key: "d5", label: "5d" },
+      { key: "d10", label: "10d" },
+      { key: "m1", label: "1m" }
+    ];
+
+    const THEMES = [
+      "SEMIS",
+      "AI_INFRA",
+      "FIBER_OPTICAL",
+      "QUANTUM",
+      "ENERGY",
+      "CRYPTO_EQ",
+      "CYBER",
+      "DEFENSE",
+      "HEALTHCARE",
+      "CONSUMER_DISC"
+    ];
+
+    function hash(input) {
+      let h = 0;
+      for (let i = 0; i < input.length; i++) h = (h * 31 + input.charCodeAt(i)) % 1000003;
+      return h;
+    }
+
+    const themeSnapshots = {};
+    for (const t of THEMES) {
+      themeSnapshots[t] = {};
+      for (const tf of TIMEFRAMES) {
+        const h = hash(`metric:${t}:${tf.key}`);
+        const perf = (((h % 220) - 110) / 10); // -11.0%..11.0%
+        const strength = Math.max(5, Math.min(95, Math.round(50 + perf * 3 + ((h >> 4) % 10) - 5)));
+        themeSnapshots[t][tf.key] = {
+          perf: Math.round(perf * 10) / 10,
+          strength
+        };
+      }
+    }
+
+    const routeSnapshots = {};
+    for (const from of THEMES) {
+      routeSnapshots[from] = {};
+      for (const to of THEMES) {
+        if (from === to) continue;
+        routeSnapshots[from][to] = {};
+        for (const tf of TIMEFRAMES) {
+          const h = hash(`route:${from}:${to}:${tf.key}`);
+          const score = (((h % 180) - 90) / 100); // -0.90..0.90
+          const rs = (((h >> 3) % 60) - 30) / 100;
+          const breadth = (((h >> 5) % 70) - 35) / 10;
+          const volume = (((h >> 7) % 40) - 20) / 10;
+          routeSnapshots[from][to][tf.key] = {
+            score: Math.round(score * 100) / 100,
+            rs: Math.round(rs * 100) / 100,
+            breadth: Math.round(breadth * 10) / 10,
+            volume: Math.round(volume * 10) / 10
+          };
+        }
+      }
+    }
+
+    let activeTf = "current";
+    let compTf = null;
+    let showPriceColumns = true;
+    const visiblePriceCols = new Set(TIMEFRAMES.map((tf) => tf.key));
+    let focusedTheme = "QUANTUM";
+    let selectedRoute = null;
+    let sortKey = "strength";
+    let sortDir = "desc";
+
+    const tfButtonsEl = document.getElementById("tfButtons");
+    const compSelectEl = document.getElementById("compSelect");
+    const compSummaryEl = document.getElementById("compSummary");
+    const priceChecksEl = document.getElementById("priceChecks");
+    const matrixEl = document.getElementById("matrix");
+    const narrativeEl = document.getElementById("narrative");
+    const confidenceEl = document.getElementById("confidence");
+    const activeTfLabelEl = document.getElementById("activeTfLabel");
+    const focusThemeEl = document.getElementById("focusTheme");
+    const inflowsEl = document.getElementById("inflows");
+    const outflowsEl = document.getElementById("outflows");
+    const routeDetailsEl = document.getElementById("routeDetails");
+
+    function fmtScore(v) {
+      return `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+    }
+
+    function fmtPct(v) {
+      return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+    }
+
+    function scoreClass(v) {
+      return v >= 0 ? "score-up" : "score-down";
+    }
+
+    function getStrength(theme) {
+      const now = themeSnapshots[theme][activeTf].strength;
+      if (!compTf) return now;
+      return now - themeSnapshots[theme][compTf].strength;
+    }
+
+    function getPerf(theme, tfKey) {
+      const now = themeSnapshots[theme][tfKey].perf;
+      if (!compTf) return now;
+      return now - themeSnapshots[theme][compTf].perf;
+    }
+
+    function getRoute(from, to) {
+      const now = routeSnapshots[from][to][activeTf];
+      if (!compTf) return { ...now };
+      const base = routeSnapshots[from][to][compTf];
+      return {
+        score: Math.round((now.score - base.score) * 100) / 100,
+        rs: Math.round((now.rs - base.rs) * 100) / 100,
+        breadth: Math.round((now.breadth - base.breadth) * 10) / 10,
+        volume: Math.round((now.volume - base.volume) * 10) / 10
+      };
+    }
+
+    function sortArrow(key) {
+      if (sortKey !== key) return "";
+      return sortDir === "asc" ? " ▲" : " ▼";
+    }
+
+    function setSort(nextKey) {
+      if (sortKey === nextKey) {
+        sortDir = sortDir === "asc" ? "desc" : "asc";
+      } else {
+        sortKey = nextKey;
+        sortDir = nextKey === "theme" ? "asc" : "desc";
+      }
+    }
+
+    function sortedThemes() {
+      const copy = [...THEMES];
+      copy.sort((a, b) => {
+        let av, bv;
+        if (sortKey === "theme") {
+          av = a;
+          bv = b;
+        } else if (sortKey === "strength") {
+          av = getStrength(a);
+          bv = getStrength(b);
+        } else if (sortKey.startsWith("perf:")) {
+          const tfKey = sortKey.split(":")[1];
+          av = getPerf(a, tfKey);
+          bv = getPerf(b, tfKey);
+        } else {
+          av = getStrength(a);
+          bv = getStrength(b);
+        }
+        if (typeof av === "string" && typeof bv === "string") {
+          return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+        }
+        return sortDir === "asc" ? av - bv : bv - av;
+      });
+      return copy;
+    }
+
+    function bgForScore(v) {
+      const a = Math.min(Math.abs(v), 1);
+      if (v > 0.001) return `rgba(34, 197, 94, ${0.10 + a * 0.42})`;
+      if (v < -0.001) return `rgba(239, 68, 68, ${0.10 + a * 0.42})`;
+      return "rgba(148, 163, 184, 0.08)";
+    }
+
+    function confidenceLevel() {
+      const vals = [];
+      for (const from of THEMES) {
+        for (const to of THEMES) {
+          if (from === to) continue;
+          vals.push(Math.abs(getRoute(from, to).score));
+        }
+      }
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      if (avg >= 0.45) return "HIGH";
+      if (avg >= 0.30) return "MEDIUM-HIGH";
+      if (avg >= 0.18) return "MEDIUM";
+      return "LOW";
+    }
+
+    function allRoutes() {
+      const list = [];
+      for (const from of THEMES) {
+        for (const to of THEMES) {
+          if (from === to) continue;
+          const r = getRoute(from, to);
+          list.push({ from, to, ...r });
+        }
+      }
+      return list;
+    }
+
+    function topRoutesForTheme(theme, dir) {
+      return allRoutes()
+        .filter((r) => (dir === "in" ? r.to === theme : r.from === theme))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+    }
+
+    function renderTopControls() {
+      tfButtonsEl.innerHTML = TIMEFRAMES.map((tf) => {
+        const active = tf.key === activeTf ? "active" : "";
+        return `<button class="tf-btn ${active}" data-tf="${tf.key}">${tf.label}</button>`;
+      }).join("");
+
+      tfButtonsEl.querySelectorAll("[data-tf]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          activeTf = btn.getAttribute("data-tf");
+          renderAll();
+        });
+      });
+
+      compSelectEl.innerHTML =
+        `<option value="">No comp</option>` +
+        TIMEFRAMES.map((tf) => `<option value="${tf.key}" ${compTf === tf.key ? "selected" : ""}>${tf.label}</option>`).join("");
+      compSelectEl.onchange = (e) => {
+        const next = e.target.value || null;
+        compTf = next === activeTf ? null : next;
+        renderAll();
+      };
+
+      priceChecksEl.innerHTML = TIMEFRAMES.map((tf) => {
+        const checked = visiblePriceCols.has(tf.key) ? "checked" : "";
+        return `<label><input type="checkbox" data-col="${tf.key}" ${checked} /> ${tf.label}</label>`;
+      }).join("");
+
+      priceChecksEl.querySelectorAll("[data-col]").forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const key = cb.getAttribute("data-col");
+          if (cb.checked) visiblePriceCols.add(key);
+          else visiblePriceCols.delete(key);
+          renderMatrix();
+        });
+      });
+
+      document.getElementById("showPrices").checked = showPriceColumns;
+      document.getElementById("showPrices").onchange = (e) => {
+        showPriceColumns = e.target.checked;
+        renderMatrix();
+      };
+    }
+
+    function renderNarrative() {
+      const routes = allRoutes().sort((a, b) => b.score - a.score);
+      const best = routes[0];
+      const weak = routes[routes.length - 1];
+      activeTfLabelEl.textContent = TIMEFRAMES.find((x) => x.key === activeTf)?.label || activeTf;
+      confidenceEl.textContent = confidenceLevel();
+      compSummaryEl.textContent = compTf
+        ? `Comp baseline: ${TIMEFRAMES.find((x) => x.key === compTf)?.label}. Entire chart rebased vs that snapshot.`
+        : "Comp baseline: none (absolute snapshot values).";
+      narrativeEl.textContent =
+        `${compTf ? "Comp" : "Snapshot"} ${activeTfLabelEl.textContent}: strongest route ${best.from} -> ${best.to} (${fmtScore(best.score)}), weakest ${weak.from} -> ${weak.to} (${fmtScore(weak.score)}).`;
+    }
+
+    function renderMatrix() {
+      const visiblePriceTf = TIMEFRAMES.filter((tf) => visiblePriceCols.has(tf.key));
+      const orderedThemes = sortedThemes();
+      let html = "<tr>";
+      html += `<th class='sticky1 col-theme sortable ${sortKey === "theme" ? "active-sort" : ""}' data-sort='theme'>Theme${sortArrow("theme")}</th>`;
+      html += `<th class='sticky2 sortable ${sortKey === "strength" ? "active-sort" : ""}' data-sort='strength'>Strength${sortArrow("strength")}</th>`;
+      if (showPriceColumns) {
+        for (const tf of visiblePriceTf) {
+          const active = tf.key === activeTf ? "active" : "";
+          const sk = `perf:${tf.key}`;
+          const sorted = sortKey === sk ? "active-sort" : "";
+          html += `<th class="price-col ${active} sortable ${sorted}" data-sort="${sk}">${tf.label}${sortArrow(sk)}</th>`;
+        }
+      }
+      for (const to of THEMES) {
+        const active = to === focusedTheme ? "active-theme" : "";
+        html += `<th class="clickable ${active}" data-col-theme="${to}">${to}</th>`;
+      }
+      html += "</tr>";
+
+      for (const from of orderedThemes) {
+        const rowActive = from === focusedTheme ? "active-theme" : "";
+        const strength = getStrength(from);
+        html += "<tr>";
+        html += `<td class="sticky1 col-theme clickable ${rowActive}" data-row-theme="${from}">${from}</td>`;
+        html += `<td class="sticky2 ${scoreClass(strength)}">${compTf ? fmtScore(strength) : strength}</td>`;
+
+        if (showPriceColumns) {
+          for (const tf of visiblePriceTf) {
+            const v = getPerf(from, tf.key);
+            const activeCol = tf.key === activeTf ? "active" : "";
+            html += `<td class="price-col ${activeCol} ${scoreClass(v)}">${fmtPct(v)}</td>`;
+          }
+        }
+
+        for (const to of THEMES) {
+          if (from === to) {
+            html += `<td class="diag">--</td>`;
+            continue;
+          }
+          const route = getRoute(from, to);
+          const selectedClass =
+            selectedRoute && selectedRoute.from === from && selectedRoute.to === to ? "selected-cell" : "";
+          html += `<td class="clickable ${selectedClass}" data-from="${from}" data-to="${to}" style="background:${bgForScore(route.score)}">${fmtScore(route.score)}</td>`;
+        }
+
+        html += "</tr>";
+      }
+
+      matrixEl.innerHTML = html;
+
+      matrixEl.querySelectorAll("[data-row-theme]").forEach((el) => {
+        el.addEventListener("click", () => {
+          focusedTheme = el.getAttribute("data-row-theme");
+          selectedRoute = null;
+          renderAll();
+        });
+      });
+
+      matrixEl.querySelectorAll("[data-col-theme]").forEach((el) => {
+        el.addEventListener("click", () => {
+          focusedTheme = el.getAttribute("data-col-theme");
+          selectedRoute = null;
+          renderAll();
+        });
+      });
+
+      matrixEl.querySelectorAll("[data-from][data-to]").forEach((el) => {
+        el.addEventListener("click", () => {
+          selectedRoute = {
+            from: el.getAttribute("data-from"),
+            to: el.getAttribute("data-to")
+          };
+          focusedTheme = selectedRoute.to;
+          renderAll();
+        });
+      });
+
+      matrixEl.querySelectorAll("[data-sort]").forEach((el) => {
+        el.addEventListener("click", () => {
+          setSort(el.getAttribute("data-sort"));
+          renderMatrix();
+        });
+      });
+    }
+
+    function renderSide() {
+      focusThemeEl.textContent = focusedTheme;
+      const inflows = topRoutesForTheme(focusedTheme, "in");
+      const outflows = topRoutesForTheme(focusedTheme, "out");
+
+      inflowsEl.innerHTML = inflows.map((r) =>
+        `<div class="list-row"><span>${r.from} -> ${r.to}</span><span class="${scoreClass(r.score)}">${fmtScore(r.score)}</span></div>`
+      ).join("");
+
+      outflowsEl.innerHTML = outflows.map((r) =>
+        `<div class="list-row"><span>${r.from} -> ${r.to}</span><span class="${scoreClass(r.score)}">${fmtScore(r.score)}</span></div>`
+      ).join("");
+
+      if (!selectedRoute) {
+        routeDetailsEl.textContent = "Click a matrix cell to inspect route details.";
+        return;
+      }
+
+      const route = getRoute(selectedRoute.from, selectedRoute.to);
+      routeDetailsEl.innerHTML =
+        `<strong>${selectedRoute.from} -> ${selectedRoute.to}</strong><br />` +
+        `Score (${TIMEFRAMES.find((x) => x.key === activeTf).label}${compTf ? ` vs ${TIMEFRAMES.find((x) => x.key === compTf).label}` : ""}): <span class="${scoreClass(route.score)}">${fmtScore(route.score)}</span><br />` +
+        `RSΔ: ${fmtScore(route.rs)} | BreadthΔ: ${fmtScore(route.breadth)} | VolumeΔ: ${fmtScore(route.volume)}`;
+    }
+
+    function renderAll() {
+      renderTopControls();
+      renderNarrative();
+      renderMatrix();
+      renderSide();
+    }
+
+    renderAll();
+  </script>
+</body>
+</html>

@@ -76,11 +76,14 @@ async function fetchFromFinnhub(symbol: string): Promise<FundamentalData | null>
       ? rawMarketCap * 1000000 // Finnhub returns in millions
       : 0;
 
+    const displayName =
+      typeof profile.name === "string" && profile.name.trim() ? profile.name.trim() : undefined;
+
     return {
       sector,
       industry,
       marketCap,
-      companyName: profile.name || undefined,
+      companyName: displayName,
       exchange: profile.exchange || undefined,
     };
   } catch (err) {

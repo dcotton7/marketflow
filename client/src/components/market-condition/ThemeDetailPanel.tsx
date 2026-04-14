@@ -1,6 +1,6 @@
 // Theme Detail Panel - Shows detailed metrics for a selected theme
 import { useState } from "react";
-import { ThemeRow, ReasonCode, ThemeTier, TickerRow, ETFProxy, TrendState } from "@/data/mockThemeData";
+import { ThemeRow, ReasonCode, ThemeTier, TickerRow, TrendState } from "@/data/mockThemeData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -530,29 +530,49 @@ export function ThemeDetailPanel({ theme, members = [], totalThemes = 17, accDis
           </CardHeader>
           <CardContent className="p-3">
             <div className="space-y-2">
-              {theme.etfProxies.map((proxy) => (
-                <div 
-                  key={proxy.symbol} 
-                  className="flex items-center justify-between gap-2 p-1.5 -mx-1.5 rounded hover:bg-slate-700/50 cursor-pointer transition-colors group"
-                  onClick={() => setLocation(`/sentinel/charts?symbol=${proxy.symbol}`)}
-                >
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Badge 
-                      variant="outline" 
-                      className={`text-[10px] px-1 ${ETF_TYPE_COLORS[proxy.proxyType]}`}
-                    >
-                      {proxy.proxyType}
-                    </Badge>
-                    <span className="font-mono text-sm font-medium group-hover:text-cyan-400 transition-colors">
-                      {proxy.symbol}
-                    </span>
-                    <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />
-                  </div>
-                  <span className="text-xs text-muted-foreground truncate flex-1 text-right min-w-0">
-                    {proxy.name}
-                  </span>
-                </div>
-              ))}
+              {theme.etfProxies.map((proxy) => {
+                const proxyName = proxy.name?.trim();
+                const displayName =
+                  proxyName ||
+                  `${theme.name} · ${proxy.proxyType} proxy`;
+                return (
+                  <Tooltip key={proxy.symbol}>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="flex cursor-pointer items-center justify-between gap-2 rounded p-1.5 -mx-1.5 transition-colors hover:bg-slate-700/50 group"
+                        onClick={() => setLocation(`/sentinel/charts?symbol=${proxy.symbol}`)}
+                      >
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] px-1 ${ETF_TYPE_COLORS[proxy.proxyType] ?? ETF_TYPE_COLORS.adjacent}`}
+                          >
+                            {proxy.proxyType}
+                          </Badge>
+                          <span className="font-mono text-sm font-medium transition-colors group-hover:text-cyan-400">
+                            {proxy.symbol}
+                          </span>
+                          <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-50" />
+                        </div>
+                        <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+                          {displayName}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" className="max-w-sm space-y-1 text-xs">
+                      <p className="font-semibold text-foreground">{theme.name}</p>
+                      <p>
+                        <span className="font-mono">{proxy.symbol}</span>
+                        {proxyName ? (
+                          <> — {proxyName}</>
+                        ) : (
+                          <> — ETF name not on file; ties to this theme as a {proxy.proxyType} proxy.</>
+                        )}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

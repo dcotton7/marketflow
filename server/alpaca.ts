@@ -121,6 +121,35 @@ export async function fetchAlpacaTradingCalendar(
   }
 }
 
+const alpacaAssetNameCache = new Map<string, string | null>();
+
+/**
+ * Official asset display name from Alpaca (works well for ETFs; Finnhub/fundamentals often leave name blank).
+ * GET /v2/assets/{symbol_or_asset_id}
+ */
+export async function fetchAlpacaAssetName(symbol: string): Promise<string | null> {
+  const upper = symbol.toUpperCase();
+  const hit = alpacaAssetNameCache.get(upper);
+  if (hit !== undefined) return hit;
+
+  if (!getApiKey() || !getApiSecret()) {
+    alpacaAssetNameCache.set(upper, null);
+    return null;
+  }
+
+  try {
+    const url = `${ALPACA_BASE_URL}/v2/assets/${encodeURIComponent(upper)}`;
+    const data = await alpacaFetchWithRetry(url);
+    const name = typeof data?.name === "string" ? data.name.trim() : "";
+    const out = name.length > 0 ? name : null;
+    alpacaAssetNameCache.set(upper, out);
+    return out;
+  } catch {
+    alpacaAssetNameCache.set(upper, null);
+    return null;
+  }
+}
+
 /**
  * Fetch intraday bars from Alpaca Market Data API v2
  * Supports extended hours (pre-market + after-hours)

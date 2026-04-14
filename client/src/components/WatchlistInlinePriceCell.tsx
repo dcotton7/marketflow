@@ -3,7 +3,9 @@ import { Check, X } from "lucide-react";
 
 export interface WatchlistInlinePriceCellProps {
   value: number | null | undefined;
-  onSave: (value: number) => void;
+  onSave: (value: number | null) => void;
+  /** When true, empty input on blur / save clears the value (sends `null`). */
+  allowClear?: boolean;
   className?: string;
   "data-testid"?: string;
 }
@@ -11,6 +13,7 @@ export interface WatchlistInlinePriceCellProps {
 export function WatchlistInlinePriceCell({
   value,
   onSave,
+  allowClear = false,
   className = "",
   "data-testid": testId = "watchlist-inline-price",
 }: WatchlistInlinePriceCellProps) {
@@ -34,7 +37,12 @@ export function WatchlistInlinePriceCell({
   }, [isEditing]);
 
   const trySave = (): boolean => {
-    const numValue = parseFloat(editValue);
+    const trimmed = editValue.trim();
+    if (trimmed === "" && allowClear) {
+      onSave(null);
+      return true;
+    }
+    const numValue = parseFloat(trimmed);
     if (!isNaN(numValue) && numValue > 0) {
       onSave(numValue);
       return true;
@@ -54,9 +62,14 @@ export function WatchlistInlinePriceCell({
   };
 
   const handleBlur = () => {
-    const numValue = parseFloat(editValue);
-    if (!isNaN(numValue) && numValue > 0) {
-      onSave(numValue);
+    const trimmed = editValue.trim();
+    if (trimmed === "" && allowClear) {
+      onSave(null);
+    } else {
+      const numValue = parseFloat(trimmed);
+      if (!isNaN(numValue) && numValue > 0) {
+        onSave(numValue);
+      }
     }
     setIsEditing(false);
   };
@@ -66,7 +79,7 @@ export function WatchlistInlinePriceCell({
 
   return (
     <div
-      className={`inline-flex items-center justify-end gap-0.5 ${className}`}
+      className={`inline-flex max-w-full min-w-0 items-center justify-end gap-0.5 ${className}`}
       data-testid={testId}
       onClick={(e) => e.stopPropagation()}
     >
@@ -111,13 +124,14 @@ export function WatchlistInlinePriceCell({
       ) : (
         <button
           type="button"
-          className="font-mono text-sm text-muted-foreground hover:text-foreground hover:underline"
+          className="max-w-full min-w-0 truncate text-right font-mono text-sm text-muted-foreground hover:text-foreground hover:underline"
           onClick={(e) => {
             e.stopPropagation();
             setEditValue(value != null && Number.isFinite(value) ? value.toFixed(2) : "");
             setIsEditing(true);
           }}
           data-testid={`${testId}-value`}
+          title={displayPrice}
         >
           {displayPrice}
         </button>

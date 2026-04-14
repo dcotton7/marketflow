@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { playAlertChime } from "@/lib/alert-sound";
+import { SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT } from "@/lib/sentinel-ui-events";
 import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
 
 function MarketTimeDisplay() {
@@ -207,6 +208,12 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const [alertCenterOpen, setAlertCenterOpen] = useState(false);
 
   useEffect(() => {
+    const openWatchlistManager = () => setWatchlistModalOpen(true);
+    window.addEventListener(SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT, openWatchlistManager);
+    return () => window.removeEventListener(SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT, openWatchlistManager);
+  }, []);
+
+  useEffect(() => {
     if (!alertEvents?.length) {
       if (lastSeenAlertEventIdRef.current == null) {
         lastSeenAlertEventIdRef.current = 0;
@@ -274,48 +281,6 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Start</span>
             </Button>
           </Link>
-          <Button 
-            variant="ghost"
-            size="sm"
-            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
-            disabled
-            data-testid="nav-dashboard"
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
-          </Button>
-          <Button 
-            variant="ghost"
-            size="sm"
-            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
-            disabled
-            data-testid="nav-rules"
-          >
-            <BookOpen className="w-4 h-4" />
-            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
-          </Button>
-          <Link href="/sentinel/import">
-            <Button 
-              variant={isImportPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-import"
-            >
-              <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Import</span>
-            </Button>
-          </Link>
-          <Link href="/sentinel/patterns">
-            <Button 
-              variant={isPatternsPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-patterns"
-            >
-              <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
-            </Button>
-          </Link>
           <Link href="/sentinel/bigidea">
             <Button 
               variant={isBigIdeaPage ? "secondary" : "ghost"} 
@@ -380,6 +345,28 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Ivy AI</span>
             </Button>
           </Link>
+          <Link href="/sentinel/import">
+            <Button 
+              variant={isImportPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-import"
+            >
+              <Upload className="w-4 h-4" />
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Import</span>
+            </Button>
+          </Link>
+          <Link href="/sentinel/patterns">
+            <Button 
+              variant={isPatternsPage ? "secondary" : "ghost"} 
+              size="sm"
+              className="gap-2"
+              data-testid="nav-patterns"
+            >
+              <Brain className="w-4 h-4" />
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
+            </Button>
+          </Link>
           {userInfo?.isAdmin && (
             <Link href="/sentinel/admin">
               <Button 
@@ -393,6 +380,26 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               </Button>
             </Link>
           )}
+          <Button 
+            variant="ghost"
+            size="sm"
+            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
+            disabled
+            data-testid="nav-dashboard"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
+          </Button>
+          <Button 
+            variant="ghost"
+            size="sm"
+            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
+            disabled
+            data-testid="nav-rules"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
+          </Button>
         </nav>
         
         <MarketTimeDisplay />

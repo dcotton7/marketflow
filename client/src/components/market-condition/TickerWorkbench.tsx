@@ -657,8 +657,24 @@ export function TickerWorkbench({
                     ))}
                     <ArrowUpRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                  <div className="text-[10px] text-muted-foreground truncate max-w-[100px] ml-3.5">
-                    {ticker.name}
+                  <div className="ml-3.5 max-w-[140px]">
+                    {ticker.name.trim().toUpperCase() !== ticker.symbol.trim().toUpperCase() ? (
+                      <div
+                        className="truncate text-[10px] text-muted-foreground"
+                        title={ticker.name}
+                      >
+                        {ticker.name}
+                      </div>
+                    ) : themeName ? (
+                      <div
+                        className="truncate text-[10px] font-medium text-cyan-400/90"
+                        title={`Thematic group: ${themeName}. Use watchlist or symbol page for full ETF / company names.`}
+                      >
+                        {themeName}
+                      </div>
+                    ) : (
+                      <div className="truncate text-[10px] text-muted-foreground">{ticker.symbol}</div>
+                    )}
                   </div>
                 </TableCell>
 

@@ -248,114 +248,82 @@ export async function getHistoricalSnapshot(
 
   try {
     let query;
+    let preResolvedResults: ThemeSnapshot[] | null = null;
     let comparisonTime: string | null = null;
+    const now = new Date();
+
+    const queryHourlyAtOrBefore = (cutoff: Date) =>
+      db
+        .select()
+        .from(themeSnapshots)
+        .where(
+          and(
+            eq(themeSnapshots.snapshotType, "hourly"),
+            sql`${themeSnapshots.createdAt} <= ${cutoff.toISOString()}`
+          )
+        )
+        .orderBy(desc(themeSnapshots.createdAt))
+        .limit(120);
+
+    const queryHourlyByTradingDaysBack = async (daysBack: number): Promise<ThemeSnapshot[]> => {
+      const marketDates = await db
+        .select({ marketDate: themeSnapshots.marketDate })
+        .from(themeSnapshots)
+        .where(eq(themeSnapshots.snapshotType, "hourly"))
+        .groupBy(themeSnapshots.marketDate)
+        .orderBy(desc(themeSnapshots.marketDate))
+        .limit(daysBack + 30);
+      if (!marketDates.length) return [];
+      // Require enough hourly trading dates for true "N trading days back" semantics.
+      // If insufficient history, return empty so caller can apply daily-close fallback.
+      if (marketDates.length <= daysBack) return [];
+      const targetDate = marketDates[daysBack]?.marketDate;
+      if (!targetDate) return [];
+      const rows = await db
+        .select()
+        .from(themeSnapshots)
+        .where(
+          and(
+            eq(themeSnapshots.snapshotType, "hourly"),
+            eq(themeSnapshots.marketDate, targetDate)
+          )
+        )
+        .orderBy(desc(themeSnapshots.createdAt))
+        .limit(120);
+      return rows;
+    };
     
     switch (timeSlice) {
       case "15M": {
-        // Find the most recent snapshot that's at least 15 minutes old
-        const cutoffTime = new Date(Date.now() - 15 * 60 * 1000);
-        
-        query = db
-          .select()
-          .from(themeSnapshots)
-          .where(
-            and(
-              eq(themeSnapshots.marketDate, currentDate),
-              eq(themeSnapshots.snapshotType, "hourly"),
-              sql`${themeSnapshots.createdAt} <= ${cutoffTime.toISOString()}`
-            )
-          )
-          .orderBy(desc(themeSnapshots.createdAt))
-          .limit(60);
-        
+        query = queryHourlyAtOrBefore(new Date(now.getTime() - 15 * 60 * 1000));
         break;
       }
       
       case "30M": {
-        // Find the most recent snapshot that's at least 30 minutes old
-        const cutoffTime = new Date(Date.now() - 30 * 60 * 1000);
-        
-        query = db
-          .select()
-          .from(themeSnapshots)
-          .where(
-            and(
-              eq(themeSnapshots.marketDate, currentDate),
-              eq(themeSnapshots.snapshotType, "hourly"),
-              sql`${themeSnapshots.createdAt} <= ${cutoffTime.toISOString()}`
-            )
-          )
-          .orderBy(desc(themeSnapshots.createdAt))
-          .limit(60);
-        
-        // comparisonTime will be set from actual results
+        query = queryHourlyAtOrBefore(new Date(now.getTime() - 30 * 60 * 1000));
         break;
       }
       
       case "1H": {
-        // Find the most recent snapshot that's at least 1 hour old
-        const cutoffTime = new Date(Date.now() - 60 * 60 * 1000);
-        
-        query = db
-          .select()
-          .from(themeSnapshots)
-          .where(
-            and(
-              eq(themeSnapshots.marketDate, currentDate),
-              eq(themeSnapshots.snapshotType, "hourly"),
-              sql`${themeSnapshots.createdAt} <= ${cutoffTime.toISOString()}`
-            )
-          )
-          .orderBy(desc(themeSnapshots.createdAt))
-          .limit(60);
-        
+        query = queryHourlyAtOrBefore(new Date(now.getTime() - 60 * 60 * 1000));
         break;
       }
       
       case "4H": {
-        // Find the most recent snapshot that's at least 4 hours old
-        const cutoffTime = new Date(Date.now() - 4 * 60 * 60 * 1000);
-        
-        query = db
-          .select()
-          .from(themeSnapshots)
-          .where(
-            and(
-              eq(themeSnapshots.snapshotType, "hourly"),
-              sql`${themeSnapshots.createdAt} <= ${cutoffTime.toISOString()}`
-            )
-          )
-          .orderBy(desc(themeSnapshots.createdAt))
-          .limit(60);
-        
+        query = queryHourlyAtOrBefore(new Date(now.getTime() - 4 * 60 * 60 * 1000));
         break;
       }
       
       case "1D": {
-        // Find the last trading day (last weekday on or before currentDate)
-        const lastTradingDay = new Date(currentDate + "T12:00:00Z");
-        while (lastTradingDay.getUTCDay() === 0 || lastTradingDay.getUTCDay() === 6) {
-          lastTradingDay.setUTCDate(lastTradingDay.getUTCDate() - 1);
-        }
-        // Then go one more trading day back — this is the "prior close" to compare against
-        const priorClose = new Date(lastTradingDay);
-        priorClose.setUTCDate(priorClose.getUTCDate() - 1);
-        while (priorClose.getUTCDay() === 0 || priorClose.getUTCDay() === 6) {
-          priorClose.setUTCDate(priorClose.getUTCDate() - 1);
-        }
-        const priorCloseDate = priorClose.toISOString().split("T")[0];
-
-        query = db
-          .select()
-          .from(themeSnapshots)
-          .where(
-            and(
-              eq(themeSnapshots.marketDate, priorCloseDate),
-              eq(themeSnapshots.snapshotType, "daily_close")
-            )
-          )
-          .orderBy(desc(themeSnapshots.createdAt))
-          .limit(28); // one per theme
+        preResolvedResults = await queryHourlyByTradingDaysBack(1);
+        break;
+      }
+      case "5D": {
+        preResolvedResults = await queryHourlyByTradingDaysBack(5);
+        break;
+      }
+      case "10D": {
+        preResolvedResults = await queryHourlyByTradingDaysBack(10);
         break;
       }
       
@@ -371,13 +339,7 @@ export async function getHistoricalSnapshot(
       }
       
       case "1M": {
-        // Get snapshot from ~21 trading days ago
-        query = db
-          .select()
-          .from(themeSnapshots)
-          .where(eq(themeSnapshots.snapshotType, "daily_close"))
-          .orderBy(desc(themeSnapshots.marketDate))
-          .limit(25 * 22); // Get ~22 days worth
+        preResolvedResults = await queryHourlyByTradingDaysBack(21);
         break;
       }
       
@@ -385,28 +347,86 @@ export async function getHistoricalSnapshot(
         return null;
     }
 
-    const results = await query;
+    const getDailyTradingDayFallback = async (daysBack: number): Promise<ThemeSnapshot[] | null> => {
+      const dailyDates = await db
+        .select({ marketDate: themeSnapshots.marketDate })
+        .from(themeSnapshots)
+        .where(eq(themeSnapshots.snapshotType, "daily_close"))
+        .groupBy(themeSnapshots.marketDate)
+        .orderBy(desc(themeSnapshots.marketDate))
+        .limit(daysBack + 40);
+      if (!dailyDates.length) return null;
+      const uniqueDates = dailyDates
+        .map((r) => r.marketDate)
+        .filter((d) => {
+          const day = new Date(d + "T12:00:00Z").getUTCDay();
+          return day !== 0 && day !== 6;
+        });
+      const targetDate = uniqueDates[daysBack - 1] || uniqueDates[uniqueDates.length - 1];
+      if (!targetDate) return null;
+      comparisonTime = `${targetDate}T16:00:00.000Z`;
+      const targetRows = await db
+        .select()
+        .from(themeSnapshots)
+        .where(
+          and(
+            eq(themeSnapshots.snapshotType, "daily_close"),
+            eq(themeSnapshots.marketDate, targetDate)
+          )
+        );
+      return targetRows;
+    };
+
+    let results = preResolvedResults ?? (await query);
+
+    // Fallbacks: if hourly baselines are unavailable, use daily_close snapshots.
+    if ((!results || results.length === 0) && (timeSlice === "5D" || timeSlice === "10D" || timeSlice === "1M")) {
+      const fallbackDays = timeSlice === "5D" ? 5 : timeSlice === "10D" ? 10 : 21;
+      const fallback = await getDailyTradingDayFallback(fallbackDays);
+      if (fallback) results = fallback;
+    }
     
     if (!results || results.length === 0) {
       console.log(`[ThemeSnapshots] No historical data found for ${timeSlice} @ ${comparisonTime}`);
       return { ranks: new Map<ClusterId, number>(), metrics: new Map<ClusterId, HistoricalThemeMetrics>(), comparisonTime };
     }
 
-    // For weekly/monthly, we need to find the right date offset
+    // Choose an aligned snapshot batch (same createdAt across themes) for unified lookbacks.
     let targetResults = results;
+    const unifiedLookbacks: TimeSlice[] = ["15M", "30M", "1H", "4H", "1D", "5D", "10D", "1M"];
     
-    if (timeSlice === "15M" || timeSlice === "30M" || timeSlice === "1H" || timeSlice === "4H") {
-      // For intraday, take unique themes from the most recent batch (first of each theme)
-      const seenThemes = new Set<string>();
-      targetResults = results.filter(r => {
-        if (seenThemes.has(r.themeId)) return false;
-        seenThemes.add(r.themeId);
-        return true;
-      });
-      // Use the actual snapshot time from results if we got data
-      if (targetResults.length > 0 && targetResults[0].createdAt) {
-        const createdAt = targetResults[0].createdAt;
-        comparisonTime = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+    if (unifiedLookbacks.includes(timeSlice)) {
+      if (results.length > 0 && results[0].snapshotType === "daily_close") {
+        const targetDate = results[0].marketDate;
+        targetResults = results.filter((r) => r.marketDate === targetDate);
+        comparisonTime = targetDate ? `${targetDate}T16:00:00.000Z` : null;
+      } else {
+      const byBatch = new Map<string, ThemeSnapshot[]>();
+      for (const row of results) {
+        if (!row.createdAt) continue;
+        const key = row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt);
+        if (!byBatch.has(key)) byBatch.set(key, []);
+        byBatch.get(key)!.push(row);
+      }
+
+      const orderedBatchKeys = [...byBatch.keys()].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+      let selectedBatch: ThemeSnapshot[] = [];
+      let selectedKey: string | null = null;
+      for (const key of orderedBatchKeys) {
+        const batch = byBatch.get(key) || [];
+        if (batch.length >= MIN_COMPLETE_BATCH_ROWS) {
+          selectedBatch = batch;
+          selectedKey = key;
+          break;
+        }
+        if (!selectedKey && batch.length > 0) {
+          selectedBatch = batch;
+          selectedKey = key;
+        }
+      }
+
+      targetResults = selectedBatch.length ? selectedBatch : results;
+      comparisonTime = selectedKey;
       }
     } else if (timeSlice === "1W") {
       // Find results from ~5 trading days ago (skip weekends)
@@ -416,20 +436,38 @@ export async function getHistoricalSnapshot(
       const targetDate = uniqueDates[4] || uniqueDates[uniqueDates.length - 1];
       targetResults = results.filter(r => r.marketDate === targetDate);
       comparisonTime = targetDate ? `${targetDate}T16:00:00.000Z` : null;
-    } else if (timeSlice === "1M") {
-      // Find results from ~21 trading days ago (skip weekends)
-      const uniqueDates = [...new Set(results.map(r => r.marketDate))]
-        .filter(d => { const day = new Date(d + "T12:00:00Z").getUTCDay(); return day !== 0 && day !== 6; })
-        .sort().reverse();
-      const targetDate = uniqueDates[20] || uniqueDates[uniqueDates.length - 1];
-      targetResults = results.filter(r => r.marketDate === targetDate);
-      comparisonTime = targetDate ? `${targetDate}T16:00:00.000Z` : null;
-    } else if (timeSlice === "1D" && targetResults.length > 0) {
-      // Use the date from the daily snapshot
-      comparisonTime = targetResults[0].marketDate ? `${targetResults[0].marketDate}T16:00:00.000Z` : null;
     }
 
-    // Build map of themeId -> rank and full metrics
+    // If snapshot has no meaningful data (all zeros), treat as no historical data
+    // so the UI shows current values instead of 0% / "—" everywhere
+    const hasMeaningfulData = targetResults.some(
+      (s) =>
+        (s.score != null && Math.abs(s.score) > 0.01) ||
+        (s.medianPct != null && Math.abs(s.medianPct) > 0.001)
+    );
+    if (!hasMeaningfulData && targetResults.length > 0) {
+      if (timeSlice === "5D" || timeSlice === "10D" || timeSlice === "1M") {
+        const fallbackDays = timeSlice === "5D" ? 5 : timeSlice === "10D" ? 10 : 21;
+        const fallback = await getDailyTradingDayFallback(fallbackDays);
+        if (fallback && fallback.length > 0) {
+          targetResults = fallback;
+        }
+      }
+    }
+
+    const hasMeaningfulAfterFallback = targetResults.some(
+      (s) =>
+        (s.score != null && Math.abs(s.score) > 0.01) ||
+        (s.medianPct != null && Math.abs(s.medianPct) > 0.001)
+    );
+    if (!hasMeaningfulAfterFallback && targetResults.length > 0) {
+      console.log(
+        `[ThemeSnapshots] Historical snapshot for ${timeSlice} has all-zero metrics (likely saved before data was ready); treating as no data`
+      );
+      return null;
+    }
+
+    // Build map of themeId -> rank and full metrics (after any fallback adjustments)
     const rankMap = new Map<ClusterId, number>();
     const metricsMap = new Map<ClusterId, HistoricalThemeMetrics>();
     for (const snapshot of targetResults) {
@@ -442,20 +480,6 @@ export async function getHistoricalSnapshot(
         rsVsBenchmark: snapshot.rsVsBenchmark ?? 0,
         breadthPct: snapshot.breadthPct ?? 0,
       });
-    }
-
-    // If snapshot has no meaningful data (all zeros), treat as no historical data
-    // so the UI shows current values instead of 0% / "—" everywhere
-    const hasMeaningfulData = targetResults.some(
-      (s) =>
-        (s.score != null && Math.abs(s.score) > 0.01) ||
-        (s.medianPct != null && Math.abs(s.medianPct) > 0.001)
-    );
-    if (!hasMeaningfulData && targetResults.length > 0) {
-      console.log(
-        `[ThemeSnapshots] Historical snapshot for ${timeSlice} has all-zero metrics (likely saved before data was ready); treating as no data`
-      );
-      return null;
     }
 
     console.log(`[ThemeSnapshots] Found ${rankMap.size} historical rankings for ${timeSlice} @ ${comparisonTime} (queried ${results.length} rows)`);

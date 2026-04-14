@@ -8,7 +8,10 @@
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test:start-here-smoke": "tsx client/src/components/start-here/dashboard-persistence.smoke.test.ts && tsx client/src/components/MiniChart.entry-line.smoke.test.ts",
     "db:push": "drizzle-kit push",
+    "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",
+    "db:deactivate-other-sentinel-users": "tsx server/scripts/deactivateNonForebodingSentinelUsers.ts",
     "universe:refresh": "tsx server/scripts/refreshUniverseConstituents.ts"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import {
   sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides, sentinelSystemSettings,
   ivyEvalSettings, ivyEvalUsage, ivyEvalHistory,
   askIvySettings,
+  startHereWorkspacePaletteSettings,
   watchlists,
   type SentinelUser, type SentinelTrade, type SentinelEvaluation, type SentinelEvent, type SentinelWatchlistItem, type SentinelRule,
   type SentinelRuleSuggestion, type SentinelRulePerformance, type SentinelRuleOverride, type SentinelSystemSettings,
@@ -12,8 +13,13 @@ import {
   type Watchlist, type InsertWatchlist,
   type InsertSentinelUser, type InsertSentinelTrade, type InsertSentinelEvaluation, type InsertSentinelEvent, type InsertSentinelWatchlistItem, type InsertSentinelRule, type InsertSentinelRuleOverride, type InsertSentinelSystemSettings
 } from "@shared/schema";
-import { eq, desc, and, asc, or, isNull } from "drizzle-orm";
+import { eq, desc, and, asc, or, isNull, sql } from "drizzle-orm";
 import { STARTER_RULES } from "./starterRules";
+import {
+  DEFAULT_START_HERE_WORKSPACE_PALETTE,
+  normalizeStartHereWorkspacePalette,
+  type StartHereWorkspacePalette,
+} from "@shared/startHereWorkspacePalette";
 
 const DEFAULT_ASK_IVY_SETTINGS: AskIvyOverlaySettings = {
   enableMinerviniCheatEntries: true,
@@ -182,14 +188,55 @@ export const sentinelModels = {
   },
 
   async getWatchlistsByUser(userId: number): Promise<Watchlist[]> {
-    return db.select().from(watchlists)
-      .where(eq(watchlists.userId, userId))
-      .orderBy(desc(watchlists.isDefault), asc(watchlists.name));
+    try {
+      return await db
+        .select()
+        .from(watchlists)
+        .where(eq(watchlists.userId, userId))
+        .orderBy(desc(watchlists.isDefault), asc(watchlists.name));
+    } catch (error: any) {
+      // Backward-compatible fallback when DB hasn't been migrated with is_portfolio yet.
+      if (error?.code !== "42703") throw error;
+      const rows = await db.execute(sql`
+        select id, user_id, name, is_default, created_at
+        from watchlists
+        where user_id = ${userId}
+        order by is_default desc, name asc
+      `);
+      return rows.rows.map((r: any) => ({
+        id: Number(r.id),
+        userId: Number(r.user_id),
+        name: String(r.name),
+        isDefault: Boolean(r.is_default),
+        isPortfolio: false,
+        createdAt: r.created_at,
+      })) as Watchlist[];
+    }
   },
 
   async getWatchlistById(id: number): Promise<Watchlist | undefined> {
-    const [wl] = await db.select().from(watchlists).where(eq(watchlists.id, id));
-    return wl;
+    try {
+      const [wl] = await db.select().from(watchlists).where(eq(watchlists.id, id));
+      return wl;
+    } catch (error: any) {
+      if (error?.code !== "42703") throw error;
+      const rows = await db.execute(sql`
+        select id, user_id, name, is_default, created_at
+        from watchlists
+        where id = ${id}
+        limit 1
+      `);
+      const r = rows.rows[0];
+      if (!r) return undefined;
+      return {
+        id: Number(r.id),
+        userId: Number(r.user_id),
+        name: String(r.name),
+        isDefault: Boolean(r.is_default),
+        isPortfolio: false,
+        createdAt: r.created_at,
+      } as Watchlist;
+    }
   },
 
   async updateWatchlist(id: number, data: Partial<Watchlist>): Promise<Watchlist | undefined> {
@@ -692,6 +739,39 @@ export const sentinelModels = {
 
     askIvySettingsCache = null;
     return merged;
+  },
+
+  // === START HERE WORKSPACE LINK-LANE PALETTE (global) ===
+  async getStartHereWorkspacePalette(): Promise<StartHereWorkspacePalette> {
+    const [row] = await db.select().from(startHereWorkspacePaletteSettings).limit(1);
+    if (!row) {
+      const [created] = await db
+        .insert(startHereWorkspacePaletteSettings)
+        .values({ palette: DEFAULT_START_HERE_WORKSPACE_PALETTE })
+        .returning();
+      return normalizeStartHereWorkspacePalette(created?.palette ?? DEFAULT_START_HERE_WORKSPACE_PALETTE);
+    }
+    return normalizeStartHereWorkspacePalette(row.palette);
+  },
+
+  async updateStartHereWorkspacePalette(
+    palette: StartHereWorkspacePalette
+  ): Promise<StartHereWorkspacePalette> {
+    const normalized = normalizeStartHereWorkspacePalette(palette);
+    const [row] = await db.select().from(startHereWorkspacePaletteSettings).limit(1);
+    if (!row) {
+      const [created] = await db
+        .insert(startHereWorkspacePaletteSettings)
+        .values({ palette: normalized })
+        .returning();
+      return normalizeStartHereWorkspacePalette(created!.palette);
+    }
+    const [updated] = await db
+      .update(startHereWorkspacePaletteSettings)
+      .set({ palette: normalized, updatedAt: new Date() })
+      .where(eq(startHereWorkspacePaletteSettings.id, row.id))
+      .returning();
+    return normalizeStartHereWorkspacePalette(updated!.palette);
   },
 
   // Get current month's usage for a user

@@ -1,4 +1,19 @@
 let audioContext: AudioContext | null = null;
+let gestureUnlockAttached = false;
+
+function attachAudioResumeOnUserGesture(): void {
+  if (typeof window === "undefined" || gestureUnlockAttached) return;
+  gestureUnlockAttached = true;
+  const tryResume = () => {
+    if (audioContext?.state === "suspended") {
+      void audioContext.resume().catch(() => {});
+    }
+  };
+  window.addEventListener("pointerdown", tryResume, { capture: true, passive: true });
+  window.addEventListener("keydown", tryResume, { capture: true, passive: true });
+}
+
+attachAudioResumeOnUserGesture();
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -12,15 +27,7 @@ function getAudioContext(): AudioContext | null {
 
 export async function playAlertChime(): Promise<void> {
   const context = getAudioContext();
-  if (!context) return;
-
-  if (context.state === "suspended") {
-    try {
-      await context.resume();
-    } catch {
-      return;
-    }
-  }
+  if (!context || context.state !== "running") return;
 
   const pulseTimes = [0, 0.16, 0.34];
   const pulseFrequencies = [740, 1240, 540];

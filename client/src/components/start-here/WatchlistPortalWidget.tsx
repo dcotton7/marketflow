@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { CssVariables } from "@/context/SystemSettingsContext";
 import {
@@ -15,10 +15,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Loader2, ArrowUpDown, ArrowUp, ArrowDown, BarChart3, X } from "lucide-react";
-import { WatchlistInlinePriceCell } from "@/components/WatchlistInlinePriceCell";
-import { StartHereWidgetChrome } from "./StartHereWidgetChrome";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Loader2, ArrowUpDown, ArrowUp, ArrowDown, Plus } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { requestOpenSentinelWatchlistManager } from "@/lib/sentinel-ui-events";
+import { WatchlistColumnPicker } from "@/components/WatchlistColumnPicker";
+import {
+  WatchlistConfigurableTable,
+  type WatchlistConfigurableSortField,
+} from "@/components/WatchlistConfigurableTable";
+import {
+  paletteLaneHeaderControlClass,
+  StartHereWidgetChrome,
+} from "./StartHereWidgetChrome";
 import { useToast } from "@/hooks/use-toast";
 import {
   StartHereGroupPicker,
@@ -27,28 +47,25 @@ import {
 } from "./StartHereContext";
 import {
   START_HERE_MAX_LOAD_CHARTS,
+  isLinkLaneGroupId,
+  startHereWatchlistColumnWidthsStorageKey,
   startHereWatchlistStorageKey,
 } from "./dashboard-persistence";
+import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
+import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
 
 /** Named watchlists only — see docs/start-here-watchlists.md */
 
 interface TickerQuote {
   symbol: string;
   companyName: string;
+  themeLabel?: string;
   price: number;
   change: number;
   changePercent: number;
 }
 
-type SortField =
-  | "symbol"
-  | "companyName"
-  | "change"
-  | "changePercent"
-  | "entry"
-  | "entryPct"
-  | "stop"
-  | "stopPct";
+type SortField = WatchlistConfigurableSortField;
 type SortDir = "asc" | "desc";
 
 export function WatchlistPortalWidget({
@@ -66,18 +83,43 @@ export function WatchlistPortalWidget({
   accentColor?: string;
   onClose: () => void;
 }) {
-  const { symbol, setSymbol, accentLabel } = useStartHereGroup(groupId);
-  const { dashboard, loadChartsFromList, addChartFromWatchlist, activeStartId } =
-    useStartHere();
+  const {
+    dashboard,
+    loadChartsFromList,
+    addChartFromWatchlist,
+    activeStartId,
+    setDefaultWatchlistTemplate,
+    queueWorkspaceRemoteSave,
+    setChartTickerOverride,
+    broadcastLaneSymbol,
+    chartInstanceIdsForGroup,
+    workspacePalette,
+  } = useStartHere();
+  const gid = dashboard.instances[instanceId]?.groupId ?? groupId;
+  const laneChartCount = chartInstanceIdsForGroup(gid).length;
+  const { accentLabel } = useStartHereGroup(gid);
 
   /** Authoritative group + palette index for this watchlist tile (props can lag after group picker changes). */
   const getWatchlistSpawnColorOpts = () => {
-    const gid = dashboard.instances[instanceId]?.groupId ?? groupId;
     const gstate = gid ? dashboard.groups[gid] : undefined;
-    return {
-      inheritColorFromGroupId: gid,
-      ...(gstate ? { inheritColorIndex: gstate.colorIndex } : {}),
-    };
+    if (!gstate) return {};
+    if (isLinkLaneGroupId(gid)) {
+      return {
+        inheritGroupId: gid,
+        inheritColorFromGroupId: gid,
+        inheritColorIndex: gstate.colorIndex,
+      };
+    }
+    if (
+      gstate.accentColorIndex != null &&
+      Number.isFinite(gstate.accentColorIndex)
+    ) {
+      return {
+        inheritGroupId: gid,
+        inheritColorIndex: gstate.accentColorIndex,
+      };
+    }
+    return { inheritGroupId: gid };
   };
   const { toast } = useToast();
   const watchlistStorageKey = startHereWatchlistStorageKey(
@@ -85,14 +127,90 @@ export function WatchlistPortalWidget({
     groupId,
     activeStartId
   );
+
+  const defaultWatchlistId = dashboard.defaultWatchlistInstanceId ?? null;
+  const columnSeedKey = useMemo(() => {
+    if (!defaultWatchlistId || defaultWatchlistId === instanceId) return null;
+    return startHereWatchlistColumnWidthsStorageKey(
+      userId,
+      activeStartId,
+      defaultWatchlistId
+    );
+  }, [defaultWatchlistId, instanceId, userId, activeStartId]);
+
+  const columnStorageKey = startHereWatchlistColumnWidthsStorageKey(
+    userId,
+    activeStartId,
+    instanceId
+  );
+
+  const { columns, beginResize, addColumn, removeColumn, availableToAdd, applyColumnPreset } =
+    useWatchlistColumnProfile(columnStorageKey, "portal", {
+      seedFromStorageKey: columnSeedKey,
+    });
+
+  const isDefaultWatchlistTemplate = dashboard.defaultWatchlistInstanceId === instanceId;
+  const paletteHdr = paletteLaneHeaderControlClass(accentColor, workspacePalette.unlinkedColor);
   const { data: watchlists, isLoading: listsLoading } = useWatchlists();
   const [selectedWatchlistId, setSelectedWatchlistId] =
     useSelectedWatchlistId(watchlistStorageKey);
+
+  useEffect(() => {
+    queueWorkspaceRemoteSave();
+  }, [columns, selectedWatchlistId, queueWorkspaceRemoteSave]);
   const removeFromWatchlist = useRemoveFromWatchlist();
   const updateWatchlist = useUpdateWatchlist();
 
   const [sortField, setSortField] = useState<SortField>("symbol");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [laneBroadcastOpen, setLaneBroadcastOpen] = useState(false);
+  const [laneBroadcastSymbol, setLaneBroadcastSymbol] = useState("");
+
+  const watchlistHighlightSymbol = useMemo(() => {
+    const gsym = (dashboard.groups[gid]?.symbol ?? "").trim().toUpperCase();
+    const fid = dashboard.focusedChartInstanceId;
+    const fm = fid ? dashboard.instances[fid] : undefined;
+    if (fm?.type === "chart" && fm.groupId === gid) {
+      const o = fm.chartSymbolOverride?.trim();
+      if (o) return o.toUpperCase();
+    }
+    return gsym;
+  }, [dashboard.focusedChartInstanceId, dashboard.groups, dashboard.instances, gid]);
+
+  const onWatchlistRowSymbol = useCallback(
+    (raw: string) => {
+      const u = raw.trim().toUpperCase();
+      if (!u) return;
+      const fid = dashboard.focusedChartInstanceId;
+      const fmeta = fid ? dashboard.instances[fid] : undefined;
+      const focusedChart = fmeta?.type === "chart" ? fmeta : null;
+
+      // Active chart wins globally: any watchlist row click drives the active chart.
+      if (focusedChart && fid) {
+        if (focusedChart.linkedSetLocked) {
+          broadcastLaneSymbol(focusedChart.groupId, u);
+          return;
+        }
+        setChartTickerOverride(fid, u);
+        return;
+      }
+
+      if (laneChartCount < 4) {
+        broadcastLaneSymbol(gid, u);
+      } else {
+        setLaneBroadcastSymbol(u);
+        setLaneBroadcastOpen(true);
+      }
+    },
+    [
+      broadcastLaneSymbol,
+      dashboard.focusedChartInstanceId,
+      dashboard.instances,
+      gid,
+      laneChartCount,
+      setChartTickerOverride,
+    ]
+  );
 
   const effectiveWatchlistId = useMemo(() => {
     if (selectedWatchlistId !== null && watchlists?.some((w) => w.id === selectedWatchlistId)) {
@@ -104,25 +222,45 @@ export function WatchlistPortalWidget({
 
   const { data: items, isLoading: itemsLoading } = useNamedWatchlistItems(effectiveWatchlistId);
 
-  const symbols = items?.map((item) => item.symbol) || [];
+  const symbols = items?.map((item) => item.symbol.trim().toUpperCase()) || [];
   const { data: quotes, isLoading: quotesLoading } = useQuery<TickerQuote[]>({
-    queryKey: ["/api/watchlist/quotes/extended", symbols.join(",")],
+    // Do not use a queryKey that starts with "/api/..." — default QueryClient queryFn joins keys into a path and would fetch the wrong URL.
+    queryKey: ["namedWatchlistQuotesExtended", { symbolsKey: symbols.join(","), schema: 3 }],
     queryFn: async () => {
       if (symbols.length === 0) return [];
       const res = await fetch(
-        `/api/watchlist/quotes?symbols=${symbols.join(",")}&extended=true`,
+        `/api/watchlist/quotes?symbols=${encodeURIComponent(symbols.join(","))}&extended=true`,
         { credentials: "include" }
       );
       if (!res.ok) {
         return symbols.map((s) => ({
           symbol: s,
           companyName: "",
+          themeLabel: sectorSpdrThemeLabel(s),
           price: 0,
           change: 0,
           changePercent: 0,
         }));
       }
-      return res.json();
+      const raw = (await res.json()) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((row) => {
+        const r = row as Record<string, unknown>;
+        const themeRaw =
+          r.themeLabel ??
+          r["theme_label"] ??
+          (typeof r.theme === "string" ? r.theme : "");
+        const sym = String(r.symbol ?? "");
+        return {
+          symbol: sym,
+          companyName: String(r.companyName ?? "").trim(),
+          themeLabel:
+            String(themeRaw ?? "").trim() || sectorSpdrThemeLabel(sym),
+          price: Number(r.price ?? r.last ?? 0) || 0,
+          change: Number(r.change ?? 0) || 0,
+          changePercent: Number(r.changePercent ?? r.change_pct ?? 0) || 0,
+        };
+      });
     },
     enabled: symbols.length > 0,
     staleTime: 60000,
@@ -131,7 +269,10 @@ export function WatchlistPortalWidget({
   const tickersWithQuotes = useMemo(() => {
     if (!items) return [];
     return items.map((item) => {
-      const quote = quotes?.find((q) => q.symbol === item.symbol);
+      const symU = item.symbol.trim().toUpperCase();
+      const quote = quotes?.find(
+        (q) => (q.symbol ?? "").trim().toUpperCase() === symU
+      );
       const price = quote?.price || 0;
       const entry = item.targetEntry ?? null;
       const stop = item.stopPlan ?? null;
@@ -140,7 +281,9 @@ export function WatchlistPortalWidget({
       return {
         id: item.id,
         symbol: item.symbol,
-        companyName: quote?.companyName || "",
+        companyName: (quote?.companyName ?? "").trim(),
+        themeLabel:
+          (quote?.themeLabel ?? "").trim() || sectorSpdrThemeLabel(item.symbol),
         price,
         change: quote?.change || 0,
         changePercent: quote?.changePercent || 0,
@@ -160,9 +303,16 @@ export function WatchlistPortalWidget({
         case "symbol":
           cmp = a.symbol.localeCompare(b.symbol);
           break;
-        case "companyName":
-          cmp = a.companyName.localeCompare(b.companyName);
+        case "companyName": {
+          const an = (a.companyName || a.themeLabel || "").trim();
+          const bn = (b.companyName || b.themeLabel || "").trim();
+          cmp = an.localeCompare(bn);
           break;
+        }
+        case "themeLabel": {
+          cmp = (a.themeLabel || "").localeCompare(b.themeLabel || "");
+          break;
+        }
         case "change":
           cmp = a.change - b.change;
           break;
@@ -220,13 +370,13 @@ export function WatchlistPortalWidget({
   };
 
   const handleLoadListIntoCharts = () => {
-    const picked = [
-      ...new Set(
+    const picked = Array.from(
+      new Set(
         sortedTickers
           .map((t) => t.symbol.trim().toUpperCase())
           .filter(Boolean)
-      ),
-    ].slice(0, START_HERE_MAX_LOAD_CHARTS);
+      )
+    ).slice(0, START_HERE_MAX_LOAD_CHARTS);
     if (!picked.length) return;
     const { placed, skipped } = loadChartsFromList(picked, getWatchlistSpawnColorOpts());
     const capNote =
@@ -243,10 +393,82 @@ export function WatchlistPortalWidget({
   };
 
   const headerExtra = (
-    <StartHereGroupPicker instanceId={instanceId} cssVariables={cssVariables} />
+    <div className="flex items-center gap-2">
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "icon" }),
+            "start-here-no-drag h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground",
+            paletteHdr
+          )}
+          aria-label="Open Watchlist Manager"
+          onClick={() => requestOpenSentinelWatchlistManager()}
+        >
+          <Plus className="h-4 w-4" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Open Watchlist Manager</TooltipContent>
+      </Tooltip>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className={cn(
+          "start-here-no-drag h-8 flex-shrink-0 px-2 text-xs font-medium",
+          paletteHdr,
+          isDefaultWatchlistTemplate &&
+            "bg-muted text-muted-foreground opacity-80 hover:bg-muted/90 hover:opacity-100"
+        )}
+        title="New watchlist widgets copy visible columns and widths from the tile with Default on. Does not move tiles or resize widgets."
+        aria-label={
+          isDefaultWatchlistTemplate
+            ? "Default column template is on — click to clear"
+            : "Use this tile as the column template for new watchlist widgets"
+        }
+        aria-pressed={isDefaultWatchlistTemplate}
+        onClick={() =>
+          setDefaultWatchlistTemplate(isDefaultWatchlistTemplate ? null : instanceId)
+        }
+      >
+        Default
+      </Button>
+      <StartHereGroupPicker instanceId={instanceId} cssVariables={cssVariables} />
+    </div>
   );
 
   return (
+    <>
+    <AlertDialog
+      open={laneBroadcastOpen}
+      onOpenChange={(open) => {
+        setLaneBroadcastOpen(open);
+        if (!open) setLaneBroadcastSymbol("");
+      }}
+    >
+      <AlertDialogContent className="start-here-no-drag">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Update all charts on this link lane?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This lane has {laneChartCount} chart{laneChartCount === 1 ? "" : "s"}. Set every chart to{" "}
+            <span className="font-mono font-semibold">{laneBroadcastSymbol}</span> and clear per-chart
+            ticker overrides?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            type="button"
+            onClick={() => {
+              broadcastLaneSymbol(gid, laneBroadcastSymbol);
+              setLaneBroadcastOpen(false);
+              setLaneBroadcastSymbol("");
+            }}
+          >
+            Update all
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <StartHereWidgetChrome
       title="Watchlist"
       cssVariables={cssVariables}
@@ -254,6 +476,7 @@ export function WatchlistPortalWidget({
       headerExtra={headerExtra}
       accentColor={accentColor}
       accentLabel={accentLabel}
+      neutralAccentColor={workspacePalette.unlinkedColor}
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         {listsLoading ? (
@@ -281,16 +504,26 @@ export function WatchlistPortalWidget({
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="start-here-no-drag w-full text-xs"
-              disabled={!sortedTickers.length}
-              onClick={handleLoadListIntoCharts}
-            >
-              Load list into charts
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="start-here-no-drag min-w-0 flex-1 text-xs"
+                disabled={!sortedTickers.length}
+                onClick={handleLoadListIntoCharts}
+              >
+                Load list into charts
+              </Button>
+              <WatchlistColumnPicker
+                columns={columns}
+                availableToAdd={availableToAdd}
+                addColumn={addColumn}
+                removeColumn={removeColumn}
+                applyColumnPreset={applyColumnPreset}
+                triggerClassName="start-here-no-drag flex-shrink-0"
+              />
+            </div>
           </div>
         )}
 
@@ -304,197 +537,27 @@ export function WatchlistPortalWidget({
           </p>
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full min-w-[980px] text-left">
-              <thead className="sticky top-0 z-[1] border-b bg-background">
-                <tr>
-                  <th className="start-here-no-drag w-10 px-1 text-center text-xs font-medium text-muted-foreground">
-                    Chart
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 select-none hover:bg-muted/50"
-                    onClick={() => handleSort("symbol")}
-                  >
-                    <div className="flex items-center gap-1 text-sm font-medium">
-                      Ticker <SortIcon field="symbol" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 select-none hover:bg-muted/50"
-                    onClick={() => handleSort("companyName")}
-                  >
-                    <div className="flex items-center gap-1 text-sm font-medium">
-                      Company <SortIcon field="companyName" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 text-right select-none hover:bg-muted/50"
-                    onClick={() => handleSort("change")}
-                  >
-                    <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                      $ Change <SortIcon field="change" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 text-right select-none hover:bg-muted/50"
-                    onClick={() => handleSort("changePercent")}
-                  >
-                    <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                      % Change <SortIcon field="changePercent" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 text-right select-none hover:bg-muted/50"
-                    onClick={() => handleSort("entry")}
-                  >
-                    <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                      Entry <SortIcon field="entry" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 text-right select-none hover:bg-muted/50"
-                    onClick={() => handleSort("entryPct")}
-                  >
-                    <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                      % from Entry <SortIcon field="entryPct" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 text-right select-none hover:bg-muted/50"
-                    onClick={() => handleSort("stop")}
-                  >
-                    <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                      Stop <SortIcon field="stop" />
-                    </div>
-                  </th>
-                  <th
-                    className="start-here-no-drag cursor-pointer px-4 py-2 text-right select-none hover:bg-muted/50"
-                    onClick={() => handleSort("stopPct")}
-                  >
-                    <div className="flex items-center justify-end gap-1 text-sm font-medium">
-                      % from Stop <SortIcon field="stopPct" />
-                    </div>
-                  </th>
-                  <th className="w-12 px-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedTickers.map((ticker) => {
-                  const u = ticker.symbol.toUpperCase();
-                  const sel = u === symbol.toUpperCase();
-                  return (
-                    <tr
-                      key={ticker.id}
-                      className="cursor-pointer border-b hover:bg-muted/30"
-                      style={{
-                        backgroundColor: sel ? `${cssVariables.overlayColor}33` : undefined,
-                      }}
-                      onClick={() => setSymbol(u)}
-                    >
-                      <td className="px-1 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="start-here-no-drag h-7 w-7 text-muted-foreground hover:text-foreground"
-                          title="Add chart to grid (same size and timeframe as Default chart)"
-                          aria-label={`Add ${ticker.symbol} as chart on the grid`}
-                          onClick={() => handleAddChartToGrid(ticker.symbol)}
-                        >
-                          <BarChart3
-                            className="h-4 w-4"
-                            style={accentColor ? { color: accentColor } : undefined}
-                          />
-                        </Button>
-                      </td>
-                      <td className="px-4 py-2">
-                        <span
-                          className="font-mono font-bold"
-                          style={{ color: cssVariables.textColorHeader }}
-                        >
-                          {ticker.symbol}
-                        </span>
-                      </td>
-                      <td className="max-w-[200px] truncate px-4 py-2 text-sm text-muted-foreground">
-                        {ticker.companyName || "—"}
-                      </td>
-                      <td
-                        className={`px-4 py-2 text-right font-mono text-sm ${
-                          ticker.change >= 0 ? "text-green-500" : "text-red-500"
-                        }`}
-                      >
-                        {ticker.change >= 0 ? "+" : ""}
-                        {ticker.change.toFixed(2)}
-                      </td>
-                      <td
-                        className={`px-4 py-2 text-right font-mono text-sm ${
-                          ticker.changePercent >= 0 ? "text-green-500" : "text-red-500"
-                        }`}
-                      >
-                        {ticker.changePercent >= 0 ? "+" : ""}
-                        {ticker.changePercent.toFixed(2)}%
-                      </td>
-                      <td className="start-here-no-drag px-2 py-2 text-right align-middle">
-                        <WatchlistInlinePriceCell
-                          value={ticker.entry ?? undefined}
-                          onSave={(v) =>
-                            updateWatchlist.mutate({ id: ticker.id, data: { targetEntry: v } })
-                          }
-                          data-testid={`portal-entry-${ticker.id}`}
-                        />
-                      </td>
-                      <td
-                        className={`px-4 py-2 text-right font-mono text-sm ${
-                          ticker.entryPct === null
-                            ? "text-muted-foreground"
-                            : ticker.entryPct >= 0
-                              ? "text-green-500"
-                              : "text-red-500"
-                        }`}
-                      >
-                        {ticker.entryPct !== null
-                          ? `${ticker.entryPct >= 0 ? "+" : ""}${ticker.entryPct.toFixed(2)}%`
-                          : "—"}
-                      </td>
-                      <td className="start-here-no-drag px-2 py-2 text-right align-middle">
-                        <WatchlistInlinePriceCell
-                          value={ticker.stop ?? undefined}
-                          onSave={(v) =>
-                            updateWatchlist.mutate({ id: ticker.id, data: { stopPlan: v } })
-                          }
-                          data-testid={`portal-stop-${ticker.id}`}
-                        />
-                      </td>
-                      <td
-                        className={`px-4 py-2 text-right font-mono text-sm ${
-                          ticker.stopPct === null
-                            ? "text-muted-foreground"
-                            : ticker.stopPct >= 0
-                              ? "text-green-500"
-                              : "text-red-500"
-                        }`}
-                      >
-                        {ticker.stopPct !== null
-                          ? `${ticker.stopPct >= 0 ? "+" : ""}${ticker.stopPct.toFixed(2)}%`
-                          : "—"}
-                      </td>
-                      <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="start-here-no-drag h-7 w-7 text-muted-foreground hover:text-destructive"
-                          onClick={() => handleRemoveTicker(ticker.id)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <WatchlistConfigurableTable
+              variant="portal"
+              columns={columns}
+              beginResize={beginResize}
+              sortedTickers={sortedTickers}
+              sortField={sortField}
+              onSort={handleSort}
+              renderSortIcon={(f) => <SortIcon field={f} />}
+              cssVariables={cssVariables}
+              updateWatchlist={{ mutate: updateWatchlist.mutate }}
+              onRemoveTicker={handleRemoveTicker}
+              onRowClick={onWatchlistRowSymbol}
+              accentColor={accentColor}
+              onAddChartToGrid={handleAddChartToGrid}
+              noDragClassName="start-here-no-drag"
+              highlightSymbol={watchlistHighlightSymbol}
+            />
           </div>
         )}
       </div>
     </StartHereWidgetChrome>
+    </>
   );
 }

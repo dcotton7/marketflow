@@ -1,22 +1,16 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express, Request, Response } from "express";
 import { and, desc, eq } from "drizzle-orm";
 import { createAlertDefinitionSchema, updateAlertDefinitionSchema } from "@shared/alerts";
 import { alertDeliveries, alertEvents, alertSymbolStates, userAlerts } from "@shared/schema";
 import { db } from "../db";
 import { clearAlertSequenceState, evaluateAlertDefinition, evaluateStoredAlertById } from "./evaluator";
+import { requireSentinelAuth as requireAuth } from "../middleware/requireSentinelAuth";
 
 declare module "express-session" {
   interface SessionData {
     userId?: number;
     username?: string;
   }
-}
-
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
 }
 
 export function registerAlertRoutes(app: Express): void {

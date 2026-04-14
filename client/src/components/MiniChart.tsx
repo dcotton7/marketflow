@@ -1,4 +1,9 @@
-import { useStockHistory } from "@/hooks/use-stocks";
+import { useEffect, useMemo } from "react";
+import {
+  useStockHistory,
+  stockHistoryIsIntradayInterval,
+  STOCK_HISTORY_INTRADAY_REFETCH_MS,
+} from "@/hooks/use-stocks";
 import { Loader2 } from "lucide-react";
 import {
   ComposedChart,
@@ -9,10 +14,18 @@ import {
   YAxis,
   ResponsiveContainer,
   ReferenceArea,
+  ReferenceLine,
 } from "recharts";
 // Cup and Handle detection removed - thumbnails just show candlesticks
 
 export type StartHereInterval = "1d" | "5m" | "15m";
+
+export type MiniChartQuoteSummary = {
+  changePct: number;
+  lastPrice: number | null;
+  dataUpdatedAt: number;
+  historyInterval: string;
+};
 
 interface MiniChartProps {
   symbol: string;
@@ -23,11 +36,19 @@ interface MiniChartProps {
   /** Daily 21 / 50 / 200 SMA overlay (e.g. Start Here chart preview). */
   movingAverages2150200?: boolean;
   /**
-   * With `movingAverages2150200`: `1d` = daily candles + SMAs; `5m` / `15m` = intraday + session VWAP (no MAs).
+   * With `movingAverages2150200`: `1d` = daily + 50 SMA; `5m` = 6/20 EMA; `15m` = session DVWAP (dotted).
    */
   startHereInterval?: StartHereInterval;
   /** Stretch to parent height (resizable grid cells); chart area uses flex-1. */
   fillContainer?: boolean;
+  /** Hide the under-chart % / price / timestamp row (e.g. when shown in widget header). */
+  hideChangeFooter?: boolean;
+  /** Fired when Start Here MA/VWAP metrics change; null while loading or no data. */
+  onQuoteSummaryChange?: (summary: MiniChartQuoteSummary | null) => void;
+  /** Optional horizontal trade-plan entry line for Start Here mini-charts. */
+  entryPrice?: number | null;
+  /** Color profile for entry line (portfolio charts use green). */
+  entryLineTone?: "default" | "portfolio";
 }
 
 type MiniChartOhlcPayload = {
@@ -36,6 +57,12 @@ type MiniChartOhlcPayload = {
   low: number;
   close: number;
   color?: string;
+};
+
+type MiniChartInfoSnapshot = {
+  pctFromEntry: number | null;
+  pctFrom200Dma: number | null;
+  atrsFrom50: number | null;
 };
 
 /**
@@ -135,6 +162,43 @@ function calculateSMA(data: { close: number }[], period: number): (number | null
   return sma;
 }
 
+function calculateAtr(data: { high: number; low: number; close: number }[], period: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  let trSum = 0;
+  const trWindow: number[] = [];
+  for (let i = 0; i < data.length; i++) {
+    const cur = data[i];
+    const prevClose = i > 0 ? data[i - 1].close : cur.close;
+    const tr = Math.max(
+      cur.high - cur.low,
+      Math.abs(cur.high - prevClose),
+      Math.abs(cur.low - prevClose)
+    );
+    trWindow.push(tr);
+    trSum += tr;
+    if (trWindow.length > period) {
+      trSum -= trWindow.shift() ?? 0;
+    }
+    out.push(trWindow.length === period ? trSum / period : null);
+  }
+  return out;
+}
+
+function MiniChartInfoBox({ info }: { info: MiniChartInfoSnapshot | null }) {
+  if (!info) return null;
+  const fmtPct = (v: number | null) =>
+    v == null || !Number.isFinite(v) ? "--" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  const fmtAtr = (v: number | null) =>
+    v == null || !Number.isFinite(v) ? "--" : `${v >= 0 ? "+" : ""}${v.toFixed(2)} ATR`;
+  return (
+    <div className="pointer-events-none absolute bottom-6 right-1 z-30 rounded border border-white/30 bg-slate-950/85 px-2 py-1.5 text-[11px] font-medium leading-tight text-white shadow-sm">
+      <div>Entry: {fmtPct(info.pctFromEntry)}</div>
+      <div>200DMA: {fmtPct(info.pctFrom200Dma)}</div>
+      <div>vs 50: {fmtAtr(info.atrsFrom50)}</div>
+    </div>
+  );
+}
+
 function sessionDateKeyEt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
@@ -182,6 +246,33 @@ function sessionChangePct(bars: VwapBar[]): number {
   const open = bars[i].open;
   const lastClose = bars[bars.length - 1].close;
   return open > 0 ? ((lastClose - open) / open) * 100 : 0;
+}
+
+/** Same % / last price logic as the Start Here MA + intraday branches (for header strip + optional footer). */
+function computeStartHereQuoteSummary(
+  history: VwapBar[],
+  startHereInterval: StartHereInterval
+): { changePct: number; lastPrice: number | null } | null {
+  if (history.length < 1) return null;
+  if (startHereInterval !== "1d") {
+    const maxBars = startHereInterval === "5m" ? 160 : 120;
+    const sliced = history.slice(-Math.min(history.length, maxBars));
+    const last = sliced[sliced.length - 1];
+    return {
+      changePct: sessionChangePct(sliced),
+      lastPrice: last && Number.isFinite(last.close) ? last.close : null,
+    };
+  }
+  const maViewDays = 50;
+  const maCalcDays = Math.min(history.length, Math.max(maViewDays + 55, 60));
+  const calcHistory = history.slice(-maCalcDays);
+  const lastCandleMa = calcHistory[calcHistory.length - 1];
+  const prevCandleMa = calcHistory[calcHistory.length - 2];
+  const dailyChangeMa = prevCandleMa
+    ? ((lastCandleMa.close - prevCandleMa.close) / prevCandleMa.close) * 100
+    : 0;
+  const lastPxMa = Number.isFinite(lastCandleMa.close) ? lastCandleMa.close : null;
+  return { changePct: dailyChangeMa, lastPrice: lastPxMa };
 }
 
 function calculateEMA(data: { close: number }[], period: number): (number | null)[] {
@@ -299,6 +390,83 @@ function detectConsolidationChannels(
   return channels;
 }
 
+function formatMiniChartDataUpdatedAt(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(ts));
+}
+
+/** On-plot watermark: when data was last refreshed (not price — pricing stays in header/footer as configured). */
+function MiniChartDataUpdatedBgLabel({
+  dataUpdatedAt,
+  historyInterval,
+}: {
+  dataUpdatedAt: number;
+  historyInterval: string;
+}) {
+  if (dataUpdatedAt <= 0) return null;
+  const isIntraday = stockHistoryIsIntradayInterval(historyInterval);
+  const refreshHint = isIntraday
+    ? `Intraday data refetches about every ${STOCK_HISTORY_INTRADAY_REFETCH_MS / 1000} seconds while this page is open.`
+    : "Daily data does not auto-refresh; reload the page for newer bars.";
+  const formatted = formatMiniChartDataUpdatedAt(dataUpdatedAt);
+  return (
+    <div
+      className="pointer-events-none absolute bottom-1 right-1 z-10 max-w-[min(100%,12rem)] rounded border border-white/15 bg-black/65 px-1.5 py-0.5 text-center text-[9px] font-mono leading-tight text-white/85 shadow-sm backdrop-blur-sm"
+      title={`Last data update · ${refreshHint}`}
+    >
+      {formatted}
+    </div>
+  );
+}
+
+export function formatMiniChartLastPrice(p: number): string {
+  if (!Number.isFinite(p)) return "";
+  const abs = Math.abs(p);
+  const digits = abs >= 1000 ? 2 : abs >= 1 ? 2 : 4;
+  return `$${p.toFixed(digits)}`;
+}
+
+function MiniChartChangeFooter({
+  changePct,
+  lastPrice,
+  symbol,
+  wrapperClassName,
+}: {
+  changePct: number;
+  lastPrice: number | null;
+  symbol: string;
+  wrapperClassName: string;
+}) {
+  const priceLabel =
+    lastPrice != null && Number.isFinite(lastPrice) ? formatMiniChartLastPrice(lastPrice) : null;
+  return (
+    <div className={wrapperClassName}>
+      <span className="inline-flex flex-wrap items-baseline justify-center gap-x-2">
+        <span
+          className={`text-sm font-mono font-semibold ${changePct >= 0 ? "text-rs-green" : "text-rs-red"}`}
+          data-testid={`change-${symbol}`}
+        >
+          {changePct >= 0 ? "+" : ""}
+          {changePct.toFixed(2)}%
+        </span>
+        {priceLabel ? (
+          <span
+            className="text-sm font-mono font-medium text-muted-foreground"
+            data-testid={`last-price-${symbol}`}
+          >
+            {priceLabel}
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
 export function MiniChart({
   symbol,
   timeframe = '30D',
@@ -308,13 +476,79 @@ export function MiniChart({
   movingAverages2150200,
   startHereInterval = '1d',
   fillContainer,
+  hideChangeFooter,
+  onQuoteSummaryChange,
+  entryPrice,
+  entryLineTone = "default",
 }: MiniChartProps) {
-  const historyInterval = movingAverages2150200 ? startHereInterval : '1d';
-  const { data: history, isLoading, error } = useStockHistory(symbol, historyInterval);
+  const historyInterval = movingAverages2150200 ? startHereInterval : "1d";
+  const { data: history, isLoading, error, dataUpdatedAt } = useStockHistory(
+    symbol,
+    historyInterval
+  );
+  const { data: dailyHistoryData } = useStockHistory(symbol, "1d");
+
+  useEffect(() => {
+    if (!onQuoteSummaryChange || !movingAverages2150200) return;
+    if (isLoading || error || !history?.length) {
+      onQuoteSummaryChange(null);
+      return;
+    }
+    const s = computeStartHereQuoteSummary(history, startHereInterval);
+    if (!s) {
+      onQuoteSummaryChange(null);
+      return;
+    }
+    onQuoteSummaryChange({
+      ...s,
+      dataUpdatedAt,
+      historyInterval,
+    });
+  }, [
+    onQuoteSummaryChange,
+    movingAverages2150200,
+    isLoading,
+    error,
+    history,
+    startHereInterval,
+    dataUpdatedAt,
+    historyInterval,
+  ]);
 
   const loadingShell = fillContainer
     ? "flex min-h-[120px] w-full flex-1 items-center justify-center rounded-md bg-card/50"
     : "h-[180px] w-full flex items-center justify-center bg-card rounded-lg border border-border";
+  const boundedEntryPrice =
+    entryPrice != null && Number.isFinite(entryPrice) && entryPrice > 0 ? entryPrice : null;
+  const entryStroke = entryLineTone === "portfolio" ? "#22c55e" : "#facc15";
+  const entryGlow =
+    entryLineTone === "portfolio" ? "rgba(34, 197, 94, 0.49)" : "rgba(253, 224, 71, 0.49)";
+  const entryBadgeTextClass = entryLineTone === "portfolio" ? "text-emerald-300" : "text-yellow-300";
+  const entryBadgeBorderClass =
+    entryLineTone === "portfolio" ? "border-emerald-300/70" : "border-yellow-300/70";
+  const entryBorderClass =
+    entryLineTone === "portfolio" ? "border-emerald-300" : "border-yellow-300";
+  const entryDotClass = entryLineTone === "portfolio" ? "bg-emerald-300" : "bg-yellow-300";
+  const dailyHistory = historyInterval === "1d" ? history : dailyHistoryData;
+  const infoSnapshot = useMemo<MiniChartInfoSnapshot | null>(() => {
+    if (!history?.length || !dailyHistory?.length) return null;
+    const current = history[history.length - 1]?.close;
+    if (!Number.isFinite(current) || current <= 0) return null;
+    const sma200 = calculateSMA(dailyHistory, 200);
+    const sma50 = calculateSMA(dailyHistory, 50);
+    const atr14 = calculateAtr(dailyHistory, 14);
+    const i = dailyHistory.length - 1;
+    const s200 = sma200[i];
+    const s50 = sma50[i];
+    const a14 = atr14[i];
+    return {
+      pctFromEntry:
+        boundedEntryPrice != null ? ((current - boundedEntryPrice) / boundedEntryPrice) * 100 : null,
+      pctFrom200Dma: s200 != null && s200 > 0 ? ((current - s200) / s200) * 100 : null,
+      atrsFrom50: s50 != null && a14 != null && a14 > 0 ? (current - s50) / a14 : null,
+    };
+  }, [history, dailyHistory, boundedEntryPrice]);
+  const infoForRender = movingAverages2150200 ? infoSnapshot : null;
 
   if (isLoading) {
     return (
@@ -338,38 +572,87 @@ export function MiniChart({
   if (movingAverages2150200 && startHereInterval !== '1d') {
     const maxBars = startHereInterval === '5m' ? 160 : 120;
     const sliced = history.slice(-Math.min(history.length, maxBars));
-    const vwapSeries = calculateSessionVwap(sliced);
-    const intraChartData = sliced.map((item, index) => {
-      const key = sessionDateKeyEt(item.date);
-      const prevKey = index > 0 ? sessionDateKeyEt(sliced[index - 1].date) : key;
-      const sessionStart = index > 0 && key !== prevKey;
-      return {
+    const is5m = startHereInterval === '5m';
+
+    let intraChartData: Array<
+      Record<string, unknown> & {
+        date: string;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        color: string;
+      }
+    >;
+    let minP: number;
+    let maxP: number;
+
+    if (is5m) {
+      const ema6Series = calculateEMA(sliced, 6);
+      const ema20Series = calculateEMA(sliced, 20);
+      intraChartData = sliced.map((item, index) => ({
         ...item,
         color: item.close >= item.open ? '#22c55e' : '#ef4444',
-        vwap: vwapSeries[index],
-        vwapLine: sessionStart ? null : vwapSeries[index],
-      };
-    });
-    const allPx = intraChartData.flatMap((d) => [d.high, d.low]);
-    const vwapVals = vwapSeries.filter((v): v is number => v != null);
-    let minP = Math.min(...allPx);
-    let maxP = Math.max(...allPx);
-    for (const v of vwapVals) {
-      minP = Math.min(minP, v);
-      maxP = Math.max(maxP, v);
+        ema6: ema6Series[index],
+        ema20: ema20Series[index],
+      }));
+      const allPx = intraChartData.flatMap((d) => [d.high, d.low]);
+      const emaVals = [...ema6Series, ...ema20Series].filter((v): v is number => v != null);
+      minP = Math.min(...allPx);
+      maxP = Math.max(...allPx);
+      for (const v of emaVals) {
+        minP = Math.min(minP, v);
+        maxP = Math.max(maxP, v);
+      }
+    } else {
+      const vwapSeries = calculateSessionVwap(sliced);
+      intraChartData = sliced.map((item, index) => {
+        const key = sessionDateKeyEt(item.date);
+        const prevKey = index > 0 ? sessionDateKeyEt(sliced[index - 1].date) : key;
+        const sessionStart = index > 0 && key !== prevKey;
+        return {
+          ...item,
+          color: item.close >= item.open ? '#22c55e' : '#ef4444',
+          vwap: vwapSeries[index],
+          vwapLine: sessionStart ? null : vwapSeries[index],
+        };
+      });
+      const allPx = intraChartData.flatMap((d) => [d.high, d.low]);
+      const vwapVals = vwapSeries.filter((v): v is number => v != null);
+      minP = Math.min(...allPx);
+      maxP = Math.max(...allPx);
+      for (const v of vwapVals) {
+        minP = Math.min(minP, v);
+        maxP = Math.max(maxP, v);
+      }
     }
+
     if (!Number.isFinite(minP) || !Number.isFinite(maxP)) {
       minP = 0;
       maxP = 1;
     }
+    if (boundedEntryPrice != null) {
+      minP = Math.min(minP, boundedEntryPrice);
+      maxP = Math.max(maxP, boundedEntryPrice);
+    }
     const pad = (maxP - minP) * 0.05 || 0.01;
+    const domainMinIv = minP - pad;
+    const domainMaxIv = maxP + pad;
+    const domainRangeIv = Math.max(domainMaxIv - domainMinIv, 0.0001);
+    const entryLineTopPctIv =
+      boundedEntryPrice != null
+        ? ((domainMaxIv - boundedEntryPrice) / domainRangeIv) * 100
+        : null;
     const changePct = sessionChangePct(sliced);
+    const lastPx =
+      sliced.length > 0 && Number.isFinite(sliced[sliced.length - 1].close)
+        ? sliced[sliced.length - 1].close
+        : null;
 
     const outerIv = fillContainer
       ? "flex h-full w-full min-h-0 flex-1 flex-col bg-transparent p-1"
       : "w-full bg-card rounded-lg border border-border p-2";
     const plotIv = fillContainer ? "min-h-0 flex-1" : "h-[160px]";
-    const intervalLabel = startHereInterval === '5m' ? '5 min' : '15 min';
 
     return (
       <div className={outerIv} data-testid={`chart-${symbol}`}>
@@ -378,9 +661,9 @@ export function MiniChart({
             className="pointer-events-none absolute left-2 top-1 z-10 rounded border border-white/15 bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase leading-tight tracking-wide text-white/95 shadow-sm backdrop-blur-sm"
             aria-hidden
           >
-            <span className="block">{intervalLabel}</span>
+            <span className="block">{is5m ? '5 min' : '15 min'}</span>
             <span className="block font-normal normal-case text-white/80">
-              Session VWAP (resets daily · ET)
+              {is5m ? '6 EMA (green) · 20 EMA (pink)' : 'Session DVWAP · yellow-orange dotted · ET'}
             </span>
           </div>
           <ResponsiveContainer
@@ -391,70 +674,139 @@ export function MiniChart({
           >
             <ComposedChart data={intraChartData} margin={{ top: 8, right: 6, left: 4, bottom: 4 }}>
               <XAxis dataKey="date" hide />
-              <YAxis domain={[minP - pad, maxP + pad]} hide />
+              <YAxis domain={[domainMinIv, domainMaxIv]} hide />
               <Bar
                 dataKey={(item: MiniChartOhlcPayload) => [item.open, item.close]}
                 shape={MiniChartCandleShape}
                 isAnimationActive={false}
               />
-              <Line
-                type="monotone"
-                dataKey="vwapLine"
-                stroke="#38bdf8"
-                strokeWidth={1.75}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-              />
+              {is5m ? (
+                <>
+                  <Line
+                    type="monotone"
+                    dataKey="ema6"
+                    stroke="#22c55e"
+                    strokeWidth={1.75}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="ema20"
+                    stroke="#f472b6"
+                    strokeWidth={1.75}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                </>
+              ) : (
+                <Line
+                  type="monotone"
+                  dataKey="vwapLine"
+                  stroke="#f5b014"
+                  strokeWidth={1.75}
+                  strokeDasharray="4 4"
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              )}
+              {boundedEntryPrice != null ? (
+                <ReferenceLine
+                  y={boundedEntryPrice}
+                  stroke={entryStroke}
+                  strokeWidth={2.5}
+                  strokeDasharray="6 4"
+                  ifOverflow="extendDomain"
+                />
+              ) : null}
             </ComposedChart>
           </ResponsiveContainer>
+          {boundedEntryPrice != null && entryLineTopPctIv != null ? (
+            <div
+              className="pointer-events-none absolute inset-x-[6px] z-40"
+              style={{ top: `${Math.min(94, Math.max(8, entryLineTopPctIv))}%` }}
+              data-testid={`mini-chart-entry-line-${symbol}`}
+            >
+              <div
+                className={`relative border-t-[4px] border-solid ${entryBorderClass}`}
+                style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+              >
+                <span
+                  className={`absolute -top-1.5 left-0 h-2.5 w-2.5 rounded-full ${entryDotClass}`}
+                  style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+                />
+                <span
+                  className={`absolute top-1 right-0 rounded border ${entryBadgeBorderClass} bg-slate-950/90 px-1.5 py-0.5 text-[10px] font-bold ${entryBadgeTextClass}`}
+                  style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+                >
+                  Entry {boundedEntryPrice.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+          <MiniChartInfoBox info={infoForRender} />
+          <MiniChartDataUpdatedBgLabel dataUpdatedAt={dataUpdatedAt} historyInterval={historyInterval} />
         </div>
-        <div className={`text-center ${fillContainer ? 'flex-shrink-0 pt-1' : 'pt-1'}`}>
-          <span
-            className={`text-sm font-mono font-semibold ${changePct >= 0 ? 'text-rs-green' : 'text-rs-red'}`}
-            data-testid={`change-${symbol}`}
-          >
-            {changePct >= 0 ? '+' : ''}
-            {changePct.toFixed(2)}%
-          </span>
-        </div>
+        {!hideChangeFooter ? (
+          <MiniChartChangeFooter
+            changePct={changePct}
+            lastPrice={lastPx}
+            symbol={symbol}
+            wrapperClassName={`text-center ${fillContainer ? "flex-shrink-0 pt-1" : "pt-1"}`}
+          />
+        ) : null}
       </div>
     );
   }
 
   if (movingAverages2150200 && startHereInterval === '1d') {
-    /** Visible daily bars; SMAs still computed on a longer tail so 200d is valid. */
+    /** Visible daily bars; extra history so 50 SMA is defined on the left edge of the window. */
     const maViewDays = 50;
-    const maCalcDays = Math.min(
-      history.length,
-      Math.max(280, maViewDays + 199)
-    );
+    const maCalcDays = Math.min(history.length, Math.max(maViewDays + 55, 60));
     const calcHistory = history.slice(-maCalcDays);
-    const sma21Series = calculateSMA(calcHistory, 21);
     const sma50Series = calculateSMA(calcHistory, 50);
-    const sma200Series = calculateSMA(calcHistory, 200);
     const fullMaData = calcHistory.map((item, index) => ({
       ...item,
       color: item.close >= item.open ? "#22c55e" : "#ef4444",
-      sma21d: sma21Series[index],
       sma50d: sma50Series[index],
-      sma200d: sma200Series[index],
     }));
     const maChartData = fullMaData.slice(-Math.min(maViewDays, fullMaData.length));
     const allPricesMa = maChartData.flatMap((d) => [d.high, d.low]);
     let minPriceMa = Math.min(...allPricesMa);
     let maxPriceMa = Math.max(...allPricesMa);
+    for (const d of maChartData) {
+      const s = d.sma50d;
+      if (s != null && Number.isFinite(s)) {
+        minPriceMa = Math.min(minPriceMa, s);
+        maxPriceMa = Math.max(maxPriceMa, s);
+      }
+    }
+    if (boundedEntryPrice != null) {
+      minPriceMa = Math.min(minPriceMa, boundedEntryPrice);
+      maxPriceMa = Math.max(maxPriceMa, boundedEntryPrice);
+    }
     if (!Number.isFinite(minPriceMa) || !Number.isFinite(maxPriceMa)) {
       minPriceMa = 0;
       maxPriceMa = 1;
     }
     const priceRangeMa = maxPriceMa - minPriceMa;
     const pricePaddingMa = priceRangeMa * 0.05;
+    const domainMinMa = minPriceMa - pricePaddingMa;
+    const domainMaxMa = maxPriceMa + pricePaddingMa;
+    const domainRangeMa = Math.max(domainMaxMa - domainMinMa, 0.0001);
+    const entryLineTopPctMa =
+      boundedEntryPrice != null
+        ? ((domainMaxMa - boundedEntryPrice) / domainRangeMa) * 100
+        : null;
     const lastCandleMa = calcHistory[calcHistory.length - 1];
     const prevCandleMa = calcHistory[calcHistory.length - 2];
     const dailyChangeMa = prevCandleMa
       ? ((lastCandleMa.close - prevCandleMa.close) / prevCandleMa.close) * 100
       : 0;
+    const lastPxMa = Number.isFinite(lastCandleMa.close) ? lastCandleMa.close : null;
 
     const outerMa = fillContainer
       ? "flex h-full w-full min-h-0 flex-1 flex-col bg-transparent p-1"
@@ -470,7 +822,7 @@ export function MiniChart({
           >
             <span className="block">Daily</span>
             <span className="block font-normal normal-case text-white/80">
-              Last {maViewDays} sessions · 1D interval
+              Last {maViewDays} sessions · 50 SMA (red)
             </span>
           </div>
           <ResponsiveContainer
@@ -481,7 +833,7 @@ export function MiniChart({
           >
             <ComposedChart data={maChartData} margin={{ top: 8, right: 6, left: 4, bottom: 4 }}>
               <XAxis dataKey="date" hide />
-              <YAxis domain={[minPriceMa - pricePaddingMa, maxPriceMa + pricePaddingMa]} hide />
+              <YAxis domain={[domainMinMa, domainMaxMa]} hide />
               <Bar
                 dataKey={(item: MiniChartOhlcPayload) => [item.open, item.close]}
                 shape={MiniChartCandleShape}
@@ -489,43 +841,58 @@ export function MiniChart({
               />
               <Line
                 type="monotone"
-                dataKey="sma200d"
-                stroke="#ffffff"
+                dataKey="sma50d"
+                stroke="#ef4444"
                 strokeWidth={1.75}
                 dot={false}
                 isAnimationActive={false}
                 connectNulls={false}
               />
-              <Line
-                type="monotone"
-                dataKey="sma50d"
-                stroke="#ef4444"
-                strokeWidth={1.5}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="sma21d"
-                stroke="#f472b6"
-                strokeWidth={1.5}
-                dot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-              />
+              {boundedEntryPrice != null ? (
+                <ReferenceLine
+                  y={boundedEntryPrice}
+                  stroke={entryStroke}
+                  strokeWidth={2.5}
+                  strokeDasharray="6 4"
+                  ifOverflow="extendDomain"
+                />
+              ) : null}
             </ComposedChart>
           </ResponsiveContainer>
+          {boundedEntryPrice != null && entryLineTopPctMa != null ? (
+            <div
+              className="pointer-events-none absolute inset-x-[6px] z-40"
+              style={{ top: `${Math.min(94, Math.max(8, entryLineTopPctMa))}%` }}
+              data-testid={`mini-chart-entry-line-${symbol}`}
+            >
+              <div
+                className={`relative border-t-[4px] border-solid ${entryBorderClass}`}
+                style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+              >
+                <span
+                  className={`absolute -top-1.5 left-0 h-2.5 w-2.5 rounded-full ${entryDotClass}`}
+                  style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+                />
+                <span
+                  className={`absolute top-1 right-0 rounded border ${entryBadgeBorderClass} bg-slate-950/90 px-1.5 py-0.5 text-[10px] font-bold ${entryBadgeTextClass}`}
+                  style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+                >
+                  Entry {boundedEntryPrice.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          ) : null}
+          <MiniChartInfoBox info={infoForRender} />
+          <MiniChartDataUpdatedBgLabel dataUpdatedAt={dataUpdatedAt} historyInterval={historyInterval} />
         </div>
-        <div className={`text-center ${fillContainer ? "flex-shrink-0 pt-1" : "pt-1"}`}>
-          <span
-            className={`text-sm font-mono font-semibold ${dailyChangeMa >= 0 ? "text-rs-green" : "text-rs-red"}`}
-            data-testid={`change-${symbol}`}
-          >
-            {dailyChangeMa >= 0 ? "+" : ""}
-            {dailyChangeMa.toFixed(2)}%
-          </span>
-        </div>
+        {!hideChangeFooter ? (
+          <MiniChartChangeFooter
+            changePct={dailyChangeMa}
+            lastPrice={lastPxMa}
+            symbol={symbol}
+            wrapperClassName={`text-center ${fillContainer ? "flex-shrink-0 pt-1" : "pt-1"}`}
+          />
+        ) : null}
       </div>
     );
   }
@@ -630,29 +997,38 @@ export function MiniChart({
   });
 
   const allPrices = slicedHistory.flatMap(d => [d.high, d.low]);
-  const minPrice = Math.min(...allPrices);
-  const maxPrice = Math.max(...allPrices);
+  const domainPrices = boundedEntryPrice != null ? [...allPrices, boundedEntryPrice] : allPrices;
+  const minPrice = Math.min(...domainPrices);
+  const maxPrice = Math.max(...domainPrices);
   const priceRange = maxPrice - minPrice;
-  const pricePadding = priceRange * 0.05;
+  const pricePadding = Math.max(priceRange * 0.05, maxPrice * 0.01, 0.25);
+  const chartDomainMin = minPrice - pricePadding;
+  const chartDomainMax = maxPrice + pricePadding;
+  const chartDomainRange = Math.max(chartDomainMax - chartDomainMin, 0.0001);
+  const entryLineTopPct =
+    boundedEntryPrice != null
+      ? ((chartDomainMax - boundedEntryPrice) / chartDomainRange) * 100
+      : null;
   
   const lastCandle = slicedHistory[slicedHistory.length - 1];
   const prevCandle = slicedHistory[slicedHistory.length - 2];
   const dailyChange = prevCandle ? ((lastCandle.close - prevCandle.close) / prevCandle.close) * 100 : 0;
+  const lastPxDefault = Number.isFinite(lastCandle.close) ? lastCandle.close : null;
 
   return (
     <div 
       className="w-full bg-card rounded-lg border border-border p-2"
       data-testid={`chart-${symbol}`}
     >
-      <div className="h-[160px]">
+      <div className="relative h-[160px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
             <XAxis dataKey="date" hide />
             <YAxis 
-              domain={[minPrice - pricePadding, maxPrice + pricePadding]}
+              domain={[chartDomainMin, chartDomainMax]}
               hide
             />
-            
+
             {/* Channel overlays for pattern detection */}
             {channels.map((channel, index) => (
               <ReferenceArea
@@ -752,17 +1128,59 @@ export function MiniChart({
                 connectNulls={false}
               />
             )}
+
+            {boundedEntryPrice != null ? (
+              <ReferenceLine
+                y={boundedEntryPrice}
+                stroke={entryStroke}
+                strokeWidth={2.5}
+                strokeDasharray="6 4"
+                ifOverflow="extendDomain"
+                label={{
+                  value: `Entry ${boundedEntryPrice.toFixed(2)}`,
+                  position: "insideTopRight",
+                  fill: entryStroke,
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              />
+            ) : null}
           </ComposedChart>
         </ResponsiveContainer>
+        {boundedEntryPrice != null && entryLineTopPct != null ? (
+          <div
+            className="pointer-events-none absolute inset-x-[6px] z-40"
+            style={{ top: `${Math.min(94, Math.max(8, entryLineTopPct))}%` }}
+            data-testid={`mini-chart-entry-line-${symbol}`}
+          >
+            <div
+              className={`relative border-t-[4px] border-solid ${entryBorderClass}`}
+              style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+            >
+              <span
+                className={`absolute -top-1.5 left-0 h-2.5 w-2.5 rounded-full ${entryDotClass}`}
+                style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+              />
+              <span
+                className={`absolute top-1 right-0 rounded border ${entryBadgeBorderClass} bg-slate-950/90 px-1.5 py-0.5 text-[10px] font-bold ${entryBadgeTextClass}`}
+                style={{ boxShadow: `0 0 6px ${entryGlow}` }}
+              >
+                Entry {boundedEntryPrice.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        ) : null}
+        <MiniChartInfoBox info={infoForRender} />
+        <MiniChartDataUpdatedBgLabel dataUpdatedAt={dataUpdatedAt} historyInterval={historyInterval} />
       </div>
-      <div className="text-center pt-1">
-        <span 
-          className={`text-sm font-mono font-semibold ${dailyChange >= 0 ? 'text-rs-green' : 'text-rs-red'}`}
-          data-testid={`change-${symbol}`}
-        >
-          {dailyChange >= 0 ? '+' : ''}{dailyChange.toFixed(2)}%
-        </span>
-      </div>
+      {!hideChangeFooter ? (
+        <MiniChartChangeFooter
+          changePct={dailyChange}
+          lastPrice={lastPxDefault}
+          symbol={symbol}
+          wrapperClassName="text-center pt-1"
+        />
+      ) : null}
     </div>
   );
 }

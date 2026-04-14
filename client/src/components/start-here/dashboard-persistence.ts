@@ -1,22 +1,108 @@
 import type { Layout } from "react-grid-layout/legacy";
 import type { StartHereInterval } from "@/components/MiniChart";
+import {
+  DEFAULT_START_HERE_WORKSPACE_PALETTE,
+  normalizeStartHereWorkspacePalette,
+  START_HERE_LINK_LANE_COUNT,
+  type StartHereWorkspacePalette,
+} from "@shared/startHereWorkspacePalette";
+
+export type { StartHereWorkspacePalette };
 
 export const START_HERE_DASHBOARD_VERSION = 4 as const;
 
-export const PALETTE = [
-  { label: "Emerald", color: "#22c55e" },
-  { label: "Sky", color: "#38bdf8" },
-  { label: "Violet", color: "#a855f7" },
-  { label: "Amber", color: "#f59e0b" },
-  { label: "Rose", color: "#f43f5e" },
-  { label: "Cyan", color: "#06b6d4" },
-] as const;
+/** Fixed link lanes (0–9); each lane is one row in every widget’s link dropdown. */
+export const LINK_LANE_COUNT = START_HERE_LINK_LANE_COUNT;
 
-export type StartHereWidgetType = "watchlist" | "chart" | "news";
+/** Shipped default swatches; prefer `workspacePalette` from API for live UI. */
+export const PALETTE = DEFAULT_START_HERE_WORKSPACE_PALETTE.linkLanes;
+
+export const UNLINKED_LABEL = "Unlinked";
+export const UNLINKED_ACCENT_COLOR = DEFAULT_START_HERE_WORKSPACE_PALETTE.unlinkedColor;
+
+export function resolveWorkspacePalette(fromServer?: unknown): StartHereWorkspacePalette {
+  return normalizeStartHereWorkspacePalette(fromServer);
+}
+
+/** Select value when the instance uses a private (non–link-lane) group. */
+export const START_HERE_UNLINKED_SELECT_VALUE = "__start_here_unlinked__";
+
+const LINK_LANE_ID_RE = /^sh_lane_([0-9])$/;
+
+export function linkLaneGroupId(index: number): string {
+  if (index < 0 || index >= LINK_LANE_COUNT) {
+    throw new RangeError(`link lane index out of range: ${index}`);
+  }
+  return `sh_lane_${index}`;
+}
+
+/** Lane index 0–9, or null if `gid` is not a canonical link lane id. */
+export function parseLinkLaneIndex(gid: string): number | null {
+  const m = LINK_LANE_ID_RE.exec(gid);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (n < 0 || n >= LINK_LANE_COUNT) return null;
+  return n;
+}
+
+export function isLinkLaneGroupId(gid: string): boolean {
+  return parseLinkLaneIndex(gid) != null;
+}
+
+/** Merge canonical link-lane groups (always present for dropdowns). */
+export function mergeLinkLanesIntoGroups(
+  groups: Record<string, StartHereGroupState>
+): Record<string, StartHereGroupState> {
+  const out = { ...groups };
+  for (let i = 0; i < LINK_LANE_COUNT; i++) {
+    const id = linkLaneGroupId(i);
+    const prev = out[id];
+    out[id] = {
+      colorIndex: i,
+      symbol: prev && typeof prev.symbol === "string" ? prev.symbol : "",
+    };
+  }
+  return out;
+}
+
+/**
+ * Widget chrome + picker: link lanes always use palette lanes.
+ * Private groups are neutral unless they carry a private accentColorIndex.
+ * Pass `workspace` from `useWorkspacePalette()` when rendering Start Here so colors match admin settings.
+ */
+export function groupLinkAccent(
+  groupId: string,
+  workspace?: StartHereWorkspacePalette,
+  groupState?: StartHereGroupState
+): {
+  accentColor: string;
+  accentLabel: string;
+} {
+  const pal = resolveWorkspacePalette(workspace);
+  const lane = parseLinkLaneIndex(groupId);
+  if (lane != null) {
+    const p = pal.linkLanes[lane]!;
+    return { accentColor: p.color, accentLabel: p.label };
+  }
+  if (
+    groupState?.accentColorIndex != null &&
+    Number.isFinite(groupState.accentColorIndex) &&
+    groupState.accentColorIndex >= 0
+  ) {
+    const i = Math.floor(groupState.accentColorIndex);
+    const p = pal.linkLanes[((i % pal.linkLanes.length) + pal.linkLanes.length) % pal.linkLanes.length]!;
+    return { accentColor: p.color, accentLabel: p.label };
+  }
+  return { accentColor: pal.unlinkedColor, accentLabel: UNLINKED_LABEL };
+}
+
+export type StartHereWidgetType = "watchlist" | "chart" | "news" | "flow";
 
 export interface StartHereGroupState {
   colorIndex: number;
   symbol: string;
+  /** Optional private color identity for widgets that should look lane-colored without joining a link lane. */
+  accentColorIndex?: number | null;
 }
 
 export interface StartHereInstanceMeta {
@@ -24,7 +110,21 @@ export interface StartHereInstanceMeta {
   groupId: string;
   /** Chart preview timeframe; only for `type === "chart"`. */
   chartInterval?: StartHereInterval;
+  /** When set on a chart, that tile shows this symbol instead of `groups[groupId].symbol`. */
+  chartSymbolOverride?: string;
+  /** Shared id for chart sets that should move symbols together (e.g. 3 Linked Charts). */
+  linkedSetId?: string;
+  /** Prevent relinking/unlinking; used by linked chart sets. */
+  linkedSetLocked?: boolean;
 }
+
+/** Persisted grid cell size for the default Market Flow tile (kept in sync when Default is on). */
+export type StartHereFlowGridCells = {
+  w: number;
+  h: number;
+  minW: number;
+  minH: number;
+};
 
 export interface StartHereDashboardV2 {
   v: typeof START_HERE_DASHBOARD_VERSION;
@@ -35,9 +135,32 @@ export interface StartHereDashboardV2 {
   defaultChartInstanceId?: string | null;
   /** Timeframe for the default template chart; copied onto watchlist-spawned charts. */
   defaultChartInterval?: StartHereInterval;
+  /** Watchlist instance used as the column-layout template for other watchlist widgets on this Start. */
+  defaultWatchlistInstanceId?: string | null;
+  /**
+   * Chart tile that receives watchlist row clicks when set (same lane only).
+   * Cleared when that instance is removed or is not a chart.
+   */
+  focusedChartInstanceId?: string | null;
+  /** Flow widget whose current grid w/h/min* is copied when adding a new Market Flow tile. */
+  defaultFlowInstanceId?: string | null;
+  /**
+   * Saved Market Flow grid size for new tiles. Synced from the Default tile while it exists; kept after that
+   * tile is closed so "Add widget → Market Flow" still matches (see `defaultFlowInstanceId`).
+   */
+  defaultFlowGridCells?: StartHereFlowGridCells | null;
 }
 
 const LEGACY_WIDGET_IDS = ["watchlist", "chart", "news"] as const;
+
+function isStartHereWidgetType(t: unknown): t is StartHereWidgetType {
+  return (
+    t === "watchlist" ||
+    t === "chart" ||
+    t === "news" ||
+    t === "flow"
+  );
+}
 
 /** Default workspace id after multi-start migration */
 export const DEFAULT_START_ID = "home";
@@ -168,6 +291,23 @@ export function legacyNewsModeStorageKey(userId: number, instanceId: string) {
   return `startHere.newsMode.${userId}.${instanceId}`;
 }
 
+export function watchlistModalColumnWidthsStorageKey(userId: number) {
+  return `watchlistManager.columnWidths.${userId}`;
+}
+
+/** Last width/height (px) of the Watchlist Manager dialog, per user. */
+export function watchlistModalSizeStorageKey(userId: number) {
+  return `watchlistManager.modalSize.v1.${userId}`;
+}
+
+export function startHereWatchlistColumnWidthsStorageKey(
+  userId: number,
+  startId: string,
+  instanceId: string
+) {
+  return `startHere.watchlistColWidths.${userId}.${startId}.${instanceId}`;
+}
+
 const legacyAuxMigratedFlagKey = (userId: number) =>
   `startHere.legacyAuxMigrated.${userId}`;
 
@@ -213,7 +353,7 @@ export function remapDashboardIds(dashboard: StartHereDashboardV2): {
   }
   const groupMap: Record<string, string> = {};
   for (const id of Object.keys(dashboard.groups)) {
-    groupMap[id] = newGroupId();
+    groupMap[id] = isLinkLaneGroupId(id) ? id : newGroupId();
   }
   const layout = dashboard.layout.map((l) => ({
     ...l,
@@ -238,7 +378,14 @@ export function remapDashboardIds(dashboard: StartHereDashboardV2): {
   const groups: Record<string, StartHereGroupState> = {};
   for (const [oldG, g] of Object.entries(dashboard.groups)) {
     const ng = groupMap[oldG];
-    if (ng) groups[ng] = { ...g };
+    if (!ng) continue;
+    const lane = parseLinkLaneIndex(ng);
+    const sym = typeof g.symbol === "string" ? g.symbol : "";
+    if (lane != null) {
+      groups[ng] = { colorIndex: lane, symbol: sym };
+    } else {
+      groups[ng] = { ...g, symbol: sym };
+    }
   }
   let defaultChartInstanceId = dashboard.defaultChartInstanceId ?? null;
   if (defaultChartInstanceId && instanceMap[defaultChartInstanceId]) {
@@ -246,12 +393,33 @@ export function remapDashboardIds(dashboard: StartHereDashboardV2): {
   } else {
     defaultChartInstanceId = null;
   }
+  let defaultWatchlistInstanceId = dashboard.defaultWatchlistInstanceId ?? null;
+  if (defaultWatchlistInstanceId && instanceMap[defaultWatchlistInstanceId]) {
+    defaultWatchlistInstanceId = instanceMap[defaultWatchlistInstanceId];
+  } else {
+    defaultWatchlistInstanceId = null;
+  }
+  let defaultFlowInstanceId = dashboard.defaultFlowInstanceId ?? null;
+  if (defaultFlowInstanceId && instanceMap[defaultFlowInstanceId]) {
+    defaultFlowInstanceId = instanceMap[defaultFlowInstanceId];
+  } else {
+    defaultFlowInstanceId = null;
+  }
+  let focusedChartInstanceId = dashboard.focusedChartInstanceId ?? null;
+  if (focusedChartInstanceId && instanceMap[focusedChartInstanceId]) {
+    focusedChartInstanceId = instanceMap[focusedChartInstanceId];
+  } else {
+    focusedChartInstanceId = null;
+  }
   const raw: StartHereDashboardV2 = {
     ...dashboard,
     layout,
     instances,
     groups,
     defaultChartInstanceId,
+    defaultWatchlistInstanceId,
+    focusedChartInstanceId,
+    defaultFlowInstanceId,
     defaultChartInterval: dashboard.defaultChartInterval ?? "1d",
   };
   const cleaned = sanitizeDashboard(raw);
@@ -282,6 +450,12 @@ export function copyWatchlistAndNewsStorageForDuplicate(
       const v = localStorage.getItem(fromK);
       if (v != null) localStorage.setItem(toK, v);
     }
+    for (const [oldI, newI] of Object.entries(instanceMap)) {
+      const fromK = startHereWatchlistColumnWidthsStorageKey(userId, fromStartId, oldI);
+      const toK = startHereWatchlistColumnWidthsStorageKey(userId, toStartId, newI);
+      const v = localStorage.getItem(fromK);
+      if (v != null) localStorage.setItem(toK, v);
+    }
   } catch {
     /* ignore */
   }
@@ -299,33 +473,94 @@ export function purgeStartWorkspaceStorage(
     }
     for (const i of Object.keys(dashboard.instances)) {
       localStorage.removeItem(startHereNewsModeStorageKey(userId, i, startId));
+      localStorage.removeItem(startHereWatchlistColumnWidthsStorageKey(userId, startId, i));
     }
   } catch {
     /* ignore */
   }
 }
 
-export function paletteColorAt(colorIndex: number): string {
-  return PALETTE[((colorIndex % PALETTE.length) + PALETTE.length) % PALETTE.length].color;
+export function paletteColorAt(colorIndex: number, workspace?: StartHereWorkspacePalette): string {
+  const pal = resolveWorkspacePalette(workspace);
+  const lanes = pal.linkLanes;
+  const i = ((colorIndex % lanes.length) + lanes.length) % lanes.length;
+  return lanes[i]!.color;
 }
 
-export function paletteLabelAt(colorIndex: number): string {
-  return PALETTE[((colorIndex % PALETTE.length) + PALETTE.length) % PALETTE.length].label;
+export function paletteLabelAt(colorIndex: number, workspace?: StartHereWorkspacePalette): string {
+  const pal = resolveWorkspacePalette(workspace);
+  const lanes = pal.linkLanes;
+  const i = ((colorIndex % lanes.length) + lanes.length) % lanes.length;
+  return lanes[i]!.label;
 }
 
 const WIDGET_TEMPLATE: Record<
   StartHereWidgetType,
   { w: number; h: number; minW: number; minH: number }
 > = {
-  watchlist: { w: 4, h: 14, minW: 2, minH: 6 },
-  chart: { w: 4, h: 10, minW: 2, minH: 5 },
-  news: { w: 4, h: 14, minW: 2, minH: 6 },
+  watchlist: { w: 4, h: 14, minW: 2, minH: 5 },
+  chart: { w: 4, h: 10, minW: 2, minH: 4 },
+  news: { w: 4, h: 14, minW: 2, minH: 5 },
+  flow: { w: 12, h: 8, minW: 1, minH: 2 },
 };
+
+function isValidFlowGridCells(x: unknown): x is StartHereFlowGridCells {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  for (const k of ["w", "h", "minW", "minH"] as const) {
+    const n = o[k];
+    if (typeof n !== "number" || !Number.isFinite(n)) return false;
+  }
+  return true;
+}
+
+/**
+ * RGL will not shrink a tile below minW/minH. Persisted layouts often had minW === initial w (e.g. 4),
+ * which incorrectly locked width at 4 even though the product template allows 2.
+ * Always derive mins from the widget template, capped by the current w/h.
+ */
+export function computeStartHereLayoutMins(
+  w: number,
+  h: number,
+  type: StartHereWidgetType
+): { minW: number; minH: number } {
+  const tmpl = WIDGET_TEMPLATE[type];
+  const tmplMinW = Math.max(1, Math.min(12, Math.floor(tmpl.minW)));
+  const tmplMinH = Math.max(1, Math.floor(tmpl.minH));
+  const cw = Math.max(1, Math.min(12, Math.floor(w)));
+  const ch = Math.max(1, Math.floor(h));
+  return {
+    minW: Math.min(cw, tmplMinW),
+    minH: Math.min(ch, tmplMinH),
+  };
+}
+
+function clampFlowGridCells(c: StartHereFlowGridCells): StartHereFlowGridCells {
+  const w = Math.max(1, Math.min(12, Math.floor(c.w)));
+  const h = Math.max(1, Math.floor(c.h));
+  return { w, h, ...computeStartHereLayoutMins(w, h, "flow") };
+}
+
+/** RGL snaps released sizes back if minW>w or minH>h — applies to every Start Here widget type. */
+function normalizeStartHereLayoutMinBounds(
+  layout: Layout,
+  instances: Record<string, StartHereInstanceMeta>
+): Layout {
+  return layout.map((l) => {
+    const meta = instances[l.i];
+    if (!meta) return l;
+    const w = Math.max(1, Math.min(12, Math.floor(Number(l.w) || 1)));
+    const h = Math.max(1, Math.floor(Number(l.h) || 1));
+    const { minW, minH } = computeStartHereLayoutMins(w, h, meta.type);
+    return { ...l, w, h, minW, minH };
+  }) as Layout;
+}
 
 const DEFAULT_LAYOUT_POSITIONS: Record<StartHereWidgetType, { x: number; y: number }> = {
   watchlist: { x: 0, y: 0 },
   chart: { x: 4, y: 0 },
   news: { x: 8, y: 0 },
+  flow: { x: 0, y: 14 },
 };
 
 /** Stable ids for factory / reset (one shared group). */
@@ -333,6 +568,7 @@ export const DEFAULT_INSTANCE_IDS: Record<StartHereWidgetType, string> = {
   watchlist: "sh_inst_watchlist",
   chart: "sh_inst_chart",
   news: "sh_inst_news",
+  flow: "sh_inst_flow",
 };
 
 export const DEFAULT_GROUP_ID = "sh_g_default";
@@ -358,15 +594,41 @@ export function chartTemplateCellsFromDefault(dashboard: StartHereDashboardV2): 
   if (!li || meta?.type !== "chart") {
     return { ...fallback };
   }
-  const minW = li.minW ?? fallback.minW;
-  const minH = li.minH ?? fallback.minH;
-  const w = Math.max(minW, Math.min(12, li.w));
-  const h = Math.max(minH, li.h);
-  return { w, h, minW, minH };
+  const w = Math.max(1, Math.min(12, Math.floor(li.w)));
+  const h = Math.max(1, Math.floor(li.h));
+  return { w, h, ...computeStartHereLayoutMins(w, h, "chart") };
+}
+
+/** Grid cell size for new Market Flow tiles: saved template first, else live default instance, else factory. */
+export function flowTemplateCellsFromDefault(dashboard: StartHereDashboardV2): {
+  w: number;
+  h: number;
+  minW: number;
+  minH: number;
+} {
+  const fallback = WIDGET_TEMPLATE.flow;
+  const cells = dashboard.defaultFlowGridCells;
+  if (cells && isValidFlowGridCells(cells)) {
+    return clampFlowGridCells(cells);
+  }
+  const defId = dashboard.defaultFlowInstanceId;
+  if (!defId) {
+    return { ...fallback };
+  }
+  const li = dashboard.layout.find((l) => l.i === defId);
+  const meta = dashboard.instances[defId];
+  if (!li || meta?.type !== "flow") {
+    return { ...fallback };
+  }
+  const w = Math.max(1, Math.min(12, Math.floor(li.w)));
+  const h = Math.max(1, Math.floor(li.h));
+  return { w, h, ...computeStartHereLayoutMins(w, h, "flow") };
 }
 
 export function createDefaultDashboard(): StartHereDashboardV2 {
-  const groupId = DEFAULT_GROUP_ID;
+  const gw = newGroupId();
+  const gc = newGroupId();
+  const gn = newGroupId();
   const layout: Layout = (
     ["watchlist", "chart", "news"] as const
   ).map((t) => {
@@ -383,15 +645,21 @@ export function createDefaultDashboard(): StartHereDashboardV2 {
     v: START_HERE_DASHBOARD_VERSION,
     layout,
     instances: {
-      [DEFAULT_INSTANCE_IDS.watchlist]: { type: "watchlist", groupId },
-      [DEFAULT_INSTANCE_IDS.chart]: { type: "chart", groupId, chartInterval: "1d" },
-      [DEFAULT_INSTANCE_IDS.news]: { type: "news", groupId },
+      [DEFAULT_INSTANCE_IDS.watchlist]: { type: "watchlist", groupId: gw },
+      [DEFAULT_INSTANCE_IDS.chart]: { type: "chart", groupId: gc, chartInterval: "1d" },
+      [DEFAULT_INSTANCE_IDS.news]: { type: "news", groupId: gn },
     },
     groups: {
-      [groupId]: { colorIndex: 0, symbol: "" },
+      [gw]: { colorIndex: 0, symbol: "" },
+      [gc]: { colorIndex: 0, symbol: "" },
+      [gn]: { colorIndex: 0, symbol: "" },
     },
     defaultChartInstanceId: DEFAULT_INSTANCE_IDS.chart,
     defaultChartInterval: "1d",
+    defaultWatchlistInstanceId: null,
+    focusedChartInstanceId: null,
+    defaultFlowInstanceId: null,
+    defaultFlowGridCells: null,
   };
 }
 
@@ -417,13 +685,71 @@ export function sanitizeLayoutForInstances(
   instances: Record<string, StartHereInstanceMeta>
 ): Layout {
   const seen = new Set<string>();
-  const out: Layout = [];
+  const out: Layout[number][] = [];
   for (const l of layout) {
     if (!instances[l.i] || seen.has(l.i)) continue;
     seen.add(l.i);
     out.push(l);
   }
-  return out;
+  return out as Layout;
+}
+
+/** When a Default Flow instance is set, sync `defaultFlowGridCells` from its layout row; otherwise leave cells as-is (orphan template). */
+export function syncDefaultFlowGridCellsWithLayout(dashboard: StartHereDashboardV2): StartHereDashboardV2 {
+  const id = dashboard.defaultFlowInstanceId ?? null;
+  if (!id) return dashboard;
+  const meta = dashboard.instances[id];
+  if (!meta || meta.type !== "flow") {
+    return { ...dashboard, defaultFlowGridCells: null };
+  }
+  const li = dashboard.layout.find((l) => l.i === id);
+  if (!li) return { ...dashboard, defaultFlowGridCells: null };
+  const fb = WIDGET_TEMPLATE.flow;
+  return {
+    ...dashboard,
+    defaultFlowGridCells: clampFlowGridCells({
+      w: li.w,
+      h: li.h,
+      minW: li.minW ?? fb.minW,
+      minH: li.minH ?? fb.minH,
+    }),
+  };
+}
+
+/** Apply RGL layout to dashboard and refresh persisted default Flow cells when applicable. */
+export function mergePersistedGridLayout(
+  dashboard: StartHereDashboardV2,
+  layout: Layout
+): StartHereDashboardV2 {
+  // RGL may mutate the layout array it passes to callbacks; always work on a copy.
+  const layoutSnapshot = layout.map((l) => ({ ...l }));
+  let nextLayout = sanitizeLayoutForInstances(layoutSnapshot, dashboard.instances);
+  nextLayout = normalizeStartHereLayoutMinBounds(nextLayout, dashboard.instances);
+  return syncDefaultFlowGridCellsWithLayout({
+    ...dashboard,
+    layout: nextLayout,
+  });
+}
+
+/**
+ * RGL often fires `onLayoutChange` after mount or width measurement with the default Flow tile at w=12
+ * even when persisted state (and `defaultFlowGridCells`) is narrower. While the user is not dragging/resizing,
+ * snap that item back to the saved template width.
+ */
+export function patchResistDefaultFlowFullWidth(
+  dashboard: StartHereDashboardV2,
+  layout: Layout
+): Layout {
+  const defId = dashboard.defaultFlowInstanceId;
+  const cells = dashboard.defaultFlowGridCells;
+  if (!defId || !cells || !isValidFlowGridCells(cells)) return layout;
+  const clamped = clampFlowGridCells(cells);
+  if (clamped.w >= 12) return layout;
+  const nextItem = layout.find((l) => l.i === defId);
+  const prevItem = dashboard.layout.find((l) => l.i === defId);
+  if (!nextItem || nextItem.w !== 12 || !prevItem) return layout;
+  if (prevItem.w !== clamped.w) return layout;
+  return layout.map((l) => (l.i === defId ? { ...l, ...clamped } : l)) as Layout;
 }
 
 /**
@@ -464,13 +790,22 @@ export function newInstanceId(): string {
   return `sh_i_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
+function newLinkedSetId(): string {
+  return `sh_ls_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
 export function appendWidget(
   dashboard: StartHereDashboardV2,
   type: StartHereWidgetType
 ): StartHereDashboardV2 {
   const instanceId = newInstanceId();
   const groupId = newGroupId();
-  const tm = WIDGET_TEMPLATE[type];
+  const tm =
+    type === "flow"
+      ? flowTemplateCellsFromDefault(dashboard)
+      : type === "chart"
+        ? chartTemplateCellsFromDefault(dashboard)
+        : WIDGET_TEMPLATE[type];
   const pos =
     findFirstFreeGridPlacement(dashboard.layout, tm.w, tm.h) ??
     (() => {
@@ -498,7 +833,61 @@ export function appendWidget(
     groups: {
       ...dashboard.groups,
       [groupId]: {
-        colorIndex: nextColorIndex(dashboard.groups),
+        colorIndex: 0,
+        accentColorIndex: null,
+        symbol: "",
+      },
+    },
+  };
+}
+
+/** Spawn a locked 3-chart linked set (`1d`, `15m`, `5m`) sharing one group symbol. */
+export function appendLinkedChartTriplet(
+  dashboard: StartHereDashboardV2
+): StartHereDashboardV2 {
+  const intervals: StartHereInterval[] = ["1d", "15m", "5m"];
+  const { w, h, minW, minH } = chartTemplateCellsFromDefault(dashboard);
+  const linkedSetId = newLinkedSetId();
+  const groupId = newGroupId();
+  const tripletColorIndex = nextColorIndex(dashboard.groups);
+  const layout: Layout = [...dashboard.layout];
+  const instances: Record<string, StartHereInstanceMeta> = { ...dashboard.instances };
+
+  for (const interval of intervals) {
+    const pos =
+      findFirstFreeGridPlacement(layout, w, h) ??
+      (() => {
+        const maxY = layout.reduce((m, l) => Math.max(m, l.y + l.h), 0);
+        return { x: 0, y: maxY };
+      })();
+    const instanceId = newInstanceId();
+    layout.push({
+      i: instanceId,
+      x: pos.x,
+      y: pos.y,
+      w,
+      h,
+      minW,
+      minH,
+    });
+    instances[instanceId] = {
+      type: "chart",
+      groupId,
+      chartInterval: interval,
+      linkedSetId,
+      linkedSetLocked: true,
+    };
+  }
+
+  return {
+    ...dashboard,
+    layout,
+    instances,
+    groups: {
+      ...dashboard.groups,
+      [groupId]: {
+        colorIndex: tripletColorIndex,
+        accentColorIndex: tripletColorIndex,
         symbol: "",
       },
     },
@@ -515,13 +904,34 @@ export function removeInstance(
   const { [instanceId]: _, ...instances } = dashboard.instances;
   const stillUsesGroup = Object.values(instances).some((m) => m.groupId === meta.groupId);
   let groups = { ...dashboard.groups };
-  if (!stillUsesGroup) {
+  if (!stillUsesGroup && !isLinkLaneGroupId(meta.groupId)) {
     const { [meta.groupId]: __, ...rest } = groups;
     groups = rest;
   }
   let defaultChartInstanceId = dashboard.defaultChartInstanceId ?? null;
   if (defaultChartInstanceId === instanceId) defaultChartInstanceId = null;
-  return { ...dashboard, layout, instances, groups, defaultChartInstanceId };
+  let defaultWatchlistInstanceId = dashboard.defaultWatchlistInstanceId ?? null;
+  if (defaultWatchlistInstanceId === instanceId) defaultWatchlistInstanceId = null;
+  let defaultFlowInstanceId = dashboard.defaultFlowInstanceId ?? null;
+  const defaultFlowGridCells = dashboard.defaultFlowGridCells ?? null;
+  if (defaultFlowInstanceId === instanceId) {
+    defaultFlowInstanceId = null;
+    // Keep defaultFlowGridCells so new Market Flow widgets still use the saved size after this tile is removed.
+  }
+  let focusedChartInstanceId = dashboard.focusedChartInstanceId ?? null;
+  if (focusedChartInstanceId === instanceId) focusedChartInstanceId = null;
+
+  return {
+    ...dashboard,
+    layout,
+    instances,
+    groups,
+    defaultChartInstanceId,
+    defaultWatchlistInstanceId,
+    focusedChartInstanceId,
+    defaultFlowInstanceId,
+    defaultFlowGridCells,
+  };
 }
 
 export function setDefaultChartTemplate(
@@ -538,8 +948,108 @@ export function setDefaultChartTemplate(
   return { ...dashboard, defaultChartInstanceId: instanceId, defaultChartInterval };
 }
 
+export function setDefaultWatchlistTemplate(
+  dashboard: StartHereDashboardV2,
+  instanceId: string | null
+): StartHereDashboardV2 {
+  if (instanceId === null) {
+    return { ...dashboard, defaultWatchlistInstanceId: null };
+  }
+  const meta = dashboard.instances[instanceId];
+  if (!meta || meta.type !== "watchlist") return dashboard;
+  return { ...dashboard, defaultWatchlistInstanceId: instanceId };
+}
+
+/** Chart instance ids on the same link lane (for watchlist row-click policy). */
+export function chartInstanceIdsForGroup(
+  dashboard: StartHereDashboardV2,
+  groupId: string
+): string[] {
+  return Object.entries(dashboard.instances)
+    .filter(([, m]) => m.type === "chart" && m.groupId === groupId)
+    .map(([id]) => id);
+}
+
+/** Set lane symbol and drop per-chart overrides so every chart on the lane matches. */
+export function broadcastGroupSymbolToLane(
+  dashboard: StartHereDashboardV2,
+  groupId: string,
+  symbol: string
+): StartHereDashboardV2 {
+  const sym = symbol.trim().toUpperCase();
+  const g = dashboard.groups[groupId];
+  if (!g) return dashboard;
+  const instances: Record<string, StartHereInstanceMeta> = { ...dashboard.instances };
+  for (const [id, m] of Object.entries(instances)) {
+    if (m.type !== "chart" || m.groupId !== groupId) continue;
+    if ("chartSymbolOverride" in m && m.chartSymbolOverride != null) {
+      const { chartSymbolOverride: _, ...rest } = m;
+      instances[id] = rest;
+    }
+  }
+  return {
+    ...dashboard,
+    instances,
+    groups: {
+      ...dashboard.groups,
+      [groupId]: { ...g, symbol: sym },
+    },
+  };
+}
+
+export function setChartSymbolOverrideOnInstance(
+  dashboard: StartHereDashboardV2,
+  instanceId: string,
+  symbol: string
+): StartHereDashboardV2 {
+  const m = dashboard.instances[instanceId];
+  if (!m || m.type !== "chart") return dashboard;
+  const sym = symbol.trim().toUpperCase();
+  if (m.linkedSetLocked) {
+    return broadcastGroupSymbolToLane(dashboard, m.groupId, sym);
+  }
+  return {
+    ...dashboard,
+    instances: {
+      ...dashboard.instances,
+      [instanceId]: { ...m, chartSymbolOverride: sym },
+    },
+  };
+}
+
+export function clearChartSymbolOverrideOnInstance(
+  dashboard: StartHereDashboardV2,
+  instanceId: string
+): StartHereDashboardV2 {
+  const m = dashboard.instances[instanceId];
+  if (!m || m.type !== "chart") return dashboard;
+  if (!("chartSymbolOverride" in m) || m.chartSymbolOverride == null) return dashboard;
+  const { chartSymbolOverride: _, ...rest } = m;
+  return {
+    ...dashboard,
+    instances: {
+      ...dashboard.instances,
+      [instanceId]: rest,
+    },
+  };
+}
+
+export function setDefaultFlowTemplate(
+  dashboard: StartHereDashboardV2,
+  instanceId: string | null
+): StartHereDashboardV2 {
+  if (instanceId === null) {
+    return { ...dashboard, defaultFlowInstanceId: null, defaultFlowGridCells: null };
+  }
+  const meta = dashboard.instances[instanceId];
+  if (!meta || meta.type !== "flow") return dashboard;
+  return syncDefaultFlowGridCellsWithLayout({ ...dashboard, defaultFlowInstanceId: instanceId });
+}
+
 /** When spawning charts from a watchlist widget, pass color so new charts match that watchlist stripe. */
 export type StartHereWatchlistSpawnOpts = {
+  /** Join this exact group so new charts inherit both color and link behavior. */
+  inheritGroupId?: string;
   inheritColorFromGroupId?: string;
   /** Prefer this when set (from live `dashboard.groups[gid].colorIndex` at click time). */
   inheritColorIndex?: number;
@@ -549,7 +1059,7 @@ function resolveSpawnColorIndex(
   dashboard: StartHereDashboardV2,
   groupsForNext: Record<string, StartHereGroupState>,
   opts?: StartHereWatchlistSpawnOpts
-): number {
+): number | null {
   if (
     opts?.inheritColorIndex != null &&
     Number.isFinite(opts.inheritColorIndex) &&
@@ -560,7 +1070,7 @@ function resolveSpawnColorIndex(
   const gid = opts?.inheritColorFromGroupId;
   const src = gid && dashboard.groups[gid] ? dashboard.groups[gid] : null;
   if (src) return src.colorIndex;
-  return nextColorIndex(groupsForNext);
+  return null;
 }
 
 /** Add one chart widget below existing layout, sized like the default template, symbol + timeframe from defaults. */
@@ -581,9 +1091,22 @@ export function addChartFromWatchlistSymbol(
     })();
 
   const instanceId = newInstanceId();
-  const groupId = newGroupId();
   const chartInterval = dashboard.defaultChartInterval ?? "1d";
-  const colorIndex = resolveSpawnColorIndex(dashboard, dashboard.groups, opts);
+  let groups = mergeLinkLanesIntoGroups({ ...dashboard.groups });
+  const inheritGroupId =
+    opts?.inheritGroupId && groups[opts.inheritGroupId] ? opts.inheritGroupId : null;
+  const groupId = inheritGroupId ?? newGroupId();
+  const inheritedGroupSymbol = inheritGroupId
+    ? (groups[groupId]?.symbol ?? "").trim().toUpperCase()
+    : "";
+  if (!inheritGroupId) {
+    const colorIndex = resolveSpawnColorIndex(dashboard, groups, opts);
+    groups[groupId] = {
+      colorIndex: colorIndex ?? 0,
+      accentColorIndex: colorIndex,
+      symbol: sym,
+    };
+  }
 
   return {
     ...dashboard,
@@ -601,22 +1124,21 @@ export function addChartFromWatchlistSymbol(
     ],
     instances: {
       ...dashboard.instances,
-      [instanceId]: { type: "chart", groupId, chartInterval },
-    },
-    groups: {
-      ...dashboard.groups,
-      [groupId]: {
-        colorIndex,
-        symbol: sym,
+      [instanceId]: {
+        type: "chart",
+        groupId,
+        chartInterval,
+        ...(inheritGroupId && sym !== inheritedGroupSymbol ? { chartSymbolOverride: sym } : {}),
       },
     },
+    groups,
   };
 }
 
 export const START_HERE_MAX_LOAD_CHARTS = 24;
 
 /** Must match Start Here `ReactGridLayout` rowHeight + margins + containerPadding. */
-export const START_HERE_RGL_ROW_HEIGHT = 24;
+export const START_HERE_RGL_ROW_HEIGHT = 22;
 export const START_HERE_RGL_MARGIN: [number, number] = [8, 8];
 export const START_HERE_RGL_CONTAINER_PADDING: [number, number] = [4, 4];
 
@@ -639,13 +1161,9 @@ export function loadChartsFromList(
   symbolsRaw: string[],
   options?: { maxAdditionalGridRows?: number } & StartHereWatchlistSpawnOpts
 ): LoadChartsFromListResult {
-  const symbols = [
-    ...new Set(
-      symbolsRaw
-        .map((s) => s.trim().toUpperCase())
-        .filter(Boolean)
-    ),
-  ].slice(0, START_HERE_MAX_LOAD_CHARTS);
+  const symbols = Array.from(
+    new Set(symbolsRaw.map((s) => s.trim().toUpperCase()).filter(Boolean))
+  ).slice(0, START_HERE_MAX_LOAD_CHARTS);
   if (!symbols.length) {
     return { dashboard, placed: 0, skipped: 0 };
   }
@@ -665,7 +1183,12 @@ export function loadChartsFromList(
 
   const layout = [...dashboard.layout];
   const instances = { ...dashboard.instances };
-  let groups: Record<string, StartHereGroupState> = { ...dashboard.groups };
+  let groups: Record<string, StartHereGroupState> = mergeLinkLanesIntoGroups({ ...dashboard.groups });
+  const inheritGroupId =
+    options?.inheritGroupId && groups[options.inheritGroupId] ? options.inheritGroupId : null;
+  const inheritedGroupSymbol = inheritGroupId
+    ? (groups[inheritGroupId]?.symbol ?? "").trim().toUpperCase()
+    : "";
 
   let placed = 0;
   let skipped = 0;
@@ -681,7 +1204,7 @@ export function loadChartsFromList(
       break;
     }
     const instanceId = newInstanceId();
-    const groupId = newGroupId();
+    const groupId = inheritGroupId ?? newGroupId();
     layout.push({
       i: instanceId,
       x: pos.x,
@@ -691,11 +1214,20 @@ export function loadChartsFromList(
       minW,
       minH,
     });
-    instances[instanceId] = { type: "chart", groupId, chartInterval };
-    groups[groupId] = {
-      colorIndex: resolveSpawnColorIndex(dashboard, groups, options),
-      symbol: sym,
+    instances[instanceId] = {
+      type: "chart",
+      groupId,
+      chartInterval,
+      ...(inheritGroupId && sym !== inheritedGroupSymbol ? { chartSymbolOverride: sym } : {}),
     };
+    if (!inheritGroupId) {
+      const colorIndex = resolveSpawnColorIndex(dashboard, groups, options);
+      groups[groupId] = {
+        colorIndex: colorIndex ?? 0,
+        accentColorIndex: colorIndex,
+        symbol: sym,
+      };
+    }
     placed += 1;
   }
 
@@ -735,17 +1267,52 @@ export function setInstanceGroupId(
   newGroupId: string
 ): StartHereDashboardV2 {
   const meta = dashboard.instances[instanceId];
-  if (!meta || !dashboard.groups[newGroupId]) return dashboard;
+  if (!meta) return dashboard;
+  if (meta.type === "chart" && meta.linkedSetLocked) return dashboard;
+  const merged = mergeLinkLanesIntoGroups({ ...dashboard.groups });
+  if (!merged[newGroupId]) return dashboard;
   const oldGroupId = meta.groupId;
+  let nextMeta: StartHereInstanceMeta = { ...meta, groupId: newGroupId };
+  if (nextMeta.type === "chart" && "chartSymbolOverride" in nextMeta) {
+    const { chartSymbolOverride: _, ...rest } = nextMeta;
+    nextMeta = rest as StartHereInstanceMeta;
+  }
   const instances = {
     ...dashboard.instances,
-    [instanceId]: { ...meta, groupId: newGroupId },
+    [instanceId]: nextMeta,
   };
-  let groups = { ...dashboard.groups };
+  let groups = merged;
   const stillUsesOld = Object.values(instances).some((m) => m.groupId === oldGroupId);
-  if (!stillUsesOld) {
+  if (!stillUsesOld && !isLinkLaneGroupId(oldGroupId)) {
     const { [oldGroupId]: __, ...rest } = groups;
-    groups = rest;
+    groups = mergeLinkLanesIntoGroups(rest);
+  }
+  return { ...dashboard, instances, groups };
+}
+
+/** Move instance to a new private group; keeps current symbol (Unlinked lane). */
+export function unlinkInstanceToPrivateGroup(
+  dashboard: StartHereDashboardV2,
+  instanceId: string
+): StartHereDashboardV2 {
+  const meta = dashboard.instances[instanceId];
+  if (!meta) return dashboard;
+  if (meta.type === "chart" && meta.linkedSetLocked) return dashboard;
+  const oldGroupId = meta.groupId;
+  const oldState = dashboard.groups[oldGroupId];
+  const symbol = oldState && typeof oldState.symbol === "string" ? oldState.symbol : "";
+  const groupId = newGroupId();
+  const instances = {
+    ...dashboard.instances,
+    [instanceId]: { ...meta, groupId },
+  };
+  let groups = mergeLinkLanesIntoGroups({ ...dashboard.groups });
+  groups[groupId] = { colorIndex: 0, symbol };
+  groups[groupId].accentColorIndex = null;
+  const stillUsesOld = Object.values(instances).some((m) => m.groupId === oldGroupId);
+  if (!stillUsesOld && !isLinkLaneGroupId(oldGroupId)) {
+    const { [oldGroupId]: _removed, ...rest } = groups;
+    groups = mergeLinkLanesIntoGroups(rest);
   }
   return { ...dashboard, instances, groups };
 }
@@ -754,27 +1321,7 @@ export function forkNewGroupForInstance(
   dashboard: StartHereDashboardV2,
   instanceId: string
 ): StartHereDashboardV2 {
-  const meta = dashboard.instances[instanceId];
-  if (!meta) return dashboard;
-  const oldGroupId = meta.groupId;
-  const groupId = newGroupId();
-  const instances = {
-    ...dashboard.instances,
-    [instanceId]: { ...meta, groupId },
-  };
-  let groups: Record<string, StartHereGroupState> = {
-    ...dashboard.groups,
-    [groupId]: {
-      colorIndex: nextColorIndex(dashboard.groups),
-      symbol: "",
-    },
-  };
-  const stillUsesOld = Object.values(instances).some((m) => m.groupId === oldGroupId);
-  if (!stillUsesOld && oldGroupId !== groupId) {
-    const { [oldGroupId]: _removed, ...rest } = groups;
-    groups = rest;
-  }
-  return { ...dashboard, instances, groups };
+  return unlinkInstanceToPrivateGroup(dashboard, instanceId);
 }
 
 function isLayoutItem(x: unknown): x is Layout[number] {
@@ -815,34 +1362,105 @@ function migrateLegacyLayout(userId: number): StartHereDashboardV2 | null {
       groups: { [groupId]: { colorIndex: 0, symbol: "" } },
       defaultChartInstanceId: layout.some((l) => l.i === "chart") ? "chart" : null,
       defaultChartInterval: "1d",
+      defaultWatchlistInstanceId: null,
+      focusedChartInstanceId: null,
+      defaultFlowInstanceId: null,
+      defaultFlowGridCells: null,
     };
   } catch {
     return null;
   }
 }
 
-function sanitizeDashboard(d: StartHereDashboardV2): StartHereDashboardV2 {
-  const layout = d.layout.filter((l) => d.instances[l.i]);
+function coerceGroupState(raw: unknown): StartHereGroupState {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { colorIndex: 0, accentColorIndex: null, symbol: "" };
+  }
+  const o = raw as Record<string, unknown>;
+  const ci = o.colorIndex;
+  const colorIndex =
+    typeof ci === "number" && Number.isFinite(ci) ? Math.floor(ci) : 0;
+  const aci = o.accentColorIndex;
+  const accentColorIndex =
+    aci == null
+      ? null
+      : typeof aci === "number" && Number.isFinite(aci)
+        ? Math.floor(aci)
+        : null;
+  const sym = o.symbol;
+  const symbol = typeof sym === "string" ? sym : "";
+  return { colorIndex, accentColorIndex, symbol };
+}
+
+export function sanitizeDashboard(d: StartHereDashboardV2): StartHereDashboardV2 {
+  const rawGroups =
+    d.groups && typeof d.groups === "object" && !Array.isArray(d.groups)
+      ? (d.groups as Record<string, StartHereGroupState>)
+      : {};
+  let mergedInput = mergeLinkLanesIntoGroups({ ...rawGroups });
+
+  const instancesIn =
+    d.instances && typeof d.instances === "object" && !Array.isArray(d.instances)
+      ? (d.instances as Record<string, StartHereInstanceMeta>)
+      : {};
+
+  let layout = Array.isArray(d.layout)
+    ? d.layout.filter((l) => l && typeof l.i === "string" && instancesIn[l.i])
+    : [];
+
   const instanceKeys = new Set(layout.map((l) => l.i));
+
+  /** Instances often reference private `sh_g_*` groups; if `groups` was empty or missing keys, we used to drop every widget and reset the dashboard. */
+  for (const k of Array.from(instanceKeys)) {
+    const m = instancesIn[k];
+    if (!m || typeof m.groupId !== "string" || !m.groupId) continue;
+    if (mergedInput[m.groupId] != null) continue;
+    mergedInput = {
+      ...mergedInput,
+      [m.groupId]: coerceGroupState(rawGroups[m.groupId]),
+    };
+  }
+
   const instances: Record<string, StartHereInstanceMeta> = {};
-  for (const k of instanceKeys) {
-    const m = d.instances[k];
-    if (!m || !d.groups[m.groupId]) continue;
+  for (const k of Array.from(instanceKeys)) {
+    const m = instancesIn[k];
+    if (!m || mergedInput[m.groupId] == null) continue;
+    if (!isStartHereWidgetType(m.type)) continue;
     if (m.type === "chart") {
       const ci = isStartHereInterval(m.chartInterval) ? m.chartInterval : undefined;
-      instances[k] = { type: "chart", groupId: m.groupId, ...(ci ? { chartInterval: ci } : {}) };
+      const rawOv = (m as { chartSymbolOverride?: unknown }).chartSymbolOverride;
+      const chartSymbolOverride =
+        typeof rawOv === "string" && rawOv.trim() ? rawOv.trim().toUpperCase() : undefined;
+      const rawLinkedSetId = (m as { linkedSetId?: unknown }).linkedSetId;
+      const linkedSetId =
+        typeof rawLinkedSetId === "string" && rawLinkedSetId.trim()
+          ? rawLinkedSetId.trim()
+          : undefined;
+      const rawLinkedLocked = (m as { linkedSetLocked?: unknown }).linkedSetLocked;
+      const linkedSetLocked = rawLinkedLocked === true;
+      instances[k] = {
+        type: "chart",
+        groupId: m.groupId,
+        ...(ci ? { chartInterval: ci } : {}),
+        ...(chartSymbolOverride ? { chartSymbolOverride } : {}),
+        ...(linkedSetId ? { linkedSetId } : {}),
+        ...(linkedSetLocked ? { linkedSetLocked: true } : {}),
+      };
     } else {
       instances[k] = { type: m.type, groupId: m.groupId };
     }
   }
+
+  layout = layout.filter((l) => instances[l.i]);
+
   const usedGroupIds = new Set(Object.values(instances).map((m) => m.groupId));
   const groups: Record<string, StartHereGroupState> = {};
-  for (const gid of usedGroupIds) {
-    const g = d.groups[gid];
+  for (const gid of Array.from(usedGroupIds)) {
+    const g = mergedInput[gid];
     if (g) groups[gid] = { ...g, symbol: typeof g.symbol === "string" ? g.symbol : "" };
   }
   if (!layout.length || !Object.keys(instances).length) {
-    return createDefaultDashboard();
+    return sanitizeDashboard(createDefaultDashboard());
   }
   let defaultChartInstanceId = d.defaultChartInstanceId ?? null;
   if (defaultChartInstanceId != null) {
@@ -857,12 +1475,81 @@ function sanitizeDashboard(d: StartHereDashboardV2): StartHereDashboardV2 {
       defaultChartInterval = dm.chartInterval;
     }
   }
+  let defaultWatchlistInstanceId = d.defaultWatchlistInstanceId ?? null;
+  if (defaultWatchlistInstanceId != null) {
+    const wm = instances[defaultWatchlistInstanceId];
+    if (!wm || wm.type !== "watchlist") defaultWatchlistInstanceId = null;
+  }
+  let defaultFlowInstanceId = d.defaultFlowInstanceId ?? null;
+  if (defaultFlowInstanceId != null) {
+    const fm = instances[defaultFlowInstanceId];
+    if (!fm || fm.type !== "flow") defaultFlowInstanceId = null;
+  }
+  let focusedChartInstanceId = d.focusedChartInstanceId ?? null;
+  if (focusedChartInstanceId != null) {
+    const fm = instances[focusedChartInstanceId];
+    if (!fm || fm.type !== "chart") focusedChartInstanceId = null;
+  }
+
+  let defaultFlowGridCells: StartHereFlowGridCells | null = null;
+  if (defaultFlowInstanceId != null) {
+    const li = layout.find((l) => l.i === defaultFlowInstanceId);
+    if (li) {
+      const fb = WIDGET_TEMPLATE.flow;
+      const fromLi = clampFlowGridCells({
+        w: li.w,
+        h: li.h,
+        minW: li.minW ?? fb.minW,
+        minH: li.minH ?? fb.minH,
+      });
+      const stored = d.defaultFlowGridCells;
+      let cells: StartHereFlowGridCells;
+      if (isValidFlowGridCells(stored)) {
+        const cs = clampFlowGridCells(stored);
+        // Never shrink the live tile back to the saved template (that caused resize-to-smaller to "snap back").
+        // Only trust `stored` over layout when fixing the classic RGL w=12 glitch with a narrower template.
+        if (li.w === 12 && cs.w < 12) {
+          cells = cs;
+        } else {
+          cells = fromLi;
+        }
+      } else {
+        cells = fromLi;
+      }
+      defaultFlowGridCells = cells;
+      layout = layout.map((l) => (l.i === defaultFlowInstanceId ? { ...l, ...cells } : l));
+    }
+  } else {
+    const raw = d.defaultFlowGridCells;
+    if (isValidFlowGridCells(raw)) {
+      defaultFlowGridCells = clampFlowGridCells(raw);
+    }
+  }
+
+  layout = normalizeStartHereLayoutMinBounds(layout, instances);
+  if (defaultFlowInstanceId != null) {
+    const fbFlow = WIDGET_TEMPLATE.flow;
+    const liDone = layout.find((l) => l.i === defaultFlowInstanceId);
+    if (liDone) {
+      defaultFlowGridCells = clampFlowGridCells({
+        w: liDone.w,
+        h: liDone.h,
+        minW: liDone.minW ?? fbFlow.minW,
+        minH: liDone.minH ?? fbFlow.minH,
+      });
+    }
+  }
+
   return {
     v: START_HERE_DASHBOARD_VERSION,
     layout,
     instances,
-    groups,
+    groups: mergeLinkLanesIntoGroups(groups),
     defaultChartInstanceId,
+    defaultWatchlistInstanceId,
+    focusedChartInstanceId,
+    defaultFlowInstanceId,
+    defaultFlowGridCells,
     defaultChartInterval,
   };
 }
@@ -876,16 +1563,33 @@ export function loadDashboard(userId: number, startId: string): StartHereDashboa
         const rawV = (parsed as { v?: number }).v;
         if (rawV === 2 || rawV === 3 || rawV === START_HERE_DASHBOARD_VERSION) {
           const p = parsed as StartHereDashboardV2 & { defaultChartInterval?: unknown };
+          const parsedFlowCells = p.defaultFlowGridCells;
           const d = {
             ...p,
             v: START_HERE_DASHBOARD_VERSION,
             defaultChartInstanceId: p.defaultChartInstanceId ?? null,
+            defaultWatchlistInstanceId:
+              (p as StartHereDashboardV2).defaultWatchlistInstanceId ?? null,
+            focusedChartInstanceId:
+              (p as StartHereDashboardV2).focusedChartInstanceId ?? null,
+            defaultFlowInstanceId:
+              (p as StartHereDashboardV2).defaultFlowInstanceId ?? null,
+            defaultFlowGridCells: isValidFlowGridCells(parsedFlowCells)
+              ? clampFlowGridCells(parsedFlowCells)
+              : null,
             defaultChartInterval: isStartHereInterval(p.defaultChartInterval)
               ? p.defaultChartInterval
               : undefined,
           };
-          if (Array.isArray(d.layout) && d.instances && d.groups) {
-            return sanitizeDashboard(d);
+          if (Array.isArray(d.layout) && d.instances && typeof d.instances === "object") {
+            const withGroups: StartHereDashboardV2 = {
+              ...d,
+              groups:
+                d.groups && typeof d.groups === "object" && !Array.isArray(d.groups)
+                  ? d.groups
+                  : {},
+            };
+            return sanitizeDashboard(withGroups);
           }
         }
       }
@@ -906,7 +1610,7 @@ export function loadDashboard(userId: number, startId: string): StartHereDashboa
       return clean;
     }
   }
-  return createDefaultDashboard();
+  return sanitizeDashboard(createDefaultDashboard());
 }
 
 export function saveDashboard(
@@ -922,4 +1626,109 @@ export function saveDashboard(
   } catch {
     /* ignore */
   }
+}
+
+/** Per-workspace prefs mirrored to Postgres `extras` for cross-browser sync. */
+export interface StartHereExtrasPersisted {
+  watchlistPick?: Record<string, string>;
+  newsMode?: Record<string, string>;
+  /** Per watchlist widget instance: serialized `WatchlistColumnProfileFile` (v2 JSON: visible columns + widths). */
+  watchlistColWidths?: Record<string, string>;
+}
+
+export function gatherStartHereExtras(
+  userId: number,
+  startId: string,
+  dashboard: StartHereDashboardV2
+): StartHereExtrasPersisted {
+  const watchlistPick: Record<string, string> = {};
+  for (const gid of Object.keys(dashboard.groups)) {
+    try {
+      const k = startHereWatchlistStorageKey(userId, startId, gid);
+      const v = localStorage.getItem(k);
+      if (v != null) watchlistPick[gid] = v;
+    } catch {
+      /* ignore */
+    }
+  }
+  const newsMode: Record<string, string> = {};
+  const watchlistColWidths: Record<string, string> = {};
+  for (const iid of Object.keys(dashboard.instances)) {
+    try {
+      const nm = localStorage.getItem(startHereNewsModeStorageKey(userId, startId, iid));
+      if (nm != null) newsMode[iid] = nm;
+      const cw = localStorage.getItem(
+        startHereWatchlistColumnWidthsStorageKey(userId, startId, iid)
+      );
+      if (cw != null) watchlistColWidths[iid] = cw;
+    } catch {
+      /* ignore */
+    }
+  }
+  return { watchlistPick, newsMode, watchlistColWidths };
+}
+
+export function applyStartHereExtras(
+  userId: number,
+  startId: string,
+  extras: unknown,
+  dashboard: StartHereDashboardV2
+): void {
+  if (!extras || typeof extras !== "object" || Array.isArray(extras)) return;
+  const e = extras as StartHereExtrasPersisted;
+  try {
+    for (const [gid, v] of Object.entries(e.watchlistPick ?? {})) {
+      if (!dashboard.groups[gid] || typeof v !== "string") continue;
+      localStorage.setItem(startHereWatchlistStorageKey(userId, startId, gid), v);
+    }
+    for (const [iid, v] of Object.entries(e.newsMode ?? {})) {
+      if (!dashboard.instances[iid] || typeof v !== "string") continue;
+      localStorage.setItem(startHereNewsModeStorageKey(userId, startId, iid), v);
+    }
+    for (const [iid, v] of Object.entries(e.watchlistColWidths ?? {})) {
+      if (!dashboard.instances[iid] || typeof v !== "string") continue;
+      localStorage.setItem(startHereWatchlistColumnWidthsStorageKey(userId, startId, iid), v);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Write server bootstrap payload into localStorage so existing widgets keep working. */
+export function hydrateWorkspacesFromServerPayload(
+  userId: number,
+  workspaces: Array<{ workspaceId: string; name: string; dashboard: unknown; extras: unknown }>
+): StartHereStartProfile[] {
+  const profiles: StartHereStartProfile[] = workspaces.map((w) => ({
+    id: w.workspaceId,
+    name: w.name,
+  }));
+  saveStartProfiles(userId, profiles);
+  for (const w of workspaces) {
+    const raw = w.dashboard;
+    if (!raw || typeof raw !== "object") continue;
+    const d = sanitizeDashboard(raw as StartHereDashboardV2);
+    saveDashboard(userId, w.workspaceId, d);
+    applyStartHereExtras(userId, w.workspaceId, w.extras, d);
+  }
+  return profiles;
+}
+
+export function loadAllWorkspacesFromLocalStorageForMigration(userId: number): {
+  profiles: StartHereStartProfile[];
+  activeWorkspaceId: string;
+  workspaces: Array<{
+    workspaceId: string;
+    name: string;
+    dashboard: StartHereDashboardV2;
+    extras: StartHereExtrasPersisted;
+  }>;
+} {
+  const { profiles, activeStartId } = ensureStartProfilesAndActive(userId);
+  const workspaces = profiles.map((p) => {
+    const dashboard = loadDashboard(userId, p.id);
+    const extras = gatherStartHereExtras(userId, p.id, dashboard);
+    return { workspaceId: p.id, name: p.name, dashboard, extras };
+  });
+  return { profiles, activeWorkspaceId: activeStartId, workspaces };
 }

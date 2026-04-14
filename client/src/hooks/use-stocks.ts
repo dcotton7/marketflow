@@ -1,7 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl, type ScannerRunInput } from "@shared/routes";
 
-const INTRADAY_INTERVALS = ['1m', '5m', '15m', '30m', '60m'];
+const INTRADAY_INTERVALS = ['1m', '5m', '15m', '30m', '60m'] as const;
+
+/** True when `useStockHistory` auto-refetches on an interval (every 60s). */
+export function stockHistoryIsIntradayInterval(interval: string): boolean {
+  return (INTRADAY_INTERVALS as readonly string[]).includes(interval);
+}
+
+/** Milliseconds between background refetches for intraday history (see `useStockHistory`). */
+export const STOCK_HISTORY_INTRADAY_REFETCH_MS = 60_000;
 
 // GET /api/stocks/:symbol/history
 export function useStockHistory(symbol: string, interval: string = '1d') {
@@ -17,10 +25,10 @@ export function useStockHistory(symbol: string, interval: string = '1d') {
     },
     enabled: !!symbol,
     // Intraday: always treat as stale so refetchInterval actually fires a network request
-    staleTime: INTRADAY_INTERVALS.includes(interval) ? 0 : Infinity,
+    staleTime: stockHistoryIsIntradayInterval(interval) ? 0 : Infinity,
     // Re-poll intraday charts every minute to get the latest bar; daily+ don't need live refresh
-    refetchInterval: INTRADAY_INTERVALS.includes(interval) ? 60_000 : false,
-    refetchIntervalInBackground: INTRADAY_INTERVALS.includes(interval), // keep 5m/15m/30m/60m updating every minute even when tab unfocused
+    refetchInterval: stockHistoryIsIntradayInterval(interval) ? STOCK_HISTORY_INTRADAY_REFETCH_MS : false,
+    refetchIntervalInBackground: stockHistoryIsIntradayInterval(interval), // keep 5m/15m/30m/60m updating every minute even when tab unfocused
   });
 }
 

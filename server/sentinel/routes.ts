@@ -6,6 +6,7 @@ import { z } from "zod";
 import OpenAI from "openai";
 import { eq, and, or, not, inArray, sql, isNull, desc } from "drizzle-orm";
 import { db } from "../db";
+import { requireSentinelAuth as requireAuth } from "../middleware/requireSentinelAuth";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
@@ -18,6 +19,7 @@ import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 import * as alpaca from "../alpaca";
 import { STOCKS_BY_SECTOR } from "@shared/stocksBySector";
+import { normalizeStartHereWorkspacePalette } from "@shared/startHereWorkspacePalette";
 import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals } from "../fundamentals";
 
 declare module "express-session" {
@@ -150,13 +152,6 @@ const importConfirmSchema = z.object({
   brokerId: z.enum(["FIDELITY", "SCHWAB", "ROBINHOOD", "fidelity", "schwab", "robinhood", "unknown"]).optional(),
   timestampOverride: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Invalid time format (HH:MM)").optional(),
 });
-
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
-}
 
 export function registerSentinelRoutes(app: Express): void {
   const PgSession = connectPgSimple(session);
@@ -292,6 +287,10 @@ export function registerSentinelRoutes(app: Express): void {
       if (db) {
         const user = await sentinelModels.getUserById(req.session.userId);
         if (user) {
+          if (user.isActive === false) {
+            await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+            return res.status(401).json({ error: "Not authenticated" });
+          }
           return res.json({
             id: user.id,
             username: user.username,
@@ -339,8 +338,12 @@ export function registerSentinelRoutes(app: Express): void {
         
         // Try to get the first user in the DB regardless of name (only if DB is available)
         if (db) {
-          const allUsers = await db.select().from(sentinelUsers).limit(1);
-          
+          const allUsers = await db
+            .select()
+            .from(sentinelUsers)
+            .where(eq(sentinelUsers.isActive, true))
+            .limit(1);
+
           if (allUsers.length > 0) {
             user = allUsers[0];
           }
@@ -372,6 +375,10 @@ export function registerSentinelRoutes(app: Express): void {
         }
       }
       // --- LOCAL BYPASS END ---
+
+      if (user.isActive === false) {
+        return res.status(403).json({ error: "Account disabled" });
+      }
 
       req.session.userId = user.id;
       req.session.username = user.username;
@@ -1175,6 +1182,12 @@ export function registerSentinelRoutes(app: Express): void {
   });
 
   // Watchlist definitions routes (multiple watchlists per user)
+  async function ensureWatchlistPortfolioColumn(): Promise<void> {
+    await db.execute(
+      sql`alter table watchlists add column if not exists is_portfolio boolean default false`
+    );
+  }
+
   app.get("/api/sentinel/watchlists", requireAuth, async (req: Request, res: Response) => {
     try {
       let lists = await sentinelModels.getWatchlistsByUser(req.session.userId!);
@@ -1191,7 +1204,29 @@ export function registerSentinelRoutes(app: Express): void {
         })
       );
       res.json(listsWithCounts);
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === "42703") {
+        try {
+          const fallbackRows = await db.execute(sql`
+            select id, user_id, name, is_default, created_at
+            from watchlists
+            where user_id = ${req.session.userId!}
+            order by is_default desc, name asc
+          `);
+          const fallback = fallbackRows.rows.map((r: any) => ({
+            id: Number(r.id),
+            userId: Number(r.user_id),
+            name: String(r.name),
+            isDefault: Boolean(r.is_default),
+            isPortfolio: false,
+            createdAt: r.created_at,
+            itemCount: 0,
+          }));
+          return res.json(fallback);
+        } catch (fallbackError) {
+          console.error("Get watchlists fallback error:", fallbackError);
+        }
+      }
       console.error("Get watchlists error:", error);
       res.status(500).json({ error: "Failed to load watchlists" });
     }
@@ -1199,7 +1234,7 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.post("/api/sentinel/watchlists", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { name } = req.body;
+      const { name, isPortfolio } = req.body;
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
         return res.status(400).json({ error: "Name is required" });
       }
@@ -1207,9 +1242,25 @@ export function registerSentinelRoutes(app: Express): void {
         userId: req.session.userId!,
         name: name.trim(),
         isDefault: false,
+        ...(isPortfolio === true ? { isPortfolio: true } : {}),
       });
       res.status(201).json(wl);
     } catch (error: any) {
+      if (error?.code === "42703") {
+        try {
+          await ensureWatchlistPortfolioColumn();
+          const { name, isPortfolio } = req.body;
+          const wl = await sentinelModels.createWatchlist({
+            userId: req.session.userId!,
+            name: String(name).trim(),
+            isDefault: false,
+            ...(isPortfolio === true ? { isPortfolio: true } : {}),
+          });
+          return res.status(201).json(wl);
+        } catch (retryError) {
+          console.error("Create watchlist retry error:", retryError);
+        }
+      }
       if (error?.code === '23505') { // unique violation
         return res.status(409).json({ error: "A watchlist with this name already exists" });
       }
@@ -1230,14 +1281,51 @@ export function registerSentinelRoutes(app: Express): void {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const { name } = req.body;
-      if (!name || typeof name !== 'string' || name.trim().length === 0) {
-        return res.status(400).json({ error: "Name is required" });
+      const { name, isPortfolio } = req.body as {
+        name?: unknown;
+        isPortfolio?: unknown;
+      };
+      const patch: { name?: string; isPortfolio?: boolean } = {};
+      if (name != null) {
+        if (typeof name !== "string" || name.trim().length === 0) {
+          return res.status(400).json({ error: "Name must be a non-empty string" });
+        }
+        patch.name = name.trim();
+      }
+      if (isPortfolio != null) {
+        if (typeof isPortfolio !== "boolean") {
+          return res.status(400).json({ error: "isPortfolio must be a boolean" });
+        }
+        patch.isPortfolio = isPortfolio;
+      }
+      if (patch.name == null && patch.isPortfolio == null) {
+        return res.status(400).json({ error: "No valid watchlist changes provided" });
       }
 
-      const updated = await sentinelModels.updateWatchlist(id, { name: name.trim() });
+      const updated = await sentinelModels.updateWatchlist(id, patch);
       res.json(updated);
     } catch (error: any) {
+      if (error?.code === "42703") {
+        try {
+          await ensureWatchlistPortfolioColumn();
+          const id = parseInt(req.params.id);
+          const { name, isPortfolio } = req.body as {
+            name?: unknown;
+            isPortfolio?: unknown;
+          };
+          const retryPatch: { name?: string; isPortfolio?: boolean } = {};
+          if (name != null && typeof name === "string" && name.trim().length > 0) {
+            retryPatch.name = name.trim();
+          }
+          if (typeof isPortfolio === "boolean") {
+            retryPatch.isPortfolio = isPortfolio;
+          }
+          const updated = await sentinelModels.updateWatchlist(id, retryPatch);
+          return res.json(updated);
+        } catch (retryError) {
+          console.error("Update watchlist retry error:", retryError);
+        }
+      }
       if (error?.code === '23505') {
         return res.status(409).json({ error: "A watchlist with this name already exists" });
       }
@@ -1882,6 +1970,59 @@ export function registerSentinelRoutes(app: Express): void {
     } catch (error) {
       console.error("Update system settings error:", error);
       res.status(500).json({ error: "Failed to save settings" });
+    }
+  });
+
+  const startHereWorkspacePaletteSchema = z.object({
+    linkLanes: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(48),
+          color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        })
+      )
+      .length(10),
+    unlinkedColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  });
+
+  /** Global Start Here link-lane colors; any authenticated user (for Start Here UI). */
+  app.get("/api/sentinel/start-here-workspace-palette", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const palette = await sentinelModels.getStartHereWorkspacePalette();
+      res.json(palette);
+    } catch (error) {
+      console.error(
+        "Get Start Here workspace palette: database error — using built-in defaults. If saves fail, run `npm run db:push` to create table `start_here_workspace_palette`:",
+        error
+      );
+      res.json(normalizeStartHereWorkspacePalette({}));
+    }
+  });
+
+  /** Admin: update global Start Here link-lane + unlinked colors. */
+  app.patch("/api/admin/start-here-workspace-palette", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const body = startHereWorkspacePaletteSchema.parse(req.body);
+      const updated = await sentinelModels.updateStartHereWorkspacePalette(body);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid palette" });
+      }
+      console.error("Update Start Here workspace palette error:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      const missingTable =
+        /start_here_workspace_palette|does not exist|relation/i.test(msg) ||
+        /no such table/i.test(msg);
+      res.status(missingTable ? 503 : 500).json({
+        error: missingTable
+          ? "Database table missing. From the project root run: npm run db:push"
+          : "Failed to save workspace palette",
+      });
     }
   });
 

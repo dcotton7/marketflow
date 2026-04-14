@@ -1,0 +1,10 @@
+/* Used when StartHerePage START_HERE_GRID_OVERLAP_ENABLED is true (e.g. future notes tiles). */
+/* Start Here grid: keep drag/resize above manual z-index stacking */
+.start-here-rgl .react-grid-item.react-draggable-dragging,
+.start-here-rgl .react-grid-item.resizing {
+  z-index: 220 !important;
+}
+
+.start-here-rgl .react-grid-placeholder {
+  z-index: 210 !important;
+}

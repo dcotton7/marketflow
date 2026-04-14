@@ -1,5 +1,13 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type PointerEvent,
+} from "react";
 import "react-grid-layout/css/styles.css";
+import "./start-here-rgl-overrides.css";
 import ReactGridLayout, { WidthProvider, type Layout } from "react-grid-layout/legacy";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -12,6 +20,7 @@ import {
 import { WatchlistPortalWidget } from "@/components/start-here/WatchlistPortalWidget";
 import { ChartPreviewWidget } from "@/components/start-here/ChartPreviewWidget";
 import { NewsPortalWidget } from "@/components/start-here/NewsPortalWidget";
+import { StartHereFlowWidget } from "@/components/start-here/StartHereFlowWidget";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,7 +55,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import {
-  paletteColorAt,
+  computeStartHereLayoutMins,
+  groupLinkAccent,
   startHereVisibleGridRowCount,
   START_HERE_RGL_CONTAINER_PADDING,
   START_HERE_RGL_MARGIN,
@@ -55,11 +65,36 @@ import {
 
 const GridLayoutWithWidth = WidthProvider(ReactGridLayout);
 
+type GridLayoutWithWidthProps = ComponentProps<typeof GridLayoutWithWidth>;
+type RglResizeStop = NonNullable<GridLayoutWithWidthProps["onResizeStop"]>;
+type RglDragStop = NonNullable<GridLayoutWithWidthProps["onDragStop"]>;
+type RglItemCallback = NonNullable<GridLayoutWithWidthProps["onDragStart"]>;
+
+/** Apply RGL's resize/drag result item onto the layout array (layout[] can disagree with newItem). */
+function mergeItemIntoLayout(layout: Layout, item: Layout[number]): Layout {
+  return layout.map((l) => {
+    if (l.i !== item.i) return l;
+    return {
+      ...l,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      ...(item.minW != null ? { minW: item.minW } : {}),
+      ...(item.minH != null ? { minH: item.minH } : {}),
+    };
+  }) as Layout;
+}
+
 const WIDGET_MENU: { type: StartHereWidgetType; label: string }[] = [
   { type: "watchlist", label: "Watchlist" },
-  { type: "chart", label: "Chart preview" },
+  { type: "chart", label: "Chart" },
   { type: "news", label: "News" },
+  { type: "flow", label: "Market Flow" },
 ];
+
+/** False: standard non-overlapping grid. Stacking helpers stay for a future notes/overlap mode. */
+const START_HERE_GRID_OVERLAP_ENABLED = false;
 
 function StartWorkspaceToolbar() {
   const {
@@ -125,7 +160,7 @@ function StartWorkspaceToolbar() {
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 gap-1 text-xs text-destructive hover:text-destructive"
+          className="h-8 gap-1 border-border bg-white text-xs text-destructive shadow-sm hover:bg-neutral-100 hover:text-destructive"
           disabled={!canDelete}
           onClick={() => setDeleteOpen(true)}
         >
@@ -140,6 +175,8 @@ function StartWorkspaceToolbar() {
             <DialogTitle>New workspace</DialogTitle>
           </DialogHeader>
           <Input
+            id="start-here-workspace-name-new"
+            name="startHereWorkspaceNameNew"
             className="start-here-no-drag"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
@@ -177,6 +214,8 @@ function StartWorkspaceToolbar() {
             Copies layout, widgets, watchlist picks, and news view settings from the current workspace.
           </p>
           <Input
+            id="start-here-workspace-name-dup"
+            name="startHereWorkspaceNameDup"
             className="start-here-no-drag"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
@@ -211,6 +250,8 @@ function StartWorkspaceToolbar() {
             <DialogTitle>Rename workspace</DialogTitle>
           </DialogHeader>
           <Input
+            id="start-here-workspace-name-rename"
+            name="startHereWorkspaceNameRename"
             className="start-here-no-drag"
             value={nameInput}
             onChange={(e) => setNameInput(e.target.value)}
@@ -253,8 +294,8 @@ function StartWorkspaceToolbar() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                deleteStart(activeStartId);
+              onClick={async () => {
+                await deleteStart(activeStartId);
                 setDeleteOpen(false);
               }}
             >
@@ -275,12 +316,32 @@ function StartHereGridHost() {
     dashboard,
     setLayout,
     addWidget,
+    addLinkedChartTriplet,
     removeInstance,
     resetDashboard,
     setGridViewportRowCapacity,
+    workspacePalette,
   } = useStartHere();
 
   const gridViewportRef = useRef<HTMLDivElement>(null);
+  const instancesRef = useRef(dashboard.instances);
+  instancesRef.current = dashboard.instances;
+
+  /** Manual stacking when tiles overlap (RGL merges child `style` onto `.react-grid-item`). */
+  const [stackBoostId, setStackBoostId] = useState<string | null>(null);
+  const [stackSeq, setStackSeq] = useState(0);
+  const bringTileToFront = useCallback((id: string) => {
+    setStackBoostId(id);
+    setStackSeq((s) => s + 1);
+  }, []);
+
+  /** True while user is dragging or resizing any tile — RGL can emit bogus w=12 for Flow on mount otherwise. */
+  const rglTrustRef = useRef(false);
+  const rglTrustClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** After any tile resize stop, RGL often sends onLayoutChange that re-expands w/h — clamp back until next resize or timeout. */
+  const tileResizeCommitRef = useRef<{ i: string; w: number; h: number } | null>(null);
+  const tileResizeCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useLayoutEffect(() => {
     const el = gridViewportRef.current;
@@ -301,16 +362,128 @@ function StartHereGridHost() {
     };
   }, [setGridViewportRowCapacity]);
 
+  useLayoutEffect(() => {
+    return () => {
+      if (rglTrustClearTimerRef.current != null) {
+        clearTimeout(rglTrustClearTimerRef.current);
+      }
+      if (tileResizeCommitTimerRef.current != null) {
+        clearTimeout(tileResizeCommitTimerRef.current);
+      }
+    };
+  }, []);
+
   const onLayoutChange = useCallback(
     (next: Layout) => {
-      setLayout(next);
+      if (rglTrustRef.current) {
+        setLayout(next, { trustRgl: true });
+        return;
+      }
+      const commit = tileResizeCommitRef.current;
+      if (commit) {
+        const live = next.find((l) => l.i === commit.i);
+        if (live && instancesRef.current[commit.i] && (live.w > commit.w || live.h > commit.h)) {
+          const meta = instancesRef.current[commit.i];
+          const { minW, minH } = computeStartHereLayoutMins(commit.w, commit.h, meta.type);
+          const fixed = next.map((l) =>
+            l.i === commit.i ? { ...live, w: commit.w, h: commit.h, minW, minH } : l
+          ) as Layout;
+          setLayout(fixed, { trustRgl: true });
+          return;
+        }
+      }
+      setLayout(next, { trustRgl: false });
     },
     [setLayout]
   );
 
+  const finishInteractionTrustWindow = useCallback(() => {
+    if (rglTrustClearTimerRef.current != null) {
+      clearTimeout(rglTrustClearTimerRef.current);
+    }
+    rglTrustRef.current = true;
+    rglTrustClearTimerRef.current = setTimeout(() => {
+      rglTrustRef.current = false;
+      rglTrustClearTimerRef.current = null;
+    }, 400);
+  }, []);
+
+  const onDragStart = useCallback<RglItemCallback>(
+    (_layout, _oldItem, newItem) => {
+      rglTrustRef.current = true;
+      if (START_HERE_GRID_OVERLAP_ENABLED && newItem?.i) bringTileToFront(newItem.i);
+    },
+    [bringTileToFront]
+  );
+
+  const onResizeStart = useCallback<RglItemCallback>(
+    (_layout, _oldItem, newItem) => {
+      rglTrustRef.current = true;
+      if (tileResizeCommitTimerRef.current != null) {
+        clearTimeout(tileResizeCommitTimerRef.current);
+        tileResizeCommitTimerRef.current = null;
+      }
+      tileResizeCommitRef.current = null;
+      if (START_HERE_GRID_OVERLAP_ENABLED && newItem?.i) bringTileToFront(newItem.i);
+    },
+    [bringTileToFront]
+  );
+
+  const onResizeStop = useCallback<RglResizeStop>(
+    (layout, _oldItem, newItem) => {
+      const merged = newItem ? mergeItemIntoLayout(layout, newItem) : layout;
+      if (newItem && instancesRef.current[newItem.i]) {
+        tileResizeCommitRef.current = { i: newItem.i, w: newItem.w, h: newItem.h };
+        if (tileResizeCommitTimerRef.current != null) {
+          clearTimeout(tileResizeCommitTimerRef.current);
+        }
+        tileResizeCommitTimerRef.current = setTimeout(() => {
+          tileResizeCommitRef.current = null;
+          tileResizeCommitTimerRef.current = null;
+        }, 1200);
+      }
+      setLayout(merged, { trustRgl: true });
+      finishInteractionTrustWindow();
+    },
+    [setLayout, finishInteractionTrustWindow]
+  );
+
+  const onDragStop = useCallback<RglDragStop>(
+    (layout, _oldItem, newItem) => {
+      const merged = newItem ? mergeItemIntoLayout(layout, newItem) : layout;
+      setLayout(merged, { trustRgl: true });
+      finishInteractionTrustWindow();
+    },
+    [setLayout, finishInteractionTrustWindow]
+  );
+
+  const onViewportPointerDownCapture = useCallback(
+    (e: PointerEvent<HTMLDivElement>) => {
+      if (!START_HERE_GRID_OVERLAP_ENABLED || !e.altKey) return;
+      const root = gridViewportRef.current;
+      if (!root?.contains(e.target as Node)) return;
+      const hits = document.elementsFromPoint(e.clientX, e.clientY);
+      const ids: string[] = [];
+      const seen = new Set<string>();
+      for (const el of hits) {
+        const node = (el as HTMLElement).closest?.("[data-sh-instance]");
+        if (!node || !root.contains(node)) continue;
+        const id = node.getAttribute("data-sh-instance");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+      }
+      if (ids.length >= 2) {
+        bringTileToFront(ids[ids.length - 1]!);
+        e.preventDefault();
+      }
+    },
+    [bringTileToFront]
+  );
+
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       style={{ backgroundColor: cssVariables.backgroundColor }}
     >
       <div
@@ -331,8 +504,9 @@ function StartHereGridHost() {
           className="hidden min-w-0 flex-1 text-pretty lg:inline"
           style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}
         >
-          Drag to move; resize from the corner. Layout does not auto-pack—leave empty space if you want.
-          Same color group = linked symbol. Each workspace keeps its own layout and widget settings.
+          Drag to move; resize from the corner. Layout does not auto-pack—leave empty space if you want. Tile
+          overlap (e.g. for notes) is off for now. Same color group = linked symbol. Each workspace keeps its own
+          layout and widget settings.
         </span>
         <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
           <DropdownMenu>
@@ -343,6 +517,9 @@ function StartHereGridHost() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={addLinkedChartTriplet}>
+                3 Linked Charts
+              </DropdownMenuItem>
               {WIDGET_MENU.map(({ type, label }) => (
                 <DropdownMenuItem key={type} onClick={() => addWidget(type)}>
                   {label}
@@ -356,18 +533,31 @@ function StartHereGridHost() {
         </div>
       </div>
 
-      <div ref={gridViewportRef} className="min-h-0 flex-1 overflow-auto p-2">
+      <div
+        ref={gridViewportRef}
+        className="min-h-0 min-w-0 flex-1 overflow-auto p-2"
+        onPointerDownCapture={
+          START_HERE_GRID_OVERLAP_ENABLED ? onViewportPointerDownCapture : undefined
+        }
+      >
         <GridLayoutWithWidth
-          className="min-h-[calc(100vh-8rem)]"
+          className="start-here-rgl min-h-[calc(100vh-8rem)] min-w-0 w-full"
           layout={dashboard.layout}
           cols={12}
+          measureBeforeMount
           rowHeight={START_HERE_RGL_ROW_HEIGHT}
           margin={START_HERE_RGL_MARGIN}
           containerPadding={START_HERE_RGL_CONTAINER_PADDING}
           onLayoutChange={onLayoutChange}
+          onDragStart={onDragStart}
+          onDragStop={onDragStop}
+          onResizeStart={onResizeStart}
+          onResizeStop={onResizeStop}
           draggableHandle=".start-here-drag-handle"
           draggableCancel=".start-here-no-drag"
           compactType={null}
+          allowOverlap={START_HERE_GRID_OVERLAP_ENABLED}
+          preventCollision={!START_HERE_GRID_OVERLAP_ENABLED}
           isResizable
           isDraggable
         >
@@ -381,10 +571,16 @@ function StartHereGridHost() {
               );
             }
             const g = dashboard.groups[meta.groupId];
-            const accentColor = g ? paletteColorAt(g.colorIndex) : undefined;
+            const accentColor = g ? groupLinkAccent(meta.groupId, workspacePalette, g).accentColor : undefined;
             const onClose = () => removeInstance(item.i);
+            const zBase = stackBoostId === item.i ? 100 + stackSeq : 1;
             return (
-              <div key={item.i} className="h-full overflow-hidden">
+              <div
+                key={item.i}
+                data-sh-instance={item.i}
+                className="h-full overflow-hidden"
+                style={START_HERE_GRID_OVERLAP_ENABLED ? { zIndex: zBase } : undefined}
+              >
                 {meta.type === "watchlist" && (
                   <WatchlistPortalWidget
                     key={`${activeStartId}-${item.i}-${meta.groupId}`}
@@ -417,6 +613,16 @@ function StartHereGridHost() {
                     onClose={onClose}
                   />
                 )}
+                {meta.type === "flow" && (
+                  <StartHereFlowWidget
+                    key={`${activeStartId}-${item.i}`}
+                    cssVariables={cssVariables}
+                    instanceId={item.i}
+                    groupId={meta.groupId}
+                    accentColor={accentColor}
+                    onClose={onClose}
+                  />
+                )}
               </div>
             );
           })}
@@ -439,7 +645,10 @@ export default function StartHerePage() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden" style={cssVariables as any}>
+    <div
+      className="flex min-w-0 h-screen flex-col overflow-hidden"
+      style={cssVariables as any}
+    >
       <SentinelHeader showSentiment={false} />
       <StartHereProvider key={user.id} userId={user.id}>
         <StartHereGridHost />

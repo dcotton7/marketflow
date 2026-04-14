@@ -36,7 +36,7 @@ export function NewsPortalWidget({
   onClose: () => void;
 }) {
   const { symbol, accentLabel } = useStartHereGroup(groupId);
-  const { activeStartId } = useStartHere();
+  const { activeStartId, queueWorkspaceRemoteSave, workspacePalette } = useStartHere();
   const sym = symbol.trim().toUpperCase();
   const modeStorageKey = startHereNewsModeStorageKey(
     userId,
@@ -62,6 +62,10 @@ export function NewsPortalWidget({
       /* ignore */
     }
   }, [modeStorageKey, mode]);
+
+  useEffect(() => {
+    queueWorkspaceRemoteSave();
+  }, [mode, queueWorkspaceRemoteSave]);
 
   const { data: tickerNews, isLoading: tickerLoading } = useQuery<NewsArticle[]>({
     queryKey: ["/api/news", "ticker", sym],
@@ -117,11 +121,12 @@ export function NewsPortalWidget({
       headerExtra={toggle}
       accentColor={accentColor}
       accentLabel={accentLabel}
+      neutralAccentColor={workspacePalette.unlinkedColor}
     >
       <div className="flex h-full min-h-0 flex-col">
         {mode === "ticker" && !sym ? (
           <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
-            Pick a ticker from a linked watchlist or enter one in Chart preview.
+            Pick a ticker from a linked watchlist or enter one in the Chart widget.
           </p>
         ) : loading ? (
           <div className="flex flex-1 items-center justify-center py-8">

@@ -65,7 +65,7 @@ router.get("/themes", async (req: Request, res: Response) => {
     const rotationBaseline = (req.query.rotationBaseline as string) || "";
     
     // Validate timeSlice
-    const validTimeSlices: TimeSlice[] = ["TODAY", "15M", "30M", "1H", "4H", "1D", "5D", "1W", "1M", "3M", "6M", "YTD"];
+    const validTimeSlices: TimeSlice[] = ["TODAY", "15M", "30M", "1H", "4H", "1D", "5D", "10D", "1W", "1M", "3M", "6M", "YTD"];
     const validatedTimeSlice: TimeSlice = validTimeSlices.includes(timeSlice) ? timeSlice : "TODAY";
     
     // Validate sizeFilter
@@ -141,6 +141,8 @@ router.get("/themes/:id", async (req: Request, res: Response) => {
 // Number of calendar days to fetch for each time slice (for historical bars)
 const TIME_SLICE_DAYS: Partial<Record<TimeSlice, number>> = {
   "1D": 4,   // Fetch 4 calendar days, use the 1st trading day back (yesterday)
+  "5D": 12,  // Fetch enough bars for ~5 trading days
+  "10D": 20, // Fetch enough bars for ~10 trading days
   "1W": 12,  // Fetch 12 calendar days, use the 5th trading day back
   "1M": 35,  // Fetch 35 calendar days, use the 21st trading day back
 };
@@ -151,6 +153,8 @@ const INTRADAY_TIME_SLICES: TimeSlice[] = ["15M", "30M", "1H", "4H"];
 // Number of trading days to look back for each time slice
 const TRADING_DAYS_BACK: Partial<Record<TimeSlice, number>> = {
   "1D": 1,
+  "5D": 5,
+  "10D": 10,
   "1W": 5,
   "1M": 21,
 };

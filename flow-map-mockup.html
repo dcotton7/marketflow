@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Map Mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --panel: #0f172a;
+      --panel-soft: #111827;
+      --border: #334155;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --green: 34, 197, 94;
+      --red: 239, 68, 68;
+      --slate: 148, 163, 184;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }
+
+    .wrap {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .top {
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-right: 6px;
+    }
+
+    .pill {
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .mode {
+      color: #93c5fd;
+      font-weight: 600;
+    }
+
+    .conf {
+      color: #facc15;
+      font-weight: 600;
+    }
+
+    .line {
+      width: 100%;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .btn {
+      cursor: pointer;
+      color: var(--text);
+      transition: 160ms ease background;
+    }
+
+    .btn:hover {
+      background: #1e293b;
+    }
+
+    .matrix {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 940px;
+    }
+
+    th, td {
+      border: 1px solid #1f2937;
+      padding: 9px 8px;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    th:first-child, td:first-child {
+      text-align: left;
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background: #0b1220;
+      font-weight: 600;
+    }
+
+    th {
+      background: #0b1220;
+      font-weight: 700;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .cell {
+      cursor: pointer;
+      transition: 140ms ease transform;
+    }
+
+    .cell:hover {
+      transform: translateY(-1px);
+      outline: 1px solid #64748b;
+    }
+
+    .diag {
+      color: #64748b;
+      background: rgba(var(--slate), 0.08);
+    }
+
+    .footer {
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+    }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel top">
+      <div class="title">Flow Map Mockup</div>
+      <div class="pill">Mode: <span id="modeLabel" class="mode">NOW</span></div>
+      <button id="toggleBtn" class="pill btn">Toggle NOW vs 30M</button>
+      <div class="pill">Confidence: <span class="conf">MEDIUM</span></div>
+      <div id="narrative" class="line">
+        Rotation out of SEMIS/AI_INFRA into QUANTUM/FIBER_OPTICAL.
+      </div>
+    </div>
+
+    <div class="panel matrix">
+      <table id="matrixTable"></table>
+    </div>
+
+    <div class="panel footer">
+      <div><strong>Focus Theme:</strong> <span id="focusTheme">QUANTUM</span></div>
+      <div class="small" id="topInflows"></div>
+      <div class="small" id="drivers"></div>
+      <div class="small mono" id="selectedPair"></div>
+    </div>
+  </div>
+
+  <script>
+    const THEMES = ["SEMIS", "AI_INFRA", "FIBER_OPTICAL", "QUANTUM", "ENERGY", "CRYPTO_EQ"];
+    const FLOWS = [
+      { from: "SEMIS", to: "QUANTUM", now: 0.42, prev: 0.25, rs: 0.21, breadth: 2.4, vol: 0.3 },
+      { from: "SEMIS", to: "FIBER_OPTICAL", now: 0.31, prev: 0.20, rs: 0.12, breadth: 1.6, vol: 0.2 },
+      { from: "AI_INFRA", to: "FIBER_OPTICAL", now: 0.35, prev: 0.19, rs: 0.18, breadth: 1.8, vol: 0.4 },
+      { from: "AI_INFRA", to: "QUANTUM", now: 0.28, prev: 0.14, rs: 0.14, breadth: 1.3, vol: 0.3 },
+      { from: "AI_INFRA", to: "SEMIS", now: -0.21, prev: -0.10, rs: -0.14, breadth: -1.1, vol: -0.2 },
+      { from: "SEMIS", to: "ENERGY", now: -0.10, prev: -0.06, rs: -0.08, breadth: -0.8, vol: -0.1 },
+      { from: "ENERGY", to: "SEMIS", now: 0.08, prev: 0.04, rs: 0.05, breadth: 0.7, vol: 0.1 },
+      { from: "CRYPTO_EQ", to: "QUANTUM", now: 0.16, prev: 0.07, rs: 0.10, breadth: 1.0, vol: 0.2 }
+    ];
+
+    let compareMode = false;
+    let focusTheme = "QUANTUM";
+    let selected = null;
+
+    function val(flow) {
+      return compareMode ? flow.now - flow.prev : flow.now;
+    }
+
+    function findFlow(from, to) {
+      return FLOWS.find((f) => f.from === from && f.to === to);
+    }
+
+    function fmt(num) {
+      return `${num >= 0 ? "+" : ""}${num.toFixed(2)}`;
+    }
+
+    function bgColor(v) {
+      const a = Math.min(Math.abs(v), 1);
+      if (v > 0.001) return `rgba(${getComputedStyle(document.documentElement).getPropertyValue("--green")}, ${0.12 + a * 0.42})`;
+      if (v < -0.001) return `rgba(${getComputedStyle(document.documentElement).getPropertyValue("--red")}, ${0.12 + a * 0.42})`;
+      return `rgba(${getComputedStyle(document.documentElement).getPropertyValue("--slate")}, 0.08)`;
+    }
+
+    function updateHeader() {
+      document.getElementById("modeLabel").textContent = compareMode ? "NOW vs 30M" : "NOW";
+      document.getElementById("narrative").textContent = compareMode
+        ? "Since 30M baseline: inflow into QUANTUM/FIBER_OPTICAL strengthened."
+        : "Rotation out of SEMIS/AI_INFRA into QUANTUM/FIBER_OPTICAL.";
+    }
+
+    function updateFocus() {
+      const inflows = FLOWS
+        .filter((f) => f.to === focusTheme)
+        .map((f) => ({ ...f, score: val(f) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+
+      document.getElementById("focusTheme").textContent = focusTheme;
+      document.getElementById("topInflows").textContent =
+        `Top inflows: ${inflows.map((f) => `${f.from} (${fmt(f.score)})`).join(", ") || "None"}`;
+      document.getElementById("drivers").textContent =
+        compareMode
+          ? "Interpretation: green = route strengthened vs baseline, red = weakened."
+          : "Drivers: RS up, breadth up, volume up.";
+
+      const selectedEl = document.getElementById("selectedPair");
+      if (selected) {
+        const f = findFlow(selected.from, selected.to);
+        selectedEl.textContent = f
+          ? `Selected ${selected.from} -> ${selected.to} | RSΔ ${fmt(f.rs)} | BreadthΔ ${fmt(f.breadth)} | VolΔ ${fmt(f.vol)}`
+          : `Selected ${selected.from} -> ${selected.to}`;
+      } else {
+        selectedEl.textContent = "Tip: click any cell to inspect pair drivers.";
+      }
+    }
+
+    function renderTable() {
+      const table = document.getElementById("matrixTable");
+      let html = "<tr><th>Source \\\\ Dest</th>";
+      for (const to of THEMES) html += `<th>${to}</th>`;
+      html += "</tr>";
+
+      for (const from of THEMES) {
+        html += `<tr><td data-focus='${from}' title='Focus ${from}'>${from}</td>`;
+        for (const to of THEMES) {
+          if (from === to) {
+            html += "<td class='diag'>--</td>";
+            continue;
+          }
+          const flow = findFlow(from, to);
+          const value = flow ? val(flow) : 0;
+          html += `<td class='cell' data-from='${from}' data-to='${to}' style='background:${bgColor(value)}'>${fmt(value)}</td>`;
+        }
+        html += "</tr>";
+      }
+
+      table.innerHTML = html;
+
+      table.querySelectorAll("td[data-focus]").forEach((td) => {
+        td.addEventListener("click", () => {
+          focusTheme = td.getAttribute("data-focus");
+          updateFocus();
+        });
+      });
+
+      table.querySelectorAll("td[data-from][data-to]").forEach((td) => {
+        td.addEventListener("click", () => {
+          selected = {
+            from: td.getAttribute("data-from"),
+            to: td.getAttribute("data-to")
+          };
+          focusTheme = selected.to;
+          updateFocus();
+        });
+      });
+    }
+
+    document.getElementById("toggleBtn").addEventListener("click", () => {
+      compareMode = !compareMode;
+      updateHeader();
+      renderTable();
+      updateFocus();
+    });
+
+    updateHeader();
+    renderTable();
+    updateFocus();
+  </script>
+</body>
+</html>

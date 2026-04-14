@@ -11,9 +11,12 @@ import {
   HeaderBar,
   ThemeHeatmapGrid,
   ThemeDetailPanel,
+  ThemeDetailPanelActionable,
   RotationTable,
   TickerWorkbench,
   ThemeRaceLanes,
+  FlowMapPanel,
+  FlowMapFocusBox,
 } from "@/components/market-condition";
 import { AnalysisPanel } from "@/features/marketflow-analysis";
 import {
@@ -30,7 +33,7 @@ import {
 } from "@/data/mockThemeData";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { useLocation } from "wouter";
-import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search, Car } from "lucide-react";
+import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search, Car, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,9 +76,10 @@ import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
 import { useChartPopout } from "@/hooks/useChartPopout";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import type { FlowMapFocusData } from "@/components/market-condition/FlowMapPanel";
 
 type ViewMode = "grid" | "table" | "split";
-type LensMode = "flow" | "rotation" | "concentration" | "accumulation" | "race";
+type LensMode = "flow" | "rotation" | "flowMap" | "concentration" | "accumulation" | "race";
 
 // Time slice label mapping
 const TIME_SLICE_LABELS: Record<TimeSlice, string> = {
@@ -83,7 +87,10 @@ const TIME_SLICE_LABELS: Record<TimeSlice, string> = {
   "15M": "15 Minutes",
   "30M": "30 Minutes",
   "1H": "1 Hour",
+  "4H": "4 Hours",
   "1D": "vs Yesterday",
+  "5D": "5 Days",
+  "10D": "10 Days",
   "1W": "1 Week",
   "1M": "1 Month",
   "3M": "3 Months",
@@ -182,7 +189,7 @@ function PanelHeader({ title, tooltip, subtitle, action }: { title: string; tool
           <p className="text-xs">{tooltip}</p>
         </TooltipContent>
       </Tooltip>
-      {action}
+      {action ? <div className="ml-auto flex items-center gap-2">{action}</div> : null}
     </div>
   );
 }
@@ -191,8 +198,8 @@ export default function MarketConditionPage() {
   const [, navigate] = useLocation();
   const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
-  const [lensMode, setLensMode] = useState<LensMode>("flow");
-  const timeSliceDisabledModes = new Set<LensMode>(["concentration", "accumulation", "race"]);
+  const [lensMode, setLensMode] = useState<LensMode>("flowMap");
+  const timeSliceDisabledModes = new Set<LensMode>(["flowMap", "concentration", "accumulation", "race"]);
   const handleLensMode = (mode: LensMode) => {
     if (timeSliceDisabledModes.has(mode) && timeSlice !== "TODAY") {
       setTimeSlice("TODAY");
@@ -224,6 +231,11 @@ export default function MarketConditionPage() {
   const [chartSyncEnabled, setChartSyncEnabled] = useState(false);
   const [analysisSyncEnabled, setAnalysisSyncEnabled] = useState(false);
   const [analysisSheetSymbol, setAnalysisSheetSymbol] = useState<string | null>(null);
+  const [flowMapFocusData, setFlowMapFocusData] = useState<FlowMapFocusData | null>(null);
+  const [flowMapCenterTab, setFlowMapCenterTab] = useState<"flowFocus" | "actionableDetails" | "legacyDetails">("flowFocus");
+  const [showFocusedPanel, setShowFocusedPanel] = useState(true);
+  const [showMembersPanel, setShowMembersPanel] = useState(true);
+  const [showRotationTablePanel, setShowRotationTablePanel] = useState(true);
   const { syncToMarketSurge } = useMarketSurgeSync();
   const { syncToChart } = useChartPopout();
 
@@ -242,6 +254,8 @@ export default function MarketConditionPage() {
   const { data: themeMembers, refetch: refetchMembers } = useThemeMembers(selectedTheme as ClusterId | null, timeSlice);
   const forceRefresh = useForceRefresh();
   const { toast } = useToast();
+  const splitPanelsHiddenCount =
+    (showFocusedPanel ? 0 : 1) + (showMembersPanel ? 0 : 1) + (showRotationTablePanel ? 0 : 1);
   
   // Force snapshot mutation (admin only)
   const forceSnapshotMutation = useMutation({
@@ -612,6 +626,308 @@ export default function MarketConditionPage() {
     />
   );
 
+  const renderSplitTopSection = () => (
+    <PanelGroup direction="horizontal" autoSaveId="market-condition-top">
+      <Panel defaultSize={45} minSize={25}>
+        <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+          <PanelHeader
+            title={lensMode === "race" ? "Theme race" : lensMode === "flowMap" ? "Theme Flow Map" : "Theme Heatmap"}
+            tooltip={
+              lensMode === "race"
+                ? "Theme race: scrub hourly or daily snapshot history, or use live data when history is empty. Click a lane to select a theme."
+                : lensMode === "flowMap"
+                  ? "Theme-to-theme flow matrix. Sort Theme/Strength/timeframes, set a global comp baseline, then click cells for route details."
+                  : "Visual grid of all 19 themes. Color = FlowScore (green=strong, red=weak). Click to select. Drag edges to resize panels."
+            }
+            subtitle={lensMode === "race" || lensMode === "flowMap" ? undefined : comparisonTimeLabel || undefined}
+            action={
+              <div className="flex items-center gap-2">
+                {(lensMode === "flow" || lensMode === "rotation") && (
+                  <div className="flex items-center gap-1.5" style={{ marginRight: "100px", marginLeft: "16px" }}>
+                    <span className={cn(
+                      "text-[15px] select-none font-medium px-3",
+                      timeSlice === "TODAY" ? "text-green-400" : "text-purple-300"
+                    )}>
+                      {timeSlice === "TODAY"
+                        ? (pollingStatus?.marketSession === "MARKET_HOURS" ? "LIVE" : pollingStatus?.marketSession === "AFTER_HOURS" ? "After Hours" : "Closed")
+                        : `${timeSlice} Sort:`}
+                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => setHeatmapSort("current")}
+                          className={cn(
+                            "text-[15px] font-medium px-2 py-0.5 rounded transition-colors",
+                            heatmapSort === "current"
+                              ? "bg-green-500/20 text-green-400 border border-green-500/40"
+                              : "text-slate-500 hover:text-slate-300"
+                          )}
+                        >
+                          {lensMode === "rotation" && timeSlice === "TODAY"
+                            ? "Today (vs 9:30am open)"
+                            : (lastMarketDateLabel ?? "Today")}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs">
+                        {lensMode === "flow"
+                          ? "Sort by today's live ThemeScore"
+                          : timeSlice === "TODAY"
+                            ? "Sort by rank position change (Δ Rank) vs 9:30am open"
+                            : "Sort by rank position change (Δ Rank)"}
+                      </TooltipContent>
+                    </Tooltip>
+                    {timeSlice !== "TODAY" && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => {
+                              if (canUseHistoricalComparison) setHeatmapSort("historical");
+                            }}
+                            className={cn(
+                              "text-[15px] font-medium px-2 py-0.5 rounded transition-colors",
+                              !canUseHistoricalComparison && "opacity-40 cursor-not-allowed",
+                              heatmapSort === "historical"
+                                ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                                : "text-slate-500 hover:text-slate-300"
+                            )}
+                          >
+                            {marketCondition?.comparisonTime
+                              ? (() => {
+                                  const d = new Date(marketCondition.comparisonTime!);
+                                  const isSubDay = timeSlice === "15M" || timeSlice === "30M" || timeSlice === "1H";
+                                  return isSubDay
+                                    ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+                                    : `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+                                })()
+                              : timeSlice}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs">
+                          {!canUseHistoricalComparison
+                            ? `No ${timeSlice} baseline available yet`
+                            : (lensMode === "flow"
+                              ? `Sort by ThemeScore as of ${TIME_SLICE_LABELS[timeSlice]}`
+                              : `Sort by score improvement since ${TIME_SLICE_LABELS[timeSlice]}`)}
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                )}
+                {userInfo?.isAdmin && isComparisonStale && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 px-1.5 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
+                        onClick={() => forceSnapshotMutation.mutate()}
+                        disabled={forceSnapshotMutation.isPending}
+                      >
+                        <RefreshCw className={cn("w-3 h-3", forceSnapshotMutation.isPending && "animate-spin")} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Force save snapshot (admin)</TooltipContent>
+                  </Tooltip>
+                )}
+                {lensMode === "race" && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-200"
+                        onClick={() => setIsRacePopoutOpen(true)}
+                      >
+                        <Maximize2 className="mr-1 h-3.5 w-3.5" />
+                        Expand
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Open Theme Race in a resizable pop-out</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+            }
+          />
+          <div className="flex-1 overflow-auto min-h-0">
+            {lensMode === "race" ? (
+              renderThemeRaceLanes()
+            ) : lensMode === "flowMap" ? (
+              <FlowMapPanel
+                selectedTheme={selectedTheme}
+                onThemeSelect={handleThemeSelect}
+                sizeFilter={sizeFilter}
+                onFocusDataChange={setFlowMapFocusData}
+              />
+            ) : (
+              <ThemeHeatmapGrid
+                themes={sortedThemes}
+                selectedTheme={selectedTheme}
+                onThemeSelect={handleThemeSelect}
+                totalThemes={themes.length}
+                timeSlice={timeSlice}
+              />
+            )}
+          </div>
+        </div>
+      </Panel>
+
+      {showFocusedPanel && (
+        <>
+          <ResizeHandle direction="vertical" />
+          <Panel defaultSize={showMembersPanel ? 35 : 45} minSize={20}>
+            <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+              <PanelHeader
+                title={lensMode === "flowMap" ? "Focused Theme" : "Theme Details"}
+                tooltip={
+                  lensMode === "flowMap"
+                    ? "Focused flow box: top inflow/outflow routes and selected route driver breakdown."
+                    : "Deep metrics for selected theme: Score breakdown, Rotation Delta, Leader Concentration, Signals. This is your decision context."
+                }
+                action={
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
+                        onClick={() => setShowFocusedPanel(false)}
+                      >
+                        <EyeOff className="mr-1 h-3.5 w-3.5" />
+                        Hide
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Hide Focused Theme panel</TooltipContent>
+                  </Tooltip>
+                }
+              />
+              <div className="flex-1 overflow-auto">
+                {lensMode === "flowMap" ? (
+                  <div className="flex h-full min-h-0 flex-col">
+                    <div className="border-b border-slate-700/40 px-2 py-1.5">
+                      <div className="inline-flex items-center rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
+                        <button
+                          className={cn(
+                            "rounded px-2.5 py-1 text-[11px] font-medium",
+                            flowMapCenterTab === "flowFocus"
+                              ? "bg-cyan-500/20 text-cyan-200"
+                              : "text-slate-300 hover:text-slate-100"
+                          )}
+                          onClick={() => setFlowMapCenterTab("flowFocus")}
+                        >
+                          Flow Focus
+                        </button>
+                        <button
+                          className={cn(
+                            "rounded px-2.5 py-1 text-[11px] font-medium",
+                            flowMapCenterTab === "actionableDetails"
+                              ? "bg-cyan-500/20 text-cyan-200"
+                              : "text-slate-300 hover:text-slate-100"
+                          )}
+                          onClick={() => setFlowMapCenterTab("actionableDetails")}
+                        >
+                          Actionable Details
+                        </button>
+                        <button
+                          className={cn(
+                            "rounded px-2.5 py-1 text-[11px] font-medium",
+                            flowMapCenterTab === "legacyDetails"
+                              ? "bg-cyan-500/20 text-cyan-200"
+                              : "text-slate-300 hover:text-slate-100"
+                          )}
+                          onClick={() => setFlowMapCenterTab("legacyDetails")}
+                        >
+                          Legacy Details
+                        </button>
+                      </div>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      {flowMapCenterTab === "flowFocus" ? (
+                        <FlowMapFocusBox data={flowMapFocusData} />
+                      ) : flowMapCenterTab === "actionableDetails" ? (
+                        <ThemeDetailPanelActionable
+                          theme={selectedThemeData}
+                          members={selectedThemeTickers}
+                          totalThemes={themes.length}
+                          accDistStats={themeMembers?.accDistStats}
+                          timeSlice={timeSlice}
+                        />
+                      ) : (
+                        <ThemeDetailPanel
+                          theme={selectedThemeData}
+                          members={selectedThemeTickers}
+                          totalThemes={themes.length}
+                          accDistStats={themeMembers?.accDistStats}
+                          timeSlice={timeSlice}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <ThemeDetailPanel 
+                    theme={selectedThemeData} 
+                    members={selectedThemeTickers}
+                    totalThemes={themes.length}
+                    accDistStats={themeMembers?.accDistStats}
+                    timeSlice={timeSlice}
+                  />
+                )}
+              </div>
+            </div>
+          </Panel>
+        </>
+      )}
+
+      {showMembersPanel && (
+        <>
+          <ResizeHandle direction="vertical" />
+          <Panel defaultSize={showFocusedPanel ? 20 : 28} minSize={15}>
+            <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+              <PanelHeader
+                title="Theme Members"
+                tooltip="Individual stocks in the selected theme. Sorted by LeaderScore. Click ticker to open chart. Green dot = strong leader."
+                action={
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
+                        onClick={() => setShowMembersPanel(false)}
+                      >
+                        <EyeOff className="mr-1 h-3.5 w-3.5" />
+                        Hide
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Hide Theme Members panel</TooltipContent>
+                  </Tooltip>
+                }
+              />
+              <div className="flex-1 overflow-auto">
+                <TickerWorkbench
+                  themeId={selectedTheme}
+                  themeName={selectedThemeData?.name || null}
+                  tickers={selectedThemeTickers}
+                  onTickerSelect={handleTickerSelect}
+                  onTickersAdded={handleTickersAdded}
+                  isAdmin={userInfo?.isAdmin ?? false}
+                  highlightedTicker={highlightedTicker}
+                  timeSlice={timeSlice}
+                  msSyncEnabled={msSyncEnabled}
+                  onMsSyncToggle={() => setMsSyncEnabled(!msSyncEnabled)}
+                  chartSyncEnabled={chartSyncEnabled}
+                  onChartSyncToggle={() => setChartSyncEnabled(!chartSyncEnabled)}
+                  analysisSyncEnabled={analysisSyncEnabled}
+                  onAnalysisSyncToggle={() => setAnalysisSyncEnabled(!analysisSyncEnabled)}
+                  onOpenAnalysis={(symbol) => setAnalysisSheetSymbol(symbol)}
+                />
+              </div>
+            </div>
+          </Panel>
+        </>
+      )}
+    </PanelGroup>
+  );
+
   return (
     <div className={cn("h-screen flex flex-col bg-slate-950", isFullscreen && "fixed inset-0 z-50")}>
       {/* Main App Navigation */}
@@ -773,6 +1089,28 @@ export default function MarketConditionPage() {
                   size="sm"
                   className={cn(
                     "h-7 px-3 text-xs gap-1.5",
+                    lensMode === "flowMap" && "bg-slate-700 text-cyan-300"
+                  )}
+                  onClick={() => handleLensMode("flowMap")}
+                >
+                  <LayoutGrid className="w-3 h-3" />
+                  FLOW MAP
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p className="font-semibold">Flow Map Lens</p>
+                <p className="text-xs">
+                  Theme-to-theme rotation matrix with sortable timeframe columns, route scoring, and comp-vs timeframe baseline.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 px-3 text-xs gap-1.5",
                     lensMode === "rotation" && "bg-slate-700 text-purple-400"
                   )}
                   onClick={() => handleLensMode("rotation")}
@@ -854,15 +1192,15 @@ export default function MarketConditionPage() {
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild disabled={lensMode === "race"}>
+                <DropdownMenuTrigger asChild disabled={lensMode === "race" || lensMode === "flowMap"}>
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={lensMode === "race"}
+                    disabled={lensMode === "race" || lensMode === "flowMap"}
                     className={cn(
                       "h-7 px-3 text-xs gap-1.5 border-slate-600/50 bg-slate-800/30",
                       accDistFilter !== null && "bg-green-500/20 border-green-500/40 text-green-300",
-                      lensMode === "race" && "opacity-40 cursor-not-allowed"
+                      (lensMode === "race" || lensMode === "flowMap") && "opacity-40 cursor-not-allowed"
                     )}
                   >
                     <Filter className="w-3 h-3" />
@@ -872,8 +1210,8 @@ export default function MarketConditionPage() {
                 </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent>
-                {lensMode === "race" 
-                  ? "Not available in Race mode"
+                {lensMode === "race" || lensMode === "flowMap"
+                  ? "Not available in this mode"
                   : "Filter themes by accumulation/distribution streak"}
               </TooltipContent>
             </Tooltip>
@@ -918,8 +1256,10 @@ export default function MarketConditionPage() {
                   <>
                     <p className="font-semibold">Not available in this mode</p>
                     <p className="text-xs">
-                      {lensMode === "race" 
+                      {lensMode === "race"
                         ? "Race mode has its own timeline controls below the visualization."
+                        : lensMode === "flowMap"
+                          ? "Flow Map has built-in matrix controls and snapshot comparators."
                         : "Concentration and A/D data are not stored historically. Switch to Flow or Rotation to use time slices."}
                     </p>
                   </>
@@ -1080,6 +1420,59 @@ export default function MarketConditionPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {viewMode === "split" && splitPanelsHiddenCount > 0 && (
+            <div className="flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-800/40 px-2 py-1">
+              <span className="px-1 text-[11px] text-slate-400">Show:</span>
+              {!showFocusedPanel && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-xs text-slate-200 hover:bg-slate-700"
+                  onClick={() => setShowFocusedPanel(true)}
+                >
+                  <Eye className="h-3 w-3" />
+                  Focused Theme
+                </Button>
+              )}
+              {!showMembersPanel && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-xs text-slate-200 hover:bg-slate-700"
+                  onClick={() => setShowMembersPanel(true)}
+                >
+                  <Eye className="h-3 w-3" />
+                  Theme Members
+                </Button>
+              )}
+              {!showRotationTablePanel && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-xs text-slate-200 hover:bg-slate-700"
+                  onClick={() => setShowRotationTablePanel(true)}
+                >
+                  <Eye className="h-3 w-3" />
+                  Rotation Table
+                </Button>
+              )}
+              {splitPanelsHiddenCount > 1 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-200"
+                  onClick={() => {
+                    setShowFocusedPanel(true);
+                    setShowMembersPanel(true);
+                    setShowRotationTablePanel(true);
+                  }}
+                >
+                  Show All
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* View Mode Toggle */}
           <div className="flex items-center bg-slate-800/50 rounded-lg p-0.5">
             <Tooltip>
@@ -1165,225 +1558,66 @@ export default function MarketConditionPage() {
       {/* Main Content */}
       <div className="flex-1 overflow-hidden p-2">
         {viewMode === "split" ? (
-          <PanelGroup
-            direction="vertical"
-            className="h-full"
-            autoSaveId="market-condition-layout"
-          >
-            {/* Top Section - Heatmap, Details, Members */}
-            <Panel defaultSize={65} minSize={30}>
-              <PanelGroup direction="horizontal" autoSaveId="market-condition-top">
-                {/* Heatmap Panel */}
-                <Panel defaultSize={45} minSize={25}>
-                  <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
-                    <PanelHeader
-                      title={lensMode === "race" ? "Theme race" : "Theme Heatmap"}
-                      tooltip={
-                        lensMode === "race"
-                          ? "Theme race: scrub hourly or daily snapshot history, or use live data when history is empty. Click a lane to select a theme."
-                          : "Visual grid of all 19 themes. Color = FlowScore (green=strong, red=weak). Click to select. Drag edges to resize panels."
-                      }
-                      subtitle={lensMode === "race" ? undefined : comparisonTimeLabel || undefined}
-                      action={
-                        <div className="flex items-center gap-2">
-                          {/* Sort toggle — shown in Flow and Rotation modes */}
-                          {(lensMode === "flow" || lensMode === "rotation") && (
-                            <div className="flex items-center gap-1.5" style={{ marginRight: "100px", marginLeft: "16px" }}>
-                              <span className={cn(
-                                "text-[15px] select-none font-medium px-3",
-                                timeSlice === "TODAY" ? "text-green-400" : "text-purple-300"
-                              )}>
-                                {timeSlice === "TODAY"
-                                  ? (pollingStatus?.marketSession === "MARKET_HOURS" ? "LIVE" : pollingStatus?.marketSession === "AFTER_HOURS" ? "After Hours" : "Closed")
-                                  : `${timeSlice} Sort:`}
-                              </span>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    onClick={() => setHeatmapSort("current")}
-                                    className={cn(
-                                      "text-[15px] font-medium px-2 py-0.5 rounded transition-colors",
-                                      heatmapSort === "current"
-                                        ? "bg-green-500/20 text-green-400 border border-green-500/40"
-                                        : "text-slate-500 hover:text-slate-300"
-                                    )}
-                                  >
-                                    {lensMode === "rotation" && timeSlice === "TODAY"
-                                      ? "Today (vs 9:30am open)"
-                                      : (lastMarketDateLabel ?? "Today")}
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent className="text-xs">
-                                  {lensMode === "flow"
-                                    ? "Sort by today's live ThemeScore"
-                                    : timeSlice === "TODAY"
-                                      ? "Sort by rank position change (Δ Rank) vs 9:30am open"
-                                      : "Sort by rank position change (Δ Rank)"}
-                                </TooltipContent>
-                              </Tooltip>
-                              {timeSlice !== "TODAY" && (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      onClick={() => {
-                                        if (canUseHistoricalComparison) setHeatmapSort("historical");
-                                      }}
-                                      className={cn(
-                                        "text-[15px] font-medium px-2 py-0.5 rounded transition-colors",
-                                        !canUseHistoricalComparison && "opacity-40 cursor-not-allowed",
-                                        heatmapSort === "historical"
-                                          ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
-                                          : "text-slate-500 hover:text-slate-300"
-                                      )}
-                                    >
-                                      {marketCondition?.comparisonTime
-                                        ? (() => {
-                                            const d = new Date(marketCondition.comparisonTime!);
-                                            const isSubDay = timeSlice === "15M" || timeSlice === "30M" || timeSlice === "1H";
-                                            return isSubDay
-                                              ? d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
-                                              : `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
-                                          })()
-                                        : timeSlice}
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-xs">
-                                    {!canUseHistoricalComparison
-                                      ? `No ${timeSlice} baseline available yet`
-                                      : (lensMode === "flow"
-                                        ? `Sort by ThemeScore as of ${TIME_SLICE_LABELS[timeSlice]}`
-                                        : `Sort by score improvement since ${TIME_SLICE_LABELS[timeSlice]}`)}
-                                  </TooltipContent>
-                                </Tooltip>
-                              )}
-                            </div>
-                          )}
-                          {userInfo?.isAdmin && isComparisonStale && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 px-1.5 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10"
-                                  onClick={() => forceSnapshotMutation.mutate()}
-                                  disabled={forceSnapshotMutation.isPending}
-                                >
-                                  <RefreshCw className={cn("w-3 h-3", forceSnapshotMutation.isPending && "animate-spin")} />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Force save snapshot (admin)</TooltipContent>
-                            </Tooltip>
-                          )}
-                          {lensMode === "race" && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-200"
-                                  onClick={() => setIsRacePopoutOpen(true)}
-                                >
-                                  <Maximize2 className="mr-1 h-3.5 w-3.5" />
-                                  Expand
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Open Theme Race in a resizable pop-out</TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
-                      }
-                    />
-                    <div className="flex-1 overflow-auto min-h-0">
-                      {lensMode === "race" ? (
-                        renderThemeRaceLanes()
-                      ) : (
-                        <ThemeHeatmapGrid
-                          themes={sortedThemes}
-                          selectedTheme={selectedTheme}
-                          onThemeSelect={handleThemeSelect}
-                          totalThemes={themes.length}
-                          timeSlice={timeSlice}
-                        />
-                      )}
-                    </div>
-                  </div>
-                </Panel>
+          showRotationTablePanel ? (
+            <PanelGroup
+              direction="vertical"
+              className="h-full"
+              autoSaveId="market-condition-layout"
+            >
+              <Panel defaultSize={65} minSize={30}>
+                {renderSplitTopSection()}
+              </Panel>
 
-                <ResizeHandle direction="vertical" />
+              <ResizeHandle direction="horizontal" />
 
-                {/* Details Panel */}
-                <Panel defaultSize={35} minSize={20}>
-                  <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
-                    <PanelHeader
-                      title="Theme Details"
-                      tooltip="Deep metrics for selected theme: Score breakdown, Rotation Delta, Leader Concentration, Signals. This is your decision context."
-                    />
-                    <div className="flex-1 overflow-auto">
-                      <ThemeDetailPanel 
-                        theme={selectedThemeData} 
-                        members={selectedThemeTickers}
-                        totalThemes={themes.length}
-                        accDistStats={themeMembers?.accDistStats}
-                        timeSlice={timeSlice}
-                      />
-                    </div>
-                  </div>
-                </Panel>
-
-                <ResizeHandle direction="vertical" />
-
-                {/* Members Panel */}
-                <Panel defaultSize={20} minSize={15}>
-                  <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
-                    <PanelHeader
-                      title="Theme Members"
-                      tooltip="Individual stocks in the selected theme. Sorted by LeaderScore. Click ticker to open chart. Green dot = strong leader."
-                    />
-                    <div className="flex-1 overflow-auto">
-                      <TickerWorkbench
-                        themeId={selectedTheme}
-                        themeName={selectedThemeData?.name || null}
-                        tickers={selectedThemeTickers}
-                        onTickerSelect={handleTickerSelect}
-                        onTickersAdded={handleTickersAdded}
-                        isAdmin={userInfo?.isAdmin ?? false}
-                        highlightedTicker={highlightedTicker}
-                        timeSlice={timeSlice}
-                        msSyncEnabled={msSyncEnabled}
-                        onMsSyncToggle={() => setMsSyncEnabled(!msSyncEnabled)}
-                        chartSyncEnabled={chartSyncEnabled}
-                        onChartSyncToggle={() => setChartSyncEnabled(!chartSyncEnabled)}
-                        analysisSyncEnabled={analysisSyncEnabled}
-                        onAnalysisSyncToggle={() => setAnalysisSyncEnabled(!analysisSyncEnabled)}
-                        onOpenAnalysis={(symbol) => setAnalysisSheetSymbol(symbol)}
-                      />
-                    </div>
-                  </div>
-                </Panel>
-              </PanelGroup>
-            </Panel>
-
-            <ResizeHandle direction="horizontal" />
-
-            {/* Bottom Section - Rotation Table */}
-            <Panel defaultSize={35} minSize={20}>
-              <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
-                <PanelHeader
-                  title="Rotation Table"
-                  tooltip="Full metrics table. Click column headers to sort. Δ Rank shows position change - this is rotation velocity. What institutions chase."
-                />
-                <div className="flex-1 overflow-auto">
-                  <RotationTable
-                    themes={sortedThemes}
-                    selectedTheme={selectedTheme}
-                    onThemeSelect={handleThemeSelect}
-                    lensMode={lensMode}
-                    timeSlice={timeSlice}
+              <Panel defaultSize={35} minSize={20}>
+                <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+                  <PanelHeader
+                    title="Rotation Table"
+                    tooltip="Full metrics table. Click column headers to sort. Δ Rank shows position change - this is rotation velocity. What institutions chase."
+                    action={
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
+                            onClick={() => setShowRotationTablePanel(false)}
+                          >
+                            <EyeOff className="mr-1 h-3.5 w-3.5" />
+                            Hide
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Hide Rotation Table panel</TooltipContent>
+                      </Tooltip>
+                    }
                   />
+                  <div className="flex-1 overflow-auto">
+                    <RotationTable
+                      themes={sortedThemes}
+                      selectedTheme={selectedTheme}
+                      onThemeSelect={handleThemeSelect}
+                      lensMode={lensMode}
+                      timeSlice={timeSlice}
+                    />
+                  </div>
                 </div>
-              </div>
-            </Panel>
-          </PanelGroup>
+              </Panel>
+            </PanelGroup>
+          ) : (
+            <div className="h-full">
+              {renderSplitTopSection()}
+            </div>
+          )
+        ) : lensMode === "flowMap" ? (
+          <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden">
+            <FlowMapPanel
+              selectedTheme={selectedTheme}
+              onThemeSelect={handleThemeSelect}
+              sizeFilter={sizeFilter}
+              onFocusDataChange={setFlowMapFocusData}
+            />
+          </div>
         ) : viewMode === "grid" ? (
           <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-auto">
             <ThemeHeatmapGrid

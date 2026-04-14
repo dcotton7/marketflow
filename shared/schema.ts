@@ -1,7 +1,9 @@
+import { sql } from "drizzle-orm";
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision, varchar, decimal, bigint, date, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AlertDeliveryConfig, AlertEvaluationConfig, AlertRuleGroup, AlertTargetScope } from "./alerts";
+import type { StartHereWorkspacePalette } from "./startHereWorkspacePalette";
 
 // === TABLE DEFINITIONS ===
 
@@ -170,6 +172,8 @@ export const sentinelUsers = pgTable("sentinel_users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  /** When false, login and API access are denied (sessions cleared). */
+  isActive: boolean("is_active").default(true).notNull(),
   accountSize: doublePrecision("account_size").default(100000), // Default $100k
   isAdmin: boolean("is_admin").default(false),
   tier: text("tier").default("free").notNull(), // "free" | "premium" | "pro" | "admin"
@@ -181,6 +185,40 @@ export const sentinelUsers = pgTable("sentinel_users", {
   riskProfileSkippedAt: timestamp("risk_profile_skipped_at"), // When user last skipped the setup modal
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+/** Start Here page: grid layouts + widget prefs, synced across browsers for the same user. */
+export const startHereWorkspaces = pgTable(
+  "start_here_workspaces",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => sentinelUsers.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").notNull(),
+    name: text("name").notNull(),
+    dashboard: jsonb("dashboard").notNull(),
+    extras: jsonb("extras")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => ({
+    userWorkspaceUnique: unique().on(table.userId, table.workspaceId),
+  })
+);
+
+/** Which Start workspace is selected (per Sentinel user). */
+export const startHereUserState = pgTable("start_here_user_state", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => sentinelUsers.id, { onDelete: "cascade" }),
+  activeWorkspaceId: text("active_workspace_id"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type StartHereWorkspaceRow = typeof startHereWorkspaces.$inferSelect;
+export type StartHereUserStateRow = typeof startHereUserState.$inferSelect;
 
 export const sentinelTrades = pgTable("sentinel_trades", {
   id: serial("id").primaryKey(),
@@ -257,6 +295,7 @@ export const watchlists = pgTable("watchlists", {
   userId: integer("user_id").notNull(),
   name: text("name").notNull(),
   isDefault: boolean("is_default").default(false),
+  isPortfolio: boolean("is_portfolio").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -699,6 +738,15 @@ export const sentinelSystemSettings = pgTable("sentinel_system_settings", {
 export const insertSentinelSystemSettingsSchema = createInsertSchema(sentinelSystemSettings).omit({ id: true, createdAt: true, updatedAt: true });
 export type SentinelSystemSettings = typeof sentinelSystemSettings.$inferSelect;
 export type InsertSentinelSystemSettings = z.infer<typeof insertSentinelSystemSettingsSchema>;
+
+/** Global admin-managed palette for Start Here link lanes + unlinked accent (single row). */
+export const startHereWorkspacePaletteSettings = pgTable("start_here_workspace_palette", {
+  id: serial("id").primaryKey(),
+  palette: jsonb("palette").$type<StartHereWorkspacePalette>().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type StartHereWorkspacePaletteRow = typeof startHereWorkspacePaletteSettings.$inferSelect;
 
 // Order Levels - Multiple stops and profit targets per trade (1-to-many)
 export const sentinelOrderLevels = pgTable("sentinel_order_levels", {
