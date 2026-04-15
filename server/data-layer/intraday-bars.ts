@@ -9,13 +9,25 @@
  * - The trailing bars are refreshed from Alpaca on live requests
  * - The current last bar is still snapshot-patched between bar closes
  * 
+ * Cache key is symbol+interval only; RTH vs ETH is derived in-memory (one Alpaca pull per key).
  * Memory Budget: ~100MB for 50 hot tickers × 3 timeframes
  */
 
+import { isUsEquityRegularSessionEt } from "../../shared/nyRegularSession";
 import { getAlpacaIntradayData } from "../alpaca";
 import { getTickerSnapshot } from "../market-condition/engine/snapshot";
 import { getMarketSession } from "../market-condition/universe";
 import { IntradayBar } from "./types";
+
+/** Alpaca returns the same SIP payload regardless of ETH; we always cache the full series and filter for RTH views. */
+const ALPACA_INTRADAY_ALWAYS_EXTENDED = true;
+
+function filterBarsToRegularSession(bars: IntradayBar[]): IntradayBar[] {
+  return bars.filter((b) => {
+    const sec = Math.floor(new Date(b.timestamp).getTime() / 1000);
+    return isUsEquityRegularSessionEt(sec);
+  });
+}
 
 interface IntradayCacheValue {
   bars: IntradayBar[];
@@ -173,7 +185,6 @@ async function fetchFreshTailBars(
   interval: string,
   startDate: Date,
   endDate: Date,
-  includeExtendedHours: boolean,
   cachedBars: IntradayBar[]
 ): Promise<IntradayBar[]> {
   const intervalMs = parseIntervalMs(interval);
@@ -191,7 +202,7 @@ async function fetchFreshTailBars(
     tailStart,
     endDate,
     interval,
-    includeExtendedHours
+    ALPACA_INTRADAY_ALWAYS_EXTENDED
   );
 
   return normalizeBars(freshTail);
@@ -215,7 +226,12 @@ export async function getIntradayBars(
   includeExtendedHours: boolean = false
 ): Promise<IntradayBar[]> {
   const upperSymbol = symbol.toUpperCase();
-  const cacheKey = `${upperSymbol}:${interval}:${includeExtendedHours}`;
+  const cacheKey = `${upperSymbol}:${interval}`;
+
+  const applyEthMode = (fullBars: IntradayBar[]) => {
+    const merged = mergeCurrentBar(fullBars, upperSymbol, interval);
+    return includeExtendedHours ? merged : filterBarsToRegularSession(merged);
+  };
   
   const cached = intradayCache.get(cacheKey);
   const ttlMs = getTTLMs();
@@ -226,7 +242,7 @@ export async function getIntradayBars(
     
     if (ageMs < ttlMs) {
       if (!shouldRefreshTail()) {
-        return mergeCurrentBar([...cached.bars], upperSymbol, interval);
+        return applyEthMode([...cached.bars]);
       }
 
       try {
@@ -235,7 +251,6 @@ export async function getIntradayBars(
           interval,
           startDate,
           endDate,
-          includeExtendedHours,
           cached.bars
         );
 
@@ -246,7 +261,7 @@ export async function getIntradayBars(
             bars: mergedBars,
             lastTailRefreshAt: now,
           });
-          return mergeCurrentBar([...mergedBars], upperSymbol, interval);
+          return applyEthMode([...mergedBars]);
         }
       } catch (error) {
         console.warn(
@@ -255,7 +270,7 @@ export async function getIntradayBars(
         );
       }
 
-      return mergeCurrentBar([...cached.bars], upperSymbol, interval);
+      return applyEthMode([...cached.bars]);
     }
   }
 
@@ -265,7 +280,7 @@ export async function getIntradayBars(
       startDate,
       endDate,
       interval,
-      includeExtendedHours
+      ALPACA_INTRADAY_ALWAYS_EXTENDED
     );
 
     const bars = normalizeBars(alpacaBars);
@@ -279,7 +294,7 @@ export async function getIntradayBars(
       interval,
     });
 
-    return mergeCurrentBar(bars, upperSymbol, interval);
+    return applyEthMode([...bars]);
   } catch (error) {
     console.error(
       `[DataLayer] getIntradayBars error for ${symbol} ${interval}:`,
@@ -288,7 +303,7 @@ export async function getIntradayBars(
 
     if (cached) {
       console.log(`[DataLayer] Returning stale cache for ${symbol} ${interval}`);
-      return mergeCurrentBar([...cached.bars], upperSymbol, interval);
+      return applyEthMode([...cached.bars]);
     }
 
     return [];

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useSearch, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useSentinelDailyChartData, useSentinelIntradayChartData } from "@/hooks/use-sentinel-chart-data";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
@@ -8,7 +9,7 @@ import { useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddTo
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
-import { DualChartGrid, ChartDataResponse, ChartMetrics } from "@/components/DualChartGrid";
+import { DualChartGrid, ChartMetrics } from "@/components/DualChartGrid";
 import { AskIvyOverlay } from "@/components/AskIvyOverlay";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { Input } from "@/components/ui/input";
@@ -36,7 +37,21 @@ export default function SentinelChartsPage() {
   const [tickerInput, setTickerInput] = useState(initialSymbol);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol.toUpperCase());
   const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
-  const [showETH, setShowETH] = useState(false);
+  const [showETH, setShowETHState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("sentinelChartsShowETH") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const onShowETHChange = useCallback((next: boolean) => {
+    setShowETHState(next);
+    try {
+      localStorage.setItem("sentinelChartsShowETH", String(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [msSyncEnabled, setMsSyncEnabled] = useState(false);
   const [newsOpen, setNewsOpen] = useState(false);
   // Persist Trade Plan open state in localStorage
@@ -81,8 +96,22 @@ export default function SentinelChartsPage() {
     return defaultWl?.id ?? watchlistsForManager?.[0]?.id ?? null;
   }, [watchlistManagerSelectedId, watchlistsForManager]);
 
-  const { data: managerScopeItems } = useNamedWatchlistItems(effectiveManagerWatchlistId);
-  const { data: navigationWatchlist } = useNamedWatchlistItems(navigationWatchlistId);
+  const navWlEnabled =
+    typeof navigationWatchlistId === "number" && !Number.isNaN(navigationWatchlistId);
+  const managerWlEnabled =
+    typeof effectiveManagerWatchlistId === "number" && !Number.isNaN(effectiveManagerWatchlistId);
+
+  const { data: managerScopeItems, isFetched: managerWlFetched } =
+    useNamedWatchlistItems(effectiveManagerWatchlistId);
+  const { data: navigationWatchlist, isFetched: navigationWlFetched } =
+    useNamedWatchlistItems(navigationWatchlistId);
+
+  /** Wait for watchlist fetches before Trade Plan hydrates from localStorage (avoids wrong ticker's draft). */
+  const tradePlanWatchlistReady = useMemo(
+    () =>
+      (!navWlEnabled || navigationWlFetched) && (!managerWlEnabled || managerWlFetched),
+    [navWlEnabled, navigationWlFetched, managerWlEnabled, managerWlFetched]
+  );
 
   const watchlistNavOrdered = useMemo(() => {
     if (!navigationWatchlist?.length) return [];
@@ -115,6 +144,7 @@ export default function SentinelChartsPage() {
   // Get saved trade plan from watchlist item - memoized to prevent infinite loops
   const savedTradePlan = useMemo(() => {
     if (!watchlistItem) return null;
+    if (watchlistItem.symbol.toUpperCase() !== activeSymbol.toUpperCase()) return null;
     const hasData = watchlistItem.targetEntry || watchlistItem.stopPlan || watchlistItem.targetPlan;
     if (!hasData) return null;
     return {
@@ -122,7 +152,14 @@ export default function SentinelChartsPage() {
       stop: watchlistItem.stopPlan,
       target: watchlistItem.targetPlan,
     };
-  }, [watchlistItem?.targetEntry, watchlistItem?.stopPlan, watchlistItem?.targetPlan]);
+  }, [
+    activeSymbol,
+    watchlistItem?.id,
+    watchlistItem?.symbol,
+    watchlistItem?.targetEntry,
+    watchlistItem?.stopPlan,
+    watchlistItem?.targetPlan,
+  ]);
 
   // Track previous symbol to detect changes
   const [prevSymbol, setPrevSymbol] = useState(activeSymbol);
@@ -332,44 +369,40 @@ export default function SentinelChartsPage() {
     setTickerInput("");
   }, []);
 
-  const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/chart-data", activeSymbol, "daily"],
-    enabled: !!activeSymbol,
-    queryFn: async () => {
-      const res = await fetch(`/api/sentinel/chart-data?ticker=${activeSymbol}&timeframe=daily&_=${Date.now()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("Failed to fetch daily chart data");
-      return res.json();
-    },
-    staleTime: 5 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
-  });
+  const { data: dailyData, isLoading: dailyLoading } = useSentinelDailyChartData(
+    activeSymbol || undefined,
+    {
+      staleTime: 5 * 60 * 1000,
+      refetchInterval: 5 * 60 * 1000,
+    }
+  );
 
-  const { data: intradayData, isLoading: intradayLoading } = useQuery<ChartDataResponse>({
-    queryKey: ["/api/sentinel/chart-data", activeSymbol, intradayTimeframe, showETH],
-    enabled: !!activeSymbol,
-    queryFn: async () => {
-      const params = new URLSearchParams({ ticker: activeSymbol!, timeframe: intradayTimeframe });
-      if (showETH) params.set('includeETH', 'true');
-      params.set("_", Date.now().toString());
-      const res = await fetch(`/api/sentinel/chart-data?${params}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error("Failed to fetch intraday chart data");
-      return res.json();
-    },
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-    refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
-    refetchIntervalInBackground: true,
-  });
+  const {
+    data: intradayData,
+    isLoading: intradayLoading,
+    isFetching: intradayFetching,
+  } = useSentinelIntradayChartData(
+    activeSymbol || undefined,
+    intradayTimeframe,
+    showETH,
+    {
+      staleTime: 60 * 1000,
+      refetchOnWindowFocus: true,
+      refetchInterval: 30 * 1000,
+      refetchIntervalInBackground: true,
+    }
+  );
 
   const { data: chartMetrics } = useQuery<ChartMetrics>({
-    queryKey: ["/api/sentinel/trade-chart-metrics", activeSymbol, intradayTimeframe],
+    queryKey: ["/api/sentinel/trade-chart-metrics", activeSymbol, intradayTimeframe, showETH],
     enabled: !!activeSymbol,
     queryFn: async () => {
-      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${activeSymbol}&timeframe=${intradayTimeframe}`, { credentials: "include" });
+      const p = new URLSearchParams({
+        ticker: activeSymbol,
+        timeframe: intradayTimeframe,
+      });
+      if (showETH) p.set("includeETH", "true");
+      const res = await fetch(`/api/sentinel/trade-chart-metrics?${p}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch metrics");
       return res.json();
     },
@@ -701,11 +734,14 @@ export default function SentinelChartsPage() {
               dailyLoading={dailyLoading}
               intradayData={intradayData}
               intradayLoading={intradayLoading}
+              intradayFetching={intradayFetching}
               chartMetrics={chartMetrics ?? null}
               intradayTimeframe={intradayTimeframe}
               onIntradayTimeframeChange={setIntradayTimeframe}
               showETH={showETH}
-              onShowETHChange={setShowETH}
+              onShowETHChange={onShowETHChange}
+              showExtendedHoursControls
+              showIntradayMaBasisToggle
               onNavigateToTicker={handleNavigateToTicker}
               navExtra={chartsNavExtra}
               dailyChartProps={{
@@ -749,6 +785,7 @@ export default function SentinelChartsPage() {
               onSaveTradePlan={handleSaveTradePlan}
               onClearTradePlan={handleClearTradePlan}
               savedTradePlan={savedTradePlan}
+              tradePlanWatchlistReady={tradePlanWatchlistReady}
             />
             
             {/* News Panel */}

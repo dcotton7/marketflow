@@ -9,7 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Trash2, Plus, Loader2, Database } from "lucide-react";
-import { BARS_PER_DAY } from "@shared/indicatorTemplates";
+import {
+  calcBars,
+  getMaxBarsForTimeframe,
+  DEFAULT_CHART_MA_LIMITS,
+  type ChartMaDataLimits,
+  isMaRowFeasibleForTimeframe,
+} from "@/lib/chart-ma-feasibility";
 
 interface MaSettingRow {
   id?: number;
@@ -29,12 +35,8 @@ interface MaSettingRow {
   calcOn: "daily" | "intraday";
 }
 
-interface ChartPrefs {
+interface ChartPrefs extends ChartMaDataLimits {
   defaultBarsOnScreen: number;
-  dataLimitDaily: number;
-  dataLimit5min: number;
-  dataLimit15min: number;
-  dataLimit30min: number;
 }
 
 const LINE_TYPE_OPTIONS = [
@@ -51,40 +53,17 @@ const MA_TYPE_OPTIONS = [
   { value: "vwap", label: "VWAP" },
 ];
 
-function calcBars(dayPeriod: number | null, timeframe: string): number | null {
-  if (dayPeriod == null) return null;
-  const bpd = BARS_PER_DAY[timeframe];
-  if (bpd == null || bpd <= 0) return dayPeriod;
-  return Math.max(1, Math.round(dayPeriod * bpd));
-}
-
 function isNonVwap(row: MaSettingRow): boolean {
   return row.maType !== "vwap" && row.maType !== "vwap_hi" && row.maType !== "vwap_lo";
 }
 
-function getMaxBarsForTimeframe(timeframe: string, limits: ChartPrefs): number {
-  const bpd = BARS_PER_DAY[timeframe] ?? 1;
-  switch (timeframe) {
-    case "5m": case "5min": return limits.dataLimit5min * bpd;
-    case "15m": case "15min": return limits.dataLimit15min * bpd;
-    case "30m": case "30min": return limits.dataLimit30min * bpd;
-    default: return limits.dataLimitDaily;
-  }
-}
-
 function isFeasible(row: MaSettingRow, timeframe: string, limits: ChartPrefs): boolean {
-  if (!isNonVwap(row) || row.period == null) return true;
-  const requiredBars = row.calcOn === "intraday" ? row.period : calcBars(row.period, timeframe) ?? row.period;
-  const maxBars = getMaxBarsForTimeframe(timeframe, limits);
-  return requiredBars <= maxBars;
+  return isMaRowFeasibleForTimeframe(row, timeframe, limits);
 }
 
 const DEFAULT_LIMITS: ChartPrefs = {
   defaultBarsOnScreen: 200,
-  dataLimitDaily: 750,
-  dataLimit5min: 63,
-  dataLimit15min: 126,
-  dataLimit30min: 126,
+  ...DEFAULT_CHART_MA_LIMITS,
 };
 
 export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {

@@ -19,6 +19,7 @@ import SentinelImportPage from "@/pages/SentinelImportPage";
 import PatternLearningPage from "@/pages/PatternLearningPage";
 import BigIdeaPage from "@/pages/BigIdeaPage";
 import SentinelChartsPage from "@/pages/SentinelChartsPage";
+import BetaChartsPage from "@/pages/BetaChartsPage";
 import AnalysisPopoutPage from "@/pages/AnalysisPopoutPage";
 import SetupLibraryPage from "@/pages/SetupLibraryPage";
 import SentinelSettingsPage from "@/pages/SentinelSettingsPage";
@@ -86,6 +87,11 @@ function Router() {
       <Route path="/sentinel/charts">
         <SentinelProtectedRoute>
           <SentinelChartsPage />
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/sentinel/beta-charts">
+        <SentinelProtectedRoute>
+          <BetaChartsPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/start-here">

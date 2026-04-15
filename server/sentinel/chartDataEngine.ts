@@ -1,4 +1,6 @@
 import { getPeriodsForTimeframe } from "../../shared/indicatorTemplates";
+import { isUsEquityRegularSessionEt } from "../../shared/nyRegularSession";
+import type { SentinelChartIndicators, SentinelChartIndicatorsMeta } from "../../shared/sentinelChartData";
 import * as alpaca from "../alpaca";
 import { getDailyBars, getIntradayBars } from "../data-layer";
 
@@ -28,16 +30,13 @@ export interface Gap {
 
 export interface ChartDataWithIndicators {
   candles: ChartCandle[];
-  indicators: {
-    ema5: (number | null)[];
-    ema10: (number | null)[];
-    sma21: (number | null)[];
-    sma50: (number | null)[];
-    sma200: (number | null)[];
-    vwap?: (number | null)[];
-    avwapHigh?: (number | null)[];
-    avwapLow?: (number | null)[];
-  };
+  indicators: SentinelChartIndicators;
+  /**
+   * When intraday `includeETH` is true: full-series MAs/VWAP computed on every bar (premarket + RTH + after-hours).
+   * Primary `indicators` defaults to **RTH-only math** expanded onto all timestamps (forward-filled on ETH bars).
+   */
+  indicatorsExtended?: SentinelChartIndicators;
+  indicatorsMeta?: SentinelChartIndicatorsMeta;
   gaps?: Gap[];              // Support/Resistance gaps
   ticker: string;
   timeframe: string;
@@ -52,14 +51,22 @@ interface HistoricalBar {
   volume: number;
 }
 
+/** Rolling SMA in O(n). The naive slice+reduce per bar is O(n×period) and blows up for intraday (e.g. 200d ≈ 15.6k bars on 5m). */
 function calculateSMASeriesForward(prices: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = [];
-  for (let i = 0; i < prices.length; i++) {
+  const n = prices.length;
+  const result: (number | null)[] = new Array(n);
+  if (period <= 0 || n === 0) {
+    for (let i = 0; i < n; i++) result[i] = null;
+    return result;
+  }
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += prices[i];
+    if (i >= period) sum -= prices[i - period];
     if (i < period - 1) {
-      result.push(null);
+      result[i] = null;
     } else {
-      const slice = prices.slice(i - period + 1, i + 1);
-      result.push(slice.reduce((a, b) => a + b, 0) / period);
+      result[i] = sum / period;
     }
   }
   return result;
@@ -289,6 +296,108 @@ function findRecentLowIndex(candles: { low: number; close: number }[], lookback:
   return minIdx;
 }
 
+function computeIndicatorBundle(candles: ChartCandle[], timeframe: string): SentinelChartIndicators {
+  const closes = candles.map((c) => c.close);
+  const maConfig = getPeriodsForTimeframe(timeframe);
+  const ma5Def = maConfig.find((m) => m.id === "ma5");
+  const ma10Def = maConfig.find((m) => m.id === "ma10");
+  const ma20Def = maConfig.find((m) => m.id === "ma20");
+  const ma50Def = maConfig.find((m) => m.id === "ma50");
+  const ma200Def = maConfig.find((m) => m.id === "ma200");
+
+  const ma5 = ma5Def
+    ? ma5Def.type === "ema"
+      ? calculateEMASeriesForward(closes, ma5Def.period)
+      : calculateSMASeriesForward(closes, ma5Def.period)
+    : calculateSMASeriesForward(closes, 5);
+  const ma10 = ma10Def
+    ? ma10Def.type === "ema"
+      ? calculateEMASeriesForward(closes, ma10Def.period)
+      : calculateSMASeriesForward(closes, ma10Def.period)
+    : calculateSMASeriesForward(closes, 10);
+  const ma20 = ma20Def
+    ? ma20Def.type === "ema"
+      ? calculateEMASeriesForward(closes, ma20Def.period)
+      : calculateSMASeriesForward(closes, ma20Def.period)
+    : calculateSMASeriesForward(closes, 21);
+  const ma50 = ma50Def
+    ? ma50Def.type === "ema"
+      ? calculateEMASeriesForward(closes, ma50Def.period)
+      : calculateSMASeriesForward(closes, ma50Def.period)
+    : calculateSMASeriesForward(closes, 50);
+  const ma200 = ma200Def
+    ? ma200Def.type === "ema"
+      ? calculateEMASeriesForward(closes, ma200Def.period)
+      : calculateSMASeriesForward(closes, ma200Def.period)
+    : calculateSMASeriesForward(closes, 200);
+
+  const vwap = calculateSessionVWAP(candles);
+  const avwapHighIdx = findRecentHighIndex(candles, 120);
+  const avwapLowIdx = findRecentLowIndex(candles, 120);
+  const avwapHigh = calculateAVWAPSeries(candles, avwapHighIdx);
+  const avwapLow = calculateAVWAPSeries(candles, avwapLowIdx);
+
+  return { ema5: ma5, ema10: ma10, sma21: ma20, sma50: ma50, sma200: ma200, vwap, avwapHigh, avwapLow };
+}
+
+/** Map RTH-only indicator series (aligned to RTH candles only) onto full ETH-inclusive candle timeline. */
+function expandRthIndicatorsOntoFullSeries(
+  fullCandles: ChartCandle[],
+  rthCandles: ChartCandle[],
+  rthBundle: SentinelChartIndicators
+): SentinelChartIndicators {
+  const scalarKeys = ["ema5", "ema10", "sma21", "sma50", "sma200"] as const;
+  const optionalKeys = ["vwap", "avwapHigh", "avwapLow"] as const;
+
+  const last: Partial<Record<(typeof scalarKeys)[number] | (typeof optionalKeys)[number], number | null>> = {};
+  let j = -1;
+
+  const out: SentinelChartIndicators = {
+    ema5: [],
+    ema10: [],
+    sma21: [],
+    sma50: [],
+    sma200: [],
+  };
+
+  for (const k of optionalKeys) {
+    if (rthBundle[k]?.length) {
+      out[k] = [];
+    }
+  }
+
+  for (let i = 0; i < fullCandles.length; i++) {
+    const isRth = isUsEquityRegularSessionEt(fullCandles[i].timestamp);
+    if (isRth) {
+      j++;
+      for (const k of scalarKeys) {
+        const v = rthBundle[k][j] ?? null;
+        out[k][i] = v;
+        if (v !== null) last[k] = v;
+      }
+      for (const k of optionalKeys) {
+        const src = rthBundle[k];
+        const dst = out[k];
+        if (!src || !dst) continue;
+        const v = src[j] ?? null;
+        dst[i] = v;
+        if (v !== null) last[k] = v;
+      }
+    } else {
+      for (const k of scalarKeys) {
+        out[k][i] = last[k] ?? null;
+      }
+      for (const k of optionalKeys) {
+        const dst = out[k];
+        if (!dst) continue;
+        dst[i] = last[k] ?? null;
+      }
+    }
+  }
+
+  return out;
+}
+
 async function fetchHistoricalBars(symbol: string, days: number, interval: string = "1d", includeETH: boolean = false): Promise<HistoricalBar[]> {
   try {
     const endDate = new Date();
@@ -352,7 +461,8 @@ export async function fetchChartData(
   includeETH: boolean = false
 ): Promise<ChartDataWithIndicators | null> {
   try {
-    const intradayLookback: Record<string, number> = { "5min": 90, "15min": 180, "30min": 180 };
+    /** Shorter 5m window = fewer Alpaca pages + faster indicator passes; adjust if you need deeper history. */
+    const intradayLookback: Record<string, number> = { "5min": 45, "15min": 120, "30min": 120 };
     const isIntraday = timeframe !== "daily";
     const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 90) : 750);
     const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
@@ -385,33 +495,44 @@ export async function fetchChartData(
     });
 
     const finalCandles = dedupedCandles;
-    const closes = finalCandles.map(c => c.close);
-
-    const maConfig = getPeriodsForTimeframe(timeframe);
-    const ma5Def = maConfig.find(m => m.id === "ma5");
-    const ma10Def = maConfig.find(m => m.id === "ma10");
-    const ma20Def = maConfig.find(m => m.id === "ma20");
-    const ma50Def = maConfig.find(m => m.id === "ma50");
-    const ma200Def = maConfig.find(m => m.id === "ma200");
-
-    const ma5 = ma5Def ? (ma5Def.type === "ema" ? calculateEMASeriesForward(closes, ma5Def.period) : calculateSMASeriesForward(closes, ma5Def.period)) : calculateSMASeriesForward(closes, 5);
-    const ma10 = ma10Def ? (ma10Def.type === "ema" ? calculateEMASeriesForward(closes, ma10Def.period) : calculateSMASeriesForward(closes, ma10Def.period)) : calculateSMASeriesForward(closes, 10);
-    const ma20 = ma20Def ? (ma20Def.type === "ema" ? calculateEMASeriesForward(closes, ma20Def.period) : calculateSMASeriesForward(closes, ma20Def.period)) : calculateSMASeriesForward(closes, 21);
-    const ma50 = ma50Def ? (ma50Def.type === "ema" ? calculateEMASeriesForward(closes, ma50Def.period) : calculateSMASeriesForward(closes, ma50Def.period)) : calculateSMASeriesForward(closes, 50);
-    const ma200 = ma200Def ? (ma200Def.type === "ema" ? calculateEMASeriesForward(closes, ma200Def.period) : calculateSMASeriesForward(closes, ma200Def.period)) : calculateSMASeriesForward(closes, 200);
-
-    const vwap = calculateSessionVWAP(finalCandles);
-    const avwapHighIdx = findRecentHighIndex(finalCandles, 120);
-    const avwapLowIdx = findRecentLowIndex(finalCandles, 120);
-    const avwapHigh = calculateAVWAPSeries(finalCandles, avwapHighIdx);
-    const avwapLow = calculateAVWAPSeries(finalCandles, avwapLowIdx);
 
     // Calculate Support/Resistance Gaps (only for daily timeframe)
     const gaps = timeframe === "daily" ? calculateGaps(finalCandles, false) : undefined;
 
+    const metaBase: SentinelChartIndicatorsMeta = {
+      includeExtendedHours: includeETH,
+      primarySession: "rth",
+    };
+
+    if (isIntraday && includeETH) {
+      const extendedBundle = computeIndicatorBundle(finalCandles, timeframe);
+      const rthCandles = finalCandles.filter((c) => isUsEquityRegularSessionEt(c.timestamp));
+      const rthBundle =
+        rthCandles.length >= 10
+          ? computeIndicatorBundle(rthCandles, timeframe)
+          : extendedBundle;
+      const rthExpanded =
+        rthCandles.length >= 10
+          ? expandRthIndicatorsOntoFullSeries(finalCandles, rthCandles, rthBundle)
+          : extendedBundle;
+
+      return {
+        candles: finalCandles,
+        indicators: rthExpanded,
+        indicatorsExtended: extendedBundle,
+        indicatorsMeta: { ...metaBase, primarySession: "rth" },
+        gaps,
+        ticker: ticker.toUpperCase(),
+        timeframe,
+      };
+    }
+
+    const indicators = computeIndicatorBundle(finalCandles, timeframe);
+
     return {
       candles: finalCandles,
-      indicators: { ema5: ma5, ema10: ma10, sma21: ma20, sma50: ma50, sma200: ma200, vwap, avwapHigh, avwapLow },
+      indicators,
+      indicatorsMeta: metaBase,
       gaps,
       ticker: ticker.toUpperCase(),
       timeframe,

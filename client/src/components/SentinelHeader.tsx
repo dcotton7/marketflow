@@ -200,7 +200,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const isAdminPage = location.startsWith("/sentinel/admin");
   const isBigIdeaPage = location === "/sentinel/bigidea";
   const isMarketConditionPage = location === "/sentinel/market-condition";
-  const isChartsPage = location === "/sentinel/charts";
+  const isChartsPage = location === "/sentinel/charts" || location === "/sentinel/beta-charts";
   const isStartHerePage = location === "/sentinel/start-here";
   const isEvaluatePage = location === "/sentinel/evaluate";
 

@@ -1,17 +1,39 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, startTransition, type ReactNode } from "react";
 import { IChartApi, ISeriesApi } from "lightweight-charts";
-import { TradingChart, ChartCandle, ChartIndicators, Gap } from "@/components/TradingChart";
+import { TradingChart, ChartCandle, ChartIndicators, Gap, type PriceLevelLine } from "@/components/TradingChart";
+import type { DrawingData } from "@/lib/chartDrawingPrimitives";
+import {
+  clampHorizontalDrawingLineStyle,
+  clampHorizontalDrawingWidth,
+  getHorizontalDrawingDefaults,
+  resolveHorizontalDrawingHex,
+  setHorizontalDrawingDefaults,
+  type HorizontalDrawingLineStyle,
+} from "@/lib/chartHorizontalDrawingPrefs";
+import type { SentinelChartIndicators, SentinelChartIndicatorsMeta } from "@shared/sentinelChartData";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { AlertBuilderDialog } from "@/components/alerts/AlertBuilderDialog";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useQuery } from "@tanstack/react-query";
-import { useChartDrawings, DrawingToolType } from "@/hooks/useChartDrawings";
+import { useChartDrawings } from "@/hooks/useChartDrawings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Settings2, Ruler, Minus, Trash2, Bell } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Loader2, Ruler, Minus, Trash2, Bell, Settings2 } from "lucide-react";
+import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
+import { DEFAULT_CHART_MA_LIMITS, type ChartMaDataLimits } from "@/lib/chart-ma-feasibility";
 
-export type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; gaps?: Gap[]; ticker: string; timeframe: string };
+export type ChartDataResponse = {
+  candles: ChartCandle[];
+  indicators: ChartIndicators;
+  indicatorsExtended?: SentinelChartIndicators;
+  indicatorsMeta?: SentinelChartIndicatorsMeta;
+  gaps?: Gap[];
+  ticker: string;
+  timeframe: string;
+};
 
 export interface ChartMetrics {
   currentPrice: number;
@@ -66,11 +88,23 @@ interface DualChartGridProps {
   dailyLoading: boolean;
   intradayData: ChartDataResponse | undefined;
   intradayLoading: boolean;
+  /** True while a background refetch is in flight; chart stays visible with a light "Updating" hint. */
+  intradayFetching?: boolean;
   chartMetrics: ChartMetrics | null | undefined;
   intradayTimeframe: string;
   onIntradayTimeframeChange: (tf: string) => void;
   showETH: boolean;
   onShowETHChange: (show: boolean) => void;
+  /**
+   * When false (default): hide ETH + MA-basis controls — standard Sentinel Charts UX (RTH intraday only).
+   * Beta Charts sets true to expose extended hours.
+   */
+  showExtendedHoursControls?: boolean;
+  /**
+   * Only when `showExtendedHoursControls` + ETH on: show MA RTH vs EXT indicator toggle.
+   * Big Idea / scans: leave false so extended candles still use server primary (RTH) indicators only.
+   */
+  showIntradayMaBasisToggle?: boolean;
   onNavigateToTicker?: (ticker: string) => void;
   dailyChartProps?: Record<string, any>;
   intradayChartProps?: Record<string, any>;
@@ -87,13 +121,171 @@ interface DualChartGridProps {
   alertWatchlistId?: number | null;
 }
 
-const TrendLineIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <line x1="2" y1="12" x2="12" y2="2" stroke="currentColor" strokeWidth="1.5"/>
-    <circle cx="2" cy="12" r="1.5" fill="currentColor"/>
-    <circle cx="12" cy="2" r="1.5" fill="currentColor"/>
-  </svg>
-);
+function chartHorizontalDrawingsToPriceLines(drawings: DrawingData[]): PriceLevelLine[] {
+  return drawings
+    .filter((d) => d.toolType === "horizontal" && d.points.p1 && typeof d.points.p1.price === "number")
+    .map((d) => ({
+      price: d.points.p1!.price,
+      color: resolveHorizontalDrawingHex(d.styling?.color),
+      label: "",
+      lineStyle: clampHorizontalDrawingLineStyle(d.styling?.lineStyle),
+      lineWidth: clampHorizontalDrawingWidth(d.styling?.width ?? 1),
+    }));
+}
+
+function HorizontalLineSettingsPopover({
+  drawings,
+  selectedId,
+  updateStyling,
+  testIdPrefix,
+}: {
+  drawings: DrawingData[];
+  selectedId: number | string | null;
+  updateStyling: (id: number | string, patch: Partial<NonNullable<DrawingData["styling"]>>) => void;
+  testIdPrefix: string;
+}) {
+  const [saveDefaultLocked, setSaveDefaultLocked] = useState(false);
+
+  const d =
+    selectedId != null ? drawings.find((x) => x.id === selectedId) : undefined;
+  const isHorizontal = d?.toolType === "horizontal";
+
+  const color =
+    isHorizontal && d ? resolveHorizontalDrawingHex(d.styling?.color) : "";
+  const width =
+    isHorizontal && d ? clampHorizontalDrawingWidth(d.styling?.width) : 1;
+  const lineStyle =
+    isHorizontal && d
+      ? clampHorizontalDrawingLineStyle(d.styling?.lineStyle)
+      : ("solid" as HorizontalDrawingLineStyle);
+
+  useEffect(() => {
+    setSaveDefaultLocked(false);
+  }, [selectedId]);
+
+  if (selectedId == null || !d || !isHorizontal) return null;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-white h-7 px-2 gap-1 text-[10px] shrink-0"
+          title="Line color & thickness"
+          data-testid={`${testIdPrefix}-horiz-line-settings-trigger`}
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          Settings
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-64 border-border bg-popover text-popover-foreground"
+        align="start"
+        sideOffset={6}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-foreground">Horizontal line</div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Color</Label>
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => {
+                setSaveDefaultLocked(false);
+                updateStyling(d.id, { color: e.target.value });
+              }}
+              className="h-9 w-full cursor-pointer rounded border border-input bg-transparent p-1"
+              data-testid={`${testIdPrefix}-horiz-line-color`}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Thickness</Label>
+            <Select
+              value={String(width)}
+              onValueChange={(v) => {
+                setSaveDefaultLocked(false);
+                updateStyling(d.id, { width: parseInt(v, 10) });
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs" data-testid={`${testIdPrefix}-horiz-line-width`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {([1, 2, 3, 4] as const).map((n) => (
+                  <SelectItem key={n} value={String(n)} className="text-xs">
+                    {n}px
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Line type</Label>
+            <Select
+              value={lineStyle}
+              onValueChange={(v) => {
+                setSaveDefaultLocked(false);
+                updateStyling(d.id, { lineStyle: v as HorizontalDrawingLineStyle });
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs" data-testid={`${testIdPrefix}-horiz-line-style`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="solid" className="text-xs">
+                  Solid
+                </SelectItem>
+                <SelectItem value="dashed" className="text-xs">
+                  Dashed
+                </SelectItem>
+                <SelectItem value="dotted" className="text-xs">
+                  Dotted
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => {
+                setSaveDefaultLocked(false);
+                const def = getHorizontalDrawingDefaults();
+                updateStyling(d.id, { color: def.color, width: def.width, lineStyle: def.lineStyle });
+              }}
+              data-testid={`${testIdPrefix}-horiz-use-default`}
+            >
+              Use saved default
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              disabled={saveDefaultLocked}
+              title={
+                saveDefaultLocked
+                  ? "Change color, thickness, or line type to save a new default"
+                  : undefined
+              }
+              onClick={() => {
+                setHorizontalDrawingDefaults(color, width, lineStyle);
+                setSaveDefaultLocked(true);
+              }}
+              data-testid={`${testIdPrefix}-horiz-save-default`}
+            >
+              Save as default for new lines
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function DualChartGrid({
   symbol,
@@ -101,11 +293,14 @@ export function DualChartGrid({
   dailyLoading,
   intradayData,
   intradayLoading,
+  intradayFetching = false,
   chartMetrics,
   intradayTimeframe,
   onIntradayTimeframeChange,
   showETH,
   onShowETHChange,
+  showExtendedHoursControls = false,
+  showIntradayMaBasisToggle = false,
   onNavigateToTicker,
   dailyChartProps = {},
   intradayChartProps = {},
@@ -116,10 +311,6 @@ export function DualChartGrid({
   alertTradePlanPreview = null,
   alertWatchlistId = null,
 }: DualChartGridProps) {
-  // ETH/extended-hours mode is intentionally disabled for now.
-  // We keep the backend plumbing (`includeETH`) but prevent toggling in UI
-  // to avoid risking any regression to RTH timestamp alignment.
-  const ETH_FEATURE_ENABLED = false;
   const { cssVariables } = useSystemSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(300);
@@ -127,6 +318,8 @@ export function DualChartGrid({
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
   const [showGaps, setShowGaps] = useState(false);
+  /** When ETH candles are on: RTH = server primary (regular-session math, forward-filled), EXT = all bars in MA/VWAP. */
+  const [intradayMaBasis, setIntradayMaBasis] = useState<"rth" | "extended">("rth");
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
 
   const dailyChartRef = useRef<IChartApi | null>(null);
@@ -150,49 +343,54 @@ export function DualChartGrid({
     enabled: !!symbol && !!intradayData,
   });
 
+  const mergedDailyChartProps = useMemo(() => {
+    const base = dailyChartProps ?? {};
+    const fromDrawings = chartHorizontalDrawingsToPriceLines(dailyDrawings.drawings);
+    const pl = [...(base.priceLines ?? []), ...fromDrawings];
+    return { ...base, priceLines: pl };
+  }, [dailyChartProps, dailyDrawings.drawings]);
+
+  const mergedIntradayChartProps = useMemo(() => {
+    const base = intradayChartProps ?? {};
+    const fromDrawings = chartHorizontalDrawingsToPriceLines(intradayDrawings.drawings);
+    const pl = [...(base.priceLines ?? []), ...fromDrawings];
+    return { ...base, priceLines: pl };
+  }, [intradayChartProps, intradayDrawings.drawings]);
+
   const { data: maSettingsData } = useQuery<any[]>({
     queryKey: ["/api/sentinel/ma-settings"],
   });
 
-  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+  const { data: chartPrefs } = useQuery<{
+    defaultBarsOnScreen: number;
+    dataLimitDaily?: number;
+    dataLimit5min?: number;
+    dataLimit15min?: number;
+    dataLimit30min?: number;
+  }>({
     queryKey: ["/api/sentinel/chart-preferences"],
   });
 
   const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
 
-  const rthData = useMemo(() => {
-    if (!intradayData) return null;
-    const rthFmt = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      hour: "2-digit", minute: "2-digit",
-      hour12: false,
-    });
-    const rthIndices: number[] = [];
-    intradayData.candles.forEach((c, i) => {
-      const parts = rthFmt.formatToParts(new Date(c.timestamp * 1000));
-      let etH = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
-      if (etH === 24) etH = 0;
-      const etM = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
-      const totalMin = etH * 60 + etM;
-      if (totalMin >= 570 && totalMin < 960) rthIndices.push(i);
-    });
-    if (rthIndices.length === 0) return intradayData;
-    const rthResult: ChartDataResponse = {
-      ...intradayData,
-      candles: rthIndices.map(i => intradayData.candles[i]),
-      indicators: {
-        ema5: rthIndices.map(i => intradayData.indicators.ema5[i] ?? null),
-        ema10: rthIndices.map(i => intradayData.indicators.ema10[i] ?? null),
-        sma21: rthIndices.map(i => intradayData.indicators.sma21[i] ?? null),
-        sma50: rthIndices.map(i => intradayData.indicators.sma50[i] ?? null),
-        sma200: rthIndices.map(i => intradayData.indicators.sma200[i] ?? null),
-        vwap: intradayData.indicators.vwap ? rthIndices.map(i => intradayData.indicators.vwap![i] ?? null) : undefined,
-        avwapHigh: intradayData.indicators.avwapHigh ? rthIndices.map(i => intradayData.indicators.avwapHigh![i] ?? null) : undefined,
-        avwapLow: intradayData.indicators.avwapLow ? rthIndices.map(i => intradayData.indicators.avwapLow![i] ?? null) : undefined,
-      },
-    };
-    return rthResult;
-  }, [intradayData]);
+  const maDataLimits: ChartMaDataLimits = useMemo(
+    () => ({
+      dataLimitDaily: chartPrefs?.dataLimitDaily ?? DEFAULT_CHART_MA_LIMITS.dataLimitDaily,
+      dataLimit5min: chartPrefs?.dataLimit5min ?? DEFAULT_CHART_MA_LIMITS.dataLimit5min,
+      dataLimit15min: chartPrefs?.dataLimit15min ?? DEFAULT_CHART_MA_LIMITS.dataLimit15min,
+      dataLimit30min: chartPrefs?.dataLimit30min ?? DEFAULT_CHART_MA_LIMITS.dataLimit30min,
+    }),
+    [
+      chartPrefs?.dataLimitDaily,
+      chartPrefs?.dataLimit5min,
+      chartPrefs?.dataLimit15min,
+      chartPrefs?.dataLimit30min,
+    ]
+  );
+
+  useEffect(() => {
+    if (!showETH) setIntradayMaBasis("rth");
+  }, [showETH]);
 
   useEffect(() => {
     const measure = () => {
@@ -216,7 +414,52 @@ export function DualChartGrid({
     return () => { clearTimeout(timer); observer.disconnect(); };
   }, [!!upperPane, !!lowerPane]);
 
-  const effectiveIntradayData = ETH_FEATURE_ENABLED && showETH ? intradayData : rthData;
+  const effectiveIntradayData = useMemo(() => {
+    if (!intradayData) return null;
+    const useExt =
+      showIntradayMaBasisToggle &&
+      showETH &&
+      intradayMaBasis === "extended" &&
+      intradayData.indicatorsExtended;
+    const indicators = useExt ? intradayData.indicatorsExtended! : intradayData.indicators;
+    return { ...intradayData, indicators };
+  }, [intradayData, showIntradayMaBasisToggle, showETH, intradayMaBasis]);
+
+  const intradayTickerMismatch = useMemo(() => {
+    if (!symbol || !intradayData?.ticker) return false;
+    return intradayData.ticker.toUpperCase() !== symbol.toUpperCase();
+  }, [symbol, intradayData?.ticker]);
+
+  const intradayBlockingLoad =
+    !!symbol && ((intradayLoading && !intradayData) || intradayTickerMismatch);
+
+  const [intradayLoadSec, setIntradayLoadSec] = useState(0);
+  useEffect(() => {
+    if (!intradayBlockingLoad) {
+      setIntradayLoadSec(0);
+      return;
+    }
+    const t0 = Date.now();
+    setIntradayLoadSec(0);
+    const id = window.setInterval(() => {
+      setIntradayLoadSec(Math.floor((Date.now() - t0) / 1000));
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [intradayBlockingLoad, symbol, intradayTimeframe]);
+
+  const [intradayFetchSec, setIntradayFetchSec] = useState(0);
+  useEffect(() => {
+    if (!intradayFetching) {
+      setIntradayFetchSec(0);
+      return;
+    }
+    const t0 = Date.now();
+    setIntradayFetchSec(0);
+    const id = window.setInterval(() => {
+      setIntradayFetchSec(Math.floor((Date.now() - t0) / 1000));
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [intradayFetching, symbol, intradayTimeframe, showETH]);
 
   const dayChange = useMemo(() => {
     if (!dailyData || dailyData.candles.length < 2) return null;
@@ -333,17 +576,6 @@ export function DualChartGrid({
             <Button
               size="sm"
               variant="ghost"
-              className={`text-white toggle-elevate ${dailyDrawings.activeTool === "trendline" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => { dailyDrawings.setActiveTool(dailyDrawings.activeTool === "trendline" ? null : "trendline"); setDailyMeasureMode(false); }}
-              style={dailyDrawings.activeTool === "trendline" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-daily-trend-line-mode`}
-              title="Trend Line"
-            >
-              <TrendLineIcon />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
               className={`text-white toggle-elevate ${dailyDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
               onClick={() => { dailyDrawings.setActiveTool(dailyDrawings.activeTool === "horizontal" ? null : "horizontal"); setDailyMeasureMode(false); }}
               style={dailyDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
@@ -352,6 +584,12 @@ export function DualChartGrid({
             >
               <Minus className="h-3.5 w-3.5" />
             </Button>
+            <HorizontalLineSettingsPopover
+              drawings={dailyDrawings.drawings}
+              selectedId={dailyDrawings.selectedId}
+              updateStyling={dailyDrawings.updateDrawingStyling}
+              testIdPrefix={`${pid}daily`}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -391,6 +629,7 @@ export function DualChartGrid({
                 showLegend={true}
                 showGaps={showGaps}
                 maSettings={maSettingsData}
+                maDataLimits={maDataLimits}
                 maxBars={maxBars}
                 measureMode={dailyMeasureMode}
                 drawingToolActive={dailyDrawings.activeTool}
@@ -403,7 +642,7 @@ export function DualChartGrid({
                 onChartMouseDown={dailyDrawings.handleMouseDown}
                 onChartCrosshairMove={dailyDrawings.handleMouseMove}
                 onChartMouseUp={dailyDrawings.handleMouseUp}
-                {...dailyChartProps}
+                {...mergedDailyChartProps}
               />
             ) : (
               <Card className="h-full">
@@ -435,7 +674,7 @@ export function DualChartGrid({
               onClick={() => setMaSettingsOpen(true)}
               data-testid={`${pid}button-ma-settings`}
             >
-              <Settings2 className="h-3.5 w-3.5" />
+              <IndicatorsFourSquaresIcon className="text-current" />
             </Button>
             <Button
               size="sm"
@@ -450,17 +689,6 @@ export function DualChartGrid({
             <Button
               size="sm"
               variant="ghost"
-              className={`text-white toggle-elevate ${intradayDrawings.activeTool === "trendline" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => { intradayDrawings.setActiveTool(intradayDrawings.activeTool === "trendline" ? null : "trendline"); setIntradayMeasureMode(false); }}
-              style={intradayDrawings.activeTool === "trendline" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-intraday-trend-line-mode`}
-              title="Trend Line"
-            >
-              <TrendLineIcon />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
               className={`text-white toggle-elevate ${intradayDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
               onClick={() => { intradayDrawings.setActiveTool(intradayDrawings.activeTool === "horizontal" ? null : "horizontal"); setIntradayMeasureMode(false); }}
               style={intradayDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
@@ -469,6 +697,12 @@ export function DualChartGrid({
             >
               <Minus className="h-3.5 w-3.5" />
             </Button>
+            <HorizontalLineSettingsPopover
+              drawings={intradayDrawings.drawings}
+              selectedId={intradayDrawings.selectedId}
+              updateStyling={intradayDrawings.updateDrawingStyling}
+              testIdPrefix={`${pid}intraday`}
+            />
             {intradayDrawings.drawings.length > 0 && (
               <Button
                 size="sm"
@@ -481,48 +715,90 @@ export function DualChartGrid({
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`text-white text-[10px] font-semibold toggle-elevate ${ETH_FEATURE_ENABLED && showETH ? "toggle-elevated bg-white/15" : ""} ${!ETH_FEATURE_ENABLED ? "opacity-40 cursor-not-allowed" : ""}`}
-              onClick={() => { if (ETH_FEATURE_ENABLED) onShowETHChange(!showETH); }}
-              style={ETH_FEATURE_ENABLED && showETH ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-intraday-eth-toggle`}
-              disabled={!ETH_FEATURE_ENABLED}
-              title={!ETH_FEATURE_ENABLED ? "ETH temporarily disabled (RTH timestamps fixed)" : "Extended Trading Hours"}
-            >
-              ETH
-            </Button>
+            {showExtendedHoursControls && (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`text-white text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-white/15" : ""}`}
+                  onClick={() => startTransition(() => onShowETHChange(!showETH))}
+                  style={showETH ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+                  data-testid={`${pid}button-intraday-eth-toggle`}
+                  title="Show pre-market and after-hours candles (data from Alpaca extended hours)"
+                >
+                  ETH
+                </Button>
+                {showIntradayMaBasisToggle &&
+                  showETH &&
+                  intradayData?.indicatorsExtended && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`text-white text-[10px] font-semibold toggle-elevate ${intradayMaBasis === "extended" ? "toggle-elevated bg-white/15" : ""}`}
+                    onClick={() =>
+                      startTransition(() =>
+                        setIntradayMaBasis((b) => (b === "rth" ? "extended" : "rth"))
+                      )
+                    }
+                    style={
+                      intradayMaBasis === "extended"
+                        ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" }
+                        : undefined
+                    }
+                    data-testid={`${pid}button-intraday-ma-basis-toggle`}
+                    title="RTH: MAs/VWAP use regular session only (forward-filled on ETH bars). EXT: indicators include all extended-hours bars."
+                  >
+                    MA {intradayMaBasis === "rth" ? "RTH" : "EXT"}
+                  </Button>
+                )}
+              </>
+            )}
           </div>
-          <div className="flex-1 min-h-0">
-            {intradayLoading ? (
+          <div className="flex-1 min-h-0 relative">
+            {intradayBlockingLoad ? (
               <Card className="h-full">
-                <CardContent className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                <CardContent className="flex flex-col items-center justify-center gap-2 h-full text-muted-foreground text-sm">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-center px-2" data-testid={`${pid}intraday-loading-label`}>
+                    Loading {intradayTimeframe} for {symbol}… {intradayLoadSec}s
+                  </span>
                 </CardContent>
               </Card>
             ) : effectiveIntradayData ? (
-              <TradingChart
-                data={effectiveIntradayData}
-                timeframe={intradayTimeframe}
-                height={chartHeight}
-                showLegend={true}
-                showDayDividers={true}
-                maSettings={maSettingsData}
-                maxBars={maxBars}
-                measureMode={intradayMeasureMode}
-                drawingToolActive={intradayDrawings.activeTool}
-                onChartReady={(chart, series) => {
-                  intradayChartRef.current = chart;
-                  intradaySeriesRef.current = series;
-                  intradayDrawings.syncPrimitivesToChart();
-                }}
-                onChartClick={intradayDrawings.handleChartClick}
-                onChartMouseDown={intradayDrawings.handleMouseDown}
-                onChartCrosshairMove={intradayDrawings.handleMouseMove}
-                onChartMouseUp={intradayDrawings.handleMouseUp}
-                {...intradayChartProps}
-              />
+              <>
+                <TradingChart
+                  key={`${symbol ?? ""}-${intradayTimeframe}-${showETH ? 1 : 0}`}
+                  data={effectiveIntradayData}
+                  timeframe={intradayTimeframe}
+                  height={chartHeight}
+                  showLegend={true}
+                  maSettings={maSettingsData}
+                  maDataLimits={maDataLimits}
+                  maxBars={maxBars}
+                  measureMode={intradayMeasureMode}
+                  drawingToolActive={intradayDrawings.activeTool}
+                  onChartReady={(chart, series) => {
+                    intradayChartRef.current = chart;
+                    intradaySeriesRef.current = series;
+                    intradayDrawings.syncPrimitivesToChart();
+                  }}
+                  onChartClick={intradayDrawings.handleChartClick}
+                  onChartMouseDown={intradayDrawings.handleMouseDown}
+                  onChartCrosshairMove={intradayDrawings.handleMouseMove}
+                  onChartMouseUp={intradayDrawings.handleMouseUp}
+                  {...mergedIntradayChartProps}
+                  whiteExtendedHoursCandles={showETH}
+                />
+                {intradayFetching ? (
+                  <div
+                    className="pointer-events-none absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-md border border-white/15 bg-black/55 px-2 py-1 text-[11px] text-white/90 shadow-md backdrop-blur-sm"
+                    data-testid={`${pid}intraday-fetching-hint`}
+                  >
+                    <Loader2 className="h-3 w-3 animate-spin opacity-80" />
+                    Updating…{intradayFetchSec > 0 ? ` ${intradayFetchSec}s` : ""}
+                  </div>
+                ) : null}
+              </>
             ) : (
               <Card className="h-full">
                 <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">

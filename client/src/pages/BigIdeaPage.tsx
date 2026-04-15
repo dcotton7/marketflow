@@ -4866,7 +4866,7 @@ function ScanChartViewer({
   const [msSyncEnabled, setMsSyncEnabled] = useState(false);
 
   // Watchlist integration
-  const { data: watchlist } = useWatchlist();
+  const { data: watchlist, isFetched: watchlistFetched } = useWatchlist();
   const { mutate: addToWatchlist, isPending: isAddingToWatchlist } = useAddToWatchlist();
   const { mutate: removeFromWatchlist, isPending: isRemovingFromWatchlist } = useRemoveFromWatchlist();
   const { mutate: updateWatchlist } = useUpdateWatchlist();
@@ -4974,7 +4974,12 @@ function ScanChartViewer({
     staleTime: 0,
   });
 
-  const { data: intradayData, isLoading: intradayLoading, error: intradayError } = useQuery<ChartDataResponse>({
+  const {
+    data: intradayData,
+    isLoading: intradayLoading,
+    error: intradayError,
+    isFetching: intradayFetching,
+  } = useQuery<ChartDataResponse>({
     queryKey: ["/api/sentinel/chart-data", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
     refetchOnMount: 'always',
@@ -5007,11 +5012,13 @@ function ScanChartViewer({
   });
 
   const { data: chartMetrics, error: metricsError } = useQuery<ChartMetrics>({
-    queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe],
+    queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
     queryFn: async () => {
       console.log(`[ScanChartViewer] Fetching metrics for ${symbol}`);
-      const res = await fetch(`/api/sentinel/trade-chart-metrics?ticker=${symbol}&timeframe=${intradayTimeframe}`, { credentials: "include" });
+      const p = new URLSearchParams({ ticker: symbol, timeframe: intradayTimeframe });
+      if (showETH) p.set("includeETH", "true");
+      const res = await fetch(`/api/sentinel/trade-chart-metrics?${p}`, { credentials: "include" });
       if (!res.ok) {
         console.error(`[ScanChartViewer] Metrics fetch failed: ${res.status} ${res.statusText}`);
         throw new Error("Failed to fetch metrics");
@@ -5356,6 +5363,7 @@ function ScanChartViewer({
   // Get saved trade plan from watchlist item - memoized to prevent infinite loops
   const savedTradePlan = useMemo(() => {
     if (!watchlistItem) return null;
+    if (watchlistItem.symbol.toUpperCase() !== symbol.toUpperCase()) return null;
     const hasData = watchlistItem.targetEntry || watchlistItem.stopPlan || watchlistItem.targetPlan;
     if (!hasData) return null;
     return {
@@ -5363,7 +5371,14 @@ function ScanChartViewer({
       stop: watchlistItem.stopPlan,
       target: watchlistItem.targetPlan,
     };
-  }, [watchlistItem?.targetEntry, watchlistItem?.stopPlan, watchlistItem?.targetPlan]);
+  }, [
+    symbol,
+    watchlistItem?.id,
+    watchlistItem?.symbol,
+    watchlistItem?.targetEntry,
+    watchlistItem?.stopPlan,
+    watchlistItem?.targetPlan,
+  ]);
 
   // NOTE: Price lines loading is handled by AskIvyOverlay via savedTradePlan prop
   // AskIvyOverlay calls onSelectionChange to update ivyEntryLevel/Stop/Target
@@ -5828,11 +5843,14 @@ function ScanChartViewer({
             dailyLoading={dailyLoading}
             intradayData={intradayData}
             intradayLoading={intradayLoading}
+            intradayFetching={intradayFetching}
             chartMetrics={chartMetrics ?? null}
             intradayTimeframe={intradayTimeframe}
             onIntradayTimeframeChange={setIntradayTimeframe}
             showETH={showETH}
             onShowETHChange={setShowETH}
+            showExtendedHoursControls
+            showIntradayMaBasisToggle={false}
             upperPane={scanUpperPane}
             navExtra={scanNavExtra}
             lowerPane={scanLowerPane}
@@ -5890,6 +5908,7 @@ function ScanChartViewer({
             onSaveTradePlan={handleSaveTradePlan}
             onClearTradePlan={handleClearTradePlan}
             savedTradePlan={savedTradePlan}
+            tradePlanWatchlistReady={watchlistFetched}
           />
           
           {/* News Panel */}

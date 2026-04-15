@@ -209,15 +209,26 @@ export async function fetchAlpacaIntradayBars(
       return [];
     }
 
-    const allBars = rawBars.map((bar: AlpacaBar) => ({
-      date: bar.t,
-      open: bar.o,
-      high: bar.h,
-      low: bar.l,
-      close: bar.c,
-      volume: bar.v || 0,
-    }))
-    .filter((bar) => bar.open && bar.close);
+    const allBars = rawBars
+      .map((bar: AlpacaBar) => ({
+        date: bar.t,
+        open: bar.o,
+        high: bar.h,
+        low: bar.l,
+        close: bar.c,
+        volume: bar.v || 0,
+      }))
+      .filter(
+        (bar) =>
+          bar.open != null &&
+          bar.close != null &&
+          bar.high != null &&
+          bar.low != null &&
+          Number.isFinite(bar.open) &&
+          Number.isFinite(bar.close) &&
+          Number.isFinite(bar.high) &&
+          Number.isFinite(bar.low)
+      );
     
     console.log(`[Alpaca] Received ${allBars.length} total bars from API (${pages} page${pages === 1 ? "" : "s"})`);
     if (allBars.length > 0) {

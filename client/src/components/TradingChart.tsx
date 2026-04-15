@@ -14,9 +14,16 @@ import {
   ISeriesApi,
 } from "lightweight-charts";
 import { DEFAULT_MA_TEMPLATE, BARS_PER_DAY } from "@shared/indicatorTemplates";
-import { Settings2 } from "lucide-react";
+import {
+  chartTimeframeToFeasibilityKey,
+  type ChartMaDataLimits,
+  DEFAULT_CHART_MA_LIMITS,
+  isMaRowFeasibleForTimeframe,
+} from "@/lib/chart-ma-feasibility";
 import { Button } from "@/components/ui/button";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
+import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
+import { buildIntradayCandlestickAndVolume } from "@/lib/intradayEthBarStyle";
 
 function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];
@@ -155,7 +162,6 @@ export interface TradingChartProps {
   height?: number;
   timeframe?: string;
   snapToPrice?: number | null;
-  showDayDividers?: boolean;
   maSettings?: MaSettingForChart[];
   maxBars?: number;
   measureMode?: boolean;
@@ -169,6 +175,10 @@ export interface TradingChartProps {
   onChartMouseDown?: (param: any) => void;
   onChartCrosshairMove?: (param: any) => void;
   onChartMouseUp?: () => void;
+  /** Intraday + ETH: paint pre/post US session bars white (ET clock). */
+  whiteExtendedHoursCandles?: boolean;
+  /** When set, MAs that exceed provider lookback are hidden (matches Indicator Settings). */
+  maDataLimits?: ChartMaDataLimits;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -190,12 +200,24 @@ const LINE_TYPE_TO_STYLE: Record<number, number> = {
   4: LineStyle.SparseDotted,
 };
 
+function normalizeChartTimeframe(timeframe: string): string {
+  return (timeframe || "daily").toLowerCase().trim();
+}
+
 function getTimeframeToggle(setting: MaSettingForChart, timeframe: string): boolean {
-  if (timeframe === "daily" || timeframe === "1d") return setting.dailyOn;
-  if (timeframe === "5min" || timeframe === "5m") return setting.fiveMinOn;
-  if (timeframe === "15min" || timeframe === "15m") return setting.fifteenMinOn;
-  if (timeframe === "30min" || timeframe === "30m") return setting.thirtyMinOn;
-  return setting.dailyOn;
+  const tf = normalizeChartTimeframe(timeframe);
+  if (tf === "daily" || tf === "1d") return !!setting.dailyOn;
+  if (tf === "5min" || tf === "5m") return !!setting.fiveMinOn;
+  if (tf === "15min" || tf === "15m") return !!setting.fifteenMinOn;
+  if (tf === "30min" || tf === "30m" || tf === "60min" || tf === "1h") return !!setting.thirtyMinOn;
+  return !!setting.dailyOn;
+}
+
+/** Matches Indicator Settings defaults: SMA 200d is off on 5m and 15m until the user turns it on in the overlay. */
+function isSma200DefaultOnForTimeframe(timeframe: string): boolean {
+  const tf = normalizeChartTimeframe(timeframe);
+  if (tf === "5min" || tf === "5m" || tf === "15min" || tf === "15m") return false;
+  return true;
 }
 
 const INDICATOR_FIELD_MAP: { field: keyof ChartIndicators; templateId: string }[] = [
@@ -220,14 +242,18 @@ function renderMaLinesToChart(
   chart: IChartApi,
   settings: MaSettingForChart[] | undefined,
   chartData: { candles: ChartCandle[]; indicators: ChartIndicators },
-  tf: string
+  tf: string,
+  maDataLimits?: ChartMaDataLimits
 ): ISeriesApi<"Line">[] {
   const addedSeries: ISeriesApi<"Line">[] = [];
+  const limits = maDataLimits ?? DEFAULT_CHART_MA_LIMITS;
+  const feasibilityTf = chartTimeframeToFeasibilityKey(tf);
 
   if (settings && settings.length > 0) {
     const closes = chartData.candles.map(c => c.close);
     for (const setting of settings) {
       if (!getTimeframeToggle(setting, tf)) continue;
+      if (!isMaRowFeasibleForTimeframe(setting, feasibilityTf, limits)) continue;
 
       let indicatorValues: (number | null)[] | undefined;
 
@@ -269,6 +295,13 @@ function renderMaLinesToChart(
     }
   } else {
     for (const ma of MA_CONFIG) {
+      if (ma.key === "sma200" && !isSma200DefaultOnForTimeframe(tf)) continue;
+      if (
+        ma.key === "sma200" &&
+        !isMaRowFeasibleForTimeframe({ maType: "sma", period: 200, calcOn: "daily" }, feasibilityTf, limits)
+      ) {
+        continue;
+      }
       const indicatorValues = chartData.indicators[ma.key];
       if (!indicatorValues || indicatorValues.length === 0) continue;
 
@@ -483,7 +516,6 @@ export function TradingChart({
   height,
   timeframe = "daily",
   snapToPrice,
-  showDayDividers = false,
   maSettings,
   maxBars,
   measureMode = false,
@@ -497,10 +529,13 @@ export function TradingChart({
   onChartMouseDown,
   onChartCrosshairMove,
   onChartMouseUp,
+  whiteExtendedHoursCandles = false,
+  maDataLimits,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const onCandleClickRef = useRef(onCandleClick);
   const candlesRef = useRef(rawData.candles);
   const markersHandleRef = useRef<any>(null);
@@ -518,11 +553,6 @@ export function TradingChart({
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   const [chartReady, setChartReady] = useState(false);
-  
-  // Debug log to see what priceLines are received
-  useEffect(() => {
-    console.log(`[TradingChart] Component rendered - timeframe: ${timeframe}, priceLines received:`, priceLines?.length ?? 0, priceLines);
-  }, [timeframe, priceLines]);
   
   useEffect(() => {
     measureModeRef.current = measureMode;
@@ -549,6 +579,22 @@ export function TradingChart({
   // IMPORTANT: candle timestamps are UTC epoch seconds from the server.
   // We do NOT shift timestamps to ET; we only format display labels in ET.
   const displayData = data;
+
+  const chartTicker = (displayData as { ticker?: string }).ticker ?? "";
+  const candleLen = displayData.candles.length;
+  const cFirst = candleLen > 0 ? displayData.candles[0] : null;
+  const cLast = candleLen > 0 ? displayData.candles[candleLen - 1] : null;
+  const candleSyncKey = useMemo(
+    () =>
+      candleLen === 0
+        ? `${chartTicker}|empty`
+        : `${chartTicker}|${candleLen}|${cFirst!.timestamp}|${cLast!.timestamp}|${cLast!.close}|${cLast!.volume}|${whiteExtendedHoursCandles}`,
+    [chartTicker, candleLen, cFirst?.timestamp, cLast?.timestamp, cLast?.close, cLast?.volume, whiteExtendedHoursCandles]
+  );
+  const hasCandles = candleLen > 0;
+
+  const displayDataRef = useRef(displayData);
+  displayDataRef.current = displayData;
 
   const clearMeasure = useCallback(() => {
     measureStartRef.current = null;
@@ -688,17 +734,19 @@ export function TradingChart({
   );
 
   useEffect(() => {
-    if (!containerRef.current || displayData.candles.length === 0) return;
+    if (!containerRef.current) return;
 
     if (chartRef.current) {
-      console.log(`[TradingChart] Cleaning up chart - setting chartReady=false, timeframe: ${timeframe}`);
       chartRef.current.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
       markersHandleRef.current = null;
       priceLinesRef.current = [];
       setChartReady(false);
     }
+
+    if (!hasCandles) return;
 
     const containerHeight = height || containerRef.current.clientHeight || 500;
     const chart = createChart(containerRef.current, {
@@ -783,17 +831,14 @@ export function TradingChart({
 
     candleSeriesRef.current = candleSeries;
 
-    const candleData: CandlestickData[] = displayData.candles.map((c) => ({
-      time: c.timestamp as any,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
+    const { candleData, volumeData: styledVolumeData } = buildIntradayCandlestickAndVolume(
+      displayData.candles,
+      isIntraday && whiteExtendedHoursCandles
+    );
 
     candleSeries.setData(candleData);
 
-    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, displayData, timeframe);
+    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, displayData, timeframe, maDataLimits);
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -804,59 +849,8 @@ export function TradingChart({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
-    const volumeData: HistogramData[] = displayData.candles.map((c) => ({
-      time: c.timestamp as any,
-      value: c.volume,
-      color:
-        c.close >= c.open
-          ? "rgba(34, 197, 94, 0.3)"
-          : "rgba(239, 68, 68, 0.3)",
-    }));
-
-    volumeSeries.setData(volumeData);
-
-    if (showDayDividers && isIntraday && displayData.candles.length > 0) {
-      const dayBoundaryTimestamps: number[] = [];
-      let prevDateStr = "";
-      for (const c of displayData.candles) {
-        const d = new Date(c.timestamp * 1000);
-        // Get ET date components for proper day boundary detection
-        const etYear = d.toLocaleString("en-US", { timeZone: "America/New_York", year: "numeric" });
-        const etMonth = d.toLocaleString("en-US", { timeZone: "America/New_York", month: "numeric" });
-        const etDay = d.toLocaleString("en-US", { timeZone: "America/New_York", day: "numeric" });
-        const etHour = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
-        const etMin = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }));
-        
-        const dateStr = `${etYear}-${etMonth}-${etDay}`;
-        const etTotalMin = etHour * 60 + etMin;
-        
-        // Mark boundary at first bar of each new trading day (at or after 9:30 AM ET = 570 min)
-        if (dateStr !== prevDateStr && prevDateStr !== "" && etTotalMin >= 570) {
-          dayBoundaryTimestamps.push(c.timestamp);
-        }
-        prevDateStr = dateStr;
-      }
-
-      if (dayBoundaryTimestamps.length > 0) {
-        const dividerSeries = chart.addSeries(HistogramSeries, {
-          priceFormat: { type: "volume" },
-          priceScaleId: "dayDividers",
-          lastValueVisible: false,
-          priceLineVisible: false,
-        });
-        chart.priceScale("dayDividers").applyOptions({
-          scaleMargins: { top: 0, bottom: 0 },
-          visible: false,
-        });
-        const maxPrice = Math.max(...displayData.candles.map(c => c.high));
-        const dividerData: HistogramData[] = dayBoundaryTimestamps.map(ts => ({
-          time: ts as any,
-          value: maxPrice * 10,
-          color: "rgba(148, 163, 184, 0.15)",
-        }));
-        dividerSeries.setData(dividerData);
-      }
-    }
+    volumeSeries.setData(styledVolumeData);
+    volumeSeriesRef.current = volumeSeries;
 
     const measurePrimitive = new MeasurePrimitive();
     candleSeries.attachPrimitive(measurePrimitive);
@@ -872,7 +866,6 @@ export function TradingChart({
     chart.subscribeCrosshairMove(crosshairHandler);
     chart.subscribeClick(handleChartClick);
 
-    console.log(`[TradingChart] Chart initialized - setting chartReady=true, timeframe: ${timeframe}, priceLines count: ${priceLines?.length ?? 0}`);
     setChartReady(true);
     
     if (onChartReady) {
@@ -926,8 +919,8 @@ export function TradingChart({
 
     return () => {
       resizeObserver.disconnect();
-      measurePrimitiveRef.current = null;
-      measureStartRef.current = null;
+        measurePrimitiveRef.current = null;
+        measureStartRef.current = null;
       if (chartContainer) {
         chartContainer.removeEventListener("mousedown", mouseDownHandler);
       }
@@ -938,6 +931,7 @@ export function TradingChart({
         chartRef.current.remove();
         chartRef.current = null;
         candleSeriesRef.current = null;
+        volumeSeriesRef.current = null;
         markersHandleRef.current = null;
         priceLinesRef.current = [];
         setChartReady(false);
@@ -952,7 +946,40 @@ export function TradingChart({
         baseZoneSeriesRef.current = [];
       }
     };
-  }, [displayData, isIntraday, showDayDividers, timeframe]);
+  }, [hasCandles, isIntraday, timeframe]);
+
+  /** Keep candle/volume in sync immediately (no rAF) so intraday isn’t delayed while daily chart inits. */
+  useEffect(() => {
+    if (!candleSeriesRef.current || !chartRef.current || !hasCandles) return;
+    const latest = displayDataRef.current;
+    if (latest.candles.length === 0) return;
+
+    const { candleData, volumeData } = buildIntradayCandlestickAndVolume(
+      latest.candles,
+      isIntraday && whiteExtendedHoursCandles
+    );
+    candleSeriesRef.current.setData(candleData);
+    if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.setData(volumeData);
+    }
+  }, [candleSyncKey, hasCandles, isIntraday, whiteExtendedHoursCandles]);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const chart = chartRef.current;
+    for (const s of maLineSeriesRef.current) {
+      try {
+        chart.removeSeries(s);
+      } catch {}
+    }
+    maLineSeriesRef.current = renderMaLinesToChart(
+      chart,
+      maSettings,
+      displayDataRef.current,
+      timeframe,
+      maDataLimits
+    );
+  }, [maSettings, timeframe, candleSyncKey, maDataLimits]);
 
   useEffect(() => {
     if (!chartRef.current || !height) return;
@@ -962,21 +989,13 @@ export function TradingChart({
   useEffect(() => {
     if (!chartRef.current) return;
     const chart = chartRef.current;
-    if (maxBars && displayData.candles.length > maxBars) {
-      const from = displayData.candles.length - maxBars;
-      const to = displayData.candles.length - 1;
+    const n = displayDataRef.current.candles.length;
+    if (maxBars && n > maxBars) {
+      const from = n - maxBars;
+      const to = n - 1;
       chart.timeScale().setVisibleLogicalRange({ from, to });
     }
-  }, [maxBars]);
-
-  useEffect(() => {
-    if (!chartRef.current) return;
-    const chart = chartRef.current;
-    for (const s of maLineSeriesRef.current) {
-      try { chart.removeSeries(s); } catch {}
-    }
-    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, displayData, timeframe);
-  }, [maSettings]);
+  }, [maxBars, candleSyncKey]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
@@ -1428,9 +1447,16 @@ export function TradingChart({
   }, [snapToPrice]);
 
   const legendItems = useMemo(() => {
+    const limits = maDataLimits ?? DEFAULT_CHART_MA_LIMITS;
+    const ft = chartTimeframeToFeasibilityKey(timeframe);
     if (maSettings && maSettings.length > 0) {
       return maSettings
-        .filter(s => getTimeframeToggle(s, timeframe) && (SYSTEM_ROW_TO_FIELD[s.rowId] || s.maType === "sma" || s.maType === "ema"))
+        .filter(
+          (s) =>
+            getTimeframeToggle(s, timeframe) &&
+            isMaRowFeasibleForTimeframe(s, ft, limits) &&
+            (SYSTEM_ROW_TO_FIELD[s.rowId] || s.maType === "sma" || s.maType === "ema")
+        )
         .map(s => ({
           key: s.rowId,
           label: s.title,
@@ -1439,7 +1465,18 @@ export function TradingChart({
           isDashed: s.lineType === 1 || s.lineType === 3,
         }));
     }
-    const items: { key: string; label: string; color: string; isDotted: boolean; isDashed: boolean }[] = MA_CONFIG.map(ma => ({
+    const items: { key: string; label: string; color: string; isDotted: boolean; isDashed: boolean }[] = MA_CONFIG.filter(
+      (ma) => {
+        if (ma.key === "sma200" && !isSma200DefaultOnForTimeframe(timeframe)) return false;
+        if (
+          ma.key === "sma200" &&
+          !isMaRowFeasibleForTimeframe({ maType: "sma", period: 200, calcOn: "daily" }, ft, limits)
+        ) {
+          return false;
+        }
+        return true;
+      }
+    ).map((ma) => ({
       key: ma.key,
       label: ma.label,
       color: ma.color,
@@ -1456,7 +1493,7 @@ export function TradingChart({
       items.push({ key: "avwapLow", label: "VWAP Lo", color: "#38bdf8", isDotted: true, isDashed: false });
     }
     return items;
-  }, [maSettings, timeframe, data.indicators]);
+  }, [maSettings, timeframe, data.indicators, maDataLimits]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1525,7 +1562,7 @@ export function TradingChart({
           onClick={(e) => { e.stopPropagation(); setShowMaSettings(true); }}
           data-testid="button-chart-indicator-settings"
         >
-          <Settings2 className="h-3.5 w-3.5 text-slate-400" />
+          <IndicatorsFourSquaresIcon className="text-slate-400" />
         </Button>
       </div>
       <div ref={containerRef} className="w-full flex-1 min-h-[400px]" style={drawingToolActive ? { cursor: 'crosshair' } : undefined} />

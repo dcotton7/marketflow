@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
 import { TradingChart, type ChartCandle, type ChartIndicators, type PriceLevelLine } from "@/components/TradingChart";
+import { DEFAULT_CHART_MA_LIMITS, type ChartMaDataLimits } from "@/lib/chart-ma-feasibility";
 
 function isDateOnly(dateStr: string): boolean {
   return dateStr.endsWith('T00:00:00.000Z') || dateStr.endsWith('T00:00:00Z') || !dateStr.includes('T');
@@ -1376,10 +1377,31 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
     queryKey: ["/api/sentinel/ma-settings"],
   });
 
-  const { data: chartPrefs } = useQuery<{ defaultBarsOnScreen: number }>({
+  const { data: chartPrefs } = useQuery<{
+    defaultBarsOnScreen: number;
+    dataLimitDaily?: number;
+    dataLimit5min?: number;
+    dataLimit15min?: number;
+    dataLimit30min?: number;
+  }>({
     queryKey: ["/api/sentinel/chart-preferences"],
   });
   const maxBars = chartPrefs?.defaultBarsOnScreen ?? 200;
+
+  const maDataLimits: ChartMaDataLimits = useMemo(
+    () => ({
+      dataLimitDaily: chartPrefs?.dataLimitDaily ?? DEFAULT_CHART_MA_LIMITS.dataLimitDaily,
+      dataLimit5min: chartPrefs?.dataLimit5min ?? DEFAULT_CHART_MA_LIMITS.dataLimit5min,
+      dataLimit15min: chartPrefs?.dataLimit15min ?? DEFAULT_CHART_MA_LIMITS.dataLimit15min,
+      dataLimit30min: chartPrefs?.dataLimit30min ?? DEFAULT_CHART_MA_LIMITS.dataLimit30min,
+    }),
+    [
+      chartPrefs?.dataLimitDaily,
+      chartPrefs?.dataLimit5min,
+      chartPrefs?.dataLimit15min,
+      chartPrefs?.dataLimit30min,
+    ]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -1637,6 +1659,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                 height={chartHeight}
                 showLegend={true}
                 maSettings={maSettingsData}
+                maDataLimits={maDataLimits}
                 maxBars={maxBars}
               />
             ) : (
@@ -1681,8 +1704,8 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   timeframe={intradayTimeframe}
                   height={chartHeight}
                   showLegend={true}
-                  showDayDividers={true}
                   maSettings={maSettingsData}
+                  maDataLimits={maDataLimits}
                   maxBars={maxBars}
                   snapToPrice={refiningLotId && lotEntries ? (() => {
                     const lot = lotEntries.find(l => l.id === refiningLotId);

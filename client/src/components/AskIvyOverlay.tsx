@@ -142,10 +142,17 @@ interface AskIvyOverlayProps {
   onSaveTradePlan?: (data: { entry?: number; stop?: number; target?: number; watchlistItemId?: number; symbol?: string }) => void;
   onClearTradePlan?: () => void;
   savedTradePlan?: { entry?: number; stop?: number; target?: number } | null;
+  /**
+   * When false, defer hydrating Trade Plan from localStorage or applying `savedTradePlan`
+   * until watchlist (or equivalent) has finished loading so we never flash another ticker's plan.
+   */
+  tradePlanWatchlistReady?: boolean;
 }
 
 // LocalStorage key for persisting Trade Plan state
 const ASK_IVY_STORAGE_KEY = "askIvyOverlayState";
+/** Bump when persisted shape/semantics change — old blobs are ignored (avoids cross-ticker corruption). */
+const ASK_IVY_SCHEMA_VERSION = 2;
 
 interface PersistedIvyState {
   symbol: string;
@@ -156,6 +163,7 @@ interface PersistedIvyState {
   evalResult: IvyEvalResponse | null;
   userRating: "up" | "down" | null;
   timestamp: number;
+  schemaVersion?: number;
 }
 
 function loadPersistedState(symbol: string): Partial<PersistedIvyState> | null {
@@ -163,9 +171,15 @@ function loadPersistedState(symbol: string): Partial<PersistedIvyState> | null {
     const stored = localStorage.getItem(ASK_IVY_STORAGE_KEY);
     if (!stored) return null;
     const state: PersistedIvyState = JSON.parse(stored);
+    if (state.schemaVersion !== ASK_IVY_SCHEMA_VERSION) {
+      return null;
+    }
     // Only restore if same symbol and less than 24 hours old
     const hoursSince = (Date.now() - state.timestamp) / (1000 * 60 * 60);
-    if (state.symbol === symbol && hoursSince < 24) {
+    if (
+      (state.symbol || "").toUpperCase() === symbol.toUpperCase() &&
+      hoursSince < 24
+    ) {
       return state;
     }
     return null;
@@ -176,7 +190,10 @@ function loadPersistedState(symbol: string): Partial<PersistedIvyState> | null {
 
 function savePersistedState(state: PersistedIvyState) {
   try {
-    localStorage.setItem(ASK_IVY_STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(
+      ASK_IVY_STORAGE_KEY,
+      JSON.stringify({ ...state, schemaVersion: ASK_IVY_SCHEMA_VERSION })
+    );
   } catch {
     // Ignore storage errors
   }
@@ -448,6 +465,7 @@ export function AskIvyOverlay({
   onSaveTradePlan,
   onClearTradePlan,
   savedTradePlan,
+  tradePlanWatchlistReady = true,
 }: AskIvyOverlayProps) {
   const { systemSettings } = useSystemSettings();
   const { toast } = useToast();
@@ -499,25 +517,14 @@ export function AskIvyOverlay({
   // Track if we've already auto-filled with Ivy suggestions for this symbol
   const [hasAutoFilledIvy, setHasAutoFilledIvy] = useState(false);
   
-  // SAVE before clearing when symbol changes
+  // SAVE for the previous symbol, then reset Trade Plan state whenever `symbol` changes.
+  // (Must not require prevSymbol truthy to clear — '' → first ticker still needs a clean slate.)
   useEffect(() => {
-    console.log('[AskIvy] Symbol change effect RUNNING:', { symbol, prevSymbol, condition: symbol !== prevSymbol && prevSymbol });
-    if (symbol !== prevSymbol && prevSymbol) {
-      // SAVE levels for OLD symbol BEFORE clearing
-      // Use ref which has the watchlistItemId from BEFORE the symbol changed
+    if (symbol === prevSymbol) return;
+
+    if (prevSymbol) {
       const hasLevels = entryLevel?.price || stopLevel?.price || targetLevel?.price;
-      console.log('[AskIvy] Symbol change detected:', { 
-        from: prevSymbol, 
-        to: symbol, 
-        hasLevels,
-        entry: entryLevel?.price,
-        stop: stopLevel?.price,
-        target: targetLevel?.price,
-        watchlistItemId: currentWatchlistItemIdRef.current 
-      });
-      
       if (hasLevels) {
-        console.log('[AskIvy] SAVING levels for', prevSymbol);
         onSaveTradePlan?.({
           entry: entryLevel?.price,
           stop: stopLevel?.price,
@@ -526,26 +533,36 @@ export function AskIvyOverlay({
           symbol: prevSymbol,
         });
       }
-      
-      setPrevSymbol(symbol);
-      // Update the ref for the NEW symbol
-      currentWatchlistItemIdRef.current = watchlistItemId;
-      
-      // Clear everything for new symbol
-      setEvalResult(null);
-      setUserRating(null);
-      setEntryLevel(null);
-      setStopLevel(null);
-      setTargetLevel(null);
-      setEntryInputValue("");
-      setStopInputValue("");
-      setTargetInputValue("");
-      setHasRestoredState(false);
-      setHasInitializedFromWatchlist(false);
-      setUserClearedLevels(false);
-      setHasAutoFilledIvy(false);
-      setEvalOpen(false);
     }
+
+    // Scrub local draft for the *new* symbol immediately so refresh/hydrate never reads stale prices.
+    savePersistedState({
+      symbol,
+      entryLevel: null,
+      stopLevel: null,
+      targetLevel: null,
+      position: null,
+      evalResult: null,
+      userRating: null,
+      timestamp: Date.now(),
+    });
+
+    setPrevSymbol(symbol);
+    currentWatchlistItemIdRef.current = watchlistItemId;
+
+    setEvalResult(null);
+    setUserRating(null);
+    setEntryLevel(null);
+    setStopLevel(null);
+    setTargetLevel(null);
+    setEntryInputValue("");
+    setStopInputValue("");
+    setTargetInputValue("");
+    setHasRestoredState(false);
+    setHasInitializedFromWatchlist(false);
+    setUserClearedLevels(false);
+    setHasAutoFilledIvy(false);
+    setEvalOpen(false);
   }, [symbol, prevSymbol, entryLevel, stopLevel, targetLevel, onSaveTradePlan, watchlistItemId]);
 
   // Check if there are any price levels set (for save prompt)
@@ -596,7 +613,13 @@ export function AskIvyOverlay({
       savedTradePlan 
     });
     
-    if (open && symbol && hasSavedData && !hasInitializedFromWatchlist) {
+    if (
+      open &&
+      symbol &&
+      tradePlanWatchlistReady &&
+      hasSavedData &&
+      !hasInitializedFromWatchlist
+    ) {
       console.log('[AskIvy] LOADING saved levels for', symbol, savedTradePlan);
       if (savedTradePlan.entry) {
         setEntryLevel({ price: savedTradePlan.entry, label: "Saved", source: "user" });
@@ -616,11 +639,11 @@ export function AskIvyOverlay({
       setHasInitializedFromWatchlist(false);
       setUserClearedLevels(false);
     }
-  }, [open, symbol, savedTradePlan, hasInitializedFromWatchlist]);
+  }, [open, symbol, savedTradePlan, hasInitializedFromWatchlist, tradePlanWatchlistReady]);
 
   // Restore persisted state when opening with a symbol (fallback if no watchlist data)
   useEffect(() => {
-    if (open && symbol && !hasRestoredState && !savedTradePlan) {
+    if (open && symbol && tradePlanWatchlistReady && !hasRestoredState && !savedTradePlan) {
       const persisted = loadPersistedState(symbol);
       if (persisted) {
         if (persisted.entryLevel) {
@@ -644,11 +667,13 @@ export function AskIvyOverlay({
     if (!open) {
       setHasRestoredState(false);
     }
-  }, [open, symbol, hasRestoredState, savedTradePlan]);
+  }, [open, symbol, hasRestoredState, savedTradePlan, tradePlanWatchlistReady]);
 
-  // Save state to localStorage when it changes (for persistence across navigation)
+  // Save state to localStorage when it changes (for persistence across navigation).
+  // Skip while `symbol !== prevSymbol`: same commit still has the *previous* ticker's levels in state,
+  // which would corrupt storage (new symbol key + old prices) and restore wrong stops/targets.
   useEffect(() => {
-    if (open && symbol) {
+    if (open && symbol && symbol === prevSymbol) {
       savePersistedState({
         symbol,
         entryLevel,
@@ -660,7 +685,7 @@ export function AskIvyOverlay({
         timestamp: Date.now(),
       });
     }
-  }, [open, symbol, entryLevel, stopLevel, targetLevel, position, evalResult, userRating]);
+  }, [open, symbol, prevSymbol, entryLevel, stopLevel, targetLevel, position, evalResult, userRating]);
 
   const effectivePrice = currentPrice > 0
     ? currentPrice

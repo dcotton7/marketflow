@@ -7187,15 +7187,18 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       let rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
 
       if (rows.length === 0) {
-        const inserts = DEFAULT_MA_ROWS.map(r => ({
-          userId,
-          ...r,
-          isVisible: true,
-          dailyOn: true,
-          fiveMinOn: true,
-          fifteenMinOn: true,
-          thirtyMinOn: true,
-        }));
+        const inserts = DEFAULT_MA_ROWS.map((r) => {
+          const is200d = r.rowId === "sys_sma200";
+          return {
+            userId,
+            ...r,
+            isVisible: true,
+            dailyOn: true,
+            fiveMinOn: is200d ? false : true,
+            fifteenMinOn: is200d ? false : true,
+            thirtyMinOn: true,
+          };
+        });
         await db.insert(userMaSettings).values(inserts);
         rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
       }
