@@ -467,7 +467,7 @@ export function AskIvyOverlay({
   savedTradePlan,
   tradePlanWatchlistReady = true,
 }: AskIvyOverlayProps) {
-  const { systemSettings } = useSystemSettings();
+  const { settings: systemSettings } = useSystemSettings();
   const { toast } = useToast();
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [evalOpen, setEvalOpen] = useState(false);
