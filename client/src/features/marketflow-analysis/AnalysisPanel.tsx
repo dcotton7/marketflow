@@ -3,7 +3,7 @@
  * Full 10-module analysis with AI-generated narrative
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CacheMeta } from "./CachePrompt";
 import {
@@ -44,6 +44,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useAnalysisPopout } from "@/hooks/useAnalysisPopout";
 import { useToast } from "@/hooks/use-toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { WatchlistSelector } from "@/components/WatchlistSelector";
 
 const FLOATING_STORAGE_KEY = "analysis-panel-floating";
 const DEFAULT_FLOATING = { x: 80, y: 60, w: 520, h: 560, pinned: false };
@@ -916,6 +918,20 @@ export function AnalysisPanel({ symbol, open, onOpenChange, showDetach = true, v
     ? new Date(result.generated_at).toLocaleString()
     : "—";
 
+  /** Same control as Sentinel Charts (`SentinelChartsPage` nav). */
+  const watchlistToolbar: ReactNode = symbol ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="shrink-0">
+          <WatchlistSelector symbol={symbol} storageKey="standaloneWatchlistId" />
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p className="text-sm">Add/remove from watchlist</p>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
+
   const handleReload = () => {
     hasTriggeredLoad.current = true; // prevent effect from re-triggering
     reRunMutation.reset();
@@ -1114,6 +1130,7 @@ export function AnalysisPanel({ symbol, open, onOpenChange, showDetach = true, v
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           Last analysis: {lastAnalysisLabel}
         </span>
+        {watchlistToolbar}
         {result && (
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => printAnalysisAsPdf(result)} title="Download as PDF">
             <FileDown className="w-4 h-4" />
@@ -1220,6 +1237,7 @@ export function AnalysisPanel({ symbol, open, onOpenChange, showDetach = true, v
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               Last analysis: {lastAnalysisLabel}
             </span>
+            {watchlistToolbar}
             {result && (
               <Button
                 variant="ghost"

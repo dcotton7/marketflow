@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
@@ -12,13 +12,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
-import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen, LayoutGrid } from "lucide-react";
+import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen, LayoutGrid, Pencil } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspacePaletteAdminPanel } from "@/components/admin/WorkspacePaletteAdminPanel";
+import {
+  effectiveTierCaps,
+  FEATURE_LABELS,
+  FEATURE_ORDER,
+  normalizeSentinelTier,
+  SENTINEL_ACCESS_TIERS,
+  tierFeatureRow,
+  tierFeaturesForRole,
+  tierRoleBundleEquals,
+  tierTokensForRole,
+  type SentinelAccessTier,
+  type TierAccessOverrides,
+  type TierFeatureRow,
+} from "@shared/sentinelTierAccess";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface TnnFactor {
   id: number;
@@ -149,20 +165,158 @@ interface SystemSettings {
 interface AdminUser {
   id: number;
   username: string;
+  email: string;
   isAdmin: boolean;
+  isActive: boolean;
+  tier: SentinelAccessTier;
   createdAt: string;
   totalRules: number;
   starterRulesCount: number;
   userRulesCount: number;
   needsSeeding: boolean;
+  features: TierFeatureRow;
+  tokensAllowed: number | null;
+  tokensUsed: number;
 }
+
+const TIER_DISPLAY: Record<SentinelAccessTier, string> = {
+  free: "Free",
+  standard: "Standard",
+  professional: "Professional",
+  pro_plus: "Pro+",
+};
 
 function UsersTab() {
   const { toast } = useToast();
+  const [editUser, setEditUser] = useState<AdminUser | null>(null);
+  const [draftTier, setDraftTier] = useState<SentinelAccessTier>("free");
+  const [draftIsAdmin, setDraftIsAdmin] = useState(false);
+  const [draftIsActive, setDraftIsActive] = useState(true);
+  const [draftRoleFeatures, setDraftRoleFeatures] = useState<TierFeatureRow>(() =>
+    tierFeaturesForRole("free", undefined)
+  );
+  const [draftTokensAllowed, setDraftTokensAllowed] = useState<number | null>(null);
+
+  const { data: me } = useQuery<{ id: number }>({
+    queryKey: ["/api/sentinel/me"],
+    retry: false,
+  });
+
+  const { data: tierRoleDefaults } = useQuery<{ overrides: TierAccessOverrides }>({
+    queryKey: ["/api/sentinel/admin/tier-role-defaults"],
+    retry: false,
+    staleTime: Infinity,
+  });
 
   const { data: users, isLoading, isError, error, refetch } = useQuery<AdminUser[]>({
     queryKey: ["/api/sentinel/admin/users"],
     retry: false,
+  });
+
+  const openEditor = (user: AdminUser) => {
+    setEditUser(user);
+    setDraftTier(normalizeSentinelTier(user.tier));
+    setDraftIsAdmin(user.isAdmin);
+    setDraftIsActive(user.isActive);
+  };
+
+  useEffect(() => {
+    if (!editUser) return;
+    const o = tierRoleDefaults?.overrides;
+    const t = normalizeSentinelTier(draftTier);
+    setDraftRoleFeatures(tierFeaturesForRole(t, o));
+    setDraftTokensAllowed(tierTokensForRole(t, o));
+  }, [editUser?.id, draftTier, tierRoleDefaults]);
+
+  const previewMergedOverrides = useMemo(() => {
+    const base = tierRoleDefaults?.overrides ?? {};
+    const t = normalizeSentinelTier(draftTier);
+    return {
+      ...base,
+      [t]: { features: draftRoleFeatures, tokensAllowed: draftTokensAllowed },
+    } as TierAccessOverrides;
+  }, [tierRoleDefaults, draftTier, draftRoleFeatures, draftTokensAllowed]);
+
+  const previewCaps = useMemo(
+    () => effectiveTierCaps(normalizeSentinelTier(draftTier), draftIsAdmin, previewMergedOverrides),
+    [draftTier, draftIsAdmin, previewMergedOverrides]
+  );
+
+  const roleDirty = useMemo(() => {
+    const o = tierRoleDefaults?.overrides;
+    const t = normalizeSentinelTier(draftTier);
+    return !tierRoleBundleEquals(
+      draftRoleFeatures,
+      draftTokensAllowed,
+      tierFeaturesForRole(t, o),
+      tierTokensForRole(t, o)
+    );
+  }, [draftRoleFeatures, draftTokensAllowed, draftTier, tierRoleDefaults]);
+
+  const parseApiErrorMessage = (err: Error) => {
+    let msg = err.message || "Request failed";
+    if (msg === "Failed to fetch" || msg.includes("NetworkError")) {
+      msg =
+        "Could not reach the server (network). Restart dev with `npm run dev`, try http://127.0.0.1:5000 if localhost fails, or set LISTEN_HOST.";
+    }
+    const m = /^(\d+):\s*(\{.*\})\s*$/s.exec(msg);
+    if (m?.[2]) {
+      try {
+        const j = JSON.parse(m[2]) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        /* keep raw */
+      }
+    }
+    return msg;
+  };
+
+  const patchUserMutation = useMutation({
+    mutationFn: async (payload: {
+      id: number;
+      tier: SentinelAccessTier;
+      isAdmin: boolean;
+      isActive: boolean;
+    }) => {
+      const res = await apiRequest("PUT", `/api/sentinel/admin/users/${payload.id}`, {
+        tier: payload.tier,
+        isAdmin: payload.isAdmin,
+        isActive: payload.isActive,
+      });
+      return res.json() as Promise<AdminUser>;
+    },
+    onSuccess: () => {
+      toast({ title: "User updated", description: "Tier and access flags saved." });
+      setEditUser(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/admin/users"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: parseApiErrorMessage(err), variant: "destructive" });
+    },
+  });
+
+  const saveTierRoleMutation = useMutation({
+    mutationFn: async () => {
+      const tier = normalizeSentinelTier(draftTier);
+      const res = await apiRequest("PUT", "/api/sentinel/admin/tier-role-defaults", {
+        tier,
+        features: draftRoleFeatures,
+        tokensAllowed: draftTokensAllowed,
+      });
+      return res.json() as Promise<{ overrides: TierAccessOverrides }>;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["/api/sentinel/admin/tier-role-defaults"], data);
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/admin/users"] });
+      const t = normalizeSentinelTier(draftTier);
+      toast({
+        title: "Tier role saved",
+        description: `Feature defaults for ${TIER_DISPLAY[t] ?? t} are updated for all users on that tier.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: parseApiErrorMessage(err), variant: "destructive" });
+    },
   });
 
   const seedRulesMutation = useMutation({
@@ -174,8 +328,8 @@ function UsersTab() {
       toast({ title: "Rules Seeded", description: data.message });
       refetch();
     },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message || "Failed to seed rules", variant: "destructive" });
+    onError: (e: Error) => {
+      toast({ title: "Error", description: e.message || "Failed to seed rules", variant: "destructive" });
     },
   });
 
@@ -202,8 +356,8 @@ function UsersTab() {
           <div className="text-center py-4">
             <XCircle className="w-8 h-8 mx-auto mb-2 text-destructive" />
             <p className="text-muted-foreground">
-              {(error as Error)?.message?.includes("403") 
-                ? "Admin access required to view users" 
+              {(error as Error)?.message?.includes("403")
+                ? "Admin access required to view users"
                 : "Failed to load users"}
             </p>
           </div>
@@ -220,7 +374,9 @@ function UsersTab() {
             <Users className="w-5 h-5" />
             User Management
           </CardTitle>
-          <CardDescription data-testid="text-users-desc">Manage users and seed starter rules</CardDescription>
+          <CardDescription data-testid="text-users-desc">
+            Tier, feature access, and account flags (admin tools stay admin-gated)
+          </CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-users">
           <RefreshCw className="w-4 h-4 mr-1" />
@@ -230,38 +386,59 @@ function UsersTab() {
       <CardContent>
         <div className="space-y-2">
           {users?.map((user) => (
-            <div 
-              key={user.id} 
-              className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border"
+            <div
+              key={user.id}
+              className="flex flex-col gap-3 p-3 rounded-lg bg-muted/30 border sm:flex-row sm:items-center sm:justify-between"
               data-testid={`card-user-${user.id}`}
             >
-              <div className="flex items-center gap-3">
-                <div className="flex flex-col">
-                  <span className="font-medium" data-testid={`text-username-${user.id}`}>
-                    {user.username}
-                    {user.isAdmin && (
-                      <Badge variant="secondary" className="ml-2 text-xs">Admin</Badge>
-                    )}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Joined {new Date(user.createdAt).toLocaleDateString()}
-                  </span>
-                </div>
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="font-medium flex flex-wrap items-center gap-2" data-testid={`text-username-${user.id}`}>
+                  {user.username}
+                  {me?.id === user.id && (
+                    <Badge variant="outline" className="text-xs font-normal">
+                      You
+                    </Badge>
+                  )}
+                  {user.isAdmin && <Badge variant="secondary" className="text-xs">Admin</Badge>}
+                  {!user.isActive && (
+                    <Badge variant="destructive" className="text-xs">
+                      Inactive
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="text-xs">
+                    {TIER_DISPLAY[user.tier] ?? user.tier}
+                  </Badge>
+                </span>
+                <span className="text-xs text-muted-foreground truncate" title={user.email}>
+                  {user.email}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Joined {new Date(user.createdAt).toLocaleDateString()}
+                </span>
               </div>
-              
-              <div className="flex items-center gap-4">
-                <div className="text-right text-sm">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs">
-                      {user.starterRulesCount} Starter
-                    </Badge>
-                    <Badge variant="outline" className="text-xs">
-                      {user.userRulesCount} Custom
-                    </Badge>
-                  </div>
+
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="outline" className="text-xs">
+                    {user.starterRulesCount} Starter
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">
+                    {user.userRulesCount} Custom
+                  </Badge>
                 </div>
-                
-                {user.needsSeeding && (
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditor(user)}
+                  data-testid={`button-edit-user-${user.id}`}
+                >
+                  <Pencil className="w-4 h-4 mr-1" />
+                  Edit
+                </Button>
+
+                {user.needsSeeding ? (
                   <Button
                     size="sm"
                     onClick={() => seedRulesMutation.mutate(user.id)}
@@ -277,9 +454,7 @@ function UsersTab() {
                       </>
                     )}
                   </Button>
-                )}
-                
-                {!user.needsSeeding && (
+                ) : (
                   <Badge variant="secondary" className="text-xs text-rs-green">
                     <CheckCircle2 className="w-3 h-3 mr-1" />
                     Has Rules
@@ -288,11 +463,254 @@ function UsersTab() {
               </div>
             </div>
           ))}
-          
+
           {(!users || users.length === 0) && (
             <p className="text-muted-foreground text-center py-4">No users found</p>
           )}
         </div>
+
+        <Dialog
+          open={!!editUser}
+          onOpenChange={(open) => {
+            if (!open) setEditUser(null);
+          }}
+        >
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit user</DialogTitle>
+              <DialogDescription>
+                {editUser ? (
+                  <>
+                    <span className="font-medium text-foreground">{editUser.username}</span>
+                    <span className="text-muted-foreground"> — {editUser.email}</span>
+                  </>
+                ) : null}
+              </DialogDescription>
+            </DialogHeader>
+
+            {editUser && (
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="admin-user-tier">Access tier</Label>
+                  <Select
+                    key={editUser.id}
+                    value={normalizeSentinelTier(draftTier)}
+                    onValueChange={(v) => setDraftTier(v as SentinelAccessTier)}
+                  >
+                    <SelectTrigger id="admin-user-tier" data-testid="select-user-tier">
+                      <SelectValue placeholder="Select tier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SENTINEL_ACCESS_TIERS.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {TIER_DISPLAY[t]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Administrator</p>
+                    <p className="text-xs text-muted-foreground">Full product access; Sentinel admin routes</p>
+                  </div>
+                  <Switch checked={draftIsAdmin} onCheckedChange={setDraftIsAdmin} data-testid="switch-user-admin" />
+                </div>
+
+                <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Account active</p>
+                    <p className="text-xs text-muted-foreground">Inactive users cannot sign in</p>
+                  </div>
+                  <Switch checked={draftIsActive} onCheckedChange={setDraftIsActive} data-testid="switch-user-active" />
+                </div>
+
+                <div className="space-y-3 rounded-md border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Role defaults for selected tier</p>
+                    <p className="text-xs text-muted-foreground">
+                      Applies to every account on the access tier you picked above. Choosing a different tier reloads
+                      that tier&apos;s saved preset (built-in defaults plus any admin overrides).
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    {FEATURE_ORDER.map((key) => (
+                      <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={draftRoleFeatures[key]}
+                          onCheckedChange={(v) =>
+                            setDraftRoleFeatures((prev) => ({ ...prev, [key]: v === true }))
+                          }
+                          data-testid={`checkbox-tier-feature-${key}`}
+                        />
+                        <span>{FEATURE_LABELS[key]}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Max alerts (tier default)</Label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={draftRoleFeatures.maxAlerts === null}
+                          onCheckedChange={(v) => {
+                            if (v === true) {
+                              setDraftRoleFeatures((prev) => ({ ...prev, maxAlerts: null }));
+                            } else {
+                              const t = normalizeSentinelTier(draftTier);
+                              const fromMatrix = tierFeatureRow(t).maxAlerts;
+                              setDraftRoleFeatures((prev) => ({
+                                ...prev,
+                                maxAlerts: fromMatrix === null ? 0 : fromMatrix,
+                              }));
+                            }
+                          }}
+                        />
+                        <span>Unlimited</span>
+                      </label>
+                      {draftRoleFeatures.maxAlerts !== null && (
+                        <Input
+                          type="number"
+                          min={0}
+                          className="w-24 h-8"
+                          value={draftRoleFeatures.maxAlerts}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            setDraftRoleFeatures((prev) => ({
+                              ...prev,
+                              maxAlerts: Number.isFinite(n) ? Math.max(0, n) : 0,
+                            }));
+                          }}
+                          data-testid="input-tier-max-alerts"
+                        />
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tokens allowed (tier default)</Label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <Checkbox
+                          checked={draftTokensAllowed === null}
+                          onCheckedChange={(v) => {
+                            setDraftTokensAllowed(v === true ? null : 0);
+                          }}
+                        />
+                        <span>Unlimited</span>
+                      </label>
+                      {draftTokensAllowed !== null && (
+                        <Input
+                          type="number"
+                          min={0}
+                          className="w-28 h-8"
+                          value={draftTokensAllowed}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            setDraftTokensAllowed(Number.isFinite(n) ? Math.max(0, n) : 0);
+                          }}
+                          data-testid="input-tier-tokens"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Effective access (preview)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Administrators always see every feature and unlimited alerts in the product; token cap below still
+                    follows the tier role unless you grant unlimited tokens.
+                  </p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Feature</TableHead>
+                        <TableHead className="text-right">Access</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {FEATURE_ORDER.map((key) => (
+                        <TableRow key={key}>
+                          <TableCell className="text-muted-foreground">{FEATURE_LABELS[key]}</TableCell>
+                          <TableCell className="text-right">
+                            {previewCaps.features[key] ? (
+                              <span className="text-rs-green">Yes</span>
+                            ) : (
+                              <span className="text-muted-foreground">No</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell className="text-muted-foreground">Alerts (max)</TableCell>
+                        <TableCell className="text-right">
+                          {previewCaps.features.maxAlerts === null ? (
+                            <span>Unlimited</span>
+                          ) : (
+                            <span>{previewCaps.features.maxAlerts}</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="text-muted-foreground">Tokens</TableCell>
+                        <TableCell className="text-right">
+                          {previewCaps.tokensAllowed === null ? (
+                            <span>Unlimited</span>
+                          ) : (
+                            <span>{previewCaps.tokensAllowed}</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="pt-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    disabled={!roleDirty || saveTierRoleMutation.isPending}
+                    onClick={() => saveTierRoleMutation.mutate()}
+                    data-testid="button-save-tier-role-defaults"
+                  >
+                    {saveTierRoleMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      "Change features for role"
+                    )}
+                  </Button>
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button type="button" variant="outline" onClick={() => setEditUser(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={patchUserMutation.isPending}
+                    onClick={() =>
+                      patchUserMutation.mutate({
+                        id: editUser.id,
+                        tier: normalizeSentinelTier(draftTier),
+                        isAdmin: draftIsAdmin,
+                        isActive: draftIsActive,
+                      })
+                    }
+                    data-testid="button-save-user"
+                  >
+                    {patchUserMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      "Save changes"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
@@ -536,15 +954,19 @@ function SystemSettingsTab() {
 
         <div className="p-4 bg-muted/50 rounded-lg">
           <h4 className="font-medium mb-2">Preview</h4>
-          <div 
-            className="h-32 rounded-lg flex items-center justify-center relative overflow-hidden"
+          <div
+            className="min-h-[9.5rem] rounded-lg flex items-center justify-center relative py-6 px-8"
             style={{ backgroundColor: localSettings.backgroundColor }}
           >
-            <div 
-              className="absolute inset-0 flex items-center justify-center"
+            <div
+              className="absolute inset-0 flex items-center justify-center py-5 px-6"
               style={{ opacity: (100 - localSettings.logoTransparency) / 100 }}
             >
-              <img src="/rubricshield-logo.png" alt="Watermark" className="w-24 h-24 object-contain" />
+              <img
+                src="/structuremap-logo.png"
+                alt="StructureMap"
+                className="structuremap-wordmark-glow max-h-[6.5rem] w-auto max-w-[min(100%,22rem)] object-contain"
+              />
             </div>
             <div 
               className="px-6 py-3 rounded-lg z-10"

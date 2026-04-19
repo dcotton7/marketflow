@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AlertDeliveryConfig, AlertEvaluationConfig, AlertRuleGroup, AlertTargetScope } from "./alerts";
 import type { StartHereWorkspacePalette } from "./startHereWorkspacePalette";
+import type { TierAccessOverrides } from "./sentinelTierAccess";
 
 // === TABLE DEFINITIONS ===
 
@@ -748,6 +749,15 @@ export const startHereWorkspacePaletteSettings = pgTable("start_here_workspace_p
 
 export type StartHereWorkspacePaletteRow = typeof startHereWorkspacePaletteSettings.$inferSelect;
 
+/** Single-row store: admin overrides for access-tier defaults (features, alerts, tokens). */
+export const sentinelTierAccessOverrides = pgTable("sentinel_tier_access_overrides", {
+  configKey: text("config_key").primaryKey().default("global"),
+  payload: jsonb("payload").$type<TierAccessOverrides>().notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type SentinelTierAccessOverridesRow = typeof sentinelTierAccessOverrides.$inferSelect;
+
 // Order Levels - Multiple stops and profit targets per trade (1-to-many)
 export const sentinelOrderLevels = pgTable("sentinel_order_levels", {
   id: serial("id").primaryKey(),
@@ -1171,6 +1181,9 @@ export const userChartPreferences = pgTable("user_chart_preferences", {
   dataLimit5min: integer("data_limit_5min").notNull().default(63),
   dataLimit15min: integer("data_limit_15min").notNull().default(126),
   dataLimit30min: integer("data_limit_30min").notNull().default(126),
+  /** Market Condition → Theme Members table: MA column 1 / 2 (ema10d | ema20d | sma50d | sma200d) */
+  themeMembersMa1: text("theme_members_ma1").notNull().default("ema20d"),
+  themeMembersMa2: text("theme_members_ma2").notNull().default("sma50d"),
 });
 
 export type UserChartPreference = typeof userChartPreferences.$inferSelect;

@@ -12,6 +12,7 @@ import {
   ThemeHeatmapGrid,
   ThemeDetailPanel,
   ThemeDetailPanelActionable,
+  ThemeDetailPanelEtfs,
   RotationTable,
   TickerWorkbench,
   ThemeRaceLanes,
@@ -232,7 +233,9 @@ export default function MarketConditionPage() {
   const [analysisSyncEnabled, setAnalysisSyncEnabled] = useState(false);
   const [analysisSheetSymbol, setAnalysisSheetSymbol] = useState<string | null>(null);
   const [flowMapFocusData, setFlowMapFocusData] = useState<FlowMapFocusData | null>(null);
-  const [flowMapCenterTab, setFlowMapCenterTab] = useState<"flowFocus" | "actionableDetails" | "legacyDetails">("flowFocus");
+  const [flowMapCenterTab, setFlowMapCenterTab] = useState<
+    "actionableDetails" | "flowFocus" | "etfs" | "legacyDetails"
+  >("actionableDetails");
   const [showFocusedPanel, setShowFocusedPanel] = useState(true);
   const [showMembersPanel, setShowMembersPanel] = useState(true);
   const [showRotationTablePanel, setShowRotationTablePanel] = useState(true);
@@ -804,7 +807,18 @@ export default function MarketConditionPage() {
                 {lensMode === "flowMap" ? (
                   <div className="flex h-full min-h-0 flex-col">
                     <div className="border-b border-slate-700/40 px-2 py-1.5">
-                      <div className="inline-flex items-center rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
+                      <div className="inline-flex flex-wrap items-center gap-0.5 rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
+                        <button
+                          className={cn(
+                            "rounded px-2.5 py-1 text-[11px] font-medium",
+                            flowMapCenterTab === "actionableDetails"
+                              ? "bg-cyan-500/20 text-cyan-200"
+                              : "text-slate-300 hover:text-slate-100"
+                          )}
+                          onClick={() => setFlowMapCenterTab("actionableDetails")}
+                        >
+                          Actionable Details
+                        </button>
                         <button
                           className={cn(
                             "rounded px-2.5 py-1 text-[11px] font-medium",
@@ -819,13 +833,13 @@ export default function MarketConditionPage() {
                         <button
                           className={cn(
                             "rounded px-2.5 py-1 text-[11px] font-medium",
-                            flowMapCenterTab === "actionableDetails"
+                            flowMapCenterTab === "etfs"
                               ? "bg-cyan-500/20 text-cyan-200"
                               : "text-slate-300 hover:text-slate-100"
                           )}
-                          onClick={() => setFlowMapCenterTab("actionableDetails")}
+                          onClick={() => setFlowMapCenterTab("etfs")}
                         >
-                          Actionable Details
+                          ETFs
                         </button>
                         <button
                           className={cn(
@@ -850,6 +864,11 @@ export default function MarketConditionPage() {
                           totalThemes={themes.length}
                           accDistStats={themeMembers?.accDistStats}
                           timeSlice={timeSlice}
+                        />
+                      ) : flowMapCenterTab === "etfs" ? (
+                        <ThemeDetailPanelEtfs
+                          theme={selectedThemeData}
+                          onEtfSymbolClick={handleTickerSelect}
                         />
                       ) : (
                         <ThemeDetailPanel

@@ -81,10 +81,17 @@
   background: hsl(var(--muted-foreground));
 }
 
-/* RubricShield Background Watermark via ::before pseudo-element */
+/* RubricShield page watermark — full wordmark only; no mark, no blur stack */
 .sentinel-page {
   position: relative;
   isolation: isolate;
+}
+
+/* Full StructureMap wordmark: ~15% stronger glow than the previous triple drop-shadow */
+.structuremap-wordmark-glow {
+  filter: drop-shadow(0 0 1.725px rgb(255, 255, 255))
+    drop-shadow(0 0 5.75px rgba(255, 255, 255, 0.46))
+    drop-shadow(0 0 16.1px rgba(255, 255, 255, 0.138));
 }
 
 .sentinel-page::before {
@@ -94,11 +101,15 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-image: url('/rubricshield-logo.png');
+  background-image: url('/structuremap-logo.png');
   background-repeat: no-repeat;
   background-position: center;
   background-size: 33% auto;
   opacity: var(--logo-opacity, 0.06);
+  /* Match .structuremap-wordmark-glow (duplicate: pseudo-element cannot use a class) */
+  filter: drop-shadow(0 0 1.725px rgb(255, 255, 255))
+    drop-shadow(0 0 5.75px rgba(255, 255, 255, 0.46))
+    drop-shadow(0 0 16.1px rgba(255, 255, 255, 0.138));
   pointer-events: none;
   z-index: 0;
 }

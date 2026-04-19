@@ -4,7 +4,7 @@ import type { ThemeId, ThemeRow, SizeFilter } from "@/data/mockThemeData";
 import type { ThemeMetrics } from "@/hooks/useMarketCondition";
 import { cn } from "@/lib/utils";
 import { getRoutePulseTone } from "@/lib/pulse-scale";
-import { GripVertical, Info, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, GripVertical, Info, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type TfKey = "current" | "m15" | "h1" | "h4" | "d1" | "d5" | "d10" | "m1";
@@ -821,7 +821,6 @@ export function FlowMapPanel({
   const selectedRouteScore = selectedRouteDetail?.score ?? 0;
   const selectedRouteNeutral = Math.abs(selectedRouteScore) <= 0.05;
   const headlineFromClass = "text-slate-50";
-  const headlineVsClass = "text-amber-300";
   const headlineToClass = selectedRouteNeutral
     ? "text-amber-200"
     : selectedRouteScore > 0
@@ -832,11 +831,12 @@ export function FlowMapPanel({
     : selectedRouteScore > 0
       ? "text-green-400"
       : "text-red-400";
+  /** Glow matches row-vs-column arrow: row down when column leads, row up when row leads */
   const headlineGlow = selectedRouteNeutral
     ? "0 0 14px rgba(252,211,77,0.52)"
     : selectedRouteScore > 0
-      ? "0 0 16px rgba(74,222,128,0.52)"
-      : "0 0 16px rgba(248,113,113,0.52)";
+      ? "0 0 16px rgba(248,113,113,0.45)"
+      : "0 0 16px rgba(74,222,128,0.52)";
   const metricValueClass = (v: number) =>
     Math.abs(v) <= 0.05 ? "text-amber-300" : v > 0 ? "text-green-300" : "text-red-300";
 
@@ -1096,7 +1096,32 @@ export function FlowMapPanel({
                           >
                             <span className="block overflow-hidden">{truncateHeadlineLabel(narrativeDetail.fromLabel)}</span>
                           </span>
-                          <span className={cn("shrink-0 text-[1.02em]", headlineVsClass)}>V</span>
+                          <span
+                            className={cn(
+                              "shrink-0 inline-flex items-center justify-center rounded-sm border px-0.5 py-0.5",
+                              selectedRouteNeutral
+                                ? "border-slate-500/50 text-slate-400"
+                                : selectedRouteScore > 0
+                                  ? "border-red-500/50 text-red-400"
+                                  : "border-emerald-500/50 text-emerald-400"
+                            )}
+                            title={
+                              selectedRouteNeutral
+                                ? "Roughly balanced between the two themes"
+                                : selectedRouteScore > 0
+                                  ? "Row theme is down vs column (column leads this pair)"
+                                  : "Row theme is up vs column (row leads this pair)"
+                            }
+                            aria-hidden
+                          >
+                            {selectedRouteNeutral ? (
+                              <ArrowUpDown className="h-[1.05em] w-[1.05em]" strokeWidth={2.75} />
+                            ) : selectedRouteScore > 0 ? (
+                              <ArrowDown className="h-[1.05em] w-[1.05em]" strokeWidth={2.75} />
+                            ) : (
+                              <ArrowUp className="h-[1.05em] w-[1.05em]" strokeWidth={2.75} />
+                            )}
+                          </span>
                           <span
                             className={headlineToClass}
                             title={narrativeDetail.toLabel}
@@ -1123,11 +1148,13 @@ export function FlowMapPanel({
                       </>
                     ) : selectedRouteScore > 0 ? (
                       <>
-                        This is a <span className="font-semibold text-green-300">mild positive</span> edge.
+                        The <span className="font-semibold text-red-300">row theme is down</span> vs the column in
+                        this pair (column leads).
                       </>
                     ) : (
                       <>
-                        This is a <span className="font-semibold text-red-300">mild negative</span> edge.
+                        The <span className="font-semibold text-green-300">row theme is up</span> vs the column in
+                        this pair (row leads).
                       </>
                     )}
                   </p>

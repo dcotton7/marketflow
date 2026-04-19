@@ -49,6 +49,7 @@ import {
   START_HERE_MAX_LOAD_CHARTS,
   isLinkLaneGroupId,
   startHereWatchlistColumnWidthsStorageKey,
+  startHereWatchlistInstanceStorageKey,
   startHereWatchlistStorageKey,
 } from "./dashboard-persistence";
 import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
@@ -122,11 +123,24 @@ export function WatchlistPortalWidget({
     return { inheritGroupId: gid };
   };
   const { toast } = useToast();
-  const watchlistStorageKey = startHereWatchlistStorageKey(
+  const watchlistStorageKey = startHereWatchlistInstanceStorageKey(
     userId,
-    groupId,
-    activeStartId
+    activeStartId,
+    instanceId
   );
+
+  /** One-time: copy legacy lane/group-scoped pick into per-instance key so each tile keeps its own list. */
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (localStorage.getItem(watchlistStorageKey) != null) return;
+      const legacy = startHereWatchlistStorageKey(userId, gid, activeStartId);
+      const v = localStorage.getItem(legacy);
+      if (v != null) localStorage.setItem(watchlistStorageKey, v);
+    } catch {
+      /* ignore */
+    }
+  }, [watchlistStorageKey, userId, gid, activeStartId]);
 
   const defaultWatchlistId = dashboard.defaultWatchlistInstanceId ?? null;
   const columnSeedKey = useMemo(() => {
@@ -487,7 +501,10 @@ export function WatchlistPortalWidget({
           <div className="flex flex-col gap-2">
             <Select
               value={effectiveWatchlistId != null ? String(effectiveWatchlistId) : ""}
-              onValueChange={(v) => setSelectedWatchlistId(parseInt(v, 10))}
+              onValueChange={(v) => {
+                const n = Number.parseInt(v, 10);
+                setSelectedWatchlistId(Number.isFinite(n) ? n : null);
+              }}
             >
               <SelectTrigger
                 className="start-here-no-drag h-9 w-full"

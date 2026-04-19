@@ -40,22 +40,35 @@ export interface SentinelWatchlistItem {
 /** Shared with Watchlist Manager, charts, and Big Idea so the same named list is active everywhere */
 export const WATCHLIST_MANAGER_STORAGE_KEY = "watchlistModalSelectedId";
 
+function readWatchlistIdFromStorage(storageKey: string): number | null {
+  if (typeof window === "undefined") return null;
+  const stored = localStorage.getItem(storageKey);
+  if (stored == null || stored === "") return null;
+  const n = parseInt(stored, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Hook to manage selected watchlist ID with localStorage persistence
 export function useSelectedWatchlistId(storageKey: string = "selectedWatchlistId") {
-  const [selectedId, setSelectedId] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    const stored = localStorage.getItem(storageKey);
-    return stored ? parseInt(stored, 10) : null;
-  });
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    readWatchlistIdFromStorage(storageKey)
+  );
 
-  const setSelected = useCallback((id: number | null) => {
-    setSelectedId(id);
-    if (id === null) {
-      localStorage.removeItem(storageKey);
-    } else {
-      localStorage.setItem(storageKey, String(id));
-    }
+  useEffect(() => {
+    setSelectedId(readWatchlistIdFromStorage(storageKey));
   }, [storageKey]);
+
+  const setSelected = useCallback(
+    (id: number | null) => {
+      setSelectedId(id);
+      if (id === null) {
+        localStorage.removeItem(storageKey);
+      } else {
+        localStorage.setItem(storageKey, String(id));
+      }
+    },
+    [storageKey]
+  );
 
   return [selectedId, setSelected] as const;
 }

@@ -12,8 +12,14 @@ export type SizeFilter = "ALL" | "MEGA" | "LARGE" | "MID" | "SMALL" | "MICRO";
 // Trend state for individual instruments or themes
 export type TrendState = "Bull" | "Transition" | "Bear";
 
-// ETF proxy types
-export type ETFProxyType = "direct" | "adjacent" | "macro" | "hedge";
+// ETF proxy types (live universe may add inverse / leveraged)
+export type ETFProxyType =
+  | "direct"
+  | "adjacent"
+  | "macro"
+  | "hedge"
+  | "inverse"
+  | "leveraged";
 
 export interface ETFProxy {
   symbol: string;

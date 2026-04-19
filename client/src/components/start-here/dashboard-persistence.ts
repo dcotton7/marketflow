@@ -274,6 +274,18 @@ export function startHereWatchlistStorageKey(
   return `startHere.watchlistPick.${userId}.${startId}.${groupId}`;
 }
 
+/**
+ * Per watchlist *widget instance* (layout id). Preferred over {@link startHereWatchlistStorageKey}
+ * so two watchlist tiles on the same link lane keep independent named-list selections.
+ */
+export function startHereWatchlistInstanceStorageKey(
+  userId: number,
+  startId: string,
+  instanceId: string
+) {
+  return `startHere.watchlistPickInst.${userId}.${startId}.${instanceId}`;
+}
+
 /** Keys written before per-Start workspaces */
 export function legacyWatchlistStorageKey(userId: number, groupId: string) {
   return `startHere.watchlistPick.${userId}.${groupId}`;
@@ -445,6 +457,12 @@ export function copyWatchlistAndNewsStorageForDuplicate(
       if (v != null) localStorage.setItem(toK, v);
     }
     for (const [oldI, newI] of Object.entries(instanceMap)) {
+      const fromInst = startHereWatchlistInstanceStorageKey(userId, fromStartId, oldI);
+      const toInst = startHereWatchlistInstanceStorageKey(userId, toStartId, newI);
+      const pick = localStorage.getItem(fromInst);
+      if (pick != null) localStorage.setItem(toInst, pick);
+    }
+    for (const [oldI, newI] of Object.entries(instanceMap)) {
       const fromK = startHereNewsModeStorageKey(userId, oldI, fromStartId);
       const toK = startHereNewsModeStorageKey(userId, newI, toStartId);
       const v = localStorage.getItem(fromK);
@@ -472,6 +490,10 @@ export function purgeStartWorkspaceStorage(
       localStorage.removeItem(startHereWatchlistStorageKey(userId, g, startId));
     }
     for (const i of Object.keys(dashboard.instances)) {
+      const meta = dashboard.instances[i];
+      if (meta?.type === "watchlist") {
+        localStorage.removeItem(startHereWatchlistInstanceStorageKey(userId, startId, i));
+      }
       localStorage.removeItem(startHereNewsModeStorageKey(userId, i, startId));
       localStorage.removeItem(startHereWatchlistColumnWidthsStorageKey(userId, startId, i));
     }
@@ -1630,6 +1652,7 @@ export function saveDashboard(
 
 /** Per-workspace prefs mirrored to Postgres `extras` for cross-browser sync. */
 export interface StartHereExtrasPersisted {
+  /** Named watchlist id per `watchlist` widget instance id (layout `i`). Legacy payloads used link-lane `groupId`. */
   watchlistPick?: Record<string, string>;
   newsMode?: Record<string, string>;
   /** Per watchlist widget instance: serialized `WatchlistColumnProfileFile` (v2 JSON: visible columns + widths). */
@@ -1642,11 +1665,16 @@ export function gatherStartHereExtras(
   dashboard: StartHereDashboardV2
 ): StartHereExtrasPersisted {
   const watchlistPick: Record<string, string> = {};
-  for (const gid of Object.keys(dashboard.groups)) {
+  for (const [iid, meta] of Object.entries(dashboard.instances)) {
+    if (meta?.type !== "watchlist") continue;
     try {
-      const k = startHereWatchlistStorageKey(userId, startId, gid);
-      const v = localStorage.getItem(k);
-      if (v != null) watchlistPick[gid] = v;
+      const instKey = startHereWatchlistInstanceStorageKey(userId, startId, iid);
+      let v = localStorage.getItem(instKey);
+      if (v == null) {
+        const legacy = startHereWatchlistStorageKey(userId, meta.groupId, startId);
+        v = localStorage.getItem(legacy);
+      }
+      if (v != null) watchlistPick[iid] = v;
     } catch {
       /* ignore */
     }
@@ -1677,9 +1705,19 @@ export function applyStartHereExtras(
   if (!extras || typeof extras !== "object" || Array.isArray(extras)) return;
   const e = extras as StartHereExtrasPersisted;
   try {
-    for (const [gid, v] of Object.entries(e.watchlistPick ?? {})) {
-      if (!dashboard.groups[gid] || typeof v !== "string") continue;
-      localStorage.setItem(startHereWatchlistStorageKey(userId, startId, gid), v);
+    for (const [key, v] of Object.entries(e.watchlistPick ?? {})) {
+      if (typeof v !== "string") continue;
+      const instMeta = dashboard.instances[key];
+      if (instMeta?.type === "watchlist") {
+        localStorage.setItem(
+          startHereWatchlistInstanceStorageKey(userId, startId, key),
+          v
+        );
+        continue;
+      }
+      if (dashboard.groups[key]) {
+        localStorage.setItem(startHereWatchlistStorageKey(userId, key, startId), v);
+      }
     }
     for (const [iid, v] of Object.entries(e.newsMode ?? {})) {
       if (!dashboard.instances[iid] || typeof v !== "string") continue;

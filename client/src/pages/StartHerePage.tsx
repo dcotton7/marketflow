@@ -6,6 +6,7 @@ import {
   type ComponentProps,
   type PointerEvent,
 } from "react";
+import { useLocation } from "wouter";
 import "react-grid-layout/css/styles.css";
 import "./start-here-rgl-overrides.css";
 import ReactGridLayout, { WidthProvider, type Layout } from "react-grid-layout/legacy";
@@ -53,7 +54,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, FileText, LineChart, Pencil, Plus, Trash2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
+import { useChartPopout } from "@/hooks/useChartPopout";
+import { AnalysisPanel } from "@/features/marketflow-analysis";
 import {
   computeStartHereLayoutMins,
   groupLinkAccent,
@@ -310,6 +316,9 @@ function StartWorkspaceToolbar() {
 
 function StartHereGridHost() {
   const { cssVariables } = useSystemSettings();
+  const [, navigate] = useLocation();
+  const { syncToMarketSurge } = useMarketSurgeSync();
+  const { syncToChart } = useChartPopout();
   const {
     userId,
     activeStartId,
@@ -322,6 +331,38 @@ function StartHereGridHost() {
     setGridViewportRowCapacity,
     workspacePalette,
   } = useStartHere();
+
+  const [msSyncEnabled, setMsSyncEnabled] = useState(false);
+  const [chartSyncEnabled, setChartSyncEnabled] = useState(false);
+  const [analysisSyncEnabled, setAnalysisSyncEnabled] = useState(false);
+  const [analysisSheetSymbol, setAnalysisSheetSymbol] = useState<string | null>(null);
+
+  const handleChartsSymbolAction = useCallback(
+    (symbol: string) => {
+      const s = symbol.trim();
+      if (!s) return;
+      if (analysisSyncEnabled) {
+        setAnalysisSheetSymbol(s);
+      }
+      if (msSyncEnabled) {
+        syncToMarketSurge(s, "day");
+      }
+      if (chartSyncEnabled) {
+        syncToChart(s);
+      }
+      if (!msSyncEnabled && !chartSyncEnabled && !analysisSyncEnabled) {
+        navigate(`/sentinel/charts?symbol=${encodeURIComponent(s)}`);
+      }
+    },
+    [
+      analysisSyncEnabled,
+      chartSyncEnabled,
+      msSyncEnabled,
+      navigate,
+      syncToChart,
+      syncToMarketSurge,
+    ]
+  );
 
   const gridViewportRef = useRef<HTMLDivElement>(null);
   const instancesRef = useRef(dashboard.instances);
@@ -487,49 +528,122 @@ function StartHereGridHost() {
       style={{ backgroundColor: cssVariables.backgroundColor }}
     >
       <div
-        className="flex flex-shrink-0 items-center gap-2 border-b px-4 py-2"
+        className="flex flex-shrink-0 flex-col border-b"
         style={{
           borderColor: `${cssVariables.secondaryOverlayColor}44`,
           backgroundColor: cssVariables.headerBg,
         }}
       >
-        <h1
-          className="font-semibold shrink-0"
-          style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}
-        >
-          Start
-        </h1>
-        <StartWorkspaceToolbar />
-        <span
-          className="hidden min-w-0 flex-1 text-pretty lg:inline"
-          style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}
-        >
-          Drag to move; resize from the corner. Layout does not auto-pack—leave empty space if you want. Tile
-          overlap (e.g. for notes) is off for now. Same color group = linked symbol. Each workspace keeps its own
-          layout and widget settings.
-        </span>
-        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="outline" className="gap-1">
-                <Plus className="h-4 w-4" />
-                Add widget
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={addLinkedChartTriplet}>
-                3 Linked Charts
-              </DropdownMenuItem>
-              {WIDGET_MENU.map(({ type, label }) => (
-                <DropdownMenuItem key={type} onClick={() => addWidget(type)}>
-                  {label}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+          <h1
+            className="shrink-0 font-semibold"
+            style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}
+          >
+            Start
+          </h1>
+          <StartWorkspaceToolbar />
+          <span
+            className="hidden min-w-0 flex-1 text-pretty lg:inline"
+            style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}
+          >
+            Drag to move; resize from the corner. Layout does not auto-pack—leave empty space if you want. Tile
+            overlap (e.g. for notes) is off for now. Same color group = linked symbol. Each workspace keeps its own
+            layout and widget settings.
+          </span>
+          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="sm" variant="outline" className="gap-1">
+                  <Plus className="h-4 w-4" />
+                  Add widget
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={addLinkedChartTriplet}>
+                  3 Linked Charts
                 </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button type="button" size="sm" variant="secondary" onClick={resetDashboard}>
-            Reset layout
-          </Button>
+                {WIDGET_MENU.map(({ type, label }) => (
+                  <DropdownMenuItem key={type} onClick={() => addWidget(type)}>
+                    {label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button type="button" size="sm" variant="secondary" onClick={resetDashboard}>
+              Reset layout
+            </Button>
+          </div>
+        </div>
+        <div
+          className="flex flex-wrap items-center gap-2 border-t border-border/60 px-4 py-1.5"
+          style={{ backgroundColor: `${cssVariables.secondaryOverlayColor}14` }}
+        >
+          <span
+            className="text-xs text-muted-foreground"
+            style={{ fontSize: cssVariables.fontSizeSmall }}
+          >
+            Choose On Click Action:
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center rounded px-3 py-1 text-xs transition-colors",
+                  msSyncEnabled
+                    ? "border border-blue-500/30 bg-blue-500/20 text-blue-400"
+                    : "bg-muted/50 text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setMsSyncEnabled((v) => !v)}
+              >
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                MarketSurge
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Open MarketSurge in a popup window. Chart &quot;Charts&quot; uses that window when enabled.
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center rounded px-3 py-1 text-xs transition-colors",
+                  chartSyncEnabled
+                    ? "border border-cyan-500/30 bg-cyan-500/20 text-cyan-400"
+                    : "bg-muted/50 text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setChartSyncEnabled((v) => !v)}
+              >
+                <LineChart className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                Internal Charts
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Open internal charts in a popup window. Chart &quot;Charts&quot; drives that window when enabled.
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center rounded px-3 py-1 text-xs transition-colors",
+                  analysisSyncEnabled
+                    ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
+                    : "bg-muted/50 text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => setAnalysisSyncEnabled((v) => !v)}
+              >
+                <FileText className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                Detailed Analysis
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Open MarketFlow AI analysis in a side panel when you use Chart &quot;Charts&quot; with a symbol.
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -600,6 +714,7 @@ function StartHereGridHost() {
                     groupId={meta.groupId}
                     accentColor={accentColor}
                     onClose={onClose}
+                    onChartsSymbolAction={handleChartsSymbolAction}
                   />
                 )}
                 {meta.type === "news" && (
@@ -628,6 +743,12 @@ function StartHereGridHost() {
           })}
         </GridLayoutWithWidth>
       </div>
+      <AnalysisPanel
+        variant="floating"
+        symbol={analysisSheetSymbol}
+        open={analysisSheetSymbol !== null}
+        onOpenChange={(open) => !open && setAnalysisSheetSymbol(null)}
+      />
     </div>
   );
 }

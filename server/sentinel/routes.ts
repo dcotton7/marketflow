@@ -7,6 +7,7 @@ import OpenAI from "openai";
 import { eq, and, or, not, inArray, sql, isNull, desc } from "drizzle-orm";
 import { db } from "../db";
 import { requireSentinelAuth as requireAuth } from "../middleware/requireSentinelAuth";
+import { clearLoginFailures, isLoginRateLimited, recordLoginFailure } from "../middleware/loginRateLimit";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
@@ -20,6 +21,11 @@ import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./trade
 import * as alpaca from "../alpaca";
 import { STOCKS_BY_SECTOR } from "@shared/stocksBySector";
 import { normalizeStartHereWorkspacePalette } from "@shared/startHereWorkspacePalette";
+import {
+  effectiveTierCaps,
+  normalizeSentinelTier,
+  SENTINEL_ACCESS_TIERS,
+} from "@shared/sentinelTierAccess";
 import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals } from "../fundamentals";
 
 declare module "express-session" {
@@ -32,12 +38,17 @@ declare module "express-session" {
 const registerSchema = z.object({
   username: z.string().min(3).max(50),
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(8).max(200),
 });
 
 const loginSchema = z.object({
-  username: z.string(),
-  password: z.string(),
+  username: z.string().min(1).max(50),
+  password: z.string().min(1),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200),
 });
 
 const evaluateSchema = z.object({
@@ -155,12 +166,26 @@ const importConfirmSchema = z.object({
 
 export function registerSentinelRoutes(app: Express): void {
   const PgSession = connectPgSimple(session);
-  
+  const isProd = process.env.NODE_ENV === "production";
+  const sessionSecret = process.env.SESSION_SECRET?.trim();
+  if (isProd && !sessionSecret) {
+    throw new Error("SESSION_SECRET is required when NODE_ENV=production");
+  }
+  const effectiveSessionSecret =
+    sessionSecret || "dev-only-sentinel-session-secret-not-for-production";
+  if (!sessionSecret && !isProd) {
+    console.warn("[auth] SESSION_SECRET unset — using dev default; set SESSION_SECRET for shared or staging hosts.");
+  }
+
+  /** Dev-only: DB-less mock login. Never enable in production. */
+  const allowAuthBypass =
+    !isProd && process.env.ALLOW_AUTH_BYPASS === "true";
+
   // Trust proxy for production (Replit uses reverse proxy)
-  if (process.env.NODE_ENV === "production") {
+  if (isProd) {
     app.set("trust proxy", 1);
   }
-  
+
   app.use(
     session({
       store: new PgSession({
@@ -168,11 +193,11 @@ export function registerSentinelRoutes(app: Express): void {
         tableName: "session",
         createTableIfMissing: true,
       }),
-      secret: process.env.SESSION_SECRET || "sentinel-session-secret",
+      secret: effectiveSessionSecret,
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: process.env.NODE_ENV === "production",
+        secure: isProd,
         httpOnly: true,
         sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -180,51 +205,64 @@ export function registerSentinelRoutes(app: Express): void {
     })
   );
 
-  // TEMPORARY: Password reset for testing - REMOVE AFTER USE
-  app.post("/api/auth/temp-reset/:username", async (req: Request, res: Response) => {
-    try {
-      if (!db) {
-        return res.status(500).json({ error: "Database not available" });
+  /** New session id after login/register/password change (mitigates fixation). */
+  function commitAuthedSession(
+    req: Request,
+    res: Response,
+    userId: number,
+    username: string,
+    jsonBody: Record<string, unknown>,
+    statusCode = 200
+  ): void {
+    const sess = req.session as unknown as { regenerate: (cb: (err?: unknown) => void) => void };
+    sess.regenerate((regenErr?: unknown) => {
+      if (regenErr) {
+        console.error("Session regenerate error:", regenErr);
+        void res.status(500).json({ error: "Session error" });
+        return;
       }
-      const username = req.params.username;
-      const passwordHash = await bcrypt.hash("testpass123", 10);
-      const result = await db.update(sentinelUsers)
-        .set({ passwordHash })
-        .where(eq(sentinelUsers.username, username))
-        .returning({ id: sentinelUsers.id });
-      if (result.length === 0) {
-        return res.status(404).json({ error: "User not found" });
-      }
-      res.json({ success: true, message: `Password reset to 'testpass123' for ${username}` });
-    } catch (error) {
-      console.error("Temp reset error:", error);
-      res.status(500).json({ error: "Failed to reset password" });
-    }
-  });
+      req.session.userId = userId;
+      req.session.username = username;
+      req.session.save((saveErr: unknown) => {
+        if (saveErr) {
+          console.error("Session save error:", saveErr);
+          void res.status(500).json({ error: "Login failed" });
+          return;
+        }
+        res.status(statusCode).json(jsonBody);
+      });
+    });
+  }
 
-  // TEMPORARY: Create session table if missing - REMOVE AFTER USE
-  app.post("/api/admin/create-session-table", async (req: Request, res: Response) => {
-    try {
-      if (!db) {
-        return res.status(500).json({ error: "Database not available" });
-      }
-      await db.execute(`
+  if (!isProd) {
+    app.post("/api/admin/create-session-table", async (_req: Request, res: Response) => {
+      try {
+        if (!db) {
+          return res.status(500).json({ error: "Database not available" });
+        }
+        await db.execute(`
         CREATE TABLE IF NOT EXISTS session (
           sid VARCHAR NOT NULL PRIMARY KEY,
           sess JSONB NOT NULL,
           expire TIMESTAMP(6) NOT NULL
         )
       `);
-      await db.execute(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON session ("expire")`);
-      res.json({ success: true, message: "Session table created" });
-    } catch (error: any) {
-      console.error("Create session table error:", error);
-      res.status(500).json({ error: error.message || "Failed to create session table" });
-    }
-  });
+        await db.execute(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON session ("expire")`);
+        res.json({ success: true, message: "Session table created" });
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : "Failed to create session table";
+        console.error("Create session table error:", error);
+        res.status(500).json({ error: msg });
+      }
+    });
+  }
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
+      if (!db) {
+        return res.status(503).json({ error: "Registration requires database" });
+      }
+
       const data = registerSchema.parse(req.body);
 
       const existingUser = await sentinelModels.getUserByUsername(data.username);
@@ -253,20 +291,16 @@ export function registerSentinelRoutes(app: Express): void {
         // Don't fail registration if seeding fails
       }
 
-      req.session.userId = user.id;
-      req.session.username = user.username;
-
-      req.session.save((err) => {
-        if (err) {
-          console.error("Session save error:", err);
-          return res.status(500).json({ error: "Registration failed" });
-        }
-        res.status(201).json({ 
-          id: user.id, 
-          username: user.username, 
-          email: user.email 
-        });
-      });
+      clearLoginFailures(req);
+      const tier = normalizeSentinelTier(user.tier);
+      commitAuthedSession(req, res, user.id, user.username, {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        tier,
+        isAdmin: user.isAdmin ?? false,
+        isActive: user.isActive !== false,
+      }, 201);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });
@@ -283,7 +317,6 @@ export function registerSentinelRoutes(app: Express): void {
         return res.status(401).json({ error: "Not authenticated" });
       }
 
-      // If database is available, fetch real user
       if (db) {
         const user = await sentinelModels.getUserById(req.session.userId);
         if (user) {
@@ -295,20 +328,26 @@ export function registerSentinelRoutes(app: Express): void {
             id: user.id,
             username: user.username,
             email: user.email,
-            tier: user.tier || "pro",
+            tier: normalizeSentinelTier(user.tier),
             isAdmin: user.isAdmin ?? false,
+            isActive: user.isActive !== false,
             accountSize: user.accountSize,
           });
         }
+        await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+        return res.status(401).json({ error: "Not authenticated" });
       }
 
-      // Fallback for mock session (database unavailable)
+      if (isProd) {
+        return res.status(503).json({ error: "Service unavailable" });
+      }
       return res.json({
         id: req.session.userId,
-        username: req.session.username || "DonaldCotton",
+        username: req.session.username ?? "unknown",
         email: "local@example.com",
-        tier: "pro",
-        isAdmin: true,
+        tier: "pro_plus",
+        isAdmin: false,
+        isActive: true,
       });
     } catch (error) {
       console.error("Get current user error:", error);
@@ -316,86 +355,132 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/auth/login", async (req: Request, res: Response) => {
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("Logout session destroy:", err);
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.json({ ok: true });
+    });
+  });
+
+  app.post("/api/auth/change-password", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { username } = req.body;
-      
-      if (!username || typeof username !== 'string') {
-        return res.status(400).json({ error: "Username is required" });
+      if (!db) {
+        return res.status(503).json({ error: "Service unavailable" });
+      }
+      const body = changePasswordSchema.parse(req.body);
+      const uid = req.session.userId!;
+      const user = await sentinelModels.getUserById(uid);
+      if (!user?.passwordHash) {
+        return res.status(400).json({ error: "Password change is not available for this account" });
+      }
+      const match = await bcrypt.compare(body.currentPassword, user.passwordHash);
+      if (!match) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+      const newHash = await bcrypt.hash(body.newPassword, 10);
+      await sentinelModels.updateUserPassword(uid, newHash);
+      clearLoginFailures(req);
+      commitAuthedSession(req, res, user.id, user.username, {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        tier: normalizeSentinelTier(user.tier),
+        isAdmin: user.isAdmin ?? false,
+        isActive: user.isActive !== false,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid request" });
+      }
+      console.error("Change password error:", error);
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  });
+
+  /**
+   * Rules: production = bcrypt + DB only, generic 401 on failure.
+   * Dev: ALLOW_AUTH_BYPASS=true and no DB → mock session (never in production).
+   */
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
+    const invalidCreds = () => res.status(401).json({ error: "Invalid username or password" });
+
+    try {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+      const username = parsed.data.username.trim();
+      const password = parsed.data.password;
+
+      if (isLoginRateLimited(req)) {
+        return res.status(429).json({ error: "Too many failed login attempts. Try again later." });
       }
 
-      let user = null;
-
-      // Only try to query database if it's available
-      if (db) {
-        user = await sentinelModels.getUserByUsername(username);
+      if (!db) {
+        if (!allowAuthBypass) {
+          return res.status(503).json({ error: "Authentication unavailable" });
+        }
+        const mockUser = {
+          id: 1,
+          username: username || "dev",
+          email: "local@example.com",
+          tier: "pro_plus" as const,
+          isAdmin: false,
+          isActive: true,
+        };
+        clearLoginFailures(req);
+        return commitAuthedSession(req, res, mockUser.id, mockUser.username, { ...mockUser });
       }
 
-      // --- LOCAL BYPASS START ---
-      // If user is not found or DB is unavailable, automatically create/log in a default local user
+      let user = await sentinelModels.getUserByUsername(username);
+      /** Dev-only: Foreboding account accepts password `2112` (never in production). */
+      const forebodingDevBypass =
+        !isProd &&
+        password === "2112" &&
+        username.toLowerCase() === "foreboding";
+      if (!user && forebodingDevBypass) {
+        user = await sentinelModels.getUserByUsernameCaseInsensitive("foreboding");
+      }
+
       if (!user) {
-        console.log(`[Local Auth] User '${username}' not found or DB unavailable. Creating local session bypass...`);
-        
-        // Try to get the first user in the DB regardless of name (only if DB is available)
-        if (db) {
-          const allUsers = await db
-            .select()
-            .from(sentinelUsers)
-            .where(eq(sentinelUsers.isActive, true))
-            .limit(1);
-
-          if (allUsers.length > 0) {
-            user = allUsers[0];
-          }
-        }
-        
-        // If DB is unavailable or empty, create a mock user and set session
-        if (!user) {
-          console.log('[Local Auth] No database or no users found. Creating mock session for local development.');
-          const mockUser = { 
-            id: 1, 
-            username: username || "DonaldCotton", 
-            email: "local@example.com", 
-            tier: "pro", 
-            isAdmin: true 
-          };
-          
-          // Set the session for the mock user
-          req.session.userId = mockUser.id;
-          req.session.username = mockUser.username;
-          
-          return req.session.save((err) => {
-            if (err) {
-              console.error("Session save error:", err);
-              return res.status(500).json({ error: "Login failed" });
-            }
-            console.log("[Sentinel Auth] Mock user session created:", { userId: req.session.userId });
-            res.json(mockUser);
-          });
-        }
+        recordLoginFailure(req);
+        return invalidCreds();
       }
-      // --- LOCAL BYPASS END ---
+
+      if (!forebodingDevBypass && !user.passwordHash) {
+        recordLoginFailure(req);
+        return invalidCreds();
+      }
+
+      let match = forebodingDevBypass;
+      if (!match && user.passwordHash) {
+        match = await bcrypt.compare(password, user.passwordHash);
+      }
+      if (!match) {
+        recordLoginFailure(req);
+        return invalidCreds();
+      }
+
+      if (forebodingDevBypass) {
+        console.warn("[auth] Foreboding dev bypass login (password 2112)");
+      }
 
       if (user.isActive === false) {
         return res.status(403).json({ error: "Account disabled" });
       }
 
-      req.session.userId = user.id;
-      req.session.username = user.username;
-      
-      req.session.save((err) => {
-        if (err) {
-          console.error("Session save error:", err);
-          return res.status(500).json({ error: "Login failed" });
-        }
-        console.log("[Sentinel Auth] Local Session bypass active:", { userId: req.session.userId });
-        res.json({ 
-          id: user.id, 
-          username: user.username, 
-          email: user.email,
-          tier: user.tier || "pro",
-          isAdmin: true, // Force admin for local dev
-        });
+      clearLoginFailures(req);
+      const tier = normalizeSentinelTier(user.tier);
+      commitAuthedSession(req, res, user.id, user.username, {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        tier,
+        isAdmin: user.isAdmin ?? false,
+        isActive: true,
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -1878,42 +1963,211 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
-  // Admin: Get all users with rule counts
+  const adminUserPatchSchema = z.object({
+    tier: z
+      .string()
+      .optional()
+      .refine(
+        (s) => !s || (SENTINEL_ACCESS_TIERS as readonly string[]).includes(s),
+        "Invalid tier"
+      ),
+    isAdmin: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+  });
+
+  const tierFeatureOverrideSchema = z.object({
+    start: z.boolean(),
+    bigIdea: z.boolean(),
+    flow: z.boolean(),
+    charts: z.boolean(),
+    watchlists: z.boolean(),
+    askIvy: z.boolean(),
+    import: z.boolean(),
+    patterns: z.boolean(),
+    admin: z.boolean(),
+    maxAlerts: z.union([z.number().int().min(0), z.null()]),
+  });
+
+  const adminTierRoleDefaultsPutSchema = z.object({
+    tier: z.string().min(1),
+    features: tierFeatureOverrideSchema,
+    tokensAllowed: z.union([z.number().int().min(0), z.null()]),
+  });
+
+  app.get("/api/sentinel/admin/tier-role-defaults", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!db) {
+        return res.status(503).json({ error: "Database unavailable" });
+      }
+      const admin = await sentinelModels.getUserById(req.session.userId!);
+      if (!admin?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const overrides = await sentinelModels.getTierAccessOverrides();
+      res.json({ overrides });
+    } catch (error) {
+      console.error("Get tier role defaults error:", error);
+      res.status(500).json({ error: "Failed to load tier role defaults" });
+    }
+  });
+
+  app.put("/api/sentinel/admin/tier-role-defaults", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!db) {
+        return res.status(503).json({ error: "Database unavailable" });
+      }
+      const admin = await sentinelModels.getUserById(req.session.userId!);
+      if (!admin?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      const body = adminTierRoleDefaultsPutSchema.parse(req.body);
+      const tier = normalizeSentinelTier(body.tier);
+      const overrides = await sentinelModels.upsertTierAccessOverride(tier, {
+        features: body.features,
+        tokensAllowed: body.tokensAllowed,
+      });
+      res.json({ overrides });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid body" });
+      }
+      console.error("Put tier role defaults error:", error);
+      res.status(500).json({ error: "Failed to save tier role defaults" });
+    }
+  });
+
+  // Admin: Get all users with rule counts + tier / effective caps (for management UI)
   app.get("/api/sentinel/admin/users", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = await sentinelModels.getUserById(req.session.userId!);
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
       }
-      
-      // Get all users with their rule counts
+
+      const tierOverrides = await sentinelModels.getTierAccessOverrides();
+
       const users = await db.select({
         id: sentinelUsers.id,
         username: sentinelUsers.username,
+        email: sentinelUsers.email,
         isAdmin: sentinelUsers.isAdmin,
+        isActive: sentinelUsers.isActive,
+        tier: sentinelUsers.tier,
         createdAt: sentinelUsers.createdAt,
       }).from(sentinelUsers);
-      
-      // Get rule counts for each user
-      const usersWithCounts = await Promise.all(users.map(async (u) => {
-        const rules = await sentinelModels.getRulesByUser(u.id);
-        const starterRules = rules.filter(r => r.source === 'starter');
-        const userRules = rules.filter(r => r.source === 'user');
-        return {
-          ...u,
-          totalRules: rules.length,
-          starterRulesCount: starterRules.length,
-          userRulesCount: userRules.length,
-          needsSeeding: starterRules.length === 0
-        };
-      }));
-      
+
+      const usersWithCounts = await Promise.all(
+        users.map(async (u) => {
+          const rules = await sentinelModels.getRulesByUser(u.id);
+          const starterRules = rules.filter((r) => r.source === "starter");
+          const userRules = rules.filter((r) => r.source === "user");
+          const normTier = normalizeSentinelTier(u.tier);
+          const caps = effectiveTierCaps(normTier, !!u.isAdmin, tierOverrides);
+          return {
+            id: u.id,
+            username: u.username,
+            email: u.email,
+            isAdmin: u.isAdmin,
+            isActive: u.isActive,
+            tier: normTier,
+            createdAt: u.createdAt,
+            totalRules: rules.length,
+            starterRulesCount: starterRules.length,
+            userRulesCount: userRules.length,
+            needsSeeding: starterRules.length === 0,
+            features: caps.features,
+            tokensAllowed: caps.tokensAllowed,
+            tokensUsed: caps.tokensUsed,
+          };
+        })
+      );
+
       res.json(usersWithCounts);
     } catch (error) {
       console.error("Get users error:", error);
       res.status(500).json({ error: "Failed to fetch users" });
     }
   });
+
+  /** Admin: update tier / admin / active flags (PUT + PATCH — some stacks mishandle PATCH to /api). */
+  const handleAdminUserUpdate = async (req: Request, res: Response) => {
+    try {
+      if (!db) {
+        return res.status(503).json({ error: "Database unavailable" });
+      }
+
+      const admin = await sentinelModels.getUserById(req.session.userId!);
+      if (!admin?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const userId = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(userId) || userId < 1) {
+        return res.status(400).json({ error: "Invalid user id" });
+      }
+
+      const body = adminUserPatchSchema.parse(req.body);
+      if (
+        body.tier === undefined &&
+        body.isAdmin === undefined &&
+        body.isActive === undefined
+      ) {
+        return res.status(400).json({ error: "No changes" });
+      }
+
+      const target = await sentinelModels.getUserById(userId);
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (body.isAdmin === false && target.isAdmin) {
+        const admins = await db
+          .select({ id: sentinelUsers.id })
+          .from(sentinelUsers)
+          .where(eq(sentinelUsers.isAdmin, true));
+        if (admins.length <= 1) {
+          return res.status(400).json({ error: "Cannot remove the only admin account" });
+        }
+      }
+
+      const tierCanonical =
+        body.tier !== undefined ? normalizeSentinelTier(body.tier) : undefined;
+
+      const updated = await sentinelModels.updateUserAdminProfile(userId, {
+        ...(tierCanonical !== undefined ? { tier: tierCanonical } : {}),
+        ...(body.isAdmin !== undefined ? { isAdmin: body.isAdmin } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+      });
+
+      if (!updated) {
+        return res.status(500).json({ error: "Update failed" });
+      }
+
+      const normTier = normalizeSentinelTier(updated.tier);
+      const tierOverrides = await sentinelModels.getTierAccessOverrides();
+      const caps = effectiveTierCaps(normTier, !!updated.isAdmin, tierOverrides);
+      res.json({
+        id: updated.id,
+        username: updated.username,
+        email: updated.email,
+        isAdmin: updated.isAdmin,
+        isActive: updated.isActive,
+        tier: normTier,
+        createdAt: updated.createdAt,
+        features: caps.features,
+        tokensAllowed: caps.tokensAllowed,
+        tokensUsed: caps.tokensUsed,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid body" });
+      }
+      console.error("Admin patch user error:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  };
+  app.patch("/api/sentinel/admin/users/:id", requireAuth, handleAdminUserUpdate);
+  app.put("/api/sentinel/admin/users/:id", requireAuth, handleAdminUserUpdate);
 
   // System Settings - Get user's UI settings
   app.get("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
@@ -2014,13 +2268,13 @@ export function registerSentinelRoutes(app: Express): void {
         return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid palette" });
       }
       console.error("Update Start Here workspace palette error:", error);
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
       const missingTable =
-        /start_here_workspace_palette|does not exist|relation/i.test(msg) ||
-        /no such table/i.test(msg);
+        msg.includes("start_here_workspace_palette") ||
+        (msg.includes("does not exist") && msg.includes("palette"));
       res.status(missingTable ? 503 : 500).json({
         error: missingTable
-          ? "Database table missing. From the project root run: npm run db:push"
+          ? "Database table missing. From project root: npm run db:ensure-start-here (or npm run db:push), then restart the server."
           : "Failed to save workspace palette",
       });
     }
@@ -3508,6 +3762,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         username: user.username,
         email: user.email,
         isAdmin: user.isAdmin ?? false,
+        isActive: user.isActive !== false,
+        tier: normalizeSentinelTier(user.tier),
         accountSize: user.accountSize,
       });
     } catch (error) {
@@ -7249,13 +7505,29 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
+  const THEME_MEMBERS_MA_KEYS = ["ema10d", "ema20d", "sma50d", "sma200d"] as const;
+  type ThemeMembersMaKey = (typeof THEME_MEMBERS_MA_KEYS)[number];
+
+  function parseThemeMembersMaKey(raw: unknown, fallback: ThemeMembersMaKey): ThemeMembersMaKey {
+    if (typeof raw !== "string") return fallback;
+    return (THEME_MEMBERS_MA_KEYS as readonly string[]).includes(raw) ? (raw as ThemeMembersMaKey) : fallback;
+  }
+
   app.get("/api/sentinel/chart-preferences", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       if (!db) return res.status(500).json({ error: "Database not available" });
       let [pref] = await db.select().from(userChartPreferences).where(eq(userChartPreferences.userId, userId));
       if (!pref) {
-        [pref] = await db.insert(userChartPreferences).values({ userId, defaultBarsOnScreen: 200 }).returning();
+        [pref] = await db
+          .insert(userChartPreferences)
+          .values({
+            userId,
+            defaultBarsOnScreen: 200,
+            themeMembersMa1: "ema20d",
+            themeMembersMa2: "sma50d",
+          })
+          .returning();
       }
       res.json(pref);
     } catch (error) {
@@ -7268,19 +7540,59 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const userId = req.session.userId!;
       if (!db) return res.status(500).json({ error: "Database not available" });
-      const { defaultBarsOnScreen, dataLimitDaily, dataLimit5min, dataLimit15min, dataLimit30min } = req.body;
-      const barsVal = Math.max(50, Math.min(1000, parseInt(defaultBarsOnScreen) || 200));
-      const updateFields: Record<string, any> = { defaultBarsOnScreen: barsVal };
-      if (dataLimitDaily != null) updateFields.dataLimitDaily = Math.max(30, Math.min(3000, parseInt(dataLimitDaily) || 750));
-      if (dataLimit5min != null) updateFields.dataLimit5min = Math.max(1, Math.min(365, parseInt(dataLimit5min) || 63));
-      if (dataLimit15min != null) updateFields.dataLimit15min = Math.max(1, Math.min(365, parseInt(dataLimit15min) || 126));
-      if (dataLimit30min != null) updateFields.dataLimit30min = Math.max(1, Math.min(365, parseInt(dataLimit30min) || 126));
-      const existing = await db.select().from(userChartPreferences).where(eq(userChartPreferences.userId, userId));
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const [existing] = await db.select().from(userChartPreferences).where(eq(userChartPreferences.userId, userId));
+
+      const base = existing ?? {
+        userId,
+        defaultBarsOnScreen: 200,
+        dataLimitDaily: 750,
+        dataLimit5min: 63,
+        dataLimit15min: 126,
+        dataLimit30min: 126,
+        themeMembersMa1: "ema20d" as ThemeMembersMaKey,
+        themeMembersMa2: "sma50d" as ThemeMembersMaKey,
+      };
+
+      const barsVal =
+        b.defaultBarsOnScreen !== undefined
+          ? Math.max(50, Math.min(1000, parseInt(String(b.defaultBarsOnScreen), 10) || 200))
+          : base.defaultBarsOnScreen;
+
+      const nextRow = {
+        defaultBarsOnScreen: barsVal,
+        dataLimitDaily:
+          b.dataLimitDaily !== undefined
+            ? Math.max(30, Math.min(3000, parseInt(String(b.dataLimitDaily), 10) || 750))
+            : base.dataLimitDaily,
+        dataLimit5min:
+          b.dataLimit5min !== undefined
+            ? Math.max(1, Math.min(365, parseInt(String(b.dataLimit5min), 10) || 63))
+            : base.dataLimit5min,
+        dataLimit15min:
+          b.dataLimit15min !== undefined
+            ? Math.max(1, Math.min(365, parseInt(String(b.dataLimit15min), 10) || 126))
+            : base.dataLimit15min,
+        dataLimit30min:
+          b.dataLimit30min !== undefined
+            ? Math.max(1, Math.min(365, parseInt(String(b.dataLimit30min), 10) || 126))
+            : base.dataLimit30min,
+        themeMembersMa1: parseThemeMembersMaKey(b.themeMembersMa1, base.themeMembersMa1 as ThemeMembersMaKey),
+        themeMembersMa2: parseThemeMembersMaKey(b.themeMembersMa2, base.themeMembersMa2 as ThemeMembersMaKey),
+      };
+
       let pref;
-      if (existing.length === 0) {
-        [pref] = await db.insert(userChartPreferences).values({ userId, ...updateFields }).returning();
+      if (!existing) {
+        [pref] = await db
+          .insert(userChartPreferences)
+          .values({ userId, ...nextRow })
+          .returning();
       } else {
-        [pref] = await db.update(userChartPreferences).set(updateFields).where(eq(userChartPreferences.userId, userId)).returning();
+        [pref] = await db
+          .update(userChartPreferences)
+          .set(nextRow)
+          .where(eq(userChartPreferences.userId, userId))
+          .returning();
       }
       res.json(pref);
     } catch (error) {

@@ -11,6 +11,8 @@
     "test:start-here-smoke": "tsx client/src/components/start-here/dashboard-persistence.smoke.test.ts && tsx client/src/components/MiniChart.entry-line.smoke.test.ts",
     "db:push": "drizzle-kit push",
     "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",
+    "db:ensure-tier-overrides": "tsx server/scripts/ensureSentinelTierAccessOverridesTable.ts",
+    "db:ensure-theme-members-ma": "tsx server/scripts/ensureUserChartThemeMembersMaColumns.ts",
     "db:deactivate-other-sentinel-users": "tsx server/scripts/deactivateNonForebodingSentinelUsers.ts",
     "universe:refresh": "tsx server/scripts/refreshUniverseConstituents.ts"
   },

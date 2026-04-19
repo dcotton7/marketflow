@@ -115,8 +115,8 @@ export function WorkspacePaletteAdminPanel() {
           <p className="mt-1 text-amber-200/90">
             The form below uses <span className="font-medium">shipped defaults</span>. Edit and save may fail until
             the server can read/write the table. From the project root run{" "}
-            <code className="rounded bg-black/30 px-1 py-0.5 text-xs">npm run db:push</code> to create{" "}
-            <code className="rounded bg-black/30 px-1 py-0.5 text-xs">start_here_workspace_palette</code>, then
+            <code className="rounded bg-black/30 px-1 py-0.5 text-xs">npm run db:ensure-start-here</code> (creates
+            Start Here tables, no prompts) or <code className="rounded bg-black/30 px-1 py-0.5 text-xs">npm run db:push</code>, then
             restart the dev server and refresh.
           </p>
           {error instanceof Error ? (

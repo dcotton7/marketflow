@@ -42,6 +42,7 @@ import {
 import { ArrowUpRight, Star, Users, ChevronUp, ChevronDown, Plus, Info, Crown, Cpu, Trophy, Loader2, AlertTriangle, ExternalLink, LineChart, FileText } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useMarketConditionSettings } from "@/hooks/useMarketCondition";
 
 export type MaColumnKey = "ema10d" | "ema20d" | "sma50d" | "sma200d";
@@ -59,6 +60,14 @@ const MA_KEY_TO_FIELD: Record<MaColumnKey, keyof TickerRow> = {
   sma50d: "pctVsSma50d",
   sma200d: "pctVsSma200d",
 };
+
+const DEFAULT_THEME_MEMBERS_MA1: MaColumnKey = "ema20d";
+const DEFAULT_THEME_MEMBERS_MA2: MaColumnKey = "sma50d";
+
+function parseStoredMaColumn(raw: string | undefined | null, fallback: MaColumnKey): MaColumnKey {
+  if (!raw) return fallback;
+  return MA_OPTIONS.some((o) => o.value === raw) ? (raw as MaColumnKey) : fallback;
+}
 
 function getPctVsMa(ticker: TickerRow, key: MaColumnKey): number | null | undefined {
   return ticker[MA_KEY_TO_FIELD[key]];
@@ -229,12 +238,49 @@ export function TickerWorkbench({
   const { data: settings } = useMarketConditionSettings();
   const maBoldThreshold = settings?.maBoldThresholdPct ?? 0.5;
 
+  const { data: chartPrefs } = useQuery<{
+    themeMembersMa1?: string | null;
+    themeMembersMa2?: string | null;
+  }>({
+    queryKey: ["/api/sentinel/chart-preferences"],
+    staleTime: 60_000,
+  });
+
   const [sortKey, setSortKey] = useState<SortKey>("leaderScore");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
   const [showCoreOnly, setShowCoreOnly] = useState(false);
-  const [maCol1, setMaCol1] = useState<MaColumnKey>("ema20d");
-  const [maCol2, setMaCol2] = useState<MaColumnKey>("sma50d");
+  const [maCol1, setMaCol1] = useState<MaColumnKey>(DEFAULT_THEME_MEMBERS_MA1);
+  const [maCol2, setMaCol2] = useState<MaColumnKey>(DEFAULT_THEME_MEMBERS_MA2);
+  const maCol1Ref = useRef(maCol1);
+  const maCol2Ref = useRef(maCol2);
+  maCol1Ref.current = maCol1;
+  maCol2Ref.current = maCol2;
   const highlightedRowRef = useRef<HTMLTableRowElement>(null);
+
+  useEffect(() => {
+    if (!chartPrefs) return;
+    setMaCol1(parseStoredMaColumn(chartPrefs.themeMembersMa1 ?? undefined, DEFAULT_THEME_MEMBERS_MA1));
+    setMaCol2(parseStoredMaColumn(chartPrefs.themeMembersMa2 ?? undefined, DEFAULT_THEME_MEMBERS_MA2));
+  }, [chartPrefs]);
+
+  const saveThemeMembersMaMutation = useMutation({
+    mutationFn: async (pair: { ma1: MaColumnKey; ma2: MaColumnKey }) => {
+      await apiRequest("PUT", "/api/sentinel/chart-preferences", {
+        themeMembersMa1: pair.ma1,
+        themeMembersMa2: pair.ma2,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/chart-preferences"] });
+    },
+    onError: () => {
+      toast({
+        title: "Could not save MA columns",
+        description: "Check that you are signed in and try again.",
+        variant: "destructive",
+      });
+    },
+  });
   
   // Add Tickers dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -509,6 +555,31 @@ export function TickerWorkbench({
               Toggle between showing all theme members or only core (permanent) members
             </TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled={saveThemeMembersMaMutation.isPending}
+                onClick={() => {
+                  setMaCol1(DEFAULT_THEME_MEMBERS_MA1);
+                  setMaCol2(DEFAULT_THEME_MEMBERS_MA2);
+                  saveThemeMembersMaMutation.mutate({
+                    ma1: DEFAULT_THEME_MEMBERS_MA1,
+                    ma2: DEFAULT_THEME_MEMBERS_MA2,
+                  });
+                }}
+                className={cn(
+                  "text-xs px-2 py-1 rounded transition-colors text-muted-foreground hover:text-foreground",
+                  "bg-slate-700/30 disabled:opacity-50"
+                )}
+              >
+                Reset MA cols
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Restore Theme Members MA 1 / MA 2 to defaults (20d EMA and 50d SMA) and save
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -539,7 +610,14 @@ export function TickerWorkbench({
                         )}
                       </div>
                       <div onClick={(e) => e.stopPropagation()}>
-                        <Select value={maCol1} onValueChange={(v) => setMaCol1(v as MaColumnKey)}>
+                        <Select
+                          value={maCol1}
+                          onValueChange={(v) => {
+                            const next = v as MaColumnKey;
+                            setMaCol1(next);
+                            saveThemeMembersMaMutation.mutate({ ma1: next, ma2: maCol2Ref.current });
+                          }}
+                        >
                           <SelectTrigger className="h-7 text-[10px] w-[90px] min-w-[90px] border-slate-600 bg-slate-800/50">
                             <SelectValue />
                           </SelectTrigger>
@@ -573,7 +651,14 @@ export function TickerWorkbench({
                         )}
                       </div>
                       <div onClick={(e) => e.stopPropagation()}>
-                        <Select value={maCol2} onValueChange={(v) => setMaCol2(v as MaColumnKey)}>
+                        <Select
+                          value={maCol2}
+                          onValueChange={(v) => {
+                            const next = v as MaColumnKey;
+                            setMaCol2(next);
+                            saveThemeMembersMaMutation.mutate({ ma1: maCol1Ref.current, ma2: next });
+                          }}
+                        >
                           <SelectTrigger className="h-7 text-[10px] w-[90px] min-w-[90px] border-slate-600 bg-slate-800/50">
                             <SelectValue />
                           </SelectTrigger>

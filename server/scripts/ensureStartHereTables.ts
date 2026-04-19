@@ -27,6 +27,11 @@ const STATEMENTS = [
   CONSTRAINT "start_here_user_state_user_id_sentinel_users_id_fk"
     FOREIGN KEY ("user_id") REFERENCES "public"."sentinel_users"("id") ON DELETE cascade ON UPDATE no action
 )`,
+  `CREATE TABLE IF NOT EXISTS "start_here_workspace_palette" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "palette" jsonb NOT NULL,
+  "updated_at" timestamp DEFAULT now()
+)`,
 ];
 
 (async () => {

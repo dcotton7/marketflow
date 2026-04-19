@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Star, Clock, Bell, House } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Star, Clock, Bell, House, LogOut, UserRound } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistModal } from "./WatchlistModal";
 import { AlertCenterDialog } from "@/components/alerts/AlertCenterDialog";
@@ -11,7 +11,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { playAlertChime } from "@/lib/alert-sound";
 import { SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT } from "@/lib/sentinel-ui-events";
-import rubricShieldLogo from "@/assets/images/rubricshield-logo.png";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function MarketTimeDisplay() {
   // offsetMs corrects local clock drift using authoritative NYC time from API
@@ -177,7 +185,8 @@ function supportsInAppSound(deliveryConfig: unknown): boolean {
 }
 
 export function SentinelHeader({ showSentiment = true, rightContent }: SentinelHeaderProps) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
+  const { user: authUser, logout } = useSentinelAuth();
   const { cssVariables } = useSystemSettings();
   const { data: sentiment, isLoading } = useQuery<MarketSentiment>({
     queryKey: ["/api/sentinel/sentiment/market"],
@@ -186,9 +195,6 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
     staleTime: 30 * 60 * 1000,
   });
 
-  const { data: userInfo } = useQuery<{ id: number; username: string; isAdmin: boolean }>({
-    queryKey: ["/api/sentinel/me"],
-  });
   const { data: alerts } = useAlerts();
   const { data: alertEvents } = useAlertEvents(25);
   const lastSeenAlertEventIdRef = useRef<number | null>(null);
@@ -258,14 +264,24 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
     >
       <div className="flex items-center gap-4">
         <Link href="/sentinel">
-          <div className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md p-1" data-testid="link-sentinel-home">
-            <img 
-              src={rubricShieldLogo} 
-              alt="RubricShield" 
-              className="h-10"
+          <div
+            className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md px-0.5 py-0.5"
+            data-testid="link-sentinel-home"
+          >
+            {/* Mark only (structuremap-mark.png) — no glow; as tall as the bar allows */}
+            <div
+              className="h-16 max-h-[4.25rem] shrink-0 flex items-center justify-center rounded-sm"
               style={{ opacity: cssVariables.logoOpacity }}
-              data-testid="img-sentinel-header-logo"
-            />
+              data-testid="img-sentinel-header-logo-wrap"
+            >
+              <img
+                src="/structuremap-mark.png"
+                alt="StructureMap"
+                className="h-16 w-auto max-h-full object-contain object-left block select-none pointer-events-none"
+                draggable={false}
+                data-testid="img-sentinel-header-logo"
+              />
+            </div>
           </div>
         </Link>
         
@@ -367,7 +383,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
             </Button>
           </Link>
-          {userInfo?.isAdmin && (
+          {authUser?.isAdmin && (
             <Link href="/sentinel/admin">
               <Button 
                 variant={isAdminPage ? "secondary" : "ghost"} 
@@ -510,6 +526,51 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
         </div>
       )}
       {rightContent}
+      {authUser && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2 h-8 border-slate-600/50 bg-slate-900/40"
+              data-testid="button-user-menu"
+            >
+              <UserRound className="h-4 w-4 shrink-0 opacity-80" />
+              <span className="max-w-[8rem] truncate text-xs font-medium">{authUser.username}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel className="font-normal">
+              <div className="flex flex-col space-y-0.5">
+                <span className="truncate font-medium">{authUser.username}</span>
+                <span className="truncate text-xs text-muted-foreground">{authUser.email}</span>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/sentinel/settings" className="cursor-pointer">
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="cursor-pointer text-destructive focus:text-destructive"
+              onSelect={() => {
+                void (async () => {
+                  await logout();
+                  setLocation("/sentinel/login");
+                })();
+              }}
+              data-testid="menu-sign-out"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <div className="flex items-center gap-1 ml-2 select-none shrink-0">
         <span className="text-xs font-bold font-mono text-amber-400">
           v{__APP_VERSION__}+{__APP_BUILD_SHA__}

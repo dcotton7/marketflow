@@ -30,12 +30,15 @@ export function ChartPreviewWidget({
   groupId,
   accentColor,
   onClose,
+  /** Same behavior as Theme Members "Charts" / Choose On Click Action when set. */
+  onChartsSymbolAction,
 }: {
   cssVariables: CssVariables;
   instanceId: string;
   groupId: string;
   accentColor?: string;
   onClose: () => void;
+  onChartsSymbolAction?: (symbol: string) => void;
 }) {
   const {
     userId,
@@ -163,22 +166,40 @@ export function ChartPreviewWidget({
           className="start-here-no-drag h-8 min-w-0 flex-1 font-mono uppercase"
           style={{ color: cssVariables.textColorNormal, fontSize: cssVariables.fontSizeSmall }}
         />
-        <Link
-          href={sym ? `/sentinel/charts?symbol=${encodeURIComponent(sym)}` : "/sentinel/charts"}
-          className="start-here-no-drag shrink-0"
-        >
+        {onChartsSymbolAction ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 gap-1 px-2"
+            className="start-here-no-drag h-8 shrink-0 gap-1 px-2"
             disabled={!sym}
-            aria-label="Open Sentinel charts"
+            aria-label="Charts — uses Choose On Click Action from the Start toolbar"
+            onClick={() => {
+              const u = sym.trim();
+              if (u) onChartsSymbolAction(u);
+            }}
           >
             <BarChart3 className="h-4 w-4" />
             Charts
           </Button>
-        </Link>
+        ) : (
+          <Link
+            href={sym ? `/sentinel/charts?symbol=${encodeURIComponent(sym)}` : "/sentinel/charts"}
+            className="start-here-no-drag shrink-0"
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 px-2"
+              disabled={!sym}
+              aria-label="Open Sentinel charts"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Charts
+            </Button>
+          </Link>
+        )}
       </div>
       <div
         className="start-here-no-drag flex min-w-0 flex-1 shrink items-baseline justify-end gap-x-1.5 text-xs font-mono sm:gap-x-2 sm:text-sm"

@@ -37,6 +37,8 @@ interface MaSettingRow {
 
 interface ChartPrefs extends ChartMaDataLimits {
   defaultBarsOnScreen: number;
+  themeMembersMa1?: string;
+  themeMembersMa2?: string;
 }
 
 const LINE_TYPE_OPTIONS = [
@@ -111,12 +113,15 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   const saveMutation = useMutation({
     mutationFn: async (currentRows: MaSettingRow[]) => {
       await apiRequest("PUT", "/api/sentinel/ma-settings", { rows: currentRows });
+      const cachedPrefs = queryClient.getQueryData<ChartPrefs>(["/api/sentinel/chart-preferences"]);
       await apiRequest("PUT", "/api/sentinel/chart-preferences", {
         defaultBarsOnScreen: defaultBarsRef.current,
         dataLimitDaily: limitsRef.current.dataLimitDaily,
         dataLimit5min: limitsRef.current.dataLimit5min,
         dataLimit15min: limitsRef.current.dataLimit15min,
         dataLimit30min: limitsRef.current.dataLimit30min,
+        themeMembersMa1: cachedPrefs?.themeMembersMa1,
+        themeMembersMa2: cachedPrefs?.themeMembersMa2,
       });
     },
     onSuccess: () => {

@@ -32,6 +32,8 @@ const ETF_TYPE_COLORS: Record<string, string> = {
   adjacent: "bg-blue-500/20 text-blue-400 border-blue-500/30",
   macro: "bg-purple-500/20 text-purple-400 border-purple-500/30",
   hedge: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  inverse: "bg-red-500/20 text-red-300 border-red-500/30",
+  leveraged: "bg-orange-500/20 text-orange-300 border-orange-500/30",
 };
 
 // Trend state colors

@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import sentinelLogo from "@/assets/images/sentinel-logo.png";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 export default function SentinelLoginPage() {
@@ -28,6 +27,7 @@ export default function SentinelLoginPage() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,17 +35,23 @@ export default function SentinelLoginPage() {
 
     try {
       if (isRegistering) {
+        if (password !== confirmPassword) {
+          toast({ title: "Passwords do not match", variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
         await register(username, email, password);
-        toast({ title: "Account created", description: "Welcome to Sentinel" });
+        toast({ title: "Account created", description: "Welcome to StructureMap" });
       } else {
         await login(username, password);
-        toast({ title: "Welcome back", description: "Logged in successfully" });
+        toast({ title: "Welcome back", description: "Signed in successfully" });
       }
       setLocation("/sentinel/market-condition");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Authentication failed";
       toast({
         title: "Error",
-        description: error.message || "Authentication failed",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -57,10 +63,10 @@ export default function SentinelLoginPage() {
     <div className="min-h-screen sentinel-page flex items-center justify-center p-4" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <img 
-            src={sentinelLogo} 
-            alt="Sentinel - Judgment before risk" 
-            className="h-48 mx-auto mb-4"
+          <img
+            src="/structuremap-logo.png"
+            alt="StructureMap"
+            className="structuremap-wordmark-glow h-36 sm:h-44 max-w-full mx-auto mb-4 object-contain"
             data-testid="img-sentinel-logo"
           />
         </div>
@@ -72,8 +78,8 @@ export default function SentinelLoginPage() {
             </CardTitle>
             <CardDescription style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
               {isRegistering
-                ? "Create an account to start evaluating trades"
-                : "Sign in to access your trade evaluations"}
+                ? "Create an account (password at least 8 characters)"
+                : "Sign in with your username and password"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -105,17 +111,36 @@ export default function SentinelLoginPage() {
                 </div>
               )}
 
+              <div className="space-y-2">
+                <Label htmlFor="password" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  data-testid="input-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  required
+                  minLength={isRegistering ? 8 : 1}
+                  autoComplete={isRegistering ? "new-password" : "current-password"}
+                />
+              </div>
+
               {isRegistering && (
                 <div className="space-y-2">
-                  <Label htmlFor="password" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Password</Label>
+                  <Label htmlFor="confirmPassword" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
+                    Confirm password
+                  </Label>
                   <Input
-                    id="password"
+                    id="confirmPassword"
                     type="password"
-                    data-testid="input-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter password"
+                    data-testid="input-confirm-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
                     required
+                    minLength={8}
+                    autoComplete="new-password"
                   />
                 </div>
               )}
@@ -139,7 +164,10 @@ export default function SentinelLoginPage() {
                 type="button"
                 className="hover:text-foreground underline"
                 style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}
-                onClick={() => setIsRegistering(!isRegistering)}
+                onClick={() => {
+                  setIsRegistering(!isRegistering);
+                  setConfirmPassword("");
+                }}
                 data-testid="button-toggle-auth"
               >
                 {isRegistering

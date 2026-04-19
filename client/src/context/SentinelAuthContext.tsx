@@ -1,15 +1,19 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 
-interface User {
+export interface SentinelAuthUser {
   id: number;
   username: string;
   email: string;
+  tier: string;
+  isAdmin: boolean;
+  isActive?: boolean;
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: SentinelAuthUser | null;
   isLoading: boolean;
+  refreshUser: () => Promise<void>;
   login: (username: string, password?: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -17,47 +21,82 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+async function postAuthJson(url: string, body: Record<string, unknown>): Promise<SentinelAuthUser> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let parsed: unknown;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+  if (!res.ok) {
+    const msg =
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed &&
+      typeof (parsed as { error: unknown }).error === "string"
+        ? (parsed as { error: string }).error
+        : text || res.statusText;
+    throw new Error(msg);
+  }
+  return parsed as SentinelAuthUser;
+}
+
 export function SentinelAuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<SentinelAuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
+  const refreshUser = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as SentinelAuthUser;
         setUser(data);
+      } else {
+        setUser(null);
       }
     } catch (error) {
       console.error("Auth check failed:", error);
-    } finally {
-      setIsLoading(false);
+      setUser(null);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      await refreshUser();
+      setIsLoading(false);
+    })();
+  }, [refreshUser]);
 
   const login = useCallback(async (username: string, password?: string) => {
-    const res = await apiRequest("POST", "/api/auth/login", { username });
-    const data = await res.json();
+    const data = await postAuthJson("/api/auth/login", { username, password: password ?? "" });
     setUser(data);
+    await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/me"] });
   }, []);
 
   const register = useCallback(async (username: string, email: string, password: string) => {
-    const res = await apiRequest("POST", "/api/auth/register", { username, email, password });
-    const data = await res.json();
+    const data = await postAuthJson("/api/auth/register", { username, email, password });
     setUser(data);
+    await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/me"] });
   }, []);
 
   const logout = useCallback(async () => {
-    await apiRequest("POST", "/api/auth/logout");
-    setUser(null);
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
+      setUser(null);
+      await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/me"] });
+    }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, refreshUser, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

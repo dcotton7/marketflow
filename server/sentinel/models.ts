@@ -2,6 +2,7 @@ import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
   sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides, sentinelSystemSettings,
+  sentinelTierAccessOverrides,
   ivyEvalSettings, ivyEvalUsage, ivyEvalHistory,
   askIvySettings,
   startHereWorkspacePaletteSettings,
@@ -20,6 +21,9 @@ import {
   normalizeStartHereWorkspacePalette,
   type StartHereWorkspacePalette,
 } from "@shared/startHereWorkspacePalette";
+import type { SentinelAccessTier, TierAccessOverrides, TierFeatureRow } from "@shared/sentinelTierAccess";
+
+const TIER_ACCESS_OVERRIDES_KEY = "global" as const;
 
 const DEFAULT_ASK_IVY_SETTINGS: AskIvyOverlaySettings = {
   enableMinerviniCheatEntries: true,
@@ -88,6 +92,16 @@ export const sentinelModels = {
 
   async getUserByUsername(username: string): Promise<SentinelUser | undefined> {
     const [user] = await db.select().from(sentinelUsers).where(eq(sentinelUsers.username, username));
+    return user;
+  },
+
+  /** Case-insensitive username match (e.g. dev login helpers). */
+  async getUserByUsernameCaseInsensitive(username: string): Promise<SentinelUser | undefined> {
+    const key = username.toLowerCase();
+    const [user] = await db
+      .select()
+      .from(sentinelUsers)
+      .where(sql`lower(${sentinelUsers.username}) = ${key}`);
     return user;
   },
 
@@ -896,5 +910,67 @@ export const sentinelModels = {
       .where(eq(sentinelWatchlist.id, watchlistId))
       .returning();
     return item;
-  }
+  },
+
+  async updateUserPassword(userId: number, passwordHash: string): Promise<SentinelUser | undefined> {
+    const [user] = await db
+      .update(sentinelUsers)
+      .set({ passwordHash })
+      .where(eq(sentinelUsers.id, userId))
+      .returning();
+    return user;
+  },
+
+  async getTierAccessOverrides(): Promise<TierAccessOverrides> {
+    if (!db) return {};
+    try {
+      const [row] = await db
+        .select()
+        .from(sentinelTierAccessOverrides)
+        .where(eq(sentinelTierAccessOverrides.configKey, TIER_ACCESS_OVERRIDES_KEY));
+      if (!row?.payload || typeof row.payload !== "object") return {};
+      return row.payload as TierAccessOverrides;
+    } catch (err) {
+      console.warn(
+        "[sentinel] getTierAccessOverrides failed (missing sentinel_tier_access_overrides table or bad row). Using built-in tier matrix. Run: npm run db:ensure-tier-overrides",
+        err
+      );
+      return {};
+    }
+  },
+
+  async upsertTierAccessOverride(
+    tier: SentinelAccessTier,
+    payload: { features: TierFeatureRow; tokensAllowed: number | null }
+  ): Promise<TierAccessOverrides> {
+    const current = await this.getTierAccessOverrides();
+    const next: TierAccessOverrides = { ...current, [tier]: payload };
+    await db
+      .insert(sentinelTierAccessOverrides)
+      .values({
+        configKey: TIER_ACCESS_OVERRIDES_KEY,
+        payload: next,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: sentinelTierAccessOverrides.configKey,
+        set: { payload: next, updatedAt: new Date() },
+      });
+    return next;
+  },
+
+  async updateUserAdminProfile(
+    userId: number,
+    data: Partial<Pick<SentinelUser, "tier" | "isAdmin" | "isActive">>
+  ): Promise<SentinelUser | undefined> {
+    const patch: Partial<Pick<SentinelUser, "tier" | "isAdmin" | "isActive">> = {};
+    if (data.tier !== undefined) patch.tier = data.tier;
+    if (data.isAdmin !== undefined) patch.isAdmin = data.isAdmin;
+    if (data.isActive !== undefined) patch.isActive = data.isActive;
+    if (Object.keys(patch).length === 0) {
+      return this.getUserById(userId);
+    }
+    const [user] = await db.update(sentinelUsers).set(patch).where(eq(sentinelUsers.id, userId)).returning();
+    return user;
+  },
 };

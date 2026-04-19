@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SentinelHeader } from "@/components/SentinelHeader";
-import { Settings, DollarSign, Percent, TrendingUp, Shield, Calculator, Save, Loader2 } from "lucide-react";
+import { Settings, DollarSign, Percent, TrendingUp, Shield, Calculator, Save, Loader2, KeyRound } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 
 interface UserSettings {
   accountSize: number | null;
@@ -28,11 +29,16 @@ interface UsageInfo {
 
 export default function SentinelSettingsPage() {
   const { toast } = useToast();
+  const { refreshUser } = useSentinelAuth();
   const { systemSettings } = useSystemSettings();
   
   const [accountSize, setAccountSize] = useState("");
   const [maxRiskPercent, setMaxRiskPercent] = useState("");
   const [avgPositionSize, setAvgPositionSize] = useState("");
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   
   // Fetch user settings (uses default queryFn from queryClient)
   const { data: settings, isLoading } = useQuery<UserSettings>({
@@ -54,6 +60,39 @@ export default function SentinelSettingsPage() {
   }, [settings]);
 
   // Save mutation
+  const changePasswordMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/auth/change-password", {
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      });
+      return res.json();
+    },
+    onSuccess: async () => {
+      toast({
+        title: "Password updated",
+        description: "Your session was refreshed for security.",
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      await refreshUser();
+    },
+    onError: (error: Error) => {
+      let msg = error.message || "Failed to change password";
+      const m = /^(\d+):\s*(\{.*\})\s*$/s.exec(msg);
+      if (m?.[2]) {
+        try {
+          const j = JSON.parse(m[2]) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          /* keep */
+        }
+      }
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    },
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data: Partial<UserSettings>) => {
       const res = await apiRequest("PATCH", "/api/sentinel/user-settings", data);
@@ -149,6 +188,77 @@ export default function SentinelSettingsPage() {
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5" />
+                Security
+              </CardTitle>
+              <CardDescription>Change the password you use to sign in</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="currentPassword">Current password</Label>
+                <Input
+                  id="currentPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">New password</Label>
+                <Input
+                  id="newPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  minLength={8}
+                />
+                <p className="text-xs text-muted-foreground">At least 8 characters</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirmNewPassword">Confirm new password</Label>
+                <Input
+                  id="confirmNewPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  minLength={8}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={
+                  changePasswordMutation.isPending ||
+                  !currentPassword ||
+                  newPassword.length < 8 ||
+                  newPassword !== confirmNewPassword
+                }
+                onClick={() => {
+                  if (newPassword !== confirmNewPassword) {
+                    toast({ title: "Passwords do not match", variant: "destructive" });
+                    return;
+                  }
+                  changePasswordMutation.mutate();
+                }}
+              >
+                {changePasswordMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Updating…
+                  </>
+                ) : (
+                  "Update password"
+                )}
+              </Button>
             </CardContent>
           </Card>
 

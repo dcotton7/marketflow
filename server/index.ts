@@ -132,11 +132,20 @@ app.use((req, res, next) => {
     }
 
     const port = parseInt(process.env.PORT || "5000", 10);
-    const host = process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
-    console.log(`Starting HTTP server on ${host}:${port}...`);
-    httpServer.listen(port, host, () => {
-      log(`serving on port ${port}`);
-    });
+    const isProd = process.env.NODE_ENV === "production";
+    /** Dev: omit host so Node uses default binding (avoids localhost→::1 vs 127.0.0.1-only "Failed to fetch"). Override with LISTEN_HOST. */
+    const listenHost = process.env.LISTEN_HOST?.trim();
+    const onListen = () => {
+      log(`serving on port ${port}${listenHost ? ` (host=${listenHost})` : isProd ? " (host=0.0.0.0)" : " (default bind)"}`);
+    };
+    console.log(`Starting HTTP server on port ${port}...`);
+    if (listenHost) {
+      httpServer.listen(port, listenHost, onListen);
+    } else if (isProd) {
+      httpServer.listen(port, "0.0.0.0", onListen);
+    } else {
+      httpServer.listen(port, onListen);
+    }
   } catch (error) {
     console.error("Fatal error during application startup:", error);
     process.exit(1);

@@ -1,5 +1,17 @@
 # Deploy to Render
 
+## Terminology (LOCAL vs LIVE)
+
+Use these names consistently in chat, tickets, and AI sessions so deploy discussions stay unambiguous.
+
+| Meaning | Names to use (all equivalent) |
+|--------|-------------------------------|
+| **Don’s computer** — editor, branch, `npm run dev`, uncommitted work | **LOCAL**, **DEV** (on-machine development), **My Machine**, **My PC** |
+| **Hosted app** — what users open after GitHub + Render (or similar) | **Live**, **Production**, **Live App**, **Main** (the shipped product, not “any random branch”) |
+
+- **LOCAL** is never **Live** until changes are committed, pushed to the branch your host deploys (often git `main`), and the deploy succeeds.
+- **Git branch `main`** is a branch name; it often backs **Live**, but “push to **Main**” in conversation usually means **push to Live / Production**, i.e. the deploy pipeline’s branch.
+
 ## 1. You do first (one-time)
 
 1. **Sign up:** Go to [render.com](https://render.com) → Sign up (GitHub or email).

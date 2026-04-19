@@ -3,6 +3,7 @@ export { HeaderBar } from "./HeaderBar";
 export { ThemeHeatmapGrid } from "./ThemeHeatmapGrid";
 export { ThemeDetailPanel } from "./ThemeDetailPanel";
 export { ThemeDetailPanelActionable } from "./ThemeDetailPanelActionable";
+export { ThemeDetailPanelEtfs } from "./ThemeDetailPanelEtfs";
 export { RotationTable } from "./RotationTable";
 export { TickerWorkbench } from "./TickerWorkbench";
 export { MarketFlowButton } from "./MarketFlowButton";
