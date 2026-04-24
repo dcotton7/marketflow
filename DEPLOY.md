@@ -12,6 +12,20 @@ Use these names consistently in chat, tickets, and AI sessions so deploy discuss
 - **LOCAL** is never **Live** until changes are committed, pushed to the branch your host deploys (often git `main`), and the deploy succeeds.
 - **Git branch `main`** is a branch name; it often backs **Live**, but “push to **Main**” in conversation usually means **push to Live / Production**, i.e. the deploy pipeline’s branch.
 
+## Versioning (DEV and LIVE)
+
+- The header shows **`v…` + git short SHA**; the number comes from **`package.json` → `version`** (Vite maps `2.11.0` to **`2.11`** for display).
+- **DEV** vs **LIVE** is only the environment (`npm run dev` vs production build), not two different version files. Bump **`package.json`** once per release; the same value ships to Live when you deploy that commit.
+- **Next release:** bump semver (e.g. `2.11.0` → `2.12.0` for the next “tenth” step on `2.11`).
+
+## How to deploy (Live)
+
+There is **no** `npm run deploy` in this repo. You do **not** put `"deploy,\"` in JSON—that is invalid escaping.
+
+1. Commit your changes (including `package.json` version if you bumped it).
+2. **`git push`** to the branch Render is connected to (usually **`main`**).
+3. In Render: **Manual Deploy** → **Deploy latest commit**, or wait for auto-deploy if enabled.
+
 ## 1. You do first (one-time)
 
 1. **Sign up:** Go to [render.com](https://render.com) → Sign up (GitHub or email).

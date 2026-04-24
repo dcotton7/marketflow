@@ -5,7 +5,11 @@ import { readFileSync } from "fs";
 import { execSync } from "child_process";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8"));
-const appVersion = String(pkg.version || "0.0.0");
+const rawVersion = String(pkg.version || "0.0.0");
+/** Marketing label: 2.11.0 → 2.11; other semver left as-is */
+const appVersion = /^\d+\.\d+\.0$/.test(rawVersion.trim())
+  ? rawVersion.replace(/\.0$/, "")
+  : rawVersion;
 const appBuildSha = (() => {
   try {
     return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })

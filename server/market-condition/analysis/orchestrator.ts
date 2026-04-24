@@ -19,7 +19,7 @@ import {
 } from "./modules";
 import { runSynthesis } from "./synthesis/engine";
 
-const VERSION = "v2.1";
+const VERSION = "v2.11";
 
 interface OrchestratorOptions {
   skipSynthesis?: boolean;
