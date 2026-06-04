@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 
 // Watchlist definition (the named list itself)
 export interface Watchlist {
@@ -37,8 +37,17 @@ export interface SentinelWatchlistItem {
   ivyRiskAssessment?: string;
 }
 
-/** Shared with Watchlist Manager, charts, and Big Idea so the same named list is active everywhere */
+/** Last-used watchlist — shared across Charts, Manager, MarketFlow, Big Idea, header */
 export const WATCHLIST_MANAGER_STORAGE_KEY = "watchlistModalSelectedId";
+export const LAST_USED_WATCHLIST_STORAGE_KEY = WATCHLIST_MANAGER_STORAGE_KEY;
+
+/** Older per-page keys migrated into LAST_USED_WATCHLIST_STORAGE_KEY on first read */
+const LEGACY_WATCHLIST_STORAGE_KEYS = [
+  "standaloneWatchlistId",
+  "scanWatchlistId",
+  "sidebarWatchlistId",
+  "selectedWatchlistId",
+] as const;
 
 function readWatchlistIdFromStorage(storageKey: string): number | null {
   if (typeof window === "undefined") return null;
@@ -48,14 +57,84 @@ function readWatchlistIdFromStorage(storageKey: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Hook to manage selected watchlist ID with localStorage persistence
-export function useSelectedWatchlistId(storageKey: string = "selectedWatchlistId") {
-  const [selectedId, setSelectedId] = useState<number | null>(() =>
-    readWatchlistIdFromStorage(storageKey)
+/** Read last-used id, migrating legacy keys when the primary key is empty. */
+export function readLastUsedWatchlistId(
+  storageKey: string = LAST_USED_WATCHLIST_STORAGE_KEY
+): number | null {
+  const primary = readWatchlistIdFromStorage(storageKey);
+  if (primary != null) return primary;
+
+  if (typeof window === "undefined") return null;
+
+  for (const legacyKey of LEGACY_WATCHLIST_STORAGE_KEYS) {
+    if (legacyKey === storageKey) continue;
+    const legacyId = readWatchlistIdFromStorage(legacyKey);
+    if (legacyId != null) {
+      localStorage.setItem(storageKey, String(legacyId));
+      localStorage.removeItem(legacyKey);
+      return legacyId;
+    }
+  }
+  return null;
+}
+
+/** Resolve persisted id to a valid watchlist id (falls back to default / first list). */
+export function resolveEffectiveWatchlistId(
+  selectedId: number | null | undefined,
+  watchlists: Watchlist[] | undefined
+): number | null {
+  if (selectedId != null && watchlists?.some((w) => w.id === selectedId)) {
+    return selectedId;
+  }
+  return watchlists?.find((wl) => wl.isDefault)?.id ?? watchlists?.[0]?.id ?? null;
+}
+
+/** Last-used watchlist id + setter; persists to localStorage across sessions. */
+export function useLastUsedWatchlistId() {
+  return useSelectedWatchlistId(LAST_USED_WATCHLIST_STORAGE_KEY);
+}
+
+/** Selected id resolved against loaded lists; auto-persists fallback when nothing stored. */
+export function useEffectiveWatchlistId() {
+  const { data: watchlists, isLoading } = useWatchlists();
+  const [selectedId, setSelectedId] = useLastUsedWatchlistId();
+
+  const effectiveId = useMemo(
+    () => resolveEffectiveWatchlistId(selectedId, watchlists),
+    [selectedId, watchlists]
   );
 
   useEffect(() => {
-    setSelectedId(readWatchlistIdFromStorage(storageKey));
+    if (selectedId == null && effectiveId != null) {
+      setSelectedId(effectiveId);
+    }
+  }, [selectedId, effectiveId, setSelectedId]);
+
+  const selectedWatchlist = watchlists?.find((wl) => wl.id === effectiveId) ?? null;
+
+  return {
+    watchlists,
+    isLoading,
+    selectedId: effectiveId,
+    selectedWatchlist,
+    setSelectedId,
+  };
+}
+
+// Hook to manage selected watchlist ID with localStorage persistence
+export function useSelectedWatchlistId(storageKey: string = LAST_USED_WATCHLIST_STORAGE_KEY) {
+  const [selectedId, setSelectedId] = useState<number | null>(() =>
+    storageKey === LAST_USED_WATCHLIST_STORAGE_KEY
+      ? readLastUsedWatchlistId(storageKey)
+      : readWatchlistIdFromStorage(storageKey)
+  );
+
+  useEffect(() => {
+    const next =
+      storageKey === LAST_USED_WATCHLIST_STORAGE_KEY
+        ? readLastUsedWatchlistId(storageKey)
+        : readWatchlistIdFromStorage(storageKey);
+    setSelectedId(next);
   }, [storageKey]);
 
   const setSelected = useCallback(

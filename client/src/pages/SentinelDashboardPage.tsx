@@ -22,6 +22,8 @@ import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
 import { TradingChart, type ChartCandle, type ChartIndicators, type PriceLevelLine } from "@/components/TradingChart";
 import { DEFAULT_CHART_MA_LIMITS, type ChartMaDataLimits } from "@/lib/chart-ma-feasibility";
+import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimeframe";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 
 function isDateOnly(dateStr: string): boolean {
   return dateStr.endsWith('T00:00:00.000Z') || dateStr.endsWith('T00:00:00Z') || !dateStr.includes('T');
@@ -1357,7 +1359,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
+  const [intradayTimeframe, setIntradayTimeframe] = usePersistedIntradayTimeframe();
   const [refiningLotId, setRefiningLotId] = useState<string | null>(null);
   const [showStops, setShowStops] = useState(true);
   const [showTargets, setShowTargets] = useState(true);
@@ -1383,6 +1385,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
     dataLimit5min?: number;
     dataLimit15min?: number;
     dataLimit30min?: number;
+    chartBackgroundColor?: string | null;
   }>({
     queryKey: ["/api/sentinel/chart-preferences"],
   });
@@ -1661,6 +1664,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                 maSettings={maSettingsData}
                 maDataLimits={maDataLimits}
                 maxBars={maxBars}
+                chartBackgroundColor={chartPrefs?.chartBackgroundColor}
               />
             ) : (
               <Card className="flex-1">
@@ -1707,6 +1711,7 @@ function TradeChartDialog({ trade: tradeProp, open, onOpenChange }: {
                   maSettings={maSettingsData}
                   maDataLimits={maDataLimits}
                   maxBars={maxBars}
+                  chartBackgroundColor={chartPrefs?.chartBackgroundColor}
                   snapToPrice={refiningLotId && lotEntries ? (() => {
                     const lot = lotEntries.find(l => l.id === refiningLotId);
                     return lot ? parseFloat(lot.price) : null;
@@ -2027,7 +2032,7 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
         )}
 
         {/* Side-by-side comparison: Your Plan vs Ivy's */}
-        {hasIvyData ? (
+        {isTradePlanEnabled() && hasIvyData ? (
           <div className="grid grid-cols-2 gap-3 text-xs">
             {/* User's Plan */}
             <div className="space-y-1">
@@ -2081,7 +2086,7 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
               </div>
             </div>
           </div>
-        ) : (
+        ) : isTradePlanEnabled() ? (
           /* Original simple display if no Ivy data */
           <div className="text-sm text-muted-foreground space-y-1">
             {item.targetEntry && <div>Target Entry: ${item.targetEntry.toFixed(2)}</div>}
@@ -2091,7 +2096,11 @@ function WatchlistCard({ item, onDelete }: { item: WatchlistItem; onDelete: (id:
               {item.targetPlan && <span>Target: ${item.targetPlan.toFixed(2)}</span>}
             </div>
           </div>
-        )}
+        ) : item.alertPrice ? (
+          <div className="text-sm text-muted-foreground space-y-1">
+            <div>Alert at: ${item.alertPrice.toFixed(2)}</div>
+          </div>
+        ) : null}
 
         {/* Collapsible Ivy Eval Text */}
         {item.ivyEvalText && (
@@ -3382,10 +3391,12 @@ export default function SentinelDashboardPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {isTradePlanEnabled() ? (
               <DropdownMenuItem onClick={() => setLocation("/sentinel/evaluate")} data-testid="menu-new-evaluation">
                 <Brain className="w-4 h-4 mr-2" />
                 Trade Plan
               </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onClick={() => setShowAddTrade(true)} data-testid="menu-add-trade-direct">
                 <Plus className="w-4 h-4 mr-2" />
                 Add Trade Directly
@@ -4179,6 +4190,7 @@ export default function SentinelDashboardPage() {
                 data-testid="input-watchlist-symbol"
               />
             </div>
+            {isTradePlanEnabled() ? (
             <div className="space-y-2">
               <Label htmlFor="watchlist-entry">Target Entry Price</Label>
               <Input
@@ -4191,6 +4203,7 @@ export default function SentinelDashboardPage() {
                 data-testid="input-watchlist-entry"
               />
             </div>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="watchlist-priority">Priority</Label>
               <Select value={watchlistForm.priority} onValueChange={(v) => setWatchlistForm({ ...watchlistForm, priority: v })}>

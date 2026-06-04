@@ -107,6 +107,7 @@ export interface ThemeRow {
     rsVsBenchmark: number;
     breadthPct: number;
   };
+  breakdownWatch?: import("@shared/theme-breakdown-watch").BreakdownWatchAssessment;
 }
 
 export interface TickerRow {
@@ -129,6 +130,7 @@ export interface TickerRow {
   // % above/below each MA (for configurable columns)
   pctVsEma10d?: number | null;
   pctVsEma20d?: number | null;
+  pctVsSma20d?: number | null;
   pctVsSma50d?: number | null;
   pctVsSma200d?: number | null;
   // Volume split: previous full session vs today

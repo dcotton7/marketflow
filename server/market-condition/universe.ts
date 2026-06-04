@@ -301,6 +301,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     etfProxies: [
       { symbol: "SMH", name: "VanEck Semiconductor ETF", proxyType: "direct" },
       { symbol: "SOXX", name: "iShares Semiconductor ETF", proxyType: "direct" },
+      { symbol: "DRAM", name: "Roundhill Memory ETF", proxyType: "direct" },
       { symbol: "XLK", name: "Technology Select SPDR", proxyType: "adjacent" },
       { symbol: "QQQ", name: "Invesco QQQ Trust", proxyType: "macro" },
       { symbol: "SOXS", name: "Direxion Daily Semiconductor Bear 3X", proxyType: "inverse" },
@@ -380,15 +381,15 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Fiber / Optical / Connectivity",
     tier: "Structural",
     leadersTarget: 4,
-    core: ["LITE", "CIEN", "FN", "GLW", "CALX", "VIAV", "AAOI", "INFN"],
-    candidates: ["COHR", "IIVI", "COMM"],
+    core: ["LITE", "CIEN", "FN", "GLW", "CALX", "VIAV", "AAOI", "COHR"],
+    candidates: ["COMM"],
     etfProxies: [
       { symbol: "FIVG", name: "Defiance Next Gen Connectivity ETF", proxyType: "direct" },
       { symbol: "XLC", name: "Communication Services SPDR", proxyType: "macro" },
       { symbol: "TECS", name: "Direxion Daily Technology Bear 3X", proxyType: "inverse" },
       { symbol: "TECL", name: "Direxion Daily Technology Bull 3X", proxyType: "leveraged" },
     ],
-    notes: "Early-cycle signal cluster. GLW primary here.",
+    notes: "Early-cycle signal cluster. GLW primary here. COHR replaces merged IIVI / acquired INFN.",
   },
   {
     id: "DATA_CENTER_REITS",

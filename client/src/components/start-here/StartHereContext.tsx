@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { StartHereInterval } from "@/components/MiniChart";
+import type { LiveThemeChartsConfig } from "@/lib/live-theme-charts";
 import { useStartHereChromeHeaderContext } from "@/components/start-here/StartHereWidgetChrome";
 import { useWorkspacePalette } from "@/context/WorkspacePaletteContext";
 import {
@@ -34,6 +35,7 @@ import {
   gatherStartHereExtras,
   hydrateWorkspacesFromServerPayload,
   loadAllWorkspacesFromLocalStorageForMigration,
+  loadChartWallColumns,
   unlinkInstanceToPrivateGroup,
   loadChartsFromList,
   loadDashboard,
@@ -45,12 +47,14 @@ import {
   LINK_LANE_COUNT,
   paletteColorAt,
   paletteLabelAt,
+  saveChartWallColumns,
   START_HERE_UNLINKED_SELECT_VALUE,
   purgeStartWorkspaceStorage,
   remapDashboardIds,
   removeInstance,
   mergePersistedGridLayout,
   patchResistDefaultFlowFullWidth,
+  reflowWatchlistChartWalls,
   saveActiveStartId,
   sanitizeDashboard,
   saveDashboard,
@@ -61,9 +65,13 @@ import {
   setDefaultFlowTemplate,
   setDefaultWatchlistTemplate,
   setInstanceGroupId,
+  setLiveThemeChartsConfig,
   startHereWatchlistColumnWidthsStorageKey,
+  type StartHereChartWallColumns,
   type StartHereDashboardV2,
+  type StartHereGridViewportMetrics,
   type StartHereStartProfile,
+  type StartHereWatchlistSpawnOpts,
   type StartHereWidgetType,
   type StartHereWorkspacePalette,
 } from "./dashboard-persistence";
@@ -83,6 +91,7 @@ export type { StartHereWidgetType };
 export interface LoadChartsFromListOutcome {
   placed: number;
   skipped: number;
+  removed: number;
 }
 
 interface StartHereContextValue {
@@ -108,17 +117,25 @@ interface StartHereContextValue {
   setDefaultChartTemplate: (instanceId: string | null) => void;
   setDefaultWatchlistTemplate: (instanceId: string | null) => void;
   setDefaultFlowTemplate: (instanceId: string | null) => void;
-  /** Updated by the grid host via ResizeObserver; caps bulk chart placement to roughly one viewport below existing layout. */
-  setGridViewportRowCapacity: (rows: number | undefined) => void;
+  /** Bulk chart wall density (Load list into charts). Per workspace; synced via extras. */
+  chartWallColumns: StartHereChartWallColumns;
+  setChartWallColumns: (value: StartHereChartWallColumns) => void;
+  /** Updated by the grid host via ResizeObserver; drives bulk chart sizing and viewport row cap. */
+  setGridViewportMetrics: (metrics: StartHereGridViewportMetrics | undefined) => void;
   loadChartsFromList: (
     symbols: string[],
-    opts?: { inheritColorFromGroupId?: string; inheritColorIndex?: number }
+    opts?: StartHereWatchlistSpawnOpts
   ) => LoadChartsFromListOutcome;
   setChartInterval: (instanceId: string, interval: StartHereInterval) => void;
+  setLiveThemeChartsConfig: (
+    instanceId: string,
+    config: LiveThemeChartsConfig,
+    options?: { setWorkspaceChartDefault?: boolean }
+  ) => void;
   /** Adds a chart widget on the grid (below existing layout), sized like the Default chart; symbol + timeframe from that template. */
   addChartFromWatchlist: (
     symbol: string,
-    opts?: { inheritColorFromGroupId?: string; inheritColorIndex?: number }
+    opts?: StartHereWatchlistSpawnOpts
   ) => void;
   /**
    * After localStorage-only prefs change (e.g. watchlist column profile), queue a debounced save so
@@ -290,10 +307,35 @@ export function StartHereProvider({
     };
   }, [userId, flushRemote]);
 
-  const gridViewportRowCapacityRef = useRef<number | undefined>(undefined);
-  const setGridViewportRowCapacity = useCallback((rows: number | undefined) => {
-    gridViewportRowCapacityRef.current = rows;
+  const [chartWallColumns, setChartWallColumnsState] = useState<StartHereChartWallColumns>("auto");
+
+  useEffect(() => {
+    setChartWallColumnsState(loadChartWallColumns(userId, activeStartId));
+  }, [userId, activeStartId]);
+
+  const gridViewportMetricsRef = useRef<StartHereGridViewportMetrics | undefined>(undefined);
+  const setGridViewportMetrics = useCallback((metrics: StartHereGridViewportMetrics | undefined) => {
+    gridViewportMetricsRef.current = metrics;
   }, []);
+
+  const setChartWallColumns = useCallback(
+    (value: StartHereChartWallColumns) => {
+      setChartWallColumnsState(value);
+      saveChartWallColumns(userId, activeStartIdRef.current, value);
+      const viewport = gridViewportMetricsRef.current;
+      setDashboard((d) => {
+        const { dashboard: next, reflowed } = reflowWatchlistChartWalls(d, value, viewport);
+        saveDashboard(userId, activeStartIdRef.current, next);
+        if (reflowed > 0) {
+          scheduleRemoteSave();
+        } else {
+          queueWorkspaceRemoteSave();
+        }
+        return next;
+      });
+    },
+    [userId, scheduleRemoteSave, queueWorkspaceRemoteSave]
+  );
 
   const commit = useCallback(
     (updater: (d: StartHereDashboardV2) => StartHereDashboardV2) => {
@@ -640,24 +682,21 @@ export function StartHereProvider({
   );
 
   const loadChartsFromListFn = useCallback(
-    (
-      symbols: string[],
-      opts?: { inheritColorFromGroupId?: string; inheritColorIndex?: number }
-    ) => {
-      const cap = gridViewportRowCapacityRef.current;
-      let stats: LoadChartsFromListOutcome = { placed: 0, skipped: 0 };
+    (symbols: string[], opts?: StartHereWatchlistSpawnOpts) => {
+      const viewport = gridViewportMetricsRef.current;
+      let stats: LoadChartsFromListOutcome = { placed: 0, skipped: 0, removed: 0 };
       const sid = activeStartIdRef.current;
       setDashboard((d) => {
         const result = loadChartsFromList(d, symbols, {
-          ...(cap != null && cap > 0 ? { maxAdditionalGridRows: cap } : {}),
-          ...(opts?.inheritColorFromGroupId
-            ? { inheritColorFromGroupId: opts.inheritColorFromGroupId }
+          ...(viewport
+            ? {
+                gridViewport: viewport,
+                maxAdditionalGridRows: viewport.visibleRows,
+              }
             : {}),
-          ...(opts?.inheritColorIndex != null
-            ? { inheritColorIndex: opts.inheritColorIndex }
-            : {}),
+          ...opts,
         });
-        stats = { placed: result.placed, skipped: result.skipped };
+        stats = { placed: result.placed, skipped: result.skipped, removed: result.removed };
         saveDashboard(userId, sid, result.dashboard);
         scheduleRemoteSave();
         return result.dashboard;
@@ -673,11 +712,18 @@ export function StartHereProvider({
     [commit]
   );
 
-  const addChartFromWatchlistFn = useCallback(
+  const setLiveThemeChartsConfigFn = useCallback(
     (
-      symbol: string,
-      opts?: { inheritColorFromGroupId?: string; inheritColorIndex?: number }
-    ) => commit((d) => addChartFromWatchlistSymbol(d, symbol, opts)),
+      instanceId: string,
+      config: LiveThemeChartsConfig,
+      options?: { setWorkspaceChartDefault?: boolean }
+    ) => commit((d) => setLiveThemeChartsConfig(d, instanceId, config, options)),
+    [commit]
+  );
+
+  const addChartFromWatchlistFn = useCallback(
+    (symbol: string, opts?: StartHereWatchlistSpawnOpts) =>
+      commit((d) => addChartFromWatchlistSymbol(d, symbol, opts)),
     [commit]
   );
 
@@ -703,9 +749,12 @@ export function StartHereProvider({
       setDefaultChartTemplate: setDefaultChartTemplateFn,
       setDefaultWatchlistTemplate: setDefaultWatchlistTemplateFn,
       setDefaultFlowTemplate: setDefaultFlowTemplateFn,
-      setGridViewportRowCapacity,
+      chartWallColumns,
+      setChartWallColumns,
+      setGridViewportMetrics,
       loadChartsFromList: loadChartsFromListFn,
       setChartInterval: setChartIntervalFn,
+      setLiveThemeChartsConfig: setLiveThemeChartsConfigFn,
       addChartFromWatchlist: addChartFromWatchlistFn,
       queueWorkspaceRemoteSave,
       setFocusedChartInstance,
@@ -736,9 +785,12 @@ export function StartHereProvider({
       setDefaultChartTemplateFn,
       setDefaultWatchlistTemplateFn,
       setDefaultFlowTemplateFn,
-      setGridViewportRowCapacity,
+      chartWallColumns,
+      setChartWallColumns,
+      setGridViewportMetrics,
       loadChartsFromListFn,
       setChartIntervalFn,
+      setLiveThemeChartsConfigFn,
       addChartFromWatchlistFn,
       queueWorkspaceRemoteSave,
       setFocusedChartInstance,

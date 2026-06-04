@@ -46,6 +46,16 @@ async function alpacaFetch(url: string): Promise<any> {
   return resp.json();
 }
 
+/** Cap in-memory historical bar cache keys (symbol+days); avoids unbounded Map growth on Render. */
+const DEFAULT_HISTORICAL_CACHE_MAX_KEYS = 400;
+
+function getHistoricalCacheMaxKeys(): number {
+  const raw = process.env.MC_ALPACA_HISTORICAL_CACHE_MAX;
+  if (raw == null || raw === "") return DEFAULT_HISTORICAL_CACHE_MAX_KEYS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 32 ? Math.floor(n) : DEFAULT_HISTORICAL_CACHE_MAX_KEYS;
+}
+
 async function alpacaFetchWithRetry(url: string, retries = 3, delay = 1000): Promise<any> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
@@ -240,11 +250,14 @@ export class AlpacaProvider implements MarketDataProvider {
   async getHistoricalBars(symbol: string, days: number): Promise<HistoricalBar[]> {
     const cacheKey = `${symbol}-${days}`;
     const cached = this.historicalCache.get(cacheKey);
-    
+
     if (isCacheValid(cached)) {
       return cached!.data;
     }
-    
+    if (cached) {
+      this.historicalCache.delete(cacheKey);
+    }
+
     try {
       const endDate = new Date();
       const startDate = new Date();
@@ -279,10 +292,10 @@ export class AlpacaProvider implements MarketDataProvider {
       
       // Take only the most recent 'days' bars
       const result = bars.slice(-days);
-      
-      // Cache the result
+
+      this.pruneHistoricalCache();
       this.historicalCache.set(cacheKey, createCacheEntry(result, this.historicalTtlMs));
-      
+
       return result;
       
     } catch (error) {
@@ -341,7 +354,34 @@ export class AlpacaProvider implements MarketDataProvider {
     this.snapshotCache = undefined;
     this.historicalCache.clear();
   }
-  
+
+  /** Drop expired entries, then oldest keys until under cap. */
+  private pruneHistoricalCache(): void {
+    const staleKeys: string[] = [];
+    for (const [key, entry] of this.historicalCache) {
+      if (!isCacheValid(entry)) {
+        staleKeys.push(key);
+      }
+    }
+    for (const key of staleKeys) {
+      this.historicalCache.delete(key);
+    }
+    const maxKeys = getHistoricalCacheMaxKeys();
+    while (this.historicalCache.size > maxKeys) {
+      let oldestKey: string | null = null;
+      let oldestTime = Infinity;
+      for (const [key, entry] of this.historicalCache) {
+        const t = entry.timestamp.getTime();
+        if (t < oldestTime) {
+          oldestTime = t;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey == null) break;
+      this.historicalCache.delete(oldestKey);
+    }
+  }
+
   // =============================================================================
   // Private Helpers
   // =============================================================================

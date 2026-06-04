@@ -1,3 +1,5 @@
+import { detectIntradayCrossOfDailyMaFromCandles } from "../shared/intraday-daily-ma-cross";
+
 export type CandleData = {
   date: string;
   open: number;
@@ -556,6 +558,58 @@ const MOVING_AVERAGES: IndicatorDefinition[] = [
         }
       }
       return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no cross', threshold: `price ${crossType} within ${lookback} bars`, detail: `price $${currentPrice.toFixed(2)} vs MA $${currentMA.toFixed(2)}` } } };
+    },
+  },
+  {
+    id: "MA-10",
+    name: "Intraday Cross of Daily MA",
+    category: "Moving Averages",
+    description: "Finds stocks where intraday price recently crossed above or below a daily moving average (e.g. 5-day, 10-day, 20-day SMA). Uses intraday bars for timing and daily bars for the MA level — the correct way to express 'crossed the 10-day MA in the last 30 minutes'. Default: 5-minute bars, 30-minute lookback.",
+    params: [
+      { name: "maPeriod", label: "Daily MA Period", type: "number", defaultValue: 10, min: 5, max: 200, step: 1 },
+      { name: "maType", label: "MA Type", type: "select", defaultValue: "sma", options: ["sma", "ema"] },
+      { name: "intradayTimeframe", label: "Intraday Bars", type: "select", defaultValue: "5min", options: ["5min", "15min", "30min"] },
+      { name: "lookbackMinutes", label: "Lookback (minutes)", type: "number", defaultValue: 30, min: 5, max: 120, step: 5 },
+      { name: "crossType", label: "Cross Direction", type: "select", defaultValue: "above", options: ["above", "below", "any"] },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const maPeriod = params.maPeriod ?? 10;
+      const maType = (params.maType ?? "sma") as "sma" | "ema";
+      const intradayTimeframe = params.intradayTimeframe ?? "5min";
+      const lookbackMinutes = params.lookbackMinutes ?? 30;
+      const crossType = (params.crossType ?? "above") as "above" | "below" | "any";
+
+      const candlesByTimeframe = upstreamData?.candlesByTimeframe as Record<string, CandleData[]> | undefined;
+      const dailyCandles = candlesByTimeframe?.daily;
+      const intradayCandles = candlesByTimeframe?.[intradayTimeframe] ?? candles;
+
+      if (!dailyCandles?.length || dailyCandles.length < maPeriod + 1) {
+        return { pass: false, data: { _diagnostics: { value: "insufficient daily data", threshold: `${maPeriod}d ${maType} cross within ${lookbackMinutes}m` } } };
+      }
+      if (!intradayCandles?.length || intradayCandles.length < 2) {
+        return { pass: false, data: { _diagnostics: { value: "insufficient intraday data", threshold: `${maPeriod}d ${maType} cross within ${lookbackMinutes}m` } } };
+      }
+
+      const dailyCloses = dailyCandles.map((c) => c.close);
+      const intradayCloses = intradayCandles.map((c) => c.close);
+      const result = detectIntradayCrossOfDailyMaFromCandles(dailyCloses, intradayCloses, {
+        maPeriod,
+        maType,
+        lookbackMinutes,
+        intradayTimeframe,
+        crossType,
+      });
+
+      return {
+        pass: result.pass,
+        data: {
+          _diagnostics: {
+            value: result.pass ? result.detail : "no cross",
+            threshold: `price ${crossType} ${maPeriod}d ${maType} within ${lookbackMinutes}m`,
+            detail: result.maLevel != null ? `${result.detail} (MA $${result.maLevel.toFixed(2)})` : result.detail,
+          },
+        },
+      };
     },
   },
 ];

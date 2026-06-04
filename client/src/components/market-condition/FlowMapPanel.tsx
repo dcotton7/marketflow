@@ -35,6 +35,13 @@ const TIMEFRAMES: Array<{
   { key: "m1", label: "1Mo", apiSlice: "1M" },
 ];
 
+/** YYYY-MM-DD in US Eastern — baseline "freshness" must use session calendar, not UTC `toISOString()` dates. */
+function etCalendarYmd(isoOrDate: string | Date): string | null {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
 interface FlowRoute {
   from: ThemeId;
   to: ThemeId;
@@ -344,6 +351,7 @@ export function FlowMapPanel({
   onFocusDataChange,
 }: FlowMapPanelProps) {
   const helpPanelRef = useRef<HTMLDivElement | null>(null);
+  const flowMapTableScrollRef = useRef<HTMLDivElement | null>(null);
   const helpMoveDragRef = useRef<{
     startX: number;
     startY: number;
@@ -442,8 +450,14 @@ export function FlowMapPanel({
   }, [helpOpen]);
 
   useEffect(() => {
-    if (focusedTheme && focusedTheme !== selectedTheme) onThemeSelect(focusedTheme);
-  }, [focusedTheme, selectedTheme, onThemeSelect]);
+    if (!focusedTheme || focusedTheme === selectedTheme) return;
+    // Avoid overwriting parent selection (e.g. from ticker search) when Flow Map falls back to
+    // the first row because selectedTheme is not yet in the active matrix — that would steal focus.
+    const focusFromMatrix = !!(selectedRow || selectedCol || selectedRoute);
+    const selectedInMatrix = !!(selectedTheme && themeIds.includes(selectedTheme));
+    if (!focusFromMatrix && selectedTheme && !selectedInMatrix) return;
+    onThemeSelect(focusedTheme);
+  }, [focusedTheme, selectedTheme, themeIds, selectedRow, selectedCol, selectedRoute, onThemeSelect]);
 
   const getStrength = (id: ThemeId) => {
     const active = activeMap.get(id)?.score ?? 0;
@@ -557,6 +571,55 @@ export function FlowMapPanel({
     });
     return arr;
   }, [themeIds, sortKey, sortDir, activeTf, compareEnabled, selectedRow, activeMap, mapsByTf, currentMap]);
+
+  const focusThemeRowInView = useCallback((themeId: ThemeId) => {
+    const root = flowMapTableScrollRef.current;
+    if (!root) return;
+    const row = root.querySelector(`[data-flow-theme-row="${CSS.escape(themeId)}"]`);
+    row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, []);
+
+  const onFlowMapTableAreaPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("button, input, textarea, select, a, [role='button'], label")) return;
+    flowMapTableScrollRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const onFlowMapThemeListKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (helpOpen) return;
+      const key = e.key;
+      if (key !== "ArrowDown" && key !== "ArrowUp" && key !== " ") return;
+      if (orderedThemes.length === 0) return;
+
+      let anchor: ThemeId | null = selectedRow ?? focusedTheme;
+      if (!anchor || orderedThemes.indexOf(anchor) < 0) {
+        anchor = orderedThemes[0] ?? null;
+      }
+      if (!anchor) return;
+
+      const idx = orderedThemes.indexOf(anchor);
+      if (key === "ArrowUp") {
+        e.preventDefault();
+        const nextIdx = Math.max(0, idx - 1);
+        const next = orderedThemes[nextIdx];
+        setHeaderSelection({ axis: "row", themeId: next });
+        onThemeSelect(next);
+        setSelectedRoute(null);
+        requestAnimationFrame(() => focusThemeRowInView(next));
+        return;
+      }
+
+      e.preventDefault();
+      const nextIdx = Math.min(orderedThemes.length - 1, idx + 1);
+      const next = orderedThemes[nextIdx];
+      setHeaderSelection({ axis: "row", themeId: next });
+      onThemeSelect(next);
+      setSelectedRoute(null);
+      requestAnimationFrame(() => focusThemeRowInView(next));
+    },
+    [helpOpen, orderedThemes, selectedRow, focusedTheme, onThemeSelect, focusThemeRowInView]
+  );
 
   const toggleSort = (next: SortKey) => {
     if (sortKey === next) {
@@ -681,7 +744,7 @@ export function FlowMapPanel({
   const scoreClass = (v: number) => (v >= 0 ? "text-green-400" : "text-red-400");
   const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
   const fmtScore = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayEtYmd = etCalendarYmd(new Date()) ?? "";
   const fmtTs = (iso: string | null | undefined) => {
     if (!iso) return "N/A";
     const d = new Date(iso);
@@ -1197,7 +1260,15 @@ export function FlowMapPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        ref={flowMapTableScrollRef}
+        tabIndex={0}
+        role="region"
+        aria-label="Flow Map matrix — use Arrow Down or Space for next theme, Arrow Up for previous"
+        className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+        onPointerDown={onFlowMapTableAreaPointerDown}
+        onKeyDown={onFlowMapThemeListKeyDown}
+      >
         <table className="w-full min-w-[1300px] border-collapse">
           <thead className="sticky top-0 z-10 bg-slate-900">
             <tr>
@@ -1231,7 +1302,8 @@ export function FlowMapPanel({
                   const sk = `perf:${tf.key}` as SortKey;
                   const cTime = dataByTf[tf.key]?.comparisonTime;
                   const cUnavailable = dataByTf[tf.key]?.comparisonUnavailable;
-                  const isPrevSessionFallback = !!cTime && cTime.slice(0, 10) < todayIso;
+                  const compEtYmd = cTime ? etCalendarYmd(cTime) : null;
+                  const isPrevSessionFallback = !!compEtYmd && compEtYmd < todayEtYmd;
                   const headerTitle = cUnavailable
                     ? cUnavailable
                     : cTime
@@ -1259,7 +1331,8 @@ export function FlowMapPanel({
                   const sk = `perf:${tf.key}` as SortKey;
                   const cTime = dataByTf[tf.key]?.comparisonTime;
                   const cUnavailable = dataByTf[tf.key]?.comparisonUnavailable;
-                  const isPrevSessionFallback = !!cTime && cTime.slice(0, 10) < todayIso;
+                  const compEtYmd = cTime ? etCalendarYmd(cTime) : null;
+                  const isPrevSessionFallback = !!compEtYmd && compEtYmd < todayEtYmd;
                   // "Prev session fallback" warning only applies to intraday checkpoints.
                   // For day/week/month lookbacks, prior-date baselines are expected and should not show "!". 
                   const isIntradayCol = tf.key === "m15" || tf.key === "h1" || tf.key === "h4";
@@ -1314,7 +1387,11 @@ export function FlowMapPanel({
               const strength = getStrength(from);
               const name = activeMap.get(from)?.name ?? from;
               return (
-                <tr key={from} className={cn("hover:bg-slate-800/30", rowSelected && "bg-cyan-500/8")}>
+                <tr
+                  key={from}
+                  data-flow-theme-row={from}
+                  className={cn("hover:bg-slate-800/30", rowSelected && "bg-cyan-500/8")}
+                >
                   <td
                     className={cn(
                       "sticky left-0 z-[20] w-[240px] min-w-[240px] max-w-[240px] cursor-pointer border border-slate-700/30 bg-slate-900 p-2 text-xs font-medium",
@@ -1418,9 +1495,22 @@ export function FlowMapPanel({
   );
 }
 
-export function FlowMapFocusBox({ data }: { data: FlowMapFocusData | null }) {
+export function FlowMapFocusBox({
+  data,
+  emptyState = "flowMap",
+}: {
+  data: FlowMapFocusData | null;
+  /** When not in Flow Map lens, parent passes "otherLens" for a clearer empty message. */
+  emptyState?: "flowMap" | "otherLens";
+}) {
   if (!data || !data.focusedTheme) {
-    return <div className="p-3 text-sm text-muted-foreground">Select a theme in Flow Map to view focus details.</div>;
+    return (
+      <div className="p-3 text-sm text-muted-foreground">
+        {emptyState === "otherLens"
+          ? "Route focus is filled in Theme Flow Map. Switch to that lens and pick a theme or matrix cell."
+          : "Select a theme in Flow Map to view focus details."}
+      </div>
+    );
   }
   return (
     <div className="h-full overflow-auto p-3 text-xs">

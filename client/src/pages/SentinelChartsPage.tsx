@@ -5,7 +5,7 @@ import { useSentinelDailyChartData, useSentinelIntradayChartData } from "@/hooks
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
-import { useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useSelectedWatchlistId, useWatchlists, WATCHLIST_MANAGER_STORAGE_KEY, useNamedWatchlistItems, type SentinelWatchlistItem } from "@/hooks/use-watchlist";
+import { useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useEffectiveWatchlistId, useNamedWatchlistItems, type SentinelWatchlistItem } from "@/hooks/use-watchlist";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
@@ -17,12 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Search, Sparkles, Eye, X, ExternalLink, Star, ChevronLeft, ChevronRight, ChevronDown, Newspaper, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimeframe";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 
 
 export default function SentinelChartsPage() {
@@ -36,7 +32,7 @@ export default function SentinelChartsPage() {
 
   const [tickerInput, setTickerInput] = useState(initialSymbol);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol.toUpperCase());
-  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
+  const [intradayTimeframe, setIntradayTimeframe] = usePersistedIntradayTimeframe();
   const [showETH, setShowETHState] = useState<boolean>(() => {
     try {
       return localStorage.getItem("sentinelChartsShowETH") === "true";
@@ -86,18 +82,11 @@ export default function SentinelChartsPage() {
   /** Symbol order from Watchlist Manager table when opening via Load in Charts (matches overlay top→bottom) */
   const [chartWatchlistSymOrder, setChartWatchlistSymOrder] = useState<string[] | null>(null);
 
-  const [watchlistManagerSelectedId] = useSelectedWatchlistId(WATCHLIST_MANAGER_STORAGE_KEY);
-  const { data: watchlistsForManager } = useWatchlists();
-  const effectiveManagerWatchlistId = useMemo(() => {
-    if (watchlistManagerSelectedId != null && watchlistsForManager?.some((w) => w.id === watchlistManagerSelectedId)) {
-      return watchlistManagerSelectedId;
-    }
-    const defaultWl = watchlistsForManager?.find((wl) => wl.isDefault);
-    return defaultWl?.id ?? watchlistsForManager?.[0]?.id ?? null;
-  }, [watchlistManagerSelectedId, watchlistsForManager]);
+  const {
+    selectedId: effectiveManagerWatchlistId,
+    setSelectedId: setLastUsedWatchlistId,
+  } = useEffectiveWatchlistId();
 
-  const navWlEnabled =
-    typeof navigationWatchlistId === "number" && !Number.isNaN(navigationWatchlistId);
   const managerWlEnabled =
     typeof effectiveManagerWatchlistId === "number" && !Number.isNaN(effectiveManagerWatchlistId);
 
@@ -107,6 +96,9 @@ export default function SentinelChartsPage() {
     useNamedWatchlistItems(navigationWatchlistId);
 
   /** Wait for watchlist fetches before Trade Plan hydrates from localStorage (avoids wrong ticker's draft). */
+  const navWlEnabled =
+    typeof navigationWatchlistId === "number" && !Number.isNaN(navigationWatchlistId);
+
   const tradePlanWatchlistReady = useMemo(
     () =>
       (!navWlEnabled || navigationWlFetched) && (!managerWlEnabled || managerWlFetched),
@@ -133,11 +125,8 @@ export default function SentinelChartsPage() {
 
   const watchlistItem = useMemo(() => {
     const sym = activeSymbol.toUpperCase();
-    if (navigationMode === "watchlist" && navigationWatchlist?.length) {
-      return navigationWatchlist.find((item) => item.symbol.toUpperCase() === sym);
-    }
     return managerScopeItems?.find((item) => item.symbol.toUpperCase() === sym);
-  }, [navigationMode, navigationWatchlist, managerScopeItems, activeSymbol]);
+  }, [managerScopeItems, activeSymbol]);
 
   const isWatchlisted = !!watchlistItem;
 
@@ -237,10 +226,10 @@ export default function SentinelChartsPage() {
         targetEntry: data.entry, 
         stopPlan: data.stop, 
         targetPlan: data.target,
-        watchlistId: navigationWatchlistId ?? effectiveManagerWatchlistId ?? undefined,
+        watchlistId: effectiveManagerWatchlistId ?? undefined,
       });
     }
-  }, [watchlistItem, updateWatchlist, addToWatchlistWithTradePlan, activeSymbol, navigationWatchlistId, effectiveManagerWatchlistId]);
+  }, [watchlistItem, updateWatchlist, addToWatchlistWithTradePlan, activeSymbol, effectiveManagerWatchlistId]);
 
   // Handler to clear trade plan
   const handleClearTradePlan = useCallback(() => {
@@ -287,6 +276,7 @@ export default function SentinelChartsPage() {
   }, [activeSymbol]);
   
   useEffect(() => {
+    if (!isTradePlanEnabled()) return;
     // Skip if no symbol or overlay not open
     if (!activeSymbol || !askIvyOpen) return;
     
@@ -337,7 +327,8 @@ export default function SentinelChartsPage() {
           symbol: symbolToSave, 
           targetEntry: entryToSave, 
           stopPlan: stopToSave, 
-          targetPlan: targetToSave 
+          targetPlan: targetToSave,
+          watchlistId: effectiveManagerWatchlistId ?? undefined,
         });
       }
       
@@ -349,7 +340,7 @@ export default function SentinelChartsPage() {
         clearTimeout(autoSaveTimeoutRef.current);
       }
     };
-  }, [activeSymbol, askIvyOpen, ivyEntryLevel, ivyStopLevel, ivyTargetLevel, isWatchlisted, watchlistItem, updateWatchlist, addToWatchlistWithTradePlan]);
+  }, [activeSymbol, askIvyOpen, ivyEntryLevel, ivyStopLevel, ivyTargetLevel, isWatchlisted, watchlistItem, updateWatchlist, addToWatchlistWithTradePlan, effectiveManagerWatchlistId]);
 
   const handleSubmitTicker = useCallback(() => {
     const cleaned = tickerInput.trim().toUpperCase();
@@ -409,6 +400,27 @@ export default function SentinelChartsPage() {
     staleTime: 60 * 1000,
   });
 
+  const ivyTradePlanPriceLines = useMemo(() => {
+    if (!isTradePlanEnabled()) return [];
+    return [
+      ...(ivyEntryLevel
+        ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }]
+        : []),
+      ...(ivyStopLevel
+        ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }]
+        : []),
+      ...(ivyTargetLevel
+        ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }]
+        : []),
+    ];
+  }, [ivyEntryLevel, ivyStopLevel, ivyTargetLevel]);
+
+  const ivyChartClickHandler = isTradePlanEnabled() && ivyActiveClickField
+    ? (_candle: unknown, clickedPrice: number) => {
+        setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
+      }
+    : undefined;
+
   // News query - only fetch when panel is open (lazy loading)
   interface NewsArticle {
     id: number;
@@ -450,7 +462,13 @@ export default function SentinelChartsPage() {
     if (source !== "watchlist") return;
 
     const wlId = p.get("watchlistId");
-    if (wlId) setNavigationWatchlistId(parseInt(wlId, 10));
+    if (wlId) {
+      const parsed = parseInt(wlId, 10);
+      if (!Number.isNaN(parsed)) {
+        setNavigationWatchlistId(parsed);
+        setLastUsedWatchlistId(parsed);
+      }
+    }
 
     if (!navigationWatchlist?.length) return;
 
@@ -498,7 +516,7 @@ export default function SentinelChartsPage() {
     }
 
     window.history.replaceState({}, "", "/sentinel/charts");
-  }, [searchString, navigationWatchlist]);
+  }, [searchString, navigationWatchlist, setLastUsedWatchlistId]);
 
   // Navigation handlers
   const handleNavigatePrev = useCallback(() => {
@@ -575,6 +593,7 @@ export default function SentinelChartsPage() {
           <div className="w-px h-6 bg-border mx-1" />
         </>
       )}
+      {isTradePlanEnabled() ? (
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -597,6 +616,7 @@ export default function SentinelChartsPage() {
           <p className="text-sm">Set entry, stop & target levels</p>
         </TooltipContent>
       </Tooltip>
+      ) : null}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -622,10 +642,7 @@ export default function SentinelChartsPage() {
       <Tooltip>
         <TooltipTrigger asChild>
           <div>
-            <WatchlistSelector 
-              symbol={activeSymbol} 
-              storageKey="standaloneWatchlistId"
-            />
+            <WatchlistSelector symbol={activeSymbol} />
           </div>
         </TooltipTrigger>
         <TooltipContent>
@@ -745,29 +762,22 @@ export default function SentinelChartsPage() {
               onNavigateToTicker={handleNavigateToTicker}
               navExtra={chartsNavExtra}
               dailyChartProps={{
-                priceLines: [
-                  ...(ivyEntryLevel ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }] : []),
-                  ...(ivyStopLevel ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }] : []),
-                  ...(ivyTargetLevel ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }] : []),
-                ],
-                onCandleClick: ivyActiveClickField ? (_candle: any, clickedPrice: number) => {
-                  setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
-                } : undefined,
+                priceLines: ivyTradePlanPriceLines,
+                onCandleClick: ivyChartClickHandler,
               }}
               intradayChartProps={{
-                priceLines: [
-                  ...(ivyEntryLevel ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }] : []),
-                  ...(ivyStopLevel ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }] : []),
-                  ...(ivyTargetLevel ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }] : []),
-                ],
-                onCandleClick: ivyActiveClickField ? (_candle: any, clickedPrice: number) => {
-                  setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
-                } : undefined,
+                priceLines: ivyTradePlanPriceLines,
+                onCandleClick: ivyChartClickHandler,
               }}
               testIdPrefix="chart"
-              alertTradePlanPreview={savedTradePlan ? { mode: "single", ...savedTradePlan } : null}
-              alertWatchlistId={watchlistItem?.watchlistId ?? navigationWatchlistId}
+              alertTradePlanPreview={
+                isTradePlanEnabled() && savedTradePlan
+                  ? { mode: "single", ...savedTradePlan }
+                  : null
+              }
+              alertWatchlistId={watchlistItem?.watchlistId ?? effectiveManagerWatchlistId}
             />
+            {isTradePlanEnabled() ? (
             <AskIvyOverlay
               open={askIvyOpen}
               onOpenChange={setAskIvyOpen}
@@ -787,6 +797,7 @@ export default function SentinelChartsPage() {
               savedTradePlan={savedTradePlan}
               tradePlanWatchlistReady={tradePlanWatchlistReady}
             />
+            ) : null}
             
             {/* News Panel */}
             {newsOpen && (

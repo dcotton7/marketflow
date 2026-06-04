@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { WatchlistPullingState } from "@/components/WatchlistPullingState";
 import { Loader2, ArrowUpDown, ArrowUp, ArrowDown, Plus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -103,10 +104,11 @@ export function WatchlistPortalWidget({
   /** Authoritative group + palette index for this watchlist tile (props can lag after group picker changes). */
   const getWatchlistSpawnColorOpts = () => {
     const gstate = gid ? dashboard.groups[gid] : undefined;
-    if (!gstate) return {};
+    const base = { inheritGroupId: gid, watchlistLoadSourceId: instanceId };
+    if (!gstate) return base;
     if (isLinkLaneGroupId(gid)) {
       return {
-        inheritGroupId: gid,
+        ...base,
         inheritColorFromGroupId: gid,
         inheritColorIndex: gstate.colorIndex,
       };
@@ -116,11 +118,11 @@ export function WatchlistPortalWidget({
       Number.isFinite(gstate.accentColorIndex)
     ) {
       return {
-        inheritGroupId: gid,
+        ...base,
         inheritColorIndex: gstate.accentColorIndex,
       };
     }
-    return { inheritGroupId: gid };
+    return base;
   };
   const { toast } = useToast();
   const watchlistStorageKey = startHereWatchlistInstanceStorageKey(
@@ -392,17 +394,28 @@ export function WatchlistPortalWidget({
       )
     ).slice(0, START_HERE_MAX_LOAD_CHARTS);
     if (!picked.length) return;
-    const { placed, skipped } = loadChartsFromList(picked, getWatchlistSpawnColorOpts());
+    const preserveChartInstanceIds = dashboard.defaultChartInstanceId
+      ? [dashboard.defaultChartInstanceId]
+      : undefined;
+    const { placed, skipped, removed } = loadChartsFromList(picked, {
+      ...getWatchlistSpawnColorOpts(),
+      preserveChartInstanceIds,
+    });
     const capNote =
       skipped > 0
         ? ` ${skipped} not placed (one viewport of rows below your layout). Scroll down and run again for more.`
         : "";
+    const parts: string[] = [];
+    if (placed > 0) parts.push(`${placed} added`);
+    if (removed > 0) parts.push(`${removed} removed`);
+    const syncNote =
+      parts.length > 0 ? parts.join(", ") : "Already in sync with this list";
     toast({
-      title: placed > 0 ? "Charts added" : "No charts added",
+      title: placed > 0 || removed > 0 ? "Charts updated" : "Charts in sync",
       description:
-        placed > 0
-          ? `Placed ${placed} chart(s) in new rows (Default chart size and timeframe). Press Default on a chart widget to change the template.${capNote}`
-          : `Nothing fit in the next viewport below your widgets.${capNote}`,
+        placed > 0 || removed > 0 || skipped > 0
+          ? `${syncNote} for this watchlist (Default chart size and timeframe).${capNote}`
+          : `Grid already matches this watchlist.${capNote}`,
     });
   };
 
@@ -545,9 +558,7 @@ export function WatchlistPortalWidget({
         )}
 
         {itemsLoading || quotesLoading ? (
-          <div className="flex flex-1 items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin" style={{ color: cssVariables.textColorSmall }} />
-          </div>
+          <WatchlistPullingState compact className="flex-1" />
         ) : !items?.length ? (
           <p style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
             No symbols in this list.

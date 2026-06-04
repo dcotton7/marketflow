@@ -10,5 +10,6 @@
 export * from "./types";
 export * from "./daily-bars";
 export * from "./moving-averages";
+export * from "./session-adjusted-ma";
 export * from "./intraday-bars";
 export * from "./quotes";

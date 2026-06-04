@@ -4,7 +4,7 @@
  * Provides pre-calculated moving averages from the ticker_ma table.
  * MAs are calculated nightly from historical bars:
  * - EMA 10d, EMA 20d (Exponential)
- * - SMA 50d, SMA 200d (Simple)
+ * - SMA 20d, SMA 50d, SMA 200d (Simple)
  */
 
 import { eq } from "drizzle-orm";
@@ -44,6 +44,7 @@ export async function getMAs(symbol: string): Promise<TickerMAs | null> {
       symbol: row.symbol,
       ema10d: row.ema10d ? Number(row.ema10d) : null,
       ema20d: row.ema20d ? Number(row.ema20d) : null,
+      sma20d: row.sma20d ? Number(row.sma20d) : null,
       sma50d: row.sma50d ? Number(row.sma50d) : null,
       sma200d: row.sma200d ? Number(row.sma200d) : null,
       updatedAt: row.updatedAt || new Date(),
@@ -82,6 +83,7 @@ export async function getAllMAs(): Promise<Map<string, TickerMAs>> {
         symbol: row.symbol,
         ema10d: row.ema10d ? Number(row.ema10d) : null,
         ema20d: row.ema20d ? Number(row.ema20d) : null,
+        sma20d: row.sma20d ? Number(row.sma20d) : null,
         sma50d: row.sma50d ? Number(row.sma50d) : null,
         sma200d: row.sma200d ? Number(row.sma200d) : null,
         updatedAt: row.updatedAt || new Date(),
@@ -123,18 +125,19 @@ export async function getSMADataForThemes(): Promise<
 
 /**
  * Get full MA data for theme member calculations (pct vs MA).
- * Returns Map of symbol -> { ema10d, ema20d, sma50d, sma200d }
+ * Returns Map of symbol -> { ema10d, ema20d, sma20d, sma50d, sma200d }
  */
 export async function getMADataForThemes(): Promise<
-  Map<string, { ema10d: number | null; ema20d: number | null; sma50d: number | null; sma200d: number | null }>
+  Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null }>
 > {
   const allMAs = await getAllMAs();
-  const result = new Map<string, { ema10d: number | null; ema20d: number | null; sma50d: number | null; sma200d: number | null }>();
+  const result = new Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null }>();
 
   for (const [symbol, ma] of allMAs) {
     result.set(symbol, {
       ema10d: ma.ema10d,
       ema20d: ma.ema20d,
+      sma20d: ma.sma20d,
       sma50d: ma.sma50d,
       sma200d: ma.sma200d,
     });

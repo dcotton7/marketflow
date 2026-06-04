@@ -78,9 +78,40 @@ import { useChartPopout } from "@/hooks/useChartPopout";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import type { FlowMapFocusData } from "@/components/market-condition/FlowMapPanel";
+import { MARKET_FLOW_SURFACE, uiRegion } from "@shared/ui-surfaces";
 
 type ViewMode = "grid" | "table" | "split";
 type LensMode = "flow" | "rotation" | "flowMap" | "concentration" | "accumulation" | "race";
+
+interface SearchSubthemeResult {
+  id: string;
+  name: string;
+  themeId: ClusterId;
+  themeName?: string | null;
+}
+
+interface SearchTickerResult {
+  symbol: string;
+  themeId: ClusterId | null;
+  themes: Array<{ theme: string; isCore: boolean }>;
+  subthemes?: string[];
+}
+
+interface UnifiedSearchResponse {
+  themes: Array<{ id: ClusterId; name: string; tier?: string }>;
+  subthemes: SearchSubthemeResult[];
+  tickers: SearchTickerResult[];
+}
+
+interface ThemeSubthemeSummary {
+  id: string;
+  name: string;
+  description?: string | null;
+  themeId: string;
+  sortOrder?: number | null;
+  memberCount: number;
+  leaderEligibleCount: number;
+}
 
 // Time slice label mapping
 const TIME_SLICE_LABELS: Record<TimeSlice, string> = {
@@ -142,6 +173,7 @@ function convertToThemeRow(theme: ThemeMetrics): ThemeRow {
     bearCount: theme.bearCount,
     etfProxies: theme.etfProxies,
     historicalMetrics: theme.historicalMetrics,
+    breakdownWatch: theme.breakdownWatch,
   };
 }
 
@@ -171,7 +203,19 @@ function ResizeHandle({ direction = "vertical" }: { direction?: "vertical" | "ho
 }
 
 // Panel header component
-function PanelHeader({ title, tooltip, subtitle, action }: { title: string; tooltip: string; subtitle?: string; action?: React.ReactNode }) {
+function PanelHeader({
+  title,
+  tooltip,
+  subtitle,
+  titleAfterInfo,
+  action,
+}: {
+  title: string;
+  tooltip: string;
+  subtitle?: string;
+  titleAfterInfo?: string;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border-b border-slate-700/50 shrink-0">
       <Tooltip>
@@ -184,6 +228,9 @@ function PanelHeader({ title, tooltip, subtitle, action }: { title: string; tool
               </span>
             )}
             <Info className="w-3 h-3 text-muted-foreground" />
+            {titleAfterInfo && (
+              <span className="text-sm font-medium">{titleAfterInfo}</span>
+            )}
           </div>
         </TooltipTrigger>
         <TooltipContent className="max-w-xs">
@@ -226,6 +273,9 @@ export default function MarketConditionPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedTicker, setHighlightedTicker] = useState<string | null>(null);
+  const [selectedSubthemeId, setSelectedSubthemeId] = useState<string | null>(null);
+  const [selectedSubthemeName, setSelectedSubthemeName] = useState<string | null>(null);
+  const [memberScope, setMemberScope] = useState<"leaders" | "theme" | "subtheme">("theme");
 
   // Pop-out charting state and hooks
   const [msSyncEnabled, setMsSyncEnabled] = useState(false);
@@ -233,12 +283,18 @@ export default function MarketConditionPage() {
   const [analysisSyncEnabled, setAnalysisSyncEnabled] = useState(false);
   const [analysisSheetSymbol, setAnalysisSheetSymbol] = useState<string | null>(null);
   const [flowMapFocusData, setFlowMapFocusData] = useState<FlowMapFocusData | null>(null);
-  const [flowMapCenterTab, setFlowMapCenterTab] = useState<
-    "actionableDetails" | "flowFocus" | "etfs" | "legacyDetails"
+  const [focusedCenterTab, setFocusedCenterTab] = useState<
+    "actionableDetails" | "flowFocus" | "etfs" | "subthemes" | "legacyDetails"
   >("actionableDetails");
   const [showFocusedPanel, setShowFocusedPanel] = useState(true);
   const [showMembersPanel, setShowMembersPanel] = useState(true);
   const [showRotationTablePanel, setShowRotationTablePanel] = useState(true);
+
+  useEffect(() => {
+    if (lensMode !== "flowMap") {
+      setFlowMapFocusData(null);
+    }
+  }, [lensMode]);
   const { syncToMarketSurge } = useMarketSurgeSync();
   const { syncToChart } = useChartPopout();
 
@@ -253,8 +309,13 @@ export default function MarketConditionPage() {
         ? "open930"
         : undefined,
   });
+  // Keep top benchmark strip (QQQ/IWM/MDY/SPY) live even when viewing non-TODAY slices.
+  const { data: liveBenchmarkCondition } = useMarketCondition({
+    timeSlice: "TODAY",
+    sizeFilter: "ALL",
+  });
   const { data: rai, isLoading: raiLoading, isFetching: raiFetching } = useRAI();
-  const { data: themeMembers, refetch: refetchMembers } = useThemeMembers(selectedTheme as ClusterId | null, timeSlice);
+  const { data: themeMembers, refetch: refetchMembers } = useThemeMembers(selectedTheme as ClusterId | null, { timeSlice });
   const forceRefresh = useForceRefresh();
   const { toast } = useToast();
   const splitPanelsHiddenCount =
@@ -284,6 +345,47 @@ export default function MarketConditionPage() {
       if (!res.ok) throw new Error("Failed to fetch ticker assignments");
       return res.json();
     },
+  });
+
+  const { data: unifiedSearch } = useQuery<UnifiedSearchResponse>({
+    queryKey: ["/api/market-condition/search", searchQuery.trim()],
+    queryFn: async () => {
+      const p = new URLSearchParams({ q: searchQuery.trim() });
+      const res = await fetch(`/api/market-condition/search?${p}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch search results");
+      return res.json();
+    },
+    enabled: searchOpen && searchQuery.trim().length > 0,
+    staleTime: 15_000,
+    retry: 1,
+  });
+
+  const { data: subthemeMembersData } = useQuery<{ subthemeId: string; members: Array<{ symbol: string }> }>({
+    queryKey: ["/api/market-condition/subthemes", selectedSubthemeId, "members"],
+    queryFn: async () => {
+      const res = await fetch(`/api/market-condition/subthemes/${selectedSubthemeId}/members`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch subtheme members");
+      return res.json();
+    },
+    enabled: !!selectedSubthemeId,
+    staleTime: 30_000,
+    retry: 1,
+  });
+
+  const { data: selectedThemeSubthemes } = useQuery<ThemeSubthemeSummary[]>({
+    queryKey: ["/api/market-condition/themes", selectedTheme, "subthemes"],
+    queryFn: async () => {
+      const res = await fetch(`/api/market-condition/themes/${selectedTheme}/subthemes`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch theme subthemes");
+      return res.json();
+    },
+    enabled: !!selectedTheme,
+    staleTime: 30_000,
+    retry: 1,
   });
   
   // User info for admin check
@@ -317,30 +419,42 @@ export default function MarketConditionPage() {
 
   // Build market summary from live data or use mock
   const marketSummary: MarketConditionSummary = useMemo(() => {
-    if (shouldUseLive && marketCondition && rai) {
-      const sortedThemes = [...themes].sort((a, b) => b.score - a.score);
+    const benchmarkSource = liveBenchmarkCondition ?? marketCondition;
+    if (benchmarkSource) {
+      const sourceThemes = shouldUseLive && marketCondition?.themes ? themes : MOCK_THEMES;
+      const sortedThemes = [...sourceThemes].sort((a, b) => b.score - a.score);
+      const regime = rai
+        ? rai.label === "AGGRESSIVE"
+          ? "RISK_ON"
+          : rai.label === "DEFENSIVE"
+            ? "RISK_OFF"
+            : "NEUTRAL"
+        : MOCK_MARKET_SUMMARY.regime;
+      const raiSummary = rai
+        ? {
+            score: rai.score,
+            components: rai.components,
+            label: rai.label,
+            riskMultiplier: rai.riskMultiplier,
+          }
+        : MOCK_MARKET_SUMMARY.rai;
       return {
-        regime: rai.label === "AGGRESSIVE" ? "RISK_ON" : rai.label === "DEFENSIVE" ? "RISK_OFF" : "NEUTRAL",
-        spyPct: marketCondition.spyBenchmark?.changePct || 0,
-        benchmarks: marketCondition.benchmarks,
-        overallBreadth: themes.length > 0 
-          ? themes.reduce((sum, t) => sum + t.breadthPct, 0) / themes.length 
+        regime,
+        spyPct: benchmarkSource.spyBenchmark?.changePct ?? 0,
+        benchmarks: benchmarkSource.benchmarks,
+        overallBreadth: sourceThemes.length > 0
+          ? sourceThemes.reduce((sum, t) => sum + t.breadthPct, 0) / sourceThemes.length
           : 50,
-        leadersCount: themes.filter(t => t.score >= 70).length,
-        weakCount: themes.filter(t => t.score < 40).length,
+        leadersCount: sourceThemes.filter(t => t.score >= 70).length,
+        weakCount: sourceThemes.filter(t => t.score < 40).length,
         topTheme: sortedThemes[0]?.id || "SEMIS",
         bottomTheme: sortedThemes[sortedThemes.length - 1]?.id || "STRATEGIC_METALS",
-        rai: {
-          score: rai.score,
-          components: rai.components,
-          label: rai.label,
-          riskMultiplier: rai.riskMultiplier,
-        },
+        rai: raiSummary,
         megaOverlay: MOCK_MARKET_SUMMARY.megaOverlay, // Use mock for now
       };
     }
     return MOCK_MARKET_SUMMARY;
-  }, [shouldUseLive, marketCondition, rai, themes]);
+  }, [shouldUseLive, marketCondition, liveBenchmarkCondition, rai, themes]);
 
   // Get selected theme members
   const selectedThemeTickers: TickerRow[] = useMemo(() => {
@@ -364,6 +478,7 @@ export default function MarketConditionPage() {
         rsRank: m.rsRank,
         pctVsEma10d: m.pctVsEma10d,
         pctVsEma20d: m.pctVsEma20d,
+        pctVsSma20d: m.pctVsSma20d,
         pctVsSma50d: m.pctVsSma50d,
         pctVsSma200d: m.pctVsSma200d,
         prevDayVolExp: m.prevDayVolExp,
@@ -381,6 +496,9 @@ export default function MarketConditionPage() {
   // Handle theme selection
   const handleThemeSelect = useCallback((themeId: ThemeId) => {
     setSelectedTheme(themeId);
+    setSelectedSubthemeId(null);
+    setSelectedSubthemeName(null);
+    setMemberScope("theme");
   }, []);
 
   // Handle ticker click - navigate or sync to popout window
@@ -486,7 +604,7 @@ export default function MarketConditionPage() {
 
   // Build search results from query
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return { themes: [], tickers: [] };
+    if (!searchQuery.trim()) return { themes: [], subthemes: [], tickers: [] };
     
     const q = searchQuery.toUpperCase();
     
@@ -495,8 +613,8 @@ export default function MarketConditionPage() {
       .filter(t => t.name.toUpperCase().includes(q))
       .slice(0, 5);
     
-    // Find matching tickers (by symbol, max 10)
-    const tickerMatches = tickerAssignments
+    // Find matching tickers (by symbol, max 10) as fallback.
+    const fallbackTickerMatches = tickerAssignments
       ? Object.keys(tickerAssignments)
           .filter(ticker => ticker.includes(q))
           .slice(0, 10)
@@ -507,25 +625,97 @@ export default function MarketConditionPage() {
           }))
           .filter(t => t.themeId) // Filter out any without a theme
       : [];
-    
-    return { themes: themeMatches, tickers: tickerMatches };
-  }, [searchQuery, themes, tickerAssignments]);
 
-  // Handle search selection
-  const handleSelectTicker = useCallback((symbol: string, themeId: ClusterId) => {
-    setSelectedTheme(themeId as ThemeId);
-    setHighlightedTicker(symbol);
-    setSearchOpen(false);
-    setSearchQuery("");
-    if (analysisSyncEnabled) setAnalysisSheetSymbol(symbol);
-  }, [analysisSyncEnabled]);
+    const apiThemes = unifiedSearch?.themes ?? [];
+    const apiSubthemes = unifiedSearch?.subthemes ?? [];
+    const apiTickers = (unifiedSearch?.tickers ?? [])
+      .filter((t): t is SearchTickerResult & { themeId: ClusterId } => !!t.themeId);
+
+    return {
+      themes: apiThemes.length > 0 ? apiThemes : themeMatches,
+      subthemes: apiSubthemes,
+      tickers: apiTickers.length > 0 ? apiTickers : fallbackTickerMatches,
+    };
+  }, [searchQuery, themes, tickerAssignments, unifiedSearch]);
+
+  // Handle search selection — align with clicking a theme: show center + members, load theme data
+  const handleSelectTicker = useCallback(
+    (symbol: string, themeId: ClusterId) => {
+      setSelectedTheme(themeId as ThemeId);
+      setSelectedSubthemeId(null);
+      setSelectedSubthemeName(null);
+      setMemberScope("theme");
+      setHighlightedTicker(symbol);
+      setShowFocusedPanel(true);
+      setShowMembersPanel(true);
+      setFocusedCenterTab("actionableDetails");
+      setSearchOpen(false);
+      setSearchQuery("");
+      if (analysisSyncEnabled) setAnalysisSheetSymbol(symbol);
+    },
+    [analysisSyncEnabled]
+  );
 
   const handleSelectTheme = useCallback((themeId: ThemeId) => {
     setSelectedTheme(themeId);
+    setSelectedSubthemeId(null);
+    setSelectedSubthemeName(null);
+    setMemberScope("theme");
     setHighlightedTicker(null);
+    setShowFocusedPanel(true);
+    setShowMembersPanel(true);
+    setFocusedCenterTab("actionableDetails");
     setSearchOpen(false);
     setSearchQuery("");
   }, []);
+
+  const handleSelectSubtheme = useCallback((subthemeId: string, subthemeName: string, themeId: ClusterId) => {
+    setSelectedTheme(themeId as ThemeId);
+    setSelectedSubthemeId(subthemeId);
+    setSelectedSubthemeName(subthemeName);
+    setMemberScope("subtheme");
+    setHighlightedTicker(null);
+    setShowFocusedPanel(true);
+    setShowMembersPanel(true);
+    setFocusedCenterTab("subthemes");
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
+
+  const selectedSubthemeSymbols = useMemo(() => {
+    const out = new Set<string>();
+    for (const member of subthemeMembersData?.members ?? []) {
+      out.add(member.symbol.toUpperCase());
+    }
+    return out;
+  }, [subthemeMembersData]);
+
+  const selectedSubthemeSummary = useMemo(() => {
+    if (!selectedSubthemeId) return null;
+    return (selectedThemeSubthemes ?? []).find((s) => s.id === selectedSubthemeId) ?? null;
+  }, [selectedThemeSubthemes, selectedSubthemeId]);
+
+  const visibleThemeTickers = useMemo(() => {
+    const leaderFiltered = selectedThemeTickers.filter(
+      (ticker) => ticker.isCore || (ticker.leaderScore ?? 0) >= 70
+    );
+    if (memberScope === "leaders") return leaderFiltered;
+    if (memberScope === "theme") return selectedThemeTickers;
+    if (!selectedSubthemeId) return leaderFiltered;
+    return selectedThemeTickers.filter((ticker) => selectedSubthemeSymbols.has(ticker.symbol.toUpperCase()));
+  }, [memberScope, selectedSubthemeId, selectedThemeTickers, selectedSubthemeSymbols]);
+
+  useEffect(() => {
+    if (!selectedSubthemeId || !selectedThemeSubthemes) return;
+    const match = selectedThemeSubthemes.find((subtheme) => subtheme.id === selectedSubthemeId);
+    if (match) setSelectedSubthemeName(match.name);
+  }, [selectedSubthemeId, selectedThemeSubthemes]);
+
+  useEffect(() => {
+    if (memberScope === "subtheme" && !selectedSubthemeId) {
+      setMemberScope("theme");
+    }
+  }, [memberScope, selectedSubthemeId]);
 
   // Handle ESC key to exit fullscreen
   useEffect(() => {
@@ -780,12 +970,9 @@ export default function MarketConditionPage() {
           <Panel defaultSize={showMembersPanel ? 35 : 45} minSize={20}>
             <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
               <PanelHeader
-                title={lensMode === "flowMap" ? "Focused Theme" : "Theme Details"}
-                tooltip={
-                  lensMode === "flowMap"
-                    ? "Focused flow box: top inflow/outflow routes and selected route driver breakdown."
-                    : "Deep metrics for selected theme: Score breakdown, Rotation Delta, Leader Concentration, Signals. This is your decision context."
-                }
+                title="Focused Theme"
+                tooltip="Tabs: Actionable Details, Flow Focus (Theme Flow Map lens), ETF proxies, and full legacy metrics. Pick a theme from the left panel."
+                titleAfterInfo={selectedThemeData?.name ?? "None selected"}
                 action={
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -804,92 +991,148 @@ export default function MarketConditionPage() {
                 }
               />
               <div className="flex-1 overflow-auto">
-                {lensMode === "flowMap" ? (
-                  <div className="flex h-full min-h-0 flex-col">
-                    <div className="border-b border-slate-700/40 px-2 py-1.5">
-                      <div className="inline-flex flex-wrap items-center gap-0.5 rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
-                        <button
-                          className={cn(
-                            "rounded px-2.5 py-1 text-[11px] font-medium",
-                            flowMapCenterTab === "actionableDetails"
-                              ? "bg-cyan-500/20 text-cyan-200"
-                              : "text-slate-300 hover:text-slate-100"
-                          )}
-                          onClick={() => setFlowMapCenterTab("actionableDetails")}
-                        >
-                          Actionable Details
-                        </button>
-                        <button
-                          className={cn(
-                            "rounded px-2.5 py-1 text-[11px] font-medium",
-                            flowMapCenterTab === "flowFocus"
-                              ? "bg-cyan-500/20 text-cyan-200"
-                              : "text-slate-300 hover:text-slate-100"
-                          )}
-                          onClick={() => setFlowMapCenterTab("flowFocus")}
-                        >
-                          Flow Focus
-                        </button>
-                        <button
-                          className={cn(
-                            "rounded px-2.5 py-1 text-[11px] font-medium",
-                            flowMapCenterTab === "etfs"
-                              ? "bg-cyan-500/20 text-cyan-200"
-                              : "text-slate-300 hover:text-slate-100"
-                          )}
-                          onClick={() => setFlowMapCenterTab("etfs")}
-                        >
-                          ETFs
-                        </button>
-                        <button
-                          className={cn(
-                            "rounded px-2.5 py-1 text-[11px] font-medium",
-                            flowMapCenterTab === "legacyDetails"
-                              ? "bg-cyan-500/20 text-cyan-200"
-                              : "text-slate-300 hover:text-slate-100"
-                          )}
-                          onClick={() => setFlowMapCenterTab("legacyDetails")}
-                        >
-                          Legacy Details
-                        </button>
-                      </div>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-auto">
-                      {flowMapCenterTab === "flowFocus" ? (
-                        <FlowMapFocusBox data={flowMapFocusData} />
-                      ) : flowMapCenterTab === "actionableDetails" ? (
-                        <ThemeDetailPanelActionable
-                          theme={selectedThemeData}
-                          members={selectedThemeTickers}
-                          totalThemes={themes.length}
-                          accDistStats={themeMembers?.accDistStats}
-                          timeSlice={timeSlice}
-                        />
-                      ) : flowMapCenterTab === "etfs" ? (
-                        <ThemeDetailPanelEtfs
-                          theme={selectedThemeData}
-                          onEtfSymbolClick={handleTickerSelect}
-                        />
-                      ) : (
-                        <ThemeDetailPanel
-                          theme={selectedThemeData}
-                          members={selectedThemeTickers}
-                          totalThemes={themes.length}
-                          accDistStats={themeMembers?.accDistStats}
-                          timeSlice={timeSlice}
-                        />
-                      )}
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className="border-b border-slate-700/40 px-2 py-1.5">
+                    <div className="inline-flex flex-wrap items-center gap-0.5 rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2.5 py-1 text-[11px] font-medium",
+                          focusedCenterTab === "actionableDetails"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setFocusedCenterTab("actionableDetails")}
+                      >
+                        Actionable Details
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2.5 py-1 text-[11px] font-medium",
+                          focusedCenterTab === "subthemes"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setFocusedCenterTab("subthemes")}
+                      >
+                        Sub-themes
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2.5 py-1 text-[11px] font-medium",
+                          focusedCenterTab === "etfs"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setFocusedCenterTab("etfs")}
+                      >
+                        ETFs
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2.5 py-1 text-[11px] font-medium",
+                          focusedCenterTab === "flowFocus"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setFocusedCenterTab("flowFocus")}
+                      >
+                        Flow Focus
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2.5 py-1 text-[11px] font-medium",
+                          focusedCenterTab === "legacyDetails"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setFocusedCenterTab("legacyDetails")}
+                      >
+                        Legacy Details
+                      </button>
                     </div>
                   </div>
-                ) : (
-                  <ThemeDetailPanel 
-                    theme={selectedThemeData} 
-                    members={selectedThemeTickers}
-                    totalThemes={themes.length}
-                    accDistStats={themeMembers?.accDistStats}
-                    timeSlice={timeSlice}
-                  />
-                )}
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    {focusedCenterTab === "actionableDetails" ? (
+                      <ThemeDetailPanelActionable
+                        theme={selectedThemeData}
+                        members={selectedThemeTickers}
+                        totalThemes={themes.length}
+                        accDistStats={themeMembers?.accDistStats}
+                        timeSlice={timeSlice}
+                      />
+                    ) : focusedCenterTab === "subthemes" ? (
+                      <div className="p-3 space-y-3">
+                        {!selectedTheme ? (
+                          <div className="text-sm text-muted-foreground">Select a theme to view sub-themes.</div>
+                        ) : (selectedThemeSubthemes?.length ?? 0) === 0 ? (
+                          <div className="rounded border border-slate-700/50 bg-slate-800/30 p-3 text-sm text-muted-foreground">
+                            No sub-themes configured for this theme yet.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {selectedThemeSubthemes?.map((subtheme) => {
+                              const isSelected = selectedSubthemeId === subtheme.id;
+                              return (
+                                <button
+                                  key={subtheme.id}
+                                  type="button"
+                                  className={cn(
+                                    "w-full rounded border px-3 py-2 text-left transition-colors",
+                                    isSelected
+                                      ? "border-cyan-500/50 bg-cyan-500/10"
+                                      : "border-slate-700/50 bg-slate-800/30 hover:bg-slate-700/40"
+                                  )}
+                                  onClick={() => {
+                                    setSelectedSubthemeId(subtheme.id);
+                                    setSelectedSubthemeName(subtheme.name);
+                                    setMemberScope("subtheme");
+                                  }}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm font-medium">{subtheme.name}</span>
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {subtheme.memberCount} members
+                                    </span>
+                                  </div>
+                                  {subtheme.description && (
+                                    <p className="mt-1 text-xs text-muted-foreground">{subtheme.description}</p>
+                                  )}
+                                  <div className="mt-1 text-[11px] text-slate-400">
+                                    Leader-eligible: {subtheme.leaderEligibleCount}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : focusedCenterTab === "etfs" ? (
+                      <ThemeDetailPanelEtfs
+                        theme={selectedThemeData}
+                        selectedSubthemeId={selectedSubthemeId}
+                        onEtfSymbolClick={handleTickerSelect}
+                      />
+                    ) : focusedCenterTab === "flowFocus" ? (
+                      <FlowMapFocusBox
+                        data={flowMapFocusData}
+                        emptyState={lensMode === "flowMap" ? "flowMap" : "otherLens"}
+                      />
+                    ) : (
+                      <ThemeDetailPanel
+                        theme={selectedThemeData}
+                        members={selectedThemeTickers}
+                        totalThemes={themes.length}
+                        accDistStats={themeMembers?.accDistStats}
+                        timeSlice={timeSlice}
+                      />
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </Panel>
@@ -904,33 +1147,86 @@ export default function MarketConditionPage() {
               <PanelHeader
                 title="Theme Members"
                 tooltip="Individual stocks in the selected theme. Sorted by LeaderScore. Click ticker to open chart. Green dot = strong leader."
+                subtitle={
+                  memberScope === "subtheme" && selectedSubthemeName
+                    ? `Scope: ${selectedSubthemeName}`
+                    : memberScope === "theme"
+                      ? "Scope: All in theme"
+                      : "Scope: Leaders"
+                }
                 action={
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
-                        onClick={() => setShowMembersPanel(false)}
+                  <div className="flex items-center gap-1.5">
+                    <div className="inline-flex items-center gap-0.5 rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2 py-1 text-[11px] font-medium",
+                          memberScope === "leaders"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setMemberScope("leaders")}
                       >
-                        <EyeOff className="mr-1 h-3.5 w-3.5" />
-                        Hide
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Hide Theme Members panel</TooltipContent>
-                  </Tooltip>
+                        Leaders
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded px-2 py-1 text-[11px] font-medium",
+                          memberScope === "theme"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100"
+                        )}
+                        onClick={() => setMemberScope("theme")}
+                      >
+                        All Theme
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!selectedSubthemeId}
+                        className={cn(
+                          "rounded px-2 py-1 text-[11px] font-medium",
+                          memberScope === "subtheme"
+                            ? "bg-cyan-500/20 text-cyan-200"
+                            : "text-slate-300 hover:text-slate-100",
+                          !selectedSubthemeId && "opacity-40 cursor-not-allowed"
+                        )}
+                        onClick={() => selectedSubthemeId && setMemberScope("subtheme")}
+                      >
+                        Sub-theme
+                      </button>
+                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
+                          onClick={() => setShowMembersPanel(false)}
+                        >
+                          <EyeOff className="mr-1 h-3.5 w-3.5" />
+                          Hide
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Hide Theme Members panel</TooltipContent>
+                    </Tooltip>
+                  </div>
                 }
               />
               <div className="flex-1 overflow-auto">
                 <TickerWorkbench
                   themeId={selectedTheme}
                   themeName={selectedThemeData?.name || null}
-                  tickers={selectedThemeTickers}
+                  selectedSubthemeId={selectedSubthemeId}
+                  selectedSubthemeName={selectedSubthemeName}
+                  tickers={visibleThemeTickers}
                   onTickerSelect={handleTickerSelect}
                   onTickersAdded={handleTickersAdded}
                   isAdmin={userInfo?.isAdmin ?? false}
                   highlightedTicker={highlightedTicker}
                   timeSlice={timeSlice}
+                  maAsOf={themeMembers?.maAsOf ?? marketCondition?.maAsOf}
+                  maMode={themeMembers?.maMode ?? marketCondition?.maMode}
                   msSyncEnabled={msSyncEnabled}
                   onMsSyncToggle={() => setMsSyncEnabled(!msSyncEnabled)}
                   chartSyncEnabled={chartSyncEnabled}
@@ -948,7 +1244,10 @@ export default function MarketConditionPage() {
   );
 
   return (
-    <div className={cn("h-screen flex flex-col bg-slate-950", isFullscreen && "fixed inset-0 z-50")}>
+    <div
+      className={cn("h-screen flex flex-col bg-slate-950", isFullscreen && "fixed inset-0 z-50")}
+      data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "pageShell")}
+    >
       {/* Main App Navigation */}
       <SentinelHeader showSentiment={false} />
       
@@ -957,7 +1256,8 @@ export default function MarketConditionPage() {
         summary={marketSummary} 
         themes={themes} 
         lastUpdated={lastUpdated} 
-        marketSession={pollingStatus?.marketSession} 
+        marketSession={pollingStatus?.marketSession}
+        universeParticipation={pollingStatus?.universeParticipation}
       />
 
       {/* Error Banner - shown when API fails */}
@@ -1329,16 +1629,55 @@ export default function MarketConditionPage() {
                 </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent>
-                <p className="font-semibold">Search Ticker or Theme</p>
-                <p className="text-xs">Find any ticker or theme in the universe</p>
+                <p className="font-semibold">Search Ticker, Theme, or Sub-theme</p>
+                <p className="text-xs">Find any ticker, theme, or sub-theme in the universe</p>
               </TooltipContent>
             </Tooltip>
             <PopoverContent className="w-[300px] p-0" align="start">
               <Command shouldFilter={false}>
-                <CommandInput 
-                  placeholder="Search ticker or theme..." 
+                <CommandInput
+                  placeholder="Search ticker, theme, or sub-theme..."
                   value={searchQuery}
                   onValueChange={setSearchQuery}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    const q = searchQuery.trim().toUpperCase();
+                    if (!q) return;
+                    if (
+                      searchResults.themes.length === 1 &&
+                      searchResults.subthemes.length === 0 &&
+                      searchResults.tickers.length === 0
+                    ) {
+                      e.preventDefault();
+                      handleSelectTheme(searchResults.themes[0]!.id as ThemeId);
+                      return;
+                    }
+                    if (
+                      searchResults.subthemes.length === 1 &&
+                      searchResults.themes.length === 0 &&
+                      searchResults.tickers.length === 0
+                    ) {
+                      e.preventDefault();
+                      const s = searchResults.subthemes[0]!;
+                      handleSelectSubtheme(s.id, s.name, s.themeId);
+                      return;
+                    }
+                    if (
+                      searchResults.tickers.length === 1 &&
+                      searchResults.themes.length === 0 &&
+                      searchResults.subthemes.length === 0
+                    ) {
+                      e.preventDefault();
+                      const t = searchResults.tickers[0]!;
+                      handleSelectTicker(t.symbol, t.themeId);
+                      return;
+                    }
+                    const exact = searchResults.tickers.find((t) => t.symbol === q);
+                    if (exact) {
+                      e.preventDefault();
+                      handleSelectTicker(exact.symbol, exact.themeId);
+                    }
+                  }}
                 />
                 <CommandList>
                   <CommandEmpty>No results found.</CommandEmpty>
@@ -1348,12 +1687,36 @@ export default function MarketConditionPage() {
                       {searchResults.themes.map((theme) => (
                         <CommandItem
                           key={theme.id}
-                          onSelect={() => handleSelectTheme(theme.id)}
+                          value={`theme:${theme.id}`}
+                          onSelect={() => handleSelectTheme(theme.id as ThemeId)}
                           className="cursor-pointer"
                         >
                           <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full bg-cyan-400" />
                             <span>{theme.name}</span>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+
+                  {searchResults.subthemes.length > 0 && (
+                    <CommandGroup heading="Sub-themes">
+                      {searchResults.subthemes.map((subtheme) => (
+                        <CommandItem
+                          key={subtheme.id}
+                          value={`subtheme:${subtheme.id}`}
+                          onSelect={() => handleSelectSubtheme(subtheme.id, subtheme.name, subtheme.themeId)}
+                          className="cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-2 h-2 rounded-full bg-violet-400" />
+                              <span className="truncate">{subtheme.name}</span>
+                            </div>
+                            <span className="text-xs text-muted-foreground truncate">
+                              {subtheme.themeName || subtheme.themeId}
+                            </span>
                           </div>
                         </CommandItem>
                       ))}
@@ -1365,6 +1728,7 @@ export default function MarketConditionPage() {
                       {searchResults.tickers.map((ticker) => (
                         <CommandItem
                           key={ticker.symbol}
+                          value={`ticker:${ticker.symbol}`}
                           onSelect={() => handleSelectTicker(ticker.symbol, ticker.themeId)}
                           className="cursor-pointer"
                         >

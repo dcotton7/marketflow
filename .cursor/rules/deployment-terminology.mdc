@@ -1,0 +1,35 @@
+---
+description: LOCAL vs LIVE vocabulary — Don’s PC vs deployed app
+alwaysApply: true
+---
+
+# Deployment terminology (Don / Stock-Pattern-Stream)
+
+Use this vocabulary in planning, git, and deploy discussions so **LOCAL** and **LIVE** are never conflated.
+
+## LOCAL environment (synonyms — all mean the same thing)
+
+- **LOCAL**
+- **DEV** (meaning: development on the machine, *not* a cloud “dev server” unless one exists and is named explicitly)
+- **My Machine**
+- **My PC**
+
+**Definition:** The working copy and runtime **on Don’s computer**: editor, checked-out branch, uncommitted changes, `npm run dev`, local DB if applicable. Nothing here is “live” for end users until it is built, pushed, and deployed.
+
+When Don says “fix it on DEV” or “on My Machine”, interpret as **local workspace only**, not the Render URL.
+
+## LIVE environment (synonyms — all mean the same thing)
+
+- **Live**
+- **Production**
+- **Live App**
+- **Main** (meaning: the **primary shipped product** / hosted app users hit — *not* “any git branch named main” in isolation)
+
+**Definition:** The **deployed** application (e.g. Render web service after a successful deploy). Usually tracks the default integration branch on GitHub (often git `main`), but **“Main” in conversation = hosted Live App**, not “whatever branch is checked out locally.”
+
+When Don says “push live” or “get this to Production”, interpret as **promote LOCAL changes through git to the branch the host deploys, then deploy** — not “assume `origin/main` already matches my laptop without verifying.”
+
+## Disambiguation
+
+- **Git branch `main`:** A branch name. Often what Live deploys from; still not “Live” until that commit is what the host is running.
+- **Avoid** using the single word **“dev”** without **LOCAL** or **My Machine** if it could be read as “a server” or “non-production cloud.” Prefer **LOCAL** or **DEV (My Machine)**.

@@ -39,6 +39,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useCreateAlert, usePreviewAlert } from "@/hooks/use-alerts";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 interface AlertBuilderDialogProps {
@@ -283,6 +284,22 @@ export function AlertBuilderDialog({
     () =>
       `alert-builder-draft:${targetScope.sourceClient}:${targetScope.mode}:${targetScope.label}:${targetScope.symbol ?? ""}`,
     [targetScope.label, targetScope.mode, targetScope.sourceClient, targetScope.symbol]
+  );
+  const alertRowTypes = useMemo(
+    () =>
+      isTradePlanEnabled()
+        ? ALERT_ROW_TYPES
+        : ALERT_ROW_TYPES.filter((type) => type !== "trade_plan_reference"),
+    []
+  );
+  const alertReferenceKinds = useMemo(
+    () =>
+      isTradePlanEnabled()
+        ? ALERT_REFERENCE_KINDS
+        : ALERT_REFERENCE_KINDS.filter(
+            (kind) => kind !== "trade_entry" && kind !== "trade_stop" && kind !== "trade_target"
+          ),
+    []
   );
 
   const clearDraftStorage = () => {
@@ -670,7 +687,7 @@ export function AlertBuilderDialog({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {ALERT_ROW_TYPES.map((type) => (
+                        {alertRowTypes.map((type) => (
                           <SelectItem key={type} value={type}>
                             {getRowTypeLabel(type)}
                           </SelectItem>
@@ -730,7 +747,7 @@ export function AlertBuilderDialog({
                       >
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {ALERT_REFERENCE_KINDS.map((kind) => (
+                          {alertReferenceKinds.map((kind) => (
                             <SelectItem key={kind} value={kind}>
                               {kind.replaceAll("_", " ")}
                             </SelectItem>
@@ -864,7 +881,7 @@ export function AlertBuilderDialog({
                       <Select value={row.reference.kind} onValueChange={(value: AlertReferenceOperand["kind"]) => updateReference(row.id, () => row.reference, defaultReference(value))}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {ALERT_REFERENCE_KINDS.map((kind) => (
+                          {alertReferenceKinds.map((kind) => (
                             <SelectItem key={kind} value={kind}>
                               {kind.replaceAll("_", " ")}
                             </SelectItem>

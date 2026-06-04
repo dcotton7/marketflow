@@ -11,12 +11,12 @@ import {
   useAddToWatchlist,
   useRemoveFromWatchlist,
   useUpdateWatchlist,
-  useSelectedWatchlistId,
-  WATCHLIST_MANAGER_STORAGE_KEY,
+  useEffectiveWatchlistId,
   useNamedWatchlistItems,
   type Watchlist,
   type SentinelWatchlistItem,
 } from "@/hooks/use-watchlist";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
@@ -40,6 +40,7 @@ import {
   watchlistModalColumnWidthsStorageKey,
   watchlistModalSizeStorageKey,
 } from "@/components/start-here/dashboard-persistence";
+import { WatchlistPullingState } from "@/components/WatchlistPullingState";
 import {
   Star,
   Pencil,
@@ -332,8 +333,10 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     [uid]
   );
 
-  // Watchlist state - persisted to localStorage
-  const [selectedWatchlistId, setSelectedWatchlistId] = useSelectedWatchlistId(WATCHLIST_MANAGER_STORAGE_KEY);
+  const {
+    selectedId: effectiveWatchlistId,
+    setSelectedId: setSelectedWatchlistId,
+  } = useEffectiveWatchlistId();
   const [editingWatchlistId, setEditingWatchlistId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   const [newWatchlistName, setNewWatchlistName] = useState("");
@@ -343,6 +346,8 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   // Ticker add state
   const [tickerInput, setTickerInput] = useState("");
   const [isAddingTickers, setIsAddingTickers] = useState(false);
+  const [addProgress, setAddProgress] = useState<{ done: number; total: number } | null>(null);
+  const [awaitingQuoteRefresh, setAwaitingQuoteRefresh] = useState(false);
   
   // Sort state
   const [sortField, setSortField] = useState<SortField>("symbol");
@@ -357,13 +362,6 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const addToWatchlist = useAddToWatchlist();
   const removeFromWatchlist = useRemoveFromWatchlist();
   const updateWatchlist = useUpdateWatchlist();
-
-  // Auto-select default watchlist on first load
-  const effectiveWatchlistId = useMemo(() => {
-    if (selectedWatchlistId !== null) return selectedWatchlistId;
-    const defaultWl = watchlists?.find(wl => wl.isDefault);
-    return defaultWl?.id ?? watchlists?.[0]?.id ?? null;
-  }, [selectedWatchlistId, watchlists]);
 
   // Fetch items for selected watchlist
   const { data: watchlistItems, isLoading: itemsLoading } = useNamedWatchlistItems(effectiveWatchlistId);
@@ -520,7 +518,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const handleDelete = async (id: number) => {
     try {
       await deleteWatchlist.mutateAsync(id);
-      if (selectedWatchlistId === id) {
+      if (effectiveWatchlistId === id) {
         setSelectedWatchlistId(null);
       }
     } catch {}
@@ -553,11 +551,13 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
 
     if (tickers.length === 0) {
       toast({ title: "Invalid tickers", description: "Enter valid ticker symbols (1-5 letters)", variant: "destructive" });
+      setAddProgress(null);
       setIsAddingTickers(false);
       return;
     }
 
     let added = 0;
+    setAddProgress({ done: 0, total: tickers.length });
     for (const ticker of tickers) {
       try {
         await addToWatchlist.mutateAsync({ symbol: ticker, watchlistId: effectiveWatchlistId });
@@ -565,14 +565,17 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
       } catch {
         // Skip invalid/duplicate tickers
       }
+      setAddProgress({ done: added, total: tickers.length });
     }
 
     if (added > 0) {
+      setAwaitingQuoteRefresh(true);
       toast({ title: `Added ${added} ticker${added > 1 ? "s" : ""}` });
     } else if (tickers.length > 0) {
       toast({ title: "Could not add", description: "Tickers may already be in the list or a server error occurred.", variant: "destructive" });
     }
     setTickerInput("");
+    setAddProgress(null);
     setIsAddingTickers(false);
   };
 
@@ -599,6 +602,22 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     if (sortField !== field) return <ArrowUpDown className="w-3 h-3 opacity-50" />;
     return sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />;
   };
+
+  useEffect(() => {
+    if (awaitingQuoteRefresh && !itemsLoading && !quotesLoading) {
+      setAwaitingQuoteRefresh(false);
+    }
+  }, [awaitingQuoteRefresh, itemsLoading, quotesLoading]);
+
+  const isPullingTickers =
+    isAddingTickers ||
+    awaitingQuoteRefresh ||
+    itemsLoading ||
+    (quotesLoading && symbols.length > 0);
+  const addProgressPct =
+    addProgress && addProgress.total > 0
+      ? (addProgress.done / addProgress.total) * 100
+      : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -836,11 +855,11 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
             </div>
 
             {/* Ticker Table */}
-            <div className="flex-1 overflow-y-auto">
-              {itemsLoading || quotesLoading ? (
-                <div className="flex items-center justify-center py-16">
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                </div>
+            <div className="relative flex-1 overflow-y-auto">
+              {isPullingTickers ? (
+                <WatchlistPullingState
+                  progressPct={isAddingTickers ? addProgressPct : null}
+                />
               ) : sortedTickers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <List className="w-12 h-12 mb-4 opacity-30" />
@@ -888,7 +907,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           open={alertDialogOpen}
           onOpenChange={setAlertDialogOpen}
           suggestedName={`${selectedWatchlist.name} watchlist alert`}
-          tradePlanPreview={{ mode: "per_symbol" }}
+          tradePlanPreview={isTradePlanEnabled() ? { mode: "per_symbol" } : undefined}
           targetScope={{
             mode: "group",
             targetType: "watchlist",

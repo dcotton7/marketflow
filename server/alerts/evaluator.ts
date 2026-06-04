@@ -14,13 +14,23 @@ import { getDb } from "../db";
 import { getDailyBars } from "../data-layer/daily-bars";
 import { getIntradayBars } from "../data-layer/intraday-bars";
 import { getMAs } from "../data-layer/moving-averages";
+import { getSessionAdjustedMAsForSymbol, maEntryToTickerMas } from "../data-layer/session-adjusted-ma";
 import { getQuote } from "../data-layer/quotes";
 import type { DailyBar, IntradayBar, Quote } from "../data-layer/types";
 import { sendMessage } from "../messages";
+import { buildAlertEmailBody, buildAlertEmailSubject } from "../messages/templates/alert-email";
 import { buildAlertSmsBody } from "../messages/templates/alert-sms";
 import { fetchTwilioMessageStatus } from "../messages/providers/twilio";
 import { getThemeMembersFromCache, getThemeMembersFromDB, isCacheInitialized } from "../market-condition/utils/theme-db-loader";
+import { getMarketSession } from "../market-condition/universe";
 import { fetchAlpacaTradingCalendar } from "../alpaca";
+import {
+  calculateEMA,
+  calculateEMAAtOffset,
+  calculateSMA,
+  calculateSMAAtOffset,
+  intradayIntervalToBarMinutes as timeframeToIntradayIntervalFromShared,
+} from "../shared/ma-math";
 
 type WatchlistReferenceMap = Record<string, { entry?: number | null; stop?: number | null; target?: number | null }>;
 
@@ -93,11 +103,11 @@ function normalizeSymbols(symbols: string[]): string[] {
 }
 
 function timeframeToIntradayInterval(timeframe: string | undefined): string {
-  const value = (timeframe ?? "5m").toLowerCase();
-  if (value === "5m" || value === "5min") return "5m";
-  if (value === "15m" || value === "15min") return "15m";
-  if (value === "30m" || value === "30min") return "30m";
-  if (value === "60m" || value === "60min" || value === "1h") return "60m";
+  const barMinutes = timeframeToIntradayIntervalFromShared(timeframe);
+  if (barMinutes === 5) return "5m";
+  if (barMinutes === 15) return "15m";
+  if (barMinutes === 30) return "30m";
+  if (barMinutes === 60) return "60m";
   return "5m";
 }
 
@@ -237,34 +247,6 @@ async function resolveSequenceExpiration(
     : addMarketHours(anchor, sequenceWindow.value);
 }
 
-function calculateSMA(values: number[], period: number): number | null {
-  if (values.length < period || period <= 0) return null;
-  const slice = values.slice(values.length - period);
-  const sum = slice.reduce((acc, value) => acc + value, 0);
-  return sum / period;
-}
-
-function calculateEMA(values: number[], period: number): number | null {
-  if (values.length < period || period <= 0) return null;
-  const multiplier = 2 / (period + 1);
-  let ema = calculateSMA(values.slice(0, period), period);
-  if (ema == null) return null;
-  for (let i = period; i < values.length; i++) {
-    ema = (values[i] - ema) * multiplier + ema;
-  }
-  return ema;
-}
-
-function calculateEMAAtOffset(values: number[], period: number, offsetFromEnd: number): number | null {
-  if (offsetFromEnd < 0 || values.length - offsetFromEnd <= 0) return null;
-  return calculateEMA(values.slice(0, values.length - offsetFromEnd), period);
-}
-
-function calculateSMAAtOffset(values: number[], period: number, offsetFromEnd: number): number | null {
-  if (offsetFromEnd < 0 || values.length - offsetFromEnd <= 0) return null;
-  return calculateSMA(values.slice(0, values.length - offsetFromEnd), period);
-}
-
 async function getBarsForTimeframe(
   symbol: string,
   timeframe: string,
@@ -291,21 +273,48 @@ function getCloseSeries(bars: Array<DailyBar | IntradayBar>): number[] {
   return bars.map((bar) => bar.close).filter((value) => Number.isFinite(value));
 }
 
+async function loadDailyMasForSymbol(
+  symbol: string,
+  quote: Quote | null,
+  caches: SymbolEvaluationCaches
+): Promise<Awaited<ReturnType<typeof getMAs>> | null> {
+  if (caches.mas !== undefined) return caches.mas ?? null;
+
+  const session = getMarketSession();
+  if (session === "MARKET_HOURS" && quote && quote.open > 0) {
+    const entry = await getSessionAdjustedMAsForSymbol(symbol, {
+      open: quote.open,
+      high: quote.high,
+      low: quote.low,
+      price: quote.price,
+      volume: quote.volume,
+      vwap: quote.vwap,
+    });
+    if (entry) {
+      caches.mas = maEntryToTickerMas(symbol, entry);
+      return caches.mas;
+    }
+  }
+
+  caches.mas = await getMAs(symbol);
+  return caches.mas ?? null;
+}
+
 async function resolveIndicatorValue(
   symbol: string,
   operand: AlertIndicatorOperand,
   caches: SymbolEvaluationCaches,
-  offsetFromEnd: number = 0
+  offsetFromEnd: number = 0,
+  quote: Quote | null = null
 ): Promise<number | null> {
   if (isDailyTimeframe(operand.timeframe) && offsetFromEnd === 0 && (operand.length === 10 || operand.length === 20 || operand.length === 50 || operand.length === 200)) {
-    if (caches.mas === undefined) {
-      caches.mas = await getMAs(symbol);
-    }
-    if (caches.mas) {
-      if (operand.kind === "EMA" && operand.length === 10) return caches.mas.ema10d;
-      if (operand.kind === "EMA" && operand.length === 20) return caches.mas.ema20d;
-      if (operand.kind === "SMA" && operand.length === 50) return caches.mas.sma50d;
-      if (operand.kind === "SMA" && operand.length === 200) return caches.mas.sma200d;
+    const mas = await loadDailyMasForSymbol(symbol, quote, caches);
+    if (mas) {
+      if (operand.kind === "EMA" && operand.length === 10) return mas.ema10d;
+      if (operand.kind === "EMA" && operand.length === 20) return mas.ema20d;
+      if (operand.kind === "SMA" && operand.length === 20) return mas.sma20d;
+      if (operand.kind === "SMA" && operand.length === 50) return mas.sma50d;
+      if (operand.kind === "SMA" && operand.length === 200) return mas.sma200d;
     }
   }
 
@@ -342,7 +351,7 @@ async function resolveReferenceValue(
         kind: reference.indicatorKind,
         length: reference.length,
         timeframe: reference.timeframe,
-      }, caches);
+      }, caches, 0, context.quote);
     default:
       return null;
   }
@@ -398,10 +407,10 @@ async function evaluateCondition(
   }
 
   if (condition.rowType === "indicator_cross") {
-    const leftCurrent = await resolveIndicatorValue(symbol, condition.left, caches, 0);
-    const leftPrevious = await resolveIndicatorValue(symbol, condition.left, caches, 1);
-    const rightCurrent = await resolveIndicatorValue(symbol, condition.right, caches, 0);
-    const rightPrevious = await resolveIndicatorValue(symbol, condition.right, caches, 1);
+    const leftCurrent = await resolveIndicatorValue(symbol, condition.left, caches, 0, context.quote);
+    const leftPrevious = await resolveIndicatorValue(symbol, condition.left, caches, 1, context.quote);
+    const rightCurrent = await resolveIndicatorValue(symbol, condition.right, caches, 0, context.quote);
+    const rightPrevious = await resolveIndicatorValue(symbol, condition.right, caches, 1, context.quote);
     if ([leftCurrent, leftPrevious, rightCurrent, rightPrevious].some((value) => value == null)) {
       return { pass: false, clauses, triggerPrice: null };
     }
@@ -415,8 +424,8 @@ async function evaluateCondition(
   }
 
   if (condition.rowType === "indicator_reference") {
-    const indicatorCurrent = await resolveIndicatorValue(symbol, condition.indicator, caches, 0);
-    const indicatorPrevious = await resolveIndicatorValue(symbol, condition.indicator, caches, 1);
+    const indicatorCurrent = await resolveIndicatorValue(symbol, condition.indicator, caches, 0, context.quote);
+    const indicatorPrevious = await resolveIndicatorValue(symbol, condition.indicator, caches, 1, context.quote);
     const referenceCurrent = await resolveReferenceValue(symbol, condition.reference, context, caches);
     if (indicatorCurrent == null || referenceCurrent == null) return { pass: false, clauses, triggerPrice: null };
 
@@ -859,6 +868,7 @@ export async function evaluateStoredAlertById(userId: number, alertId: number, p
 
         const deliveryConfig = alert.deliveryConfig as AlertDeliveryConfig;
         const smsPhoneNumber = deliveryConfig.phoneNumber?.trim() || process.env.MY_ALERT_SMS_NUMBER?.trim();
+        const emailAddress = deliveryConfig.emailAddress?.trim() || process.env.MY_ALERT_EMAIL?.trim();
         if (channels.includes("sms")) {
           const smsDeliveries = insertedDeliveries.filter((delivery) => delivery.channel === "sms");
           for (let index = 0; index < result.matches.length; index += 1) {
@@ -926,6 +936,57 @@ export async function evaluateStoredAlertById(userId: number, alertId: number, p
                   updatedAt: new Date(),
                 })
                 .where(eq(alertDeliveries.id, delivery.id));
+            }
+          }
+        }
+
+        if (channels.includes("email")) {
+          const emailDelivery = insertedDeliveries.find((delivery) => delivery.channel === "email");
+          if (emailDelivery) {
+            if (!emailAddress) {
+              await db
+                .update(alertDeliveries)
+                .set({
+                  status: "failed",
+                  errorMessage: "Email destination is missing",
+                  attemptedAt: new Date(),
+                  updatedAt: new Date(),
+                })
+                .where(eq(alertDeliveries.id, emailDelivery.id));
+            } else {
+              try {
+                const emailResult = await sendMessage({
+                  channel: "email",
+                  to: emailAddress,
+                  subject: buildAlertEmailSubject(alert.name, result.matches.length),
+                  body: buildAlertEmailBody(alert.name, result.matches),
+                });
+
+                await db
+                  .update(alertDeliveries)
+                  .set({
+                    status: emailResult.success ? "provider_accepted" : "failed",
+                    providerMessageId: emailResult.providerMessageId ?? null,
+                    providerStatus: emailResult.providerStatus ?? (emailResult.success ? "accepted" : "failed"),
+                    providerErrorCode: emailResult.providerErrorCode ?? null,
+                    providerPayload: emailResult.providerPayload ?? null,
+                    errorMessage: emailResult.success ? null : (emailResult.errorMessage ?? "Email send failed"),
+                    attemptedAt: new Date(),
+                    providerStatusAt: new Date(),
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(alertDeliveries.id, emailDelivery.id));
+              } catch (error) {
+                await db
+                  .update(alertDeliveries)
+                  .set({
+                    status: "failed",
+                    errorMessage: error instanceof Error ? error.message : "Email send failed",
+                    attemptedAt: new Date(),
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(alertDeliveries.id, emailDelivery.id));
+              }
             }
           }
         }

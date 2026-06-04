@@ -13,10 +13,14 @@
 
 import { Router, Request, Response } from "express";
 import { z } from "zod";
+import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice } from "./universe";
+import { db } from "../db";
+import { subthemes, themes, tickers as tickerTable, tickerSliceMemberships, tnnSettings } from "@shared/schema";
 import {
   getMarketCondition,
   getMarketConditionWithTimeSlice,
+  getMarketConditionAtComparisonTime,
   getMarketConditionWithOpenBaseline,
   getThemeById,
   getAllThemes,
@@ -24,6 +28,7 @@ import {
   getClusterLeaderCandidates,
   getAllLeaders,
   getPollingStatus,
+  getUniverseParticipation,
   startPolling,
   stopPolling,
   setPollInterval,
@@ -31,16 +36,52 @@ import {
   refreshSnapshot,
   touchActivity,
   getSleepStatus,
+  getMaMetadata,
 } from "./engine/snapshot";
-import { calculateRAI, getCachedRAI } from "./engine/rai";
-import { getMarketRegimeForScanner } from "./exports";
-import { db } from "../db";
-import { tnnSettings, tickers, themes } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { getRaceTimeline, listIntradaySnapshotSlots, getHistoricalSnapshotAt } from "./engine/theme-snapshots";
 import { refreshThemeMembersCache } from "./utils/theme-db-loader";
-import { getRaceTimeline } from "./engine/theme-snapshots";
 
 const router = Router();
+const MIN_SUBTHEME_MARKET_CAP = 500_000_000;
+
+function normalizeForMatch(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+}
+
+function inferSubthemeByIndustry(
+  industry: string | null | undefined,
+  candidates: Array<{ id: string; name: string }>
+): { id: string; name: string } | null {
+  const normalizedIndustry = normalizeForMatch(industry ?? "");
+  if (!normalizedIndustry) return null;
+
+  let best: { id: string; name: string; score: number } | null = null;
+  for (const candidate of candidates) {
+    const normalizedName = normalizeForMatch(candidate.name);
+    if (!normalizedName) continue;
+    const exact = normalizedIndustry === normalizedName;
+    const contains = normalizedIndustry.includes(normalizedName) || normalizedName.includes(normalizedIndustry);
+    const tokenOverlap = normalizedName
+      .split(" ")
+      .filter((token) => token.length >= 3)
+      .some((token) => normalizedIndustry.includes(token));
+
+    const score = exact ? 3 : contains ? 2 : tokenOverlap ? 1 : 0;
+    if (score === 0) continue;
+    if (!best || score > best.score) {
+      best = { id: candidate.id, name: candidate.name, score };
+    }
+  }
+  return best ? { id: best.id, name: best.name } : null;
+}
+
+function missingSubthemeTables(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message ?? "");
+  return (
+    message.includes('relation "subthemes" does not exist') ||
+    message.includes('relation "ticker_slice_memberships" does not exist')
+  );
+}
 
 // =============================================================================
 // Theme Endpoints
@@ -60,6 +101,7 @@ router.get("/themes", async (req: Request, res: Response) => {
     
     // Parse and validate query params
     const timeSlice = (req.query.timeSlice as TimeSlice) || "TODAY";
+    const snapshotAtRaw = typeof req.query.snapshotAt === "string" ? req.query.snapshotAt.trim() : "";
     const sizeFilter = (req.query.sizeFilter as string || "ALL") as any;
     const useIntradayBaseline = req.query.useIntradayBaseline === "true";
     const rotationBaseline = (req.query.rotationBaseline as string) || "";
@@ -73,27 +115,31 @@ router.get("/themes", async (req: Request, res: Response) => {
     const validatedSizeFilter = validSizeFilters.includes(sizeFilter) ? sizeFilter : "ALL";
     const useOpenBaselineForToday = validatedTimeSlice === "TODAY" && rotationBaseline === "open930";
     
-    // Get condition with appropriate deltaRank calculation
-    // ALWAYS force fresh calculation for ANY size filter to prevent cache poisoning
-    let condition;
-    if (useIntradayBaseline || validatedSizeFilter !== "ALL") {
-      // Force fresh snapshot with filters
+    // Refresh theme metrics when filters require it, then apply TODAY vs historical.
+    // Important: non-ALL sizeFilter must NOT skip getMarketConditionWithTimeSlice — otherwise
+    // Flow Map / MC with e.g. MID + 15M never gets comparisonTime or historical deltas.
+    const needsFilteredRefresh = useIntradayBaseline || validatedSizeFilter !== "ALL";
+    const needsAllTodayRefresh = validatedSizeFilter === "ALL" && validatedTimeSlice === "TODAY";
+
+    if (needsFilteredRefresh) {
       await refreshSnapshot(useIntradayBaseline, validatedSizeFilter as any);
+    } else if (needsAllTodayRefresh) {
+      await refreshSnapshot(useIntradayBaseline, "ALL");
+    }
+
+    let condition;
+    if (snapshotAtRaw) {
+      console.log(`[MC-API] Themes requested with snapshotAt=${snapshotAtRaw}`);
+      condition = await getMarketConditionAtComparisonTime(snapshotAtRaw);
+    } else if (validatedTimeSlice === "TODAY") {
       condition = useOpenBaselineForToday
         ? await getMarketConditionWithOpenBaseline()
         : getMarketCondition();
-    } else if (validatedTimeSlice !== "TODAY") {
-      // Use historical comparison for non-default time slices
+    } else {
       console.log(`[MC-API] Themes requested with timeSlice=${validatedTimeSlice} (historical comparison)`);
       condition = await getMarketConditionWithTimeSlice(validatedTimeSlice);
-    } else {
-      // ALWAYS refresh for "ALL" to clear any previous filter cache
-      await refreshSnapshot(useIntradayBaseline, "ALL");
-      condition = useOpenBaselineForToday
-        ? await getMarketConditionWithOpenBaseline()
-        : getMarketCondition();
     }
-    
+
     res.json({
       themes: condition.themes,
       spyBenchmark: condition.spyBenchmark,
@@ -106,6 +152,8 @@ router.get("/themes", async (req: Request, res: Response) => {
       // Comparison timestamp for deltaRank calculations
       comparisonTime: condition.comparisonTime || null,
       comparisonUnavailable: condition.comparisonUnavailable || null,
+      maAsOf: condition.maAsOf ?? null,
+      maMode: condition.maMode ?? null,
     });
   } catch (error) {
     console.error("[MC-API] Failed to get themes:", error);
@@ -170,6 +218,7 @@ router.get("/themes/:id/members", async (req: Request, res: Response) => {
     touchActivity(); // Wake from sleep if needed
     const { id } = req.params;
     const timeSlice = (req.query.timeSlice as TimeSlice) || "TODAY";
+    const snapshotAtRaw = typeof req.query.snapshotAt === "string" ? req.query.snapshotAt.trim() : "";
     
     if (!CLUSTER_IDS.includes(id as ClusterId)) {
       return res.status(400).json({ error: `Invalid theme ID: ${id}` });
@@ -197,12 +246,20 @@ router.get("/themes/:id/members", async (req: Request, res: Response) => {
     // Date-only for daily bar lookup (1D, 1W, 1M)
     let comparisonDateIso: string | null = null;
     try {
-      const { getHistoricalSnapshot, getMarketDateTime } = await import("./engine/theme-snapshots");
-      const { date: marketDate, hour: marketHour } = getMarketDateTime();
-      const histResult = await getHistoricalSnapshot(timeSlice, marketDate, marketHour);
-      if (histResult && histResult.comparisonTime) {
-        comparisonTimeIso = String(histResult.comparisonTime);
-        comparisonDateIso = comparisonTimeIso.split("T")[0];
+      if (snapshotAtRaw) {
+        const histResult = await getHistoricalSnapshotAt(snapshotAtRaw);
+        if (histResult?.comparisonTime) {
+          comparisonTimeIso = String(histResult.comparisonTime);
+          comparisonDateIso = comparisonTimeIso.split("T")[0];
+        }
+      } else {
+        const { getHistoricalSnapshot, getMarketDateTime } = await import("./engine/theme-snapshots");
+        const { date: marketDate, hour: marketHour } = getMarketDateTime();
+        const histResult = await getHistoricalSnapshot(timeSlice, marketDate, marketHour);
+        if (histResult && histResult.comparisonTime) {
+          comparisonTimeIso = String(histResult.comparisonTime);
+          comparisonDateIso = comparisonTimeIso.split("T")[0];
+        }
       }
     } catch (err) {
       console.warn(`[API] /themes/${id}/members - Failed to get historical comparison date:`, err);
@@ -329,6 +386,7 @@ router.get("/themes/:id/members", async (req: Request, res: Response) => {
       accDistStats, // Theme-specific A/D aggregates
       totalCount: enrichedMembers.length,
       leaderCount: enrichedMembers.filter(m => m.isLeader).length,
+      ...getMaMetadata(),
     });
   } catch (error) {
     console.error(`[MC-API] Failed to get members for ${req.params.id}:`, error);
@@ -423,6 +481,23 @@ router.get("/regime", async (req: Request, res: Response) => {
  * effective lookback boundary, terminal session state, and whether the window
  * used trading-day or calendar semantics.
  */
+/**
+ * GET /api/market-condition/intraday-snapshot-slots
+ * Query: date=YYYY-MM-DD (optional, defaults to current ET market date)
+ * Returns 15-minute snapshot times that exist in storage for that session.
+ */
+router.get("/intraday-snapshot-slots", async (req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const dateRaw = typeof req.query.date === "string" ? req.query.date.trim() : undefined;
+    const slots = await listIntradaySnapshotSlots(dateRaw || undefined);
+    res.json({ slots, marketDate: dateRaw || null });
+  } catch (error) {
+    console.error("[MC-API] intraday-snapshot-slots failed:", error);
+    res.status(500).json({ error: "Failed to load snapshot slots" });
+  }
+});
+
 router.get("/race-timeline", async (req: Request, res: Response) => {
   try {
     touchActivity();
@@ -445,6 +520,7 @@ router.get("/status", async (req: Request, res: Response) => {
     const status = getPollingStatus();
     const sleepStatus = getSleepStatus();
     const universeSize = getAllUniverseTickers().length;
+    const universeParticipation = getUniverseParticipation();
     
     res.json({
       ...status,
@@ -452,6 +528,7 @@ router.get("/status", async (req: Request, res: Response) => {
       universeSize,
       clusterCount: CLUSTERS.length,
       overlayCount: OVERLAYS.length,
+      universeParticipation,
     });
   } catch (error) {
     console.error("[MC-API] Failed to get status:", error);
@@ -763,6 +840,309 @@ router.get("/universe/:id", async (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// Sub-theme and unified search endpoints
+// =============================================================================
+
+/**
+ * GET /api/market-condition/subthemes
+ * Returns active sub-themes with parent-theme context and member counts.
+ */
+router.get("/subthemes", async (_req: Request, res: Response) => {
+  try {
+    if (!db) {
+      return res.json([]);
+    }
+
+    const rows = await db
+      .select({
+        id: subthemes.id,
+        name: subthemes.name,
+        description: subthemes.description,
+        themeId: subthemes.themeId,
+        themeName: themes.name,
+        sortOrder: subthemes.sortOrder,
+      })
+      .from(subthemes)
+      .leftJoin(themes, eq(subthemes.themeId, themes.id))
+      .where(eq(subthemes.isActive, true))
+      .orderBy(asc(subthemes.themeId), asc(subthemes.sortOrder), asc(subthemes.name));
+
+    const subthemeIds = rows.map((r) => r.id);
+    const membershipCounts =
+      subthemeIds.length > 0
+        ? await db
+            .select({
+              subthemeId: tickerSliceMemberships.subthemeId,
+              memberCount: sql<number>`count(*)::int`,
+              leaderEligibleCount:
+                sql<number>`sum(case when ${tickerSliceMemberships.isLeaderEligible} then 1 else 0 end)::int`,
+            })
+            .from(tickerSliceMemberships)
+            .where(
+              and(
+                sql`${tickerSliceMemberships.subthemeId} is not null`,
+                inArray(tickerSliceMemberships.subthemeId, subthemeIds)
+              )
+            )
+            .groupBy(tickerSliceMemberships.subthemeId)
+        : [];
+
+    const countsById = new Map(
+      membershipCounts.map((c) => [
+        c.subthemeId ?? "",
+        {
+          memberCount: c.memberCount ?? 0,
+          leaderEligibleCount: c.leaderEligibleCount ?? 0,
+        },
+      ])
+    );
+
+    res.json(
+      rows.map((row) => {
+        const counts = countsById.get(row.id);
+        return {
+          ...row,
+          memberCount: counts?.memberCount ?? 0,
+          leaderEligibleCount: counts?.leaderEligibleCount ?? 0,
+        };
+      })
+    );
+  } catch (error) {
+    if (missingSubthemeTables(error)) {
+      return res.json([]);
+    }
+    console.error("[MC-API] Failed to get subthemes:", error);
+    res.status(500).json({ error: "Failed to fetch subthemes" });
+  }
+});
+
+/**
+ * GET /api/market-condition/themes/:id/subthemes
+ * Returns sub-themes under a given parent theme.
+ */
+router.get("/themes/:id/subthemes", async (req: Request, res: Response) => {
+  try {
+    const themeId = String(req.params.id);
+    if (!db) return res.json([]);
+
+    const rows = await db
+      .select({
+        id: subthemes.id,
+        name: subthemes.name,
+        description: subthemes.description,
+        themeId: subthemes.themeId,
+        sortOrder: subthemes.sortOrder,
+      })
+      .from(subthemes)
+      .where(and(eq(subthemes.themeId, themeId), eq(subthemes.isActive, true)))
+      .orderBy(asc(subthemes.sortOrder), asc(subthemes.name));
+
+    const subthemeIds = rows.map((r) => r.id);
+    const membershipCounts =
+      subthemeIds.length > 0
+        ? await db
+            .select({
+              subthemeId: tickerSliceMemberships.subthemeId,
+              memberCount: sql<number>`count(*)::int`,
+              leaderEligibleCount:
+                sql<number>`sum(case when ${tickerSliceMemberships.isLeaderEligible} then 1 else 0 end)::int`,
+            })
+            .from(tickerSliceMemberships)
+            .where(
+              and(
+                sql`${tickerSliceMemberships.subthemeId} is not null`,
+                inArray(tickerSliceMemberships.subthemeId, subthemeIds)
+              )
+            )
+            .groupBy(tickerSliceMemberships.subthemeId)
+        : [];
+
+    const countsById = new Map(
+      membershipCounts.map((c) => [
+        c.subthemeId ?? "",
+        {
+          memberCount: c.memberCount ?? 0,
+          leaderEligibleCount: c.leaderEligibleCount ?? 0,
+        },
+      ])
+    );
+
+    res.json(
+      rows.map((row) => {
+        const counts = countsById.get(row.id);
+        return {
+          ...row,
+          memberCount: counts?.memberCount ?? 0,
+          leaderEligibleCount: counts?.leaderEligibleCount ?? 0,
+        };
+      })
+    );
+  } catch (error) {
+    if (missingSubthemeTables(error)) {
+      return res.json([]);
+    }
+    console.error(`[MC-API] Failed to get subthemes for theme ${req.params.id}:`, error);
+    res.status(500).json({ error: "Failed to fetch theme subthemes" });
+  }
+});
+
+/**
+ * GET /api/market-condition/subthemes/:id/members
+ * Returns members for a sub-theme from slice memberships.
+ */
+router.get("/subthemes/:id/members", async (req: Request, res: Response) => {
+  try {
+    const subthemeId = String(req.params.id);
+    if (!db) return res.json({ subthemeId, members: [], totalCount: 0 });
+
+    const memberRows = await db
+      .select({
+        symbol: tickerSliceMemberships.symbol,
+        themeId: tickerSliceMemberships.themeId,
+        isAnchor: tickerSliceMemberships.isAnchor,
+        isLeaderEligible: tickerSliceMemberships.isLeaderEligible,
+        isDefaultVisible: tickerSliceMemberships.isDefaultVisible,
+        source: tickerSliceMemberships.source,
+        companyName: tickerTable.companyName,
+        sector: tickerTable.sector,
+        industry: tickerTable.industry,
+        marketCap: tickerTable.marketCap,
+        marketCapSize: tickerTable.marketCapSize,
+      })
+      .from(tickerSliceMemberships)
+      .innerJoin(tickerTable, eq(tickerSliceMemberships.symbol, tickerTable.symbol))
+      .where(eq(tickerSliceMemberships.subthemeId, subthemeId))
+      .orderBy(asc(tickerSliceMemberships.symbol));
+
+    res.json({
+      subthemeId,
+      members: memberRows,
+      totalCount: memberRows.length,
+      leaderEligibleCount: memberRows.filter((m) => m.isLeaderEligible).length,
+    });
+  } catch (error) {
+    if (missingSubthemeTables(error)) {
+      return res.json({ subthemeId: String(req.params.id), members: [], totalCount: 0, leaderEligibleCount: 0 });
+    }
+    console.error(`[MC-API] Failed to get members for subtheme ${req.params.id}:`, error);
+    res.status(500).json({ error: "Failed to fetch subtheme members" });
+  }
+});
+
+/**
+ * GET /api/market-condition/search?q=
+ * Unified search across themes, sub-themes, and tickers.
+ */
+router.get("/search", async (req: Request, res: Response) => {
+  try {
+    const raw = String(req.query.q || "").trim();
+    if (!raw) return res.json({ themes: [], subthemes: [], tickers: [] });
+    const q = raw.toUpperCase();
+
+    // Fallback keeps old behavior if DB is unavailable.
+    if (!db) {
+      const themeMatches = getAllThemes()
+        .filter((t) => t.name.toUpperCase().includes(q))
+        .slice(0, 8)
+        .map((t) => ({ id: t.id, name: t.name, tier: t.tier }));
+      return res.json({ themes: themeMatches, subthemes: [], tickers: [] });
+    }
+
+    const [themeRows, subthemeRows, tickerRows] = await Promise.all([
+      db
+        .select({
+          id: themes.id,
+          name: themes.name,
+          tier: themes.tier,
+        })
+        .from(themes)
+        .where(ilike(themes.name, `%${raw}%`))
+        .orderBy(asc(themes.name))
+        .limit(8),
+      db
+        .select({
+          id: subthemes.id,
+          name: subthemes.name,
+          themeId: subthemes.themeId,
+          themeName: themes.name,
+        })
+        .from(subthemes)
+        .leftJoin(themes, eq(subthemes.themeId, themes.id))
+        .where(and(eq(subthemes.isActive, true), ilike(subthemes.name, `%${raw}%`)))
+        .orderBy(asc(subthemes.name))
+        .limit(10),
+      db
+        .select({
+          symbol: tickerTable.symbol,
+          companyName: tickerTable.companyName,
+          anchorThemeId: tickerTable.themeId,
+        })
+        .from(tickerTable)
+        .where(
+          or(
+            ilike(tickerTable.symbol, `%${q}%`),
+            ilike(tickerTable.companyName, `%${raw}%`)
+          )
+        )
+        .orderBy(asc(tickerTable.symbol))
+        .limit(20),
+    ]);
+
+    const tickerSymbols = tickerRows.map((row) => row.symbol);
+    const sliceRows =
+      tickerSymbols.length > 0
+        ? await db
+            .select({
+              symbol: tickerSliceMemberships.symbol,
+              themeId: tickerSliceMemberships.themeId,
+              subthemeId: tickerSliceMemberships.subthemeId,
+            })
+            .from(tickerSliceMemberships)
+            .where(inArray(tickerSliceMemberships.symbol, tickerSymbols))
+        : [];
+
+    const tickerSlices = new Map<
+      string,
+      { themes: string[]; subthemes: string[] }
+    >();
+    for (const row of sliceRows) {
+      const key = row.symbol.toUpperCase();
+      if (!tickerSlices.has(key)) {
+        tickerSlices.set(key, { themes: [], subthemes: [] });
+      }
+      const entry = tickerSlices.get(key)!;
+      if (row.themeId && !entry.themes.includes(row.themeId)) entry.themes.push(row.themeId);
+      if (row.subthemeId && !entry.subthemes.includes(row.subthemeId)) entry.subthemes.push(row.subthemeId);
+    }
+
+    const tickersOut = tickerRows.map((row) => {
+      const key = row.symbol.toUpperCase();
+      const slices = tickerSlices.get(key);
+      const themesOut = slices?.themes ?? (row.anchorThemeId ? [row.anchorThemeId] : []);
+      return {
+        symbol: row.symbol,
+        companyName: row.companyName,
+        themeId: themesOut[0] ?? null,
+        themes: themesOut.map((themeId) => ({ theme: themeId, isCore: false })),
+        subthemes: slices?.subthemes ?? [],
+      };
+    });
+
+    res.json({
+      themes: themeRows,
+      subthemes: subthemeRows,
+      tickers: tickersOut,
+    });
+  } catch (error) {
+    if (missingSubthemeTables(error)) {
+      return res.json({ themes: [], subthemes: [], tickers: [] });
+    }
+    console.error("[MC-API] Unified search failed:", error);
+    res.status(500).json({ error: "Failed to search market condition entities" });
+  }
+});
+
+// =============================================================================
 // Admin: Ticker Management
 // =============================================================================
 
@@ -792,6 +1172,31 @@ router.get("/ticker-assignments", async (req: Request, res: Response) => {
     for (const [ticker, entries] of Object.entries(assignments)) {
       result[ticker] = entries.map(e => ({ theme: e.themes[0], isCore: e.isCore }));
     }
+
+    // Merge DB-backed slice memberships so search reflects new many-to-many model.
+    if (db) {
+      const sliceRows = await db
+        .select({
+          symbol: tickerSliceMemberships.symbol,
+          themeId: tickerSliceMemberships.themeId,
+          isLeaderEligible: tickerSliceMemberships.isLeaderEligible,
+        })
+        .from(tickerSliceMemberships)
+        .where(sql`${tickerSliceMemberships.themeId} is not null`);
+
+      for (const row of sliceRows) {
+        const symbol = row.symbol.toUpperCase();
+        const themeId = row.themeId;
+        if (!themeId) continue;
+        if (!result[symbol]) result[symbol] = [];
+        if (!result[symbol].some((e) => e.theme === themeId)) {
+          result[symbol].push({
+            theme: themeId,
+            isCore: !!row.isLeaderEligible,
+          });
+        }
+      }
+    }
     
     res.json(result);
   } catch (error) {
@@ -807,23 +1212,53 @@ router.get("/ticker-assignments", async (req: Request, res: Response) => {
  */
 router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const { tickers, force } = req.body as { tickers: string[]; force?: boolean };
+    const themeId = String(req.params.id);
+    const { tickers, force, subthemeId } = req.body as {
+      tickers: string[];
+      force?: boolean;
+      subthemeId?: string | null;
+    };
     
-    if (!CLUSTER_IDS.includes(id as ClusterId)) {
-      return res.status(400).json({ error: `Invalid theme ID: ${id}` });
+    if (!CLUSTER_IDS.includes(themeId as ClusterId)) {
+      return res.status(400).json({ error: `Invalid theme ID: ${themeId}` });
     }
     
     if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
       return res.status(400).json({ error: "No tickers provided" });
     }
+
+    let targetSubtheme:
+      | {
+          id: string;
+          name: string;
+        }
+      | null = null;
+    if (subthemeId && db) {
+      const match = await db
+        .select({ id: subthemes.id, name: subthemes.name })
+        .from(subthemes)
+        .where(and(eq(subthemes.id, subthemeId), eq(subthemes.themeId, themeId), eq(subthemes.isActive, true)))
+        .limit(1);
+      if (match.length === 0) {
+        return res.status(400).json({ error: `Invalid subtheme for theme ${themeId}` });
+      }
+      targetSubtheme = match[0]!;
+    }
+
+    const themeSubthemes =
+      db
+        ? await db
+            .select({ id: subthemes.id, name: subthemes.name })
+            .from(subthemes)
+            .where(and(eq(subthemes.themeId, themeId), eq(subthemes.isActive, true)))
+        : [];
     
     // Normalize tickers
     const normalizedTickers = tickers.map(t => t.trim().toUpperCase()).filter(t => t.length > 0);
     
     // Check for conflicts
     const conflicts: Array<{ ticker: string; existingTheme: string; isCore: boolean }> = [];
-    const targetCluster = CLUSTERS.find(c => c.id === id);
+    const targetCluster = CLUSTERS.find(c => c.id === themeId);
     
     if (!targetCluster) {
       return res.status(404).json({ error: "Theme not found" });
@@ -832,13 +1267,13 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
     for (const ticker of normalizedTickers) {
       // Check if already in target theme
       if (targetCluster.core.includes(ticker) || targetCluster.candidates.includes(ticker)) {
-        conflicts.push({ ticker, existingTheme: id, isCore: targetCluster.core.includes(ticker) });
+        conflicts.push({ ticker, existingTheme: themeId, isCore: targetCluster.core.includes(ticker) });
         continue;
       }
       
       // Check other themes
       for (const cluster of CLUSTERS) {
-        if (cluster.id === id) continue;
+        if (cluster.id === themeId) continue;
         if (cluster.core.includes(ticker)) {
           conflicts.push({ ticker, existingTheme: cluster.id, isCore: true });
         } else if (cluster.candidates.includes(ticker)) {
@@ -859,6 +1294,10 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
     // Add tickers to candidates (in-memory + persist to DB)
     const added: string[] = [];
     const skipped: string[] = [];
+    const marketCapFiltered: string[] = [];
+    const addedToSubtheme: string[] = [];
+    const inferredSubthemeAssignments: Array<{ symbol: string; subthemeId: string; subthemeName: string }> = [];
+    const deferredData: string[] = [];
     
     for (const ticker of normalizedTickers) {
       // Skip if already in this theme
@@ -874,10 +1313,10 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
       // Persist to DB so it survives restarts and shows in list
       if (db) {
         try {
-          const themeRow = CLUSTERS.find(c => c.id === id);
+          const themeRow = CLUSTERS.find(c => c.id === themeId);
           if (themeRow) {
             await db.insert(themes).values({
-              id: id,
+              id: themeId,
               name: themeRow.name,
               tier: themeRow.tier,
               leadersTarget: themeRow.leadersTarget,
@@ -889,21 +1328,102 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
               set: { name: themeRow.name, tier: themeRow.tier, updatedAt: new Date() },
             });
           }
-          const existing = await db.select({ symbol: tickers.symbol }).from(tickers).where(eq(tickers.symbol, ticker)).limit(1);
+          const existing = await db.select({ symbol: tickerTable.symbol }).from(tickerTable).where(eq(tickerTable.symbol, ticker)).limit(1);
           if (existing.length > 0) {
-            await db.update(tickers).set({ themeId: id, isCore: false }).where(eq(tickers.symbol, ticker));
+            await db.update(tickerTable).set({ themeId, isCore: false }).where(eq(tickerTable.symbol, ticker));
           } else {
-            await db.insert(tickers).values({
+            await db.insert(tickerTable).values({
               symbol: ticker,
               sector: "Unknown",
               industry: "Unknown",
-              themeId: id,
+              themeId,
               isCore: false,
               fetchedAt: new Date(),
             }).onConflictDoUpdate({
-              target: tickers.symbol,
-              set: { themeId: id, isCore: false },
+              target: tickerTable.symbol,
+              set: { themeId, isCore: false },
             });
+          }
+
+          const [tickerMeta] = await db
+            .select({ marketCap: tickerTable.marketCap, industry: tickerTable.industry })
+            .from(tickerTable)
+            .where(eq(tickerTable.symbol, ticker))
+            .limit(1);
+
+          const existingThemeLevel = await db
+            .select({ id: tickerSliceMemberships.id })
+            .from(tickerSliceMemberships)
+            .where(
+              and(
+                eq(tickerSliceMemberships.symbol, ticker),
+                eq(tickerSliceMemberships.themeId, themeId),
+                isNull(tickerSliceMemberships.subthemeId)
+              )
+            )
+            .limit(1);
+
+          if (existingThemeLevel.length === 0) {
+            await db.insert(tickerSliceMemberships).values({
+              symbol: ticker,
+              themeId,
+              subthemeId: null,
+              isAnchor: false,
+              isLeaderEligible: false,
+              isDefaultVisible: true,
+              source: "manual",
+              updatedAt: new Date(),
+            });
+          }
+
+          const inferredSubtheme = !targetSubtheme
+            ? inferSubthemeByIndustry(tickerMeta?.industry, themeSubthemes)
+            : null;
+          const subthemeTarget = targetSubtheme ?? inferredSubtheme;
+
+          if (subthemeTarget) {
+            const marketCap = tickerMeta?.marketCap ?? null;
+            if (marketCap == null || marketCap < MIN_SUBTHEME_MARKET_CAP) {
+              marketCapFiltered.push(ticker);
+              if (marketCap == null) {
+                deferredData.push(ticker);
+              }
+            } else {
+              await db
+                .insert(tickerSliceMemberships)
+                .values({
+                  symbol: ticker,
+                  themeId,
+                  subthemeId: subthemeTarget.id,
+                  isAnchor: false,
+                  isLeaderEligible: false,
+                  isDefaultVisible: true,
+                  source: "manual",
+                  updatedAt: new Date(),
+                })
+                .onConflictDoUpdate({
+                  target: [
+                    tickerSliceMemberships.symbol,
+                    tickerSliceMemberships.themeId,
+                    tickerSliceMemberships.subthemeId,
+                  ],
+                  set: {
+                    isDefaultVisible: true,
+                    source: "manual",
+                    updatedAt: new Date(),
+                  },
+                });
+              addedToSubtheme.push(ticker);
+              if (!targetSubtheme && inferredSubtheme) {
+                inferredSubthemeAssignments.push({
+                  symbol: ticker,
+                  subthemeId: inferredSubtheme.id,
+                  subthemeName: inferredSubtheme.name,
+                });
+              }
+            }
+          } else if ((tickerMeta?.marketCap ?? null) == null) {
+            deferredData.push(ticker);
           }
         } catch (err) {
           console.error(`[MC-API] Failed to persist ${ticker} to DB:`, err);
@@ -914,18 +1434,30 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
     if (db && added.length > 0) {
       try {
         await refreshThemeMembersCache();
+        // Pull fresh quotes/metrics now so newly added symbols populate immediately.
+        await refreshSnapshot(false, "ALL");
       } catch (err) {
         console.error("[MC-API] Failed to refresh theme cache:", err);
       }
     }
     
-    console.log(`[MC-API] Added ${added.length} tickers to ${id}: ${added.join(", ")}`);
+    console.log(`[MC-API] Added ${added.length} tickers to ${themeId}: ${added.join(", ")}`);
+    const uniqueDeferredData = [...new Set(deferredData)];
     
     res.json({
       success: true,
       added,
+      addedToSubtheme,
       skipped,
-      message: `Added ${added.length} ticker(s) to ${targetCluster.name}`,
+      marketCapFiltered,
+      inferredSubthemeAssignments,
+      deferredData: uniqueDeferredData,
+      message:
+        targetSubtheme
+          ? `Added ${added.length} ticker(s) to ${targetCluster.name} (${targetSubtheme.name})${
+              marketCapFiltered.length > 0 ? `; ${marketCapFiltered.length} skipped under $500M cap` : ""
+            }`
+          : `Added ${added.length} ticker(s) to ${targetCluster.name}`,
     });
   } catch (error) {
     console.error("[MC-API] Failed to add tickers:", error);

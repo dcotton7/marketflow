@@ -14,7 +14,7 @@ import { generateSuggestions, type SuggestRequest } from "./suggest";
 import { startMonitoring } from "./monitor";
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userChartPreferences } from "@shared/schema";
+import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
 import { fetchChartData } from "./chartDataEngine";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
@@ -26,7 +26,9 @@ import {
   normalizeSentinelTier,
   SENTINEL_ACCESS_TIERS,
 } from "@shared/sentinelTierAccess";
+import { parseIntradayChartTimeframe, DEFAULT_INTRADAY_CHART_TIMEFRAME } from "@shared/chart-timeframes";
 import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals } from "../fundamentals";
+import { resolveSessionMaLevelsForSymbol } from "../data-layer/session-adjusted-ma";
 
 declare module "express-session" {
   interface SessionData {
@@ -7275,15 +7277,47 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       let extensionFrom50dAdr = 0;
       let extensionFrom50dPct = 0;
-      if (validDaily.length >= 50) {
+      let sma50ForExt: number | null = null;
+      let sma20ForExt: number | null = null;
+
+      if (currentPrice > 0) {
+        const sessionMa = await resolveSessionMaLevelsForSymbol(
+          ticker,
+          currentPrice,
+          quoteData
+            ? {
+                open: quoteData.sessionOpen,
+                high: quoteData.sessionHigh,
+                low: quoteData.sessionLow,
+                price: currentPrice,
+                volume: quoteData.volume,
+                vwap: quoteData.sessionVwap,
+              }
+            : null
+        );
+        if (sessionMa?.sma50d != null) sma50ForExt = sessionMa.sma50d;
+        if (sessionMa?.sma20d != null) sma20ForExt = sessionMa.sma20d;
+      }
+
+      if (sma50ForExt == null && validDaily.length >= 50) {
         const last50 = validDaily.slice(-50);
-        const sma50 = last50.reduce((sum: number, q: any) => sum + q.close, 0) / 50;
+        sma50ForExt = last50.reduce((sum: number, q: any) => sum + q.close, 0) / 50;
+      }
+      if (sma20ForExt == null && validDaily.length >= 20) {
+        const last20 = validDaily.slice(-20);
+        sma20ForExt = last20.reduce((sum: number, q: any) => sum + q.close, 0) / 20;
+      }
+
+      if (sma50ForExt != null && sma50ForExt > 0) {
         if (adr20 > 0) {
-          extensionFrom50dAdr = Math.round(((currentPrice - sma50) / adr20) * 10) / 10;
+          extensionFrom50dAdr = Math.round(((currentPrice - sma50ForExt) / adr20) * 10) / 10;
         }
-        if (sma50 > 0) {
-          extensionFrom50dPct = Math.round(((currentPrice - sma50) / sma50) * 1000) / 10;
-        }
+        extensionFrom50dPct = Math.round(((currentPrice - sma50ForExt) / sma50ForExt) * 1000) / 10;
+      }
+
+      let extensionFrom20d = 0;
+      if (sma20ForExt != null && sma20ForExt > 0) {
+        extensionFrom20d = Math.round(((currentPrice - sma20ForExt) / sma20ForExt) * 1000) / 10;
       }
 
       let macdStatus = "N/A";
@@ -7316,10 +7350,16 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           marketCap: fundData.marketCap || 0,
         };
         
-        // Generate description from fundamentals
-        if (fundamentalData.companyName) {
-          companyDescription = `${fundamentalData.companyName} is a publicly traded company in the ${fundamentalData.industry !== 'Unknown' ? fundamentalData.industry : fundamentalData.sector} sector.`;
-        }
+        const displayName = fundamentalData.companyName || ticker;
+        const industryOrSector =
+          fundamentalData.industry !== "Unknown"
+            ? fundamentalData.industry
+            : fundamentalData.sector !== "Unknown"
+              ? fundamentalData.sector
+              : "";
+        companyDescription = industryOrSector
+          ? `${displayName} is a publicly traded company in the ${industryOrSector} sector.`
+          : `${displayName} is a publicly traded company.`;
         
         const sector = fundamentalData.sector;
         sectorEtf = SECTOR_ETF_MAP[sector] || "";
@@ -7337,13 +7377,6 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       const adr20Dollar = Math.round(adr20 * 100) / 100;
       const adr20Pct = currentPrice > 0 ? Math.round((adr20 / currentPrice) * 10000) / 100 : 0;
-
-      let extensionFrom20d = 0;
-      if (validDaily.length >= 20) {
-        const last20 = validDaily.slice(-20);
-        const sma20 = last20.reduce((sum: number, q: any) => sum + q.close, 0) / 20;
-        extensionFrom20d = sma20 > 0 ? Math.round(((currentPrice - sma20) / sma20) * 1000) / 10 : 0;
-      }
 
       let rsMomentum = 0;
       try {
@@ -7435,29 +7468,90 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     { rowId: "sys_vwap_lo", title: "VWAP Lo",   maType: "vwap_lo", period: null, color: "#f87171", lineType: 2, isSystem: true, sortOrder: 7, calcOn: "daily" as const },
   ];
 
+  const DEFAULT_CHART_BACKGROUND_COLOR = "#0f172a";
+
+  function parseChartBackgroundColor(raw: unknown, fallback: string | null | undefined): string | null {
+    if (raw === null || raw === "") return null;
+    if (raw === undefined) return fallback ?? null;
+    const s = String(raw).trim();
+    if (/^#[0-9A-Fa-f]{6}$/.test(s)) return s;
+    return fallback ?? null;
+  }
+
+  function mapMaRowsForInsert(userId: number, rows: any[]) {
+    return rows.map((r: any, i: number) => ({
+      userId,
+      rowId: r.rowId || `user_${Date.now()}_${i}`,
+      title: r.title || "Custom MA",
+      maType: r.maType || "sma",
+      period: r.period ?? null,
+      color: r.color || "#ffffff",
+      lineType: r.lineType ?? 0,
+      isSystem: r.isSystem ?? false,
+      isVisible: true,
+      dailyOn: r.dailyOn ?? false,
+      fiveMinOn: r.fiveMinOn ?? false,
+      fifteenMinOn: r.fifteenMinOn ?? false,
+      thirtyMinOn: r.thirtyMinOn ?? false,
+      sortOrder: i,
+      calcOn: r.calcOn || "daily",
+    }));
+  }
+
+  async function ensureMainMaSettings(userId: number) {
+    let rows = await db!.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
+    if (rows.length === 0) {
+      const inserts = DEFAULT_MA_ROWS.map((r) => {
+        const is200d = r.rowId === "sys_sma200";
+        return {
+          userId,
+          ...r,
+          isVisible: true,
+          dailyOn: true,
+          fiveMinOn: is200d ? false : true,
+          fifteenMinOn: is200d ? false : true,
+          thirtyMinOn: true,
+        };
+      });
+      await db!.insert(userMaSettings).values(inserts);
+      rows = await db!.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
+    }
+    return rows;
+  }
+
+  async function copyMainMaToMini(userId: number) {
+    const mainRows = await ensureMainMaSettings(userId);
+    await db!.delete(userMiniMaSettings).where(eq(userMiniMaSettings.userId, userId));
+    if (mainRows.length > 0) {
+      const inserts = mainRows.map((r) => ({
+        userId,
+        rowId: r.rowId,
+        title: r.title,
+        maType: r.maType,
+        period: r.period,
+        color: r.color,
+        lineType: r.lineType,
+        isSystem: r.isSystem,
+        isVisible: r.isVisible,
+        dailyOn: r.dailyOn,
+        fiveMinOn: r.fiveMinOn,
+        fifteenMinOn: r.fifteenMinOn,
+        // Mini charts include 30m — inherit 15m (or existing 30m) so presets work on 30m tiles.
+        thirtyMinOn: r.thirtyMinOn || r.fifteenMinOn,
+        sortOrder: r.sortOrder,
+        calcOn: r.calcOn,
+      }));
+      await db!.insert(userMiniMaSettings).values(inserts);
+    }
+    return db!.select().from(userMiniMaSettings).where(eq(userMiniMaSettings.userId, userId)).orderBy(userMiniMaSettings.sortOrder);
+  }
+
   app.get("/api/sentinel/ma-settings", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       if (!db) return res.status(500).json({ error: "Database not available" });
 
-      let rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
-
-      if (rows.length === 0) {
-        const inserts = DEFAULT_MA_ROWS.map((r) => {
-          const is200d = r.rowId === "sys_sma200";
-          return {
-            userId,
-            ...r,
-            isVisible: true,
-            dailyOn: true,
-            fiveMinOn: is200d ? false : true,
-            fifteenMinOn: is200d ? false : true,
-            thirtyMinOn: true,
-          };
-        });
-        await db.insert(userMaSettings).values(inserts);
-        rows = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
-      }
+      let rows = await ensureMainMaSettings(userId);
 
       res.json(rows.map(r => ({ ...r, isVisible: true })));
     } catch (error) {
@@ -7477,24 +7571,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       await db.delete(userMaSettings).where(eq(userMaSettings.userId, userId));
 
       if (rows.length > 0) {
-        const inserts = rows.map((r: any, i: number) => ({
-          userId,
-          rowId: r.rowId || `user_${Date.now()}_${i}`,
-          title: r.title || "Custom MA",
-          maType: r.maType || "sma",
-          period: r.period ?? null,
-          color: r.color || "#ffffff",
-          lineType: r.lineType ?? 0,
-          isSystem: r.isSystem ?? false,
-          isVisible: true,
-          dailyOn: r.dailyOn ?? false,
-          fiveMinOn: r.fiveMinOn ?? false,
-          fifteenMinOn: r.fifteenMinOn ?? false,
-          thirtyMinOn: r.thirtyMinOn ?? false,
-          sortOrder: i,
-          calcOn: r.calcOn || "daily",
-        }));
-        await db.insert(userMaSettings).values(inserts);
+        await db.insert(userMaSettings).values(mapMaRowsForInsert(userId, rows));
       }
 
       const updated = await db.select().from(userMaSettings).where(eq(userMaSettings.userId, userId)).orderBy(userMaSettings.sortOrder);
@@ -7505,11 +7582,71 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
-  const THEME_MEMBERS_MA_KEYS = ["ema10d", "ema20d", "sma50d", "sma200d"] as const;
+  app.get("/api/sentinel/mini-ma-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+
+      let rows = await db.select().from(userMiniMaSettings).where(eq(userMiniMaSettings.userId, userId)).orderBy(userMiniMaSettings.sortOrder);
+      if (rows.length === 0) {
+        rows = await copyMainMaToMini(userId);
+      }
+
+      res.json(rows.map(r => ({ ...r, isVisible: true })));
+    } catch (error) {
+      console.error("Get mini MA settings error:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/user_mini_ma_settings/i.test(msg) && /does not exist/i.test(msg)) {
+        return res.status(503).json({
+          error:
+            "Database table user_mini_ma_settings is missing. Run: npm run db:ensure-mini-ma — then restart the server.",
+        });
+      }
+      res.status(500).json({ error: "Failed to fetch mini MA settings" });
+    }
+  });
+
+  app.put("/api/sentinel/mini-ma-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+
+      const rows = req.body.rows as any[];
+      if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array required" });
+
+      await db.delete(userMiniMaSettings).where(eq(userMiniMaSettings.userId, userId));
+
+      if (rows.length > 0) {
+        await db.insert(userMiniMaSettings).values(mapMaRowsForInsert(userId, rows));
+      }
+
+      const updated = await db.select().from(userMiniMaSettings).where(eq(userMiniMaSettings.userId, userId)).orderBy(userMiniMaSettings.sortOrder);
+      res.json(updated);
+    } catch (error) {
+      console.error("Save mini MA settings error:", error);
+      res.status(500).json({ error: "Failed to save mini MA settings" });
+    }
+  });
+
+  app.post("/api/sentinel/mini-ma-settings/copy-from-main", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      if (!db) return res.status(500).json({ error: "Database not available" });
+
+      const rows = await copyMainMaToMini(userId);
+      res.json(rows);
+    } catch (error) {
+      console.error("Copy mini MA from main error:", error);
+      res.status(500).json({ error: "Failed to copy mini MA settings from main chart" });
+    }
+  });
+
+  const THEME_MEMBERS_MA_KEYS = ["ema10d", "sma20d", "sma50d", "sma200d"] as const;
   type ThemeMembersMaKey = (typeof THEME_MEMBERS_MA_KEYS)[number];
 
   function parseThemeMembersMaKey(raw: unknown, fallback: ThemeMembersMaKey): ThemeMembersMaKey {
     if (typeof raw !== "string") return fallback;
+    if (raw === "ema20d") return "sma20d";
     return (THEME_MEMBERS_MA_KEYS as readonly string[]).includes(raw) ? (raw as ThemeMembersMaKey) : fallback;
   }
 
@@ -7524,8 +7661,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           .values({
             userId,
             defaultBarsOnScreen: 200,
-            themeMembersMa1: "ema20d",
+            themeMembersMa1: "sma20d",
             themeMembersMa2: "sma50d",
+            lastIntradayTimeframe: DEFAULT_INTRADAY_CHART_TIMEFRAME,
           })
           .returning();
       }
@@ -7550,8 +7688,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         dataLimit5min: 63,
         dataLimit15min: 126,
         dataLimit30min: 126,
-        themeMembersMa1: "ema20d" as ThemeMembersMaKey,
+        themeMembersMa1: "sma20d" as ThemeMembersMaKey,
         themeMembersMa2: "sma50d" as ThemeMembersMaKey,
+        lastIntradayTimeframe: DEFAULT_INTRADAY_CHART_TIMEFRAME,
       };
 
       const barsVal =
@@ -7579,6 +7718,14 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             : base.dataLimit30min,
         themeMembersMa1: parseThemeMembersMaKey(b.themeMembersMa1, base.themeMembersMa1 as ThemeMembersMaKey),
         themeMembersMa2: parseThemeMembersMaKey(b.themeMembersMa2, base.themeMembersMa2 as ThemeMembersMaKey),
+        lastIntradayTimeframe:
+          b.lastIntradayTimeframe !== undefined
+            ? parseIntradayChartTimeframe(b.lastIntradayTimeframe, base.lastIntradayTimeframe as typeof DEFAULT_INTRADAY_CHART_TIMEFRAME)
+            : base.lastIntradayTimeframe,
+        chartBackgroundColor: parseChartBackgroundColor(
+          b.chartBackgroundColor,
+          (base as { chartBackgroundColor?: string | null }).chartBackgroundColor
+        ),
       };
 
       let pref;

@@ -3,8 +3,11 @@ import { ThemeRow, TickerRow } from "@/data/mockThemeData";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Activity, AlertTriangle, ArrowUpDown, Gauge, Layers, Target, TrendingUp, Users, Zap } from "lucide-react";
+import { Activity, AlertTriangle, ArrowUpDown, Gauge, HelpCircle, Layers, Target, TrendingUp, Users, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ACTIONABLE_HELP } from "@/components/market-condition/marketflowHelpContent";
+import { BreakdownWatchBadge, BreakdownWatchPanel } from "@/components/market-condition/BreakdownWatchBadge";
+import { computeThemeBreakdownWatch } from "@shared/theme-breakdown-watch";
 import { getPulseToneByBandId, getScoreBandIndex, PULSE_BAND_ORDER } from "@/lib/pulse-scale";
 
 interface AccDistStats {
@@ -39,10 +42,12 @@ function SegmentBar({
   label,
   score,
   detail,
+  helpDetail,
 }: {
   label: string;
   score: number;
   detail: string;
+  helpDetail?: string;
 }) {
   const segments = PULSE_BAND_ORDER.length;
   const lit = Math.max(0, Math.min(segments, getScoreBandIndex(score) + 1));
@@ -58,7 +63,12 @@ function SegmentBar({
       <TooltipTrigger asChild>
         <div className="rounded border border-slate-700/40 bg-slate-900/60 p-2">
           <div className="mb-1 flex items-center justify-between gap-3 text-[11px]">
-            <span className="font-medium text-slate-200">{label}</span>
+            <span className="flex items-center gap-1 font-medium text-slate-200">
+              {label}
+              {helpDetail ? (
+                <HelpCircle className="h-3 w-3 text-slate-500" aria-hidden />
+              ) : null}
+            </span>
             <span className="font-mono text-slate-400">{status}</span>
           </div>
           <div className="flex gap-1">
@@ -83,8 +93,9 @@ function SegmentBar({
           <div className="mt-1 text-[10px] text-slate-400">{detail}</div>
         </div>
       </TooltipTrigger>
-      <TooltipContent side="left" className="max-w-xs text-xs">
-        {detail}
+      <TooltipContent side="left" className="max-w-xs text-xs space-y-1">
+        <p>{detail}</p>
+        {helpDetail ? <p className="text-muted-foreground">{helpDetail}</p> : null}
       </TooltipContent>
     </Tooltip>
   );
@@ -199,6 +210,28 @@ export function ThemeDetailPanelActionable({
     };
   }, [theme, accDistStats, totalThemes]);
 
+  const breakdownAssessment = useMemo(() => {
+    if (!theme) return null;
+    const input = {
+      trendState: theme.trendState,
+      pctAbove50d: theme.pctAbove50d,
+      pctAbove200d: theme.pctAbove200d,
+      breadthPct: theme.breadthPct,
+      medianPct: theme.medianPct,
+      rsVsBenchmark: theme.rsVsSpy,
+      deltaRank: theme.deltaRank,
+      acceleration: theme.acceleration,
+      accDistDays: theme.accDistDays,
+      bearCount: theme.bearCount,
+      totalCount: theme.coreCount,
+      rank: theme.rank,
+      totalThemes,
+      distributionPct: accDistStats?.distributionPct,
+    };
+    if (theme.breakdownWatch && accDistStats == null) return theme.breakdownWatch;
+    return computeThemeBreakdownWatch(input);
+  }, [theme, accDistStats, totalThemes]);
+
   if (!theme || !model) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -230,6 +263,7 @@ export function ThemeDetailPanelActionable({
               <Badge variant="outline" className={statusClass}>
                 {model.status}
               </Badge>
+              <BreakdownWatchBadge assessment={breakdownAssessment} />
               {isHistorical && (
                 <Badge variant="outline" className="border-cyan-500/40 text-cyan-300">
                   {timeSlice} context
@@ -247,31 +281,38 @@ export function ThemeDetailPanelActionable({
         </div>
       </div>
 
+      <BreakdownWatchPanel assessment={breakdownAssessment} />
+
       <div className="grid gap-2">
         <SegmentBar
           label="Rotation"
           score={model.rotationScore}
-          detail={`Built from delta rank ${theme.deltaRank > 0 ? "+" : ""}${theme.deltaRank} and acceleration ${theme.acceleration > 0 ? "+" : ""}${theme.acceleration}.`}
+          detail={`Delta rank ${theme.deltaRank > 0 ? "+" : ""}${theme.deltaRank}, acceleration ${theme.acceleration > 0 ? "+" : ""}${theme.acceleration}.`}
+          helpDetail={`${ACTIONABLE_HELP.rotation.detail} ${ACTIONABLE_HELP.rotation.formula}`}
         />
         <SegmentBar
           label="Participation"
           score={model.participationScore}
-          detail={`Breadth ${theme.breadthPct.toFixed(1)}% of names participating.`}
+          detail={`Breadth ${theme.breadthPct.toFixed(1)}% of members green today.`}
+          helpDetail={`${ACTIONABLE_HELP.participation.detail} ${ACTIONABLE_HELP.participation.formula}`}
         />
         <SegmentBar
           label="Leadership"
           score={model.leadershipScore}
           detail={`RS vs SPY ${theme.rsVsSpy > 0 ? "+" : ""}${theme.rsVsSpy.toFixed(2)}.`}
+          helpDetail={`${ACTIONABLE_HELP.leadership.detail} ${ACTIONABLE_HELP.leadership.formula}`}
         />
         <SegmentBar
           label="Confirmation"
           score={model.confirmationScore}
           detail={`Volume ${theme.volExp.toFixed(2)}x${accDistStats ? `, A/D ${accDistStats.accumulationPct.toFixed(1)}% acc / ${accDistStats.distributionPct.toFixed(1)}% dist` : ""}.`}
+          helpDetail={`${ACTIONABLE_HELP.confirmation.detail} ${ACTIONABLE_HELP.confirmation.formula}`}
         />
         <SegmentBar
           label="Durability"
           score={model.durabilityScore}
-          detail={`Inverse concentration score. Top 3 contribution = ${Math.round((theme.top3Contribution ?? 0) * 100)}%.`}
+          detail={`Top 3 contribution = ${Math.round((theme.top3Contribution ?? 0) * 100)}%.`}
+          helpDetail={`${ACTIONABLE_HELP.durability.detail} ${ACTIONABLE_HELP.durability.formula}`}
         />
       </div>
 

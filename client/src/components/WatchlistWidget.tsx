@@ -6,7 +6,7 @@ import {
   useRenameWatchlist,
   useDeleteWatchlist,
   useSetDefaultWatchlist,
-  useSelectedWatchlistId,
+  useEffectiveWatchlistId,
   type Watchlist,
 } from "@/hooks/use-watchlist";
 import { Link, useLocation } from "wouter";
@@ -40,12 +40,13 @@ export function WatchlistWidget() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
   
-  const { data: watchlists, isLoading: listsLoading } = useWatchlists();
-  const [selectedWatchlistId, setSelectedWatchlistId] = useSelectedWatchlistId("sidebarWatchlistId");
-  
-  const selectedWatchlist = watchlists?.find(wl => wl.id === selectedWatchlistId) 
-    || watchlists?.find(wl => wl.isDefault)
-    || watchlists?.[0];
+  const {
+    watchlists,
+    isLoading: listsLoading,
+    selectedId: selectedWatchlistId,
+    setSelectedId: setSelectedWatchlistId,
+    selectedWatchlist,
+  } = useEffectiveWatchlistId();
   
   const { data: watchlistItems, isLoading: itemsLoading } = useWatchlist(selectedWatchlist?.id);
   const { mutate: remove, isPending: isRemoving } = useRemoveFromWatchlist();

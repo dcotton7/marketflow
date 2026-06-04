@@ -923,7 +923,7 @@ export function AnalysisPanel({ symbol, open, onOpenChange, showDetach = true, v
     <Tooltip>
       <TooltipTrigger asChild>
         <div className="shrink-0">
-          <WatchlistSelector symbol={symbol} storageKey="standaloneWatchlistId" />
+          <WatchlistSelector symbol={symbol} />
         </div>
       </TooltipTrigger>
       <TooltipContent>

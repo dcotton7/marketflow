@@ -24,6 +24,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Loader2, Ruler, Minus, Trash2, Bell, Settings2 } from "lucide-react";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
 import { DEFAULT_CHART_MA_LIMITS, type ChartMaDataLimits } from "@/lib/chart-ma-feasibility";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 
 export type ChartDataResponse = {
   candles: ChartCandle[];
@@ -367,6 +368,7 @@ export function DualChartGrid({
     dataLimit5min?: number;
     dataLimit15min?: number;
     dataLimit30min?: number;
+    chartBackgroundColor?: string | null;
   }>({
     queryKey: ["/api/sentinel/chart-preferences"],
   });
@@ -631,6 +633,7 @@ export function DualChartGrid({
                 maSettings={maSettingsData}
                 maDataLimits={maDataLimits}
                 maxBars={maxBars}
+                chartBackgroundColor={chartPrefs?.chartBackgroundColor}
                 measureMode={dailyMeasureMode}
                 drawingToolActive={dailyDrawings.activeTool}
                 onChartReady={(chart, series) => {
@@ -775,6 +778,7 @@ export function DualChartGrid({
                   maSettings={maSettingsData}
                   maDataLimits={maDataLimits}
                   maxBars={maxBars}
+                  chartBackgroundColor={chartPrefs?.chartBackgroundColor}
                   measureMode={intradayMeasureMode}
                   drawingToolActive={intradayDrawings.activeTool}
                   onChartReady={(chart, series) => {
@@ -828,7 +832,7 @@ export function DualChartGrid({
         <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1 overflow-visible bg-background" data-testid={`${pid}intraday-metrics-strip`}>
           {chartMetrics ? (<>
           <div><span className="text-[10px] whitespace-nowrap text-gray-400">ADR(20) $</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">50d Ext (ADR)</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dAdr >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-adr`}>{chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dAdr}x</div></div>
+          <div><span className="text-[10px] whitespace-nowrap text-gray-400">50d Ext %</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dPct >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-pct`} title="Same session-adjusted 50d SMA as MarketFlow Theme Members MA2">{chartMetrics.extensionFrom50dPct >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dPct}%</div></div>
           <div><span className="text-[10px] whitespace-nowrap text-gray-400">MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-white"}`} data-testid={`${pid}metric-macd`}>{chartMetrics.macd}</div></div>
           <div><span className="text-[10px] whitespace-nowrap text-gray-400">Sector</span><div className="text-xs font-medium" data-testid={`${pid}metric-sector-etf`}>{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer underline decoration-dotted text-white" onClick={() => handleTickerNav(chartMetrics.sectorEtf)} data-testid={`${pid}link-sector-etf`}>{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : <span className="text-gray-500">N/A</span>}</div></div>
           <div><span className="text-[10px] whitespace-nowrap text-gray-400">ADR(20) %</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-adr20-pct`}>{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
@@ -851,7 +855,7 @@ export function DualChartGrid({
           open={alertDialogOpen}
           onOpenChange={setAlertDialogOpen}
           suggestedName={`${symbol} chart alert`}
-          tradePlanPreview={alertTradePlanPreview}
+          tradePlanPreview={isTradePlanEnabled() ? alertTradePlanPreview : undefined}
           targetScope={{
             mode: "single_symbol",
             targetType: "symbol",

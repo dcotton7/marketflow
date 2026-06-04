@@ -1,0 +1,60 @@
+---
+description: UI surface region IDs and display names for MarketFlow and Live Theme Charts
+alwaysApply: false
+globs:
+  - client/src/pages/MarketConditionPage.tsx
+  - client/src/components/market-condition/**
+  - client/src/components/start-here/LiveThemeCharts*
+  - client/src/components/start-here/ThemeChart*
+  - shared/ui-surfaces/**
+---
+
+# UI surfaces nomenclature
+
+Use **stable region IDs** from `shared/ui-surfaces/` in code comments, `data-ui-region`, tests, and planning. Do not invent new names for the same on-screen area.
+
+## Surfaces
+
+| Surface id | User-facing name | Route / host |
+|------------|------------------|--------------|
+| `marketFlow` | MarketFlow | `/sentinel/market-condition` |
+| `liveThemeCharts` | Live Theme Charts | Start Here `themeCharts` widget |
+
+Import: `import { MARKET_FLOW_SURFACE, uiRegion } from "@shared/ui-surfaces"`
+
+## Refresh tiers (not interchangeable)
+
+| Tier id | MarketFlow | Live Theme Charts |
+|---------|------------|-------------------|
+| `themeStream` | Theme list ~60s (admin) | — |
+| `memberStream` | Member table ~60s (admin) | — |
+| `themeBox` | Actionable details tab (same cadence as theme stream today) | Rank + scorecard **15m** |
+| `chartStream` | — | Mini charts **~60s** |
+| `snapshotHistory` | Race / Flow Map DB snapshots **15m ET** | Historical column baselines |
+| `benchmarkStrip` | QQQ/IWM/MDY/SPY live strip | — |
+
+## MarketFlow — key region names
+
+- **Regime bar** (`regimeBar`) — not "header bar" in new docs
+- **Command toolbar** (`commandToolbar`) — lens, time slice, search, view mode
+- **Theme tracker panel** (`themeTrackerPanel`) — left/top panel; hosts heatmap, flow map, or race by lens
+- **Focused theme panel** (`focusedThemePanel`) — center panel with detail tabs
+- **Theme box** (`actionableDetails` tab content) — actionable status/segments/breakdown; same concept as Live Theme Charts theme box
+- **Members panel** (`membersPanel`) + **Ticker workbench** (`tickerWorkbench`)
+- **Rotation table panel** (`rotationTablePanel`) — bottom panel in split view
+
+## Live Theme Charts — key region names
+
+- **Theme box** (`themeBox`) — right pane of each row (15m stats)
+- **Chart pane** (`chartPane`) / **Chart stream** — left mini chart (~60s)
+- Column kinds: `top` = Leaders, `bottom` = Laggards, `specific` = Watchlist (fixed order)
+
+## Wiring convention
+
+```tsx
+<div data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "themeTrackerPanel")}>
+```
+
+Registry source of truth: `shared/ui-surfaces/market-flow.ts`, `shared/ui-surfaces/live-theme-charts.ts`.
+
+**Wireframe (print on request):** `docs/ui-surfaces/market-flow-wireframe.md` — trigger phrase: *print Flow wireframe* (see `.cursor/rules/market-flow-wireframe.mdc`).

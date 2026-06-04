@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Star, Clock, Bell, House, LogOut, UserRound } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
+import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
 import { AlertCenterDialog } from "@/components/alerts/AlertCenterDialog";
 import { useAlerts, useAlertEvents, type AlertDeliveryConfigRecord } from "@/hooks/use-alerts";
@@ -340,16 +341,11 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             <Bell className="w-4 h-4" />
             <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Alerts</span>
           </Button>
-          <Button 
-            variant="ghost"
-            size="sm"
-            className="gap-2"
-            onClick={() => setWatchlistModalOpen(true)}
-            data-testid="nav-watchlists"
-          >
-            <Star className="w-4 h-4" />
-            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Watchlists</span>
-          </Button>
+          <WatchlistSelector
+            compact
+            showAddButton={false}
+            onManageWatchlists={() => setWatchlistModalOpen(true)}
+          />
           <Link href="/sentinel/evaluate">
             <Button 
               variant={isEvaluatePage ? "secondary" : "ghost"} 

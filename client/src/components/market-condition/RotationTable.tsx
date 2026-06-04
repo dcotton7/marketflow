@@ -30,7 +30,7 @@ const COLUMN_TOOLTIPS: Record<SortKey, string> = {
   deltaRank: "Rotation Delta: Position change vs prior period. Positive = climbing (emerging narrative). Negative = fading. This is what institutions chase.",
   name: "Theme name. Click to select and view details.",
   medianPct: "Median price change across all theme members. Uses median to avoid single-stock skew.",
-  score: "ThemeScore (0-100): Breadth (0-30) + RS vs SPY (0-30) + Volume Expansion (0-20) + Acceleration (0-20)",
+  score: "ThemeScore (0-100): percentile-ranked median return (40%), breadth (20%), RS vs SPY (20%), acceleration (20%), narrow-leadership penalty.",
   breadthPct: "% of theme members trading green. 60%+ is strong, below 40% is weak breadth.",
   rsVsSpy: "Relative Strength vs SPY. Positive = outperforming the market.",
   volExp: "Volume Expansion vs 20-day average. 1.5x+ indicates institutional interest.",

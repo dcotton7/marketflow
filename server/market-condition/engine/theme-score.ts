@@ -26,6 +26,8 @@ import {
 import { TickerSnapshot, BenchmarkData } from "../providers/types";
 import { getTickersBySize } from "../utils/size-filter-helper";
 import { getThemeTickerSymbols, getThemeCoreSymbols, isCacheInitialized, getCompanyNameMap } from "../utils/theme-db-loader";
+import { computeThemeBreakdownWatch } from "@shared/theme-breakdown-watch";
+import type { BreakdownWatchAssessment } from "@shared/theme-breakdown-watch";
 
 // =============================================================================
 // Types
@@ -45,6 +47,7 @@ export interface ThemeMetrics {
   rsVsBenchmark: number;      // Median RS vs benchmark
   acceleration: number;       // RS change from previous period
   accDistDays: number;        // Accumulation/Distribution streak (William O'Neal style)
+  volExp: number;             // Median member volume expansion vs 20d avg
   
   // Component scores (0-1 normalized)
   pctComponent: number;       // Percentile rank of median return
@@ -97,6 +100,9 @@ export interface ThemeMetrics {
   // Timestamp
   calculatedAt: Date;
   timeSlice: TimeSlice;
+
+  /** Structural breakdown radar (member breadth / trend layer). */
+  breakdownWatch?: BreakdownWatchAssessment;
 }
 
 export interface TickerMetrics {
@@ -127,6 +133,7 @@ export interface TickerMetrics {
   // % above/below each MA (for configurable columns)
   pctVsEma10d?: number | null;
   pctVsEma20d?: number | null;
+  pctVsSma20d?: number | null;
   pctVsSma50d?: number | null;
   pctVsSma200d?: number | null;
   
@@ -447,6 +454,21 @@ export function calculateAllThemeMetrics(
     m.percentile = Math.round(((finalMetrics.length - index) / finalMetrics.length) * 100);
     const prevRank = previousRankings.get(m.id);
     m.deltaRank = prevRank ? prevRank - m.rank : 0;
+    m.breakdownWatch = computeThemeBreakdownWatch({
+      trendState: m.trendState,
+      pctAbove50d: m.pctAbove50d,
+      pctAbove200d: m.pctAbove200d,
+      breadthPct: m.breadthPct,
+      medianPct: m.medianPct,
+      rsVsBenchmark: m.rsVsBenchmark,
+      deltaRank: m.deltaRank,
+      acceleration: m.acceleration,
+      accDistDays: m.accDistDays,
+      bearCount: m.bearCount,
+      totalCount: m.totalCount,
+      rank: m.rank,
+      totalThemes: finalMetrics.length,
+    });
   });
   
   // Store current values for next calculation
@@ -481,6 +503,7 @@ function calculateClusterMetricsRaw(
   const allTickers = [...cluster.core, ...cluster.candidates];
   const pctChanges: number[] = [];
   const rsValues: number[] = [];
+  const volExpValues: number[] = [];
   let greenCount = 0;
   let above50Count = 0;
   let above200Count = 0;
@@ -503,9 +526,14 @@ function calculateClusterMetricsRaw(
     // Calculate RS vs benchmark
     const rs = pctChange - benchmark.changePct;
     rsValues.push(rs);
+
+    const avgVol = historicalVolumes?.get(symbol) ?? snapshot.volume;
+    const volExp = avgVol > 0 ? snapshot.volume / avgVol : 1;
+    volExpValues.push(volExp);
     
     // Check SMA positions if data available
-    const sma = smaData?.get(symbol);
+    const symKey = symbol.toUpperCase();
+    const sma = smaData?.get(symKey) ?? smaData?.get(symbol);
     if (sma) {
       const isAbove50d = snapshot.price > sma.sma50;
       const isAbove200d = snapshot.price > sma.sma200;
@@ -533,6 +561,7 @@ function calculateClusterMetricsRaw(
   // Calculate aggregate metrics (rounded to 2 decimal places)
   const medianPct = round2(median(pctChanges));
   const rsVsBenchmark = round2(median(rsValues));
+  const volExp = round2(median(volExpValues.length > 0 ? volExpValues : [1]));
   
   // Breadth percentages (rounded)
   const pctAbove50d = round2(validCount > 0 ? (above50Count / validCount) * 100 : 50);
@@ -546,7 +575,7 @@ function calculateClusterMetricsRaw(
   const trendState = determineThemeTrendState(bullCount, transitionCount, bearCount);
   
   // Generate reason codes
-  const reasonCodes = generateReasonCodes(breadthPct, rsVsBenchmark, 1, 0);
+  const reasonCodes = generateReasonCodes(breadthPct, rsVsBenchmark, volExp, 0);
   
   // Calculate penalty factor (for backward compatibility)
   const penaltyFactor = calculatePenaltyFactor(50); // Will be recalculated with final score
@@ -559,6 +588,7 @@ function calculateClusterMetricsRaw(
     baseScore: 0,       // Will be set after normalization
     medianPct,
     rsVsBenchmark,
+    volExp,
     acceleration: 0,    // Will be set after normalization
     accDistDays: 0,     // Will be set from historical snapshots
     pctComponent: 0,    // Will be set after normalization
@@ -630,7 +660,7 @@ export function generateReasonCodes(
 }
 
 /** Full MA data for pct vs MA calculations */
-export type MaDataEntry = { ema10d: number | null; ema20d: number | null; sma50d: number | null; sma200d: number | null };
+export type MaDataEntry = { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null };
 
 function pctVsMa(price: number, ma: number | null): number | null {
   if (ma == null || ma <= 0) return null;
@@ -690,9 +720,10 @@ export function getClusterTickerMetrics(
     const volExp = avgVol > 0 ? snapshot.volume / avgVol : 1;
     const prevDayVolExp = avgVol > 0 && snapshot.prevDayVolume > 0 ? snapshot.prevDayVolume / avgVol : undefined;
     
+    const symbolUpper = symbol.toUpperCase();
     // Trend state: use maData if available, else smaData, else VWAP
-    const ma = maData?.get(symbol);
-    const sma = smaData?.get(symbol);
+    const ma = maData?.get(symbolUpper) ?? maData?.get(symbol);
+    const sma = smaData?.get(symbolUpper) ?? smaData?.get(symbol);
     const isAbove50d = ma?.sma50d != null
       ? snapshot.price > ma.sma50d
       : sma ? snapshot.price > sma.sma50 : snapshot.price > snapshot.vwap;
@@ -704,10 +735,10 @@ export function getClusterTickerMetrics(
     // % vs each MA (for configurable columns)
     const pctVsEma10d = ma ? pctVsMa(snapshot.price, ma.ema10d) : null;
     const pctVsEma20d = ma ? pctVsMa(snapshot.price, ma.ema20d) : null;
+    const pctVsSma20d = ma ? pctVsMa(snapshot.price, ma.sma20d) : null;
     const pctVsSma50d = ma ? pctVsMa(snapshot.price, ma.sma50d) : null;
     const pctVsSma200d = ma ? pctVsMa(snapshot.price, ma.sma200d) : null;
     
-    const symbolUpper = symbol.toUpperCase();
     const isCore = coreTickers.has(symbolUpper);
     
     metrics.push({
@@ -724,6 +755,7 @@ export function getClusterTickerMetrics(
       isAbove200d,
       pctVsEma10d: pctVsEma10d ?? undefined,
       pctVsEma20d: pctVsEma20d ?? undefined,
+      pctVsSma20d: pctVsSma20d ?? undefined,
       pctVsSma50d: pctVsSma50d ?? undefined,
       pctVsSma200d: pctVsSma200d ?? undefined,
       isCore: isCore,

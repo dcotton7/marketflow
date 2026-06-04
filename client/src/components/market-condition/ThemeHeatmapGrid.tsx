@@ -1,4 +1,5 @@
 // Theme Heatmap Grid - Visual grid showing all 17 themes with color-coded performance
+import { useEffect } from "react";
 import { ThemeRow, ThemeId, ThemeTier, TimeSlice } from "@/data/mockThemeData";
 import type { MarketSession } from "@/hooks/useMarketCondition";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,12 @@ export function ThemeHeatmapGrid({
   const total = totalThemes || themes.length;
   const isHistorical = timeSlice !== "TODAY";
 
+  useEffect(() => {
+    if (!selectedTheme) return;
+    const el = document.querySelector(`[data-mc-theme-card="${selectedTheme}"]`);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedTheme]);
+
   // In comparison mode, scale bars by diff magnitude; otherwise by current pct
   const displayValues = themes.map(t => {
     const h = t.historicalMetrics;
@@ -101,6 +108,8 @@ export function ThemeHeatmapGrid({
             <Tooltip key={theme.id}>
               <TooltipTrigger asChild>
                 <button
+                  type="button"
+                  data-mc-theme-card={theme.id}
                   onClick={() => onThemeSelect(theme.id)}
                   className={cn(
                     "relative p-3 rounded-lg border transition-all text-left",

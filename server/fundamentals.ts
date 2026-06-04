@@ -269,6 +269,12 @@ async function saveToDbCache(symbol: string, data: FundamentalData, extended?: E
   }
 }
 
+function localStockName(symbol: string): string | undefined {
+  const local = localLookup(symbol);
+  if (!local) return undefined;
+  return STOCKS_BY_SECTOR[local.sector]?.find((s) => s.symbol === symbol)?.name;
+}
+
 export async function getFundamentals(symbol: string): Promise<FundamentalData> {
   const upper = symbol.toUpperCase();
 
@@ -279,6 +285,7 @@ export async function getFundamentals(symbol: string): Promise<FundamentalData> 
   if (local) {
     const stock = STOCKS_BY_SECTOR[local.sector]?.find(s => s.symbol === upper);
     const localCap = stock?.marketCap ?? 0;
+    const localName = stock?.name;
     if (localCap > 0) {
       // If we have companyName cached, return immediately
       if (dbCached?.companyName) {
@@ -303,19 +310,21 @@ export async function getFundamentals(symbol: string): Promise<FundamentalData> 
           exchange: finnhubData.exchange || undefined,
         };
       }
-      // Couldn't get companyName, return without it
       return {
         sector: local.sector,
         industry: local.industry,
         marketCap: localCap,
+        companyName: localName,
       };
     }
     // local has no usable marketCap, fall through to cache/Finnhub
   }
   
-  // If we already have valid cached data, return it
+  // If we already have valid cached data, return it (enrich with local name when missing)
   if (dbCached) {
-    return dbCached;
+    if (dbCached.companyName) return dbCached;
+    const name = localStockName(upper);
+    return name ? { ...dbCached, companyName: name } : dbCached;
   }
 
   // Not present or past expiry → query provider

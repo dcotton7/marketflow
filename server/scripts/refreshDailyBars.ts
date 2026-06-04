@@ -179,6 +179,7 @@ async function main() {
 
       const ema10 = calculateEMA(closes, 10);
       const ema20 = calculateEMA(closes, 20);
+      const sma20 = calculateSMA(closes, 20);
       const sma50 = calculateSMA(closes, 50);
       const sma200 = closes.length >= 200 ? calculateSMA(closes, 200) : null;
 
@@ -188,6 +189,7 @@ async function main() {
           symbol,
           ema10d: ema10?.toFixed(4) || null,
           ema20d: ema20?.toFixed(4) || null,
+          sma20d: sma20?.toFixed(4) || null,
           sma50d: sma50?.toFixed(4) || null,
           sma200d: sma200?.toFixed(4) || null,
           updatedAt: new Date(),
@@ -197,6 +199,7 @@ async function main() {
           set: {
             ema10d: sql`excluded.ema_10d`,
             ema20d: sql`excluded.ema_20d`,
+            sma20d: sql`excluded.sma_20d`,
             sma50d: sql`excluded.sma_50d`,
             sma200d: sql`excluded.sma_200d`,
             updatedAt: sql`now()`,

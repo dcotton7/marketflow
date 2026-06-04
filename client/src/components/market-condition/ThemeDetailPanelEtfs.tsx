@@ -1,6 +1,7 @@
 // ETFs tab for Focused Theme (Flow Map): only the selected theme’s proxies, bucketed by type.
 // Symbol clicks use the same handler as Theme Members (Choose On Click Action).
 import type { ETFProxy, ThemeRow } from "@/data/mockThemeData";
+import { getThemeChartSymbolCandidates } from "@/lib/theme-chart-symbols";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
@@ -196,11 +197,13 @@ function BucketBlock({
 
 export interface ThemeDetailPanelEtfsProps {
   theme: ThemeRow | null;
+  selectedSubthemeId?: string | null;
   onEtfSymbolClick: (symbol: string) => void;
 }
 
 export function ThemeDetailPanelEtfs({
   theme,
+  selectedSubthemeId,
   onEtfSymbolClick,
 }: ThemeDetailPanelEtfsProps) {
   if (!theme) {
@@ -213,9 +216,17 @@ export function ThemeDetailPanelEtfs({
 
   const proxies = theme.etfProxies ?? [];
   const parts = partitionProxies(proxies);
+  const primaryChartEtf = getThemeChartSymbolCandidates(theme, { subthemeId: selectedSubthemeId })[0];
 
   return (
     <div className="space-y-3 p-2 pb-4">
+      {primaryChartEtf ? (
+        <p className="rounded border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-[10px] text-cyan-200">
+          Primary chart ETF
+          {selectedSubthemeId ? " for this sub-theme" : ""}:{" "}
+          <span className="font-mono font-semibold">{primaryChartEtf}</span>
+        </p>
+      ) : null}
       <p className="flex items-start gap-1.5 rounded border border-slate-700/40 bg-slate-800/40 px-2 py-1.5 text-[10px] leading-snug text-slate-400">
         <Info className="mt-0.5 h-3 w-3 shrink-0 text-cyan-500/80" />
         <span>

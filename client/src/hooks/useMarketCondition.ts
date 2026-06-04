@@ -107,6 +107,7 @@ export interface ThemeMetrics {
   // Timestamp
   calculatedAt: string;
   timeSlice?: TimeSlice;
+  breakdownWatch?: import("@shared/theme-breakdown-watch").BreakdownWatchAssessment;
 }
 
 export interface TickerMetrics {
@@ -125,6 +126,7 @@ export interface TickerMetrics {
   isAbove200d?: boolean;
   pctVsEma10d?: number | null;
   pctVsEma20d?: number | null;
+  pctVsSma20d?: number | null;
   pctVsSma50d?: number | null;
   pctVsSma200d?: number | null;
   isCore: boolean;
@@ -179,6 +181,8 @@ export interface MarketConditionData {
   isStale: boolean;
   comparisonTime?: string | null; // ISO timestamp of baseline for deltaRank
   comparisonUnavailable?: string | null;
+  maAsOf?: string | null;
+  maMode?: "session_adjusted" | "eod_db" | null;
 }
 
 export interface MarketRegimeData {
@@ -204,6 +208,16 @@ export interface MarketRegimeData {
   isStale: boolean;
 }
 
+export interface UniverseParticipation {
+  pctUp: number;
+  pctDown: number;
+  pctFlat: number;
+  countUp: number;
+  countDown: number;
+  countFlat: number;
+  total: number;
+}
+
 export interface PollingStatus {
   isPolling: boolean;
   intervalMs: number;
@@ -216,6 +230,7 @@ export interface PollingStatus {
   clusterCount: number;
   overlayCount: number;
   marketSession: MarketSession;
+  universeParticipation?: UniverseParticipation;
 }
 
 export interface MarketConditionSettings {
@@ -280,35 +295,63 @@ async function putJson<T>(url: string, body: any): Promise<T> {
  * Refetches at interval from settings (default 1 min)
  */
 export function useMarketCondition(options?: { 
-  refetchInterval?: number;
+  enabled?: boolean;
+  refetchInterval?: number | false;
   timeSlice?: TimeSlice;
+  snapshotAt?: string | null;
   sizeFilter?: SizeFilter;
   useIntradayBaseline?: boolean;
   rotationBaseline?: "open930";
 }) {
+  const enabled = options?.enabled !== false;
   const { data: settings } = useQuery<MarketConditionSettings>({
     queryKey: ["market-condition", "settings"],
     queryFn: () => fetchJson(`${API_BASE}/settings`),
     staleTime: 60000,
   });
-  const themesInterval = options?.refetchInterval ?? settings?.clientThemesRefetchIntervalMs ?? 60000;
+  const themesInterval =
+    options?.refetchInterval === false
+      ? false
+      : (options?.refetchInterval ?? settings?.clientThemesRefetchIntervalMs ?? 60000);
 
   const params = new URLSearchParams();
-  if (options?.timeSlice) params.set("timeSlice", options.timeSlice);
+  if (options?.snapshotAt) {
+    params.set("snapshotAt", options.snapshotAt);
+  } else if (options?.timeSlice) {
+    params.set("timeSlice", options.timeSlice);
+  }
   if (options?.sizeFilter) params.set("sizeFilter", options.sizeFilter);
   if (options?.useIntradayBaseline) params.set("useIntradayBaseline", "true");
   if (options?.rotationBaseline) params.set("rotationBaseline", options.rotationBaseline);
   const queryString = params.toString();
   const url = queryString ? `${API_BASE}/themes?${queryString}` : `${API_BASE}/themes`;
+  const isLive = !options?.snapshotAt && (options?.timeSlice ?? "TODAY") === "TODAY";
   
   return useQuery<MarketConditionData>({
-    queryKey: ["market-condition", "themes", options?.timeSlice, options?.sizeFilter, options?.useIntradayBaseline, options?.rotationBaseline],
+    queryKey: ["market-condition", "themes", options?.timeSlice, options?.snapshotAt, options?.sizeFilter, options?.useIntradayBaseline, options?.rotationBaseline],
     queryFn: () => fetchJson(url),
+    enabled,
     staleTime: 2 * 60 * 1000,
     gcTime: 5000,
-    refetchInterval: options?.timeSlice === "TODAY" ? themesInterval : false,
+    refetchInterval: isLive ? themesInterval : false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+  });
+}
+
+export interface IntradaySnapshotSlot {
+  at: string;
+  label: string;
+}
+
+export function useIntradaySnapshotSlots(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled !== false;
+  return useQuery<{ slots: IntradaySnapshotSlot[] }>({
+    queryKey: ["market-condition", "intraday-snapshot-slots"],
+    queryFn: () => fetchJson(`${API_BASE}/intraday-snapshot-slots`),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: false,
   });
 }
 
@@ -316,7 +359,12 @@ export function useMarketCondition(options?: {
  * Get members for a specific theme
  * Refetches at interval from settings (default 1 min)
  */
-export function useThemeMembers(themeId: ClusterId | null, timeSlice?: TimeSlice) {
+export function useThemeMembers(
+  themeId: ClusterId | null,
+  options?: { timeSlice?: TimeSlice; snapshotAt?: string | null }
+) {
+  const timeSlice = options?.timeSlice;
+  const snapshotAt = options?.snapshotAt;
   const { data: settings } = useQuery<MarketConditionSettings>({
     queryKey: ["market-condition", "settings"],
     queryFn: () => fetchJson(`${API_BASE}/settings`),
@@ -324,9 +372,17 @@ export function useThemeMembers(themeId: ClusterId | null, timeSlice?: TimeSlice
   });
   const tickersInterval = settings?.clientTickersRefetchIntervalMs ?? 60000;
 
-  const url = timeSlice && timeSlice !== "TODAY"
-    ? `${API_BASE}/themes/${themeId}/members?timeSlice=${timeSlice}`
+  const params = new URLSearchParams();
+  if (snapshotAt) {
+    params.set("snapshotAt", snapshotAt);
+  } else if (timeSlice && timeSlice !== "TODAY") {
+    params.set("timeSlice", timeSlice);
+  }
+  const qs = params.toString();
+  const url = qs
+    ? `${API_BASE}/themes/${themeId}/members?${qs}`
     : `${API_BASE}/themes/${themeId}/members`;
+  const isLive = !snapshotAt && (!timeSlice || timeSlice === "TODAY");
 
   return useQuery<{ 
     themeId: string; 
@@ -334,12 +390,14 @@ export function useThemeMembers(themeId: ClusterId | null, timeSlice?: TimeSlice
     totalCount: number; 
     leaderCount: number;
     accDistStats?: AccDistStats;
+    maAsOf?: string | null;
+    maMode?: "session_adjusted" | "eod_db" | null;
   }>({
-    queryKey: ["market-condition", "members", themeId, timeSlice],
+    queryKey: ["market-condition", "members", themeId, timeSlice, snapshotAt],
     queryFn: () => fetchJson(url),
     enabled: !!themeId,
     staleTime: 30000,
-    refetchInterval: themeId ? tickersInterval : false,
+    refetchInterval: themeId && isLive ? tickersInterval : false,
     refetchIntervalInBackground: true,
   });
 }

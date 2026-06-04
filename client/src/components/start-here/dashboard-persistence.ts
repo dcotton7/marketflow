@@ -1,5 +1,7 @@
 import type { Layout } from "react-grid-layout/legacy";
 import type { StartHereInterval } from "@/components/MiniChart";
+import type { LiveThemeChartsConfig } from "@/lib/live-theme-charts";
+import { DEFAULT_LIVE_THEME_CHARTS_CONFIG, normalizeLiveThemeChartsConfig, estimateThemeChartsContentHeightPx } from "@/lib/live-theme-charts";
 import {
   DEFAULT_START_HERE_WORKSPACE_PALETTE,
   normalizeStartHereWorkspacePalette,
@@ -96,7 +98,7 @@ export function groupLinkAccent(
   return { accentColor: pal.unlinkedColor, accentLabel: UNLINKED_LABEL };
 }
 
-export type StartHereWidgetType = "watchlist" | "chart" | "news" | "flow";
+export type StartHereWidgetType = "watchlist" | "chart" | "news" | "flow" | "themeCharts";
 
 export interface StartHereGroupState {
   colorIndex: number;
@@ -116,6 +118,10 @@ export interface StartHereInstanceMeta {
   linkedSetId?: string;
   /** Prevent relinking/unlinking; used by linked chart sets. */
   linkedSetLocked?: boolean;
+  /** Set when spawned via Watchlist → Load list into charts (enables sync/removal). */
+  watchlistLoadSourceId?: string;
+  /** Live Theme Charts column config (only for `type === "themeCharts"`). */
+  liveThemeChartsConfig?: LiveThemeChartsConfig;
 }
 
 /** Persisted grid cell size for the default Market Flow tile (kept in sync when Default is on). */
@@ -158,7 +164,8 @@ function isStartHereWidgetType(t: unknown): t is StartHereWidgetType {
     t === "watchlist" ||
     t === "chart" ||
     t === "news" ||
-    t === "flow"
+    t === "flow" ||
+    t === "themeCharts"
   );
 }
 
@@ -320,6 +327,95 @@ export function startHereWatchlistColumnWidthsStorageKey(
   return `startHere.watchlistColWidths.${userId}.${startId}.${instanceId}`;
 }
 
+/** Bulk chart wall density for Load list into charts (per workspace). */
+export function startHereChartWallColumnsStorageKey(userId: number, startId: string) {
+  return `startHere.chartWallColumns.${userId}.${startId}`;
+}
+
+export type StartHereChartWallColumns = "auto" | 1 | 2 | 3 | 4 | 5 | 6;
+
+const CHART_WALL_COLUMN_VALUES: StartHereChartWallColumns[] = [
+  "auto",
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+];
+
+export function isStartHereChartWallColumns(x: unknown): x is StartHereChartWallColumns {
+  if (x === "auto") return true;
+  if (typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= 6) return true;
+  if (typeof x === "string") {
+    if (x === "auto") return true;
+    const n = Number(x);
+    return Number.isInteger(n) && n >= 1 && n <= 6;
+  }
+  return false;
+}
+
+export function parseStartHereChartWallColumns(raw: string | null): StartHereChartWallColumns {
+  if (raw == null) return "auto";
+  if (raw === "auto") return "auto";
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= 6) return n as StartHereChartWallColumns;
+  return "auto";
+}
+
+export function loadChartWallColumns(userId: number, startId: string): StartHereChartWallColumns {
+  try {
+    return parseStartHereChartWallColumns(
+      localStorage.getItem(startHereChartWallColumnsStorageKey(userId, startId))
+    );
+  } catch {
+    return "auto";
+  }
+}
+
+export function saveChartWallColumns(
+  userId: number,
+  startId: string,
+  value: StartHereChartWallColumns
+): void {
+  try {
+    localStorage.setItem(startHereChartWallColumnsStorageKey(userId, startId), String(value));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function chartWallColumnsLabel(value: StartHereChartWallColumns): string {
+  if (value === "auto") return "Auto";
+  return value === 1 ? "1 per row" : `${value} per row`;
+}
+
+/** Auto density from viewport width (used when preference is Auto). */
+export function resolveAutoChartsPerRow(clientWidthPx: number): number {
+  if (clientWidthPx >= 1800) return 6;
+  if (clientWidthPx >= 1500) return 5;
+  if (clientWidthPx >= 1024) return 3;
+  if (clientWidthPx >= 680) return 2;
+  return 1;
+}
+
+export function resolveChartsPerRowPreference(
+  clientWidthPx: number,
+  preference: StartHereChartWallColumns = "auto"
+): number {
+  if (preference !== "auto") return preference;
+  return resolveAutoChartsPerRow(clientWidthPx);
+}
+
+export function chartWidthForChartsPerRow(chartsPerRow: number): number {
+  const n = Math.max(1, Math.min(6, Math.floor(chartsPerRow)));
+  return Math.max(1, Math.floor(RGL_COLS / n));
+}
+
+export function listStartHereChartWallColumnOptions(): StartHereChartWallColumns[] {
+  return [...CHART_WALL_COLUMN_VALUES];
+}
+
 const legacyAuxMigratedFlagKey = (userId: number) =>
   `startHere.legacyAuxMigrated.${userId}`;
 
@@ -474,6 +570,10 @@ export function copyWatchlistAndNewsStorageForDuplicate(
       const v = localStorage.getItem(fromK);
       if (v != null) localStorage.setItem(toK, v);
     }
+    const wallFrom = startHereChartWallColumnsStorageKey(userId, fromStartId);
+    const wallTo = startHereChartWallColumnsStorageKey(userId, toStartId);
+    const wallV = localStorage.getItem(wallFrom);
+    if (wallV != null) localStorage.setItem(wallTo, wallV);
   } catch {
     /* ignore */
   }
@@ -497,6 +597,7 @@ export function purgeStartWorkspaceStorage(
       localStorage.removeItem(startHereNewsModeStorageKey(userId, i, startId));
       localStorage.removeItem(startHereWatchlistColumnWidthsStorageKey(userId, startId, i));
     }
+    localStorage.removeItem(startHereChartWallColumnsStorageKey(userId, startId));
   } catch {
     /* ignore */
   }
@@ -524,6 +625,7 @@ const WIDGET_TEMPLATE: Record<
   chart: { w: 4, h: 10, minW: 2, minH: 4 },
   news: { w: 4, h: 14, minW: 2, minH: 5 },
   flow: { w: 12, h: 8, minW: 1, minH: 2 },
+  themeCharts: { w: 12, h: 40, minW: 6, minH: 12 },
 };
 
 function isValidFlowGridCells(x: unknown): x is StartHereFlowGridCells {
@@ -583,6 +685,7 @@ const DEFAULT_LAYOUT_POSITIONS: Record<StartHereWidgetType, { x: number; y: numb
   chart: { x: 4, y: 0 },
   news: { x: 8, y: 0 },
   flow: { x: 0, y: 14 },
+  themeCharts: { x: 0, y: 22 },
 };
 
 /** Stable ids for factory / reset (one shared group). */
@@ -591,12 +694,13 @@ export const DEFAULT_INSTANCE_IDS: Record<StartHereWidgetType, string> = {
   chart: "sh_inst_chart",
   news: "sh_inst_news",
   flow: "sh_inst_flow",
+  themeCharts: "sh_inst_theme_charts",
 };
 
 export const DEFAULT_GROUP_ID = "sh_g_default";
 
 function isStartHereInterval(x: unknown): x is StartHereInterval {
-  return x === "1d" || x === "5m" || x === "15m";
+  return x === "1d" || x === "5m" || x === "15m" || x === "30m";
 }
 
 /** Layout cell size (w/h/minW/minH) from the favorited default chart, or chart template fallback. */
@@ -816,6 +920,41 @@ function newLinkedSetId(): string {
   return `sh_ls_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
+/** Grid w/h for Live Theme Charts from row count (fits all rows without inner scroll). */
+export function themeChartsTemplateCellsFromConfig(
+  config: LiveThemeChartsConfig,
+  rowHeightPx: number = START_HERE_RGL_ROW_HEIGHT
+): { w: number; h: number; minW: number; minH: number } {
+  const base = WIDGET_TEMPLATE.themeCharts;
+  const contentPx = estimateThemeChartsContentHeightPx(config);
+  const unit = rowHeightPx + START_HERE_RGL_MARGIN[1];
+  const padY = START_HERE_RGL_CONTAINER_PADDING[1] * 2;
+  const h = Math.max(
+    base.minH,
+    Math.min(72, Math.ceil((contentPx + padY) / unit))
+  );
+  const w = base.w;
+  return { w, h, ...computeStartHereLayoutMins(w, h, "themeCharts") };
+}
+
+function applyThemeChartsLayoutHeight(
+  dashboard: StartHereDashboardV2,
+  instanceId: string,
+  config: LiveThemeChartsConfig
+): Layout {
+  const cells = themeChartsTemplateCellsFromConfig(config);
+  return dashboard.layout.map((l) => {
+    if (l.i !== instanceId) return l;
+    return {
+      ...l,
+      w: Math.max(l.w, cells.w),
+      h: cells.h,
+      minW: cells.minW,
+      minH: cells.minH,
+    };
+  }) as Layout;
+}
+
 export function appendWidget(
   dashboard: StartHereDashboardV2,
   type: StartHereWidgetType
@@ -827,7 +966,9 @@ export function appendWidget(
       ? flowTemplateCellsFromDefault(dashboard)
       : type === "chart"
         ? chartTemplateCellsFromDefault(dashboard)
-        : WIDGET_TEMPLATE[type];
+        : type === "themeCharts"
+          ? themeChartsTemplateCellsFromConfig(DEFAULT_LIVE_THEME_CHARTS_CONFIG)
+          : WIDGET_TEMPLATE[type];
   const pos =
     findFirstFreeGridPlacement(dashboard.layout, tm.w, tm.h) ??
     (() => {
@@ -844,7 +985,13 @@ export function appendWidget(
   const chartMeta: StartHereInstanceMeta =
     type === "chart"
       ? { type: "chart", groupId, chartInterval: interval }
-      : { type, groupId };
+      : type === "themeCharts"
+        ? {
+            type: "themeCharts",
+            groupId,
+            liveThemeChartsConfig: { ...DEFAULT_LIVE_THEME_CHARTS_CONFIG },
+          }
+        : { type, groupId };
   return {
     ...dashboard,
     layout: [...dashboard.layout, newItem],
@@ -863,11 +1010,11 @@ export function appendWidget(
   };
 }
 
-/** Spawn a locked 3-chart linked set (`1d`, `15m`, `5m`) sharing one group symbol. */
+/** Spawn a locked 4-chart linked set (`1d`, `30m`, `15m`, `5m`) sharing one group symbol. */
 export function appendLinkedChartTriplet(
   dashboard: StartHereDashboardV2
 ): StartHereDashboardV2 {
-  const intervals: StartHereInterval[] = ["1d", "15m", "5m"];
+  const intervals: StartHereInterval[] = ["1d", "30m", "15m", "5m"];
   const { w, h, minW, minH } = chartTemplateCellsFromDefault(dashboard);
   const linkedSetId = newLinkedSetId();
   const groupId = newGroupId();
@@ -1075,6 +1222,10 @@ export type StartHereWatchlistSpawnOpts = {
   inheritColorFromGroupId?: string;
   /** Prefer this when set (from live `dashboard.groups[gid].colorIndex` at click time). */
   inheritColorIndex?: number;
+  /** Watchlist widget instance id — charts spawned from Load list into charts. */
+  watchlistLoadSourceId?: string;
+  /** Never auto-remove these chart tiles during watchlist sync (e.g. default template chart). */
+  preserveChartInstanceIds?: string[];
 };
 
 function resolveSpawnColorIndex(
@@ -1151,6 +1302,9 @@ export function addChartFromWatchlistSymbol(
         groupId,
         chartInterval,
         ...(inheritGroupId && sym !== inheritedGroupSymbol ? { chartSymbolOverride: sym } : {}),
+        ...(opts?.watchlistLoadSourceId
+          ? { watchlistLoadSourceId: opts.watchlistLoadSourceId }
+          : {}),
       },
     },
     groups,
@@ -1165,37 +1319,323 @@ export const START_HERE_RGL_MARGIN: [number, number] = [8, 8];
 export const START_HERE_RGL_CONTAINER_PADDING: [number, number] = [4, 4];
 
 /** Approximate number of RGL row units visible in a container of this height (content box). */
-export function startHereVisibleGridRowCount(clientHeightPx: number): number {
+export function startHereVisibleGridRowCount(
+  clientHeightPx: number,
+  rowHeightPx: number = START_HERE_RGL_ROW_HEIGHT
+): number {
   const padY = START_HERE_RGL_CONTAINER_PADDING[1];
   const inner = Math.max(0, clientHeightPx - 2 * padY);
-  const unit = START_HERE_RGL_ROW_HEIGHT + START_HERE_RGL_MARGIN[1];
+  const unit = rowHeightPx + START_HERE_RGL_MARGIN[1];
   return Math.max(1, Math.floor(inner / unit));
+}
+
+export type StartHereChartGridCells = {
+  w: number;
+  h: number;
+  minW: number;
+  minH: number;
+};
+
+/** Live grid viewport measurements — used for bulk chart walls and responsive row height. */
+export type StartHereGridViewportMetrics = {
+  clientWidthPx: number;
+  clientHeightPx: number;
+  visibleRows: number;
+  /** Charts per row at `bulkChartCells.w`. */
+  chartsPerRow: number;
+  bulkChartCells: StartHereChartGridCells;
+  /** RGL rowHeight tuned for this viewport (clamped 20–28). */
+  suggestedRowHeight: number;
+};
+
+/** Pick chart tile w/h for bulk loads from viewport width and height. */
+export function resolveBulkChartCellsForViewport(
+  clientWidthPx: number,
+  clientHeightPx: number,
+  rowHeightPx: number = START_HERE_RGL_ROW_HEIGHT,
+  chartWallColumns: StartHereChartWallColumns = "auto"
+): StartHereChartGridCells {
+  const visibleRows = startHereVisibleGridRowCount(clientHeightPx, rowHeightPx);
+  const targetVisibleChartRows = clientHeightPx < 720 ? 1.5 : 2;
+  let chartH = Math.max(
+    WIDGET_TEMPLATE.chart.minH,
+    Math.min(14, Math.floor(visibleRows / targetVisibleChartRows))
+  );
+  if (clientHeightPx < 560) {
+    chartH = Math.max(WIDGET_TEMPLATE.chart.minH, chartH - 2);
+  } else if (clientHeightPx > 1100) {
+    chartH = Math.min(13, chartH + 1);
+  }
+
+  const chartsPerRow = resolveChartsPerRowPreference(clientWidthPx, chartWallColumns);
+  const chartW = chartWidthForChartsPerRow(chartsPerRow);
+
+  const w = Math.max(1, Math.min(RGL_COLS, chartW));
+  const h = Math.max(WIDGET_TEMPLATE.chart.minH, chartH);
+  return { w, h, ...computeStartHereLayoutMins(w, h, "chart") };
+}
+
+function suggestRowHeightForViewport(
+  clientHeightPx: number,
+  chartCells: StartHereChartGridCells
+): number {
+  const chromeOverheadPx = 148;
+  const targetTilePx = Math.min(440, Math.max(260, clientHeightPx * 0.36));
+  const plotBudgetPx = Math.max(120, targetTilePx - chromeOverheadPx);
+  const marginY = START_HERE_RGL_MARGIN[1];
+  const raw =
+    (plotBudgetPx + marginY) / Math.max(1, chartCells.h) - marginY;
+  return Math.max(20, Math.min(28, Math.round(raw)));
+}
+
+/** Viewport-aware grid metrics for Start Here (bulk chart sizing + responsive row height). */
+export function startHereGridViewportMetrics(
+  clientWidthPx: number,
+  clientHeightPx: number,
+  chartWallColumns: StartHereChartWallColumns = "auto"
+): StartHereGridViewportMetrics {
+  const width = Math.max(1, Math.floor(clientWidthPx));
+  const height = Math.max(1, Math.floor(clientHeightPx));
+  const chartsPerRow = resolveChartsPerRowPreference(width, chartWallColumns);
+  let bulkChartCells = resolveBulkChartCellsForViewport(width, height, START_HERE_RGL_ROW_HEIGHT, chartWallColumns);
+  let suggestedRowHeight = suggestRowHeightForViewport(height, bulkChartCells);
+  bulkChartCells = resolveBulkChartCellsForViewport(width, height, suggestedRowHeight, chartWallColumns);
+  suggestedRowHeight = suggestRowHeightForViewport(height, bulkChartCells);
+  const visibleRows = startHereVisibleGridRowCount(height, suggestedRowHeight);
+  return {
+    clientWidthPx: width,
+    clientHeightPx: height,
+    visibleRows,
+    chartsPerRow,
+    bulkChartCells,
+    suggestedRowHeight,
+  };
+}
+
+export type BulkChartPlacementCursor = { x: number; y: number; chartsInRow?: number };
+
+/**
+ * Row-major slot for bulk chart walls: fills left-to-right, then the next row.
+ * Falls back to hole scan when the cursor hits an existing tile.
+ */
+export function findBulkChartGridPlacement(
+  layout: Layout,
+  w: number,
+  h: number,
+  cols: number = RGL_COLS,
+  maxYExclusive?: number | null,
+  cursor?: BulkChartPlacementCursor | null,
+  maxChartsPerRow?: number | null
+): { pos: { x: number; y: number }; nextCursor: BulkChartPlacementCursor } | null {
+  if (w < 1 || h < 1 || w > cols) return null;
+  const boxes = layout.map((l) => ({ x: l.x, y: l.y, w: l.w, h: l.h }));
+  const layoutBottom =
+    boxes.length > 0 ? Math.max(...boxes.map((b) => b.y + b.h)) : 0;
+
+  let x = cursor?.x ?? 0;
+  let y = cursor?.y ?? layoutBottom;
+  let chartsInRow = cursor?.chartsInRow ?? 0;
+
+  for (let attempt = 0; attempt < 600; attempt++) {
+    if (maxChartsPerRow != null && maxChartsPerRow > 0 && chartsInRow >= maxChartsPerRow) {
+      x = 0;
+      y += h;
+      chartsInRow = 0;
+    }
+    if (x + w > cols) {
+      x = 0;
+      y += h;
+      chartsInRow = 0;
+    }
+    if (maxYExclusive != null && y + h > maxYExclusive) {
+      return null;
+    }
+    const cand = { x, y, w, h };
+    if (!boxes.some((b) => rectsOverlap(cand, b))) {
+      const placedInRow = chartsInRow + 1;
+      const nextX = x + w;
+      let nextCursor: BulkChartPlacementCursor;
+      if (maxChartsPerRow != null && maxChartsPerRow > 0 && placedInRow >= maxChartsPerRow) {
+        nextCursor = { x: 0, y: y + h, chartsInRow: 0 };
+      } else if (nextX + w <= cols) {
+        nextCursor = { x: nextX, y, chartsInRow: placedInRow };
+      } else {
+        nextCursor = { x: 0, y: y + h, chartsInRow: 0 };
+      }
+      return { pos: { x, y }, nextCursor };
+    }
+    x += w;
+    chartsInRow += 1;
+  }
+
+  const fallback = findFirstFreeGridPlacement(layout, w, h, cols, maxYExclusive ?? null);
+  if (!fallback) return null;
+  const nextX = fallback.x + w;
+  const nextCursor: BulkChartPlacementCursor =
+    nextX + w <= cols ? { x: nextX, y: fallback.y, chartsInRow: 1 } : { x: 0, y: fallback.y + h, chartsInRow: 0 };
+  return { pos: fallback, nextCursor };
 }
 
 export interface LoadChartsFromListResult {
   dashboard: StartHereDashboardV2;
   placed: number;
   skipped: number;
+  removed: number;
+}
+
+/** Effective ticker shown on a chart tile (override wins over link-group symbol). */
+export function chartEffectiveSymbol(
+  dashboard: StartHereDashboardV2,
+  instanceId: string
+): string | null {
+  const meta = dashboard.instances[instanceId];
+  if (!meta || meta.type !== "chart") return null;
+  const override = meta.chartSymbolOverride?.trim().toUpperCase();
+  if (override) return override;
+  const groupSym = (dashboard.groups[meta.groupId]?.symbol ?? "").trim().toUpperCase();
+  return groupSym || null;
+}
+
+/** Charts this watchlist widget owns (sync/replace on Load list into charts). */
+function chartsManagedByWatchlistLoad(
+  dashboard: StartHereDashboardV2,
+  options?: StartHereWatchlistSpawnOpts
+): string[] {
+  const inheritGroupId = options?.inheritGroupId;
+  const loadSourceId = options?.watchlistLoadSourceId;
+  const preserve = new Set(options?.preserveChartInstanceIds ?? []);
+  return Object.entries(dashboard.instances)
+    .filter(([instanceId, meta]) => {
+      if (preserve.has(instanceId)) return false;
+      if (meta.type !== "chart") return false;
+      if (meta.linkedSetLocked) return false;
+      if (loadSourceId && meta.watchlistLoadSourceId === loadSourceId) return true;
+      // Legacy bulk loads on same link lane before tagging existed.
+      if (
+        loadSourceId &&
+        inheritGroupId &&
+        meta.groupId === inheritGroupId &&
+        !meta.watchlistLoadSourceId
+      ) {
+        return true;
+      }
+      return false;
+    })
+    .map(([id]) => id);
+}
+
+/** Untagged duplicate tiles (broken pre-sync loads) whose symbol is in the target list. */
+function legacyDuplicateChartIds(
+  dashboard: StartHereDashboardV2,
+  symbols: string[],
+  options?: StartHereWatchlistSpawnOpts
+): string[] {
+  const targetSet = new Set(symbols);
+  const preserve = new Set(options?.preserveChartInstanceIds ?? []);
+  const managed = new Set(chartsManagedByWatchlistLoad(dashboard, options));
+  return Object.entries(dashboard.instances)
+    .filter(([instanceId, meta]) => {
+      if (preserve.has(instanceId) || managed.has(instanceId)) return false;
+      if (meta.type !== "chart" || meta.linkedSetLocked) return false;
+      if (meta.watchlistLoadSourceId) return false;
+      const sym = chartEffectiveSymbol(dashboard, instanceId);
+      return Boolean(sym && targetSet.has(sym));
+    })
+    .map(([id]) => id);
+}
+
+function managedSymbolSet(
+  dashboard: StartHereDashboardV2,
+  managedIds: string[]
+): Set<string> {
+  const out = new Set<string>();
+  for (const id of managedIds) {
+    const sym = chartEffectiveSymbol(dashboard, id);
+    if (sym) out.add(sym);
+  }
+  return out;
+}
+
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
 }
 
 export function loadChartsFromList(
   dashboard: StartHereDashboardV2,
   symbolsRaw: string[],
-  options?: { maxAdditionalGridRows?: number } & StartHereWatchlistSpawnOpts
+  options?: {
+    maxAdditionalGridRows?: number;
+    gridViewport?: StartHereGridViewportMetrics;
+  } & StartHereWatchlistSpawnOpts
 ): LoadChartsFromListResult {
   const symbols = Array.from(
     new Set(symbolsRaw.map((s) => s.trim().toUpperCase()).filter(Boolean))
   ).slice(0, START_HERE_MAX_LOAD_CHARTS);
-  if (!symbols.length) {
-    return { dashboard, placed: 0, skipped: 0 };
+
+  const inheritGroupId =
+    options?.inheritGroupId && dashboard.groups[options.inheritGroupId]
+      ? options.inheritGroupId
+      : undefined;
+  const loadSourceId = options?.watchlistLoadSourceId;
+  const syncWithExisting = Boolean(inheritGroupId || loadSourceId);
+
+  let working = dashboard;
+  let removed = 0;
+
+  const syncOpts = {
+    inheritGroupId,
+    watchlistLoadSourceId: loadSourceId,
+    preserveChartInstanceIds: options?.preserveChartInstanceIds,
+  };
+
+  if (syncWithExisting && loadSourceId) {
+    const targetSet = new Set(symbols);
+
+    for (const instanceId of legacyDuplicateChartIds(working, symbols, syncOpts)) {
+      working = removeInstance(working, instanceId);
+      removed += 1;
+    }
+
+    let managedIds = chartsManagedByWatchlistLoad(working, syncOpts);
+    const managedSymbols = managedSymbolSet(working, managedIds);
+    const needsReplace =
+      symbols.length === 0
+        ? managedIds.length > 0
+        : !setsEqual(managedSymbols, targetSet) || managedIds.length !== symbols.length;
+
+    if (needsReplace) {
+      managedIds = chartsManagedByWatchlistLoad(working, syncOpts);
+      for (const instanceId of managedIds) {
+        working = removeInstance(working, instanceId);
+        removed += 1;
+      }
+    }
+  } else if (syncWithExisting) {
+    const targetSet = new Set(symbols);
+    for (const instanceId of chartsManagedByWatchlistLoad(working, syncOpts)) {
+      const sym = chartEffectiveSymbol(working, instanceId);
+      if (!sym || !targetSet.has(sym)) {
+        working = removeInstance(working, instanceId);
+        removed += 1;
+      }
+    }
   }
 
-  const { w, h, minW, minH } = chartTemplateCellsFromDefault(dashboard);
-  const chartInterval = dashboard.defaultChartInterval ?? "1d";
+  if (!symbols.length) {
+    return { dashboard: working, placed: 0, skipped: 0, removed };
+  }
+
+  const templateCells = chartTemplateCellsFromDefault(working);
+  const bulkCells = options?.gridViewport?.bulkChartCells;
+  const { w, h, minW, minH } = bulkCells ?? templateCells;
+  const useRowMajorPack = Boolean(bulkCells);
+  const chartInterval = working.defaultChartInterval ?? "1d";
 
   const layoutBottom =
-    dashboard.layout.length > 0
-      ? Math.max(...dashboard.layout.map((l) => l.y + l.h))
+    working.layout.length > 0
+      ? Math.max(...working.layout.map((l) => l.y + l.h))
       : 0;
 
   const maxYExclusive =
@@ -1203,27 +1643,60 @@ export function loadChartsFromList(
       ? layoutBottom + options.maxAdditionalGridRows
       : null;
 
-  const layout = [...dashboard.layout];
-  const instances = { ...dashboard.instances };
-  let groups: Record<string, StartHereGroupState> = mergeLinkLanesIntoGroups({ ...dashboard.groups });
-  const inheritGroupId =
-    options?.inheritGroupId && groups[options.inheritGroupId] ? options.inheritGroupId : null;
+  let symbolsToAdd: string[];
+  if (syncWithExisting && loadSourceId) {
+    const managedIds = chartsManagedByWatchlistLoad(working, syncOpts);
+    const managedSymbols = managedSymbolSet(working, managedIds);
+    symbolsToAdd = symbols.filter((sym) => !managedSymbols.has(sym));
+  } else if (syncWithExisting) {
+    const existingSymbols = managedSymbolSet(
+      working,
+      chartsManagedByWatchlistLoad(working, syncOpts)
+    );
+    symbolsToAdd = symbols.filter((sym) => !existingSymbols.has(sym));
+  } else {
+    symbolsToAdd = symbols;
+  }
+
+  const layout = [...working.layout];
+  const instances = { ...working.instances };
+  let groups: Record<string, StartHereGroupState> = mergeLinkLanesIntoGroups({ ...working.groups });
   const inheritedGroupSymbol = inheritGroupId
     ? (groups[inheritGroupId]?.symbol ?? "").trim().toUpperCase()
     : "";
 
   let placed = 0;
   let skipped = 0;
+  let bulkCursor: BulkChartPlacementCursor | null = null;
 
-  for (let idx = 0; idx < symbols.length; idx++) {
-    const sym = symbols[idx];
-    const pos =
-      maxYExclusive != null
-        ? findFirstFreeGridPlacement(layout, w, h, RGL_COLS, maxYExclusive)
-        : findFirstFreeGridPlacement(layout, w, h, RGL_COLS, null);
-    if (!pos) {
-      skipped = symbols.length - idx;
-      break;
+  for (let idx = 0; idx < symbolsToAdd.length; idx++) {
+    const sym = symbolsToAdd[idx];
+    let pos: { x: number; y: number } | null;
+    if (useRowMajorPack) {
+      const packed = findBulkChartGridPlacement(
+        layout,
+        w,
+        h,
+        RGL_COLS,
+        maxYExclusive,
+        bulkCursor,
+        options?.gridViewport?.chartsPerRow ?? null
+      );
+      if (!packed) {
+        skipped = symbolsToAdd.length - idx;
+        break;
+      }
+      pos = packed.pos;
+      bulkCursor = packed.nextCursor;
+    } else {
+      pos =
+        maxYExclusive != null
+          ? findFirstFreeGridPlacement(layout, w, h, RGL_COLS, maxYExclusive)
+          : findFirstFreeGridPlacement(layout, w, h, RGL_COLS, null);
+      if (!pos) {
+        skipped = symbolsToAdd.length - idx;
+        break;
+      }
     }
     const instanceId = newInstanceId();
     const groupId = inheritGroupId ?? newGroupId();
@@ -1241,9 +1714,12 @@ export function loadChartsFromList(
       groupId,
       chartInterval,
       ...(inheritGroupId && sym !== inheritedGroupSymbol ? { chartSymbolOverride: sym } : {}),
+      ...(options?.watchlistLoadSourceId
+        ? { watchlistLoadSourceId: options.watchlistLoadSourceId }
+        : {}),
     };
     if (!inheritGroupId) {
-      const colorIndex = resolveSpawnColorIndex(dashboard, groups, options);
+      const colorIndex = resolveSpawnColorIndex(working, groups, options);
       groups[groupId] = {
         colorIndex: colorIndex ?? 0,
         accentColorIndex: colorIndex,
@@ -1255,13 +1731,127 @@ export function loadChartsFromList(
 
   return {
     dashboard: {
-      ...dashboard,
+      ...working,
       layout,
       instances,
       groups,
     },
     placed,
     skipped,
+    removed,
+  };
+}
+
+export type ReflowWatchlistChartWallsResult = {
+  dashboard: StartHereDashboardV2;
+  /** Number of chart tiles resized/repositioned. */
+  reflowed: number;
+};
+
+/**
+ * Repack watchlist-owned chart walls when chart wall density changes.
+ * One wall per watchlist widget (includes legacy untagged charts on the same lane).
+ */
+export function reflowWatchlistChartWalls(
+  dashboard: StartHereDashboardV2,
+  chartWallColumns: StartHereChartWallColumns,
+  viewport?: Pick<
+    StartHereGridViewportMetrics,
+    "clientWidthPx" | "clientHeightPx" | "suggestedRowHeight"
+  > | null
+): ReflowWatchlistChartWallsResult {
+  const width = viewport?.clientWidthPx ?? 1200;
+  const height = viewport?.clientHeightPx ?? 900;
+  const rowHeight = viewport?.suggestedRowHeight ?? START_HERE_RGL_ROW_HEIGHT;
+  const { w, h, minW, minH } = resolveBulkChartCellsForViewport(
+    width,
+    height,
+    rowHeight,
+    chartWallColumns
+  );
+  const chartsPerRow = resolveChartsPerRowPreference(width, chartWallColumns);
+  const preserveIds = dashboard.defaultChartInstanceId
+    ? [dashboard.defaultChartInstanceId]
+    : [];
+
+  const watchlistIds = Object.entries(dashboard.instances)
+    .filter(([, meta]) => meta.type === "watchlist")
+    .map(([id]) => id);
+
+  if (watchlistIds.length === 0) {
+    return { dashboard, reflowed: 0 };
+  }
+
+  let layout = [...dashboard.layout];
+  let reflowed = 0;
+
+  for (const watchlistId of watchlistIds) {
+    const wlMeta = dashboard.instances[watchlistId];
+    if (wlMeta?.type !== "watchlist") continue;
+
+    const chartIds = chartsManagedByWatchlistLoad(dashboard, {
+      watchlistLoadSourceId: watchlistId,
+      inheritGroupId: wlMeta.groupId,
+      preserveChartInstanceIds: preserveIds,
+    });
+    if (chartIds.length === 0) continue;
+
+    const groupLayouts = chartIds
+      .map((id) => layout.find((l) => l.i === id))
+      .filter((l): l is Layout[number] => l != null);
+    if (groupLayouts.length === 0) continue;
+
+    const anchorY = Math.min(...groupLayouts.map((l) => l.y));
+    const topRow = groupLayouts.filter((l) => l.y === anchorY);
+    const startX = Math.min(...topRow.map((l) => l.x));
+    const startY = anchorY;
+    const chartIdSet = new Set(chartIds);
+
+    const withoutGroup = layout.filter((l) => !chartIdSet.has(l.i));
+    let workingLayout = [...withoutGroup];
+    let cursor: BulkChartPlacementCursor = { x: startX, y: startY, chartsInRow: 0 };
+
+    const sortedChartIds = [...chartIds].sort((a, b) => {
+      const la = layout.find((l) => l.i === a)!;
+      const lb = layout.find((l) => l.i === b)!;
+      return la.y - lb.y || la.x - lb.x;
+    });
+
+    for (const instanceId of sortedChartIds) {
+      const packed = findBulkChartGridPlacement(
+        workingLayout,
+        w,
+        h,
+        RGL_COLS,
+        null,
+        cursor,
+        chartsPerRow
+      );
+      if (!packed) break;
+
+      const newItem: Layout[number] = {
+        i: instanceId,
+        x: packed.pos.x,
+        y: packed.pos.y,
+        w,
+        h,
+        minW,
+        minH,
+      };
+      workingLayout = [...workingLayout, newItem];
+      cursor = packed.nextCursor;
+      layout = layout.map((l) => (l.i === instanceId ? newItem : l));
+      reflowed += 1;
+    }
+  }
+
+  if (reflowed === 0) {
+    return { dashboard, reflowed: 0 };
+  }
+
+  return {
+    dashboard: mergePersistedGridLayout(dashboard, layout as Layout),
+    reflowed,
   };
 }
 
@@ -1281,6 +1871,31 @@ export function setChartInstanceInterval(
     defaultChartInterval = interval;
   }
   return { ...dashboard, instances, defaultChartInterval };
+}
+
+export function setLiveThemeChartsConfig(
+  dashboard: StartHereDashboardV2,
+  instanceId: string,
+  config: LiveThemeChartsConfig,
+  options?: { setWorkspaceChartDefault?: boolean }
+): StartHereDashboardV2 {
+  const meta = dashboard.instances[instanceId];
+  if (!meta || meta.type !== "themeCharts") return dashboard;
+  const liveThemeChartsConfig = normalizeLiveThemeChartsConfig(config);
+  return {
+    ...dashboard,
+    layout: applyThemeChartsLayoutHeight(dashboard, instanceId, liveThemeChartsConfig),
+    instances: {
+      ...dashboard.instances,
+      [instanceId]: {
+        ...meta,
+        liveThemeChartsConfig,
+      },
+    },
+    ...(options?.setWorkspaceChartDefault
+      ? { defaultChartInterval: liveThemeChartsConfig.chartInterval }
+      : {}),
+  };
 }
 
 export function setInstanceGroupId(
@@ -1460,6 +2075,11 @@ export function sanitizeDashboard(d: StartHereDashboardV2): StartHereDashboardV2
           : undefined;
       const rawLinkedLocked = (m as { linkedSetLocked?: unknown }).linkedSetLocked;
       const linkedSetLocked = rawLinkedLocked === true;
+      const rawLoadSource = (m as { watchlistLoadSourceId?: unknown }).watchlistLoadSourceId;
+      const watchlistLoadSourceId =
+        typeof rawLoadSource === "string" && rawLoadSource.trim()
+          ? rawLoadSource.trim()
+          : undefined;
       instances[k] = {
         type: "chart",
         groupId: m.groupId,
@@ -1467,7 +2087,13 @@ export function sanitizeDashboard(d: StartHereDashboardV2): StartHereDashboardV2
         ...(chartSymbolOverride ? { chartSymbolOverride } : {}),
         ...(linkedSetId ? { linkedSetId } : {}),
         ...(linkedSetLocked ? { linkedSetLocked: true } : {}),
+        ...(watchlistLoadSourceId ? { watchlistLoadSourceId } : {}),
       };
+    } else if (m.type === "themeCharts") {
+      const liveThemeChartsConfig = normalizeLiveThemeChartsConfig(
+        (m as { liveThemeChartsConfig?: unknown }).liveThemeChartsConfig
+      );
+      instances[k] = { type: "themeCharts", groupId: m.groupId, liveThemeChartsConfig };
     } else {
       instances[k] = { type: m.type, groupId: m.groupId };
     }
@@ -1657,6 +2283,8 @@ export interface StartHereExtrasPersisted {
   newsMode?: Record<string, string>;
   /** Per watchlist widget instance: serialized `WatchlistColumnProfileFile` (v2 JSON: visible columns + widths). */
   watchlistColWidths?: Record<string, string>;
+  /** Bulk chart wall density for Load list into charts. */
+  chartWallColumns?: StartHereChartWallColumns;
 }
 
 export function gatherStartHereExtras(
@@ -1693,7 +2321,7 @@ export function gatherStartHereExtras(
       /* ignore */
     }
   }
-  return { watchlistPick, newsMode, watchlistColWidths };
+  return { watchlistPick, newsMode, watchlistColWidths, chartWallColumns: loadChartWallColumns(userId, startId) };
 }
 
 export function applyStartHereExtras(
@@ -1726,6 +2354,9 @@ export function applyStartHereExtras(
     for (const [iid, v] of Object.entries(e.watchlistColWidths ?? {})) {
       if (!dashboard.instances[iid] || typeof v !== "string") continue;
       localStorage.setItem(startHereWatchlistColumnWidthsStorageKey(userId, startId, iid), v);
+    }
+    if (isStartHereChartWallColumns(e.chartWallColumns)) {
+      saveChartWallColumns(userId, startId, e.chartWallColumns);
     }
   } catch {
     /* ignore */

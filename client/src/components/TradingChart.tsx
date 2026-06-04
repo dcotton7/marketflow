@@ -20,6 +20,7 @@ import {
   DEFAULT_CHART_MA_LIMITS,
   isMaRowFeasibleForTimeframe,
 } from "@/lib/chart-ma-feasibility";
+import { resolveChartBackgroundColor } from "@/lib/chart-preferences-shared";
 import { Button } from "@/components/ui/button";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
@@ -179,6 +180,8 @@ export interface TradingChartProps {
   whiteExtendedHoursCandles?: boolean;
   /** When set, MAs that exceed provider lookback are hidden (matches Indicator Settings). */
   maDataLimits?: ChartMaDataLimits;
+  /** Plot background; null/undefined uses user preference default (#0f172a). */
+  chartBackgroundColor?: string | null;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -531,7 +534,9 @@ export function TradingChart({
   onChartMouseUp,
   whiteExtendedHoursCandles = false,
   maDataLimits,
+  chartBackgroundColor,
 }: TradingChartProps) {
+  const resolvedChartBg = resolveChartBackgroundColor(chartBackgroundColor);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -753,7 +758,7 @@ export function TradingChart({
       width: containerRef.current.clientWidth,
       height: containerHeight,
       layout: {
-        background: { type: ColorType.Solid, color: "#0f172a" },
+        background: { type: ColorType.Solid, color: resolvedChartBg },
         textColor: "#94a3b8",
       },
       grid: {
@@ -980,6 +985,15 @@ export function TradingChart({
       maDataLimits
     );
   }, [maSettings, timeframe, candleSyncKey, maDataLimits]);
+
+  useEffect(() => {
+    if (!chartRef.current || !chartReady) return;
+    chartRef.current.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: resolvedChartBg },
+      },
+    });
+  }, [resolvedChartBg, chartReady]);
 
   useEffect(() => {
     if (!chartRef.current || !height) return;

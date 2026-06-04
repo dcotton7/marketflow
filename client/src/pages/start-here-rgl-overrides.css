@@ -8,3 +8,25 @@
 .start-here-rgl .react-grid-placeholder {
   z-index: 210 !important;
 }
+
+/* Easier corner resize on dense chart walls */
+.start-here-rgl .react-grid-item > .react-resizable-handle {
+  width: 18px;
+  height: 18px;
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+}
+
+.start-here-rgl .react-grid-item:hover > .react-resizable-handle,
+.start-here-rgl .react-grid-item.resizing > .react-resizable-handle {
+  opacity: 0.9;
+}
+
+.start-here-rgl .react-grid-item > .react-resizable-handle::after {
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right-width: 2px;
+  border-bottom-width: 2px;
+}

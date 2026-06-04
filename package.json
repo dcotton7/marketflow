@@ -1,6 +1,6 @@
 {
   "name": "rest-express",
-  "version": "2.11.0",
+  "version": "2.12.0",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -13,6 +13,7 @@
     "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",
     "db:ensure-tier-overrides": "tsx server/scripts/ensureSentinelTierAccessOverridesTable.ts",
     "db:ensure-theme-members-ma": "tsx server/scripts/ensureUserChartThemeMembersMaColumns.ts",
+    "db:ensure-mini-ma": "tsx server/scripts/ensureMiniMaSettingsTable.ts",
     "db:deactivate-other-sentinel-users": "tsx server/scripts/deactivateNonForebodingSentinelUsers.ts",
     "universe:refresh": "tsx server/scripts/refreshUniverseConstituents.ts"
   },
@@ -46,6 +47,7 @@
     "@radix-ui/react-toggle": "^1.1.3",
     "@radix-ui/react-toggle-group": "^1.1.3",
     "@radix-ui/react-tooltip": "^1.2.0",
+    "@sendgrid/mail": "^8.1.6",
     "@tanstack/react-query": "^5.60.5",
     "@types/bcryptjs": "^2.4.6",
     "@types/multer": "^2.0.0",

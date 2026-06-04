@@ -1,0 +1,18 @@
+---
+description: Keep current project priorities front-of-mind
+alwaysApply: true
+---
+
+# Current Project Priorities
+
+Keep these three items visible in planning, scoping, and tradeoff discussions unless the user explicitly changes priorities:
+
+1. Alerts System
+2. Workspace systems
+3. Tightening of the admin and role-based system
+
+Guidance:
+
+- Treat these as user-level product priorities unless the user explicitly says something is admin-level.
+- When proposing or sequencing work, note whether it supports one of these three priorities.
+- If a task does not clearly support one of these priorities, do not force it; just keep the priorities visible.

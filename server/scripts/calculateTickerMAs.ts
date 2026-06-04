@@ -3,7 +3,8 @@
  * 
  * Reads from historical_bars table and calculates:
  * - EMA 10-day
- * - EMA 20-day  
+ * - EMA 20-day
+ * - SMA 20-day
  * - SMA 50-day
  * - SMA 200-day
  * 
@@ -116,6 +117,7 @@ async function main() {
 
     const ema10 = calculateEMA(closes, 10);
     const ema20 = calculateEMA(closes, 20);
+    const sma20 = calculateSMA(closes, 20);
     const sma50 = calculateSMA(closes, 50);
     const sma200 = closes.length >= 200 ? calculateSMA(closes, 200) : null;
 
@@ -125,6 +127,7 @@ async function main() {
         symbol,
         ema10d: ema10?.toFixed(4) || null,
         ema20d: ema20?.toFixed(4) || null,
+        sma20d: sma20?.toFixed(4) || null,
         sma50d: sma50?.toFixed(4) || null,
         sma200d: sma200?.toFixed(4) || null,
         updatedAt: new Date(),
@@ -134,6 +137,7 @@ async function main() {
         set: {
           ema10d: sql`excluded.ema_10d`,
           ema20d: sql`excluded.ema_20d`,
+          sma20d: sql`excluded.sma_20d`,
           sma50d: sql`excluded.sma_50d`,
           sma200d: sql`excluded.sma_200d`,
           updatedAt: sql`now()`,
@@ -143,6 +147,7 @@ async function main() {
     const maStatus = [
       ema10 ? `EMA10:${ema10.toFixed(2)}` : null,
       ema20 ? `EMA20:${ema20.toFixed(2)}` : null,
+      sma20 ? `SMA20:${sma20.toFixed(2)}` : null,
       sma50 ? `SMA50:${sma50.toFixed(2)}` : null,
       sma200 ? `SMA200:${sma200.toFixed(2)}` : null,
     ]

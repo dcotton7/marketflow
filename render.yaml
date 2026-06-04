@@ -10,3 +10,14 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
+  - type: cron
+    name: refresh-daily-bars
+    runtime: node
+    plan: starter
+    schedule: "30 21 * * 1-5"
+    buildCommand: npm install
+    startCommand: npx tsx server/scripts/refreshDailyBars.ts
+    envVars:
+      - key: NODE_ENV
+        value: production

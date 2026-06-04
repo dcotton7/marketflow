@@ -1,3 +1,5 @@
+import { isTradePlanEnabled, isTradePlanWatchlistColumn } from "@/lib/trade-plan-feature";
+
 /** Column ids for configurable watchlist tables (modal + Start Here portal). */
 
 export type WatchlistColumnId =
@@ -146,7 +148,9 @@ export function simpleDefaultProfile(variant: WatchlistTableVariant): WatchlistC
 
 export function allowedColumnIds(variant: WatchlistTableVariant): WatchlistColumnId[] {
   return (Object.keys(WATCHLIST_COLUMN_META) as WatchlistColumnId[]).filter(
-    (id) => variant === "portal" || !WATCHLIST_COLUMN_META[id].portalOnly
+    (id) =>
+      (variant === "portal" || !WATCHLIST_COLUMN_META[id].portalOnly) &&
+      (isTradePlanEnabled() || !isTradePlanWatchlistColumn(id))
   );
 }
 
@@ -200,6 +204,9 @@ export function normalizeWatchlistColumnEntries(
   }
   const order = defaultColumnOrder(variant);
   out.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  if (!isTradePlanEnabled()) {
+    return out.filter((c) => !isTradePlanWatchlistColumn(c.id));
+  }
   return out;
 }
 

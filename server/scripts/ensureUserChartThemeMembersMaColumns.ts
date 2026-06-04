@@ -14,7 +14,7 @@ import { initializeDatabase, getPool } from "../db";
   }
   try {
     await pool.query(
-      `ALTER TABLE "user_chart_preferences" ADD COLUMN IF NOT EXISTS "theme_members_ma1" text NOT NULL DEFAULT 'ema20d'`
+      `ALTER TABLE "user_chart_preferences" ADD COLUMN IF NOT EXISTS "theme_members_ma1" text NOT NULL DEFAULT 'sma20d'`
     );
     await pool.query(
       `ALTER TABLE "user_chart_preferences" ADD COLUMN IF NOT EXISTS "theme_members_ma2" text NOT NULL DEFAULT 'sma50d'`

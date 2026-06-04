@@ -20,10 +20,11 @@ import {
   markDailySnapshotSaved,
   getMarketDateTime,
   calculateDeltaRanks,
+  calculateDeltaRanksAt,
   calculateDeltaRanksFromOpen,
   getLatestDailySnapshot,
 } from "./theme-snapshots";
-import { getMADataForThemes } from "../../data-layer";
+import { getMADataForThemes, getSessionAdjustedMADataForSymbols, shouldRefreshSessionMa, type MaMode } from "../../data-layer";
 
 // =============================================================================
 // Types
@@ -41,6 +42,8 @@ export interface MarketConditionSnapshot {
   isStale: boolean;
   comparisonTime?: string | null; // ISO timestamp of the baseline snapshot for deltaRank
   comparisonUnavailable?: string | null;
+  maAsOf?: string | null;
+  maMode?: MaMode | null;
 }
 
 export interface SnapshotState {
@@ -49,7 +52,9 @@ export interface SnapshotState {
   spyBenchmark: BenchmarkData | null;
   benchmarks: Map<string, BenchmarkData>;
   themeMetrics: ThemeMetrics[];
-  maData: Map<string, { ema10d: number | null; ema20d: number | null; sma50d: number | null; sma200d: number | null }>;
+  maData: Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null }>;
+  maAsOf: Date | null;
+  maMode: MaMode;
   
   // Leaders per cluster
   clusterLeaders: Map<ClusterId, LeaderCandidate[]>;
@@ -74,6 +79,8 @@ const state: SnapshotState = {
   benchmarks: new Map(),
   themeMetrics: [],
   maData: new Map(),
+  maAsOf: null,
+  maMode: "eod_db",
   clusterLeaders: new Map(),
   lastSnapshotTime: null,
   lastLeaderRefreshTime: null,
@@ -188,23 +195,61 @@ export async function refreshSnapshot(
     const { getTickersBySize } = await import("../utils/size-filter-helper");
     const allowedTickers = sizeFilter !== "ALL" ? await getTickersBySize(sizeFilter) : undefined;
     
-    // Load pre-calculated MAs from ticker_ma table (for trend state and pct vs MA)
+    // Session-adjusted MAs (prior closes + today's live bar), refreshed at least every 5 minutes
     let smaData: Map<string, { sma50: number; sma200: number }> | undefined;
     try {
-      const fullMa = await getMADataForThemes();
-      state.maData = fullMa;
-      // Derive smaData for theme-level calculations
+      const snapshotInputs = new Map<string, { open: number; high: number; low: number; price: number; volume: number; vwap?: number }>();
+      for (const [sym, snap] of snapshots) {
+        snapshotInputs.set(sym.toUpperCase(), {
+          open: snap.open,
+          high: snap.high,
+          low: snap.low,
+          price: snap.price,
+          volume: snap.volume,
+          vwap: snap.vwap,
+        });
+      }
+
+      const forceMaRefresh = shouldRefreshSessionMa();
+      const sessionMa = await getSessionAdjustedMADataForSymbols(allTickers, snapshotInputs, forceMaRefresh);
+      state.maData = new Map(sessionMa.data);
+      state.maAsOf = sessionMa.asOf;
+      state.maMode = sessionMa.mode;
+
+      const eodMa = await getMADataForThemes();
+      for (const sym of allTickers) {
+        const key = sym.toUpperCase();
+        if (!state.maData.has(key)) {
+          const fallback = eodMa.get(key) ?? eodMa.get(sym);
+          if (fallback) state.maData.set(key, fallback);
+        }
+      }
+
       smaData = new Map();
-      for (const [sym, ma] of fullMa) {
+      for (const [sym, ma] of state.maData) {
         if (ma.sma50d != null && ma.sma200d != null) {
           smaData.set(sym, { sma50: ma.sma50d, sma200: ma.sma200d });
         }
       }
-      if (smaData.size > 0) {
-        console.log(`[MC-Snapshot] Loaded ${smaData.size} ticker MAs from database`);
-      }
+      console.log(
+        `[MC-Snapshot] Session-adjusted MAs: ${sessionMa.data.size} symbols (asOf=${sessionMa.asOf.toISOString()}, refreshed=${forceMaRefresh})`
+      );
     } catch (err) {
-      console.warn("[MC-Snapshot] Could not load ticker MAs, using VWAP fallback");
+      console.warn("[MC-Snapshot] Could not load session-adjusted MAs, falling back to EOD DB:", err);
+      try {
+        const fullMa = await getMADataForThemes();
+        state.maData = fullMa;
+        state.maAsOf = state.lastSnapshotTime ?? new Date();
+        state.maMode = "eod_db";
+        smaData = new Map();
+        for (const [sym, ma] of fullMa) {
+          if (ma.sma50d != null && ma.sma200d != null) {
+            smaData.set(sym, { sma50: ma.sma50d, sma200: ma.sma200d });
+          }
+        }
+      } catch {
+        console.warn("[MC-Snapshot] EOD MA fallback also failed, using VWAP for trend state");
+      }
     }
     
     // Calculate theme metrics with optional size filter and SMA data
@@ -590,6 +635,13 @@ function getBenchmarksRecord(): Record<BenchmarkSymbol, BenchmarkData> {
  */
 const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes - don't mark stale if updated recently
 
+export function getMaMetadata(): { maAsOf: string | null; maMode: MaMode } {
+  return {
+    maAsOf: state.maAsOf?.toISOString() ?? null,
+    maMode: state.maMode,
+  };
+}
+
 export function getMarketCondition(): MarketConditionSnapshot {
   const isStale = !state.lastSnapshotTime ||
     Date.now() - state.lastSnapshotTime.getTime() > STALE_THRESHOLD_MS;
@@ -607,12 +659,67 @@ export function getMarketCondition(): MarketConditionSnapshot {
     benchmarks: getBenchmarksRecord(),
     lastUpdated: state.lastSnapshotTime || new Date(),
     isStale,
+    maAsOf: state.maAsOf?.toISOString() ?? null,
+    maMode: state.maMode,
   };
 }
 
 /**
  * Get market condition with deltaRank calculated against a specific time slice
  */
+/**
+ * Compare current theme ranks to a specific stored intraday snapshot timestamp.
+ */
+export async function getMarketConditionAtComparisonTime(
+  comparisonAtIso: string
+): Promise<MarketConditionSnapshot> {
+  const isStale =
+    !state.lastSnapshotTime ||
+    Date.now() - state.lastSnapshotTime.getTime() > STALE_THRESHOLD_MS;
+
+  let themes = [...state.themeMetrics];
+  let comparisonTime: string | null = null;
+  let comparisonUnavailable: string | null = null;
+
+  if (themes.length > 0) {
+    const deltaResult = await calculateDeltaRanksAt(themes, comparisonAtIso);
+    themes = themes.map((theme) => ({
+      ...theme,
+      deltaRank: deltaResult.deltas.get(theme.id) ?? 0,
+      historicalMetrics: deltaResult.historicalMetrics?.get(theme.id) ?? {
+        rank: theme.rank,
+        score: theme.score,
+        medianPct: theme.medianPct,
+        rsVsBenchmark: theme.rsVsBenchmark ?? theme.rsVsSpy ?? 0,
+        breadthPct: theme.breadthPct,
+      },
+    }));
+    comparisonTime = deltaResult.comparisonTime;
+    if (!comparisonTime) {
+      comparisonUnavailable = "No snapshot data at that time yet.";
+    }
+  }
+
+  return {
+    themes,
+    spyBenchmark: state.spyBenchmark || {
+      symbol: "SPY",
+      price: 0,
+      prevClose: 0,
+      changePct: 0,
+      volume: 0,
+      timestamp: new Date(),
+    },
+    benchmarks: getBenchmarksRecord(),
+    lastUpdated: state.lastSnapshotTime || new Date(),
+    isStale,
+    comparisonTime,
+    comparisonUnavailable,
+    maAsOf: state.maAsOf?.toISOString() ?? null,
+    maMode: state.maMode,
+  };
+}
+
 export async function getMarketConditionWithTimeSlice(timeSlice: TimeSlice): Promise<MarketConditionSnapshot> {
   const isStale = !state.lastSnapshotTime ||
     Date.now() - state.lastSnapshotTime.getTime() > STALE_THRESHOLD_MS;
@@ -663,6 +770,8 @@ export async function getMarketConditionWithTimeSlice(timeSlice: TimeSlice): Pro
     isStale,
     comparisonTime,
     comparisonUnavailable,
+    maAsOf: state.maAsOf?.toISOString() ?? null,
+    maMode: state.maMode,
   };
 }
 
@@ -706,6 +815,8 @@ export async function getMarketConditionWithOpenBaseline(): Promise<MarketCondit
     isStale,
     comparisonTime,
     comparisonUnavailable,
+    maAsOf: state.maAsOf?.toISOString() ?? null,
+    maMode: state.maMode,
   };
 }
 
@@ -762,6 +873,52 @@ export function getTickerSnapshot(symbol: string): TickerSnapshot | undefined {
  */
 export function getSPYBenchmark(): BenchmarkData | null {
   return state.spyBenchmark;
+}
+
+export interface UniverseParticipation {
+  pctUp: number;
+  pctDown: number;
+  pctFlat: number;
+  countUp: number;
+  countDown: number;
+  countFlat: number;
+  total: number;
+}
+
+/** Share of universe tickers up / down / flat by session change %. */
+export function getUniverseParticipation(): UniverseParticipation {
+  let countUp = 0;
+  let countDown = 0;
+  let countFlat = 0;
+
+  for (const snap of state.snapshots.values()) {
+    if (snap.changePct > 0) countUp++;
+    else if (snap.changePct < 0) countDown++;
+    else countFlat++;
+  }
+
+  const total = countUp + countDown + countFlat;
+  if (total === 0) {
+    return {
+      pctUp: 50,
+      pctDown: 50,
+      pctFlat: 0,
+      countUp: 0,
+      countDown: 0,
+      countFlat: 0,
+      total: 0,
+    };
+  }
+
+  return {
+    pctUp: Math.round((countUp / total) * 1000) / 10,
+    pctDown: Math.round((countDown / total) * 1000) / 10,
+    pctFlat: Math.round((countFlat / total) * 1000) / 10,
+    countUp,
+    countDown,
+    countFlat,
+    total,
+  };
 }
 
 /**

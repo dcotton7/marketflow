@@ -42,10 +42,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChartCandle, ChartIndicators, ChartMarker, DiamondMarker, PriceLevelLine, BaseZone } from "@/components/TradingChart";
 import { DualChartGrid, type ChartMetrics } from "@/components/DualChartGrid";
+import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimeframe";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
 import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useSelectedWatchlistId, useWatchlists } from "@/hooks/use-watchlist";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { BulkAddToWatchlist } from "@/components/BulkAddToWatchlist";
 import {
@@ -149,6 +151,8 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
   slowPeriod: "Longer MA period. Shows the bigger-picture trend direction.",
   maxDistance: "Max gap between MAs (%). Higher = looser (allows wider spread); lower = tighter (MAs must be close).",
   lookback: "How far back to look (in bars). For Base Depth (PA-4): the window to find the highest high — 60 bars ≈ 3 months; larger catches bigger moves. For Base Count (PA-5): the history to scan for base formations. For Breakout (PA-7): how many recent bars to check for a breakout candle (1-3 = just happened; 10 = within last 2 weeks).",
+  lookbackMinutes: "How far back in wall-clock minutes to search for the cross on intraday bars. 30 = last half hour using 5-minute bars.",
+  intradayTimeframe: "Intraday bar size used to detect when the cross happened. 5min with 30-minute lookback = last 6 bars.",
   crossType: "Bullish = fast MA crosses above slow (golden cross); Bearish = fast crosses below (death cross).",
   minMultiple: "Min volume vs average. Lower = looser (accepts lower volume); higher = tighter (needs bigger spikes).",
   recentPeriod: "Recent bars to measure. More bars = smoother reading (looser); fewer = more current snapshot (tighter).",
@@ -290,6 +294,13 @@ interface ScanResponse {
   dynamicDataFlows?: Array<{ provider: string; consumer: string; dataKey: string; description: string }>;
   funnelData?: any;
   sessionId?: number;
+  universeMeta?: {
+    type: "marketflow";
+    topN: number;
+    coreOnly: boolean;
+    themes: Array<{ id: string; name: string; rank: number; score: number; memberCount: number }>;
+    tickerCount: number;
+  };
 }
 
 interface TuningSuggestion {
@@ -678,6 +689,16 @@ export default function BigIdeaPage() {
     queryKey: ["/api/bigidea/indicators"],
   });
 
+  type MarketFlowUniverseOption = {
+    value: string;
+    label: string;
+    tickerCount: number;
+    themes: Array<{ id: string; name: string; rank: number; score: number }>;
+  };
+  const { data: marketFlowUniverses } = useQuery<{ options: MarketFlowUniverseOption[] }>({
+    queryKey: ["/api/bigidea/marketflow/universes"],
+  });
+
   const { data: watchlist } = useWatchlist();
 
   // Handle deep link from dashboard
@@ -756,7 +777,7 @@ export default function BigIdeaPage() {
   });
 
   const saveAndPlaceMultiThoughts = useMutation({
-    mutationFn: async (proposal: { thoughts: any[]; edges: any[] }) => {
+    mutationFn: async (proposal: { thoughts: any[]; edges: any[]; suggestedUniverse?: string }) => {
       const savedThoughts: any[] = [];
       for (const t of proposal.thoughts) {
         if (t.reuseThoughtId) {
@@ -774,9 +795,20 @@ export default function BigIdeaPage() {
         const saved = await res.json();
         savedThoughts.push({ ...saved, thoughtKey: t.thoughtKey });
       }
-      return { savedThoughts, edges: proposal.edges };
+      return { savedThoughts, edges, suggestedUniverse: proposal.suggestedUniverse };
     },
-    onSuccess: ({ savedThoughts, edges }) => {
+    onSuccess: ({ savedThoughts, edges, suggestedUniverse }) => {
+      if (suggestedUniverse && typeof suggestedUniverse === "string") {
+        setUniverse(suggestedUniverse);
+        const mfOption = marketFlowUniverses?.options.find((o) => o.value === suggestedUniverse);
+        toast({
+          title: "MarketFlow universe applied",
+          description: mfOption
+            ? `${mfOption.label} — ${mfOption.tickerCount} tickers from ${mfOption.themes.map((t) => t.name).join(", ")}`
+            : suggestedUniverse,
+          duration: 6000,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/bigidea/thoughts"] });
 
       // Check for timeframe auto-correction warnings
@@ -1669,7 +1701,12 @@ export default function BigIdeaPage() {
           return n;
         })
       );
-      toast({ title: `Scan complete: ${data.results.length} matches` });
+      toast({
+        title: `Scan complete: ${data.results.length} matches`,
+        description: data.universeMeta?.type === "marketflow"
+          ? `MarketFlow top ${data.universeMeta.topN}: ${data.universeMeta.themes.map((t: { name: string }) => t.name).join(", ")}`
+          : undefined,
+      });
     },
     onError: (err: Error) => {
       toast({ title: "Scan failed", description: err.message, variant: "destructive" });
@@ -2365,7 +2402,7 @@ export default function BigIdeaPage() {
         />
 
         <Select value={universe} onValueChange={setUniverse}>
-          <SelectTrigger className="w-48" data-testid="select-universe">
+          <SelectTrigger className="w-56" data-testid="select-universe">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -2377,6 +2414,19 @@ export default function BigIdeaPage() {
                 </SelectItem>
               ))}
             </SelectGroup>
+            {marketFlowUniverses?.options && marketFlowUniverses.options.length > 0 && (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>MarketFlow Themes</SelectLabel>
+                  {marketFlowUniverses.options.map((u) => (
+                    <SelectItem key={u.value} value={u.value} data-testid={`option-universe-${u.value}`}>
+                      {u.label} ({u.tickerCount})
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </>
+            )}
             {userWatchlists && userWatchlists.length > 0 && (
               <>
                 <SelectSeparator />
@@ -3797,6 +3847,19 @@ export default function BigIdeaPage() {
                 </div>
               )}
 
+              {aiProposal.suggestedUniverse && (
+                <div className="px-3 py-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 space-y-1">
+                  <p className="text-sm font-medium text-emerald-100">
+                    MarketFlow universe: {marketFlowUniverses?.options.find((o) => o.value === aiProposal.suggestedUniverse)?.label ?? aiProposal.suggestedUniverse}
+                  </p>
+                  {marketFlowUniverses?.options.find((o) => o.value === aiProposal.suggestedUniverse)?.themes && (
+                    <p className="text-xs text-emerald-200/80">
+                      Leading themes: {marketFlowUniverses.options.find((o) => o.value === aiProposal.suggestedUniverse)!.themes.map((t) => t.name).join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {(aiProposal.thoughts || []).map((thought: any, tIdx: number) => (
                 <div key={thought.thoughtKey || tIdx} className="space-y-3">
                   {(aiProposal.thoughts || []).length > 1 && (
@@ -3947,9 +4010,15 @@ export default function BigIdeaPage() {
                                 </div>
                                 );
                               })()}
-                              {param.type === "select" && param.options && (
+                              {param.type === "select" && (() => {
+                                const aiIndMeta = indicatorLibrary.find((m) => m.id === criterion.indicatorId);
+                                const aiMetaParam = aiIndMeta?.params.find((mp) => mp.name === param.name);
+                                const selectOptions = param.options ?? aiMetaParam?.options;
+                                const selectValue = String(param.value ?? aiMetaParam?.defaultValue ?? "");
+                                if (!selectOptions?.length) return null;
+                                return (
                                 <Select
-                                  value={String(param.value)}
+                                  value={selectValue}
                                   onValueChange={(v) => {
                                     const updated = { ...aiProposal, thoughts: aiProposal.thoughts.map((t: any, ti: number) => {
                                       if (ti !== tIdx) return t;
@@ -3965,14 +4034,15 @@ export default function BigIdeaPage() {
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {param.options.map((opt) => (
+                                    {selectOptions.map((opt) => (
                                       <SelectItem key={opt} value={opt}>
                                         {opt}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
-                              )}
+                                );
+                              })()}
                             </div>
                           ))}
                         </CardContent>
@@ -4823,7 +4893,7 @@ function ScanChartViewer({
   navigationMode?: 'scan' | 'watchlist';
   onNavigationModeChange?: (mode: 'scan' | 'watchlist') => void;
 }) {
-  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
+  const [intradayTimeframe, setIntradayTimeframe] = usePersistedIntradayTimeframe();
   const [showETH, setShowETH] = useState(false);
   const [chartRatings, setChartRatings] = useState<Record<string, "up" | "down">>({});
   const [newsOpen, setNewsOpen] = useState(false);
@@ -5432,6 +5502,27 @@ function ScanChartViewer({
     setIvyTargetLevel(target ?? null);
   }, []);
 
+  const ivyTradePlanPriceLines = useMemo(() => {
+    if (!isTradePlanEnabled()) return [];
+    return [
+      ...(ivyEntryLevel
+        ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }]
+        : []),
+      ...(ivyStopLevel
+        ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }]
+        : []),
+      ...(ivyTargetLevel
+        ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }]
+        : []),
+    ];
+  }, [ivyEntryLevel, ivyStopLevel, ivyTargetLevel]);
+
+  const ivyChartClickHandler = isTradePlanEnabled() && ivyActiveClickField
+    ? (_candle: unknown, clickedPrice: number) => {
+        setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
+      }
+    : undefined;
+
   // NOW safe to return early - all hooks have been called
   if (!open) return null;
   
@@ -5526,6 +5617,7 @@ function ScanChartViewer({
           </TooltipContent>
         </Tooltip>
       </div>
+      {isTradePlanEnabled() ? (
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -5548,6 +5640,7 @@ function ScanChartViewer({
           <p className="text-sm">Set entry, stop & target levels</p>
         </TooltipContent>
       </Tooltip>
+      ) : null}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -5573,10 +5666,7 @@ function ScanChartViewer({
       <Tooltip>
         <TooltipTrigger asChild>
           <div>
-            <WatchlistSelector 
-              symbol={symbol} 
-              storageKey="scanWatchlistId"
-            />
+            <WatchlistSelector symbol={symbol} />
           </div>
         </TooltipTrigger>
         <TooltipContent>
@@ -5854,35 +5944,27 @@ function ScanChartViewer({
             upperPane={scanUpperPane}
             navExtra={scanNavExtra}
             lowerPane={scanLowerPane}
-            alertTradePlanPreview={savedTradePlan ? { mode: "single", ...savedTradePlan } : null}
+            alertTradePlanPreview={
+              isTradePlanEnabled() && savedTradePlan
+                ? { mode: "single", ...savedTradePlan }
+                : null
+            }
             alertWatchlistId={watchlistItem?.watchlistId ?? null}
             dailyChartProps={{
               markers: cocAnnotations.markers,
               diamondMarkers: cocAnnotations.diamondMarkers,
-              priceLines: [
-                ...(cocAnnotations.priceLines || []),
-                ...(ivyEntryLevel ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }] : []),
-                ...(ivyStopLevel ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }] : []),
-                ...(ivyTargetLevel ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }] : []),
-              ],
+              priceLines: [...(cocAnnotations.priceLines || []), ...ivyTradePlanPriceLines],
               resistanceLines: cocAnnotations.resistanceLines,
               baseZones: cocAnnotations.baseZones,
-              onCandleClick: ivyActiveClickField ? (_candle: any, clickedPrice: number) => {
-                setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
-              } : undefined,
+              onCandleClick: ivyChartClickHandler,
             }}
             intradayChartProps={{
-              priceLines: [
-                ...(ivyEntryLevel ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }] : []),
-                ...(ivyStopLevel ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }] : []),
-                ...(ivyTargetLevel ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }] : []),
-              ],
-              onCandleClick: ivyActiveClickField ? (_candle: any, clickedPrice: number) => {
-                setIvyChartClick({ price: clickedPrice, timestamp: Date.now() });
-              } : undefined,
+              priceLines: ivyTradePlanPriceLines,
+              onCandleClick: ivyChartClickHandler,
             }}
             testIdPrefix="scan"
           />
+          {isTradePlanEnabled() ? (
           <AskIvyOverlay
             open={askIvyOpen}
             onOpenChange={setAskIvyOpen}
@@ -5910,6 +5992,7 @@ function ScanChartViewer({
             savedTradePlan={savedTradePlan}
             tradePlanWatchlistReady={watchlistFetched}
           />
+          ) : null}
           
           {/* News Panel */}
           {newsOpen && (

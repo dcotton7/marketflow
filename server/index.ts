@@ -20,6 +20,9 @@ process.on("uncaughtException", (err) => {
 const app = express();
 const httpServer = createServer(app);
 
+/** Default lowered from 50mb to reduce heap spikes on small Render instances; override with JSON_BODY_LIMIT. */
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT?.trim() || "10mb";
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -28,14 +31,14 @@ declare module "http" {
 
 app.use(
   express.json({
-    limit: '50mb',
+    limit: jsonBodyLimit,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+app.use(express.urlencoded({ extended: false, limit: jsonBodyLimit }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

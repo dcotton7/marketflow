@@ -285,6 +285,18 @@ export async function getIntradayBars(
 
     const bars = normalizeBars(alpacaBars);
 
+    if (bars.length === 0) {
+      console.warn(
+        `[DataLayer] Empty intraday fetch for ${upperSymbol} ${interval}; ${
+          cached ? "reusing stale cache" : "skipping cache seed"
+        }`
+      );
+      if (cached) {
+        return applyEthMode([...cached.bars]);
+      }
+      return [];
+    }
+
     evictOldest();
 
     intradayCache.set(cacheKey, {

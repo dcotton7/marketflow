@@ -22,6 +22,7 @@ import { WatchlistPortalWidget } from "@/components/start-here/WatchlistPortalWi
 import { ChartPreviewWidget } from "@/components/start-here/ChartPreviewWidget";
 import { NewsPortalWidget } from "@/components/start-here/NewsPortalWidget";
 import { StartHereFlowWidget } from "@/components/start-here/StartHereFlowWidget";
+import { LiveThemeChartsWidget } from "@/components/start-here/LiveThemeChartsWidget";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -54,16 +55,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Copy, ExternalLink, FileText, LineChart, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, FileText, LayoutGrid, LineChart, Pencil, Plus, Trash2 } from "lucide-react";
+import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
+import { MiniMaSettingsDialog } from "@/components/MiniMaSettingsDialog";
+import { isMiniMaSettingsEnabled } from "@/lib/chart-preferences-shared";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
 import { useChartPopout } from "@/hooks/useChartPopout";
 import { AnalysisPanel } from "@/features/marketflow-analysis";
 import {
+  chartWallColumnsLabel,
   computeStartHereLayoutMins,
   groupLinkAccent,
-  startHereVisibleGridRowCount,
+  listStartHereChartWallColumnOptions,
+  parseStartHereChartWallColumns,
+  startHereGridViewportMetrics,
   START_HERE_RGL_CONTAINER_PADDING,
   START_HERE_RGL_MARGIN,
   START_HERE_RGL_ROW_HEIGHT,
@@ -97,6 +104,7 @@ const WIDGET_MENU: { type: StartHereWidgetType; label: string }[] = [
   { type: "chart", label: "Chart" },
   { type: "news", label: "News" },
   { type: "flow", label: "Market Flow" },
+  { type: "themeCharts", label: "Live Theme Charts" },
 ];
 
 /** False: standard non-overlapping grid. Stacking helpers stay for a future notes/overlap mode. */
@@ -328,7 +336,9 @@ function StartHereGridHost() {
     addLinkedChartTriplet,
     removeInstance,
     resetDashboard,
-    setGridViewportRowCapacity,
+    setGridViewportMetrics,
+    chartWallColumns,
+    setChartWallColumns,
     workspacePalette,
   } = useStartHere();
 
@@ -336,6 +346,8 @@ function StartHereGridHost() {
   const [chartSyncEnabled, setChartSyncEnabled] = useState(false);
   const [analysisSyncEnabled, setAnalysisSyncEnabled] = useState(false);
   const [analysisSheetSymbol, setAnalysisSheetSymbol] = useState<string | null>(null);
+  const [miniMaSettingsOpen, setMiniMaSettingsOpen] = useState(false);
+  const miniMaSettingsEnabled = isMiniMaSettingsEnabled();
 
   const handleChartsSymbolAction = useCallback(
     (symbol: string) => {
@@ -365,6 +377,7 @@ function StartHereGridHost() {
   );
 
   const gridViewportRef = useRef<HTMLDivElement>(null);
+  const [gridRowHeight, setGridRowHeight] = useState(START_HERE_RGL_ROW_HEIGHT);
   const instancesRef = useRef(dashboard.instances);
   instancesRef.current = dashboard.instances;
 
@@ -387,11 +400,18 @@ function StartHereGridHost() {
   useLayoutEffect(() => {
     const el = gridViewportRef.current;
     if (!el) {
-      setGridViewportRowCapacity(undefined);
+      setGridViewportMetrics(undefined);
+      setGridRowHeight(START_HERE_RGL_ROW_HEIGHT);
       return;
     }
     const apply = () => {
-      setGridViewportRowCapacity(startHereVisibleGridRowCount(el.clientHeight));
+      const metrics = startHereGridViewportMetrics(
+        el.clientWidth,
+        el.clientHeight,
+        chartWallColumns
+      );
+      setGridViewportMetrics(metrics);
+      setGridRowHeight(metrics.suggestedRowHeight);
     };
     apply();
     if (typeof ResizeObserver === "undefined") return;
@@ -399,9 +419,10 @@ function StartHereGridHost() {
     ro.observe(el);
     return () => {
       ro.disconnect();
-      setGridViewportRowCapacity(undefined);
+      setGridViewportMetrics(undefined);
+      setGridRowHeight(START_HERE_RGL_ROW_HEIGHT);
     };
-  }, [setGridViewportRowCapacity]);
+  }, [setGridViewportMetrics, chartWallColumns]);
 
   useLayoutEffect(() => {
     return () => {
@@ -551,6 +572,55 @@ function StartHereGridHost() {
             layout and widget settings.
           </span>
           <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+            {miniMaSettingsEnabled ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="start-here-no-drag gap-1.5"
+                    onClick={() => setMiniMaSettingsOpen(true)}
+                    data-testid="button-start-here-mini-ma-settings"
+                  >
+                    <IndicatorsFourSquaresIcon className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Mini indicators</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Indicator settings for Start Here mini charts (separate from main trade charts)
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1.5">
+                  <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <Select
+                    value={String(chartWallColumns)}
+                    onValueChange={(v) => {
+                      const parsed = parseStartHereChartWallColumns(v);
+                      setChartWallColumns(parsed);
+                    }}
+                  >
+                    <SelectTrigger className="start-here-no-drag h-8 w-[min(148px,36vw)] text-xs">
+                      <SelectValue placeholder="Chart wall" />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {listStartHereChartWallColumnOptions().map((opt) => (
+                        <SelectItem key={String(opt)} value={String(opt)} className="text-xs">
+                          {chartWallColumnsLabel(opt)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                Charts per row for watchlist-loaded walls. Changing this reflows those charts
+                immediately; manually placed charts are not moved.
+              </TooltipContent>
+            </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" size="sm" variant="outline" className="gap-1">
@@ -560,7 +630,7 @@ function StartHereGridHost() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={addLinkedChartTriplet}>
-                  3 Linked Charts
+                  4 Linked Charts
                 </DropdownMenuItem>
                 {WIDGET_MENU.map(({ type, label }) => (
                   <DropdownMenuItem key={type} onClick={() => addWidget(type)}>
@@ -659,7 +729,7 @@ function StartHereGridHost() {
           layout={dashboard.layout}
           cols={12}
           measureBeforeMount
-          rowHeight={START_HERE_RGL_ROW_HEIGHT}
+          rowHeight={gridRowHeight}
           margin={START_HERE_RGL_MARGIN}
           containerPadding={START_HERE_RGL_CONTAINER_PADDING}
           onLayoutChange={onLayoutChange}
@@ -738,6 +808,16 @@ function StartHereGridHost() {
                     onClose={onClose}
                   />
                 )}
+                {meta.type === "themeCharts" && (
+                  <LiveThemeChartsWidget
+                    key={`${activeStartId}-${item.i}`}
+                    cssVariables={cssVariables}
+                    instanceId={item.i}
+                    groupId={meta.groupId}
+                    accentColor={accentColor}
+                    onClose={onClose}
+                  />
+                )}
               </div>
             );
           })}
@@ -749,6 +829,9 @@ function StartHereGridHost() {
         open={analysisSheetSymbol !== null}
         onOpenChange={(open) => !open && setAnalysisSheetSymbol(null)}
       />
+      {miniMaSettingsEnabled ? (
+        <MiniMaSettingsDialog open={miniMaSettingsOpen} onOpenChange={setMiniMaSettingsOpen} />
+      ) : null}
     </div>
   );
 }

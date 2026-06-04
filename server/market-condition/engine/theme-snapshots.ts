@@ -9,7 +9,7 @@
 import { getDb } from "../../db";
 import { themeSnapshots, InsertThemeSnapshot, ThemeSnapshot } from "@shared/schema";
 import { eq, and, asc, desc, gte, sql, lt, inArray, isNotNull } from "drizzle-orm";
-import { ClusterId, TimeSlice } from "../universe";
+import { ClusterId, TimeSlice, CLUSTER_COUNT } from "../universe";
 import type { ThemeMetrics } from "./theme-score";
 import { getRaceTimelineWindow, type RaceTerminalState } from "../utils/theme-tracker-time";
 
@@ -19,6 +19,16 @@ import { getRaceTimelineWindow, type RaceTerminalState } from "../utils/theme-tr
 
 export type SnapshotType = "hourly" | "daily_close";
 const MIN_COMPLETE_BATCH_ROWS = 20;
+
+/** Enough rows for many full theme batches (avoid LIMIT slicing mid-batch). */
+const HOURLY_LOOKBACK_ROW_LIMIT = Math.max(800, CLUSTER_COUNT * 40);
+
+/** One logical poll: rows inserted in the same wall second share one batch key. */
+function hourlySnapshotBatchKey(row: ThemeSnapshot): string {
+  if (!row.createdAt) return "unknown";
+  const d = row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt as string);
+  return String(Math.floor(d.getTime() / 1000) * 1000);
+}
 
 export interface HistoricalRankings {
   themeId: ClusterId;
@@ -263,7 +273,7 @@ export async function getHistoricalSnapshot(
           )
         )
         .orderBy(desc(themeSnapshots.createdAt))
-        .limit(120);
+        .limit(HOURLY_LOOKBACK_ROW_LIMIT);
 
     const queryHourlyByTradingDaysBack = async (daysBack: number): Promise<ThemeSnapshot[]> => {
       const marketDates = await db
@@ -288,29 +298,30 @@ export async function getHistoricalSnapshot(
             eq(themeSnapshots.marketDate, targetDate)
           )
         )
-        .orderBy(desc(themeSnapshots.createdAt))
-        .limit(120);
+        .orderBy(desc(themeSnapshots.marketDate), desc(themeSnapshots.createdAt))
+        .limit(HOURLY_LOOKBACK_ROW_LIMIT);
       return rows;
     };
     
     switch (timeSlice) {
       case "15M": {
-        query = queryHourlyAtOrBefore(new Date(now.getTime() - 15 * 60 * 1000));
+        // Query through `now`; apply slice lookback only when picking a batch (see unified lookback loop).
+        query = queryHourlyAtOrBefore(now);
         break;
       }
       
       case "30M": {
-        query = queryHourlyAtOrBefore(new Date(now.getTime() - 30 * 60 * 1000));
+        query = queryHourlyAtOrBefore(now);
         break;
       }
       
       case "1H": {
-        query = queryHourlyAtOrBefore(new Date(now.getTime() - 60 * 60 * 1000));
+        query = queryHourlyAtOrBefore(now);
         break;
       }
       
       case "4H": {
-        query = queryHourlyAtOrBefore(new Date(now.getTime() - 4 * 60 * 60 * 1000));
+        query = queryHourlyAtOrBefore(now);
         break;
       }
       
@@ -404,15 +415,32 @@ export async function getHistoricalSnapshot(
       const byBatch = new Map<string, ThemeSnapshot[]>();
       for (const row of results) {
         if (!row.createdAt) continue;
-        const key = row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt);
+        const key = hourlySnapshotBatchKey(row);
         if (!byBatch.has(key)) byBatch.set(key, []);
         byBatch.get(key)!.push(row);
       }
 
-      const orderedBatchKeys = [...byBatch.keys()].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+      const intradayLookbackMs =
+        timeSlice === "15M"
+          ? 15 * 60 * 1000
+          : timeSlice === "30M"
+            ? 30 * 60 * 1000
+            : timeSlice === "1H"
+              ? 60 * 60 * 1000
+              : timeSlice === "4H"
+                ? 4 * 60 * 60 * 1000
+                : 0;
+      const maxBatchEpochMs =
+        intradayLookbackMs > 0 ? now.getTime() - intradayLookbackMs : Number.POSITIVE_INFINITY;
+
+      const orderedBatchKeys = [...byBatch.keys()].sort((a, b) => Number(b) - Number(a));
       let selectedBatch: ThemeSnapshot[] = [];
       let selectedKey: string | null = null;
       for (const key of orderedBatchKeys) {
+        const epoch = Number(key);
+        if (key !== "unknown" && Number.isFinite(epoch) && epoch > maxBatchEpochMs) {
+          continue;
+        }
         const batch = byBatch.get(key) || [];
         if (batch.length >= MIN_COMPLETE_BATCH_ROWS) {
           selectedBatch = batch;
@@ -426,7 +454,9 @@ export async function getHistoricalSnapshot(
       }
 
       targetResults = selectedBatch.length ? selectedBatch : results;
-      comparisonTime = selectedKey;
+      comparisonTime =
+        selectedKey != null && selectedKey !== "unknown" ? new Date(Number(selectedKey)).toISOString() : null;
+
       }
     } else if (timeSlice === "1W") {
       // Find results from ~5 trading days ago (skip weekends)
@@ -530,8 +560,7 @@ export async function getOpenBaselineSnapshot(
 
     const byBatch = new Map<string, ThemeSnapshot[]>();
     for (const row of rows) {
-      const key =
-        row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt);
+      const key = hourlySnapshotBatchKey(row);
       if (!byBatch.has(key)) byBatch.set(key, []);
       byBatch.get(key)!.push(row);
     }
@@ -545,7 +574,7 @@ export async function getOpenBaselineSnapshot(
       }
       if (!selectedKey) selectedKey = key;
     }
-    if (!selectedKey) return null;
+    if (!selectedKey || selectedKey === "unknown") return null;
 
     const selectedRows = byBatch.get(selectedKey) || [];
     const ranks = new Map<ClusterId, number>();
@@ -563,7 +592,7 @@ export async function getOpenBaselineSnapshot(
       });
     }
 
-    return { ranks, metrics, comparisonTime: selectedKey };
+    return { ranks, metrics, comparisonTime: new Date(Number(selectedKey)).toISOString() };
   } catch (error) {
     console.error("[ThemeSnapshots] Failed to get open baseline snapshot:", error);
     return null;
@@ -605,6 +634,161 @@ export async function calculateDeltaRanksFromOpen(
  * Calculate deltaRank values based on time slice selection
  * Returns both the delta values and the comparison timestamp
  */
+/**
+ * Load theme rankings from the hourly snapshot batch at or before `comparisonAtIso`.
+ */
+export async function getHistoricalSnapshotAt(
+  comparisonAtIso: string
+): Promise<HistoricalSnapshotResult | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  const cutoff = new Date(comparisonAtIso);
+  if (Number.isNaN(cutoff.getTime())) return null;
+
+  try {
+    const results = await db
+      .select()
+      .from(themeSnapshots)
+      .where(
+        and(
+          eq(themeSnapshots.snapshotType, "hourly"),
+          sql`${themeSnapshots.createdAt} <= ${cutoff.toISOString()}`
+        )
+      )
+      .orderBy(desc(themeSnapshots.createdAt))
+      .limit(HOURLY_LOOKBACK_ROW_LIMIT);
+
+    if (!results.length) return null;
+
+    const byBatch = new Map<string, ThemeSnapshot[]>();
+    for (const row of results) {
+      const key = hourlySnapshotBatchKey(row);
+      if (!byBatch.has(key)) byBatch.set(key, []);
+      byBatch.get(key)!.push(row);
+    }
+
+    const targetMs = cutoff.getTime();
+    const orderedEpochs = [...byBatch.keys()]
+      .filter((k) => k !== "unknown")
+      .map((k) => Number(k))
+      .filter(Number.isFinite)
+      .sort((a, b) => b - a);
+
+    let selectedKey: string | null = null;
+    for (const epoch of orderedEpochs) {
+      if (epoch > targetMs) continue;
+      const key = String(epoch);
+      const batch = byBatch.get(key) ?? [];
+      if (batch.length >= MIN_COMPLETE_BATCH_ROWS || batch.length > 0) {
+        selectedKey = key;
+        break;
+      }
+    }
+
+    if (!selectedKey && orderedEpochs.length > 0) {
+      selectedKey = String(orderedEpochs[0]);
+    }
+    if (!selectedKey || selectedKey === "unknown") return null;
+
+    const targetResults = byBatch.get(selectedKey) ?? [];
+    if (!targetResults.length) return null;
+
+    const comparisonTime = new Date(Number(selectedKey)).toISOString();
+    const rankMap = new Map<ClusterId, number>();
+    const metricsMap = new Map<ClusterId, HistoricalThemeMetrics>();
+    for (const snapshot of targetResults) {
+      const id = snapshot.themeId as ClusterId;
+      rankMap.set(id, snapshot.rank);
+      metricsMap.set(id, {
+        rank: snapshot.rank,
+        score: snapshot.score ?? 0,
+        medianPct: snapshot.medianPct ?? 0,
+        rsVsBenchmark: snapshot.rsVsBenchmark ?? 0,
+        breadthPct: snapshot.breadthPct ?? 0,
+      });
+    }
+
+    return { ranks: rankMap, metrics: metricsMap, comparisonTime };
+  } catch (error) {
+    console.error("[ThemeSnapshots] Failed to get snapshot at time:", error);
+    return null;
+  }
+}
+
+/**
+ * List stored 15-minute intraday snapshot slots for a market date (ET session).
+ */
+export async function listIntradaySnapshotSlots(
+  marketDate?: string
+): Promise<Array<{ at: string; label: string }>> {
+  const db = getDb();
+  if (!db) return [];
+
+  const { date: today } = getMarketDateTime();
+  const date = marketDate || today;
+
+  try {
+    const rows = await db
+      .select()
+      .from(themeSnapshots)
+      .where(
+        and(eq(themeSnapshots.snapshotType, "hourly"), eq(themeSnapshots.marketDate, date))
+      )
+      .orderBy(asc(themeSnapshots.createdAt));
+
+    const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+    const byBucket = new Map<number, number>();
+    for (const row of rows) {
+      if (!row.createdAt) continue;
+      const ms = new Date(row.createdAt).getTime();
+      const bucket = Math.floor(ms / FIFTEEN_MIN_MS) * FIFTEEN_MIN_MS;
+      byBucket.set(bucket, (byBucket.get(bucket) ?? 0) + 1);
+    }
+
+    const slots: Array<{ at: string; label: string }> = [];
+    for (const bucket of [...byBucket.keys()].sort((a, b) => a - b)) {
+      if ((byBucket.get(bucket) ?? 0) < MIN_COMPLETE_BATCH_ROWS) continue;
+      const d = new Date(bucket);
+      const label = d.toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      slots.push({ at: d.toISOString(), label });
+    }
+    return slots;
+  } catch (error) {
+    console.error("[ThemeSnapshots] Failed to list intraday snapshot slots:", error);
+    return [];
+  }
+}
+
+export async function calculateDeltaRanksAt(
+  currentThemes: ThemeMetrics[],
+  comparisonAtIso: string
+): Promise<DeltaRankResult> {
+  const deltaMap = new Map<ClusterId, number>();
+  const emptyMetrics = new Map<ClusterId, HistoricalThemeMetrics>();
+  const historicalResult = await getHistoricalSnapshotAt(comparisonAtIso);
+
+  if (!historicalResult) {
+    for (const theme of currentThemes) {
+      deltaMap.set(theme.id, 0);
+    }
+    return { deltas: deltaMap, historicalMetrics: emptyMetrics, comparisonTime: null };
+  }
+
+  const { ranks: historicalRanks, metrics: historicalMetrics, comparisonTime } = historicalResult;
+  for (const theme of currentThemes) {
+    const historicalRank = historicalRanks.get(theme.id);
+    deltaMap.set(theme.id, historicalRank !== undefined ? historicalRank - theme.rank : 0);
+  }
+
+  return { deltas: deltaMap, historicalMetrics, comparisonTime };
+}
+
 export async function calculateDeltaRanks(
   currentThemes: ThemeMetrics[],
   timeSlice: TimeSlice,

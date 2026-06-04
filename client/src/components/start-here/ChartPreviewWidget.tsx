@@ -23,6 +23,11 @@ import {
   STOCK_HISTORY_INTRADAY_REFETCH_MS,
 } from "@/hooks/use-stocks";
 import { useWatchlist, useWatchlists } from "@/hooks/use-watchlist";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
+
+function isStartHereChartInterval(v: string): v is StartHereInterval {
+  return v === "5m" || v === "15m" || v === "30m" || v === "1d";
+}
 
 export function ChartPreviewWidget({
   cssVariables,
@@ -65,12 +70,18 @@ export function ChartPreviewWidget({
   const chartTf: StartHereInterval =
     instMeta?.type === "chart" ? (instMeta.chartInterval ?? "1d") : "1d";
   const linkedSetLocked = instMeta?.type === "chart" && instMeta.linkedSetLocked === true;
+  const linkedSetSize = useMemo(() => {
+    const setId = instMeta?.linkedSetId;
+    if (!setId) return 0;
+    return Object.values(dashboard.instances).filter((m) => m.linkedSetId === setId).length;
+  }, [dashboard.instances, instMeta?.linkedSetId]);
   const chartFocused = dashboard.focusedChartInstanceId === instanceId;
   const { data: allWatchlistItems } = useWatchlist();
   const { data: watchlists } = useWatchlists();
 
   const paletteHdr = paletteLaneHeaderControlClass(accentColor, workspacePalette.unlinkedColor);
   const entryPrice = useMemo(() => {
+    if (!isTradePlanEnabled()) return null;
     const symU = sym.trim().toUpperCase();
     if (!symU || !allWatchlistItems?.length) return null;
     const portfolioWatchlistIds = new Set(
@@ -134,6 +145,7 @@ export function ChartPreviewWidget({
   }, []);
 
   const entryPct = useMemo(() => {
+    if (!isTradePlanEnabled()) return null;
     const px = quoteStrip?.lastPrice ?? null;
     if (!isPortfolioTicker || entryPrice == null || !Number.isFinite(entryPrice) || entryPrice <= 0) {
       return null;
@@ -254,7 +266,7 @@ export function ChartPreviewWidget({
           type="single"
           value={chartTf}
           onValueChange={(v) => {
-            if (v === "5m" || v === "15m" || v === "1d") {
+            if (isStartHereChartInterval(v)) {
               setChartInterval(instanceId, v);
             }
           }}
@@ -264,13 +276,16 @@ export function ChartPreviewWidget({
           style={{ fontSize: cssVariables.fontSizeSmall }}
         >
           <ToggleGroupItem value="5m" aria-label="5 minute bars">
-            5m
+            5
           </ToggleGroupItem>
           <ToggleGroupItem value="15m" aria-label="15 minute bars">
-            15m
+            15
+          </ToggleGroupItem>
+          <ToggleGroupItem value="30m" aria-label="30 minute bars">
+            30
           </ToggleGroupItem>
           <ToggleGroupItem value="1d" aria-label="Daily bars">
-            Daily
+            D
           </ToggleGroupItem>
         </ToggleGroup>
         <Button
@@ -292,16 +307,16 @@ export function ChartPreviewWidget({
           aria-pressed={isDefaultTemplate}
           onClick={() => setDefaultChartTemplate(isDefaultTemplate ? null : instanceId)}
         >
-          Default
+          Set Default
         </Button>
       </div>
       <div className="start-here-no-drag flex shrink-0">
         {linkedSetLocked ? (
           <span
             className="inline-flex h-8 items-center rounded border border-amber-500/40 bg-amber-500/10 px-2 text-[11px] font-semibold text-amber-200"
-            title="This chart belongs to a locked 3-chart linked set."
+            title={`This chart belongs to a locked linked set (${linkedSetSize} charts).`}
           >
-            Linked x3
+            Linked x{linkedSetSize || 4}
           </span>
         ) : (
           <StartHereGroupPicker instanceId={instanceId} cssVariables={cssVariables} />
@@ -349,8 +364,12 @@ export function ChartPreviewWidget({
                 timeframe="50D"
                 movingAverages2150200
                 startHereInterval={chartTf}
-                entryPrice={entryPrice}
-                entryLineTone={isPortfolioTicker ? "portfolio" : "default"}
+                {...(isTradePlanEnabled()
+                  ? {
+                      entryPrice,
+                      entryLineTone: isPortfolioTicker ? ("portfolio" as const) : ("default" as const),
+                    }
+                  : {})}
                 fillContainer
                 hideChangeFooter
                 onQuoteSummaryChange={onQuoteSummaryChange}

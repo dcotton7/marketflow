@@ -16,6 +16,7 @@ export interface TickerMAs {
   symbol: string;
   ema10d: number | null;
   ema20d: number | null;
+  sma20d: number | null;
   sma50d: number | null;
   sma200d: number | null;
   updatedAt: Date;

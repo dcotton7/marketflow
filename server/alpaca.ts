@@ -273,6 +273,11 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
   prevClose: number;
   volume: number;
   timestamp: string;
+  /** Today's developing session OHLC from Alpaca snapshot (for session-adjusted MAs). */
+  sessionOpen: number;
+  sessionHigh: number;
+  sessionLow: number;
+  sessionVwap?: number;
 } | null> {
   try {
     // Fetch daily bars first - this is reliable even when market is closed
@@ -309,13 +314,19 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
     const quoteAsk = snapshot?.latestQuote?.ap || 0;
     const quoteBid = snapshot?.latestQuote?.bp || 0;
     const midPrice = quoteAsk > 0 && quoteBid > 0 ? (quoteAsk + quoteBid) / 2 : 0;
+    const minuteBar = snapshot?.minuteBar;
+    const dailyBar = snapshot?.dailyBar;
     const lastPrice = latestTradePrice || midPrice || lastBarClose;
-    const volume = snapshot?.minuteBar?.v || dailyBars[dailyBars.length - 1]?.volume || 0;
+    const volume = minuteBar?.v || dailyBar?.v || dailyBars[dailyBars.length - 1]?.volume || 0;
     const timestamp =
       snapshot?.latestTrade?.t ||
       snapshot?.latestQuote?.t ||
       new Date().toISOString();
-    
+    const sessionOpen = minuteBar?.o || dailyBar?.o || lastPrice;
+    const sessionHigh = minuteBar?.h || dailyBar?.h || lastPrice;
+    const sessionLow = minuteBar?.l || dailyBar?.l || lastPrice;
+    const sessionVwap = minuteBar?.vw || dailyBar?.vw;
+
     return {
       ticker,
       lastPrice,
@@ -324,6 +335,10 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
       prevClose: prevBarClose,
       volume,
       timestamp,
+      sessionOpen,
+      sessionHigh,
+      sessionLow,
+      sessionVwap,
     };
   } catch (error) {
     console.error(`[Alpaca] Failed to fetch quote for ${ticker}:`, error);

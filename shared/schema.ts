@@ -33,6 +33,20 @@ export const themes = pgTable("themes", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Sub-themes nested under top-level themes
+export const subthemes = pgTable("subthemes", {
+  id: text("id").primaryKey(),
+  themeId: text("theme_id")
+    .notNull()
+    .references(() => themes.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").default(0),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Master ticker registry with current fundamentals (renamed from fundamentals_cache)
 export const tickers = pgTable("tickers", {
   id: serial("id").primaryKey(),
@@ -64,6 +78,28 @@ export const tickers = pgTable("tickers", {
   // Cache metadata
   fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
 });
+
+// Many-to-many ticker slice memberships (theme and/or sub-theme)
+export const tickerSliceMemberships = pgTable(
+  "ticker_slice_memberships",
+  {
+    id: serial("id").primaryKey(),
+    symbol: text("symbol")
+      .notNull()
+      .references(() => tickers.symbol, { onDelete: "cascade" }),
+    themeId: text("theme_id").references(() => themes.id, { onDelete: "cascade" }),
+    subthemeId: text("subtheme_id").references(() => subthemes.id, { onDelete: "cascade" }),
+    isAnchor: boolean("is_anchor").default(false).notNull(),
+    isLeaderEligible: boolean("is_leader_eligible").default(true).notNull(),
+    isDefaultVisible: boolean("is_default_visible").default(true).notNull(),
+    source: text("source").default("manual").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => ({
+    uniqueMembership: unique().on(table.symbol, table.themeId, table.subthemeId),
+  })
+);
 
 // Backward compatibility alias during migration
 export const fundamentalsCache = tickers;
@@ -136,6 +172,8 @@ export const insertWatchlistSchema = createInsertSchema(watchlistItems).omit({ i
 export type StockData = typeof stockDataCache.$inferSelect;
 export type SavedScan = typeof savedScans.$inferSelect;
 export type WatchlistItem = typeof watchlistItems.$inferSelect;
+export type Subtheme = typeof subthemes.$inferSelect;
+export type TickerSliceMembership = typeof tickerSliceMemberships.$inferSelect;
 
 export type InsertScan = z.infer<typeof insertScanSchema>;
 export type InsertWatchlistItem = z.infer<typeof insertWatchlistSchema>;
@@ -1173,6 +1211,28 @@ export const insertUserMaSettingSchema = createInsertSchema(userMaSettings).omit
 export type UserMaSetting = typeof userMaSettings.$inferSelect;
 export type InsertUserMaSetting = z.infer<typeof insertUserMaSettingSchema>;
 
+/** Per-user MA indicator rows for Start Here / workspace mini charts (separate from main chart grid). */
+export const userMiniMaSettings = pgTable("user_mini_ma_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  rowId: text("row_id").notNull(),
+  title: text("title").notNull(),
+  maType: text("ma_type").notNull(),
+  period: integer("period"),
+  color: text("color").notNull().default("#ffffff"),
+  lineType: integer("line_type").notNull().default(0),
+  isSystem: boolean("is_system").notNull().default(false),
+  isVisible: boolean("is_visible").notNull().default(true),
+  dailyOn: boolean("daily_on").notNull().default(true),
+  fiveMinOn: boolean("five_min_on").notNull().default(true),
+  fifteenMinOn: boolean("fifteen_min_on").notNull().default(true),
+  thirtyMinOn: boolean("thirty_min_on").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  calcOn: text("calc_on").notNull().default("daily"),
+});
+
+export type UserMiniMaSetting = typeof userMiniMaSettings.$inferSelect;
+
 export const userChartPreferences = pgTable("user_chart_preferences", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().unique(),
@@ -1181,9 +1241,13 @@ export const userChartPreferences = pgTable("user_chart_preferences", {
   dataLimit5min: integer("data_limit_5min").notNull().default(63),
   dataLimit15min: integer("data_limit_15min").notNull().default(126),
   dataLimit30min: integer("data_limit_30min").notNull().default(126),
-  /** Market Condition → Theme Members table: MA column 1 / 2 (ema10d | ema20d | sma50d | sma200d) */
-  themeMembersMa1: text("theme_members_ma1").notNull().default("ema20d"),
+  /** Market Condition → Theme Members table: MA column 1 / 2 (ema10d | sma20d | sma50d | sma200d) */
+  themeMembersMa1: text("theme_members_ma1").notNull().default("sma20d"),
   themeMembersMa2: text("theme_members_ma2").notNull().default("sma50d"),
+  /** Last intraday chart timeframe selected (5min | 15min | 30min) */
+  lastIntradayTimeframe: text("last_intraday_timeframe").notNull().default("5min"),
+  /** Trading + mini chart plot background; null uses DEFAULT_CHART_BACKGROUND_COLOR. */
+  chartBackgroundColor: text("chart_background_color"),
 });
 
 export type UserChartPreference = typeof userChartPreferences.$inferSelect;
@@ -2058,6 +2122,7 @@ export const tickerMa = pgTable("ticker_ma", {
   symbol: varchar("symbol", { length: 20 }).notNull().unique(),
   ema10d: decimal("ema_10d", { precision: 12, scale: 4 }),
   ema20d: decimal("ema_20d", { precision: 12, scale: 4 }),
+  sma20d: decimal("sma_20d", { precision: 12, scale: 4 }),
   sma50d: decimal("sma_50d", { precision: 12, scale: 4 }),
   sma200d: decimal("sma_200d", { precision: 12, scale: 4 }),
   updatedAt: timestamp("updated_at").defaultNow(),

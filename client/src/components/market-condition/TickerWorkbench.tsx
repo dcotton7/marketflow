@@ -43,34 +43,44 @@ import { ArrowUpRight, Star, Users, ChevronUp, ChevronDown, Plus, Info, Crown, C
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { MARKETFLOW_MA_HELP, formatMaAsOfLabel } from "@/components/market-condition/marketflowHelpContent";
 import { useMarketConditionSettings } from "@/hooks/useMarketCondition";
+import {
+  useAddToWatchlist,
+  useNamedWatchlistItems,
+  useRemoveFromWatchlist,
+  useWatchlists,
+} from "@/hooks/use-watchlist";
 
-export type MaColumnKey = "ema10d" | "ema20d" | "sma50d" | "sma200d";
+export type MaColumnKey = "ema10d" | "sma20d" | "sma50d" | "sma200d";
 
 const MA_OPTIONS: { value: MaColumnKey; label: string }[] = [
   { value: "ema10d", label: "10d EMA" },
-  { value: "ema20d", label: "20d EMA" },
+  { value: "sma20d", label: "20d SMA" },
   { value: "sma50d", label: "50d SMA" },
   { value: "sma200d", label: "200d SMA" },
 ];
 
 const MA_KEY_TO_FIELD: Record<MaColumnKey, keyof TickerRow> = {
   ema10d: "pctVsEma10d",
-  ema20d: "pctVsEma20d",
+  sma20d: "pctVsSma20d",
   sma50d: "pctVsSma50d",
   sma200d: "pctVsSma200d",
 };
 
-const DEFAULT_THEME_MEMBERS_MA1: MaColumnKey = "ema20d";
+const DEFAULT_THEME_MEMBERS_MA1: MaColumnKey = "sma20d";
 const DEFAULT_THEME_MEMBERS_MA2: MaColumnKey = "sma50d";
 
 function parseStoredMaColumn(raw: string | undefined | null, fallback: MaColumnKey): MaColumnKey {
   if (!raw) return fallback;
+  // Legacy: MA1 default was 20d EMA before switching to 20d SMA
+  if (raw === "ema20d") return "sma20d";
   return MA_OPTIONS.some((o) => o.value === raw) ? (raw as MaColumnKey) : fallback;
 }
 
 function getPctVsMa(ticker: TickerRow, key: MaColumnKey): number | null | undefined {
-  return ticker[MA_KEY_TO_FIELD[key]];
+  const value = ticker[MA_KEY_TO_FIELD[key]];
+  return typeof value === "number" ? value : value ?? null;
 }
 
 // Static overlay memberships
@@ -107,6 +117,8 @@ function getOverlayBadges(symbol: string): Array<{ id: string; label: string; co
 interface TickerWorkbenchProps {
   themeId: string | null;
   themeName: string | null;
+  selectedSubthemeId?: string | null;
+  selectedSubthemeName?: string | null;
   tickers: TickerRow[];
   onTickerSelect: (symbol: string) => void;
   onTickersAdded?: () => void;
@@ -121,6 +133,8 @@ interface TickerWorkbenchProps {
   analysisSyncEnabled?: boolean;
   onAnalysisSyncToggle?: () => void;
   onOpenAnalysis?: (symbol: string) => void;
+  maAsOf?: string | null;
+  maMode?: "session_adjusted" | "eod_db" | null;
 }
 
 interface ConflictInfo {
@@ -132,8 +146,12 @@ interface ConflictInfo {
 interface AddTickersResponse {
   success: boolean;
   added?: string[];
+  addedToSubtheme?: string[];
   skipped?: string[];
   conflicts?: ConflictInfo[];
+  marketCapFiltered?: string[];
+  inferredSubthemeAssignments?: Array<{ symbol: string; subthemeId: string; subthemeName: string }>;
+  deferredData?: string[];
   message?: string;
 }
 
@@ -172,8 +190,8 @@ const COLUMN_TOOLTIPS: Record<string, string> = {
   rsRank: "RS Rank within theme. #1 = strongest relative strength. Trophy icon for top 3.",
   contributionPct: "Contribution % to theme move. Shows how much of the positive return comes from this ticker.",
   accDistDays: "Accumulation/Distribution streak (William O'Neal style).",
-  ma1: "Price % above or below the selected moving average. White box when within threshold.",
-  ma2: "Price % above or below the selected moving average. White box when within threshold.",
+  ma1: "Price % above or below the selected moving average. White box when within threshold. Hover for exact % (2 decimals).",
+  ma2: "Price % above or below the selected moving average. White box when within threshold. Hover for exact % (2 decimals).",
 };
 
 function SortableHeader({
@@ -216,9 +234,42 @@ function SortableHeader({
   );
 }
 
+function MaPctCell({ pct, isNearMa }: { pct: number | null | undefined; isNearMa: boolean }) {
+  const display =
+    pct != null ? (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%" : "-";
+  const precise =
+    pct != null ? (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%" : "No MA data";
+
+  if (pct == null) {
+    return <span className="font-mono text-xs text-muted-foreground">-</span>;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "font-mono text-xs inline-block cursor-help",
+            pct >= 0 ? "text-green-400" : "text-red-400",
+            isNearMa && "border border-white rounded px-1"
+          )}
+        >
+          {display}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        <p className="font-mono">{precise}</p>
+        <p className="mt-1 text-muted-foreground">{MARKETFLOW_MA_HELP.formula}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function TickerWorkbench({
   themeId,
   themeName,
+  selectedSubthemeId = null,
+  selectedSubthemeName = null,
   tickers,
   onTickerSelect,
   onTickersAdded,
@@ -232,11 +283,16 @@ export function TickerWorkbench({
   analysisSyncEnabled = false,
   onAnalysisSyncToggle,
   onOpenAnalysis,
+  maAsOf,
+  maMode,
 }: TickerWorkbenchProps) {
   const isHistorical = timeSlice !== "TODAY";
   const { toast } = useToast();
   const { data: settings } = useMarketConditionSettings();
   const maBoldThreshold = settings?.maBoldThresholdPct ?? 0.5;
+  const { data: watchlists } = useWatchlists();
+  const addToWatchlistMutation = useAddToWatchlist();
+  const removeFromWatchlistMutation = useRemoveFromWatchlist();
 
   const { data: chartPrefs } = useQuery<{
     themeMembersMa1?: string | null;
@@ -256,12 +312,68 @@ export function TickerWorkbench({
   maCol1Ref.current = maCol1;
   maCol2Ref.current = maCol2;
   const highlightedRowRef = useRef<HTMLTableRowElement>(null);
+  const [pendingWatchlistSymbol, setPendingWatchlistSymbol] = useState<string | null>(null);
+
+  const defaultWatchlistId = useMemo(() => {
+    if (!watchlists || watchlists.length === 0) return null;
+    const defaultWatchlist = watchlists.find((watchlist) => watchlist.isDefault);
+    return defaultWatchlist?.id ?? watchlists[0]?.id ?? null;
+  }, [watchlists]);
+
+  const { data: defaultWatchlistItems } = useNamedWatchlistItems(defaultWatchlistId);
+
+  const defaultWatchlistSymbols = useMemo(() => {
+    return new Set(
+      (defaultWatchlistItems ?? []).map((item) => item.symbol.trim().toUpperCase())
+    );
+  }, [defaultWatchlistItems]);
+
+  const defaultWatchlistItemsBySymbol = useMemo(() => {
+    const entries = (defaultWatchlistItems ?? []).map((item) => [
+      item.symbol.trim().toUpperCase(),
+      item,
+    ] as const);
+    return new Map(entries);
+  }, [defaultWatchlistItems]);
 
   useEffect(() => {
     if (!chartPrefs) return;
     setMaCol1(parseStoredMaColumn(chartPrefs.themeMembersMa1 ?? undefined, DEFAULT_THEME_MEMBERS_MA1));
     setMaCol2(parseStoredMaColumn(chartPrefs.themeMembersMa2 ?? undefined, DEFAULT_THEME_MEMBERS_MA2));
   }, [chartPrefs]);
+
+  const handleToggleTickerInDefaultWatchlist = (symbol: string) => {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) return;
+    if (pendingWatchlistSymbol === normalized) return;
+    if (defaultWatchlistId == null) {
+      toast({
+        title: "No default watchlist",
+        description: "Set up a default watchlist first, then try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPendingWatchlistSymbol(normalized);
+    const watchlistItem = defaultWatchlistItemsBySymbol.get(normalized);
+    const onSettled = () => {
+      setPendingWatchlistSymbol((current) => (current === normalized ? null : current));
+    };
+
+    if (watchlistItem) {
+      removeFromWatchlistMutation.mutate(
+        { id: watchlistItem.id },
+        { onSettled }
+      );
+      return;
+    }
+
+    addToWatchlistMutation.mutate(
+      { symbol: normalized, watchlistId: defaultWatchlistId },
+      { onSettled }
+    );
+  };
 
   const saveThemeMembersMaMutation = useMutation({
     mutationFn: async (pair: { ma1: MaColumnKey; ma2: MaColumnKey }) => {
@@ -295,7 +407,7 @@ export function TickerWorkbench({
       const res = await fetch(`/api/market-condition/themes/${themeId}/add-tickers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers, force }),
+        body: JSON.stringify({ tickers, force, subthemeId: selectedSubthemeId }),
       });
       if (!res.ok) throw new Error("Failed to add tickers");
       return res.json() as Promise<AddTickersResponse>;
@@ -306,13 +418,36 @@ export function TickerWorkbench({
         setConflicts(data.conflicts);
         setShowConflictDialog(true);
       } else if (data.success) {
+        const addedCount = data.added?.length ?? 0;
+        const subthemeAddedCount = data.addedToSubtheme?.length ?? 0;
+        const capFilteredCount = data.marketCapFiltered?.length ?? 0;
+        const deferredCount = data.deferredData?.length ?? 0;
+        const inferredCount = data.inferredSubthemeAssignments?.length ?? 0;
+        const details: string[] = [];
+        if (subthemeAddedCount > 0) details.push(`${subthemeAddedCount} in sub-theme`);
+        if (inferredCount > 0) details.push(`${inferredCount} auto-mapped sub-theme`);
+        if (capFilteredCount > 0) details.push(`${capFilteredCount} below $500M for sub-theme`);
+        if (deferredCount > 0) details.push(`${deferredCount} pending profile/market-cap data`);
+
         // Success - close dialog and refresh
         setAddDialogOpen(false);
         setTickerInput("");
         toast({
           title: "Tickers Added",
-          description: data.message || `Added ${data.added?.length || 0} ticker(s)`,
+          description:
+            details.length > 0
+              ? `Added ${addedCount} ticker(s); ${details.join(" • ")}`
+              : data.message || `Added ${addedCount} ticker(s)`,
         });
+        queryClient.invalidateQueries({ queryKey: ["market-condition", "members", themeId] });
+        queryClient.invalidateQueries({ queryKey: ["market-condition", "themes"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/market-condition/themes", themeId, "subthemes"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/market-condition/search"] });
+        if (selectedSubthemeId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/market-condition/subthemes", selectedSubthemeId, "members"],
+          });
+        }
         onTickersAdded?.();
       }
     },
@@ -489,6 +624,24 @@ export function TickerWorkbench({
           <Badge variant="outline" className="text-xs">
             {tickers.length} members
           </Badge>
+          {defaultWatchlistId != null && (
+            <Badge variant="outline" className="text-xs border-amber-500/30 text-amber-300">
+              Default watchlist star enabled
+            </Badge>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="text-[10px] text-cyan-400/80 hover:text-cyan-300 underline-offset-2 hover:underline">
+                MA ?
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-sm text-xs space-y-1.5">
+              <p className="font-semibold">{MARKETFLOW_MA_HELP.title}</p>
+              <p>{MARKETFLOW_MA_HELP.summary}</p>
+              <p>{MARKETFLOW_MA_HELP.sessionAdjusted}</p>
+              <p>{formatMaAsOfLabel(maAsOf, maMode)}</p>
+            </TooltipContent>
+          </Tooltip>
           {/* Icon Legend */}
           <Tooltip>
             <TooltipTrigger>
@@ -512,6 +665,10 @@ export function TickerWorkbench({
                 <div className="flex items-center gap-2">
                   <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />
                   <span>Core member (permanent)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Star className="w-3 h-3 text-amber-300" />
+                  <span>Watchlist button (turns yellow when saved)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-cyan-400 font-medium">1°</span>
@@ -577,7 +734,7 @@ export function TickerWorkbench({
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              Restore Theme Members MA 1 / MA 2 to defaults (20d EMA and 50d SMA) and save
+              Restore Theme Members MA 1 / MA 2 to defaults (20d SMA and 50d SMA) and save
             </TooltipContent>
           </Tooltip>
         </div>
@@ -683,6 +840,9 @@ export function TickerWorkbench({
           <TableBody>
             {filteredTickers.map((ticker) => {
               const isHighlighted = highlightedTicker === ticker.symbol;
+              const normalizedSymbol = ticker.symbol.trim().toUpperCase();
+              const isInDefaultWatchlist = defaultWatchlistSymbols.has(normalizedSymbol);
+              const isAddingToDefaultWatchlist = pendingWatchlistSymbol === normalizedSymbol;
               return (
                 <TableRow
                   key={ticker.symbol}
@@ -700,6 +860,48 @@ export function TickerWorkbench({
                 {/* Symbol with LeaderScore dot */}
                 <TableCell className="font-medium">
                   <div className="flex items-center gap-1.5">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className={cn(
+                            "inline-flex h-5 w-5 items-center justify-center rounded-sm transition-colors",
+                            isInDefaultWatchlist
+                              ? "text-yellow-400 hover:bg-yellow-500/10"
+                              : "text-slate-500 hover:bg-slate-700/60 hover:text-yellow-300",
+                            (isAddingToDefaultWatchlist || defaultWatchlistId == null) && "cursor-not-allowed opacity-70"
+                          )}
+                          disabled={isAddingToDefaultWatchlist || defaultWatchlistId == null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleToggleTickerInDefaultWatchlist(ticker.symbol);
+                          }}
+                          aria-label={
+                            isInDefaultWatchlist
+                              ? `Remove ${ticker.symbol} from the default watchlist`
+                              : `Add ${ticker.symbol} to the default watchlist`
+                          }
+                        >
+                          {isAddingToDefaultWatchlist ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Star
+                              className={cn(
+                                "h-3.5 w-3.5",
+                                isInDefaultWatchlist && "fill-yellow-400"
+                              )}
+                            />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {defaultWatchlistId == null
+                          ? "No default watchlist available"
+                          : isInDefaultWatchlist
+                            ? "Remove from default watchlist"
+                            : "Add to default watchlist"}
+                      </TooltipContent>
+                    </Tooltip>
                     {/* LeaderScore indicator dot */}
                     <Tooltip>
                       <TooltipTrigger>
@@ -936,15 +1138,7 @@ export function TickerWorkbench({
                   {(() => {
                     const pct = getPctVsMa(ticker, maCol1);
                     const isNearMa = pct != null && Math.abs(pct) <= maBoldThreshold;
-                    return (
-                      <span className={cn(
-                        "font-mono text-xs inline-block",
-                        pct == null ? "text-muted-foreground" : pct >= 0 ? "text-green-400" : "text-red-400",
-                        isNearMa && "border border-white rounded px-1"
-                      )}>
-                        {pct != null ? (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%" : "-"}
-                      </span>
-                    );
+                    return <MaPctCell pct={pct} isNearMa={isNearMa} />;
                   })()}
                 </TableCell>
 
@@ -953,15 +1147,7 @@ export function TickerWorkbench({
                   {(() => {
                     const pct = getPctVsMa(ticker, maCol2);
                     const isNearMa = pct != null && Math.abs(pct) <= maBoldThreshold;
-                    return (
-                      <span className={cn(
-                        "font-mono text-xs inline-block",
-                        pct == null ? "text-muted-foreground" : pct >= 0 ? "text-green-400" : "text-red-400",
-                        isNearMa && "border border-white rounded px-1"
-                      )}>
-                        {pct != null ? (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%" : "-"}
-                      </span>
-                    );
+                    return <MaPctCell pct={pct} isNearMa={isNearMa} />;
                   })()}
                 </TableCell>
               </TableRow>
@@ -969,6 +1155,11 @@ export function TickerWorkbench({
             })}
           </TableBody>
         </Table>
+        {!isHistorical && (
+          <p className="px-2 py-1 text-[10px] text-muted-foreground border-t border-slate-700/30">
+            {formatMaAsOfLabel(maAsOf, maMode)}
+          </p>
+        )}
       </div>
 
       {/* Footer with Add Tickers button (admin only) */}
@@ -999,7 +1190,10 @@ export function TickerWorkbench({
           <DialogHeader>
             <DialogTitle>Add Tickers to {themeName}</DialogTitle>
             <DialogDescription>
-              Enter ticker symbols separated by commas. They will be added to the candidate pool.
+              Enter ticker symbols separated by commas. They will be added to the candidate pool
+              {selectedSubthemeName
+                ? ` and assigned to sub-theme "${selectedSubthemeName}" (requires $500M+ market cap).`
+                : ". If a matching sub-theme is inferred, assignment also requires $500M+ market cap."}
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">

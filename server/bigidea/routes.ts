@@ -6,7 +6,12 @@ import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition } from "./indicators";
 import { evaluateDslIndicator, validateDslDefinition, DslLogicDefinition } from "./dsl-evaluator";
 import { evaluateScanQuality } from "./quality";
-import { getUniverseTickers } from "./universes";
+import {
+  isMarketFlowUniverse,
+  marketFlowUniverseLabel,
+  resolveMarketFlowUniverseTickers,
+  resolveScanUniverseTickers,
+} from "./marketflow-universe";
 import OpenAI from "openai";
 import * as alpaca from "../alpaca";
 import * as fundamentals from "../fundamentals";
@@ -26,6 +31,35 @@ const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
 
 const INTRADAY_INDICATORS = ["ITD-1", "ITD-2", "ITD-3"];
+const MA10_INDICATOR = "MA-10";
+
+function thoughtUsesIntradayData(criteria: any[]): boolean {
+  if (!Array.isArray(criteria)) return false;
+  return criteria.some((c) =>
+    (c.indicatorId && INTRADAY_INDICATORS.includes(c.indicatorId)) ||
+    c.indicatorId === MA10_INDICATOR
+  );
+}
+
+function getMa10IntradayTimeframe(criterion: any): string {
+  const tfParam = (criterion.params || []).find((p: any) => p.name === "intradayTimeframe");
+  return tfParam?.value || "5min";
+}
+
+function collectScanTimeframes(thoughtNodes: any[]): Set<string> {
+  const needed = new Set<string>();
+  for (const tn of thoughtNodes) {
+    needed.add(tn.thoughtTimeframe || "daily");
+    for (const c of tn.thoughtCriteria || []) {
+      if (c.timeframeOverride) needed.add(c.timeframeOverride);
+      if (c.indicatorId === MA10_INDICATOR) {
+        needed.add("daily");
+        needed.add(getMa10IntradayTimeframe(c));
+      }
+    }
+  }
+  return needed;
+}
 
 /**
  * Check if criteria contain intraday-only indicators and validate/correct timeframe
@@ -38,9 +72,7 @@ function validateIntradayIndicators(
     return { correctedTimeframe: timeframe, warning: null };
   }
   
-  const hasIntradayIndicator = criteria.some(
-    (c: any) => c.indicatorId && INTRADAY_INDICATORS.includes(c.indicatorId)
-  );
+  const hasIntradayIndicator = thoughtUsesIntradayData(criteria);
   
   const isIntradayTimeframe = ["5min", "15min", "30min"].includes(timeframe);
   
@@ -341,6 +373,55 @@ function repairCriterion(criterion: any): { indicatorId: string; params: Record<
   return { indicatorId: criterion.indicatorId, params: paramValues };
 }
 
+function inferCrossTypeFromPrompt(prompt: string): "above" | "below" | "any" | null {
+  const p = prompt.toLowerCase();
+  if (/\b(cross(ed|es)?\s+above|above\s+(the\s+)?\d+\s*(day\s+)?(sma|ema|ma)|reclaim)\b/.test(p)) return "above";
+  if (/\b(cross(ed|es)?\s+below|below\s+(the\s+)?\d+\s*(day\s+)?(sma|ema|ma)|breakdown)\b/.test(p)) return "below";
+  if (/\b(any direction|either direction|above or below)\b/.test(p)) return "any";
+  return null;
+}
+
+/** Merge AI criterion params with indicator library metadata so selects always have options + values. */
+function enrichAiCriteria(thoughts: any[], userPrompt?: string): any[] {
+  const inferredCross = userPrompt ? inferCrossTypeFromPrompt(userPrompt) : null;
+
+  return thoughts.map((thought) => ({
+    ...thought,
+    criteria: (thought.criteria || []).map((criterion: any) => {
+      const indDef = INDICATOR_LIBRARY.find((i) => i.id === criterion.indicatorId);
+      if (!indDef) return criterion;
+
+      const aiParams: any[] = criterion.params || [];
+      const enrichedParams = indDef.params.map((metaParam) => {
+        const aiParam = aiParams.find((p: any) => p.name === metaParam.name);
+        let value = aiParam?.value ?? metaParam.defaultValue;
+
+        if (
+          metaParam.name === "crossType" &&
+          (criterion.indicatorId === "MA-9" || criterion.indicatorId === "MA-10") &&
+          inferredCross &&
+          (value == null || value === "")
+        ) {
+          value = inferredCross;
+        }
+
+        return {
+          name: metaParam.name,
+          label: metaParam.label,
+          type: metaParam.type,
+          value,
+          min: metaParam.min,
+          max: metaParam.max,
+          step: metaParam.step,
+          options: metaParam.options,
+        };
+      });
+
+      return { ...criterion, params: enrichedParams };
+    }),
+  }));
+}
+
 type CriterionResult = {
   indicatorId: string;
   indicatorName: string;
@@ -399,7 +480,12 @@ function evaluateThoughtCriteria(
       ? candlesByTimeframe[overrideTf]
       : candles;
 
-    const rawResult = indicator.evaluate(useCandles, repaired.params, benchmarkCandles, upstreamData);
+    const evalContext = {
+      ...(upstreamData || {}),
+      ...(candlesByTimeframe ? { candlesByTimeframe } : {}),
+    };
+
+    const rawResult = indicator.evaluate(useCandles, repaired.params, benchmarkCandles, evalContext);
     const normalized = normalizeResult(rawResult);
 
     const diagnostics = normalized.data?._diagnostics as { value: string; threshold: string; detail?: string } | undefined;
@@ -582,6 +668,38 @@ export function registerBigIdeaRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching thoughts:", error);
       res.status(500).json({ error: "Failed to fetch thoughts" });
+    }
+  });
+
+  app.get("/api/bigidea/marketflow/universes", async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const topCounts = [3, 4, 5];
+      const options = topCounts.flatMap((topN) => {
+        const full = resolveMarketFlowUniverseTickers(topN, false);
+        const core = resolveMarketFlowUniverseTickers(topN, true);
+        return [
+          {
+            value: `marketflow-top-${topN}`,
+            label: marketFlowUniverseLabel(topN),
+            tickerCount: full.tickers.length,
+            themes: full.themes.map((t) => ({ id: t.id, name: t.name, rank: t.rank, score: Math.round(t.score) })),
+          },
+          {
+            value: `marketflow-top-${topN}-core`,
+            label: marketFlowUniverseLabel(topN, true),
+            tickerCount: core.tickers.length,
+            themes: core.themes.map((t) => ({ id: t.id, name: t.name, rank: t.rank, score: Math.round(t.score) })),
+          },
+        ];
+      });
+
+      res.json({ options, updatedAt: new Date().toISOString() });
+    } catch (error) {
+      console.error("Error fetching MarketFlow universes:", error);
+      res.status(500).json({ error: "Failed to fetch MarketFlow universes" });
     }
   });
 
@@ -986,6 +1104,7 @@ The data-linking relationships:
 
 You must respond with valid JSON. When the idea needs multiple thoughts, use this format:
 {
+  "suggestedUniverse": "marketflow-top-4 or sp500 or omit",
   "thoughts": [
     {
       "thoughtKey": "A",
@@ -1009,6 +1128,7 @@ You must respond with valid JSON. When the idea needs multiple thoughts, use thi
 
 When only a single thought is needed (no data-linking), use this simpler format:
 {
+  "suggestedUniverse": "marketflow-top-4 or omit",
   "thoughts": [
     {
       "thoughtKey": "A",
@@ -1058,6 +1178,22 @@ Examples of BAD vs GOOD names:
 
 IMPORTANT GUIDELINES for indicator selection:
 - For "price crossed above/below a moving average" (e.g. "price crossed above the 50 SMA", "price broke below the 20 EMA"), ALWAYS use MA-9 (Price Crosses MA). Set crossType to "above" or "below". Do NOT use MA-7 for this — MA-7 is only for two MAs crossing each other.
+- INTRADAY CROSS OF DAILY MA — CRITICAL: When the user mentions BOTH (a) a daily MA period like "5-day", "10-day", "20-day", "50-day" AND (b) a recent intraday time window like "last 30 minutes", "this session", "today", "in the last hour", ALWAYS use MA-10 (Intraday Cross of Daily MA) — NOT MA-9. MA-9 only checks crosses on a single timeframe's bars; MA-10 correctly uses daily bars for the MA level and intraday bars for timing.
+  - MA-10 defaults: intradayTimeframe="5min", lookbackMinutes=30, maType="sma", crossType="above"
+  - Map "last 30 minutes" → lookbackMinutes=30; "last hour" / "60 minutes" → lookbackMinutes=60; "last 15 minutes" → lookbackMinutes=15
+  - Map "5-day MA" → maPeriod=5; "10-day" → maPeriod=10; "20-day" → maPeriod=20
+  - Set the thought timeframe to match intradayTimeframe (typically "5min" for MA-10)
+  - Example: "crossed above the 10-day MA in the last 30 minutes" → MA-10 with maPeriod=10, lookbackMinutes=30, crossType="above", intradayTimeframe="5min", timeframe="5min"
+- MARKETFLOW / LEADING THEMES — When the user mentions MarketFlow, leading themes, top themes, theme leaders, or "stocks in the leading N themes":
+  - Set "suggestedUniverse" in your JSON response to "marketflow-top-N" where N is the number they specified (default 4 if they say "leading themes" without a number)
+  - Use "marketflow-top-N-core" only if they explicitly want core members only
+  - Do NOT invent ticker lists — the scan engine resolves theme members from live MarketFlow rankings
+  - Valid suggestedUniverse values: "marketflow-top-3", "marketflow-top-4", "marketflow-top-5", and "-core" variants
+  - Include "suggestedUniverse" at the top level of your JSON alongside "thoughts" and "edges"
+  - Example combined query: "Screen stocks in the leading 4 MarketFlow themes that crossed above the 5, 10, or 20-day MA in the last 30 minutes"
+    → suggestedUniverse: "marketflow-top-4"
+    → Three OR thoughts (MA-10): 5-day cross, 10-day cross, 20-day cross — each with lookbackMinutes=30, crossType="above"
+    → OR edges from each cross thought to RESULTS
 - To compare two moving averages (e.g. "50 SMA above 200 SMA", "EMA cross", "golden cross"), use MA-8 (MA Comparison) with the direction parameter. Do NOT use MA-6 for this purpose.
 - MA-7 (MA Crossover) is ONLY for detecting when two MAs cross each other (golden cross / death cross). It does NOT detect price crossing a single MA.
 - MA-6 (MA Distance/Convergence) is ONLY for measuring how close two MAs are to each other in percentage terms. It does NOT check which one is above the other.
@@ -1514,7 +1650,7 @@ ${summaries}`;
         }
       }
 
-      res.json({ thoughts: fixedThoughts, edges: fixedEdges });
+      res.json({ thoughts: enrichAiCriteria(fixedThoughts, description), edges: fixedEdges, suggestedUniverse: result.suggestedUniverse });
     } catch (error: any) {
       console.error("[BigIdea AI] Error creating thought:", error?.message || error);
       if (error?.status === 401 || error?.code === 'invalid_api_key') {
@@ -1708,7 +1844,11 @@ Respond with valid JSON in this format:
 
       res.json({
         response: parsed.response || "Updated!",
-        proposal: { thoughts: fixedThoughts, edges: fixedEdges },
+        proposal: {
+          thoughts: enrichAiCriteria(fixedThoughts, originalDescription || message),
+          edges: fixedEdges,
+          suggestedUniverse: parsed.suggestedUniverse ?? currentProposal.suggestedUniverse,
+        },
       });
     } catch (error: any) {
       console.error("[BigIdea AI] Error refining proposal:", error?.message || error);
@@ -1840,11 +1980,12 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "nodes, edges, and universe (or customTickers) are required" });
       }
 
-      const tickers = customTickers && Array.isArray(customTickers) && customTickers.length > 0
-        ? customTickers.map((t: string) => t.toUpperCase())
-        : getUniverseTickers(universe);
+      const { tickers, marketFlow } = resolveScanUniverseTickers(universe, customTickers);
       if (tickers.length === 0) {
-        return res.status(400).json({ error: "Invalid universe or empty watchlist" });
+        const hint = isMarketFlowUniverse(universe)
+          ? "MarketFlow theme universe is empty — ensure Market Condition has loaded theme data"
+          : "Invalid universe or empty watchlist";
+        return res.status(400).json({ error: hint });
       }
 
       const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && (n.thoughtCriteria || n.isMuted));
@@ -2031,15 +2172,12 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         }
       }
 
-      const timeframesNeeded = new Set<string>();
-      for (const tn of thoughtNodes) {
-        timeframesNeeded.add(tn.thoughtTimeframe || "daily");
-        for (const c of (tn.thoughtCriteria || [])) {
-          if (c.timeframeOverride) timeframesNeeded.add(c.timeframeOverride);
-        }
-      }
+      const timeframesNeeded = collectScanTimeframes(thoughtNodes);
       const timeframesArray = Array.from(timeframesNeeded);
       console.log(`[BigIdea Scan] Universe: ${universe}, tickers: ${tickers.length}, thought nodes: ${thoughtNodes.length}, timeframes: [${timeframesArray.join(", ")}]`);
+      if (marketFlow) {
+        console.log(`[BigIdea Scan] MarketFlow top-${marketFlow.topN}${marketFlow.coreOnly ? " (core)" : ""}: ${marketFlow.themes.map((t) => `${t.name} (#${t.rank})`).join(", ")}`);
+      }
       for (const tn of thoughtNodes) {
         console.log(`[BigIdea Scan] Thought: "${tn.thoughtName}" (${tn.id}, tf=${tn.thoughtTimeframe || "daily"}), criteria:`, JSON.stringify(tn.thoughtCriteria?.map((c: any) => ({ id: c.indicatorId, label: c.label, params: c.params?.map((p: any) => `${p.name}=${p.value}`) }))));
       }
@@ -2745,7 +2883,24 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         })
       };
 
-      res.json({ results, thoughtCounts, linkOverrides, dynamicDataFlows, funnelData, sessionId, debugInfo: enhancedDebugInfo });
+      res.json({
+        results,
+        thoughtCounts,
+        linkOverrides,
+        dynamicDataFlows,
+        funnelData,
+        sessionId,
+        debugInfo: enhancedDebugInfo,
+        ...(marketFlow ? {
+          universeMeta: {
+            type: "marketflow",
+            topN: marketFlow.topN,
+            coreOnly: marketFlow.coreOnly,
+            themes: marketFlow.themes,
+            tickerCount: tickers.length,
+          },
+        } : {}),
+      });
     } catch (error) {
       console.error("Error executing scan:", error);
       res.status(500).json({ error: "Failed to execute scan" });
@@ -3131,7 +3286,8 @@ CRITICAL: If the user asks to ADD something or describes a filter that IS NOT in
 Common add requests and their indicators:
 - "add price above/below X SMA" → add_criterion with MA-1 (SMA Value), direction: above/below, period: X
 - "add price above/below X EMA" → add_criterion with MA-2 (EMA Value), direction: above/below, period: X  
-- "add price crossed above/below X MA" → add_criterion with MA-9 (Price Crosses MA)
+- "add price crossed above/below X MA" on daily bars only → add_criterion with MA-9 (Price Crosses MA)
+- "add price crossed above/below X-day MA in the last N minutes" → add_criterion with MA-10 (Intraday Cross of Daily MA)
 - "add RSI above/below X" or "RSI filter" → add_criterion with RS-4 (RSI Range)
 - "add volume surge" or "high volume" → add_criterion with VOL-5 (Volume Spike)
 - "add near 52-week high" → add_criterion with PA-6 (Distance from 52-Week High)

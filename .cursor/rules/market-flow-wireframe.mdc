@@ -1,0 +1,16 @@
+---
+description: When Don says "print Flow wireframe", output the canonical MarketFlow wireframe from docs/ui-surfaces/market-flow-wireframe.md
+alwaysApply: true
+---
+
+# Print Flow wireframe
+
+When Don (or the user) says **"print Flow wireframe"**, **"show Flow wireframe"**, or similar:
+
+1. Read `docs/ui-surfaces/market-flow-wireframe.md`.
+2. Reply with the **full ASCII layout diagram** from that file, plus the **Lens switcher**, **View modes**, and **Refresh tiers** sections.
+3. Use the **region ids in brackets** exactly as documented — do not rename regions or redraw a different layout.
+4. Do not substitute Live Theme Charts or other surfaces unless explicitly asked.
+
+Canonical source: `docs/ui-surfaces/market-flow-wireframe.md`  
+Region registry: `shared/ui-surfaces/market-flow.ts`

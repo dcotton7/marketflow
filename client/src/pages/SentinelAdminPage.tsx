@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspacePaletteAdminPanel } from "@/components/admin/WorkspacePaletteAdminPanel";
+import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 import {
   effectiveTierCaps,
   FEATURE_LABELS,
@@ -3227,10 +3228,12 @@ export default function SentinelAdminPage() {
               <Activity className="w-4 h-4" />
               Query Optimizer
             </TabsTrigger>
+            {isTradePlanEnabled() ? (
             <TabsTrigger value="ask-ivy-rules" className="gap-2" data-testid="tab-ask-ivy-rules">
               <Lightbulb className="w-4 h-4" />
               Trade Plan Rules
             </TabsTrigger>
+            ) : null}
             <TabsTrigger value="market-condition" className="gap-2" data-testid="tab-market-condition">
               <Activity className="w-4 h-4" />
               Market Condition
@@ -4083,9 +4086,11 @@ export default function SentinelAdminPage() {
             <QueryOptimizerPanel />
           </TabsContent>
 
+          {isTradePlanEnabled() ? (
           <TabsContent value="ask-ivy-rules" data-testid="content-ask-ivy-rules">
             <AskIvyRulesPanel />
           </TabsContent>
+          ) : null}
           <TabsContent value="market-condition" data-testid="content-market-condition">
             <MarketConditionPanel />
           </TabsContent>

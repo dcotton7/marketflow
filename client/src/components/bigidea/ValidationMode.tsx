@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { DualChartGrid, ChartDataResponse, ChartMetrics } from "@/components/DualChartGrid";
+import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimeframe";
 import {
   Loader2, ThumbsUp, ThumbsDown, Play, ChevronRight,
   ChevronLeft, X, Sparkles, SkipForward, CheckCircle2, AlertCircle
@@ -451,7 +452,7 @@ function ValidationChartViewer({
 }: ValidationChartViewerProps) {
   const current = results[currentIndex];
   const symbol = current?.symbol || "";
-  const [intradayTimeframe, setIntradayTimeframe] = useState("5min");
+  const [intradayTimeframe, setIntradayTimeframe] = usePersistedIntradayTimeframe();
   const [showETH, setShowETH] = useState(false);
 
   const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
