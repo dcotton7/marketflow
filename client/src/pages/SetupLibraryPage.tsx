@@ -23,6 +23,7 @@ import {
 import { IVY_ENTRY_STRATEGIES, IVY_STOP_STRATEGIES, IVY_TARGET_STRATEGIES } from "@shared/schema";
 import { FileUploader, UploadedFile } from "@/components/uploads/FileUploader";
 import { ExtractedIdeasTab } from "@/components/bigidea/ExtractedIdeasTab";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 interface SetupIndicator {
   id?: number;
@@ -61,6 +62,7 @@ interface IndicatorOption {
 }
 
 export default function SetupLibraryPage() {
+  const { pageShellStyle } = useSystemSettings();
   const { toast } = useToast();
   const [selectedSetup, setSelectedSetup] = useState<Setup | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -169,7 +171,7 @@ export default function SetupLibraryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <SentinelHeader />
       
       <div className="container mx-auto p-6 max-w-7xl">

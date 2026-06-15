@@ -21,6 +21,7 @@ import { STOCK_HISTORY_INTRADAY_REFETCH_MS } from "@/hooks/use-stocks";
 import { useLiveThemeChartsPopout } from "@/hooks/useLiveThemeChartsPopout";
 import { LiveThemeChartsConfigDialog } from "@/components/start-here/LiveThemeChartsConfigDialog";
 import { LiveThemeChartsContent } from "@/components/start-here/LiveThemeChartsContent";
+import { ThemeChartSymbolViewer } from "@/components/start-here/ThemeChartSymbolViewer";
 
 function isLiveThemeChartInterval(v: string): v is StartHereInterval {
   return (LIVE_THEME_CHART_INTERVAL_OPTIONS as readonly string[]).includes(v);
@@ -58,6 +59,7 @@ export function LiveThemeChartsWidget({
   const { openLiveThemeChartsPopout, windowRef } = useLiveThemeChartsPopout();
   const [configOpen, setConfigOpen] = useState(false);
   const [externalPopoutOpen, setExternalPopoutOpen] = useState(false);
+  const [chartsViewerSymbol, setChartsViewerSymbol] = useState<string | null>(null);
 
   const config = normalizeLiveThemeChartsConfig(
     meta?.type === "themeCharts"
@@ -183,7 +185,11 @@ export function LiveThemeChartsWidget({
         {STOCK_HISTORY_INTRADAY_REFETCH_MS / 1000}s · theme stats every 15m (rank vs prior 15m slot) · max 8 rows
         each
       </p>
-      <LiveThemeChartsContent config={config} density={isWindowMode ? "popout" : "compact"} />
+      <LiveThemeChartsContent
+        config={config}
+        density={isWindowMode ? "popout" : "compact"}
+        onOpenCharts={(symbol) => setChartsViewerSymbol(symbol.toUpperCase())}
+      />
     </div>
   );
 
@@ -221,6 +227,11 @@ export function LiveThemeChartsWidget({
         config={config}
         workspaceDefaultInterval={dashboard.defaultChartInterval}
         onSave={(next, options) => setLiveThemeChartsConfig(instanceId, next, options)}
+      />
+
+      <ThemeChartSymbolViewer
+        symbol={chartsViewerSymbol}
+        onClose={() => setChartsViewerSymbol(null)}
       />
     </>
   );

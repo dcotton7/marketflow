@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
@@ -203,6 +203,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const isRulesPage = location === "/sentinel/rules";
   const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
   const isImportPage = location === "/sentinel/import";
+  const isTradeJournalPage = location === "/sentinel/trade-journal";
   const isPatternsPage = location === "/sentinel/patterns";
   const isAdminPage = location.startsWith("/sentinel/admin");
   const isBigIdeaPage = location === "/sentinel/bigidea";
@@ -366,6 +367,17 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             >
               <Upload className="w-4 h-4" />
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Import</span>
+            </Button>
+          </Link>
+          <Link href="/sentinel/trade-journal">
+            <Button
+              variant={isTradeJournalPage ? "secondary" : "ghost"}
+              size="sm"
+              className="gap-2"
+              data-testid="nav-trade-journal"
+            >
+              <CalendarDays className="w-4 h-4" />
+              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Trade Journal</span>
             </Button>
           </Link>
           <Link href="/sentinel/patterns">

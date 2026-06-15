@@ -183,7 +183,7 @@ export function MarketFlowStripCompact({
               <div
                 className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-semibold sm:text-xs ${
                   marketSession === "AFTER_HOURS"
-                    ? "border-purple-500/40 bg-purple-500/20 text-purple-300"
+                    ? "border-rs-pink/40 bg-rs-pink/20 text-rs-pink"
                     : "border-slate-600/50 bg-slate-700/50 text-slate-300"
                 }`}
               >

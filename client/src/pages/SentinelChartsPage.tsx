@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { useSearch, useLocation } from "wouter";
+import { useSearch, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useSentinelDailyChartData, useSentinelIntradayChartData } from "@/hooks/use-sentinel-chart-data";
 import { queryClient } from "@/lib/queryClient";
@@ -19,16 +19,19 @@ import { Search, Sparkles, Eye, X, ExternalLink, Star, ChevronLeft, ChevronRight
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimeframe";
 import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
+import { ChartLoadStatusDialog } from "@/components/charts/ChartLoadStatusDialog";
+import { useChartLoadStatus } from "@/hooks/useChartLoadStatus";
 
 
 export default function SentinelChartsPage() {
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
   const { toast } = useToast();
   const { syncToMarketSurge } = useMarketSurgeSync();
-  const [, navigate] = useLocation();
+  const [, pathParams] = useRoute("/sentinel/charts/:symbol");
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
-  const initialSymbol = urlParams.get("symbol") || "";
+  const pathSymbol = pathParams?.symbol?.toUpperCase() ?? "";
+  const initialSymbol = urlParams.get("symbol")?.toUpperCase() || pathSymbol || "";
 
   const [tickerInput, setTickerInput] = useState(initialSymbol);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol.toUpperCase());
@@ -81,6 +84,8 @@ export default function SentinelChartsPage() {
 
   /** Symbol order from Watchlist Manager table when opening via Load in Charts (matches overlay top→bottom) */
   const [chartWatchlistSymOrder, setChartWatchlistSymOrder] = useState<string[] | null>(null);
+  /** Symbol order from Ticker Review "Review on chart" when Internal Charts popout is active */
+  const [tickerReviewSymOrder, setTickerReviewSymOrder] = useState<string[] | null>(null);
 
   const {
     selectedId: effectiveManagerWatchlistId,
@@ -117,6 +122,11 @@ export default function SentinelChartsPage() {
       a.symbol.localeCompare(b.symbol, undefined, { sensitivity: "base" })
     );
   }, [navigationWatchlist, chartWatchlistSymOrder]);
+
+  const queueNavSymbols = useMemo(() => {
+    if (tickerReviewSymOrder?.length) return tickerReviewSymOrder;
+    return watchlistNavOrdered.map((w) => w.symbol);
+  }, [tickerReviewSymOrder, watchlistNavOrdered]);
 
   const { mutate: addToWatchlist, isPending: isAddingToWatchlist } = useAddToWatchlist();
   const { mutate: removeFromWatchlist, isPending: isRemovingFromWatchlist } = useRemoveFromWatchlist();
@@ -169,8 +179,8 @@ export default function SentinelChartsPage() {
 
   // React to URL changes (for popout window driving from Flow page)
   useEffect(() => {
-    const urlParams = new URLSearchParams(searchString);
-    const newSymbol = urlParams.get("symbol")?.toUpperCase() || "";
+    const params = new URLSearchParams(searchString);
+    const newSymbol = params.get("symbol")?.toUpperCase() || "";
     if (newSymbol && newSymbol !== activeSymbol) {
       setActiveSymbol(newSymbol);
       setTickerInput(newSymbol);
@@ -182,18 +192,40 @@ export default function SentinelChartsPage() {
     const handleMessage = (event: MessageEvent) => {
       // Security: only accept messages from same origin
       if (event.origin !== window.location.origin) return;
+      if (event.data?.type === 'QUEUE_UPDATE') {
+        const order: string[] = Array.isArray(event.data.symOrder)
+          ? event.data.symOrder.map((s: string) => String(s).toUpperCase()).filter(Boolean)
+          : [];
+        if (order.length) {
+          setTickerReviewSymOrder(order);
+          setNavigationMode("watchlist");
+          setChartWatchlistSymOrder(null);
+        }
+        const newSymbol = event.data.symbol?.toUpperCase();
+        if (newSymbol) {
+          setActiveSymbol(newSymbol);
+          setTickerInput(newSymbol);
+          const idx = order.findIndex((s) => s === newSymbol);
+          if (idx >= 0) setCurrentWatchlistIndex(idx);
+        }
+        return;
+      }
       if (event.data?.type === 'SYMBOL_CHANGE') {
         const newSymbol = event.data.symbol?.toUpperCase();
         if (newSymbol && newSymbol !== activeSymbol) {
           setActiveSymbol(newSymbol);
           setTickerInput(newSymbol);
+          if (queueNavSymbols.length > 1) {
+            const nextIdx = queueNavSymbols.findIndex((s) => s.toUpperCase() === newSymbol);
+            if (nextIdx >= 0) setCurrentWatchlistIndex(nextIdx);
+          }
         }
       }
     };
     
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [activeSymbol]);
+  }, [activeSymbol, queueNavSymbols]);
 
   // Handler to save trade plan to watchlist
   // Can optionally pass watchlistItemId for saving when symbol is changing
@@ -360,18 +392,20 @@ export default function SentinelChartsPage() {
     setTickerInput("");
   }, []);
 
-  const { data: dailyData, isLoading: dailyLoading } = useSentinelDailyChartData(
-    activeSymbol || undefined,
-    {
-      staleTime: 5 * 60 * 1000,
-      refetchInterval: 5 * 60 * 1000,
-    }
-  );
+  const {
+    data: dailyData,
+    isLoading: dailyLoading,
+    isError: dailyError,
+  } = useSentinelDailyChartData(activeSymbol || undefined, {
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
 
   const {
     data: intradayData,
     isLoading: intradayLoading,
     isFetching: intradayFetching,
+    isError: intradayError,
   } = useSentinelIntradayChartData(
     activeSymbol || undefined,
     intradayTimeframe,
@@ -384,7 +418,11 @@ export default function SentinelChartsPage() {
     }
   );
 
-  const { data: chartMetrics } = useQuery<ChartMetrics>({
+  const {
+    data: chartMetrics,
+    isLoading: metricsLoading,
+    isError: metricsError,
+  } = useQuery<ChartMetrics>({
     queryKey: ["/api/sentinel/trade-chart-metrics", activeSymbol, intradayTimeframe, showETH],
     enabled: !!activeSymbol,
     queryFn: async () => {
@@ -399,6 +437,43 @@ export default function SentinelChartsPage() {
     },
     staleTime: 60 * 1000,
   });
+
+  const chartLoadStatus = useChartLoadStatus({
+    symbol: activeSymbol,
+    intradayTimeframe,
+    dailyLoading,
+    dailyData,
+    dailyError,
+    intradayLoading,
+    intradayFetching,
+    intradayData,
+    intradayError,
+    metricsLoading,
+    metricsData: chartMetrics ?? null,
+    metricsError,
+  });
+
+  const [loadDialogOpen, setLoadDialogOpen] = useState(!!initialSymbol);
+
+  useEffect(() => {
+    if (activeSymbol) setLoadDialogOpen(true);
+  }, [activeSymbol]);
+
+  useEffect(() => {
+    if (!chartLoadStatus.isComplete || !loadDialogOpen) return;
+    const t = window.setTimeout(() => setLoadDialogOpen(false), 600);
+    return () => window.clearTimeout(t);
+  }, [chartLoadStatus.isComplete, loadDialogOpen]);
+
+  // Normalize /sentinel/charts/SYM from Theme Charts external link → query param
+  useEffect(() => {
+    if (!pathSymbol) return;
+    if (pathSymbol !== activeSymbol) {
+      setActiveSymbol(pathSymbol);
+      setTickerInput(pathSymbol);
+    }
+    window.history.replaceState({}, "", `/sentinel/charts?symbol=${encodeURIComponent(pathSymbol)}`);
+  }, [pathSymbol, activeSymbol]);
 
   const ivyTradePlanPriceLines = useMemo(() => {
     if (!isTradePlanEnabled()) return [];
@@ -455,11 +530,35 @@ export default function SentinelChartsPage() {
     }
   }, [msSyncEnabled, activeSymbol, syncToMarketSurge]);
 
-  // Open watchlist navigation from URL (Load in Charts); symOrder matches overlay table order
+  // Open symbol-queue navigation from URL (Watchlist Manager or Ticker Review popout)
   useEffect(() => {
     const p = new URLSearchParams(searchString);
     const source = p.get("source");
+
+    if (source === "tickerReview") {
+      const symOrderRaw = p.get("symOrder");
+      const parsedSymOrder = symOrderRaw
+        ? symOrderRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+        : [];
+      if (!parsedSymOrder.length) return;
+
+      setTickerReviewSymOrder(parsedSymOrder);
+      setNavigationMode("watchlist");
+      setChartWatchlistSymOrder(null);
+
+      const symbol = p.get("symbol")?.toUpperCase() || parsedSymOrder[0];
+      const index = parsedSymOrder.findIndex((s) => s === symbol);
+      const resolvedIdx = index >= 0 ? index : 0;
+      const resolved = parsedSymOrder[resolvedIdx];
+      setCurrentWatchlistIndex(resolvedIdx);
+      setActiveSymbol(resolved);
+      setTickerInput(resolved);
+      window.history.replaceState({}, "", "/sentinel/charts");
+      return;
+    }
+
     if (source !== "watchlist") return;
+    setTickerReviewSymOrder(null);
 
     const wlId = p.get("watchlistId");
     if (wlId) {
@@ -520,30 +619,30 @@ export default function SentinelChartsPage() {
 
   // Navigation handlers
   const handleNavigatePrev = useCallback(() => {
-    if (navigationMode === 'watchlist' && watchlistNavOrdered.length) {
+    if (navigationMode === 'watchlist' && queueNavSymbols.length) {
       const newIndex = Math.max(0, currentWatchlistIndex - 1);
       setCurrentWatchlistIndex(newIndex);
-      const sym = watchlistNavOrdered[newIndex].symbol;
+      const sym = queueNavSymbols[newIndex];
       setActiveSymbol(sym);
       setTickerInput(sym);
       if (msSyncEnabled) {
         syncToMarketSurge(sym, 'day');
       }
     }
-  }, [navigationMode, watchlistNavOrdered, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
+  }, [navigationMode, queueNavSymbols, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
 
   const handleNavigateNext = useCallback(() => {
-    if (navigationMode === 'watchlist' && watchlistNavOrdered.length) {
-      const newIndex = Math.min(watchlistNavOrdered.length - 1, currentWatchlistIndex + 1);
+    if (navigationMode === 'watchlist' && queueNavSymbols.length) {
+      const newIndex = Math.min(queueNavSymbols.length - 1, currentWatchlistIndex + 1);
       setCurrentWatchlistIndex(newIndex);
-      const sym = watchlistNavOrdered[newIndex].symbol;
+      const sym = queueNavSymbols[newIndex];
       setActiveSymbol(sym);
       setTickerInput(sym);
       if (msSyncEnabled) {
         syncToMarketSurge(sym, 'day');
       }
     }
-  }, [navigationMode, watchlistNavOrdered, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
+  }, [navigationMode, queueNavSymbols, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -567,7 +666,7 @@ export default function SentinelChartsPage() {
   const chartsNavExtra = activeSymbol ? (
     <div className="flex items-center gap-1.5">
       {/* Watchlist navigation controls */}
-      {navigationMode === 'watchlist' && watchlistNavOrdered.length > 0 && (
+      {navigationMode === 'watchlist' && queueNavSymbols.length > 0 && (
         <>
           <Button
             size="icon"
@@ -579,12 +678,12 @@ export default function SentinelChartsPage() {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm text-muted-foreground px-2" data-testid="text-watchlist-position">
-            {currentWatchlistIndex + 1} of {watchlistNavOrdered.length}
+            {currentWatchlistIndex + 1} of {queueNavSymbols.length}
           </span>
           <Button
             size="icon"
             variant="outline"
-            disabled={currentWatchlistIndex === watchlistNavOrdered.length - 1}
+            disabled={currentWatchlistIndex === queueNavSymbols.length - 1}
             onClick={handleNavigateNext}
             data-testid="button-watchlist-next"
           >
@@ -639,16 +738,7 @@ export default function SentinelChartsPage() {
           <p className="text-sm">View recent news for {activeSymbol}</p>
         </TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div>
-            <WatchlistSelector symbol={activeSymbol} />
-          </div>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p className="text-sm">Add/remove from watchlist</p>
-        </TooltipContent>
-      </Tooltip>
+      <WatchlistSelector symbol={activeSymbol} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -680,7 +770,15 @@ export default function SentinelChartsPage() {
   ) : null;
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden" style={cssVariables as any}>
+    <div className="h-screen sentinel-page flex flex-col overflow-hidden" style={pageShellStyle as React.CSSProperties}>
+      <ChartLoadStatusDialog
+        open={loadDialogOpen && !!activeSymbol}
+        symbol={activeSymbol}
+        steps={chartLoadStatus.steps}
+        activeStep={chartLoadStatus.activeStep}
+        elapsedMs={chartLoadStatus.elapsedMs}
+        isComplete={chartLoadStatus.isComplete}
+      />
       <SentinelHeader showSentiment={false} />
 
       <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border" style={{ backgroundColor: cssVariables.headerBg }}>

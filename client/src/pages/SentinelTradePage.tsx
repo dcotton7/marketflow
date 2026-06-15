@@ -71,7 +71,7 @@ export default function SentinelTradePage() {
   const params = useParams<{ tradeId: string }>();
   const tradeId = parseInt(params.tradeId || "0");
   const { toast } = useToast();
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
   const queryClient = useQueryClient();
 
   const [editingStop, setEditingStop] = useState(false);
@@ -230,7 +230,7 @@ export default function SentinelTradePage() {
   const latestEval = evaluations[0];
 
   return (
-    <div className="min-h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+    <div className="min-h-screen sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <SentinelHeader showSentiment={true} />
       <div className="flex items-center justify-between gap-3 px-4 py-2 border-b flex-wrap" style={{ backgroundColor: cssVariables.headerBg }}>
         <div className="flex items-center gap-2">

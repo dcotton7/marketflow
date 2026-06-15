@@ -1,7 +1,12 @@
 import type { Layout } from "react-grid-layout/legacy";
 import type { StartHereInterval } from "@/components/MiniChart";
 import type { LiveThemeChartsConfig } from "@/lib/live-theme-charts";
-import { DEFAULT_LIVE_THEME_CHARTS_CONFIG, normalizeLiveThemeChartsConfig, estimateThemeChartsContentHeightPx } from "@/lib/live-theme-charts";
+import {
+  defaultLiveThemeChartsConfig,
+  normalizeLiveThemeChartsConfig,
+  estimateThemeChartsContentHeightPx,
+  writePersistedThemeChartsInterval,
+} from "@/lib/live-theme-charts";
 import {
   DEFAULT_START_HERE_WORKSPACE_PALETTE,
   normalizeStartHereWorkspacePalette,
@@ -789,6 +794,48 @@ export function createDefaultDashboard(): StartHereDashboardV2 {
   };
 }
 
+/** Empty workspace — no widgets. Preserves chart wall / flow size prefs for the next add. */
+export function createEmptyDashboard(
+  preserve?: Pick<StartHereDashboardV2, "defaultFlowGridCells" | "defaultChartInterval">
+): StartHereDashboardV2 {
+  return {
+    v: START_HERE_DASHBOARD_VERSION,
+    layout: [],
+    instances: {},
+    groups: {},
+    defaultChartInstanceId: null,
+    defaultWatchlistInstanceId: null,
+    focusedChartInstanceId: null,
+    defaultFlowInstanceId: null,
+    defaultFlowGridCells: preserve?.defaultFlowGridCells ?? null,
+    defaultChartInterval: preserve?.defaultChartInterval ?? "1d",
+  };
+}
+
+export function clearAllWidgets(dashboard: StartHereDashboardV2): StartHereDashboardV2 {
+  return createEmptyDashboard({
+    defaultFlowGridCells: dashboard.defaultFlowGridCells ?? null,
+    defaultChartInterval: dashboard.defaultChartInterval ?? "1d",
+  });
+}
+
+/** Remove per-widget localStorage keys when clearing or deleting instances. */
+export function purgeWidgetInstanceStorage(
+  userId: number,
+  startId: string,
+  instanceIds: string[]
+): void {
+  for (const instanceId of instanceIds) {
+    try {
+      localStorage.removeItem(startHereWatchlistInstanceStorageKey(userId, startId, instanceId));
+      localStorage.removeItem(startHereNewsModeStorageKey(userId, instanceId, startId));
+      localStorage.removeItem(startHereWatchlistColumnWidthsStorageKey(userId, startId, instanceId));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function nextColorIndex(groups: Record<string, StartHereGroupState>): number {
   const max = Object.values(groups).reduce((m, g) => Math.max(m, g.colorIndex), -1);
   return max + 1;
@@ -967,7 +1014,7 @@ export function appendWidget(
       : type === "chart"
         ? chartTemplateCellsFromDefault(dashboard)
         : type === "themeCharts"
-          ? themeChartsTemplateCellsFromConfig(DEFAULT_LIVE_THEME_CHARTS_CONFIG)
+          ? themeChartsTemplateCellsFromConfig(defaultLiveThemeChartsConfig())
           : WIDGET_TEMPLATE[type];
   const pos =
     findFirstFreeGridPlacement(dashboard.layout, tm.w, tm.h) ??
@@ -1882,6 +1929,7 @@ export function setLiveThemeChartsConfig(
   const meta = dashboard.instances[instanceId];
   if (!meta || meta.type !== "themeCharts") return dashboard;
   const liveThemeChartsConfig = normalizeLiveThemeChartsConfig(config);
+  writePersistedThemeChartsInterval(liveThemeChartsConfig.chartInterval);
   return {
     ...dashboard,
     layout: applyThemeChartsLayoutHeight(dashboard, instanceId, liveThemeChartsConfig),
@@ -2106,6 +2154,23 @@ export function sanitizeDashboard(d: StartHereDashboardV2): StartHereDashboardV2
   for (const gid of Array.from(usedGroupIds)) {
     const g = mergedInput[gid];
     if (g) groups[gid] = { ...g, symbol: typeof g.symbol === "string" ? g.symbol : "" };
+  }
+  if (!layout.length && Object.keys(instances).length === 0) {
+    const rawFlowCells = d.defaultFlowGridCells;
+    return {
+      v: START_HERE_DASHBOARD_VERSION,
+      layout: [],
+      instances: {},
+      groups: mergeLinkLanesIntoGroups({}),
+      defaultChartInstanceId: null,
+      defaultWatchlistInstanceId: null,
+      focusedChartInstanceId: null,
+      defaultFlowInstanceId: null,
+      defaultFlowGridCells: isValidFlowGridCells(rawFlowCells)
+        ? clampFlowGridCells(rawFlowCells)
+        : null,
+      defaultChartInterval: isStartHereInterval(d.defaultChartInterval) ? d.defaultChartInterval : "1d",
+    };
   }
   if (!layout.length || !Object.keys(instances).length) {
     return sanitizeDashboard(createDefaultDashboard());

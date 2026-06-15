@@ -20,6 +20,7 @@ export function ThemeChartColumn({
   isLoading,
   error,
   density = "compact",
+  onOpenCharts,
 }: {
   columnKey: LiveThemeChartsColumnKey;
   config: LiveThemeChartsConfig;
@@ -28,6 +29,7 @@ export function ThemeChartColumn({
   isLoading: boolean;
   error: unknown;
   density?: LiveThemeChartsDensity;
+  onOpenCharts?: (symbol: string) => void;
 }) {
   const columnConfig = config[columnKey];
   const snapshotKey = columnConfig.snapshotKey;
@@ -82,6 +84,7 @@ export function ThemeChartColumn({
               highlights={highlightsByThemeId.get(theme.id) ?? []}
               accDistStats={accDistStatsByThemeId.get(theme.id) ?? null}
               density={density}
+              onOpenCharts={onOpenCharts}
             />
           ))
         )}

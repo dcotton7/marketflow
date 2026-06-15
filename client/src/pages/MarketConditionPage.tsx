@@ -20,6 +20,10 @@ import {
   FlowMapFocusBox,
 } from "@/components/market-condition";
 import { AnalysisPanel } from "@/features/marketflow-analysis";
+import { ThemeBriefingPickerDialog, type BriefingMode } from "@/components/market-condition/ThemeBriefingPickerDialog";
+import { ThemeBriefingPanel } from "@/components/market-condition/ThemeBriefingPanel";
+import { ThemeReviewActions } from "@/components/market-condition/ThemeReviewActions";
+import { ThemeTickerReviewPanel } from "@/components/market-condition/ThemeTickerReviewPanel";
 import {
   MOCK_THEMES,
   MOCK_THEME_MEMBERS,
@@ -31,8 +35,10 @@ import {
   getCompanyName,
   TimeSlice,
   SizeFilter,
+  type RiskAppetiteIndex,
 } from "@/data/mockThemeData";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useLocation } from "wouter";
 import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search, Car, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -79,6 +85,8 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import type { FlowMapFocusData } from "@/components/market-condition/FlowMapPanel";
 import { MARKET_FLOW_SURFACE, uiRegion } from "@shared/ui-surfaces";
+import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
+import { localSlotBgStyle, localSlotHeaderStyle } from "@/lib/local-slot-style";
 
 type ViewMode = "grid" | "table" | "split";
 type LensMode = "flow" | "rotation" | "flowMap" | "concentration" | "accumulation" | "race";
@@ -139,6 +147,34 @@ const SIZE_FILTER_LABELS: Record<SizeFilter, string> = {
   SMALL: "Small Cap (IWM)",
   MICRO: "Micro Cap (IWC)",
 };
+
+/** Live fallback when RAI API is loading/unavailable — never use stale mock 72. */
+function estimateRaiFromBenchmarks(
+  benchmarks: Record<string, { changePct?: number }> | undefined
+): RiskAppetiteIndex {
+  const spy = benchmarks?.SPY?.changePct ?? 0;
+  const qqq = benchmarks?.QQQ?.changePct ?? 0;
+  const iwm = benchmarks?.IWM?.changePct ?? 0;
+  const avg = (spy + qqq + iwm) / 3;
+  const score = Math.round(Math.max(8, Math.min(92, 50 + avg * 14)));
+  const label: RiskAppetiteIndex["label"] =
+    score >= 70 ? "AGGRESSIVE" : score >= 40 ? "NEUTRAL" : "DEFENSIVE";
+  const riskMultiplier =
+    label === "AGGRESSIVE" ? 1.05 : label === "DEFENSIVE" ? 0.65 : 0.85;
+  const half = Math.round(score / 5);
+  return {
+    score,
+    label,
+    riskMultiplier,
+    components: {
+      trendPosition: half,
+      smallVsLarge: half,
+      specLeadership: half,
+      marketBreadth: half,
+      volatilityRegime: half,
+    },
+  };
+}
 
 // Convert server ThemeMetrics to UI ThemeRow format
 function convertToThemeRow(theme: ThemeMetrics): ThemeRow {
@@ -208,16 +244,27 @@ function PanelHeader({
   tooltip,
   subtitle,
   titleAfterInfo,
+  titleTrailing,
   action,
+  headerSlotId = "marketFlow:panelHeader",
+  bodySlotId,
 }: {
   title: string;
   tooltip: string;
   subtitle?: string;
   titleAfterInfo?: string;
+  titleTrailing?: React.ReactNode;
   action?: React.ReactNode;
+  /** Local theme slot for section sub-header chrome */
+  headerSlotId?: string;
+  /** Optional panel body slot — second chip for section background */
+  bodySlotId?: string;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border-b border-slate-700/50 shrink-0">
+    <div
+      className="flex items-center gap-2 px-3 py-2 border-b border-slate-700/50 shrink-0"
+      style={localSlotHeaderStyle(headerSlotId)}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="flex items-center gap-2 cursor-help">
@@ -237,12 +284,18 @@ function PanelHeader({
           <p className="text-xs">{tooltip}</p>
         </TooltipContent>
       </Tooltip>
+      <div className="flex items-center gap-1.5">
+        {titleTrailing}
+        <ThemeColorChip slotId={headerSlotId} />
+        {bodySlotId ? <ThemeColorChip slotId={bodySlotId} /> : null}
+      </div>
       {action ? <div className="ml-auto flex items-center gap-2">{action}</div> : null}
     </div>
   );
 }
 
 export default function MarketConditionPage() {
+  const { pageShellStyle } = useSystemSettings();
   const [, navigate] = useLocation();
   const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -282,6 +335,10 @@ export default function MarketConditionPage() {
   const [chartSyncEnabled, setChartSyncEnabled] = useState(false);
   const [analysisSyncEnabled, setAnalysisSyncEnabled] = useState(false);
   const [analysisSheetSymbol, setAnalysisSheetSymbol] = useState<string | null>(null);
+  const [briefingPickerOpen, setBriefingPickerOpen] = useState(false);
+  const [briefingReportOpen, setBriefingReportOpen] = useState(false);
+  const [briefingMode, setBriefingMode] = useState<BriefingMode | null>(null);
+  const [tickerReviewOpen, setTickerReviewOpen] = useState(false);
   const [flowMapFocusData, setFlowMapFocusData] = useState<FlowMapFocusData | null>(null);
   const [focusedCenterTab, setFocusedCenterTab] = useState<
     "actionableDetails" | "flowFocus" | "etfs" | "subthemes" | "legacyDetails"
@@ -423,13 +480,6 @@ export default function MarketConditionPage() {
     if (benchmarkSource) {
       const sourceThemes = shouldUseLive && marketCondition?.themes ? themes : MOCK_THEMES;
       const sortedThemes = [...sourceThemes].sort((a, b) => b.score - a.score);
-      const regime = rai
-        ? rai.label === "AGGRESSIVE"
-          ? "RISK_ON"
-          : rai.label === "DEFENSIVE"
-            ? "RISK_OFF"
-            : "NEUTRAL"
-        : MOCK_MARKET_SUMMARY.regime;
       const raiSummary = rai
         ? {
             score: rai.score,
@@ -437,7 +487,14 @@ export default function MarketConditionPage() {
             label: rai.label,
             riskMultiplier: rai.riskMultiplier,
           }
-        : MOCK_MARKET_SUMMARY.rai;
+        : shouldUseLive
+          ? estimateRaiFromBenchmarks(benchmarkSource.benchmarks)
+          : MOCK_MARKET_SUMMARY.rai;
+      const regime = raiSummary.label === "AGGRESSIVE"
+        ? "RISK_ON"
+        : raiSummary.label === "DEFENSIVE"
+          ? "RISK_OFF"
+          : "NEUTRAL";
       return {
         regime,
         spyPct: benchmarkSource.spyBenchmark?.changePct ?? 0,
@@ -463,9 +520,9 @@ export default function MarketConditionPage() {
         symbol: m.symbol,
         name: getCompanyName(m.symbol),
         price: m.price,
-        pct: m.pctChange,
+        pct: m.pctChange ?? 0,
         leaderScore: m.leaderScore || 50,
-        rsVsSpy: m.rsVsSpy,
+        rsVsSpy: m.rsVsBenchmark ?? m.rsVsSpy ?? 0,
         volExp: m.volExp,
         momentum: m.momentum,
         isPrimary: m.isCore,
@@ -597,10 +654,21 @@ export default function MarketConditionPage() {
           return b.score - a.score;
         });
 
+      case "flowMap":
       default:
-        return themesCopy;
+        return themesCopy.sort((a, b) => b.score - a.score);
     }
   }, [lensMode, themes, accDistFilter, heatmapSort, timeSlice]);
+
+  // Default selection on Flow load — Ticker Review / members need a theme before manual pick.
+  // Flow Map owns first-row selection from its matrix order once slice data loads.
+  useEffect(() => {
+    if (sortedThemes.length === 0 || lensMode === "flowMap") return;
+    const selectionInList =
+      selectedTheme != null && sortedThemes.some((t) => t.id === selectedTheme);
+    if (selectionInList) return;
+    handleThemeSelect(sortedThemes[0].id);
+  }, [lensMode, selectedTheme, sortedThemes, handleThemeSelect]);
 
   // Build search results from query
   const searchResults = useMemo(() => {
@@ -822,8 +890,13 @@ export default function MarketConditionPage() {
   const renderSplitTopSection = () => (
     <PanelGroup direction="horizontal" autoSaveId="market-condition-top">
       <Panel defaultSize={45} minSize={25}>
-        <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+        <div
+          className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
+          style={localSlotBgStyle("marketFlow:themeTrackerPanel")}
+          data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "themeTrackerPanel")}
+        >
           <PanelHeader
+            bodySlotId="marketFlow:themeTrackerPanel"
             title={lensMode === "race" ? "Theme race" : lensMode === "flowMap" ? "Theme Flow Map" : "Theme Heatmap"}
             tooltip={
               lensMode === "race"
@@ -839,7 +912,7 @@ export default function MarketConditionPage() {
                   <div className="flex items-center gap-1.5" style={{ marginRight: "100px", marginLeft: "16px" }}>
                     <span className={cn(
                       "text-[15px] select-none font-medium px-3",
-                      timeSlice === "TODAY" ? "text-green-400" : "text-purple-300"
+                      timeSlice === "TODAY" ? "text-rs-green" : "text-admin-market-flow"
                     )}>
                       {timeSlice === "TODAY"
                         ? (pollingStatus?.marketSession === "MARKET_HOURS" ? "LIVE" : pollingStatus?.marketSession === "AFTER_HOURS" ? "After Hours" : "Closed")
@@ -880,7 +953,7 @@ export default function MarketConditionPage() {
                               "text-[15px] font-medium px-2 py-0.5 rounded transition-colors",
                               !canUseHistoricalComparison && "opacity-40 cursor-not-allowed",
                               heatmapSort === "historical"
-                                ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                                ? "bg-admin-market-flow/20 text-admin-market-flow border border-admin-market-flow"
                                 : "text-slate-500 hover:text-slate-300"
                             )}
                           >
@@ -968,8 +1041,13 @@ export default function MarketConditionPage() {
         <>
           <ResizeHandle direction="vertical" />
           <Panel defaultSize={showMembersPanel ? 35 : 45} minSize={20}>
-            <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+            <div
+              className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
+              style={localSlotBgStyle("marketFlow:focusedThemePanel")}
+              data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "focusedThemePanel")}
+            >
               <PanelHeader
+                bodySlotId="marketFlow:focusedThemePanel"
                 title="Focused Theme"
                 tooltip="Tabs: Actionable Details, Flow Focus (Theme Flow Map lens), ETF proxies, and full legacy metrics. Pick a theme from the left panel."
                 titleAfterInfo={selectedThemeData?.name ?? "None selected"}
@@ -992,7 +1070,12 @@ export default function MarketConditionPage() {
               />
               <div className="flex-1 overflow-auto">
                 <div className="flex h-full min-h-0 flex-col">
-                  <div className="border-b border-slate-700/40 px-2 py-1.5">
+                  <div
+                    className="border-b border-slate-700/40 px-2 py-1.5 flex items-center gap-2"
+                    style={localSlotHeaderStyle("marketFlow:detailTabBar")}
+                    data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "detailTabBar")}
+                  >
+                    <ThemeColorChip slotId="marketFlow:detailTabBar" />
                     <div className="inline-flex flex-wrap items-center gap-0.5 rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
                       <button
                         type="button"
@@ -1143,8 +1226,13 @@ export default function MarketConditionPage() {
         <>
           <ResizeHandle direction="vertical" />
           <Panel defaultSize={showFocusedPanel ? 20 : 28} minSize={15}>
-            <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+            <div
+              className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
+              style={localSlotBgStyle("marketFlow:membersPanel")}
+              data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "membersPanel")}
+            >
               <PanelHeader
+                bodySlotId="marketFlow:membersPanel"
                 title="Theme Members"
                 tooltip="Individual stocks in the selected theme. Sorted by LeaderScore. Click ticker to open chart. Green dot = strong leader."
                 subtitle={
@@ -1153,6 +1241,13 @@ export default function MarketConditionPage() {
                     : memberScope === "theme"
                       ? "Scope: All in theme"
                       : "Scope: Leaders"
+                }
+                titleTrailing={
+                  <ThemeReviewActions
+                      disabled={!selectedTheme}
+                      onThemeReview={() => setBriefingPickerOpen(true)}
+                      onTickerReview={() => setTickerReviewOpen(true)}
+                    />
                 }
                 action={
                   <div className="flex items-center gap-1.5">
@@ -1245,7 +1340,8 @@ export default function MarketConditionPage() {
 
   return (
     <div
-      className={cn("h-screen flex flex-col bg-slate-950", isFullscreen && "fixed inset-0 z-50")}
+      className={cn("sentinel-page h-screen flex flex-col", isFullscreen && "fixed inset-0 z-50")}
+      style={pageShellStyle as React.CSSProperties}
       data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "pageShell")}
     >
       {/* Main App Navigation */}
@@ -1292,8 +1388,13 @@ export default function MarketConditionPage() {
       )}
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-900/50 border-b border-slate-700/50 shrink-0">
-        <div className="flex items-center gap-4">
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-slate-700/50 shrink-0"
+        style={localSlotHeaderStyle("marketFlow:commandToolbar")}
+        data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "commandToolbar")}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2 md:gap-4">
+          <ThemeColorChip slotId="marketFlow:commandToolbar" />
           <Tooltip>
             <TooltipTrigger>
               <div className="flex items-center gap-2">
@@ -1430,7 +1531,7 @@ export default function MarketConditionPage() {
                   size="sm"
                   className={cn(
                     "h-7 px-3 text-xs gap-1.5",
-                    lensMode === "rotation" && "bg-slate-700 text-purple-400"
+                    lensMode === "rotation" && "bg-slate-700 text-admin-market-flow"
                   )}
                   onClick={() => handleLensMode("rotation")}
                 >
@@ -1802,7 +1903,7 @@ export default function MarketConditionPage() {
           </DropdownMenu>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {viewMode === "split" && splitPanelsHiddenCount > 0 && (
             <div className="flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-800/40 px-2 py-1">
               <span className="px-1 text-[11px] text-slate-400">Show:</span>
@@ -1954,8 +2055,13 @@ export default function MarketConditionPage() {
               <ResizeHandle direction="horizontal" />
 
               <Panel defaultSize={35} minSize={20}>
-                <div className="h-full bg-slate-900/80 rounded-lg border border-slate-700/50 overflow-hidden flex flex-col">
+                <div
+                  className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
+                  style={localSlotBgStyle("marketFlow:rotationTable")}
+                  data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "rotationTable")}
+                >
                   <PanelHeader
+                    bodySlotId="marketFlow:rotationTable"
                     title="Rotation Table"
                     tooltip="Full metrics table. Click column headers to sort. Δ Rank shows position change - this is rotation velocity. What institutions chase."
                     action={
@@ -2086,6 +2192,49 @@ export default function MarketConditionPage() {
         symbol={analysisSheetSymbol}
         open={analysisSheetSymbol !== null}
         onOpenChange={(open) => !open && setAnalysisSheetSymbol(null)}
+      />
+      <ThemeBriefingPickerDialog
+        open={briefingPickerOpen}
+        onOpenChange={setBriefingPickerOpen}
+        generating={briefingReportOpen && briefingMode !== null}
+        onGenerate={(mode) => {
+          setBriefingMode(mode);
+          setBriefingReportOpen(true);
+        }}
+      />
+      <ThemeBriefingPanel
+        open={briefingReportOpen}
+        mode={briefingMode}
+        onOpenChange={(open) => {
+          setBriefingReportOpen(open);
+          if (!open) setBriefingMode(null);
+        }}
+      />
+      <ThemeTickerReviewPanel
+        open={tickerReviewOpen}
+        onOpenChange={setTickerReviewOpen}
+        themeId={selectedTheme}
+        themeName={selectedThemeData?.name ?? null}
+        memberScope={memberScope}
+        scopeLabel={
+          memberScope === "subtheme" && selectedSubthemeName
+            ? selectedSubthemeName
+            : memberScope === "leaders"
+              ? "Leaders"
+              : "All theme"
+        }
+        tickers={visibleThemeTickers}
+        themeMedianPct={selectedThemeData?.medianPct}
+        themeRank={selectedThemeData?.rank}
+        themeBreakdownWatch={selectedThemeData?.breakdownWatch}
+        raiLabel={marketSummary.rai.label}
+        chartSyncEnabled={chartSyncEnabled}
+        msSyncEnabled={msSyncEnabled}
+        analysisSyncEnabled={analysisSyncEnabled}
+        onSyncToChart={syncToChart}
+        onSyncToMarketSurge={(symbol) => syncToMarketSurge(symbol, "day")}
+        onOpenAnalysis={(symbol) => setAnalysisSheetSymbol(symbol)}
+        marketSession={pollingStatus?.marketSession}
       />
     </div>
   );

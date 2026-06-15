@@ -46,6 +46,7 @@ import { getSectorAndIndustry, getFundamentals } from "./fundamentals";
 import { normalizeWatchlistSymbol } from "@shared/watchlist-theme";
 import { getThemeLabelForSymbol } from "./market-condition/universe";
 import { getQuote, getQuotesBatch } from "./data-layer/quotes";
+import { isDelistedSymbol, scheduleDelistedTickerCheck } from "./market-condition/utils/delisted-ticker-registry";
 import { getIntradayBars } from "./data-layer/intraday-bars";
 import { getConstituents } from "./universe/constituents";
 
@@ -947,6 +948,9 @@ export async function registerRoutes(
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {
     const symbol = String(req.params.symbol).toUpperCase();
+    if (isDelistedSymbol(symbol)) {
+      return res.status(404).json({ message: `Symbol ${symbol} is delisted and removed from the universe` });
+    }
     const interval = String(req.query.interval || '1d');
     let period = String(req.query.period || '3y'); // Default to 3 years for scrollback history
     
@@ -998,6 +1002,7 @@ export async function registerRoutes(
       }
       
       if (history.length === 0) {
+        scheduleDelistedTickerCheck(symbol, "history-empty");
         res.status(404).json({ message: `No data available for ${symbol}` });
         return;
       }
@@ -1013,6 +1018,9 @@ export async function registerRoutes(
   // --- Stock Quote ---
   app.get(api.stocks.quote.path, async (req, res) => {
     const symbol = String(req.params.symbol).toUpperCase();
+    if (isDelistedSymbol(symbol)) {
+      return res.status(404).json({ message: `Symbol ${symbol} is delisted and removed from the universe` });
+    }
     try {
       const [quote, fundamentals] = await Promise.all([
         getQuote(symbol),
@@ -1020,6 +1028,7 @@ export async function registerRoutes(
       ]);
 
       if (!quote) {
+        scheduleDelistedTickerCheck(symbol, "quote-missing");
         return res.status(404).json({ message: `Symbol ${symbol} not found` });
       }
 

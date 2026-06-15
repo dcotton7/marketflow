@@ -51,6 +51,40 @@ export const LIVE_THEME_CHARTS_MAX_ROWS = 8;
 export const LIVE_THEME_CHART_INTERVAL_OPTIONS: StartHereInterval[] = ["5m", "15m", "30m", "1d"];
 export const DEFAULT_LIVE_THEME_CHARTS_CHART_INTERVAL: StartHereInterval = "30m";
 
+/** Last mini-chart interval chosen in Live Theme Charts or Flow ThemeChart review. */
+export const THEME_CHARTS_LAST_INTERVAL_STORAGE_KEY = "sps:theme-charts-last-interval";
+
+export function readPersistedThemeChartsInterval(): StartHereInterval | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(THEME_CHARTS_LAST_INTERVAL_STORAGE_KEY);
+    if (!raw) return null;
+    return normalizeLiveThemeChartsChartInterval(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function writePersistedThemeChartsInterval(interval: StartHereInterval): void {
+  try {
+    localStorage.setItem(
+      THEME_CHARTS_LAST_INTERVAL_STORAGE_KEY,
+      normalizeLiveThemeChartsChartInterval(interval)
+    );
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+/** Default widget config; chart interval restores from localStorage when set. */
+export function defaultLiveThemeChartsConfig(): LiveThemeChartsConfig {
+  const persisted = readPersistedThemeChartsInterval();
+  return {
+    ...DEFAULT_LIVE_THEME_CHARTS_CONFIG,
+    chartInterval: persisted ?? DEFAULT_LIVE_THEME_CHARTS_CHART_INTERVAL,
+  };
+}
+
 /** Approximate pixel height of one theme row (mini chart + scorecard panel). */
 export const THEME_CHART_ROW_PX = 196;
 /** Widget chrome, column headers, subtitle, and padding above the scroll area. */
@@ -210,7 +244,7 @@ function readSnapshotKey(col: Record<string, unknown>, fallback: LiveThemeCharts
 }
 
 export function normalizeLiveThemeChartsConfig(raw: unknown): LiveThemeChartsConfig {
-  const base = DEFAULT_LIVE_THEME_CHARTS_CONFIG;
+  const base = defaultLiveThemeChartsConfig();
   if (!raw || typeof raw !== "object") return { ...base };
 
   const o = raw as Record<string, unknown>;

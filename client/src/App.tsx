@@ -7,6 +7,7 @@ import { TimeframeProvider } from "@/context/TimeframeContext";
 import { SentinelAuthProvider } from "@/context/SentinelAuthContext";
 import { SentinelProtectedRoute } from "@/components/SentinelProtectedRoute";
 import { SystemSettingsProvider } from "@/context/SystemSettingsContext";
+import { ThemeEditorProvider } from "@/context/ThemeEditorContext";
 import { WorkspacePaletteProvider } from "@/context/WorkspacePaletteContext";
 import NotFound from "@/pages/not-found";
 import SentinelLoginPage from "@/pages/SentinelLoginPage";
@@ -16,6 +17,7 @@ import SentinelTradePage from "@/pages/SentinelTradePage";
 import SentinelRulesPage from "@/pages/SentinelRulesPage";
 import SentinelAdminPage from "@/pages/SentinelAdminPage";
 import SentinelImportPage from "@/pages/SentinelImportPage";
+import SentinelTradeJournalPage from "@/pages/SentinelTradeJournalPage";
 import PatternLearningPage from "@/pages/PatternLearningPage";
 import BigIdeaPage from "@/pages/BigIdeaPage";
 import SentinelChartsPage from "@/pages/SentinelChartsPage";
@@ -70,6 +72,11 @@ function Router() {
           <SentinelImportPage />
         </SentinelProtectedRoute>
       </Route>
+      <Route path="/sentinel/trade-journal">
+        <SentinelProtectedRoute>
+          <SentinelTradeJournalPage />
+        </SentinelProtectedRoute>
+      </Route>
       <Route path="/sentinel/patterns">
         <SentinelProtectedRoute>
           <PatternLearningPage />
@@ -85,7 +92,7 @@ function Router() {
           <SetupLibraryPage />
         </SentinelProtectedRoute>
       </Route>
-      <Route path="/sentinel/charts">
+      <Route path="/sentinel/charts/:symbol?">
         <SentinelProtectedRoute>
           <SentinelChartsPage />
         </SentinelProtectedRoute>
@@ -150,10 +157,12 @@ function App() {
         <SentinelAuthProvider>
           <WorkspacePaletteProvider>
             <SystemSettingsProvider>
-              <TimeframeProvider>
-                <Toaster />
-                <Router />
-              </TimeframeProvider>
+              <ThemeEditorProvider>
+                <TimeframeProvider>
+                  <Toaster />
+                  <Router />
+                </TimeframeProvider>
+              </ThemeEditorProvider>
             </SystemSettingsProvider>
           </WorkspacePaletteProvider>
         </SentinelAuthProvider>

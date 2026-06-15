@@ -86,6 +86,11 @@ app.use((req, res, next) => {
     const { initializeDatabase } = await import("./db");
     await initializeDatabase();
     
+    // Strip persisted delisted symbols from in-memory universe before theme cache
+    console.log("Initializing delisted ticker registry...");
+    const { initializeDelistedTickerRegistry } = await import("./market-condition/utils/delisted-ticker-registry");
+    await initializeDelistedTickerRegistry();
+
     // Initialize theme members cache (needs DB)
     console.log("Initializing theme members cache from database...");
     const { initializeThemeMembersCache } = await import("./market-condition/utils/theme-db-loader");

@@ -15,7 +15,7 @@ import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
 import { useToast } from "@/hooks/use-toast";
 
 export default function SymbolPage() {
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
   const { symbol } = useParams();
   const [, setLocation] = useLocation();
   const searchString = useSearch();
@@ -118,7 +118,7 @@ export default function SymbolPage() {
 
   if (isLoading) {
     return (
-      <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+      <div className="sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <Layout>
         <div className="flex h-[50vh] items-center justify-center">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -130,7 +130,7 @@ export default function SymbolPage() {
 
   if (!quote) {
     return (
-      <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+      <div className="sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <Layout>
         <div className="text-center py-20">
           <h2 className="font-bold" style={{ color: cssVariables.textColorTitle, fontSize: cssVariables.fontSizeTitle }}>Symbol not found</h2>
@@ -144,14 +144,14 @@ export default function SymbolPage() {
   const isPositive = quote.change >= 0;
 
   return (
-    <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+    <div className="sentinel-page" style={pageShellStyle as React.CSSProperties}>
     <Layout>
       {/* Back Button */}
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <Button 
           variant="outline" 
           onClick={handleBackToResults}
-          className="gap-2 bg-purple-600/10 text-purple-400 border-purple-500/50 hover:bg-purple-600/20 hover:text-purple-300"
+          className="gap-2 bg-admin-market-flow/10 text-admin-market-flow border-admin-market-flow/50 hover:bg-admin-market-flow/20 hover:text-admin-market-flow"
           data-testid="button-back-to-results"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -160,7 +160,7 @@ export default function SymbolPage() {
         {evalReturn && (
           <Button
             variant="outline"
-            className="gap-2 bg-purple-600/10 text-purple-400 border-purple-500/50 hover:bg-purple-600/20 hover:text-purple-300"
+            className="gap-2 bg-admin-market-flow/10 text-admin-market-flow border-admin-market-flow/50 hover:bg-admin-market-flow/20 hover:text-admin-market-flow"
             onClick={() => {
               sessionStorage.removeItem('ivy_eval_return');
               setLocation(`/sentinel/evaluate?from=eval-return`);

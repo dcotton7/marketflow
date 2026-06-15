@@ -920,16 +920,9 @@ export function AnalysisPanel({ symbol, open, onOpenChange, showDetach = true, v
 
   /** Same control as Sentinel Charts (`SentinelChartsPage` nav). */
   const watchlistToolbar: ReactNode = symbol ? (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="shrink-0">
-          <WatchlistSelector symbol={symbol} />
-        </div>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p className="text-sm">Add/remove from watchlist</p>
-      </TooltipContent>
-    </Tooltip>
+    <div className="shrink-0">
+      <WatchlistSelector symbol={symbol} />
+    </div>
   ) : null;
 
   const handleReload = () => {

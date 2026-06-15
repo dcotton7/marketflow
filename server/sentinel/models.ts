@@ -2,6 +2,7 @@ import { db } from "../db";
 import { 
   sentinelUsers, sentinelTrades, sentinelEvaluations, sentinelEvents, sentinelWatchlist, sentinelRules,
   sentinelRuleSuggestions, sentinelRulePerformance, sentinelTradeToLabels, sentinelRuleOverrides, sentinelSystemSettings,
+  sentinelGlobalThemeSettings,
   sentinelTierAccessOverrides,
   ivyEvalSettings, ivyEvalUsage, ivyEvalHistory,
   askIvySettings,
@@ -22,6 +23,8 @@ import {
   type StartHereWorkspacePalette,
 } from "@shared/startHereWorkspacePalette";
 import type { SentinelAccessTier, TierAccessOverrides, TierFeatureRow } from "@shared/sentinelTierAccess";
+import { DEFAULT_ADMIN_THEME, normalizeAdminThemeSettings, type AdminThemeSettings } from "@shared/admin-theme";
+import { normalizeLocalThemeOverrides, type LocalThemeOverrides } from "@shared/local-theme";
 
 const TIER_ACCESS_OVERRIDES_KEY = "global" as const;
 
@@ -661,6 +664,87 @@ export const sentinelModels = {
         .returning();
       return created;
     }
+  },
+
+  async getGlobalThemeSettings(): Promise<AdminThemeSettings & { localDefaults: LocalThemeOverrides }> {
+    const [row] = await db.select().from(sentinelGlobalThemeSettings).limit(1);
+    if (!row) {
+      const [created] = await db
+        .insert(sentinelGlobalThemeSettings)
+        .values({})
+        .returning();
+      return {
+        ...normalizeAdminThemeSettings(created ?? DEFAULT_ADMIN_THEME),
+        localDefaults: normalizeLocalThemeOverrides(created?.localDefaults),
+      };
+    }
+    return {
+      ...normalizeAdminThemeSettings(row),
+      localDefaults: normalizeLocalThemeOverrides(row.localDefaults),
+    };
+  },
+
+  async updateGlobalThemeSettings(data: Partial<AdminThemeSettings>): Promise<AdminThemeSettings> {
+    const current = await this.getGlobalThemeSettings();
+    const merged = normalizeAdminThemeSettings({ ...current, ...data });
+    const [row] = await db.select().from(sentinelGlobalThemeSettings).limit(1);
+    const payload = {
+      overlayColor: merged.overlayColor,
+      overlayTransparency: merged.overlayTransparency,
+      backgroundColor: merged.backgroundColor,
+      logoTransparency: merged.logoTransparency,
+      secondaryOverlayColor: merged.secondaryOverlayColor,
+      textColorTitle: merged.textColorTitle,
+      textColorHeader: merged.textColorHeader,
+      textColorSection: merged.textColorSection,
+      textColorNormal: merged.textColorNormal,
+      textColorSmall: merged.textColorSmall,
+      textColorTiny: merged.textColorTiny,
+      textColorPositive: merged.textColorPositive,
+      textColorWarning: merged.textColorWarning,
+      textColorCaution: merged.textColorCaution,
+      textColorNegative: merged.textColorNegative,
+      textColorMarketFlow: merged.textColorMarketFlow,
+      fontSizeTitle: merged.fontSizeTitle,
+      fontSizeHeader: merged.fontSizeHeader,
+      fontSizeSection: merged.fontSizeSection,
+      fontSizeNormal: merged.fontSizeNormal,
+      fontSizeSmall: merged.fontSizeSmall,
+      fontSizeTiny: merged.fontSizeTiny,
+      updatedAt: new Date(),
+    };
+    if (!row) {
+      await db.insert(sentinelGlobalThemeSettings).values(payload);
+    } else {
+      await db.update(sentinelGlobalThemeSettings).set(payload).where(eq(sentinelGlobalThemeSettings.id, row.id));
+    }
+    const next = await this.getGlobalThemeSettings();
+    return normalizeAdminThemeSettings(next);
+  },
+
+  async updateGlobalLocalDefaults(defaults: LocalThemeOverrides): Promise<LocalThemeOverrides> {
+    const normalized = normalizeLocalThemeOverrides(defaults);
+    const [row] = await db.select().from(sentinelGlobalThemeSettings).limit(1);
+    if (!row) {
+      await db.insert(sentinelGlobalThemeSettings).values({ localDefaults: normalized });
+    } else {
+      await db
+        .update(sentinelGlobalThemeSettings)
+        .set({ localDefaults: normalized, updatedAt: new Date() })
+        .where(eq(sentinelGlobalThemeSettings.id, row.id));
+    }
+    return normalized;
+  },
+
+  async getUserLocalThemeOverrides(userId: number): Promise<LocalThemeOverrides> {
+    const row = await this.getSystemSettings(userId);
+    return normalizeLocalThemeOverrides(row?.localThemeOverrides);
+  },
+
+  async updateUserLocalThemeOverrides(userId: number, overrides: LocalThemeOverrides): Promise<LocalThemeOverrides> {
+    const normalized = normalizeLocalThemeOverrides(overrides);
+    await this.upsertSystemSettings(userId, { localThemeOverrides: normalized });
+    return normalized;
   },
 
   // === IVY STOCK EVAL FUNCTIONS ===

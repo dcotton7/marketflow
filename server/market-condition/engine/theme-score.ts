@@ -26,6 +26,7 @@ import {
 import { TickerSnapshot, BenchmarkData } from "../providers/types";
 import { getTickersBySize } from "../utils/size-filter-helper";
 import { getThemeTickerSymbols, getThemeCoreSymbols, isCacheInitialized, getCompanyNameMap } from "../utils/theme-db-loader";
+import { isDelistedSymbol } from "../utils/delisted-ticker-registry";
 import { computeThemeBreakdownWatch } from "@shared/theme-breakdown-watch";
 import type { BreakdownWatchAssessment } from "@shared/theme-breakdown-watch";
 
@@ -691,6 +692,7 @@ export function getClusterTickerMetrics(
     const seen = new Set<string>();
     for (const s of [...dbTickers, ...runtimeTickers]) {
       const u = s.toUpperCase();
+      if (isDelistedSymbol(u)) continue;
       if (!seen.has(u)) {
         seen.add(u);
         allTickers.push(s);

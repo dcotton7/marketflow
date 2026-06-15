@@ -39,6 +39,7 @@ import {
   getMaMetadata,
 } from "./engine/snapshot";
 import { getRaceTimeline, listIntradaySnapshotSlots, getHistoricalSnapshotAt } from "./engine/theme-snapshots";
+import { calculateRAI } from "./engine/rai";
 import { refreshThemeMembersCache } from "./utils/theme-db-loader";
 
 const router = Router();
@@ -368,6 +369,7 @@ router.get("/themes/:id/members", async (req: Request, res: Response) => {
 
       return {
         ...m,
+        rsVsSpy: m.rsVsBenchmark,
         accDistDays: adValue,
         leaderScore: leaderInfo?.leaderScore || 0,
         isLeader: leaderInfo?.isLeader || false,
@@ -1462,6 +1464,180 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("[MC-API] Failed to add tickers:", error);
     res.status(500).json({ error: "Failed to add tickers" });
+  }
+});
+
+/**
+ * GET /api/market-condition/briefing/preview
+ * Pre/post briefing options with session dates.
+ */
+router.get("/briefing/preview", async (_req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const { buildBriefingPreviews } = await import("./briefing");
+    const preview = await buildBriefingPreviews();
+    res.json({ preview });
+  } catch (error) {
+    console.error("[MC-API] briefing/preview failed:", error);
+    res.status(500).json({ error: "Failed to load briefing preview" });
+  }
+});
+
+/**
+ * GET /api/market-condition/briefing?mode=pre|post|auto&synthesize=1
+ * Theme-focused market briefing: rule-derived story atoms + GPT-5.1 narrative (fallback: rules).
+ */
+router.get("/briefing", async (req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const modeRaw = typeof req.query.mode === "string" ? req.query.mode : "auto";
+    const synthParam = req.query.synthesize;
+    const synthesize =
+      synthParam === "0" || synthParam === "false"
+        ? false
+        : synthParam === "1" || synthParam === "true" || synthParam === undefined;
+    const force =
+      req.query.force === "1" || req.query.force === "true" || req.query.refresh === "1";
+    const { buildThemeBriefing } = await import("./briefing");
+    const briefing = await buildThemeBriefing(modeRaw, synthesize, { force });
+    res.json(briefing);
+  } catch (error) {
+    console.error("[MC-API] briefing failed:", error);
+    res.status(500).json({ error: "Failed to generate theme briefing" });
+  }
+});
+
+/**
+ * POST /api/market-condition/themes/:id/ticker-review
+ * Score theme members with AND/OR criteria (+ optional HVC from daily bars).
+ */
+router.post("/themes/:id/ticker-review", async (req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const { id } = req.params;
+    if (!CLUSTER_IDS.includes(id as ClusterId)) {
+      return res.status(400).json({ error: `Invalid theme ID: ${id}` });
+    }
+
+    const body = req.body ?? {};
+    const mode = (body.mode as string) || "auto";
+    const enabledRequired = Array.isArray(body.enabledRequired) ? body.enabledRequired : undefined;
+    const enabledOptional = Array.isArray(body.enabledOptional) ? body.enabledOptional : undefined;
+    const scope = body.scope === "leaders" ? "leaders" : "theme";
+    const maxResults = typeof body.maxResults === "number" ? body.maxResults : 10;
+
+    const members = getClusterMembers(id as ClusterId);
+    const leaders = getClusterLeaderCandidates(id as ClusterId);
+    const leaderSymbols = new Set(
+      leaders.filter((l) => l.isLeader).map((l) => l.symbol.toUpperCase())
+    );
+
+    const { getTickerAccDistMap } = await import("./utils/ticker-acc-dist-loader");
+    const accDistMap = await getTickerAccDistMap(members.map((m) => m.symbol));
+
+    const themes = getAllThemes();
+    const themeMetrics = themes.find((t) => t.id === id);
+    let raiLabel = body.raiLabel as "AGGRESSIVE" | "NEUTRAL" | "DEFENSIVE" | undefined;
+    if (!raiLabel) {
+      try {
+        const rai = await calculateRAI(themes);
+        raiLabel = rai.label;
+      } catch {
+        raiLabel = undefined;
+      }
+    }
+
+    const { runThemeTickerReview } = await import("./ticker-review");
+    const result = await runThemeTickerReview(
+      id as ClusterId,
+      members,
+      leaderSymbols,
+      accDistMap,
+      {
+        mode: mode as any,
+        enabledRequired,
+        enabledOptional,
+        raiLabel,
+        themeRank: body.themeRank ?? themeMetrics?.rank,
+        themeMedianPct: body.themeMedianPct ?? themeMetrics?.medianPct,
+        maxResults,
+        scope,
+      }
+    );
+
+    res.json({
+      themeId: id,
+      themeName: themeMetrics?.name ?? id,
+      scanMode: result.scanMode,
+      effectiveMode: result.effectiveMode,
+      referenceSession: new Date().toISOString(),
+      dataQuality: {
+        memberCount: result.memberCount,
+        patternEnriched: result.patternEnriched,
+        hvcEnriched: result.hvcEnriched,
+        warnings: result.warnings,
+      },
+      results: result.results,
+      hiddenCount: result.hiddenCount,
+    });
+  } catch (error) {
+    console.error(`[MC-API] ticker-review failed for ${req.params.id}:`, error);
+    res.status(500).json({ error: "Failed to run ticker review scan" });
+  }
+});
+
+/**
+ * POST /api/market-condition/themes/:id/ticker-review/enrich
+ * Batch LLM enrich for starred tickers before View Saved Charts.
+ */
+router.post("/themes/:id/ticker-review/enrich", async (req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const { id } = req.params;
+    if (!CLUSTER_IDS.includes(id as ClusterId)) {
+      return res.status(400).json({ error: `Invalid theme ID: ${id}` });
+    }
+
+    const body = req.body ?? {};
+    const symbols: string[] = Array.isArray(body.symbols)
+      ? body.symbols.map((s: string) => String(s).toUpperCase())
+      : [];
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+
+    if (!symbols.length) {
+      return res.status(400).json({ error: "symbols array required" });
+    }
+
+    const themes = getAllThemes();
+    const themeMetrics = themes.find((t) => t.id === id);
+
+    const rowBySym = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      if (row?.symbol) rowBySym.set(String(row.symbol).toUpperCase(), row);
+    }
+
+    const { enrichTickerReviewBatch } = await import("./ticker-review/synthesis/engine");
+    const items = symbols.map((sym) => ({
+      symbol: sym,
+      row: rowBySym.get(sym) ?? { symbol: sym, setupNarrative: "", summaryLines: [], firedOptional: [], bucket: "setup_forming", watchScore: 0, patternHits: [], tags: [], tightMa: { fired: false, clusterSize: 0, masInCluster: [], onStack: false, tier: null }, rs: { vsSpy: 0, rankInTheme: 0, memberCount: 0 }, structure: { pctVs20: null, pctVs50: null, pctVs200: null } },
+      themeName: themeMetrics?.name,
+      themeRank: body.themeRank ?? themeMetrics?.rank,
+    }));
+
+    const enriched = await enrichTickerReviewBatch(items);
+    const bySymbol: Record<string, { decisionBrief: string; invalidation: string; source: string }> = {};
+    for (const e of enriched) {
+      bySymbol[e.symbol] = {
+        decisionBrief: e.decisionBrief,
+        invalidation: e.invalidation,
+        source: e.source,
+      };
+    }
+
+    res.json({ themeId: id, enriched: bySymbol });
+  } catch (error) {
+    console.error(`[MC-API] ticker-review enrich failed for ${req.params.id}:`, error);
+    res.status(500).json({ error: "Failed to enrich ticker review" });
   }
 });
 

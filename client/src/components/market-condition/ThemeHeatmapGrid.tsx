@@ -83,6 +83,13 @@ export function ThemeHeatmapGrid({
   const isHistorical = timeSlice !== "TODAY";
 
   useEffect(() => {
+    if (themes.length === 0) return;
+    const selectionInList =
+      selectedTheme != null && themes.some((t) => t.id === selectedTheme);
+    if (!selectionInList) onThemeSelect(themes[0].id);
+  }, [themes, selectedTheme, onThemeSelect]);
+
+  useEffect(() => {
     if (!selectedTheme) return;
     const el = document.querySelector(`[data-mc-theme-card="${selectedTheme}"]`);
     el?.scrollIntoView({ block: "nearest", behavior: "smooth" });

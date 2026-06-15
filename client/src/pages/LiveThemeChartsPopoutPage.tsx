@@ -10,12 +10,12 @@ import { StartHereProvider } from "@/components/start-here/StartHereContext";
 import { LiveThemeChartsWidget } from "@/components/start-here/LiveThemeChartsWidget";
 
 function LiveThemeChartsPopoutShell({ instanceId }: { instanceId: string }) {
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
 
   return (
     <div
-      className="flex h-dvh min-h-0 flex-col p-2"
-      style={{ backgroundColor: cssVariables.backgroundColor }}
+      className="flex h-dvh min-h-0 flex-col p-2 sentinel-page"
+      style={pageShellStyle as React.CSSProperties}
       data-testid="live-theme-charts-popout-page"
     >
       <LiveThemeChartsWidget
@@ -42,7 +42,7 @@ export default function LiveThemeChartsPopoutPage() {
 
   if (!user) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-slate-950 text-sm text-muted-foreground">
+      <div className="flex h-dvh items-center justify-center bg-admin-main text-sm text-muted-foreground">
         Sign in to view Live Theme Charts.
       </div>
     );
@@ -50,7 +50,7 @@ export default function LiveThemeChartsPopoutPage() {
 
   if (!instanceId) {
     return (
-      <div className="flex h-dvh items-center justify-center bg-slate-950 text-sm text-muted-foreground">
+      <div className="flex h-dvh items-center justify-center bg-admin-main text-sm text-muted-foreground">
         Missing widget id — close this window and use Pop out from Start Here again.
       </div>
     );

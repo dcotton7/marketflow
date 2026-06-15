@@ -21,10 +21,25 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Loader2, Ruler, Minus, Trash2, Bell, Settings2 } from "lucide-react";
+import { GripHorizontal, GripVertical, Loader2, Ruler, Minus, Trash2, Bell, Settings2 } from "lucide-react";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import {
+  isChartLayoutV2Enabled,
+  loadChartLayoutPrefs,
+  saveChartLayoutPrefs,
+  type ChartLayoutPrefs,
+} from "@/lib/chart-layout-prefs";
+import { cn } from "@/lib/utils";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
 import { DEFAULT_CHART_MA_LIMITS, type ChartMaDataLimits } from "@/lib/chart-ma-feasibility";
 import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
+import {
+  ChartInfoFooter,
+  CHART_FOOTER_GAP,
+  CHART_FOOTER_TOTAL_H,
+  chartFooterTargetHeight,
+  type ChartSetupInfo,
+} from "@/components/ChartInfoFooter";
 
 export type ChartDataResponse = {
   candles: ChartCandle[];
@@ -43,8 +58,13 @@ export interface ChartMetrics {
   adr20Pct: number;
   extensionFrom50dAdr: number;
   extensionFrom50dPct: number;
+  extensionFrom20dAdr?: number;
   extensionFrom200d: number;
   extensionFrom20d: number;
+  avgVolume14d?: number;
+  rsVsSpy?: number;
+  themeRank?: number;
+  themeName?: string;
   macd: string;
   macdTimeframe: string;
   sectorEtf: string;
@@ -79,9 +99,27 @@ export const formatMarketCap = (mc: number) => {
 const UPPER_PANE_H = 40;
 const NAV_INFO_H = 76;
 const CHART_TOOLBAR_H = 28;
-const FUND_H = 70;
+const FUND_H_MIN = CHART_FOOTER_TOTAL_H;
 const LOWER_PANE_H = 24;
 const GAP = 4;
+
+function ChartResizeHandle({ direction }: { direction: "vertical" | "horizontal" }) {
+  return (
+    <ResizableHandle
+      withHandle
+      className={cn(
+        "bg-border/80 hover:bg-cyan-500/25 transition-colors z-10",
+        direction === "vertical" ? "w-2" : "h-2"
+      )}
+    >
+      {direction === "vertical" ? (
+        <GripVertical className="h-3 w-3 text-muted-foreground" />
+      ) : (
+        <GripHorizontal className="h-3 w-3 text-muted-foreground" />
+      )}
+    </ResizableHandle>
+  );
+}
 
 interface DualChartGridProps {
   symbol?: string;
@@ -92,6 +130,11 @@ interface DualChartGridProps {
   /** True while a background refetch is in flight; chart stays visible with a light "Updating" hint. */
   intradayFetching?: boolean;
   chartMetrics: ChartMetrics | null | undefined;
+  /** Ticker Review scan row for Setup Info panel */
+  setupInfo?: ChartSetupInfo | null;
+  themeId?: string | null;
+  themeRank?: number | null;
+  themeBreakdownWatch?: import("@shared/theme-breakdown-watch").BreakdownWatchAssessment | null;
   intradayTimeframe: string;
   onIntradayTimeframeChange: (tf: string) => void;
   showETH: boolean;
@@ -296,6 +339,10 @@ export function DualChartGrid({
   intradayLoading,
   intradayFetching = false,
   chartMetrics,
+  setupInfo,
+  themeId,
+  themeRank,
+  themeBreakdownWatch,
   intradayTimeframe,
   onIntradayTimeframeChange,
   showETH,
@@ -314,7 +361,53 @@ export function DualChartGrid({
 }: DualChartGridProps) {
   const { cssVariables } = useSystemSettings();
   const containerRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const saveLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [layoutV2] = useState(() => isChartLayoutV2Enabled());
+  const [layoutPrefs, setLayoutPrefs] = useState<ChartLayoutPrefs>(() => loadChartLayoutPrefs());
+  const [containerH, setContainerH] = useState(0);
+  const [footerH, setFooterH] = useState(FUND_H_MIN);
   const [chartHeight, setChartHeight] = useState(300);
+  const footerTargetH = useMemo(
+    () => chartFooterTargetHeight(containerH),
+    [containerH]
+  );
+
+  const intradayPanelPct = useMemo(
+    () => Math.max(20, Math.min(80, 100 - layoutPrefs.dailyPanelPct)),
+    [layoutPrefs.dailyPanelPct]
+  );
+
+  const persistLayout = useCallback((patch: Partial<ChartLayoutPrefs>) => {
+    setLayoutPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      if (saveLayoutTimerRef.current) clearTimeout(saveLayoutTimerRef.current);
+      saveLayoutTimerRef.current = setTimeout(() => saveChartLayoutPrefs(next), 300);
+      return next;
+    });
+  }, []);
+
+  const handleVerticalLayout = useCallback(
+    (sizes: number[]) => {
+      if (sizes.length < 2) return;
+      persistLayout({ chartsPanelPct: sizes[0], footerPanelPct: sizes[1] });
+    },
+    [persistLayout]
+  );
+
+  const handleHorizontalLayout = useCallback(
+    (sizes: number[]) => {
+      if (sizes.length < 2) return;
+      persistLayout({ dailyPanelPct: sizes[0] });
+    },
+    [persistLayout]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (saveLayoutTimerRef.current) clearTimeout(saveLayoutTimerRef.current);
+    };
+  }, []);
   const [dailyMeasureMode, setDailyMeasureMode] = useState(false);
   const [intradayMeasureMode, setIntradayMeasureMode] = useState(false);
   const [maSettingsOpen, setMaSettingsOpen] = useState(false);
@@ -395,16 +488,29 @@ export function DualChartGrid({
   }, [showETH]);
 
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const sync = () => setContainerH(el.clientHeight);
+    sync();
+    const ro = new ResizeObserver(() => requestAnimationFrame(sync));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (layoutV2) return;
     const measure = () => {
       if (!containerRef.current) return;
       const totalH = containerRef.current.clientHeight;
       const hasUpper = !!upperPane;
       const hasLower = !!lowerPane;
+      const measuredFooter = footerRef.current?.offsetHeight ?? footerH;
+      const footerAlloc = Math.max(measuredFooter, footerTargetH);
       const fixedH =
         (hasUpper ? UPPER_PANE_H + GAP : 0) +
         NAV_INFO_H + GAP +
         CHART_TOOLBAR_H +
-        FUND_H + GAP +
+        footerAlloc + CHART_FOOTER_GAP +
         (hasLower ? LOWER_PANE_H + GAP : 0) +
         GAP * 2;
       const available = totalH - fixedH;
@@ -413,8 +519,9 @@ export function DualChartGrid({
     const timer = setTimeout(measure, 50);
     const observer = new ResizeObserver(() => requestAnimationFrame(measure));
     if (containerRef.current) observer.observe(containerRef.current);
+    if (footerRef.current) observer.observe(footerRef.current);
     return () => { clearTimeout(timer); observer.disconnect(); };
-  }, [!!upperPane, !!lowerPane]);
+  }, [layoutV2, !!upperPane, !!lowerPane, footerH, footerTargetH, setupInfo]);
 
   const effectiveIntradayData = useMemo(() => {
     if (!intradayData) return null;
@@ -482,10 +589,315 @@ export function DualChartGrid({
 
   const pid = testIdPrefix ? `${testIdPrefix}-` : "";
 
+  useEffect(() => {
+    if (layoutV2 || !footerRef.current) return;
+    const syncFooterH = () => {
+      if (footerRef.current) setFooterH(footerRef.current.offsetHeight);
+    };
+    syncFooterH();
+    const ro = new ResizeObserver(() => requestAnimationFrame(syncFooterH));
+    ro.observe(footerRef.current);
+    return () => ro.disconnect();
+  }, [layoutV2, setupInfo, symbol]);
+
   const displayPrice = dayChange?.price ?? 0;
   const priceChange = dayChange?.change ?? 0;
   const pricePctChange = dayChange?.changePct ?? 0;
   const isPriceUp = priceChange >= 0;
+
+  /** Enrich only needs daily OHLCV; intraday/metrics improve the dossier but must not block the button. */
+  const enrichChartsReady = useMemo(() => {
+    if (!symbol) return false;
+    if (dailyLoading) return false;
+    const candles = dailyData?.candles?.length ?? 0;
+    if (candles === 0) return false;
+    if (dailyData?.ticker && dailyData.ticker.toUpperCase() !== symbol.toUpperCase()) return false;
+    return true;
+  }, [symbol, dailyLoading, dailyData]);
+
+  const chartPixelHeight = layoutV2 ? undefined : chartHeight;
+
+  const dailyChartPane = (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div
+        className="flex flex-shrink-0 items-center gap-2 rounded-md px-1"
+        style={{ height: CHART_TOOLBAR_H, backgroundColor: cssVariables.overlayBg }}
+      >
+        <span className="text-xs font-medium text-white">Daily</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`text-white toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
+          onClick={() => { setDailyMeasureMode((m) => !m); dailyDrawings.setActiveTool(null); }}
+          style={dailyMeasureMode ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+          data-testid={`${pid}button-daily-measure-mode`}
+        >
+          <Ruler className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`text-white toggle-elevate ${dailyDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
+          onClick={() => {
+            dailyDrawings.setActiveTool(dailyDrawings.activeTool === "horizontal" ? null : "horizontal");
+            setDailyMeasureMode(false);
+          }}
+          style={dailyDrawings.activeTool === "horizontal" ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+          data-testid={`${pid}button-daily-horizontal-line`}
+          title="Horizontal Line"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </Button>
+        <HorizontalLineSettingsPopover
+          drawings={dailyDrawings.drawings}
+          selectedId={dailyDrawings.selectedId}
+          updateStyling={dailyDrawings.updateDrawingStyling}
+          testIdPrefix={`${pid}daily`}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`text-white toggle-elevate px-2 text-[10px] ${showGaps ? "toggle-elevated bg-white/15" : ""}`}
+          onClick={() => setShowGaps(!showGaps)}
+          style={showGaps ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+          data-testid={`${pid}button-toggle-gaps`}
+          title="Support/Resistance Gaps"
+        >
+          S/R Gaps
+        </Button>
+        {dailyDrawings.drawings.length > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-white"
+            onClick={() => dailyDrawings.clearAll()}
+            data-testid={`${pid}button-daily-clear-drawings`}
+            title="Clear All Drawings"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <div className="min-h-0 flex-1">
+        {dailyLoading ? (
+          <Card className="h-full">
+            <CardContent className="flex h-full items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </CardContent>
+          </Card>
+        ) : dailyData ? (
+          <TradingChart
+            data={dailyData}
+            timeframe="daily"
+            height={chartPixelHeight}
+            showLegend={true}
+            showGaps={showGaps}
+            maSettings={maSettingsData}
+            maDataLimits={maDataLimits}
+            maxBars={maxBars}
+            chartBackgroundColor={chartPrefs?.chartBackgroundColor}
+            measureMode={dailyMeasureMode}
+            drawingToolActive={dailyDrawings.activeTool}
+            onChartReady={(chart, series) => {
+              dailyChartRef.current = chart;
+              dailySeriesRef.current = series;
+              dailyDrawings.syncPrimitivesToChart();
+            }}
+            onChartClick={dailyDrawings.handleChartClick}
+            onChartMouseDown={dailyDrawings.handleMouseDown}
+            onChartCrosshairMove={dailyDrawings.handleMouseMove}
+            onChartMouseUp={dailyDrawings.handleMouseUp}
+            {...mergedDailyChartProps}
+          />
+        ) : (
+          <Card className="h-full">
+            <CardContent className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              No daily data
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+
+  const intradayChartPane = (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div
+        className="flex flex-shrink-0 items-center gap-2 rounded-md px-1 overflow-x-auto"
+        style={{ height: CHART_TOOLBAR_H, backgroundColor: cssVariables.overlayBg }}
+      >
+        <span className="text-xs font-medium text-white whitespace-nowrap">Intraday</span>
+        <Select value={intradayTimeframe} onValueChange={onIntradayTimeframeChange}>
+          <SelectTrigger className="h-6 w-20 text-[10px]" data-testid={`${pid}select-intraday-timeframe`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="5min">5m</SelectItem>
+            <SelectItem value="15min">15m</SelectItem>
+            <SelectItem value="30min">30m</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-white"
+          onClick={() => setMaSettingsOpen(true)}
+          data-testid={`${pid}button-ma-settings`}
+        >
+          <IndicatorsFourSquaresIcon className="text-current" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`text-white toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
+          onClick={() => { setIntradayMeasureMode((m) => !m); intradayDrawings.setActiveTool(null); }}
+          style={intradayMeasureMode ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+          data-testid={`${pid}button-intraday-measure-mode`}
+        >
+          <Ruler className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`text-white toggle-elevate ${intradayDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
+          onClick={() => {
+            intradayDrawings.setActiveTool(intradayDrawings.activeTool === "horizontal" ? null : "horizontal");
+            setIntradayMeasureMode(false);
+          }}
+          style={intradayDrawings.activeTool === "horizontal" ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+          data-testid={`${pid}button-intraday-horizontal-line`}
+          title="Horizontal Line"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </Button>
+        <HorizontalLineSettingsPopover
+          drawings={intradayDrawings.drawings}
+          selectedId={intradayDrawings.selectedId}
+          updateStyling={intradayDrawings.updateDrawingStyling}
+          testIdPrefix={`${pid}intraday`}
+        />
+        {intradayDrawings.drawings.length > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-white"
+            onClick={() => intradayDrawings.clearAll()}
+            data-testid={`${pid}button-intraday-clear-drawings`}
+            title="Clear All Drawings"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {showExtendedHoursControls && (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`text-white text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-white/15" : ""}`}
+              onClick={() => onShowETHChange(!showETH)}
+              style={showETH ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+              data-testid={`${pid}button-intraday-eth-toggle`}
+              title="Show pre-market and after-hours candles (data from Alpaca extended hours)"
+            >
+              ETH
+            </Button>
+            {showIntradayMaBasisToggle && showETH && intradayData?.indicatorsExtended && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`text-white text-[10px] font-semibold toggle-elevate ${intradayMaBasis === "extended" ? "toggle-elevated bg-white/15" : ""}`}
+                onClick={() =>
+                  startTransition(() => setIntradayMaBasis((b) => (b === "rth" ? "extended" : "rth")))
+                }
+                style={
+                  intradayMaBasis === "extended"
+                    ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" }
+                    : undefined
+                }
+                data-testid={`${pid}button-intraday-ma-basis-toggle`}
+                title="RTH: MAs/VWAP use regular session only (forward-filled on ETH bars). EXT: indicators include all extended-hours bars."
+              >
+                MA {intradayMaBasis === "rth" ? "RTH" : "EXT"}
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {intradayBlockingLoad ? (
+          <Card className="h-full">
+            <CardContent className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <span className="px-2 text-center" data-testid={`${pid}intraday-loading-label`}>
+                Loading {intradayTimeframe} for {symbol}… {intradayLoadSec}s
+              </span>
+            </CardContent>
+          </Card>
+        ) : effectiveIntradayData ? (
+          <>
+            <TradingChart
+              key={`${symbol ?? ""}-${intradayTimeframe}-${showETH ? 1 : 0}`}
+              data={effectiveIntradayData}
+              timeframe={intradayTimeframe}
+              height={chartPixelHeight}
+              showLegend={true}
+              maSettings={maSettingsData}
+              maDataLimits={maDataLimits}
+              maxBars={maxBars}
+              chartBackgroundColor={chartPrefs?.chartBackgroundColor}
+              measureMode={intradayMeasureMode}
+              drawingToolActive={intradayDrawings.activeTool}
+              onChartReady={(chart, series) => {
+                intradayChartRef.current = chart;
+                intradaySeriesRef.current = series;
+                intradayDrawings.syncPrimitivesToChart();
+              }}
+              onChartClick={intradayDrawings.handleChartClick}
+              onChartMouseDown={intradayDrawings.handleMouseDown}
+              onChartCrosshairMove={intradayDrawings.handleMouseMove}
+              onChartMouseUp={intradayDrawings.handleMouseUp}
+              {...mergedIntradayChartProps}
+              whiteExtendedHoursCandles={showETH}
+            />
+            {intradayFetching ? (
+              <div
+                className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-md border border-white/15 bg-black/55 px-2 py-1 text-[11px] text-white/90 shadow-md backdrop-blur-sm"
+                data-testid={`${pid}intraday-fetching-hint`}
+              >
+                <Loader2 className="h-3 w-3 animate-spin opacity-80" />
+                Updating…{intradayFetchSec > 0 ? ` ${intradayFetchSec}s` : ""}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <Card className="h-full">
+            <CardContent className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              No intraday data
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+
+  const chartInfoFooter = (
+    <ChartInfoFooter
+      chartMetrics={chartMetrics}
+      setupInfo={setupInfo}
+      symbol={symbol ?? ""}
+      dailyData={dailyData}
+      intradayData={intradayData}
+      intradayTimeframe={intradayTimeframe}
+      themeId={themeId}
+      themeRank={themeRank}
+      themeBreakdownWatch={themeBreakdownWatch}
+      chartsReady={enrichChartsReady}
+      testIdPrefix={testIdPrefix}
+      footerTargetHeight={footerTargetH}
+      fillPanel={layoutV2}
+      onNavigateToTicker={handleTickerNav}
+    />
+  );
 
   return (
     <div ref={containerRef} className="flex flex-col flex-1 min-h-0" data-testid={`${pid}dual-chart-container`}>
@@ -530,7 +942,7 @@ export function DualChartGrid({
           {chartMetrics ? (
             <>
               {/* Left frame: Company info */}
-              <div className="flex flex-col justify-center gap-0 px-2 py-1 rounded border border-border/50 bg-card/50 flex-shrink-0 min-w-0" style={{ maxWidth: '220px' }}>
+              <div className="flex flex-col justify-start gap-0 px-2 py-1 rounded border border-border/50 bg-card/50 flex-shrink-0 min-w-0 text-left" style={{ maxWidth: '220px' }}>
                 <div className="flex items-center gap-1.5 overflow-hidden">
                   <span className="font-bold" style={{ color: cssVariables.textColorHeader, fontSize: cssVariables.fontSizeSmall }}>{symbol}</span>
                   <span style={{ color: cssVariables.textColorTiny }}>|</span>
@@ -550,8 +962,8 @@ export function DualChartGrid({
               </div>
               {/* Right frame: Description */}
               {chartMetrics.companyDescription && (
-                <div className="flex-1 flex items-center px-2 py-1 rounded border border-border/50 bg-card/50 min-w-0 overflow-hidden">
-                  <p className="line-clamp-2 overflow-hidden leading-tight" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeTiny }} title={chartMetrics.companyDescription}>
+                <div className="flex-1 flex items-start px-2 py-1 rounded border border-border/50 bg-card/50 min-w-0 overflow-hidden text-left">
+                  <p className="line-clamp-2 overflow-hidden leading-tight text-left" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeTiny }} title={chartMetrics.companyDescription}>
                     {chartMetrics.companyDescription}
                   </p>
                 </div>
@@ -561,287 +973,71 @@ export function DualChartGrid({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 overflow-hidden" style={{ height: chartHeight + CHART_TOOLBAR_H, marginTop: GAP }}>
-        <div className="flex flex-col min-h-0 overflow-hidden">
-          <div className="flex items-center gap-2 px-1 flex-shrink-0 rounded-md" style={{ height: CHART_TOOLBAR_H, backgroundColor: cssVariables.overlayBg }}>
-            <span className="text-xs text-white font-medium">Daily</span>
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`text-white toggle-elevate ${dailyMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => { setDailyMeasureMode(m => !m); dailyDrawings.setActiveTool(null); }}
-              style={dailyMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-daily-measure-mode`}
+      {layoutV2 ? (
+        <div className="flex min-h-0 flex-1 flex-col" style={{ marginTop: GAP }} data-testid={`${pid}chart-layout-v2`}>
+          <ResizablePanelGroup
+            direction="vertical"
+            className="min-h-0 flex-1"
+            onLayout={handleVerticalLayout}
+          >
+            <ResizablePanel
+              defaultSize={layoutPrefs.chartsPanelPct}
+              minSize={35}
+              className="min-h-0"
             >
-              <Ruler className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`text-white toggle-elevate ${dailyDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => { dailyDrawings.setActiveTool(dailyDrawings.activeTool === "horizontal" ? null : "horizontal"); setDailyMeasureMode(false); }}
-              style={dailyDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-daily-horizontal-line`}
-              title="Horizontal Line"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </Button>
-            <HorizontalLineSettingsPopover
-              drawings={dailyDrawings.drawings}
-              selectedId={dailyDrawings.selectedId}
-              updateStyling={dailyDrawings.updateDrawingStyling}
-              testIdPrefix={`${pid}daily`}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`text-white toggle-elevate text-[10px] px-2 ${showGaps ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => setShowGaps(!showGaps)}
-              style={showGaps ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-toggle-gaps`}
-              title="Support/Resistance Gaps"
-            >
-              S/R Gaps
-            </Button>
-            {dailyDrawings.drawings.length > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-white"
-                onClick={() => dailyDrawings.clearAll()}
-                data-testid={`${pid}button-daily-clear-drawings`}
-                title="Clear All Drawings"
+              <ResizablePanelGroup
+                direction="horizontal"
+                className="h-full min-h-0"
+                onLayout={handleHorizontalLayout}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </div>
-          <div className="flex-1 min-h-0">
-            {dailyLoading ? (
-              <Card className="h-full">
-                <CardContent className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </CardContent>
-              </Card>
-            ) : dailyData ? (
-              <TradingChart
-                data={dailyData}
-                timeframe="daily"
-                height={chartHeight}
-                showLegend={true}
-                showGaps={showGaps}
-                maSettings={maSettingsData}
-                maDataLimits={maDataLimits}
-                maxBars={maxBars}
-                chartBackgroundColor={chartPrefs?.chartBackgroundColor}
-                measureMode={dailyMeasureMode}
-                drawingToolActive={dailyDrawings.activeTool}
-                onChartReady={(chart, series) => {
-                  dailyChartRef.current = chart;
-                  dailySeriesRef.current = series;
-                  dailyDrawings.syncPrimitivesToChart();
-                }}
-                onChartClick={dailyDrawings.handleChartClick}
-                onChartMouseDown={dailyDrawings.handleMouseDown}
-                onChartCrosshairMove={dailyDrawings.handleMouseMove}
-                onChartMouseUp={dailyDrawings.handleMouseUp}
-                {...mergedDailyChartProps}
-              />
-            ) : (
-              <Card className="h-full">
-                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  No daily data
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-col min-h-0 overflow-hidden">
-          <div className="flex items-center gap-2 px-1 flex-shrink-0 rounded-md" style={{ height: CHART_TOOLBAR_H, backgroundColor: cssVariables.overlayBg }}>
-            <span className="text-xs text-white font-medium">Intraday</span>
-            <Select value={intradayTimeframe} onValueChange={onIntradayTimeframeChange}>
-              <SelectTrigger className="h-6 w-20 text-[10px]" data-testid={`${pid}select-intraday-timeframe`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5min">5m</SelectItem>
-                <SelectItem value="15min">15m</SelectItem>
-                <SelectItem value="30min">30m</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-white"
-              onClick={() => setMaSettingsOpen(true)}
-              data-testid={`${pid}button-ma-settings`}
-            >
-              <IndicatorsFourSquaresIcon className="text-current" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`text-white toggle-elevate ${intradayMeasureMode ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => { setIntradayMeasureMode(m => !m); intradayDrawings.setActiveTool(null); }}
-              style={intradayMeasureMode ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-intraday-measure-mode`}
-            >
-              <Ruler className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className={`text-white toggle-elevate ${intradayDrawings.activeTool === "horizontal" ? "toggle-elevated bg-white/15" : ""}`}
-              onClick={() => { intradayDrawings.setActiveTool(intradayDrawings.activeTool === "horizontal" ? null : "horizontal"); setIntradayMeasureMode(false); }}
-              style={intradayDrawings.activeTool === "horizontal" ? { boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)' } : undefined}
-              data-testid={`${pid}button-intraday-horizontal-line`}
-              title="Horizontal Line"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </Button>
-            <HorizontalLineSettingsPopover
-              drawings={intradayDrawings.drawings}
-              selectedId={intradayDrawings.selectedId}
-              updateStyling={intradayDrawings.updateDrawingStyling}
-              testIdPrefix={`${pid}intraday`}
-            />
-            {intradayDrawings.drawings.length > 0 && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-white"
-                onClick={() => intradayDrawings.clearAll()}
-                data-testid={`${pid}button-intraday-clear-drawings`}
-                title="Clear All Drawings"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
-            {showExtendedHoursControls && (
-              <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={`text-white text-[10px] font-semibold toggle-elevate ${showETH ? "toggle-elevated bg-white/15" : ""}`}
-                  onClick={() => startTransition(() => onShowETHChange(!showETH))}
-                  style={showETH ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
-                  data-testid={`${pid}button-intraday-eth-toggle`}
-                  title="Show pre-market and after-hours candles (data from Alpaca extended hours)"
+                <ResizablePanel
+                  defaultSize={layoutPrefs.dailyPanelPct}
+                  minSize={20}
+                  className="min-h-0"
                 >
-                  ETH
-                </Button>
-                {showIntradayMaBasisToggle &&
-                  showETH &&
-                  intradayData?.indicatorsExtended && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className={`text-white text-[10px] font-semibold toggle-elevate ${intradayMaBasis === "extended" ? "toggle-elevated bg-white/15" : ""}`}
-                    onClick={() =>
-                      startTransition(() =>
-                        setIntradayMaBasis((b) => (b === "rth" ? "extended" : "rth"))
-                      )
-                    }
-                    style={
-                      intradayMaBasis === "extended"
-                        ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" }
-                        : undefined
-                    }
-                    data-testid={`${pid}button-intraday-ma-basis-toggle`}
-                    title="RTH: MAs/VWAP use regular session only (forward-filled on ETH bars). EXT: indicators include all extended-hours bars."
-                  >
-                    MA {intradayMaBasis === "rth" ? "RTH" : "EXT"}
-                  </Button>
-                )}
-              </>
-            )}
+                  {dailyChartPane}
+                </ResizablePanel>
+                <ChartResizeHandle direction="vertical" />
+                <ResizablePanel
+                  defaultSize={intradayPanelPct}
+                  minSize={20}
+                  className="min-h-0"
+                >
+                  {intradayChartPane}
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </ResizablePanel>
+            <ChartResizeHandle direction="horizontal" />
+            <ResizablePanel
+              defaultSize={layoutPrefs.footerPanelPct}
+              minSize={12}
+              maxSize={40}
+              className="min-h-0"
+            >
+              <div className="flex h-full min-h-0 flex-col overflow-hidden">
+                {chartInfoFooter}
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
+      ) : (
+        <>
+          <div
+            className="grid grid-cols-2 gap-3 overflow-hidden"
+            style={{ height: chartHeight + CHART_TOOLBAR_H, marginTop: GAP }}
+          >
+            {dailyChartPane}
+            {intradayChartPane}
           </div>
-          <div className="flex-1 min-h-0 relative">
-            {intradayBlockingLoad ? (
-              <Card className="h-full">
-                <CardContent className="flex flex-col items-center justify-center gap-2 h-full text-muted-foreground text-sm">
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                  <span className="text-center px-2" data-testid={`${pid}intraday-loading-label`}>
-                    Loading {intradayTimeframe} for {symbol}… {intradayLoadSec}s
-                  </span>
-                </CardContent>
-              </Card>
-            ) : effectiveIntradayData ? (
-              <>
-                <TradingChart
-                  key={`${symbol ?? ""}-${intradayTimeframe}-${showETH ? 1 : 0}`}
-                  data={effectiveIntradayData}
-                  timeframe={intradayTimeframe}
-                  height={chartHeight}
-                  showLegend={true}
-                  maSettings={maSettingsData}
-                  maDataLimits={maDataLimits}
-                  maxBars={maxBars}
-                  chartBackgroundColor={chartPrefs?.chartBackgroundColor}
-                  measureMode={intradayMeasureMode}
-                  drawingToolActive={intradayDrawings.activeTool}
-                  onChartReady={(chart, series) => {
-                    intradayChartRef.current = chart;
-                    intradaySeriesRef.current = series;
-                    intradayDrawings.syncPrimitivesToChart();
-                  }}
-                  onChartClick={intradayDrawings.handleChartClick}
-                  onChartMouseDown={intradayDrawings.handleMouseDown}
-                  onChartCrosshairMove={intradayDrawings.handleMouseMove}
-                  onChartMouseUp={intradayDrawings.handleMouseUp}
-                  {...mergedIntradayChartProps}
-                  whiteExtendedHoursCandles={showETH}
-                />
-                {intradayFetching ? (
-                  <div
-                    className="pointer-events-none absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-md border border-white/15 bg-black/55 px-2 py-1 text-[11px] text-white/90 shadow-md backdrop-blur-sm"
-                    data-testid={`${pid}intraday-fetching-hint`}
-                  >
-                    <Loader2 className="h-3 w-3 animate-spin opacity-80" />
-                    Updating…{intradayFetchSec > 0 ? ` ${intradayFetchSec}s` : ""}
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <Card className="h-full">
-                <CardContent className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  No intraday data
-                </CardContent>
-              </Card>
-            )}
+          <div
+            ref={footerRef}
+            className="min-h-0 flex-shrink-0"
+            style={{ minHeight: footerTargetH }}
+          >
+            {chartInfoFooter}
           </div>
-        </div>
-      </div>
-
-      <div className="flex-shrink-0 grid grid-cols-2 gap-3 overflow-visible" style={{ height: FUND_H, marginTop: GAP }} data-testid={`${pid}fundamentals-row`}>
-        <div className="border border-border rounded p-2 grid grid-cols-5 gap-x-4 gap-y-1 overflow-visible bg-background" data-testid={`${pid}daily-metrics-strip`}>
-          {chartMetrics ? (<>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Market Cap</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-market-cap`}>{formatMarketCap(chartMetrics.marketCap)}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Sales Growth 3Q YoY</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-sales-growth`}>{chartMetrics.salesGrowth3QYoY}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">EPS Current Q YoY</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-eps-yoy`}>{chartMetrics.epsCurrentQYoY}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Next Earnings</span><div className={`text-xs font-medium ${chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7 ? "text-rs-yellow" : "text-white"}`} data-testid={`${pid}metric-next-earnings`}>{chartMetrics.nextEarningsDate !== "N/A" ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)` : "N/A"}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Analyst Consensus</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-analyst-consensus`}>{chartMetrics.analystConsensus}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">PE</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-pe`}>{chartMetrics.pe != null ? chartMetrics.pe.toFixed(1) : "N/A"}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Pre-Tax Margin</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-pretax-margin`}>{chartMetrics.preTaxMargin != null ? `${chartMetrics.preTaxMargin.toFixed(1)}%` : "N/A"}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Last EPS Surprise</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-eps-surprise`}>{chartMetrics.lastEpsSurprise}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Debt/Equity</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-debt-equity`}>{chartMetrics.debtToEquity != null ? chartMetrics.debtToEquity.toFixed(2) : "N/A"}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Target Price</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-target-price`}>{chartMetrics.targetPrice != null ? `$${chartMetrics.targetPrice.toFixed(2)}` : "N/A"}</div></div>
-          </>) : null}
-        </div>
-        <div className="border border-border rounded p-2 grid grid-cols-4 gap-x-4 gap-y-1 overflow-visible bg-background" data-testid={`${pid}intraday-metrics-strip`}>
-          {chartMetrics ? (<>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">ADR(20) $</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-adr20-dollar`}>${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">50d Ext %</span><div className={`text-xs font-medium ${chartMetrics.extensionFrom50dPct >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-50d-ext-pct`} title="Same session-adjusted 50d SMA as MarketFlow Theme Members MA2">{chartMetrics.extensionFrom50dPct >= 0 ? "+" : ""}{chartMetrics.extensionFrom50dPct}%</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">MACD ({chartMetrics.macdTimeframe})</span><div className={`text-xs font-medium ${chartMetrics.macd === "Open" ? "text-rs-green" : chartMetrics.macd === "Closed" ? "text-rs-red" : "text-white"}`} data-testid={`${pid}metric-macd`}>{chartMetrics.macd}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">Sector</span><div className="text-xs font-medium" data-testid={`${pid}metric-sector-etf`}>{chartMetrics.sectorEtf !== "N/A" ? (<><span className="cursor-pointer underline decoration-dotted text-white" onClick={() => handleTickerNav(chartMetrics.sectorEtf)} data-testid={`${pid}link-sector-etf`}>{chartMetrics.sectorEtf}</span><span className={`ml-1 ${chartMetrics.sectorEtfChange >= 0 ? "text-rs-green" : "text-rs-red"}`}>{chartMetrics.sectorEtfChange >= 0 ? "+" : ""}{chartMetrics.sectorEtfChange}%</span></>) : <span className="text-gray-500">N/A</span>}</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">ADR(20) %</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-adr20-pct`}>{chartMetrics.adr20Pct?.toFixed(1) ?? "N/A"}%</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">20d Ext %</span><div className={`text-xs font-medium ${(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-20d-ext`}>{(chartMetrics.extensionFrom20d ?? 0) >= 0 ? "+" : ""}{chartMetrics.extensionFrom20d ?? 0}%</div></div>
-          <div><span className="text-[10px] whitespace-nowrap text-gray-400">RS Momentum</span><div className={`text-xs font-medium ${(chartMetrics.rsMomentum ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"}`} data-testid={`${pid}metric-rs-momentum`}>{chartMetrics.rsMomentum ?? "N/A"}</div></div>
-          <div className="col-span-1"><span className="text-[10px] whitespace-nowrap text-gray-400">Peers ({chartMetrics.industryName || "Industry"})</span><div className="text-xs font-medium text-white" data-testid={`${pid}metric-industry-peers`}>{chartMetrics.industryPeers?.length > 0 ? chartMetrics.industryPeers.slice(0, 5).map((p, i) => (<span key={p.symbol}>{i > 0 && ", "}<span className="cursor-pointer underline decoration-dotted" onClick={() => handleTickerNav(p.symbol)} data-testid={`${pid}link-peer-${p.symbol}`}>{p.symbol}</span></span>)) : "N/A"}</div></div>
-          </>) : null}
-        </div>
-      </div>
+        </>
+      )}
 
       {lowerPane && (
         <div className="flex-shrink-0 overflow-hidden" style={{ height: LOWER_PANE_H, marginTop: GAP }} data-testid={`${pid}lower-pane`}>

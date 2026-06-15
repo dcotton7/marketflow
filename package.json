@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push",
     "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",
     "db:ensure-tier-overrides": "tsx server/scripts/ensureSentinelTierAccessOverridesTable.ts",
+    "db:ensure-chart-enrich": "tsx server/scripts/ensureChartSetupEnrichTables.ts",
     "db:ensure-theme-members-ma": "tsx server/scripts/ensureUserChartThemeMembersMaColumns.ts",
     "db:ensure-mini-ma": "tsx server/scripts/ensureMiniMaSettingsTable.ts",
     "db:deactivate-other-sentinel-users": "tsx server/scripts/deactivateNonForebodingSentinelUsers.ts",

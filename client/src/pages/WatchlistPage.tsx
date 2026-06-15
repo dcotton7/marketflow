@@ -116,13 +116,13 @@ function WatchlistItem({ item, onRemove }: {
 }
 
 export default function WatchlistPage() {
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
   const { data: watchlist, isLoading } = useWatchlist();
   const { mutate: removeFromWatchlist } = useRemoveFromWatchlist();
 
   if (isLoading) {
     return (
-      <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+      <div className="sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <Layout>
         <div className="flex h-[50vh] items-center justify-center">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -133,7 +133,7 @@ export default function WatchlistPage() {
   }
 
   return (
-    <div className="sentinel-page" style={{ '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+    <div className="sentinel-page" style={pageShellStyle as React.CSSProperties}>
     <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-2">

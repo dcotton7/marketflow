@@ -134,7 +134,7 @@ const SCORE_COLORS: Record<string, string> = {
 export default function PatternLearningPage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
-  const { settings: systemSettings, cssVariables } = useSystemSettings();
+  const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
   
   const [activeTab, setActiveTab] = useState<string>("v2");
   
@@ -507,11 +507,7 @@ export default function PatternLearningPage() {
   return (
     <div 
       className="min-h-screen sentinel-page"
-      style={{ 
-        backgroundColor: cssVariables.backgroundColor,
-        '--logo-opacity': cssVariables.logoOpacity,
-        '--overlay-bg': cssVariables.overlayBg,
-      } as React.CSSProperties}
+      style={pageShellStyle as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
       <SentinelHeader />

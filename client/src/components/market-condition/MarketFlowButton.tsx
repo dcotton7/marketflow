@@ -22,28 +22,26 @@ export function MarketFlowButton({ variant = "navigation", className, "data-test
   const [, navigate] = useLocation();
 
   if (variant === "branding") {
-    // Static branding badge (no click)
     return (
       <div
         className={cn(
-          "flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10",
+          "flex items-center gap-2.5 px-3 py-1.5 rounded-lg border border-admin-market-flow bg-admin-market-flow/10",
           className
         )}
         data-testid={dataTestId}
       >
-        <Waves className="w-5 h-5 text-purple-400" />
-        <span className="text-sm font-bold text-purple-400">Market Flow</span>
+        <Waves className="w-5 h-5 text-admin-market-flow" />
+        <span className="text-sm font-bold text-admin-market-flow">Market Flow</span>
       </div>
     );
   }
 
-  // Navigation button (clickable)
   return (
     <Button
       size="sm"
       variant="outline"
       className={cn(
-        "gap-2 bg-purple-600/10 text-purple-400 border-purple-500/50 hover:bg-purple-600/20 hover:text-purple-300",
+        "gap-2 bg-admin-market-flow/10 text-admin-market-flow border-admin-market-flow/50 hover:bg-admin-market-flow/20 hover:text-admin-market-flow",
         className
       )}
       onClick={() => navigate("/sentinel/market-condition")}

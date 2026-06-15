@@ -1,11 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { ThemeId, ThemeRow, SizeFilter } from "@/data/mockThemeData";
 import type { ThemeMetrics } from "@/hooks/useMarketCondition";
 import { cn } from "@/lib/utils";
 import { getRoutePulseTone } from "@/lib/pulse-scale";
-import { ArrowDown, ArrowUp, ArrowUpDown, GripVertical, Info, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronUp, GripVertical, Info, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { FlowMapFontSizeControl } from "./FlowMapFontSizeControl";
+import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
+import { localSlotBgStyle } from "@/lib/local-slot-style";
+import {
+  loadFlowMapFontPrefs,
+  saveFlowMapFontPrefs,
+  type FlowMapFontPrefs,
+  type FlowMapFontSection,
+} from "./flow-map-font-prefs";
 
 type TfKey = "current" | "m15" | "h1" | "h4" | "d1" | "d5" | "d10" | "m1";
 type SortKey =
@@ -251,6 +261,27 @@ function truncateHeadlineLabel(value: string, maxChars = 18): string {
   return `${value.slice(0, Math.max(1, maxChars - 2))}..`;
 }
 
+/** Short label for matrix column/row headers — full name stays in title/tooltip. */
+function shortThemeLabel(name: string, compact: boolean): string {
+  const max = compact ? 10 : 14;
+  if (name.length <= max) return name;
+  const slash = name.indexOf(" / ");
+  if (slash > 0) {
+    const head = name.slice(0, slash).trim();
+    if (head.length <= max + 2) return head;
+  }
+  return truncateHeadlineLabel(name, max);
+}
+
+function fixedColStyle(width: number, left?: number): CSSProperties {
+  return {
+    width,
+    minWidth: width,
+    maxWidth: width,
+    ...(left !== undefined ? { left } : {}),
+  };
+}
+
 function toThemeRow(theme: ThemeMetrics): ThemeRow {
   return {
     id: theme.id as ThemeId,
@@ -350,8 +381,11 @@ export function FlowMapPanel({
   sizeFilter,
   onFocusDataChange,
 }: FlowMapPanelProps) {
+  const { user } = useSentinelAuth();
   const helpPanelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const flowMapTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const initialThemeSelectDoneRef = useRef(false);
   const helpMoveDragRef = useRef<{
     startX: number;
     startY: number;
@@ -377,6 +411,45 @@ export function FlowMapPanel({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [headerSelection, setHeaderSelection] = useState<HeaderSelection | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<{ from: ThemeId; to: ThemeId } | null>(null);
+  const [panelSize, setPanelSize] = useState({ w: 1200, h: 800 });
+  const [detailsExpanded, setDetailsExpanded] = useState(true);
+  const [fontPrefs, setFontPrefs] = useState<FlowMapFontPrefs>(() =>
+    loadFlowMapFontPrefs(undefined)
+  );
+
+  const isCompact = panelSize.w < 720 || panelSize.h < 520;
+  const showDetailCards = detailsExpanded || !isCompact;
+
+  useEffect(() => {
+    setFontPrefs(loadFlowMapFontPrefs(user?.id));
+  }, [user?.id]);
+
+  const setFontSection = useCallback(
+    (section: FlowMapFontSection, px: number) => {
+      setFontPrefs((prev) => {
+        const next = { ...prev, [section]: px };
+        saveFlowMapFontPrefs(user?.id, next);
+        return next;
+      });
+    },
+    [user?.id]
+  );
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      setPanelSize({ w: rect.width, h: rect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (isCompact) setDetailsExpanded(false);
+  }, [isCompact]);
 
   const queries = useQueries({
     queries: TIMEFRAMES.map((tf) => ({
@@ -419,6 +492,33 @@ export function FlowMapPanel({
   const currentMap = mapsByTf.current;
 
   const themeIds = useMemo<ThemeId[]>(() => activeRows.map((r) => r.id as ThemeId), [activeRows]);
+
+  const tableLayout = useMemo(() => {
+    const themeCol = isCompact ? 108 : 168;
+    const strengthCol = isCompact ? 44 : 64;
+    const nowCol = isCompact ? 48 : 72;
+    const perfCol = isCompact ? 40 : 52;
+    const matrixCol = isCompact ? 36 : 48;
+    const strengthLeft = themeCol;
+    const nowLeft = themeCol + strengthCol;
+    const perfVisibleCount = showPerfCols
+      ? TIMEFRAMES.filter((tf) => tf.key !== "current" && visiblePerfCols.has(tf.key)).length
+      : 0;
+    const minWidth =
+      themeCol + strengthCol + nowCol + perfVisibleCount * perfCol + themeIds.length * matrixCol;
+    return {
+      themeCol,
+      strengthCol,
+      nowCol,
+      perfCol,
+      matrixCol,
+      strengthLeft,
+      nowLeft,
+      minWidth,
+      cellPad: isCompact ? "p-0.5" : "p-1",
+      headerPad: isCompact ? "px-0.5 py-1" : "px-1 py-1.5",
+    };
+  }, [isCompact, showPerfCols, visiblePerfCols, themeIds.length]);
   const selectedRow = headerSelection?.axis === "row" ? headerSelection.themeId : null;
   const selectedCol = headerSelection?.axis === "col" ? headerSelection.themeId : null;
 
@@ -449,15 +549,15 @@ export function FlowMapPanel({
     return () => window.removeEventListener("resize", onWindowResize);
   }, [helpOpen]);
 
+  // Only sync parent selection when the user picks a row/column/route — not on load fallback.
   useEffect(() => {
     if (!focusedTheme || focusedTheme === selectedTheme) return;
-    // Avoid overwriting parent selection (e.g. from ticker search) when Flow Map falls back to
-    // the first row because selectedTheme is not yet in the active matrix — that would steal focus.
     const focusFromMatrix = !!(selectedRow || selectedCol || selectedRoute);
-    const selectedInMatrix = !!(selectedTheme && themeIds.includes(selectedTheme));
-    if (!focusFromMatrix && selectedTheme && !selectedInMatrix) return;
+    if (!focusFromMatrix) return;
     onThemeSelect(focusedTheme);
-  }, [focusedTheme, selectedTheme, themeIds, selectedRow, selectedCol, selectedRoute, onThemeSelect]);
+    setHeaderSelection({ axis: "row", themeId: focusedTheme });
+    setSelectedRoute(null);
+  }, [focusedTheme, selectedTheme, selectedRow, selectedCol, selectedRoute, onThemeSelect]);
 
   const getStrength = (id: ThemeId) => {
     const active = activeMap.get(id)?.score ?? 0;
@@ -571,6 +671,47 @@ export function FlowMapPanel({
     });
     return arr;
   }, [themeIds, sortKey, sortDir, activeTf, compareEnabled, selectedRow, activeMap, mapsByTf, currentMap]);
+
+  useEffect(() => {
+    if (isLoading) initialThemeSelectDoneRef.current = false;
+  }, [isLoading]);
+
+  // Auto-select the top row in the left theme list (first visible row, not API/mock array order).
+  useEffect(() => {
+    if (isLoading || orderedThemes.length === 0) return;
+
+    const topRow = orderedThemes[0];
+
+    if (!initialThemeSelectDoneRef.current) {
+      initialThemeSelectDoneRef.current = true;
+      setHeaderSelection({ axis: "row", themeId: topRow });
+      setSelectedRoute(null);
+      if (selectedTheme !== topRow) onThemeSelect(topRow);
+      return;
+    }
+
+    const themeInList = !!(selectedTheme && orderedThemes.includes(selectedTheme));
+    const rowHighlighted = !!(selectedRow && orderedThemes.includes(selectedRow));
+
+    if (!themeInList) {
+      setHeaderSelection({ axis: "row", themeId: topRow });
+      setSelectedRoute(null);
+      if (selectedTheme !== topRow) onThemeSelect(topRow);
+      return;
+    }
+
+    if (!rowHighlighted && !selectedRoute && !selectedCol) {
+      setHeaderSelection({ axis: "row", themeId: selectedTheme });
+    }
+  }, [
+    isLoading,
+    orderedThemes,
+    selectedTheme,
+    selectedRow,
+    selectedRoute,
+    selectedCol,
+    onThemeSelect,
+  ]);
 
   const focusThemeRowInView = useCallback((themeId: ThemeId) => {
     const root = flowMapTableScrollRef.current;
@@ -909,7 +1050,10 @@ export function FlowMapPanel({
 
   return (
     <div
+      ref={panelRef}
       className="flex h-full min-h-0 flex-col"
+      style={localSlotBgStyle("marketFlow:flowMapMatrix")}
+      data-ui-region="marketFlow:flowMapMatrix"
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
         if (helpOpen) {
@@ -1017,14 +1161,63 @@ export function FlowMapPanel({
         </div>
       ) : null}
 
-      <div className="border-b border-slate-700/40 px-2 py-2">
-        <div className="flex items-stretch justify-between gap-3">
-          <div className="min-w-0 flex-1 rounded border border-slate-700/40 bg-slate-900/50 p-2">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
+      <div
+        className={cn(
+          "shrink-0 border-b border-slate-700/40 px-2 py-2",
+          "max-h-[min(48%,320px)] overflow-x-hidden overflow-y-auto",
+          isCompact && "max-h-[min(40%,240px)]"
+        )}
+      >
+        <div className="flex flex-col gap-2">
+          {isCompact ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0 text-[10px] text-slate-400">
+                {fmtTs(activeSnapshotUpdated)} · {TIMEFRAMES.find((t) => t.key === activeTf)?.label ?? activeTf}
+                {compareEnabled ? " · Compare on" : ""}
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailsExpanded((v) => !v)}
+                className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-600/60 bg-slate-800/60 px-2 py-1 text-[10px] font-medium text-slate-200 hover:bg-slate-700/60"
+              >
+                {detailsExpanded ? (
+                  <>
+                    Hide details
+                    <ChevronUp className="h-3 w-3" />
+                  </>
+                ) : (
+                  <>
+                    Show details
+                    <ChevronDown className="h-3 w-3" />
+                  </>
+                )}
+              </button>
+            </div>
+          ) : null}
+
+          <div
+            className="min-w-0 rounded border border-slate-700/40 bg-slate-900/50 p-2"
+            style={{ fontSize: fontPrefs.toolbar }}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-[0.85em] text-muted-foreground">
+                Snapshot controls
+                <ThemeColorChip slotId="marketFlow:flowMapMatrix" />
+              </span>
+              <FlowMapFontSizeControl
+                section="toolbar"
+                value={fontPrefs.toolbar}
+                onChange={(px) => setFontSection("toolbar", px)}
+              />
+            </div>
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={openHelp}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-purple-500/50 bg-purple-500/15 text-lg font-black text-purple-100 shadow-[0_0_22px_rgba(168,85,247,0.2)] transition-colors hover:bg-purple-500/25"
+                className={cn(
+                  "inline-flex items-center justify-center rounded-md border border-purple-500/50 bg-purple-500/15 font-black text-purple-100 shadow-[0_0_22px_rgba(168,85,247,0.2)] transition-colors hover:bg-purple-500/25",
+                  isCompact ? "h-8 w-8 text-base" : "h-10 w-10 text-lg"
+                )}
                 title="Open Flow Map help"
                 aria-label="Open Flow Map help"
               >
@@ -1039,7 +1232,7 @@ export function FlowMapPanel({
                 <button
                   key={tf.key}
                   className={cn(
-                    "rounded border px-2 py-1 text-xs",
+                    "rounded border px-1.5 py-0.5 text-[10px] sm:px-2 sm:py-1 sm:text-xs",
                     activeTf === tf.key
                       ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-300"
                       : "border-slate-600/50 bg-slate-800/40 text-muted-foreground hover:text-foreground"
@@ -1086,7 +1279,7 @@ export function FlowMapPanel({
                 timeframe columns between Strength and the theme-to-theme grid.
               </InlineInfoTooltip>
             </div>
-            {showPerfCols && (
+            {showPerfCols && !isCompact && (
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-muted-foreground">Visible columns:</span>
                 <InlineInfoTooltip label="Timeframe columns help">
@@ -1116,26 +1309,44 @@ export function FlowMapPanel({
             )}
           </div>
 
-          <div className="flex shrink-0 items-stretch gap-3">
-            <div className="w-[240px] rounded border border-slate-700/60 bg-slate-900/85 p-3 text-[11px]">
-              <div className="mb-1 flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-200">
-                <span>Snapshot Updated</span>
-                <InlineInfoTooltip label="Snapshot updated help" className="h-4 w-4 text-[10px]">
-                  This is the timestamp of the active snapshot currently driving the Flow Map table.
-                </InlineInfoTooltip>
+          {showDetailCards ? (
+          <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="min-w-0 rounded border border-slate-700/60 bg-slate-900/85 p-3" style={{ fontSize: fontPrefs.snapshot }}>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-wide text-slate-200">
+                  <span>Snapshot Updated</span>
+                  <InlineInfoTooltip label="Snapshot updated help" className="h-4 w-4 text-[10px]">
+                    This is the timestamp of the active snapshot currently driving the Flow Map table.
+                  </InlineInfoTooltip>
+                </div>
+                <FlowMapFontSizeControl
+                  section="snapshot"
+                  value={fontPrefs.snapshot}
+                  onChange={(px) => setFontSection("snapshot", px)}
+                />
               </div>
               <div className="text-slate-300">{fmtTs(activeSnapshotUpdated)}</div>
               <div className="mt-1 text-[10px] text-slate-400">
                 Active: {TIMEFRAMES.find((t) => t.key === activeTf)?.label ?? activeTf}
               </div>
             </div>
-            <div className="w-[562px] rounded border border-cyan-500/40 bg-gradient-to-b from-cyan-500/10 to-slate-900/90 p-3 text-[11px] shadow-[0_0_0_1px_rgba(34,211,238,0.15)]">
-              <div className="mb-1 flex items-center gap-2 text-xs font-semibold tracking-wide text-cyan-200">
-                <span>FLOW Map Narrative</span>
-                <InlineInfoTooltip label="Flow Map Narrative help" className="h-4 w-4 text-[10px]">
-                  This box summarizes market tone when nothing is selected, and switches to selection-aware guidance when
-                  you pick rows or route cells.
-                </InlineInfoTooltip>
+            <div
+              className="min-w-0 rounded border border-cyan-500/40 bg-gradient-to-b from-cyan-500/10 to-slate-900/90 p-3 shadow-[0_0_0_1px_rgba(34,211,238,0.15)] sm:col-span-2 xl:col-span-1"
+              style={{ fontSize: fontPrefs.narrative }}
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-wide text-cyan-200">
+                  <span>FLOW Map Narrative</span>
+                  <InlineInfoTooltip label="Flow Map Narrative help" className="h-4 w-4 text-[10px]">
+                    This box summarizes market tone when nothing is selected, and switches to selection-aware guidance when
+                    you pick rows or route cells.
+                  </InlineInfoTooltip>
+                </div>
+                <FlowMapFontSizeControl
+                  section="narrative"
+                  value={fontPrefs.narrative}
+                  onChange={(px) => setFontSection("narrative", px)}
+                />
               </div>
               {!narrativeDetail ? (
                 <>
@@ -1150,18 +1361,21 @@ export function FlowMapPanel({
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 overflow-hidden">
                     {narrativeDetail.arrow && narrativeDetail.fromLabel && narrativeDetail.toLabel && narrativeDetail.scoreLabel ? (
-                      <div className="flex min-w-0 items-center gap-2 overflow-hidden text-[17.5px] font-black leading-none sm:text-[19.5px]" style={{ textShadow: headlineGlow }}>
+                      <div
+                        className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-black leading-none"
+                        style={{ fontSize: Math.round(fontPrefs.narrative * 1.45), textShadow: headlineGlow }}
+                      >
                         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap">
                           <span
                             className={headlineFromClass}
                             title={narrativeDetail.fromLabel}
-                            style={{ maxWidth: "min(13ch, 20vw)" }}
+                            style={{ maxWidth: "min(13ch, 40vw)" }}
                           >
-                            <span className="block overflow-hidden">{truncateHeadlineLabel(narrativeDetail.fromLabel)}</span>
+                            <span className="block truncate">{truncateHeadlineLabel(narrativeDetail.fromLabel)}</span>
                           </span>
                           <span
                             className={cn(
-                              "shrink-0 inline-flex items-center justify-center rounded-sm border px-0.5 py-0.5",
+                              "inline-flex shrink-0 items-center justify-center rounded-sm border px-0.5 py-0.5",
                               selectedRouteNeutral
                                 ? "border-slate-500/50 text-slate-400"
                                 : selectedRouteScore > 0
@@ -1188,9 +1402,9 @@ export function FlowMapPanel({
                           <span
                             className={headlineToClass}
                             title={narrativeDetail.toLabel}
-                            style={{ maxWidth: "min(15ch, 22vw)" }}
+                            style={{ maxWidth: "min(15ch, 45vw)" }}
                           >
-                            <span className="block overflow-hidden">{truncateHeadlineLabel(narrativeDetail.toLabel)}</span>
+                            <span className="block truncate">{truncateHeadlineLabel(narrativeDetail.toLabel)}</span>
                           </span>
                         </div>
                         <span className={cn("shrink-0 pl-1", headlineScoreClass)}>
@@ -1201,10 +1415,10 @@ export function FlowMapPanel({
                       <p className={cn("font-semibold", narrativeDetail.headlineClass)}>{narrativeDetail.headline}</p>
                     )}
                   </div>
-                  <p className="text-[16px] font-semibold leading-tight text-slate-100">
+                  <p className="font-semibold leading-tight text-slate-100" style={{ fontSize: "1.15em" }}>
                     {narrativeDetail.body}
                   </p>
-                  <p className="text-[15px] leading-snug text-slate-100">
+                  <p className="leading-snug text-slate-100" style={{ fontSize: "1.05em" }}>
                     {selectedRouteNeutral ? (
                       <>
                         This is a <span className="font-semibold text-amber-300">neutral</span> edge.
@@ -1222,7 +1436,7 @@ export function FlowMapPanel({
                     )}
                   </p>
                   {selectedRouteDetail ? (
-                    <p className="font-mono text-[13px] text-slate-100">
+                    <p className="font-mono text-slate-100" style={{ fontSize: "0.95em" }}>
                       <span className="text-slate-300">RSΔ </span>
                       <span className={metricValueClass(selectedRouteDetail.rsDelta)}>
                         {selectedRouteDetail.rsDelta >= 0 ? "+" : ""}
@@ -1246,18 +1460,35 @@ export function FlowMapPanel({
               )}
             </div>
 
-            <div className="w-[284px] rounded border border-slate-700/60 bg-slate-900/85 p-3 text-[11px]">
-              <div className="mb-1 flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-200">
-                <span>Current Tool Settings</span>
-                <InlineInfoTooltip label="Current Tool Settings help" className="h-4 w-4 text-[10px]">
-                  This box explains why the table looks the way it does right now: active snapshot, compare state,
-                  selections, and size filter.
-                </InlineInfoTooltip>
+            <div className="min-w-0 rounded border border-slate-700/60 bg-slate-900/85 p-3 sm:col-span-2 xl:col-span-1" style={{ fontSize: fontPrefs.settings }}>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-wide text-slate-200">
+                  <span>Current Tool Settings</span>
+                  <InlineInfoTooltip label="Current Tool Settings help" className="h-4 w-4 text-[10px]">
+                    This box explains why the table looks the way it does right now: active snapshot, compare state,
+                    selections, and size filter.
+                  </InlineInfoTooltip>
+                </div>
+                <FlowMapFontSizeControl
+                  section="settings"
+                  value={fontPrefs.settings}
+                  onChange={(px) => setFontSection("settings", px)}
+                />
               </div>
               <p className="mt-1 border-t border-slate-700/50 pt-2 leading-relaxed text-slate-300">{infoSettings}</p>
             </div>
           </div>
+          ) : null}
         </div>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700/30 px-2 py-1">
+        <span className="text-[10px] text-slate-500">Flow matrix</span>
+        <FlowMapFontSizeControl
+          section="matrix"
+          value={fontPrefs.matrix}
+          onChange={(px) => setFontSection("matrix", px)}
+        />
       </div>
 
       <div
@@ -1265,38 +1496,52 @@ export function FlowMapPanel({
         tabIndex={0}
         role="region"
         aria-label="Flow Map matrix — use Arrow Down or Space for next theme, Arrow Up for previous"
-        className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+        className="min-h-[120px] flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
         onPointerDown={onFlowMapTableAreaPointerDown}
         onKeyDown={onFlowMapThemeListKeyDown}
       >
-        <table className="w-full min-w-[1300px] border-collapse">
+        <table
+          className="w-full border-collapse leading-tight"
+          style={{ minWidth: Math.max(tableLayout.minWidth, 480), fontSize: fontPrefs.matrix }}
+        >
           <thead className="sticky top-0 z-10 bg-slate-900">
             <tr>
-              <th className="sticky left-0 z-30 w-[240px] min-w-[240px] max-w-[240px] border border-slate-700/50 bg-slate-900 p-2 text-left text-xs">
-                <div className="flex items-center justify-between gap-2">
+              <th
+                className={cn(
+                  "sticky left-0 z-30 border border-slate-700/50 bg-slate-900 text-left",
+                  tableLayout.headerPad,
+                )}
+                style={fixedColStyle(tableLayout.themeCol, 0)}
+              >
+                <div className="flex items-center justify-between gap-1">
                   <button
-                    className={cn("cursor-pointer text-left", sortKey === "theme" && "text-cyan-300")}
+                    className={cn("cursor-pointer truncate text-left", sortKey === "theme" && "text-cyan-300")}
                     onClick={() => toggleSort("theme")}
+                    title="Sort by theme name"
                   >
-                    Theme {sortKey === "theme" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                    Theme{sortKey === "theme" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                   </button>
                   <button
                     onClick={resetTable}
-                    className="rounded border border-slate-600/50 bg-slate-800/50 px-2 py-0.5 text-[10px] text-slate-300 hover:text-cyan-200"
+                    className="shrink-0 rounded border border-slate-600/50 bg-slate-800/50 px-1 py-0.5 text-[9px] text-slate-300 hover:text-cyan-200"
                     title="Reset entire table to default state"
                   >
-                    Reset Table
+                    {isCompact ? "↺" : "Reset"}
                   </button>
                 </div>
               </th>
               <th
                 className={cn(
-                  "sticky left-[240px] z-25 w-[80px] min-w-[80px] max-w-[80px] cursor-pointer border border-slate-700/50 bg-slate-900 p-2 text-xs",
+                  "sticky z-25 cursor-pointer border border-slate-700/50 bg-slate-900 text-center",
+                  tableLayout.headerPad,
                   sortKey === "strength" && "text-cyan-300"
                 )}
+                style={fixedColStyle(tableLayout.strengthCol, tableLayout.strengthLeft)}
                 onClick={() => toggleSort("strength")}
+                title="Sort by strength"
               >
-                Strength {sortKey === "strength" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                {isCompact ? "Str" : "Strength"}
+                {sortKey === "strength" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
               </th>
               {TIMEFRAMES.filter((tf) => tf.key === "current").map((tf) => {
                   const sk = `perf:${tf.key}` as SortKey;
@@ -1313,16 +1558,18 @@ export function FlowMapPanel({
                     <th
                       key={tf.key}
                       className={cn(
-                        "cursor-pointer border border-slate-700/50 p-2 text-xs",
-                        "sticky left-[320px] z-20 w-[100px] min-w-[100px] max-w-[100px] bg-slate-900",
+                        "sticky z-20 cursor-pointer border border-slate-700/50 bg-slate-900 text-center",
+                        tableLayout.headerPad,
                         activeTf === tf.key && "bg-slate-800 text-cyan-300",
                         sortKey === sk && "text-cyan-300",
                         "border-cyan-500/30 text-cyan-200"
                       )}
+                      style={fixedColStyle(tableLayout.nowCol, tableLayout.nowLeft)}
                       onClick={() => toggleSort(sk)}
                       title={headerTitle}
                     >
-                      NOW (Open) {sortKey === sk ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                      {isCompact ? "NOW" : "NOW (Open)"}
+                      {sortKey === sk ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                     </th>
                   );
                 })}
@@ -1333,8 +1580,6 @@ export function FlowMapPanel({
                   const cUnavailable = dataByTf[tf.key]?.comparisonUnavailable;
                   const compEtYmd = cTime ? etCalendarYmd(cTime) : null;
                   const isPrevSessionFallback = !!compEtYmd && compEtYmd < todayEtYmd;
-                  // "Prev session fallback" warning only applies to intraday checkpoints.
-                  // For day/week/month lookbacks, prior-date baselines are expected and should not show "!". 
                   const isIntradayCol = tf.key === "m15" || tf.key === "h1" || tf.key === "h4";
                   const showWarn = !!cUnavailable || (isIntradayCol && isPrevSessionFallback);
                   const headerTitle = cUnavailable
@@ -1346,39 +1591,52 @@ export function FlowMapPanel({
                     <th
                       key={tf.key}
                       className={cn(
-                        "cursor-pointer border border-slate-700/50 p-2 text-xs",
+                        "cursor-pointer border border-slate-700/50 text-center",
+                        tableLayout.headerPad,
                         activeTf === tf.key && "bg-cyan-500/10 text-cyan-300",
                         sortKey === sk && "text-cyan-300"
                       )}
+                      style={fixedColStyle(tableLayout.perfCol)}
                       onClick={() => toggleSort(sk)}
                       title={headerTitle}
                     >
                       {tf.label}
-                      {showWarn ? <span className="ml-1 text-amber-300" title={headerTitle}>!</span> : null}
-                      {" "}
-                      {sortKey === sk ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                      {showWarn ? <span className="text-amber-300" title={headerTitle}>!</span> : null}
+                      {sortKey === sk ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                     </th>
                   );
                 })}
-              {themeIds.map((to) => (
+              {themeIds.map((to) => {
+                const fullName = activeMap.get(to)?.name ?? to;
+                return (
                 <th
                   key={to}
                   className={cn(
-                    "cursor-pointer border border-slate-700/50 p-2 text-xs",
+                    "cursor-pointer border border-slate-700/50 align-bottom",
+                    tableLayout.headerPad,
                     selectedCol === to && "bg-cyan-500/20 text-cyan-300",
                     focusedTheme === to && "ring-1 ring-cyan-400/50"
                   )}
+                  style={fixedColStyle(tableLayout.matrixCol)}
                   onClick={() => {
                     const isSame = headerSelection?.axis === "col" && headerSelection.themeId === to;
                     setHeaderSelection(isSame ? null : { axis: "col", themeId: to });
                     if (!isSame) onThemeSelect(to);
                     setSelectedRoute(null);
                   }}
-                  title="Toggle column select"
+                  title={fullName}
                 >
-                  {activeMap.get(to)?.name ?? to}
+                  <span
+                    className={cn(
+                      "mx-auto inline-block max-h-16 overflow-hidden font-medium text-slate-300",
+                      "[writing-mode:vertical-rl] rotate-180"
+                    )}
+                  >
+                    {shortThemeLabel(fullName, isCompact)}
+                  </span>
                 </th>
-              ))}
+              );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -1394,25 +1652,29 @@ export function FlowMapPanel({
                 >
                   <td
                     className={cn(
-                      "sticky left-0 z-[20] w-[240px] min-w-[240px] max-w-[240px] cursor-pointer border border-slate-700/30 bg-slate-900 p-2 text-xs font-medium",
+                      "sticky left-0 z-[20] cursor-pointer border border-slate-700/30 bg-slate-900 font-medium",
+                      tableLayout.cellPad,
                       rowSelected && "border-cyan-400/70 bg-slate-800 text-cyan-200"
                     )}
+                    style={fixedColStyle(tableLayout.themeCol, 0)}
                     onClick={() => {
                       const isSame = headerSelection?.axis === "row" && headerSelection.themeId === from;
                       setHeaderSelection(isSame ? null : { axis: "row", themeId: from });
                       if (!isSame) onThemeSelect(from);
                       setSelectedRoute(null);
                     }}
-                    title="Toggle row select"
+                    title={name}
                   >
-                    {name}
+                    <span className="block truncate">{shortThemeLabel(name, isCompact)}</span>
                   </td>
                   <td
                     className={cn(
-                        "sticky left-[240px] z-[15] w-[80px] min-w-[80px] max-w-[80px] border border-slate-700/30 bg-slate-900 p-2 text-xs font-medium",
+                      "sticky z-[15] border border-slate-700/30 bg-slate-900 text-center font-medium",
+                      tableLayout.cellPad,
                       scoreClass(strength),
-                        rowSelected && "border-cyan-400/70 bg-slate-800"
+                      rowSelected && "border-cyan-400/70 bg-slate-800"
                     )}
+                    style={fixedColStyle(tableLayout.strengthCol, tableLayout.strengthLeft)}
                   >
                     {compareEnabled && activeTf !== "current" ? fmtScore(strength) : Math.round(strength)}
                   </td>
@@ -1423,11 +1685,13 @@ export function FlowMapPanel({
                         <td
                           key={`${from}-${tf.key}`}
                           className={cn(
-                            "sticky left-[320px] z-[10] w-[100px] min-w-[100px] max-w-[100px] border border-slate-700/30 bg-slate-900 p-2 text-xs",
+                            "sticky z-[10] border border-slate-700/30 bg-slate-900 text-center",
+                            tableLayout.cellPad,
                             noBaseline ? "text-slate-500" : scoreClass(v),
                             activeTf === tf.key && "bg-slate-800",
                             rowSelected && "border-cyan-400/70 bg-slate-800"
                           )}
+                          style={fixedColStyle(tableLayout.nowCol, tableLayout.nowLeft)}
                           title={getPerfCellTooltip(name, tf.key)}
                         >
                           {noBaseline ? "NA" : fmtPct(v)}
@@ -1442,11 +1706,13 @@ export function FlowMapPanel({
                         <td
                           key={`${from}-${tf.key}`}
                           className={cn(
-                            "border border-slate-700/30 p-2 text-xs",
+                            "border border-slate-700/30 text-center",
+                            tableLayout.cellPad,
                             noBaseline ? "text-slate-500" : scoreClass(v),
                             activeTf === tf.key && "bg-cyan-500/5",
                             rowSelected && "border-cyan-400/70 bg-cyan-500/20"
                           )}
+                          style={fixedColStyle(tableLayout.perfCol)}
                           title={getPerfCellTooltip(name, tf.key)}
                         >
                           {noBaseline ? "NA" : fmtPct(v)}
@@ -1456,7 +1722,14 @@ export function FlowMapPanel({
                   {themeIds.map((to) => {
                     if (from === to) {
                       return (
-                        <td key={`${from}-${to}`} className="border border-slate-700/30 bg-slate-800/30 p-2 text-xs text-slate-500">
+                        <td
+                          key={`${from}-${to}`}
+                          className={cn(
+                            "border border-slate-700/30 bg-slate-800/30 text-center text-slate-500",
+                            tableLayout.cellPad,
+                          )}
+                          style={fixedColStyle(tableLayout.matrixCol)}
+                        >
                           --
                         </td>
                       );
@@ -1467,8 +1740,13 @@ export function FlowMapPanel({
                     return (
                       <td
                         key={`${from}-${to}`}
-                        className={cn("cursor-pointer border border-slate-700/30 p-2 text-xs", selected && "ring-2 ring-cyan-400")}
+                        className={cn(
+                          "cursor-pointer border border-slate-700/30 text-center",
+                          tableLayout.cellPad,
+                          selected && "ring-2 ring-cyan-400"
+                        )}
                         style={{
+                          ...fixedColStyle(tableLayout.matrixCol),
                           backgroundColor: tone.bgHex,
                           color: tone.textHex,
                         }}

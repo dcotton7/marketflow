@@ -299,6 +299,8 @@ export const sentinelTrades = pgTable("sentinel_trades", {
   aiSetupConfidence: doublePrecision("ai_setup_confidence"), // 0-1 confidence score
   // Account info for hand-entered trades
   accountName: text("account_name"), // User's trading account name
+  markPrice: doublePrecision("mark_price"),
+  markUpdatedAt: timestamp("mark_updated_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -678,6 +680,7 @@ export const sentinelImportedTrades = pgTable("sentinel_imported_trades", {
   commission: doublePrecision("commission").default(0),
   fees: doublePrecision("fees").default(0),
   netAmount: doublePrecision("net_amount").notNull(),
+  cashBalance: doublePrecision("cash_balance"), // Fidelity Activity post-trade cash (nullable)
   
   // Timestamps
   tradeDate: text("trade_date").notNull(), // ISO date YYYY-MM-DD
@@ -749,7 +752,67 @@ export const insertSentinelAccountSettingsSchema = createInsertSchema(sentinelAc
 export type SentinelAccountSettings = typeof sentinelAccountSettings.$inferSelect;
 export type InsertSentinelAccountSettings = z.infer<typeof insertSentinelAccountSettingsSchema>;
 
-// System Settings - UI theming and appearance settings per user
+/** Manual cash anchor when broker CSV has no cash balance (e.g. Schwab). */
+export const sentinelJournalCashAnchor = pgTable("sentinel_journal_cash_anchor", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  brokerId: text("broker_id").notNull(),
+  anchorDate: text("anchor_date").notNull(),
+  anchorCash: doublePrecision("anchor_cash").notNull(),
+  trackedCash: doublePrecision("tracked_cash"),
+  discrepancyAmount: doublePrecision("discrepancy_amount"),
+  discrepancyNote: text("discrepancy_note"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+/** Deposits / withdrawals applied on top of anchor + trade cash flow. */
+export const sentinelJournalCashEvents = pgTable("sentinel_journal_cash_events", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  brokerId: text("broker_id").notNull(),
+  eventDate: text("event_date").notNull(),
+  amount: doublePrecision("amount").notNull(),
+  label: text("label"),
+  eventKind: text("event_kind").default("adjustment"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type SentinelJournalCashAnchor = typeof sentinelJournalCashAnchor.$inferSelect;
+export type SentinelJournalCashEvent = typeof sentinelJournalCashEvents.$inferSelect;
+
+/** Singleton — global theme defaults for all users (admin-editable). */
+export const sentinelGlobalThemeSettings = pgTable("sentinel_global_theme_settings", {
+  id: serial("id").primaryKey(),
+  overlayColor: text("overlay_color").default("#1e3a5f"),
+  overlayTransparency: integer("overlay_transparency").default(75),
+  backgroundColor: text("background_color").default("#0f172a"),
+  logoTransparency: integer("logo_transparency").default(88),
+  secondaryOverlayColor: text("secondary_overlay_color").default("#334155"),
+  textColorTitle: text("text_color_title").default("#ffffff"),
+  textColorHeader: text("text_color_header").default("#ffffff"),
+  textColorSection: text("text_color_section").default("#ffffff"),
+  textColorNormal: text("text_color_normal").default("#ffffff"),
+  textColorSmall: text("text_color_small").default("#a1a1aa"),
+  textColorTiny: text("text_color_tiny").default("#71717a"),
+  textColorPositive: text("text_color_positive").default("#22c55e"),
+  textColorWarning: text("text_color_warning").default("#facc15"),
+  textColorCaution: text("text_color_caution").default("#f472b6"),
+  textColorNegative: text("text_color_negative").default("#ef4444"),
+  textColorMarketFlow: text("text_color_market_flow").default("#c084fc"),
+  fontSizeTitle: text("font_size_title").default("1.5rem"),
+  fontSizeHeader: text("font_size_header").default("1.125rem"),
+  fontSizeSection: text("font_size_section").default("1rem"),
+  fontSizeNormal: text("font_size_normal").default("0.875rem"),
+  fontSizeSmall: text("font_size_small").default("0.8125rem"),
+  fontSizeTiny: text("font_size_tiny").default("0.75rem"),
+  /** Admin local slot defaults — shared across all users */
+  localDefaults: jsonb("local_defaults").$type<Record<string, { color: string; opacity: number }>>().default({}),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type SentinelGlobalThemeSettings = typeof sentinelGlobalThemeSettings.$inferSelect;
+
+// Per-user local theme overrides (personal slot colors)
 export const sentinelSystemSettings = pgTable("sentinel_system_settings", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().unique(),
@@ -757,19 +820,25 @@ export const sentinelSystemSettings = pgTable("sentinel_system_settings", {
   overlayTransparency: integer("overlay_transparency").default(75),
   backgroundColor: text("background_color").default("#0f172a"),
   logoTransparency: integer("logo_transparency").default(6),
-  secondaryOverlayColor: text("secondary_overlay_color").default("#e8e8e8"),
+  secondaryOverlayColor: text("secondary_overlay_color").default("#334155"),
   textColorTitle: text("text_color_title").default("#ffffff"),
   textColorHeader: text("text_color_header").default("#ffffff"),
   textColorSection: text("text_color_section").default("#ffffff"),
   textColorNormal: text("text_color_normal").default("#ffffff"),
   textColorSmall: text("text_color_small").default("#a1a1aa"),
   textColorTiny: text("text_color_tiny").default("#71717a"),
+  textColorPositive: text("text_color_positive").default("#22c55e"),
+  textColorWarning: text("text_color_warning").default("#facc15"),
+  textColorCaution: text("text_color_caution").default("#f472b6"),
+  textColorNegative: text("text_color_negative").default("#ef4444"),
+  textColorMarketFlow: text("text_color_market_flow").default("#c084fc"),
   fontSizeTitle: text("font_size_title").default("1.5rem"),
   fontSizeHeader: text("font_size_header").default("1.125rem"),
   fontSizeSection: text("font_size_section").default("1rem"),
   fontSizeNormal: text("font_size_normal").default("0.875rem"),
   fontSizeSmall: text("font_size_small").default("0.8125rem"),
   fontSizeTiny: text("font_size_tiny").default("0.75rem"),
+  localThemeOverrides: jsonb("local_theme_overrides").$type<Record<string, { color: string; opacity: number }>>().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2139,6 +2208,54 @@ export const insertTickerMaSchema = createInsertSchema(tickerMa).omit({ id: true
 
 // =============================================================================
 // MarketFlow AI Analysis Cache - Full analysis payload for 3-day reuse
+// === CHART SETUP ENRICH (on-demand chart viewer analysis) ===
+
+export const chartSetupEnrichRuns = pgTable("chart_setup_enrich_runs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  symbol: text("symbol").notNull(),
+  tradingDayKey: text("trading_day_key"),
+  themeId: text("theme_id"),
+  dossier: jsonb("dossier"),
+  result: jsonb("result").notNull(),
+  includeVisual: boolean("include_visual").default(false),
+  source: text("source").default("llm"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const chartEnrichFeedback = pgTable("chart_enrich_feedback", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  enrichRunId: integer("enrich_run_id"),
+  symbol: text("symbol").notNull(),
+  helpful: text("helpful").notNull(),
+  correctionKind: text("correction_kind"),
+  correctedLifecycle: text("corrected_lifecycle"),
+  correctedPattern: text("corrected_pattern"),
+  note: text("note"),
+  enrichSnapshot: jsonb("enrich_snapshot"),
+  dossier: jsonb("dossier"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const chartEnrichModels = pgTable("chart_enrich_models", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  enrichRunId: integer("enrich_run_id"),
+  feedbackId: integer("feedback_id"),
+  symbol: text("symbol").notNull(),
+  tier: text("tier").notNull(),
+  scopes: text("scopes").array().notNull().default([]),
+  patternLabel: text("pattern_label"),
+  patternCleanliness: text("pattern_cleanliness"),
+  lifecycleStage: text("lifecycle_stage"),
+  note: text("note"),
+  enrichSnapshot: jsonb("enrich_snapshot"),
+  dossier: jsonb("dossier"),
+  applyFlag: boolean("apply_flag").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // =============================================================================
 
 export const marketflowAnalysisCache = pgTable("marketflow_analysis_cache", {

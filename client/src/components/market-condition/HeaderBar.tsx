@@ -6,6 +6,8 @@ import { MarketConditionSummary, MarketRegime, ThemeRow, MegaCapOverlay } from "
 import { TrendingUp, TrendingDown, Activity, Clock, Gauge, Crown, Moon, Sun, BarChart3 } from "lucide-react";
 import type { MarketSession, UniverseParticipation } from "@/hooks/useMarketCondition";
 import { MarketFlowButton } from "./MarketFlowButton";
+import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
+import { localSlotHeaderStyle } from "@/lib/local-slot-style";
 
 interface HeaderBarProps {
   summary: MarketConditionSummary;
@@ -87,7 +89,7 @@ function SessionBadge({ marketSession }: { marketSession?: MarketSession }) {
             isOpen
               ? "bg-green-500/15 border-green-500/35 text-green-300"
               : isAfterHours
-                ? "bg-purple-500/20 border-purple-500/40 text-purple-300"
+                ? "bg-rs-pink/20 border-rs-pink/40 text-rs-pink"
                 : "border-slate-600/50 bg-slate-800/50 text-slate-300"
           }`}
           data-ui-region="marketFlow:sessionBadge"
@@ -234,11 +236,13 @@ export function HeaderBar({
 
   return (
     <div
-      className="flex items-center justify-between p-3 bg-slate-900/80 border-b border-slate-700/50 gap-4 flex-wrap"
+      className="flex items-center justify-between p-3 border-b border-slate-700/50 gap-4 flex-wrap"
+      style={localSlotHeaderStyle("marketFlow:regimeBar")}
       data-ui-region="marketFlow:regimeBar"
     >
       {/* Left: Market Flow → Session → RAI → Mega → Breadth bar → Risk On */}
       <div className="flex items-center gap-2.5 flex-wrap">
+        <ThemeColorChip slotId="marketFlow:regimeBar" />
         <div className="pr-3 border-r border-slate-600/50" data-ui-region="marketFlow:regimeBranding">
           <MarketFlowButton variant="branding" />
         </div>

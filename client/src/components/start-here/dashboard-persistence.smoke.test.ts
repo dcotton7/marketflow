@@ -7,12 +7,14 @@ import {
   chartEffectiveSymbol,
   addChartFromWatchlistSymbol,
   appendLinkedChartTriplet,
+  clearAllWidgets,
   createDefaultDashboard,
   findBulkChartGridPlacement,
   loadChartsFromList,
   reflowWatchlistChartWalls,
   resolveBulkChartCellsForViewport,
   resolveChartsPerRowPreference,
+  sanitizeDashboard,
   setChartSymbolOverrideOnInstance,
   startHereGridViewportMetrics,
   START_HERE_RGL_ROW_HEIGHT,
@@ -246,6 +248,15 @@ function testReflowWatchlistChartWallsOnDensityChange(): void {
   assert(rows.size >= 2, "Two per row should span multiple rows for five charts");
 }
 
+function testClearAllWidgetsStaysEmpty(): void {
+  const seeded = appendLinkedChartTriplet(createDefaultDashboard());
+  const cleared = sanitizeDashboard(clearAllWidgets(seeded));
+  assert(cleared.layout.length === 0, "Clear all should remove layout tiles");
+  assert(Object.keys(cleared.instances).length === 0, "Clear all should remove instances");
+  const roundTrip = sanitizeDashboard(cleared);
+  assert(roundTrip.layout.length === 0, "Empty workspace should survive sanitize");
+}
+
 function runAll(): void {
   testSpawnChartInheritsGroupIdentity();
   testBulkLoadInheritsGroupIdentity();
@@ -256,6 +267,7 @@ function runAll(): void {
   testBulkRowMajorPlacement();
   testBulkLoadUsesViewportCells();
   testReflowWatchlistChartWallsOnDensityChange();
+  testClearAllWidgetsStaysEmpty();
   console.log("✅ Start Here dashboard persistence smoke tests passed");
 }
 

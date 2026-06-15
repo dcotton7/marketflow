@@ -1,126 +1,141 @@
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  type AdminThemeSettings,
+  type AdminThemeCssVariables,
+  DEFAULT_ADMIN_THEME,
+  normalizeAdminThemeSettings,
+  buildAdminThemeCssVariables,
+  adminThemeToCssProperties,
+  adminPageShellStyle,
+} from "@shared/admin-theme";
+import {
+  normalizeLocalThemeOverrides,
+  buildLocalThemeCssProperties,
+  type LocalThemeOverrides,
+} from "@shared/local-theme";
+import type { ThemeSettingsResponse } from "@shared/theme-api";
 
-interface SystemSettings {
-  overlayColor: string;
-  overlayTransparency: number;
-  backgroundColor: string;
-  logoTransparency: number;
-  secondaryOverlayColor: string;
-  textColorTitle: string;
-  textColorHeader: string;
-  textColorSection: string;
-  textColorNormal: string;
-  textColorSmall: string;
-  textColorTiny: string;
-  fontSizeTitle: string;
-  fontSizeHeader: string;
-  fontSizeSection: string;
-  fontSizeNormal: string;
-  fontSizeSmall: string;
-  fontSizeTiny: string;
-}
+export type SystemSettings = AdminThemeSettings;
+export type CssVariables = AdminThemeCssVariables;
 
-const defaultSettings: SystemSettings = {
-  overlayColor: "#1e3a5f",
-  overlayTransparency: 75,
-  backgroundColor: "#0f172a",
-  logoTransparency: 12,
-  secondaryOverlayColor: "#e8e8e8",
-  textColorTitle: "#ffffff",
-  textColorHeader: "#ffffff",
-  textColorSection: "#ffffff",
-  textColorNormal: "#ffffff",
-  textColorSmall: "#a1a1aa",
-  textColorTiny: "#71717a",
-  fontSizeTitle: "1.5rem",
-  fontSizeHeader: "1.125rem",
-  fontSizeSection: "1rem",
-  fontSizeNormal: "0.875rem",
-  fontSizeSmall: "0.8125rem",
-  fontSizeTiny: "0.75rem",
-};
-
-export interface CssVariables {
-  overlayBg: string;
-  headerBg: string;
-  overlayColor: string;
-  backgroundColor: string;
-  logoOpacity: number;
-  secondaryOverlayColor: string;
-  textColorTitle: string;
-  textColorHeader: string;
-  textColorSection: string;
-  textColorNormal: string;
-  textColorSmall: string;
-  textColorTiny: string;
-  fontSizeTitle: string;
-  fontSizeHeader: string;
-  fontSizeSection: string;
-  fontSizeNormal: string;
-  fontSizeSmall: string;
-  fontSizeTiny: string;
-}
-
-function buildHexAlpha(hex: string, pct: number): string {
-  return `${hex}${Math.round(pct * 2.55).toString(16).padStart(2, '0')}`;
-}
-
-function buildCssVariables(s: SystemSettings): CssVariables {
-  return {
-    overlayBg: buildHexAlpha(s.overlayColor, s.overlayTransparency),
-    headerBg: buildHexAlpha(s.overlayColor, Math.min(s.overlayTransparency + 10, 100)),
-    overlayColor: s.overlayColor,
-    backgroundColor: s.backgroundColor,
-    logoOpacity: (100 - s.logoTransparency) / 100,
-    secondaryOverlayColor: s.secondaryOverlayColor || defaultSettings.secondaryOverlayColor,
-    textColorTitle: s.textColorTitle || defaultSettings.textColorTitle,
-    textColorHeader: s.textColorHeader || defaultSettings.textColorHeader,
-    textColorSection: s.textColorSection || defaultSettings.textColorSection,
-    textColorNormal: s.textColorNormal || defaultSettings.textColorNormal,
-    textColorSmall: s.textColorSmall || defaultSettings.textColorSmall,
-    textColorTiny: s.textColorTiny || defaultSettings.textColorTiny,
-    fontSizeTitle: s.fontSizeTitle || defaultSettings.fontSizeTitle,
-    fontSizeHeader: s.fontSizeHeader || defaultSettings.fontSizeHeader,
-    fontSizeSection: s.fontSizeSection || defaultSettings.fontSizeSection,
-    fontSizeNormal: s.fontSizeNormal || defaultSettings.fontSizeNormal,
-    fontSizeSmall: s.fontSizeSmall || defaultSettings.fontSizeSmall,
-    fontSizeTiny: s.fontSizeTiny || defaultSettings.fontSizeTiny,
-  };
-}
+export const THEME_SETTINGS_QUERY_KEY = ["/api/sentinel/settings/theme"] as const;
 
 interface SystemSettingsContextType {
-  settings: SystemSettings;
+  settings: AdminThemeSettings;
   isLoading: boolean;
-  cssVariables: CssVariables;
+  cssVariables: AdminThemeCssVariables;
+  pageShellStyle: Record<string, string>;
+  globalLocalDefaults: LocalThemeOverrides;
+  userLocalOverrides: LocalThemeOverrides;
+  isAdmin: boolean;
 }
 
+const defaults = normalizeAdminThemeSettings(DEFAULT_ADMIN_THEME);
+const defaultCss = buildAdminThemeCssVariables(defaults);
+
 const SystemSettingsContext = createContext<SystemSettingsContextType>({
-  settings: defaultSettings,
+  settings: defaults,
   isLoading: false,
-  cssVariables: buildCssVariables(defaultSettings),
+  cssVariables: defaultCss,
+  pageShellStyle: adminPageShellStyle(defaultCss),
+  globalLocalDefaults: {},
+  userLocalOverrides: {},
+  isAdmin: false,
 });
 
 export function useSystemSettings() {
   return useContext(SystemSettingsContext);
 }
 
-interface SystemSettingsProviderProps {
-  children: ReactNode;
+export function useAdminTheme() {
+  const { cssVariables: v, settings, pageShellStyle } = useSystemSettings();
+  return {
+    settings,
+    pageShellStyle,
+    mainBg: v.mainBg,
+    secondaryBg: v.secondaryBg,
+    secondaryBgSolid: v.secondaryBgSolid,
+    headerBg: v.headerBg,
+    borderOnSecondary: v.borderOnSecondary,
+    primaryText: v.primaryText,
+    textPositive: v.textPositive,
+    textWarning: v.textWarning,
+    textCaution: v.textCaution,
+    textNegative: v.textNegative,
+    textMarketFlow: v.textMarketFlow,
+    cssVariables: v,
+  };
 }
 
-export function SystemSettingsProvider({ children }: SystemSettingsProviderProps) {
-  const { data: settings, isLoading } = useQuery<SystemSettings>({
-    queryKey: ["/api/sentinel/settings/system"],
+function ThemeInjector({
+  vars,
+  globalLocalDefaults,
+  userLocalOverrides,
+}: {
+  vars: AdminThemeCssVariables;
+  globalLocalDefaults: LocalThemeOverrides;
+  userLocalOverrides: LocalThemeOverrides;
+}) {
+  useEffect(() => {
+    const root = document.documentElement;
+    const globalProps = adminThemeToCssProperties(vars);
+    const localProps = buildLocalThemeCssProperties(
+      { globalLocalDefaults, userLocalOverrides },
+      vars
+    );
+    const all = { ...globalProps, ...localProps };
+    for (const [key, value] of Object.entries(all)) {
+      root.style.setProperty(key, value);
+    }
+    return () => {
+      for (const key of Object.keys(all)) {
+        root.style.removeProperty(key);
+      }
+    };
+  }, [vars, globalLocalDefaults, userLocalOverrides]);
+  return null;
+}
+
+export function SystemSettingsProvider({ children }: { children: ReactNode }) {
+  const { data, isLoading } = useQuery<ThemeSettingsResponse>({
+    queryKey: [...THEME_SETTINGS_QUERY_KEY],
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
   });
 
-  const currentSettings = settings || defaultSettings;
-  const cssVariables = buildCssVariables(currentSettings);
+  const settings = useMemo(
+    () => normalizeAdminThemeSettings(data?.global),
+    [data?.global]
+  );
+  const globalLocalDefaults = useMemo(
+    () => normalizeLocalThemeOverrides(data?.globalLocalDefaults),
+    [data?.globalLocalDefaults]
+  );
+  const userLocalOverrides = useMemo(
+    () => normalizeLocalThemeOverrides(data?.userLocalOverrides),
+    [data?.userLocalOverrides]
+  );
+  const cssVariables = buildAdminThemeCssVariables(settings);
+  const pageShellStyle = adminPageShellStyle(cssVariables);
 
   return (
-    <SystemSettingsContext.Provider value={{ settings: currentSettings, isLoading, cssVariables }}>
+    <SystemSettingsContext.Provider
+      value={{
+        settings,
+        isLoading,
+        cssVariables,
+        pageShellStyle,
+        globalLocalDefaults,
+        userLocalOverrides,
+        isAdmin: data?.isAdmin ?? false,
+      }}
+    >
+      <ThemeInjector
+        vars={cssVariables}
+        globalLocalDefaults={globalLocalDefaults}
+        userLocalOverrides={userLocalOverrides}
+      />
       {children}
     </SystemSettingsContext.Provider>
   );

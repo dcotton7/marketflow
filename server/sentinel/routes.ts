@@ -16,8 +16,19 @@ import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
 import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
 import { fetchChartData } from "./chartDataEngine";
+import { registerChartSetupEnrichRoutes } from "./chart-setup-enrich/routes";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
+import { buildTradeJournalPayload } from "./tradeJournal";
+import {
+  addJournalCashEvent,
+  deleteJournalCashEvent,
+  upsertJournalCashAnchor,
+} from "./journalCashLedger";
+import { filterNewImportTrades, loadExistingImportFingerprints } from "./importDedup";
+import { detectOrphanSellIds } from "./importOrphanDetect";
+import { autoFinalizeImportBatch, detectBatchDuplicates, schwabLotSiblingIds } from "./importFinalize";
+import { brokerTradeDateToTimestamp } from "@shared/trade-calendar-date";
 import * as alpaca from "../alpaca";
 import { STOCKS_BY_SECTOR } from "@shared/stocksBySector";
 import { normalizeStartHereWorkspacePalette } from "@shared/startHereWorkspacePalette";
@@ -29,6 +40,7 @@ import {
 import { parseIntradayChartTimeframe, DEFAULT_INTRADAY_CHART_TIMEFRAME } from "@shared/chart-timeframes";
 import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals } from "../fundamentals";
 import { resolveSessionMaLevelsForSymbol } from "../data-layer/session-adjusted-ma";
+import { isDelistedSymbol, scheduleDelistedTickerCheck } from "../market-condition/utils/delisted-ticker-registry";
 
 declare module "express-session" {
   interface SessionData {
@@ -823,6 +835,81 @@ export function registerSentinelRoutes(app: Express): void {
       res.status(500).json({ error: "Failed to load dashboard" });
     }
   });
+
+  app.get("/api/sentinel/trade-journal", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!db) {
+        return res.status(503).json({ error: "Database unavailable" });
+      }
+      const userId = req.session.userId!;
+      const payload = await buildTradeJournalPayload(db, userId);
+      res.json(payload);
+    } catch (error) {
+      console.error("Trade journal error:", error);
+      const message = error instanceof Error ? error.message : "Failed to load trade journal";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  const cashAnchorSchema = z.object({
+    brokerId: z.enum(["FIDELITY", "SCHWAB"]),
+    anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    anchorCash: z.number(),
+  });
+
+  const cashEventSchema = z.object({
+    brokerId: z.enum(["FIDELITY", "SCHWAB"]),
+    eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    amount: z.number(),
+    label: z.string().max(120).optional().nullable(),
+  });
+
+  app.put("/api/sentinel/trade-journal/cash-setup/anchor", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!db) return res.status(503).json({ error: "Database unavailable" });
+      const parsed = cashAnchorSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid anchor payload" });
+      const userId = req.session.userId!;
+      const anchor = await upsertJournalCashAnchor(db, userId, parsed.data);
+      res.json(anchor);
+    } catch (error) {
+      console.error("Cash anchor error:", error);
+      res.status(500).json({ error: "Failed to save cash anchor" });
+    }
+  });
+
+  app.post("/api/sentinel/trade-journal/cash-setup/events", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!db) return res.status(503).json({ error: "Database unavailable" });
+      const parsed = cashEventSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid cash event payload" });
+      const userId = req.session.userId!;
+      const event = await addJournalCashEvent(db, userId, { ...parsed.data, eventKind: "adjustment" });
+      res.json(event);
+    } catch (error) {
+      console.error("Cash event error:", error);
+      res.status(500).json({ error: "Failed to add cash event" });
+    }
+  });
+
+  app.delete(
+    "/api/sentinel/trade-journal/cash-setup/events/:id",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        if (!db) return res.status(503).json({ error: "Database unavailable" });
+        const eventId = parseInt(String(req.params.id), 10);
+        if (!Number.isFinite(eventId)) return res.status(400).json({ error: "Invalid event id" });
+        const userId = req.session.userId!;
+        const deleted = await deleteJournalCashEvent(db, userId, eventId);
+        if (!deleted) return res.status(404).json({ error: "Event not found" });
+        res.json({ ok: true });
+      } catch (error) {
+        console.error("Cash event delete error:", error);
+        res.status(500).json({ error: "Failed to delete cash event" });
+      }
+    }
+  );
 
   // Get trade sources for filtering (hand entered + import batches with system-generated account tags)
   app.get("/api/sentinel/trades/sources", requireAuth, async (req: Request, res: Response) => {
@@ -1977,6 +2064,10 @@ export function registerSentinelRoutes(app: Express): void {
     isActive: z.boolean().optional(),
   });
 
+  const adminResetPasswordSchema = z.object({
+    newPassword: z.string().min(8).max(200),
+  });
+
   const tierFeatureOverrideSchema = z.object({
     start: z.boolean(),
     bigIdea: z.boolean(),
@@ -2171,61 +2262,111 @@ export function registerSentinelRoutes(app: Express): void {
   app.patch("/api/sentinel/admin/users/:id", requireAuth, handleAdminUserUpdate);
   app.put("/api/sentinel/admin/users/:id", requireAuth, handleAdminUserUpdate);
 
-  // System Settings - Get user's UI settings
-  app.get("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
+  /** Admin: set a new password for any user (no current password required). */
+  app.post("/api/sentinel/admin/users/:id/reset-password", requireAuth, async (req: Request, res: Response) => {
     try {
-      const settings = await sentinelModels.getSystemSettings(req.session.userId!);
-      res.json(settings || {
-        overlayColor: "#1e3a5f",
-        overlayTransparency: 75,
-        backgroundColor: "#0f172a",
-        logoTransparency: 6,
-        secondaryOverlayColor: "#e8e8e8",
-        textColorTitle: "#ffffff",
-        textColorHeader: "#ffffff",
-        textColorSection: "#ffffff",
-        textColorNormal: "#ffffff",
-        textColorSmall: "#a1a1aa",
-        textColorTiny: "#71717a",
-        fontSizeTitle: "1.5rem",
-        fontSizeHeader: "1.125rem",
-        fontSizeSection: "1rem",
-        fontSizeNormal: "0.875rem",
-        fontSizeSmall: "0.8125rem",
-        fontSizeTiny: "0.75rem",
+      if (!db) {
+        return res.status(503).json({ error: "Database unavailable" });
+      }
+
+      const admin = await sentinelModels.getUserById(req.session.userId!);
+      if (!admin?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const userId = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(userId) || userId < 1) {
+        return res.status(400).json({ error: "Invalid user id" });
+      }
+
+      const body = adminResetPasswordSchema.parse(req.body);
+      const target = await sentinelModels.getUserById(userId);
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const newHash = await bcrypt.hash(body.newPassword, 10);
+      await sentinelModels.updateUserPassword(userId, newHash);
+
+      res.json({
+        ok: true,
+        id: target.id,
+        username: target.username,
       });
     } catch (error) {
-      console.error("Get system settings error:", error);
-      res.status(500).json({ error: "Failed to load settings" });
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0]?.message ?? "Invalid body" });
+      }
+      console.error("Admin reset password error:", error);
+      res.status(500).json({ error: "Failed to reset password" });
     }
   });
 
-  // System Settings - Update user's UI settings
-  app.patch("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
+  // Theme — merged global + per-user local layers
+  app.get("/api/sentinel/settings/theme", requireAuth, async (req: Request, res: Response) => {
     try {
-      const {
-        overlayColor, overlayTransparency, backgroundColor, logoTransparency,
-        secondaryOverlayColor,
-        textColorTitle, textColorHeader, textColorSection,
-        textColorNormal, textColorSmall, textColorTiny,
-        fontSizeTitle, fontSizeHeader, fontSizeSection,
-        fontSizeNormal, fontSizeSmall, fontSizeTiny,
-      } = req.body;
-      const settings = await sentinelModels.upsertSystemSettings(req.session.userId!, {
-        overlayColor,
-        overlayTransparency,
-        backgroundColor,
-        logoTransparency,
-        secondaryOverlayColor,
-        textColorTitle, textColorHeader, textColorSection,
-        textColorNormal, textColorSmall, textColorTiny,
-        fontSizeTitle, fontSizeHeader, fontSizeSection,
-        fontSizeNormal, fontSizeSmall, fontSizeTiny,
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      const globalRow = await sentinelModels.getGlobalThemeSettings();
+      const { localDefaults, ...global } = globalRow;
+      const userLocalOverrides = await sentinelModels.getUserLocalThemeOverrides(req.session.userId!);
+      res.json({
+        global,
+        globalLocalDefaults: localDefaults,
+        userLocalOverrides,
+        isAdmin: !!user?.isAdmin,
       });
-      res.json(settings);
     } catch (error) {
-      console.error("Update system settings error:", error);
-      res.status(500).json({ error: "Failed to save settings" });
+      console.error("Get theme settings error:", error);
+      res.status(500).json({ error: "Failed to load theme settings" });
+    }
+  });
+
+  app.patch("/api/sentinel/settings/theme/global", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Admin access required" });
+      const global = await sentinelModels.updateGlobalThemeSettings(req.body);
+      res.json({ global });
+    } catch (error) {
+      console.error("Update global theme error:", error);
+      res.status(500).json({ error: "Failed to save global theme" });
+    }
+  });
+
+  app.patch("/api/sentinel/settings/theme/global-local", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await sentinelModels.getUserById(req.session.userId!);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Admin access required" });
+      const globalLocalDefaults = await sentinelModels.updateGlobalLocalDefaults(req.body?.overrides ?? req.body);
+      res.json({ globalLocalDefaults });
+    } catch (error) {
+      console.error("Update global local theme error:", error);
+      res.status(500).json({ error: "Failed to save global local defaults" });
+    }
+  });
+
+  app.patch("/api/sentinel/settings/theme/user-local", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userLocalOverrides = await sentinelModels.updateUserLocalThemeOverrides(
+        req.session.userId!,
+        req.body?.overrides ?? req.body
+      );
+      res.json({ userLocalOverrides });
+    } catch (error) {
+      console.error("Update user local theme error:", error);
+      res.status(500).json({ error: "Failed to save your local colors" });
+    }
+  });
+
+  /** @deprecated use /api/sentinel/settings/theme */
+  app.get("/api/sentinel/settings/system", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const globalRow = await sentinelModels.getGlobalThemeSettings();
+      const { localDefaults: _ld, ...global } = globalRow;
+      res.json(global);
+    } catch (error) {
+      console.error("Get system settings error:", error);
+      res.status(500).json({ error: "Failed to load settings" });
     }
   });
 
@@ -4070,20 +4211,35 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       
       const result = parseCSV(csvContent, fileName || "upload.csv", user?.username || "unknown", brokerId as BrokerId);
       console.log(`[Import Preview] Parse complete: ${result.trades.length} trades, status: ${result.batch.status}`);
-      
-      const tradeDates = result.trades
+
+      const tickersInFile = [...new Set(result.trades.map((t) => t.ticker))];
+      const existingFingerprints = db
+        ? await loadExistingImportFingerprints(db, userId, tickersInFile)
+        : new Set<string>();
+      const { newTrades, skippedAlreadyImported } = filterNewImportTrades(
+        result.trades,
+        existingFingerprints
+      );
+
+      const tradeDates = newTrades
         .map(t => t.tradeDate)
         .filter(Boolean)
         .sort();
       const dateRange = tradeDates.length > 0 
-        ? { earliest: tradeDates[0], latest: tradeDates[tradeDates.length - 1], totalTrades: result.trades.length }
+        ? { earliest: tradeDates[0], latest: tradeDates[tradeDates.length - 1], totalTrades: newTrades.length }
         : null;
       
       res.json({
-        batch: result.batch,
-        trades: result.trades,
+        batch: {
+          ...result.batch,
+          totalTradesFound: result.trades.length,
+          totalTradesImported: newTrades.length,
+        },
+        trades: newTrades,
         detectedBroker: detectBroker(csvContent),
         dateRange,
+        skippedAlreadyImported,
+        parsedTradesFound: result.trades.length,
       });
     } catch (error) {
       console.error("[Import Preview] Error:", error);
@@ -4113,6 +4269,30 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       if (result.batch.status === "FAILED") {
         return res.status(400).json({ error: "Failed to parse CSV", batch: result.batch });
       }
+
+      const parsedTradesFound = result.trades.length;
+      const tickersInImport = [...new Set(result.trades.map((t) => t.ticker))];
+      const existingFingerprints = await loadExistingImportFingerprints(db!, userId, tickersInImport);
+      const { newTrades, skippedAlreadyImported } = filterNewImportTrades(
+        result.trades,
+        existingFingerprints
+      );
+      result.trades = newTrades;
+      result.batch.totalTradesFound = parsedTradesFound;
+      result.batch.totalTradesImported = newTrades.length;
+
+      if (newTrades.length === 0) {
+        return res.json({
+          success: true,
+          batch: result.batch,
+          tradesImported: 0,
+          skippedAlreadyImported,
+          parsedTradesFound,
+          orphanSellsCount: 0,
+          needsReview: false,
+          message: "All trades in this file were already imported — nothing new to add.",
+        });
+      }
       
       // Detect orphan sells - sells with no prior buy across ALL sources:
       // 1. Current import file
@@ -4133,20 +4313,20 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       
       // Group trades by ticker from current import
       const tradesByTicker: Record<string, typeof result.trades> = {};
-      const tickersInImport = new Set<string>();
+      const tickersInImportSet = new Set<string>();
       for (const trade of result.trades) {
         if (!tradesByTicker[trade.ticker]) {
           tradesByTicker[trade.ticker] = [];
         }
         tradesByTicker[trade.ticker].push(trade);
-        tickersInImport.add(trade.ticker);
+        tickersInImportSet.add(trade.ticker);
       }
       
       // Skip orphan detection if no tickers
       let orphanSellsCount = 0;
       const orphanSellTradeIds = new Set<string>();
       
-      if (tickersInImport.size > 0) {
+      if (tickersInImportSet.size > 0) {
         // Fetch existing imported trades for these tickers (from previous imports)
         // Include accountName for per-account filtering
         const existingImportedTrades = await db!.select({
@@ -4155,11 +4335,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           quantity: sentinelImportedTrades.quantity,
           tradeDate: sentinelImportedTrades.tradeDate,
           accountName: sentinelImportedTrades.accountName,
+          brokerId: sentinelImportedTrades.brokerId,
+          rawSource: sentinelImportedTrades.rawSource,
           id: sentinelImportedTrades.id, // For stable ordering
         }).from(sentinelImportedTrades)
           .where(and(
             eq(sentinelImportedTrades.userId, userId),
-            inArray(sentinelImportedTrades.ticker, Array.from(tickersInImport))
+            inArray(sentinelImportedTrades.ticker, Array.from(tickersInImportSet))
           ))
           .orderBy(sentinelImportedTrades.tradeDate, sentinelImportedTrades.id);
         
@@ -4177,7 +4359,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         }).from(sentinelTrades)
           .where(and(
             eq(sentinelTrades.userId, userId),
-            inArray(sentinelTrades.symbol, Array.from(tickersInImport))
+            inArray(sentinelTrades.symbol, Array.from(tickersInImportSet))
           ))
           .orderBy(sentinelTrades.entryDate, sentinelTrades.id);
         
@@ -4208,6 +4390,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             tradeDate: Date; 
             sourcePriority: number; // 1=existing, 2=hand, 3=current (for deterministic sorting)
             isCurrentImport: boolean;
+            brokerId?: string | null;
+            rawSource?: string | null;
+            accountName?: string | null;
           };
           const allTrades: UnifiedTrade[] = [];
           
@@ -4225,6 +4410,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               tradeDate: new Date(t.tradeDate),
               sourcePriority: 1,
               isCurrentImport: false,
+              brokerId: t.brokerId,
+              rawSource: t.rawSource,
+              accountName: t.accountName,
             });
           }
           
@@ -4273,39 +4461,21 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               tradeDate: new Date(t.tradeDate),
               sourcePriority: 3,
               isCurrentImport: true,
+              brokerId: t.brokerId,
+              rawSource: t.rawSource,
+              accountName: t.accountName,
             });
           }
-          
-          // Sort by date, then direction (BUYs before SELLs), then by source priority, then by id (stable tie-breaker)
-          allTrades.sort((a, b) => {
-            const dateDiff = a.tradeDate.getTime() - b.tradeDate.getTime();
-            if (dateDiff !== 0) return dateDiff;
-            // On same date, process BUYs before SELLs for proper FIFO
-            if (a.direction === 'BUY' && b.direction === 'SELL') return -1;
-            if (a.direction === 'SELL' && b.direction === 'BUY') return 1;
-            const priorityDiff = a.sourcePriority - b.sourcePriority;
-            if (priorityDiff !== 0) return priorityDiff;
-            return a.id.localeCompare(b.id);
-          });
           
           // Check short sale settings for this account
           const tradeAccountKey = `${currentBrokerId}:${accountKey === '__default__' ? '' : accountKey}`;
           const shortSalesAllowed = accountShortAllowed.get(tradeAccountKey) ?? false;
           
-          // Calculate running position and identify orphans for this account
-          let runningPosition = 0;
-          const EPSILON = 0.0001; // Small tolerance for floating point comparison
-          
-          for (const trade of allTrades) {
-            if (trade.direction === 'BUY') {
-              runningPosition += trade.quantity;
-            } else if (trade.direction === 'SELL') {
-              // For current import sells, check if position is sufficient (with epsilon tolerance)
-              if (trade.isCurrentImport && runningPosition < trade.quantity - EPSILON && !shortSalesAllowed) {
-                orphanSellTradeIds.add(trade.id);
-              }
-              runningPosition = Math.max(0, runningPosition - trade.quantity);
-            }
+          const accountOrphans = detectOrphanSellIds(allTrades, shortSalesAllowed, {
+            onlyFlagCurrentImport: true,
+          });
+          for (const orphanId of accountOrphans) {
+            orphanSellTradeIds.add(orphanId);
           }
           }
         }
@@ -4364,6 +4534,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
             status: trade.status,
             isFill: trade.isFill,
             fillGroupKey: trade.fillGroupKey,
+            cashBalance: trade.cashBalance,
             // Mark orphan sells
             isOrphanSell: orphanSellTradeIds.has(trade.tradeId),
             orphanStatus: orphanSellTradeIds.has(trade.tradeId) ? 'pending' : null,
@@ -4378,13 +4549,18 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           }
         }
       });
-      
+
+      const finalized = await autoFinalizeImportBatch(db!, userId, result.batch.batchId);
+
       res.json({
         success: true,
         batch: result.batch,
         tradesImported: result.trades.length,
-        orphanSellsCount,
-        needsReview: orphanSellsCount > 0,
+        skippedAlreadyImported,
+        parsedTradesFound,
+        orphanSellsCount: finalized.orphansRemaining,
+        needsReview: finalized.orphansRemaining > 0,
+        autoFinalized: finalized,
       });
     } catch (error) {
       console.error("Import confirm error:", error);
@@ -4916,7 +5092,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           for (const trade of dayTrades) {
             const qty = Number(trade.quantity) || 0;
             const price = Number(trade.price) || 0;
-            const tradeDate = trade.tradeDate ? new Date(trade.tradeDate) : new Date();
+            const tradeDate = trade.tradeDate
+              ? brokerTradeDateToTimestamp(trade.tradeDate.substring(0, 10))
+              : new Date();
             
             const lotEntry = {
               id: trade.tradeId,
@@ -4941,7 +5119,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
               if (availableQty < qty && trade.isOrphanSell && trade.orphanStatus === 'resolved') {
                 const shortfall = qty - availableQty;
                 const costBasis = trade.manualCostBasis != null ? Number(trade.manualCostBasis) : price;
-                const openDate = trade.manualOpenDate ? new Date(trade.manualOpenDate) : tradeDate;
+                const openDate = trade.manualOpenDate
+                  ? brokerTradeDateToTimestamp(trade.manualOpenDate.substring(0, 10))
+                  : tradeDate;
                 
                 syntheticInjections.push({
                   ticker,
@@ -6081,33 +6261,25 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         const tradeAccountKey = `${brokerId}:${accountKey === '__default__' ? '' : accountKey}`;
         const shortSalesAllowed = accountShortAllowed.get(tradeAccountKey) ?? false;
         
-        let runningPosition = 0;
-        const EPSILON = 0.0001; // Small tolerance for floating point comparison
-        
+        const orphanIds = detectOrphanSellIds(
+          trades.map((t) => ({
+            id: t.tradeId,
+            direction: t.direction,
+            quantity: Number(t.quantity) || 0,
+            tradeDate: new Date(t.tradeDate),
+            brokerId: t.brokerId,
+            rawSource: t.rawSource,
+            accountName: t.accountName,
+          })),
+          shortSalesAllowed
+        );
+
         for (const trade of trades) {
-          const qty = Number(trade.quantity) || 0;
-          
-          if (trade.direction === 'BUY') {
-            runningPosition += qty;
-          } else if (trade.direction === 'SELL') {
-            // Check if this sell has sufficient position (with epsilon tolerance)
-            if (runningPosition >= qty - EPSILON) {
-              // Full coverage - not an orphan
-              noLongerOrphanIds.add(trade.tradeId);
-              runningPosition = Math.max(0, runningPosition - qty);
-            } else if (shortSalesAllowed) {
-              // Short sale allowed
-              noLongerOrphanIds.add(trade.tradeId);
-              runningPosition -= qty;
-            } else if (runningPosition > EPSILON) {
-              // PARTIAL orphan: we have SOME shares but not enough for entire sell
-              // This can still close out remaining position, so NOT a full orphan
-              noLongerOrphanIds.add(trade.tradeId);
-              runningPosition = 0;
-            } else {
-              // True orphan - position is already 0 or negative
-              trueOrphanIds.add(trade.tradeId);
-            }
+          if (trade.direction !== "SELL") continue;
+          if (orphanIds.has(trade.tradeId)) {
+            trueOrphanIds.add(trade.tradeId);
+          } else if (trade.isOrphanSell) {
+            noLongerOrphanIds.add(trade.tradeId);
           }
         }
       }
@@ -6391,122 +6563,69 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     try {
       const userId = req.session.userId!;
       const batchId = req.params.batchId;
-      
-      // Get trades from this batch
+      const autoClean = req.body?.autoClean === true;
+
+      if (autoClean) {
+        const finalized = await autoFinalizeImportBatch(db!, userId, batchId);
+        return res.json({
+          success: true,
+          duplicatesFound: 0,
+          autoFinalized: finalized,
+        });
+      }
+
       const batchTrades = await db!.select().from(sentinelImportedTrades)
         .where(and(
           eq(sentinelImportedTrades.userId, userId),
           eq(sentinelImportedTrades.batchId, batchId)
         ));
-      
+
       if (batchTrades.length === 0) {
         return res.json({ success: true, duplicatesFound: 0, message: "No trades in batch" });
       }
-      
-      // Get existing Trading Cards for comparison
-      const existingCards = await db!.select({
-        id: sentinelTrades.id,
-        symbol: sentinelTrades.symbol,
-        entryDate: sentinelTrades.entryDate,
-        entryPrice: sentinelTrades.entryPrice,
-        positionSize: sentinelTrades.positionSize,
-        lotEntries: sentinelTrades.lotEntries,
-        accountName: sentinelTrades.accountName,
-      }).from(sentinelTrades)
-        .where(eq(sentinelTrades.userId, userId));
-      
-      // Get other import batches' trades (excluding this batch)
-      const otherImportedTrades = await db!.select().from(sentinelImportedTrades)
-        .where(and(
-          eq(sentinelImportedTrades.userId, userId),
-          not(eq(sentinelImportedTrades.batchId, batchId))
-        ));
-      
-      const duplicateTradeIds = new Set<string>();
-      const duplicateMatches = new Map<string, { matchType: 'card' | 'import', matchId: number }>();
-      
-      for (const trade of batchTrades) {
-        // Check against existing Trading Cards
-        for (const card of existingCards) {
-          // Match by: ticker, date, price (within tolerance), quantity
-          if (card.symbol.toUpperCase() === trade.ticker.toUpperCase()) {
-            // Check lot entries if available
-            if (card.lotEntries && Array.isArray(card.lotEntries)) {
-              for (const lot of card.lotEntries) {
-                const lotDate = lot.dateTime?.split('T')[0] || '';
-                const lotPrice = parseFloat(lot.price) || 0;
-                const lotQty = parseFloat(lot.qty) || 0;
-                const priceMatch = Math.abs(lotPrice - trade.price) < 0.01;
-                const qtyMatch = Math.abs(lotQty - trade.quantity) < 0.0001;
-                const dateMatch = lotDate === trade.tradeDate;
-                
-                if (dateMatch && priceMatch && qtyMatch) {
-                  duplicateTradeIds.add(trade.tradeId);
-                  duplicateMatches.set(trade.tradeId, { matchType: 'card', matchId: card.id });
-                  break;
-                }
-              }
-            } else if (card.entryDate) {
-              // Match by entry date and price
-              const cardDate = new Date(card.entryDate).toISOString().split('T')[0];
-              const priceMatch = card.entryPrice && Math.abs(card.entryPrice - trade.price) < 0.01;
-              const dateMatch = cardDate === trade.tradeDate;
-              
-              if (dateMatch && priceMatch) {
-                duplicateTradeIds.add(trade.tradeId);
-                duplicateMatches.set(trade.tradeId, { matchType: 'card', matchId: card.id });
-              }
-            }
-          }
-        }
-        
-        // Check against other imports if not already matched
-        if (!duplicateTradeIds.has(trade.tradeId)) {
-          for (const otherTrade of otherImportedTrades) {
-            if (otherTrade.ticker.toUpperCase() === trade.ticker.toUpperCase() &&
-                otherTrade.tradeDate === trade.tradeDate &&
-                Math.abs(otherTrade.price - trade.price) < 0.01 &&
-                Math.abs(otherTrade.quantity - trade.quantity) < 0.0001 &&
-                otherTrade.direction === trade.direction) {
-              duplicateTradeIds.add(trade.tradeId);
-              duplicateMatches.set(trade.tradeId, { matchType: 'import', matchId: otherTrade.id });
-              break;
-            }
-          }
-        }
-      }
-      
-      // Update trades with duplicate status
-      let updatedCount = 0;
+
+      const duplicateMatches = await detectBatchDuplicates(db!, userId, batchId);
+
       for (const [tradeId, match] of duplicateMatches) {
         await db!.update(sentinelImportedTrades)
-          .set({ 
+          .set({
             isDuplicate: true,
-            duplicateStatus: 'pending',
-            duplicateOfTradeId: match.matchType === 'card' ? match.matchId : null,
-            duplicateOfImportId: match.matchType === 'import' ? match.matchId : null,
+            duplicateStatus: "pending",
+            duplicateOfTradeId: match.matchType === "card" ? match.matchId : null,
+            duplicateOfImportId: match.matchType === "import" ? match.matchId : null,
           })
           .where(eq(sentinelImportedTrades.tradeId, tradeId));
-        updatedCount++;
       }
-      
-      // Update batch duplicate count
+
       await db!.update(sentinelImportBatches)
-        .set({ duplicatesCount: duplicateTradeIds.size })
+        .set({ duplicatesCount: duplicateMatches.size })
         .where(eq(sentinelImportBatches.batchId, batchId));
-      
-      res.json({ 
-        success: true, 
-        duplicatesFound: duplicateTradeIds.size,
+
+      res.json({
+        success: true,
+        duplicatesFound: duplicateMatches.size,
         details: Array.from(duplicateMatches.entries()).map(([tradeId, match]) => ({
           tradeId,
           matchType: match.matchType,
-          matchId: match.matchId
-        }))
+          matchId: match.matchId,
+        })),
       });
     } catch (error) {
       console.error("Detect duplicates error:", error);
       res.status(500).json({ error: "Failed to detect duplicates" });
+    }
+  });
+
+  // Auto-clean duplicates + false orphan sells after import
+  app.post("/api/sentinel/import/batches/:batchId/finalize", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.session.userId!;
+      const batchId = req.params.batchId;
+      const finalized = await autoFinalizeImportBatch(db!, userId, batchId);
+      res.json({ success: true, ...finalized });
+    } catch (error) {
+      console.error("Finalize import batch error:", error);
+      res.status(500).json({ error: "Failed to finalize import batch" });
     }
   });
   
@@ -6574,11 +6693,19 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
       
       if (action === 'delete') {
-        // Delete this import row, keeping the existing data
+        const batchTrades = await db!.select().from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.batchId, trade.batchId)
+          ));
+        const toDelete = new Set([tradeId, ...schwabLotSiblingIds(batchTrades, trade)]);
+
         await db!.delete(sentinelImportedTrades)
-          .where(eq(sentinelImportedTrades.tradeId, tradeId));
-        
-        // Update batch count
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            inArray(sentinelImportedTrades.tradeId, [...toDelete])
+          ));
+
         const batchId = trade.batchId;
         const [countResult] = await db!.select({ count: sql<number>`count(*)` })
           .from(sentinelImportedTrades)
@@ -6692,14 +6819,25 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
       
       if (action === 'delete_all') {
+        const batchTrades = await db!.select().from(sentinelImportedTrades)
+          .where(and(
+            eq(sentinelImportedTrades.userId, userId),
+            eq(sentinelImportedTrades.batchId, batchId)
+          ));
+        const toDelete = new Set<string>();
+        for (const dup of duplicates) {
+          toDelete.add(dup.tradeId);
+          for (const sib of schwabLotSiblingIds(batchTrades, dup)) {
+            toDelete.add(sib);
+          }
+        }
+
         await db!.delete(sentinelImportedTrades)
           .where(and(
             eq(sentinelImportedTrades.userId, userId),
-            eq(sentinelImportedTrades.batchId, batchId),
-            eq(sentinelImportedTrades.isDuplicate, true),
-            eq(sentinelImportedTrades.duplicateStatus, 'pending')
+            inArray(sentinelImportedTrades.tradeId, [...toDelete])
           ));
-        
+
         try {
           await db!.update(sentinelImportBatches)
             .set({ duplicatesCount: 0 })
@@ -6710,9 +6848,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         } catch (batchUpdateErr) {
           console.error(`[Bulk Duplicate] Non-critical: failed to update batch duplicatesCount:`, batchUpdateErr);
         }
-        
-        console.log(`[Bulk Duplicate] Deleted ${duplicates.length} duplicates`);
-        return res.json({ success: true, action: 'delete_all', count: duplicates.length });
+
+        console.log(`[Bulk Duplicate] Deleted ${toDelete.size} import rows (${duplicates.length} duplicates + Schwab lot pairs)`);
+        return res.json({ success: true, action: 'delete_all', count: toDelete.size });
       }
       
       if (action === 'overwrite_all') {
@@ -7168,9 +7306,15 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const timeframe = String(req.query.timeframe || "daily");
       const includeETH = req.query.includeETH as string | undefined;
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
+      if (isDelistedSymbol(ticker)) {
+        return res.status(404).json({ error: `${ticker} is delisted and removed from the universe` });
+      }
 
       const data = await fetchChartData(ticker, timeframe, undefined, includeETH === 'true');
-      if (!data) return res.status(404).json({ error: `No chart data found for ${ticker}` });
+      if (!data) {
+        scheduleDelistedTickerCheck(ticker, "chart-data-empty");
+        return res.status(404).json({ error: `No chart data found for ${ticker}` });
+      }
 
       res.json(data);
     } catch (error) {
@@ -7204,7 +7348,11 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const ticker = String(req.query.ticker || "").toUpperCase();
       const timeframe = String(req.query.timeframe || "daily");
       const includeETH = String(req.query.includeETH || "false") === "true";
+      const themeId = String(req.query.themeId || "").trim();
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
+      if (isDelistedSymbol(ticker)) {
+        return res.status(404).json({ error: `${ticker} is delisted and removed from the universe` });
+      }
 
       const endDate = new Date();
       const startDate = new Date();
@@ -7237,6 +7385,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       ]);
 
       if (!dailyBars.length) {
+        scheduleDelistedTickerCheck(ticker, "trade-chart-metrics-empty");
         return res.status(404).json({ error: `No data found for ${ticker}` });
       }
 
@@ -7316,8 +7465,20 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       }
 
       let extensionFrom20d = 0;
+      let extensionFrom20dAdr = 0;
       if (sma20ForExt != null && sma20ForExt > 0) {
         extensionFrom20d = Math.round(((currentPrice - sma20ForExt) / sma20ForExt) * 1000) / 10;
+        if (adr20 > 0) {
+          extensionFrom20dAdr = Math.round(((currentPrice - sma20ForExt) / adr20) * 10) / 10;
+        }
+      }
+
+      let avgVolume14d = 0;
+      if (validDaily.length >= 14) {
+        const last14 = validDaily.slice(-14);
+        avgVolume14d = Math.round(
+          last14.reduce((s: number, q: any) => s + (q.volume ?? 0), 0) / 14
+        );
       }
 
       let macdStatus = "N/A";
@@ -7419,6 +7580,23 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         industryPeers = peers.map(p => ({ symbol: p.symbol, name: p.name }));
       } catch {}
 
+      let rsVsSpy: number | undefined;
+      let themeRank: number | undefined;
+      let themeName: string | undefined;
+      if (themeId) {
+        try {
+          const { getClusterMembers, getThemeById } = await import("../market-condition/engine/snapshot");
+          const theme = getThemeById(themeId as any);
+          if (theme) {
+            themeRank = theme.rank;
+            themeName = theme.name;
+          }
+          const members = getClusterMembers(themeId as any);
+          const member = members.find((m) => m.symbol.toUpperCase() === ticker);
+          if (member) rsVsSpy = Math.round(member.rsVsBenchmark * 100) / 100;
+        } catch {}
+      }
+
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
         adr20: adr20Dollar,
@@ -7426,8 +7604,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         adr20Pct,
         extensionFrom50dAdr,
         extensionFrom50dPct,
+        extensionFrom20dAdr,
         extensionFrom200d,
         extensionFrom20d,
+        avgVolume14d: avgVolume14d || undefined,
+        rsVsSpy,
+        themeRank,
+        themeName,
         macd: macdStatus,
         macdTimeframe: isIntraday ? timeframe : "daily",
         sectorEtf,
@@ -8239,6 +8422,8 @@ Be concise and actionable.`;
       res.status(500).json({ error: "Failed to create watchlist item" });
     }
   });
+
+  registerChartSetupEnrichRoutes(app, requireAuth);
 
   startMonitoring(60000);
 }

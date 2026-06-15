@@ -568,7 +568,7 @@ const INITIAL_RESULTS_NODE: Node = {
 };
 
 export default function BigIdeaPage() {
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
   const { toast } = useToast();
   const { data: userWatchlists } = useWatchlists();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -2388,7 +2388,7 @@ export default function BigIdeaPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen sentinel-page" style={{ backgroundColor: cssVariables.backgroundColor, '--logo-opacity': cssVariables.logoOpacity, '--overlay-bg': cssVariables.overlayBg } as React.CSSProperties}>
+    <div className="flex flex-col h-screen sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <SentinelHeader showSentiment={false} />
 
       <div className="flex items-center gap-3 px-4 py-2 border-b flex-wrap" style={{ backgroundColor: cssVariables.headerBg }}>
@@ -5663,16 +5663,7 @@ function ScanChartViewer({
           <p className="text-sm">View recent news for {symbol}</p>
         </TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div>
-            <WatchlistSelector symbol={symbol} />
-          </div>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p className="text-sm">Add/remove from watchlist</p>
-        </TooltipContent>
-      </Tooltip>
+      <WatchlistSelector symbol={symbol} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

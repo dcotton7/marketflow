@@ -29,6 +29,7 @@ import {
   broadcastGroupSymbolToLane,
   chartInstanceIdsForGroup,
   clearChartSymbolOverrideOnInstance,
+  clearAllWidgets,
   copyWatchlistAndNewsStorageForDuplicate,
   createDefaultDashboard,
   DEFAULT_START_ID,
@@ -55,6 +56,7 @@ import {
   mergePersistedGridLayout,
   patchResistDefaultFlowFullWidth,
   reflowWatchlistChartWalls,
+  purgeWidgetInstanceStorage,
   saveActiveStartId,
   sanitizeDashboard,
   saveDashboard,
@@ -113,6 +115,7 @@ interface StartHereContextValue {
   addWidget: (type: StartHereWidgetType) => void;
   addLinkedChartTriplet: () => void;
   removeInstance: (instanceId: string) => void;
+  clearAllWidgets: () => void;
   resetDashboard: () => void;
   setDefaultChartTemplate: (instanceId: string | null) => void;
   setDefaultWatchlistTemplate: (instanceId: string | null) => void;
@@ -488,6 +491,17 @@ export function StartHereProvider({
     scheduleRemoteSave();
   }, [userId, scheduleRemoteSave]);
 
+  const clearAllWidgetsFn = useCallback(() => {
+    const cur = dashboardRef.current;
+    const instanceIds = Object.keys(cur.instances);
+    if (!instanceIds.length) return;
+    purgeWidgetInstanceStorage(userId, activeStartIdRef.current, instanceIds);
+    const empty = sanitizeDashboard(clearAllWidgets(cur));
+    setDashboard(empty);
+    saveDashboard(userId, activeStartIdRef.current, empty);
+    scheduleRemoteSave();
+  }, [userId, scheduleRemoteSave]);
+
   const switchStart = useCallback(
     async (startId: string) => {
       if (startId === activeStartIdRef.current) return;
@@ -745,6 +759,7 @@ export function StartHereProvider({
       addWidget,
       addLinkedChartTriplet: addLinkedChartTripletFn,
       removeInstance: removeInstanceFn,
+      clearAllWidgets: clearAllWidgetsFn,
       resetDashboard,
       setDefaultChartTemplate: setDefaultChartTemplateFn,
       setDefaultWatchlistTemplate: setDefaultWatchlistTemplateFn,
@@ -781,6 +796,7 @@ export function StartHereProvider({
       addWidget,
       addLinkedChartTripletFn,
       removeInstanceFn,
+      clearAllWidgetsFn,
       resetDashboard,
       setDefaultChartTemplateFn,
       setDefaultWatchlistTemplateFn,

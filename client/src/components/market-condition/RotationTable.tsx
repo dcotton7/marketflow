@@ -216,6 +216,13 @@ export function RotationTable({
     });
   }, [themes, sortKey, sortDir, isHistorical]);
 
+  useEffect(() => {
+    if (lensMode === "flowMap" || sortedThemes.length === 0) return;
+    const selectionInList =
+      selectedTheme != null && sortedThemes.some((t) => t.id === selectedTheme);
+    if (!selectionInList) onThemeSelect(sortedThemes[0].id);
+  }, [lensMode, sortedThemes, selectedTheme, onThemeSelect]);
+
   return (
     <div className="h-full overflow-auto">
       <Table>

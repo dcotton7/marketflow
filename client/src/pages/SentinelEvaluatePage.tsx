@@ -437,7 +437,7 @@ export default function SentinelEvaluatePage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { settings: systemSettings, cssVariables } = useSystemSettings();
+  const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
 
   const urlParams = new URLSearchParams(window.location.search);
   const preloadTradeId = urlParams.get('tradeId');
@@ -819,11 +819,7 @@ export default function SentinelEvaluatePage() {
   return (
     <div 
       className="min-h-screen sentinel-page"
-      style={{ 
-        backgroundColor: cssVariables.backgroundColor,
-        '--logo-opacity': cssVariables.logoOpacity,
-        '--overlay-bg': cssVariables.overlayBg,
-      } as React.CSSProperties}
+      style={pageShellStyle as React.CSSProperties}
     >
       <SentinelHeader showSentiment={true} rightContent={
         <Button variant="ghost" size="icon" onClick={() => {

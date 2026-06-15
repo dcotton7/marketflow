@@ -10,6 +10,7 @@ import { themes, tickers } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { ClusterId } from "../universe";
 import { getClusterById } from "../universe";
+import { isDelistedSymbol } from "./delisted-ticker-registry";
 
 export interface ThemeMember {
   symbol: string;
@@ -48,11 +49,16 @@ export async function initializeThemeMembersCache(): Promise<void> {
         .from(tickers)
         .where(eq(tickers.themeId, theme.id));
       
-      themeMembersCache.set(theme.id as ClusterId, members.map(m => ({
-        symbol: m.symbol,
-        isCore: m.isCore ?? false,
-        companyName: m.companyName,
-      })));
+      themeMembersCache.set(
+        theme.id as ClusterId,
+        members
+          .filter((m) => !isDelistedSymbol(m.symbol))
+          .map((m) => ({
+            symbol: m.symbol,
+            isCore: m.isCore ?? false,
+            companyName: m.companyName,
+          }))
+      );
     }
     
     cacheInitialized = true;

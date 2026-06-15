@@ -2238,7 +2238,7 @@ export default function SentinelDashboardPage() {
   const [, setLocation] = useLocation();
   const { user, logout } = useSentinelAuth();
   const { toast } = useToast();
-  const { settings: systemSettings, cssVariables } = useSystemSettings();
+  const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
   
   // State preservation keys
   const STORAGE_KEY_TAB = "sentinel_dashboard_active_tab";
@@ -3361,11 +3361,7 @@ export default function SentinelDashboardPage() {
   return (
     <div 
       className="min-h-screen sentinel-page"
-      style={{ 
-        backgroundColor: cssVariables.backgroundColor,
-        '--logo-opacity': cssVariables.logoOpacity,
-        '--overlay-bg': cssVariables.overlayBg,
-      } as React.CSSProperties}
+      style={pageShellStyle as React.CSSProperties}
     >
       <SentinelHeader showSentiment={true} rightContent={
         <div className="flex items-center gap-2">

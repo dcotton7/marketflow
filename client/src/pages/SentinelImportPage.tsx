@@ -21,6 +21,26 @@ import { Label } from "@/components/ui/label";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SentinelHeader } from "@/components/SentinelHeader";
+import { getBrokerImportGuide } from "@/lib/broker-import-instructions";
+import {
+  parseFidelityClosedPositionsAvgCost,
+  calculateSyntheticOpenDate,
+} from "@shared/fidelity-csv";
+import {
+  describeSchwabRglParseFailure,
+  parseSchwabRealizedGainLossAvgCost,
+  parseSchwabRealizedGainLossLots,
+} from "@shared/schwab-csv";
+import {
+  detectBrokerForCsv,
+  primaryImportFileType,
+  orphanCostBasisFileType,
+  expectedBundleFileHint,
+  bundleHasAnyTradeFiles,
+  bundleHasTradeFiles,
+  IMPORT_BUNDLE_LABELS,
+  type ImportBundleFileType,
+} from "@shared/import-bundle";
 
 interface ImportBatch {
   id: number;
@@ -95,6 +115,9 @@ interface PreviewResult {
   trades: ImportedTrade[];
   detectedBroker: string;
   dateRange?: { earliest: string; latest: string; totalTrades: number } | null;
+  /** Rows in CSV that match trades already in the database (overlap imports). */
+  skippedAlreadyImported?: number;
+  parsedTradesFound?: number;
 }
 
 const BROKER_OPTIONS = [
@@ -106,13 +129,34 @@ const BROKER_OPTIONS = [
 export default function SentinelImportPage() {
   const { user } = useSentinelAuth();
   const { toast } = useToast();
-  const { settings: systemSettings, cssVariables } = useSystemSettings();
+  const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
   
   const [activeTab, setActiveTab] = useState("upload");
   const [selectedBrokerId, setSelectedBrokerId] = useState<string>("FIDELITY");
   const [csvContent, setCsvContent] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
+  const [bundleFiles, setBundleFiles] = useState<Array<{
+    id: string;
+    fileName: string;
+    csvContent: string;
+    brokerId: string;
+    type: ImportBundleFileType;
+  }>>([]);
+  const [smartImportRunning, setSmartImportRunning] = useState(false);
+  const [smartImportStep, setSmartImportStep] = useState<string | null>(null);
+  const [bundleResult, setBundleResult] = useState<{
+    tradesImported: number;
+    skippedAlreadyImported: number;
+    orphansResolved: number;
+    orphansRemaining: number;
+    duplicatesFound: number;
+    promoted: boolean;
+    cardsCreated: number;
+    ordersImported: number;
+    ordersSkipped: number;
+    warnings: string[];
+  } | null>(null);
   const [showSkippedDialog, setShowSkippedDialog] = useState(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
@@ -257,10 +301,20 @@ export default function SentinelImportPage() {
       return response.json();
     },
     onSuccess: async (data) => {
-      toast({
-        title: "Import Complete",
-        description: `Successfully imported ${data.tradesImported} trades. Checking for duplicates...`,
-      });
+      const skipped = data.skippedAlreadyImported ?? 0;
+      const imported = data.tradesImported ?? 0;
+      if (imported === 0 && skipped > 0) {
+        toast({
+          title: "Nothing new to import",
+          description: `All ${skipped} trade(s) in this file were already on file — overlap skipped automatically.`,
+        });
+      } else {
+        const skipNote = skipped > 0 ? ` Skipped ${skipped} already on file.` : "";
+        toast({
+          title: "Import Complete",
+          description: `Imported ${imported} new trade(s).${skipNote}`,
+        });
+      }
       setPreviewData(null);
       setCsvContent(null);
       setFileName(null);
@@ -269,8 +323,8 @@ export default function SentinelImportPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/batches'] });
       queryClient.invalidateQueries({ queryKey: ['/api/sentinel/import/trades'] });
       
-      // Auto-detect duplicates immediately after import
-      if (data.batch?.batchId) {
+      // Auto-detect duplicates for trades that slipped past fingerprint match
+      if (data.batch?.batchId && imported > 0) {
         try {
           const dupResponse = await apiRequest('POST', `/api/sentinel/import/batches/${data.batch.batchId}/detect-duplicates`, {});
           if (dupResponse.ok) {
@@ -784,87 +838,13 @@ export default function SentinelImportPage() {
     setShowOrphanDialog(true);
   };
 
-  const calculateSyntheticDate = (sellDateStr: string): string => {
-    const sellDate = new Date(sellDateStr + 'T12:00:00');
-    const year = sellDate.getFullYear();
-    const janFirst = new Date(year, 0, 1, 12, 0, 0);
-    
-    let current = new Date(sellDate);
-    let tradingDaysBack = 0;
-    
-    while (tradingDaysBack < 10) {
-      current.setDate(current.getDate() - 1);
-      if (current <= janFirst) {
-        const jan1 = new Date(year, 0, 1, 12, 0, 0);
-        const dow = jan1.getDay();
-        if (dow === 0) jan1.setDate(2);
-        else if (dow === 6) jan1.setDate(3);
-        const mm = String(jan1.getMonth() + 1).padStart(2, '0');
-        const dd = String(jan1.getDate()).padStart(2, '0');
-        return `${year}-${mm}-${dd}`;
-      }
-      const dayOfWeek = current.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        tradingDaysBack++;
-      }
-    }
-    
-    const mm = String(current.getMonth() + 1).padStart(2, '0');
-    const dd = String(current.getDate()).padStart(2, '0');
-    return `${current.getFullYear()}-${mm}-${dd}`;
-  };
-
-  const parseFidelityClosedPositionsCsv = (csvText: string): Record<string, number> => {
-    const cleaned = csvText.replace(/^\uFEFF/, '');
-    const lines = cleaned.split('\n');
-    let headerIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('Symbol,Description,')) {
-        headerIndex = i;
-        break;
-      }
-    }
-    if (headerIndex === -1) return {};
-
-    const result: Record<string, number> = {};
-    for (let i = headerIndex + 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line || line.startsWith('Totals') || line.startsWith('Disclosure') || line.startsWith('"')) break;
-
-      const parts: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      for (let c = 0; c < line.length; c++) {
-        if (line[c] === '"') {
-          inQuotes = !inQuotes;
-        } else if (line[c] === ',' && !inQuotes) {
-          parts.push(current);
-          current = '';
-        } else {
-          current += line[c];
-        }
-      }
-      parts.push(current);
-
-      const symbol = parts[0]?.trim();
-      const avgCostStr = parts[8]?.trim().replace(/,/g, '');
-      if (symbol && avgCostStr) {
-        const avgCost = parseFloat(avgCostStr);
-        if (!isNaN(avgCost) && avgCost > 0) {
-          result[symbol.toUpperCase()] = avgCost;
-        }
-      }
-    }
-    return result;
-  };
-
   const handleCostBasisCsvUpload = (file: File, orphansList?: ImportedTrade[]) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
       if (!text) return;
 
-      const parsed = parseFidelityClosedPositionsCsv(text);
+      const parsed = parseFidelityClosedPositionsAvgCost(text);
       const tickerCount = Object.keys(parsed).length;
 
       if (tickerCount === 0) {
@@ -890,7 +870,7 @@ export default function SentinelImportPage() {
           matched++;
           const existingDate = newResolutions[orphan.tradeId]?.openDate;
           const hasUserDate = !!existingDate && !newResolutions[orphan.tradeId]?.isSyntheticDate;
-          const openDate = hasUserDate ? existingDate : (orphan.tradeDate ? calculateSyntheticDate(orphan.tradeDate) : '');
+          const openDate = hasUserDate ? existingDate : (orphan.tradeDate ? calculateSyntheticOpenDate(orphan.tradeDate) : '');
           const isSynthetic = !hasUserDate && !!orphan.tradeDate;
           
           newResolutions[orphan.tradeId] = {
@@ -958,36 +938,287 @@ export default function SentinelImportPage() {
     resolveDuplicateMutation.mutate({ tradeId, action });
   };
 
-  const handleFileDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && file.name.endsWith('.csv')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        setCsvContent(content);
-        setFileName(file.name);
-        setPreviewData(null);
-      };
-      reader.readAsText(file);
-    } else {
-      toast({ title: "Invalid File", description: "Please upload a CSV file", variant: "destructive" });
+  const addBundleFiles = useCallback(async (files: FileList | File[]) => {
+    const csvFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".csv"));
+    if (csvFiles.length === 0) {
+      toast({ title: "Invalid File", description: "Please upload CSV files", variant: "destructive" });
+      return;
+    }
+
+    const newEntries: typeof bundleFiles = [];
+    const unknownMessages: string[] = [];
+
+    for (const file of csvFiles) {
+      const content = await file.text();
+      const detected = detectBrokerForCsv(content, file.name);
+      if (!detected || detected.fileType === "UNKNOWN") {
+        unknownMessages.push(
+          `${file.name} — expected Schwab Transactions/RGL or Fidelity Activity/Closed Positions/Orders CSV.`
+        );
+        continue;
+      }
+      if (
+        detected.brokerId === "SCHWAB" &&
+        detected.fileType === "REALIZED_GAIN_LOSS" &&
+        parseSchwabRealizedGainLossLots(content).length === 0
+      ) {
+        unknownMessages.push(
+          `${file.name}: ${describeSchwabRglParseFailure(content)}`
+        );
+        continue;
+      }
+
+      newEntries.push({
+        id: crypto.randomUUID(),
+        fileName: file.name,
+        csvContent: content,
+        brokerId: detected.brokerId,
+        type: detected.fileType,
+      });
+    }
+
+    if (unknownMessages.length > 0) {
+      toast({
+        title: "Unrecognized CSV",
+        description: unknownMessages.join(" "),
+        variant: "destructive",
+      });
+    }
+
+    if (newEntries.length > 0) {
+      setBundleFiles((prev) => [...prev, ...newEntries]);
+      setBundleResult(null);
+      setPreviewData(null);
+      setCsvContent(null);
+      setFileName(null);
     }
   }, [toast]);
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.name.endsWith('.csv')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        setCsvContent(content);
-        setFileName(file.name);
-        setPreviewData(null);
-      };
-      reader.readAsText(file);
+  const handleFileDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length > 0) {
+      void addBundleFiles(e.dataTransfer.files);
     }
-  }, []);
+  }, [addBundleFiles]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      void addBundleFiles(e.target.files);
+      e.target.value = "";
+    }
+  }, [addBundleFiles]);
+
+  const removeBundleFile = (id: string) => {
+    setBundleFiles((prev) => prev.filter((f) => f.id !== id));
+    setBundleResult(null);
+  };
+
+  const runSmartImport = async () => {
+    if (!bundleHasAnyTradeFiles(bundleFiles)) {
+      toast({
+        title: "Trade CSV required",
+        description: `Drop Schwab or Fidelity trade files. ${expectedBundleFileHint(selectedBrokerId)}.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSmartImportRunning(true);
+    setBundleResult(null);
+
+    const warnings: string[] = [];
+    let tradesImported = 0;
+    let skippedAlreadyImported = 0;
+    let duplicatesAutoRemoved = 0;
+    let orphansAutoRemoved = 0;
+    const ordersFiles = bundleFiles.filter((f) => f.type === "ORDERS");
+
+    const brokerGroups = new Map<string, typeof bundleFiles>();
+    for (const file of bundleFiles) {
+      const group = brokerGroups.get(file.brokerId) ?? [];
+      group.push(file);
+      brokerGroups.set(file.brokerId, group);
+    }
+
+    try {
+      for (const [brokerId, files] of brokerGroups) {
+        const primaryType = primaryImportFileType(brokerId);
+        const costBasisType = orphanCostBasisFileType(brokerId);
+        const tradeFiles =
+          brokerId === "SCHWAB"
+            ? (() => {
+                const transactions = files.filter((f) => f.type === "TRANSACTIONS");
+                if (transactions.length > 0) return transactions;
+                return files.filter((f) => f.type === "REALIZED_GAIN_LOSS");
+              })()
+            : files.filter((f) => f.type === primaryType);
+        const usingRglAsPrimary =
+          brokerId === "SCHWAB" && tradeFiles.some((f) => f.type === "REALIZED_GAIN_LOSS");
+        const costBasisFiles =
+          costBasisType && !usingRglAsPrimary
+            ? files.filter((f) => f.type === costBasisType)
+            : [];
+
+        if (tradeFiles.length === 0) continue;
+
+        const brokerLabel = brokerId === "SCHWAB" ? "Schwab" : "Fidelity";
+        const tradeLabel = IMPORT_BUNDLE_LABELS[tradeFiles[0]?.type ?? primaryType];
+        setSmartImportStep(`Importing ${brokerLabel} ${tradeLabel}…`);
+
+        for (const file of tradeFiles) {
+          const response = await apiRequest("POST", "/api/sentinel/import/confirm", {
+            csvContent: file.csvContent,
+            fileName: file.fileName,
+            brokerId,
+            timestampOverride: timestampOverride || undefined,
+          });
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            const parseReason = err.batch?.skippedRows?.[0]?.reason;
+            throw new Error(
+              parseReason
+                ? `${file.fileName}: ${parseReason}`
+                : err.error || `Failed to import ${file.fileName}`
+            );
+          }
+          const data = await response.json();
+          tradesImported += data.tradesImported || 0;
+          skippedAlreadyImported += data.skippedAlreadyImported || 0;
+          duplicatesAutoRemoved += data.autoFinalized?.duplicatesRemoved || 0;
+          orphansAutoRemoved += data.autoFinalized?.orphansRemoved || 0;
+        }
+
+        setSmartImportStep(`Checking ${brokerLabel} orphan sells…`);
+        const orphansRes = await fetch("/api/sentinel/import/all-orphans?includeResolved=false", {
+          credentials: "include",
+        });
+        const orphansData = orphansRes.ok ? await orphansRes.json() : { orphans: [] };
+        const pendingOrphans: ImportedTrade[] = (orphansData.orphans || []).filter(
+          (o: ImportedTrade) =>
+            o.brokerId === brokerId &&
+            (o.orphanStatus === "pending" || o.orphanStatus === "muted")
+        );
+
+        if (costBasisFiles.length > 0 && pendingOrphans.length > 0) {
+          setSmartImportStep(`Applying ${brokerLabel} cost basis…`);
+          const costMap: Record<string, number> = {};
+          for (const file of costBasisFiles) {
+            if (file.type === "CLOSED_POSITIONS") {
+              Object.assign(costMap, parseFidelityClosedPositionsAvgCost(file.csvContent));
+            } else if (file.type === "REALIZED_GAIN_LOSS") {
+              Object.assign(costMap, parseSchwabRealizedGainLossAvgCost(file.csvContent));
+            }
+          }
+
+          const items = pendingOrphans
+            .filter((orphan) => costMap[orphan.ticker.toUpperCase()] !== undefined)
+            .map((orphan) => ({
+              tradeId: orphan.tradeId,
+              costBasis: costMap[orphan.ticker.toUpperCase()],
+              openDate: calculateSyntheticOpenDate(orphan.tradeDate),
+              isSyntheticDate: true,
+            }));
+
+          if (items.length > 0) {
+            const resolveRes = await apiRequest("POST", "/api/sentinel/import/all-orphans/bulk", {
+              action: "resolve_all",
+              items,
+            });
+            if (resolveRes.ok) {
+              const resolveData = await resolveRes.json();
+              orphansAutoRemoved += resolveData.resolvedCount || 0;
+            }
+          }
+        }
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/import/batches"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/import/all-orphans"] });
+
+      const batchesRes = await fetch("/api/sentinel/import/batches", { credentials: "include" });
+      const batchesData = batchesRes.ok ? await batchesRes.json() : [];
+      const pendingDuplicatesAfter = (batchesData as ImportBatch[]).reduce(
+        (sum, b) => sum + (b.duplicatesCount || 0),
+        0
+      );
+
+      const orphansAfterRes = await fetch("/api/sentinel/import/all-orphans?includeResolved=false", {
+        credentials: "include",
+      });
+      const orphansAfterData = orphansAfterRes.ok ? await orphansAfterRes.json() : { orphans: [] };
+      const pendingOrphansAfter = ((orphansAfterData.orphans || []) as ImportedTrade[]).filter(
+        (o) => o.orphanStatus === "pending" || o.orphanStatus === "muted"
+      ).length;
+
+      if (duplicatesAutoRemoved > 0) {
+        warnings.push(
+          `${duplicatesAutoRemoved} duplicate row(s) already on Trading Cards — removed automatically.`
+        );
+      }
+      if (orphansAutoRemoved > 0) {
+        warnings.push(`${orphansAutoRemoved} false orphan sell(s) cleaned up automatically.`);
+      }
+      if (pendingDuplicatesAfter > 0) {
+        warnings.push(`${pendingDuplicatesAfter} duplicate(s) still need manual review in History.`);
+      }
+      if (pendingOrphansAfter > 0) {
+        warnings.push(`${pendingOrphansAfter} orphan(s) still pending — resolve in Orphans tab.`);
+      }
+      if (ordersFiles.length > 0) {
+        warnings.push("Orders CSV noted — use Orders tab after you Promote to Trading Cards in History.");
+      }
+      if (pendingDuplicatesAfter === 0 && pendingOrphansAfter === 0) {
+        warnings.push("Ready — History → Promote to Trading Cards.");
+      }
+
+      if (skippedAlreadyImported > 0) {
+        warnings.unshift(
+          `${skippedAlreadyImported} overlapping trade(s) were already on file and skipped automatically.`
+        );
+      }
+
+      const result = {
+        tradesImported,
+        skippedAlreadyImported,
+        orphansResolved: orphansAutoRemoved,
+        orphansRemaining: pendingOrphansAfter,
+        duplicatesFound: duplicatesAutoRemoved,
+        promoted: false,
+        cardsCreated: 0,
+        ordersImported: 0,
+        ordersSkipped: 0,
+        warnings,
+      };
+      setBundleResult(result);
+
+      const skipNote =
+        skippedAlreadyImported > 0 ? `, ${skippedAlreadyImported} overlap skipped` : "";
+      const cleanNote =
+        duplicatesAutoRemoved + orphansAutoRemoved > 0
+          ? `, ${duplicatesAutoRemoved + orphansAutoRemoved} auto-cleaned`
+          : "";
+      toast({
+        title: "Smart Import complete",
+        description:
+          tradesImported > 0
+            ? `${tradesImported} new trade(s) imported${skipNote}${cleanNote}. Go to History → Promote.`
+            : `No new trades — ${skippedAlreadyImported} overlap row(s) already on file.`,
+      });
+
+      setBundleFiles([]);
+      setActiveTab("history");
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/import/batches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/import/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/import/all-orphans"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/dashboard"] });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Smart import failed";
+      toast({ title: "Smart Import failed", description: message, variant: "destructive" });
+    } finally {
+      setSmartImportRunning(false);
+      setSmartImportStep(null);
+    }
+  };
 
   const handlePreview = () => {
     if (csvContent && fileName) {
@@ -1094,14 +1325,12 @@ export default function SentinelImportPage() {
     }
   };
 
+  const brokerGuide = getBrokerImportGuide(selectedBrokerId);
+
   return (
     <div 
       className="min-h-screen sentinel-page"
-      style={{ 
-        backgroundColor: cssVariables.backgroundColor,
-        '--logo-opacity': cssVariables.logoOpacity,
-        '--overlay-bg': cssVariables.overlayBg,
-      } as React.CSSProperties}
+      style={pageShellStyle as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
       <SentinelHeader />
@@ -1145,17 +1374,26 @@ export default function SentinelImportPage() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="upload" className="mt-6 space-y-6">
+          <TabsContent value="upload" className="mt-6">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+              <div className="space-y-6 min-w-0">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <Building2 className="h-5 w-5" />
-                  Select Broker
+                  1. Select Broker
                 </CardTitle>
                 <CardDescription>Choose your brokerage platform</CardDescription>
               </CardHeader>
               <CardContent>
-                <Select value={selectedBrokerId} onValueChange={setSelectedBrokerId}>
+                <Select
+                  value={selectedBrokerId}
+                  onValueChange={(value) => {
+                    setSelectedBrokerId(value);
+                    setBundleFiles([]);
+                    setBundleResult(null);
+                  }}
+                >
                   <SelectTrigger className="w-full max-w-xs" data-testid="select-broker">
                     <SelectValue placeholder="Select broker" />
                   </SelectTrigger>
@@ -1174,7 +1412,7 @@ export default function SentinelImportPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <Clock className="h-5 w-5" />
-                  Timestamp Override (Optional)
+                  2. Timestamp Override (Optional)
                 </CardTitle>
                 <CardDescription>
                   Override execution time for all trades (useful when CSV lacks timestamps)
@@ -1218,13 +1456,15 @@ export default function SentinelImportPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                   <FileSpreadsheet className="h-5 w-5" />
-                  Upload CSV File
+                  3. Upload CSV File
                 </CardTitle>
                 <CardDescription>
-                  Drag and drop or click to select your activity export file
+                  {selectedBrokerId === "SCHWAB"
+                    ? "Drop Schwab Transactions or Realized Gain/Loss CSV (+ both if you have them). The engine sorts them out."
+                    : "Drop all Fidelity CSVs together — Activity, Closed Positions, Orders. The engine sorts them out."}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <div 
                   className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
                   onDragOver={(e) => e.preventDefault()}
@@ -1237,37 +1477,98 @@ export default function SentinelImportPage() {
                     id="file-input"
                     className="hidden"
                     accept=".csv"
+                    multiple
                     onChange={handleFileSelect}
                   />
-                  {fileName ? (
-                    <div className="space-y-2">
-                      <FileSpreadsheet className="h-12 w-12 mx-auto text-primary" />
-                      <p className="text-lg font-medium">{fileName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {csvContent ? `${csvContent.split('\n').length} lines` : 'Ready to preview'}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Upload className="h-12 w-12 mx-auto text-muted-foreground" />
-                      <p className="text-muted-foreground">Drop CSV file here or click to browse</p>
-                    </div>
-                  )}
+                  <div className="space-y-2">
+                    <Upload className="h-12 w-12 mx-auto text-muted-foreground" />
+                    <p className="text-muted-foreground">
+                      Drop Schwab or Fidelity CSVs here — broker auto-detected per file
+                    </p>
+                    <p className="text-xs text-muted-foreground">Or click to browse — multiple files OK</p>
+                  </div>
                 </div>
 
-                {fileName && !previewData && (
-                  <div className="mt-4 flex justify-center">
-                    <Button 
-                      onClick={handlePreview} 
-                      disabled={previewMutation.isPending}
-                      data-testid="button-preview"
+                {bundleFiles.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Detected files</div>
+                    {bundleFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileSpreadsheet className="h-4 w-4 shrink-0 text-primary" />
+                          <span className="truncate">{file.fileName}</span>
+                          <Badge variant="outline" className="shrink-0">
+                            {file.brokerId === "SCHWAB" ? "Schwab" : "Fidelity"}
+                          </Badge>
+                          <Badge
+                            variant={
+                              file.type === primaryImportFileType(file.brokerId) ? "default" : "outline"
+                            }
+                            className="shrink-0"
+                          >
+                            {IMPORT_BUNDLE_LABELS[file.type]}
+                          </Badge>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          onClick={() => removeBundleFile(file.id)}
+                          disabled={smartImportRunning}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {bundleFiles.length > 0 && (
+                  <div className="flex flex-col items-center gap-2">
+                    <Button
+                      onClick={() => void runSmartImport()}
+                      disabled={smartImportRunning || !bundleHasAnyTradeFiles(bundleFiles)}
+                      data-testid="button-smart-import"
+                      className="w-full max-w-sm"
                     >
-                      {previewMutation.isPending ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Parsing...</>
+                      {smartImportRunning ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {smartImportStep || "Running…"}</>
                       ) : (
-                        'Preview Import'
+                        <><Check className="h-4 w-4 mr-2" /> Run Smart Import</>
                       )}
                     </Button>
+                    <span style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
+                      {!bundleHasAnyTradeFiles(bundleFiles)
+                        ? "Add Schwab Transactions/RGL or Fidelity Activity CSV to enable Smart Import."
+                        : "Duplicates on Trading Cards and false orphan sells are auto-cleaned. Then Promote in History."}
+                    </span>
+                  </div>
+                )}
+
+                {bundleResult && (
+                  <div className="rounded-md border bg-muted/50 p-3 space-y-1 text-sm" data-testid="bundle-import-result">
+                    <div className="font-medium">Last import</div>
+                    <div>{bundleResult.tradesImported} new trade(s) imported</div>
+                    {bundleResult.skippedAlreadyImported > 0 && (
+                      <div className="text-muted-foreground">
+                        {bundleResult.skippedAlreadyImported} overlap skipped (already on file)
+                      </div>
+                    )}
+                    {bundleResult.orphansResolved > 0 && (
+                      <div className="text-rs-green">{bundleResult.orphansResolved} orphans auto-resolved</div>
+                    )}
+                    {bundleResult.promoted && (
+                      <div className="text-rs-green">{bundleResult.cardsCreated} trading cards created</div>
+                    )}
+                    {bundleResult.ordersImported > 0 && (
+                      <div>{bundleResult.ordersImported} order levels synced</div>
+                    )}
+                    {bundleResult.warnings.map((w, i) => (
+                      <div key={i} className="text-rs-yellow text-xs">• {w}</div>
+                    ))}
                   </div>
                 )}
               </CardContent>
@@ -1279,14 +1580,19 @@ export default function SentinelImportPage() {
                   <CardTitle className="flex items-center justify-between" style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
                     <span className="flex items-center gap-2">
                       <Check className="h-5 w-5 text-rs-green" />
-                      Preview Results
+                      4. Preview Results
                     </span>
                     <Badge variant={previewData.batch.status === "COMPLETE" ? "default" : "destructive"}>
                       {previewData.batch.status}
                     </Badge>
                   </CardTitle>
                   <CardDescription>
-                    Found {previewData.trades.length} trades from {previewData.batch.brokerId}
+                    {previewData.trades.length} new trade(s) to import from {previewData.batch.brokerId}
+                    {(previewData.skippedAlreadyImported ?? 0) > 0 && (
+                      <span className="ml-2 text-muted-foreground">
+                        ({previewData.skippedAlreadyImported} overlap already on file — will skip)
+                      </span>
+                    )}
                     {previewData.dateRange && (
                       <span className="ml-2 font-medium">
                         ({previewData.dateRange.earliest} to {previewData.dateRange.latest})
@@ -1297,11 +1603,17 @@ export default function SentinelImportPage() {
                 <CardContent className="space-y-4">
                   <div className="flex gap-4 flex-wrap">
                     <div className="bg-muted p-3 rounded-lg">
-                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Trades Found</div>
+                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>New Trades</div>
                       <div className="text-2xl font-bold text-rs-green">{previewData.trades.length}</div>
                     </div>
+                    {(previewData.skippedAlreadyImported ?? 0) > 0 && (
+                      <div className="bg-muted p-3 rounded-lg">
+                        <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Already on file</div>
+                        <div className="text-2xl font-bold text-slate-400">{previewData.skippedAlreadyImported}</div>
+                      </div>
+                    )}
                     <div className="bg-muted p-3 rounded-lg">
-                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>Rows Skipped</div>
+                      <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>CSV rows skipped</div>
                       <div className="text-2xl font-bold text-rs-yellow">{previewData.batch.skippedRows.length}</div>
                     </div>
                     <div className="bg-muted p-3 rounded-lg">
@@ -1390,10 +1702,12 @@ export default function SentinelImportPage() {
                     >
                       {confirmMutation.isPending ? (
                         <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
+                      ) : previewData.trades.length === 0 ? (
+                        <>Nothing new to import</>
                       ) : (
                         <>
                           <Check className="h-4 w-4 mr-2" />
-                          Import {previewData.trades.length} Trades
+                          Import {previewData.trades.length} New Trade{previewData.trades.length === 1 ? "" : "s"}
                         </>
                       )}
                     </Button>
@@ -1401,6 +1715,105 @@ export default function SentinelImportPage() {
                 </CardContent>
               </Card>
             )}
+              </div>
+
+              {brokerGuide && (
+                <aside className="lg:sticky lg:top-4 lg:self-start">
+                  <Card data-testid="broker-import-guide">
+                    <CardHeader>
+                      <CardTitle style={{ color: cssVariables.textColorSection, fontSize: cssVariables.fontSizeSection }}>
+                        {brokerGuide.label} import checklist
+                      </CardTitle>
+                      <CardDescription>{brokerGuide.summary}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-5">
+                      {!brokerGuide.supported && (
+                        <div className="rounded-md border border-rs-yellow/40 bg-rs-yellow/10 px-3 py-2 text-sm text-rs-yellow">
+                          {brokerGuide.label} import is not enabled yet.
+                        </div>
+                      )}
+
+                      {brokerGuide.steps.map((step) => (
+                        <div key={step.order} className="space-y-2 border-b border-border/60 pb-4 last:border-0 last:pb-0">
+                          <div className="flex items-start gap-2">
+                            <span
+                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold"
+                              aria-hidden
+                            >
+                              {step.order}
+                            </span>
+                            <div className="min-w-0 flex-1 space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold">
+                                  {step.fidelityExport ?? "Duplicates & Promote"}
+                                </span>
+                                <Badge variant={step.required ? "default" : "outline"} className="text-xs">
+                                  {step.required ? "Required" : "If needed"}
+                                </Badge>
+                              </div>
+
+                              {step.downloadedAs && (
+                                <div className="rounded-md bg-muted px-2.5 py-1.5 font-mono text-xs break-all">
+                                  {step.downloadedAs}
+                                </div>
+                              )}
+
+                              {step.firstLine && (
+                                <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
+                                  File starts with: {step.firstLine}
+                                </div>
+                              )}
+
+                              {step.headerRow && (
+                                <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }} className="break-all">
+                                  Header: {step.headerRow}
+                                </div>
+                              )}
+
+                              <div className="text-sm">
+                                <span className="font-medium">{step.tab} — </span>
+                                {step.action}
+                              </div>
+
+                              {step.neverDo && (
+                                <div className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
+                                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                  <span>{step.neverDo}</span>
+                                </div>
+                              )}
+
+                              {step.skipWhen && (
+                                <div style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
+                                  Skip when: {step.skipWhen}
+                                </div>
+                              )}
+
+                              {step.problems.length > 0 && (
+                                <div className="space-y-1 pt-0.5">
+                                  <div className="text-xs font-medium text-rs-yellow">If problems</div>
+                                  <ul className="space-y-1">
+                                    {step.problems.map((problem, i) => (
+                                      <li
+                                        key={i}
+                                        className="flex gap-1.5 text-xs"
+                                        style={{ color: cssVariables.textColorSmall }}
+                                      >
+                                        <span className="shrink-0 text-rs-yellow">•</span>
+                                        <span>{problem}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </aside>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="history" className="mt-6">

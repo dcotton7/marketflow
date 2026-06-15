@@ -717,6 +717,112 @@ export async function getHistoricalSnapshotAt(
 }
 
 /**
+ * Most recent market_date with hourly snapshots in storage.
+ */
+export async function getLatestMarketDateWithHourlySnapshots(): Promise<string | null> {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const rows = await db
+      .select({ marketDate: themeSnapshots.marketDate })
+      .from(themeSnapshots)
+      .where(eq(themeSnapshots.snapshotType, "hourly"))
+      .groupBy(themeSnapshots.marketDate)
+      .orderBy(desc(themeSnapshots.marketDate))
+      .limit(1);
+    return rows[0]?.marketDate ?? null;
+  } catch (error) {
+    console.error("[ThemeSnapshots] Failed to get latest hourly market date:", error);
+    return null;
+  }
+}
+
+/**
+ * Last complete intraday batch for a session (close ranks).
+ */
+export async function getCloseBaselineSnapshot(
+  marketDate: string
+): Promise<HistoricalSnapshotResult | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  try {
+    const rows = await db
+      .select()
+      .from(themeSnapshots)
+      .where(
+        and(eq(themeSnapshots.snapshotType, "hourly"), eq(themeSnapshots.marketDate, marketDate))
+      )
+      .orderBy(desc(themeSnapshots.createdAt));
+
+    if (!rows.length) return null;
+
+    const byBatch = new Map<string, ThemeSnapshot[]>();
+    for (const row of rows) {
+      const key = hourlySnapshotBatchKey(row);
+      if (!byBatch.has(key)) byBatch.set(key, []);
+      byBatch.get(key)!.push(row);
+    }
+
+    const orderedKeys = [...byBatch.keys()]
+      .filter((k) => k !== "unknown")
+      .sort((a, b) => Number(a) - Number(b));
+
+    let selectedKey: string | null = null;
+    for (let i = orderedKeys.length - 1; i >= 0; i--) {
+      const key = orderedKeys[i];
+      const batch = byBatch.get(key) ?? [];
+      if (batch.length >= MIN_COMPLETE_BATCH_ROWS || batch.length > 0) {
+        selectedKey = key;
+        break;
+      }
+    }
+    if (!selectedKey) return null;
+
+    return batchToHistoricalResult(byBatch.get(selectedKey) ?? [], selectedKey);
+  } catch (error) {
+    console.error("[ThemeSnapshots] Failed to get close baseline snapshot:", error);
+    return null;
+  }
+}
+
+/**
+ * ~3:45 PM ET baseline for late-session rotation on a stored session date.
+ */
+export async function getLateSessionBaselineSnapshot(
+  marketDate: string
+): Promise<HistoricalSnapshotResult | null> {
+  const slots = await listIntradaySnapshotSlots(marketDate);
+  if (slots.length >= 2) {
+    return getHistoricalSnapshotAt(slots[slots.length - 2].at);
+  }
+  if (slots.length === 1) {
+    return getHistoricalSnapshotAt(slots[0].at);
+  }
+  return null;
+}
+
+function batchToHistoricalResult(
+  selectedRows: ThemeSnapshot[],
+  selectedKey: string
+): HistoricalSnapshotResult {
+  const ranks = new Map<ClusterId, number>();
+  const metrics = new Map<ClusterId, HistoricalThemeMetrics>();
+  for (const s of selectedRows) {
+    const id = s.themeId as ClusterId;
+    ranks.set(id, s.rank);
+    metrics.set(id, {
+      rank: s.rank,
+      score: s.score ?? 0,
+      medianPct: s.medianPct ?? 0,
+      rsVsBenchmark: s.rsVsBenchmark ?? 0,
+      breadthPct: s.breadthPct ?? 0,
+    });
+  }
+  return { ranks, metrics, comparisonTime: new Date(Number(selectedKey)).toISOString() };
+}
+
+/**
  * List stored 15-minute intraday snapshot slots for a market date (ET session).
  */
 export async function listIntradaySnapshotSlots(
@@ -737,26 +843,28 @@ export async function listIntradaySnapshotSlots(
       )
       .orderBy(asc(themeSnapshots.createdAt));
 
-    const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-    const byBucket = new Map<number, number>();
+    const byBatch = new Map<string, ThemeSnapshot[]>();
     for (const row of rows) {
       if (!row.createdAt) continue;
-      const ms = new Date(row.createdAt).getTime();
-      const bucket = Math.floor(ms / FIFTEEN_MIN_MS) * FIFTEEN_MIN_MS;
-      byBucket.set(bucket, (byBucket.get(bucket) ?? 0) + 1);
+      const key = hourlySnapshotBatchKey(row);
+      if (!byBatch.has(key)) byBatch.set(key, []);
+      byBatch.get(key)!.push(row);
     }
 
     const slots: Array<{ at: string; label: string }> = [];
-    for (const bucket of [...byBucket.keys()].sort((a, b) => a - b)) {
-      if ((byBucket.get(bucket) ?? 0) < MIN_COMPLETE_BATCH_ROWS) continue;
-      const d = new Date(bucket);
-      const label = d.toLocaleString("en-US", {
+    for (const key of [...byBatch.keys()]
+      .filter((k) => k !== "unknown")
+      .sort((a, b) => Number(a) - Number(b))) {
+      const batch = byBatch.get(key) ?? [];
+      if (batch.length < MIN_COMPLETE_BATCH_ROWS) continue;
+      const comparisonTime = new Date(Number(key)).toISOString();
+      const label = new Date(comparisonTime).toLocaleString("en-US", {
         timeZone: "America/New_York",
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
       });
-      slots.push({ at: d.toISOString(), label });
+      slots.push({ at: comparisonTime, label });
     }
     return slots;
   } catch (error) {

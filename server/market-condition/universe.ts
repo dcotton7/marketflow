@@ -397,7 +397,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 4,
     core: ["EQIX", "DLR", "AMT", "CCI", "SBAC", "IRM", "PLD"],
-    candidates: ["CONE", "QTS", "UNIT"],
+    candidates: [],
     etfProxies: [
       { symbol: "VNQ", name: "Vanguard Real Estate ETF", proxyType: "adjacent" },
       { symbol: "XLRE", name: "Real Estate Select SPDR", proxyType: "macro" },
@@ -849,10 +849,10 @@ export const OVERLAYS: OverlayDefinition[] = [
  */
 export function getAllUniverseTickers(): string[] {
   const tickerSet = new Set<string>();
-  
+
   for (const cluster of CLUSTERS) {
-    cluster.core.forEach(t => tickerSet.add(t));
-    cluster.candidates.forEach(t => tickerSet.add(t));
+    cluster.core.forEach((t) => tickerSet.add(t));
+    cluster.candidates.forEach((t) => tickerSet.add(t));
   }
   
   // Add overlay tickers

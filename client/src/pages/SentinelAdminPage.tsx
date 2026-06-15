@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
-import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen, LayoutGrid, Pencil } from "lucide-react";
+import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCircle, TrendingUp, Zap, History, Lightbulb, Loader2, Plus, RefreshCw, Database, Sparkles, Activity, AlertTriangle, BookOpen, LayoutGrid, Pencil, KeyRound, Palette } from "lucide-react";
+import { useThemeEditor } from "@/context/ThemeEditorContext";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -143,26 +144,6 @@ const MARKET_CONDITIONS = [
   { key: "narrow_leadership", name: "Narrow Market Leadership" },
 ];
 
-interface SystemSettings {
-  overlayColor: string;
-  overlayTransparency: number;
-  backgroundColor: string;
-  logoTransparency: number;
-  secondaryOverlayColor: string;
-  textColorTitle: string;
-  textColorHeader: string;
-  textColorSection: string;
-  textColorNormal: string;
-  textColorSmall: string;
-  textColorTiny: string;
-  fontSizeTitle: string;
-  fontSizeHeader: string;
-  fontSizeSection: string;
-  fontSizeNormal: string;
-  fontSizeSmall: string;
-  fontSizeTiny: string;
-}
-
 interface AdminUser {
   id: number;
   username: string;
@@ -197,6 +178,9 @@ function UsersTab() {
     tierFeaturesForRole("free", undefined)
   );
   const [draftTokensAllowed, setDraftTokensAllowed] = useState<number | null>(null);
+  const [passwordResetUser, setPasswordResetUser] = useState<AdminUser | null>(null);
+  const [draftNewPassword, setDraftNewPassword] = useState("");
+  const [draftConfirmPassword, setDraftConfirmPassword] = useState("");
 
   const { data: me } = useQuery<{ id: number }>({
     queryKey: ["/api/sentinel/me"],
@@ -214,11 +198,21 @@ function UsersTab() {
     retry: false,
   });
 
+  const clearPasswordDraft = () => {
+    setDraftNewPassword("");
+    setDraftConfirmPassword("");
+  };
+
   const openEditor = (user: AdminUser) => {
     setEditUser(user);
     setDraftTier(normalizeSentinelTier(user.tier));
     setDraftIsAdmin(user.isAdmin);
     setDraftIsActive(user.isActive);
+  };
+
+  const openPasswordReset = (user: AdminUser) => {
+    setPasswordResetUser(user);
+    clearPasswordDraft();
   };
 
   useEffect(() => {
@@ -271,6 +265,26 @@ function UsersTab() {
     }
     return msg;
   };
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: async (payload: { id: number; newPassword: string }) => {
+      const res = await apiRequest("POST", `/api/sentinel/admin/users/${payload.id}/reset-password`, {
+        newPassword: payload.newPassword,
+      });
+      return res.json() as Promise<{ ok: boolean; username: string }>;
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Password reset",
+        description: `New password saved for ${data.username}. Share it securely with the user.`,
+      });
+      clearPasswordDraft();
+      setPasswordResetUser(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: parseApiErrorMessage(err), variant: "destructive" });
+    },
+  });
 
   const patchUserMutation = useMutation({
     mutationFn: async (payload: {
@@ -376,7 +390,7 @@ function UsersTab() {
             User Management
           </CardTitle>
           <CardDescription data-testid="text-users-desc">
-            Tier, feature access, and account flags (admin tools stay admin-gated)
+            Tier, feature access, account flags, and password resets. Users can change their own password under Settings → Security.
           </CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-users">
@@ -439,6 +453,17 @@ function UsersTab() {
                   Edit
                 </Button>
 
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  onClick={() => openPasswordReset(user)}
+                  data-testid={`button-reset-password-${user.id}`}
+                >
+                  <KeyRound className="w-4 h-4 mr-1" />
+                  Reset password
+                </Button>
+
                 {user.needsSeeding ? (
                   <Button
                     size="sm"
@@ -469,6 +494,102 @@ function UsersTab() {
             <p className="text-muted-foreground text-center py-4">No users found</p>
           )}
         </div>
+
+        <Dialog
+          open={!!passwordResetUser}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPasswordResetUser(null);
+              clearPasswordDraft();
+            }
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5" />
+                Reset password
+              </DialogTitle>
+              <DialogDescription>
+                {passwordResetUser ? (
+                  <>
+                    Set a new sign-in password for{" "}
+                    <span className="font-medium text-foreground">{passwordResetUser.username}</span>
+                    {" "}({passwordResetUser.email}). Share it securely — no email is sent.
+                  </>
+                ) : null}
+              </DialogDescription>
+            </DialogHeader>
+
+            {passwordResetUser && (
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="admin-user-new-password">New password</Label>
+                  <Input
+                    id="admin-user-new-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={draftNewPassword}
+                    onChange={(e) => setDraftNewPassword(e.target.value)}
+                    minLength={8}
+                    data-testid="input-admin-reset-password"
+                  />
+                  <p className="text-xs text-muted-foreground">At least 8 characters</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-user-confirm-password">Confirm new password</Label>
+                  <Input
+                    id="admin-user-confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={draftConfirmPassword}
+                    onChange={(e) => setDraftConfirmPassword(e.target.value)}
+                    minLength={8}
+                    data-testid="input-admin-reset-password-confirm"
+                  />
+                </div>
+
+                <DialogFooter className="gap-2 sm:gap-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setPasswordResetUser(null);
+                      clearPasswordDraft();
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={resetPasswordMutation.isPending}
+                    onClick={() => {
+                      if (draftNewPassword.length < 8) {
+                        toast({ title: "Password too short", description: "Use at least 8 characters.", variant: "destructive" });
+                        return;
+                      }
+                      if (draftNewPassword !== draftConfirmPassword) {
+                        toast({ title: "Passwords do not match", variant: "destructive" });
+                        return;
+                      }
+                      resetPasswordMutation.mutate({
+                        id: passwordResetUser.id,
+                        newPassword: draftNewPassword,
+                      });
+                    }}
+                    data-testid="button-admin-reset-password"
+                  >
+                    {resetPasswordMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      "Save new password"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={!!editUser}
@@ -718,267 +839,31 @@ function UsersTab() {
 }
 
 function SystemSettingsTab() {
-  const { toast } = useToast();
-  const [localSettings, setLocalSettings] = useState<SystemSettings>({
-    overlayColor: "#1e3a5f",
-    overlayTransparency: 75,
-    backgroundColor: "#0f172a",
-    logoTransparency: 12,
-    secondaryOverlayColor: "#e8e8e8",
-    textColorTitle: "#ffffff",
-    textColorHeader: "#ffffff",
-    textColorSection: "#ffffff",
-    textColorNormal: "#ffffff",
-    textColorSmall: "#a1a1aa",
-    textColorTiny: "#71717a",
-    fontSizeTitle: "1.5rem",
-    fontSizeHeader: "1.125rem",
-    fontSizeSection: "1rem",
-    fontSizeNormal: "0.875rem",
-    fontSizeSmall: "0.8125rem",
-    fontSizeTiny: "0.75rem",
-  });
-
-  const { data: settings, isLoading } = useQuery<SystemSettings>({
-    queryKey: ["/api/sentinel/settings/system"],
-  });
-
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (data: Partial<SystemSettings>) => {
-      const res = await apiRequest("PATCH", "/api/sentinel/settings/system", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Settings Saved", description: "Your display settings have been updated." });
-      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/settings/system"] });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to save settings", variant: "destructive" });
-    },
-  });
-
-  // Sync local state when settings load
-  useEffect(() => {
-    if (settings && !isLoading) {
-      setLocalSettings(settings);
-    }
-  }, [settings, isLoading]);
-
-  const handleSave = () => {
-    updateSettingsMutation.mutate(localSettings);
-  };
-
-  if (isLoading) {
-    return (
-      <Card>
-        <CardContent className="p-6 flex items-center justify-center">
-          <Loader2 className="w-6 h-6 animate-spin" />
-        </CardContent>
-      </Card>
-    );
-  }
+  const { openThemeEditor } = useThemeEditor();
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Settings className="w-5 h-5" />
-          System Settings
+          Theme &amp; Colors
         </CardTitle>
-        <CardDescription>Customize the appearance of your RubricShield interface</CardDescription>
+        <CardDescription>
+          Global: Main BG (page canvas), Secondary BG (panels/overlays), fonts, semantic text. Local slots on
+          Market Flow: top regime bar, command toolbar, section sub-headers, panel bodies, flow map matrix,
+          overlay background, overlay headers, result cards, and chart frames — click any <strong>c</strong> chip (admin: for everyone or
+          personal; users: personal only).
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <Label className="text-base font-medium">Overlay Background Color</Label>
-            <p className="text-sm text-muted-foreground">Color for cards, dialogs, and overlays</p>
-            <div className="flex items-center gap-4">
-              <input
-                type="color"
-                value={localSettings.overlayColor}
-                onChange={(e) => setLocalSettings(prev => ({ ...prev, overlayColor: e.target.value }))}
-                className="w-16 h-10 rounded border cursor-pointer"
-                data-testid="input-overlay-color"
-              />
-              <Input
-                value={localSettings.overlayColor}
-                onChange={(e) => setLocalSettings(prev => ({ ...prev, overlayColor: e.target.value }))}
-                className="w-28 font-mono"
-                data-testid="input-overlay-color-text"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <Label className="text-base font-medium">Overlay Transparency: {localSettings.overlayTransparency}%</Label>
-            <p className="text-sm text-muted-foreground">How see-through cards and overlays appear</p>
-            <Slider
-              value={[localSettings.overlayTransparency]}
-              onValueChange={([value]) => setLocalSettings(prev => ({ ...prev, overlayTransparency: value }))}
-              min={0}
-              max={100}
-              step={5}
-              className="w-full"
-              data-testid="slider-overlay-transparency"
-            />
-          </div>
-
-          <div className="space-y-4">
-            <Label className="text-base font-medium">Page Background Color</Label>
-            <p className="text-sm text-muted-foreground">Main background color for all pages</p>
-            <div className="flex items-center gap-4">
-              <input
-                type="color"
-                value={localSettings.backgroundColor}
-                onChange={(e) => setLocalSettings(prev => ({ ...prev, backgroundColor: e.target.value }))}
-                className="w-16 h-10 rounded border cursor-pointer"
-                data-testid="input-bg-color"
-              />
-              <Input
-                value={localSettings.backgroundColor}
-                onChange={(e) => setLocalSettings(prev => ({ ...prev, backgroundColor: e.target.value }))}
-                className="w-28 font-mono"
-                data-testid="input-bg-color-text"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <Label className="text-base font-medium">Logo Transparency: {localSettings.logoTransparency}%</Label>
-            <p className="text-sm text-muted-foreground">Visibility of the RubricShield watermark</p>
-            <Slider
-              value={[localSettings.logoTransparency]}
-              onValueChange={([value]) => setLocalSettings(prev => ({ ...prev, logoTransparency: value }))}
-              min={0}
-              max={100}
-              step={1}
-              className="w-full"
-              data-testid="slider-logo-transparency"
-            />
-          </div>
-
-          <div className="space-y-4">
-            <Label className="text-base font-medium">Secondary Overlay Color</Label>
-            <p className="text-sm text-muted-foreground">Background color for secondary panels (e.g. BigIdea lower left pane)</p>
-            <div className="flex items-center gap-4">
-              <input
-                type="color"
-                value={localSettings.secondaryOverlayColor}
-                onChange={(e) => setLocalSettings(prev => ({ ...prev, secondaryOverlayColor: e.target.value }))}
-                className="w-16 h-10 rounded border cursor-pointer"
-                data-testid="input-secondary-overlay-color"
-              />
-              <Input
-                value={localSettings.secondaryOverlayColor}
-                onChange={(e) => setLocalSettings(prev => ({ ...prev, secondaryOverlayColor: e.target.value }))}
-                className="w-28 font-mono"
-                data-testid="input-secondary-overlay-color-text"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="border-t pt-6">
-          <h3 className="text-lg font-semibold mb-1">Text Colors & Sizes</h3>
-          <p className="text-sm text-muted-foreground mb-4">Customize the text color and size hierarchy across the interface</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {([
-              { colorKey: "textColorTitle" as const, sizeKey: "fontSizeTitle" as const, label: "Title", desc: "Largest text, page titles" },
-              { colorKey: "textColorHeader" as const, sizeKey: "fontSizeHeader" as const, label: "Header", desc: "Page headers, major sections" },
-              { colorKey: "textColorSection" as const, sizeKey: "fontSizeSection" as const, label: "Section Header", desc: "Sub-section labels" },
-              { colorKey: "textColorNormal" as const, sizeKey: "fontSizeNormal" as const, label: "Normal", desc: "Standard reading text" },
-              { colorKey: "textColorSmall" as const, sizeKey: "fontSizeSmall" as const, label: "Small", desc: "Supplementary info" },
-              { colorKey: "textColorTiny" as const, sizeKey: "fontSizeTiny" as const, label: "Tiny", desc: "Timestamps, debug info" },
-            ]).map((item) => (
-              <div key={item.colorKey} className="space-y-2">
-                <Label className="text-sm font-medium">{item.label}</Label>
-                <p className="text-xs text-muted-foreground">{item.desc}</p>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    type="color"
-                    value={localSettings[item.colorKey]}
-                    onChange={(e) => setLocalSettings(prev => ({ ...prev, [item.colorKey]: e.target.value }))}
-                    className="w-10 h-8 rounded border cursor-pointer flex-shrink-0"
-                    data-testid={`input-${item.colorKey}`}
-                  />
-                  <Input
-                    value={localSettings[item.colorKey]}
-                    onChange={(e) => setLocalSettings(prev => ({ ...prev, [item.colorKey]: e.target.value }))}
-                    className="w-24 font-mono text-xs"
-                    data-testid={`input-${item.colorKey}-text`}
-                  />
-                  <Select
-                    value={localSettings[item.sizeKey]}
-                    onValueChange={(val) => setLocalSettings(prev => ({ ...prev, [item.sizeKey]: val }))}
-                  >
-                    <SelectTrigger className="w-24 text-xs" data-testid={`select-${item.sizeKey}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0.625rem">10px</SelectItem>
-                      <SelectItem value="0.75rem">12px</SelectItem>
-                      <SelectItem value="0.8125rem">13px</SelectItem>
-                      <SelectItem value="0.875rem">14px</SelectItem>
-                      <SelectItem value="1rem">16px</SelectItem>
-                      <SelectItem value="1.125rem">18px</SelectItem>
-                      <SelectItem value="1.25rem">20px</SelectItem>
-                      <SelectItem value="1.5rem">24px</SelectItem>
-                      <SelectItem value="1.875rem">30px</SelectItem>
-                      <SelectItem value="2.25rem">36px</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <span
-                  style={{ color: localSettings[item.colorKey], fontSize: localSettings[item.sizeKey] }}
-                  data-testid={`sample-${item.colorKey}`}
-                >
-                  Sample
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex justify-end">
-          <Button 
-            onClick={handleSave} 
-            disabled={updateSettingsMutation.isPending}
-            data-testid="button-save-settings"
-          >
-            {updateSettingsMutation.isPending ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</>
-            ) : (
-              "Save Settings"
-            )}
-          </Button>
-        </div>
-
-        <div className="p-4 bg-muted/50 rounded-lg">
-          <h4 className="font-medium mb-2">Preview</h4>
-          <div
-            className="min-h-[9.5rem] rounded-lg flex items-center justify-center relative py-6 px-8"
-            style={{ backgroundColor: localSettings.backgroundColor }}
-          >
-            <div
-              className="absolute inset-0 flex items-center justify-center py-5 px-6"
-              style={{ opacity: (100 - localSettings.logoTransparency) / 100 }}
-            >
-              <img
-                src="/structuremap-logo.png"
-                alt="StructureMap"
-                className="structuremap-wordmark-glow max-h-[6.5rem] w-auto max-w-[min(100%,22rem)] object-contain"
-              />
-            </div>
-            <div 
-              className="px-6 py-3 rounded-lg z-10"
-              style={{ 
-                backgroundColor: `${localSettings.overlayColor}${Math.round(localSettings.overlayTransparency * 2.55).toString(16).padStart(2, '0')}`,
-              }}
-            >
-              <span className="text-white">Sample Card</span>
-            </div>
-          </div>
-        </div>
+      <CardContent className="space-y-4">
+        <Button onClick={() => openThemeEditor({ tab: "global" })} data-testid="button-open-theme-editor">
+          <Palette className="w-4 h-4 mr-2" />
+          Open theme editor
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          Opacity sliders: higher % = more opaque. Local settings use region ids — the same control everywhere
+          shares one slot (e.g. Theme tracker panel on Market Flow).
+        </p>
       </CardContent>
     </Card>
   );
@@ -2871,7 +2756,7 @@ function TuningReviewPanel() {
 export default function SentinelAdminPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
-  const { settings: systemSettings, cssVariables } = useSystemSettings();
+  const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
   const [activeTab, setActiveTab] = useState("tnn");
   const [tnnSubTab, setTnnSubTab] = useState("discipline");
   const [expandedFactors, setExpandedFactors] = useState<number[]>([]);
@@ -3156,11 +3041,7 @@ export default function SentinelAdminPage() {
   return (
     <div 
       className="min-h-screen sentinel-page"
-      style={{ 
-        backgroundColor: cssVariables.backgroundColor,
-        '--logo-opacity': cssVariables.logoOpacity,
-        '--overlay-bg': cssVariables.overlayBg,
-      } as React.CSSProperties}
+      style={pageShellStyle as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
       <SentinelHeader />

@@ -55,7 +55,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Copy, ExternalLink, FileText, LayoutGrid, LineChart, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Eraser, ExternalLink, FileText, LayoutGrid, LineChart, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
 import { MiniMaSettingsDialog } from "@/components/MiniMaSettingsDialog";
 import { isMiniMaSettingsEnabled } from "@/lib/chart-preferences-shared";
@@ -114,20 +114,25 @@ function StartWorkspaceToolbar() {
   const {
     activeStartId,
     startProfiles,
+    dashboard,
     switchStart,
     createStart,
     duplicateActiveStart,
     renameStart,
     deleteStart,
+    clearAllWidgets,
   } = useStartHere();
   const [newOpen, setNewOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [clearAllOpen, setClearAllOpen] = useState(false);
   const [nameInput, setNameInput] = useState("");
 
   const current = startProfiles.find((p) => p.id === activeStartId);
   const canDelete = startProfiles.length > 1;
+  const widgetCount = dashboard.layout.length;
+  const canClearAll = widgetCount > 0;
 
   const openNew = () => {
     setNameInput("New Start");
@@ -169,6 +174,18 @@ function StartWorkspaceToolbar() {
         <Button type="button" size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={openRename}>
           <Pencil className="h-3.5 w-3.5" />
           Rename
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1 text-xs"
+          disabled={!canClearAll}
+          onClick={() => setClearAllOpen(true)}
+          data-testid="button-workspace-clear-all"
+        >
+          <Eraser className="h-3.5 w-3.5" />
+          Clear all
         </Button>
         <Button
           type="button"
@@ -318,12 +335,37 @@ function StartWorkspaceToolbar() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
+        <AlertDialogContent className="start-here-no-drag">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all widgets?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {current
+                ? `Remove all ${widgetCount} chart and widget tile${widgetCount === 1 ? "" : "s"} from “${current.name}”. The workspace stays; use Add widget to build again. This cannot be undone.`
+                : `Remove all ${widgetCount} chart and widget tiles from this workspace.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                clearAllWidgets();
+                setClearAllOpen(false);
+              }}
+            >
+              Clear all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
 
 function StartHereGridHost() {
-  const { cssVariables } = useSystemSettings();
+  const { cssVariables, pageShellStyle } = useSystemSettings();
   const [, navigate] = useLocation();
   const { syncToMarketSurge } = useMarketSurgeSync();
   const { syncToChart } = useChartPopout();
@@ -546,7 +588,7 @@ function StartHereGridHost() {
   return (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col"
-      style={{ backgroundColor: cssVariables.backgroundColor }}
+      style={pageShellStyle as React.CSSProperties}
     >
       <div
         className="flex flex-shrink-0 flex-col border-b"
@@ -724,6 +766,15 @@ function StartHereGridHost() {
           START_HERE_GRID_OVERLAP_ENABLED ? onViewportPointerDownCapture : undefined
         }
       >
+        {dashboard.layout.length === 0 ? (
+          <div className="flex min-h-[calc(100vh-8rem)] flex-col items-center justify-center gap-2 px-6 text-center">
+            <p className="text-sm font-medium text-muted-foreground">No widgets on this workspace</p>
+            <p className="max-w-md text-xs text-muted-foreground">
+              Use <span className="font-medium text-foreground">Add widget</span> above to add charts, watchlists,
+              news, Market Flow, or Live Theme Charts.
+            </p>
+          </div>
+        ) : (
         <GridLayoutWithWidth
           className="start-here-rgl min-h-[calc(100vh-8rem)] min-w-0 w-full"
           layout={dashboard.layout}
@@ -822,6 +873,7 @@ function StartHereGridHost() {
             );
           })}
         </GridLayoutWithWidth>
+        )}
       </div>
       <AnalysisPanel
         variant="floating"
@@ -837,12 +889,23 @@ function StartHereGridHost() {
 }
 
 export default function StartHerePage() {
-  const { user } = useSentinelAuth();
-  const { cssVariables } = useSystemSettings();
+  const { user, isLoading: authLoading } = useSentinelAuth();
+  const { pageShellStyle } = useSystemSettings();
+
+  if (authLoading) {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center sentinel-page"
+        style={pageShellStyle as React.CSSProperties}
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (
-      <div className="flex min-h-screen flex-col" style={{ backgroundColor: cssVariables.backgroundColor }}>
+      <div className="flex min-h-screen flex-col sentinel-page" style={pageShellStyle as React.CSSProperties}>
         <SentinelHeader showSentiment={false} />
       </div>
     );
@@ -850,8 +913,8 @@ export default function StartHerePage() {
 
   return (
     <div
-      className="flex min-w-0 h-screen flex-col overflow-hidden"
-      style={cssVariables as any}
+      className="flex min-w-0 h-screen flex-col overflow-hidden sentinel-page"
+      style={pageShellStyle as React.CSSProperties}
     >
       <SentinelHeader showSentiment={false} />
       <StartHereProvider key={user.id} userId={user.id}>

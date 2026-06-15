@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MiniChart, type StartHereInterval } from "@/components/MiniChart";
@@ -22,7 +21,7 @@ import type { EtfStructureFlags } from "@shared/theme-breakdown-watch";
 import type { LiveThemeChartsColumnKey } from "@/lib/live-theme-charts";
 import { BreakdownWatchBadge } from "@/components/market-condition/BreakdownWatchBadge";
 import type { MiniChartEtfStructure } from "@/components/MiniChart";
-import { AlertTriangle, ExternalLink, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, BarChart3, TrendingDown, TrendingUp } from "lucide-react";
 
 export type LiveThemeChartsDensity = "compact" | "popout";
 
@@ -65,6 +64,7 @@ export function ThemeChartRow({
   highlights,
   accDistStats,
   density = "compact",
+  onOpenCharts,
 }: {
   theme: ThemeRow;
   columnKey?: LiveThemeChartsColumnKey;
@@ -73,6 +73,8 @@ export function ThemeChartRow({
   highlights: ThemeMemberHighlight[];
   accDistStats?: ThemeAccDistStats | null;
   density?: LiveThemeChartsDensity;
+  /** Open Sentinel dual charts overlay (with load status dialog). */
+  onOpenCharts?: (symbol: string) => void;
 }) {
   const d = DENSITY[density];
   const memberSymbols = useMemo(() => highlights.map((h) => h.symbol), [highlights]);
@@ -223,6 +225,8 @@ export function ThemeChartRow({
               fillContainer
               hideChangeFooter
               hideInfoBox
+              showLeftPriceScale
+              priceScaleTickCount={density === "popout" ? 5 : 4}
               onAdrsFrom50Change={setAdrsFrom50}
               onEtfStructureChange={handleEtfStructureChange}
               onNoData={() => {
@@ -359,14 +363,15 @@ export function ThemeChartRow({
                         {h.pctChange.toFixed(1)}%
                       </span>
                     </button>
-                    <Link
-                      href={`/sentinel/charts/${h.symbol}`}
+                    <button
+                      type="button"
                       className="start-here-no-drag inline-flex rounded p-0.5 text-muted-foreground hover:text-foreground"
                       title={`Open ${h.symbol} in Sentinel charts`}
                       aria-label={`Open ${h.symbol} in Sentinel charts`}
+                      onClick={() => onOpenCharts?.(h.symbol)}
                     >
-                      <ExternalLink className={d.chipIcon} />
-                    </Link>
+                      <BarChart3 className={d.chipIcon} />
+                    </button>
                   </div>
                 );
               })}

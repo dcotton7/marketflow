@@ -11,9 +11,11 @@ import type { LiveThemeChartsDensity } from "@/components/start-here/ThemeChartR
 export function LiveThemeChartsContent({
   config,
   density = "compact",
+  onOpenCharts,
 }: {
   config: LiveThemeChartsConfig;
   density?: LiveThemeChartsDensity;
+  onOpenCharts?: (symbol: string) => void;
 }) {
   const enabledColumns = enabledLiveThemeChartColumns(config);
   const { themesBySnapshot, comparisonTimeBySnapshot, isLoading, error } =
@@ -46,6 +48,7 @@ export function LiveThemeChartsContent({
           isLoading={isLoading}
           error={error}
           density={density}
+          onOpenCharts={onOpenCharts}
         />
       ))}
     </div>

@@ -36,6 +36,7 @@ import {
 } from "@/components/WatchlistConfigurableTable";
 import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
+import { isDailyThemeWatchlistName } from "@shared/theme-daily-watchlist";
 import {
   watchlistModalColumnWidthsStorageKey,
   watchlistModalSizeStorageKey,
@@ -341,6 +342,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [editingName, setEditingName] = useState("");
   const [newWatchlistName, setNewWatchlistName] = useState("");
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [listFilter, setListFilter] = useState<"all" | "daily">("all");
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   
   // Ticker add state
@@ -481,6 +483,14 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     });
     return sorted;
   }, [tickersWithQuotes, sortField, sortDir]);
+
+  const filteredWatchlists = useMemo(() => {
+    if (!watchlists) return [];
+    if (listFilter === "daily") {
+      return watchlists.filter((wl) => isDailyThemeWatchlistName(wl.name));
+    }
+    return watchlists;
+  }, [watchlists, listFilter]);
 
   const selectedWatchlist = watchlists?.find(wl => wl.id === effectiveWatchlistId);
 
@@ -623,7 +633,8 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={contentRef}
-        className="fixed z-[100] flex max-h-[96vh] max-w-[96vw] flex-col gap-0 overflow-hidden p-0 !max-w-none !translate-x-0 !translate-y-0 !opacity-100 sm:!max-w-none"
+        overlayClassName="z-[3300]"
+        className="fixed z-[3300] flex max-h-[96vh] max-w-[96vw] flex-col gap-0 overflow-hidden p-0 !max-w-none !translate-x-0 !translate-y-0 !opacity-100 sm:!max-w-none"
         style={{
           width: modalLayout.w,
           height: modalLayout.h,
@@ -681,6 +692,24 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   Create New
                 </Button>
               )}
+              <div className="flex gap-1 mt-2">
+                <Button
+                  size="sm"
+                  variant={listFilter === "all" ? "secondary" : "ghost"}
+                  className="h-7 text-xs flex-1"
+                  onClick={() => setListFilter("all")}
+                >
+                  All
+                </Button>
+                <Button
+                  size="sm"
+                  variant={listFilter === "daily" ? "secondary" : "ghost"}
+                  className="h-7 text-xs flex-1"
+                  onClick={() => setListFilter("daily")}
+                >
+                  Daily theme
+                </Button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -692,12 +721,12 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                 <div className="text-center py-8 text-destructive text-sm">
                   Failed to load watchlists
                 </div>
-              ) : watchlists?.length === 0 ? (
+              ) : filteredWatchlists.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground text-sm">
-                  No watchlists yet
+                  {listFilter === "daily" ? "No daily theme lists yet" : "No watchlists yet"}
                 </div>
               ) : (
-                watchlists?.map(wl => (
+                filteredWatchlists.map(wl => (
                   <div
                     key={wl.id}
                     className={`flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer transition-colors ${
@@ -744,6 +773,11 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                               Portfolio
                             </span>
                           ) : null}
+                          {isDailyThemeWatchlistName(wl.name) ? (
+                            <span className="ml-1 rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-400">
+                              Daily
+                            </span>
+                          ) : null}
                         </span>
                         <Button
                           size="icon"
@@ -774,7 +808,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                             variant="ghost"
                             className="h-6 w-6 flex-shrink-0 opacity-50 hover:opacity-100 text-destructive"
                             onClick={(e) => { e.stopPropagation(); handleDelete(wl.id); }}
-                            title="Delete watchlist"
+                            title={isDailyThemeWatchlistName(wl.name) ? "Archive daily theme list" : "Delete watchlist"}
                           >
                             <Trash2 className="w-3 h-3" />
                           </Button>
@@ -829,7 +863,9 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   onClick={() => handleDelete(selectedWatchlist.id)}
                 >
                   <Trash2 className="w-4 h-4" />
-                  Delete Watchlist
+                  {selectedWatchlist && isDailyThemeWatchlistName(selectedWatchlist.name)
+                    ? "Archive Daily List"
+                    : "Delete Watchlist"}
                 </Button>
               )}
 

@@ -1579,7 +1579,7 @@ export function TradingChart({
           <IndicatorsFourSquaresIcon className="text-slate-400" />
         </Button>
       </div>
-      <div ref={containerRef} className="w-full flex-1 min-h-[400px]" style={drawingToolActive ? { cursor: 'crosshair' } : undefined} />
+      <div ref={containerRef} className="w-full min-h-0 flex-1" style={drawingToolActive ? { cursor: 'crosshair' } : undefined} />
       <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
     </div>
   );

@@ -108,7 +108,7 @@ interface AIChatMessage {
 export default function SentinelRulesPage() {
   const { user, logout } = useSentinelAuth();
   const { toast } = useToast();
-  const { settings: systemSettings, cssVariables } = useSystemSettings();
+  const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
   const [activeTab, setActiveTab] = useState("system");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -824,11 +824,7 @@ export default function SentinelRulesPage() {
   return (
     <div 
       className="min-h-screen sentinel-page"
-      style={{ 
-        backgroundColor: cssVariables.backgroundColor,
-        '--logo-opacity': cssVariables.logoOpacity,
-        '--overlay-bg': cssVariables.overlayBg,
-      } as React.CSSProperties}
+      style={pageShellStyle as React.CSSProperties}
     >
       {/* Watermark applied via background-image on container */}
       <SentinelHeader />

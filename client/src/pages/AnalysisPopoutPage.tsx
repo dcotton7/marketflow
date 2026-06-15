@@ -5,8 +5,10 @@
 import { useState, useEffect } from "react";
 import { useSearch } from "wouter";
 import { AnalysisPanel } from "@/features/marketflow-analysis";
+import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 export default function AnalysisPopoutPage() {
+  const { pageShellStyle } = useSystemSettings();
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
   const initialSymbol = urlParams.get("symbol")?.toUpperCase() || "";
@@ -34,7 +36,7 @@ export default function AnalysisPopoutPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen sentinel-page" style={pageShellStyle as React.CSSProperties}>
       <AnalysisPanel
         symbol={symbol || null}
         open={true}

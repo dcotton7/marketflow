@@ -108,7 +108,8 @@ export async function calculateRAI(
     };
     
     // Total score
-    const score = Object.values(components).reduce((a, b) => a + b, 0);
+    let score = Object.values(components).reduce((a, b) => a + b, 0);
+    score = applyThemeRegimeAdjustment(score, themeMetrics, snapshots);
     
     // Determine label and multiplier
     const { label, riskMultiplier } = getRAILabelAndMultiplier(score);
@@ -155,35 +156,32 @@ export function getCachedRAI(): RAIOutput | null {
 // =============================================================================
 
 /**
- * Trend Position: Are growth/risk proxies above their moving averages?
- * QQQ, IWO, SLY, ARKK vs VWAP (as proxy for short-term trend)
+ * Trend Position: growth/risk proxy performance today (avg % change).
  */
 function calculateTrendPosition(
   snapshots: Map<string, BenchmarkData>
 ): { score: number; detail: string } {
-  let aboveVwapCount = 0;
-  let totalChecked = 0;
+  const changes: number[] = [];
   const details: string[] = [];
-  
+
   for (const symbol of RAI_SYMBOLS.trend) {
     const data = snapshots.get(symbol);
     if (!data) continue;
-    
-    // Use price vs vwap as trend indicator (would ideally use 21D/50D SMA)
-    const isPositive = data.changePct > 0;
-    if (isPositive) aboveVwapCount++;
-    totalChecked++;
-    
+    changes.push(data.changePct);
     details.push(`${symbol}: ${data.changePct > 0 ? "+" : ""}${data.changePct.toFixed(2)}%`);
   }
-  
-  // Score: 0-20 based on % of proxies showing strength
-  const pctAbove = totalChecked > 0 ? aboveVwapCount / totalChecked : 0.5;
-  const score = Math.round(pctAbove * 20);
-  
+
+  if (!changes.length) {
+    return { score: 10, detail: "No trend proxy data" };
+  }
+
+  const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
+  // -2% avg → 0, 0% → 10, +2% → 20
+  const score = Math.max(0, Math.min(20, Math.round((avgChange + 2) * 5)));
+
   return {
     score,
-    detail: details.join(", ") || "No data",
+    detail: `${details.join(", ")} (avg ${avgChange > 0 ? "+" : ""}${avgChange.toFixed(2)}%)`,
   };
 }
 
@@ -313,12 +311,14 @@ function calculateVolatilityRegime(
     score = Math.max(0, Math.min(20, Math.round((-uvxy.changePct + 5) * 2)));
     detail = `UVXY: ${uvxy.changePct > 0 ? "+" : ""}${uvxy.changePct.toFixed(2)}%`;
   } else if (spy) {
-    // Estimate from SPY movement - big moves = high vol
     const absMove = Math.abs(spy.changePct);
-    // Small move (< 0.5%) = low vol = high score
-    // Big move (> 2%) = high vol = low score
+    // Low vol chop → higher score; big moves → lower
     score = Math.max(0, Math.min(20, Math.round((2 - absMove) * 10)));
-    detail = `SPY move: ${spy.changePct > 0 ? "+" : ""}${spy.changePct.toFixed(2)}%`;
+    // Risk-off direction penalty on selloff days
+    if (spy.changePct < -0.4) {
+      score = Math.max(0, score - Math.round(Math.abs(spy.changePct) * 6));
+    }
+    detail = `SPY: ${spy.changePct > 0 ? "+" : ""}${spy.changePct.toFixed(2)}%`;
   }
   
   return { score, detail };
@@ -327,6 +327,49 @@ function calculateVolatilityRegime(
 // =============================================================================
 // Helpers
 // =============================================================================
+
+const DEFENSIVE_THEME_IDS = new Set(["CONSUMER_STAPLES", "HEALTHCARE", "DEFENSE", "PRECIOUS_METALS"]);
+const GROWTH_THEME_IDS = new Set(["SEMIS", "AI_INFRA", "CRYPTO_EQ", "ENTERPRISE_SOFT", "QUANTUM"]);
+
+/**
+ * When defensives lead and growth lags on a red benchmark day, cap RAI — aligns with theme rotation.
+ */
+function applyThemeRegimeAdjustment(
+  score: number,
+  themeMetrics: ThemeMetrics[] | undefined,
+  snapshots: Map<string, BenchmarkData>
+): number {
+  if (!themeMetrics?.length) return score;
+
+  const spy = snapshots.get("SPY");
+  const qqq = snapshots.get("QQQ");
+  const benchAvg =
+    spy && qqq ? (spy.changePct + qqq.changePct) / 2 : spy?.changePct ?? qqq?.changePct ?? 0;
+
+  const defensiveRanks = themeMetrics
+    .filter((t) => DEFENSIVE_THEME_IDS.has(t.id))
+    .map((t) => t.rank);
+  const growthRanks = themeMetrics
+    .filter((t) => GROWTH_THEME_IDS.has(t.id))
+    .map((t) => t.rank);
+
+  if (!defensiveRanks.length || !growthRanks.length) return score;
+
+  const defAvg = defensiveRanks.reduce((a, b) => a + b, 0) / defensiveRanks.length;
+  const growthAvg = growthRanks.reduce((a, b) => a + b, 0) / growthRanks.length;
+  const defensiveRotation = defAvg <= 10 && growthAvg >= 18 && benchAvg < -0.2;
+
+  if (defensiveRotation) {
+    return Math.min(score, 42);
+  }
+  if (benchAvg < -0.8) {
+    return Math.min(score, 35);
+  }
+  if (benchAvg < -0.4) {
+    return Math.min(score, 55);
+  }
+  return score;
+}
 
 /**
  * Get RAI label and risk multiplier based on score
