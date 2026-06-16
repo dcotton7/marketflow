@@ -5,7 +5,6 @@
 
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath } from "url";
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { tickerSliceMemberships, tickers as tickerTable } from "@shared/schema";
@@ -16,8 +15,7 @@ import {
 } from "../universe";
 import { refreshThemeMembersCache, isCacheInitialized, getThemesForSymbol } from "./theme-db-loader";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DELISTED_FILE = path.resolve(__dirname, "../../../data/delisted-symbols.json");
+const DELISTED_FILE = path.resolve(process.cwd(), "data/delisted-symbols.json");
 
 const delistedSet = new Set<string>();
 let registryLoaded = false;
