@@ -1,6 +1,25 @@
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type { ChartDataResponse } from "@/components/DualChartGrid";
 
+function getChartRefetchIntervalMs(): number | false {
+  const now = new Date();
+  const et = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "numeric",
+    weekday: "short",
+    hour12: false,
+  }).formatToParts(now);
+  const h = parseInt(et.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const m = parseInt(et.find((p) => p.type === "minute")?.value ?? "0", 10);
+  const day = et.find((p) => p.type === "weekday")?.value ?? "";
+  if (["Sat", "Sun"].includes(day)) return false;
+  const mins = h * 60 + m;
+  if (mins >= 570 && mins < 960) return 30_000;   // 9:30–16:00 → every 30s
+  if (mins >= 960 && mins < 1140) return 120_000;  // 16:00–19:00 → every 2 min
+  return false;
+}
+
 export const sentinelChartDataQueryKey = (
   ticker: string,
   timeframe: string,
@@ -37,6 +56,7 @@ export function useSentinelDailyChartData(ticker: string | undefined, options?: 
     queryKey: ticker ? sentinelChartDataQueryKey(ticker, "daily", false) : ["/api/sentinel/chart-data", "", "daily", false],
     queryFn: () => fetchSentinelChartData(ticker!, "daily", false),
     enabled: !!ticker,
+    refetchInterval: getChartRefetchIntervalMs() || undefined,
     ...options,
   });
 }
@@ -66,7 +86,7 @@ export function useSentinelIntradayChartData(
     queryFn: () => fetchSentinelChartData(ticker!, timeframe, includeETH),
     enabled: !!ticker,
     placeholderData: intradayPlaceholderForTicker(ticker),
-    /** Server shares one Alpaca-backed cache per symbol+interval; long gcTime avoids refetch churn when swapping tickers. */
+    refetchInterval: getChartRefetchIntervalMs(),
     gcTime: 2 * 60 * 60_000,
     ...options,
   });
