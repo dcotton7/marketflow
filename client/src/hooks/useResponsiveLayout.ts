@@ -16,9 +16,9 @@ function hasResponsiveFlag(): boolean {
 export type BreakpointTier = "xl" | "lg" | "md" | "sm";
 
 function getTier(width: number): BreakpointTier {
-  if (width >= 1600) return "xl";
-  if (width >= 1280) return "lg";
-  if (width >= 960) return "md";
+  if (width >= 1800) return "xl";
+  if (width >= 1440) return "lg";
+  if (width >= 1100) return "md";
   return "sm";
 }
 
@@ -26,9 +26,13 @@ export interface ResponsiveLayout {
   enabled: boolean;
   width: number;
   tier: BreakpointTier;
+  /** Below 1440px — tighter spacing, collapsed nav, hidden header metrics */
   isCompact: boolean;
+  /** Below 1100px — single-column heatmap, very tight */
   isNarrow: boolean;
+  /** Below 1440px — stack the 3-column panels vertically */
   stackPanels: boolean;
+  /** Below 1440px — secondary nav items go into "More" dropdown */
   collapseNav: boolean;
 }
 
@@ -51,9 +55,9 @@ export function useResponsiveLayout(): ResponsiveLayout {
     enabled,
     width,
     tier,
-    isCompact: enabled && (tier === "md" || tier === "sm"),
+    isCompact: enabled && (tier === "md" || tier === "sm" || tier === "lg"),
     isNarrow: enabled && tier === "sm",
-    stackPanels: enabled && (tier === "md" || tier === "sm"),
-    collapseNav: enabled && (tier === "md" || tier === "sm"),
+    stackPanels: enabled && (tier === "md" || tier === "sm" || tier === "lg"),
+    collapseNav: enabled && (tier === "md" || tier === "sm" || tier === "lg"),
   };
 }

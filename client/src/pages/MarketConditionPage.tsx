@@ -348,6 +348,7 @@ export default function MarketConditionPage() {
   const [showFocusedPanel, setShowFocusedPanel] = useState(true);
   const [showMembersPanel, setShowMembersPanel] = useState(true);
   const [showRotationTablePanel, setShowRotationTablePanel] = useState(true);
+  const [compactBottomTab, setCompactBottomTab] = useState<"focused" | "members">("focused");
 
   useEffect(() => {
     if (lensMode !== "flowMap") {
@@ -889,12 +890,173 @@ export default function MarketConditionPage() {
     />
   );
 
-  const renderSplitTopSection = () => (
-    <PanelGroup
-      direction={responsive.stackPanels ? "vertical" : "horizontal"}
-      autoSaveId={responsive.stackPanels ? "market-condition-top-v" : "market-condition-top"}
+  const renderCompactFocusedContent = () => (
+    <div
+      className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
+      style={localSlotBgStyle("marketFlow:focusedThemePanel")}
     >
-      <Panel defaultSize={responsive.stackPanels ? 40 : 45} minSize={responsive.stackPanels ? 20 : 25}>
+      {/* Tab switcher */}
+      <div className="flex items-center gap-1 border-b border-slate-700/40 px-2 py-1.5 shrink-0">
+        <button
+          type="button"
+          className={cn(
+            "rounded px-3 py-1 text-xs font-medium",
+            compactBottomTab === "focused" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:text-slate-200"
+          )}
+          onClick={() => setCompactBottomTab("focused")}
+        >
+          Focused Theme
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "rounded px-3 py-1 text-xs font-medium",
+            compactBottomTab === "members" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-400 hover:text-slate-200"
+          )}
+          onClick={() => setCompactBottomTab("members")}
+        >
+          Members
+        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <ThemeReviewActions
+            disabled={!selectedTheme}
+            onThemeReview={() => setBriefingPickerOpen(true)}
+            onTickerReview={() => setTickerReviewOpen(true)}
+          />
+        </div>
+      </div>
+      {/* Tab content */}
+      <div className="flex-1 overflow-auto min-h-0">
+        {compactBottomTab === "focused" ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <div
+              className="border-b border-slate-700/40 px-2 py-1 flex items-center gap-1"
+              style={localSlotHeaderStyle("marketFlow:detailTabBar")}
+            >
+              <div className="inline-flex flex-wrap items-center gap-0.5 rounded border border-slate-700/60 bg-slate-800/40 p-0.5">
+                {(["actionableDetails", "subthemes", "etfs", "flowFocus", "legacyDetails"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={cn(
+                      "rounded px-2 py-0.5 text-[10px] font-medium",
+                      focusedCenterTab === tab ? "bg-cyan-500/20 text-cyan-200" : "text-slate-300 hover:text-slate-100"
+                    )}
+                    onClick={() => setFocusedCenterTab(tab)}
+                  >
+                    {tab === "actionableDetails" ? "Details" : tab === "subthemes" ? "Subs" : tab === "etfs" ? "ETFs" : tab === "flowFocus" ? "Focus" : "Legacy"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              {focusedCenterTab === "actionableDetails" ? (
+                <ThemeDetailPanelActionable
+                  theme={selectedThemeData}
+                  members={selectedThemeTickers}
+                  totalThemes={themes.length}
+                  accDistStats={themeMembers?.accDistStats}
+                  timeSlice={timeSlice}
+                />
+              ) : focusedCenterTab === "etfs" ? (
+                <ThemeDetailPanelEtfs
+                  theme={selectedThemeData}
+                  selectedSubthemeId={selectedSubthemeId}
+                  onEtfSymbolClick={handleTickerSelect}
+                />
+              ) : focusedCenterTab === "flowFocus" ? (
+                <FlowMapFocusBox
+                  data={flowMapFocusData}
+                  emptyState={lensMode === "flowMap" ? "flowMap" : "otherLens"}
+                />
+              ) : focusedCenterTab === "legacyDetails" ? (
+                <ThemeDetailPanel
+                  theme={selectedThemeData}
+                  members={selectedThemeTickers}
+                  totalThemes={themes.length}
+                  accDistStats={themeMembers?.accDistStats}
+                  timeSlice={timeSlice}
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <TickerWorkbench
+            themeId={selectedTheme}
+            themeName={selectedThemeData?.name || null}
+            selectedSubthemeId={selectedSubthemeId}
+            selectedSubthemeName={selectedSubthemeName}
+            tickers={visibleThemeTickers}
+            onTickerSelect={handleTickerSelect}
+            onTickersAdded={handleTickersAdded}
+            isAdmin={userInfo?.isAdmin ?? false}
+            highlightedTicker={highlightedTicker}
+            timeSlice={timeSlice}
+            maAsOf={themeMembers?.maAsOf ?? marketCondition?.maAsOf}
+            maMode={themeMembers?.maMode ?? marketCondition?.maMode}
+            msSyncEnabled={msSyncEnabled}
+            onMsSyncToggle={() => setMsSyncEnabled(!msSyncEnabled)}
+            chartSyncEnabled={chartSyncEnabled}
+            onChartSyncToggle={() => setChartSyncEnabled(!chartSyncEnabled)}
+            analysisSyncEnabled={analysisSyncEnabled}
+            onAnalysisSyncToggle={() => setAnalysisSyncEnabled(!analysisSyncEnabled)}
+            onOpenAnalysis={(symbol) => setAnalysisSheetSymbol(symbol)}
+          />
+        )}
+      </div>
+    </div>
+  );
+
+  const renderSplitTopSection = () => {
+    if (responsive.stackPanels) {
+      return (
+        <PanelGroup direction="vertical" autoSaveId="market-condition-top-compact">
+          <Panel defaultSize={50} minSize={25}>
+            <div
+              className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
+              style={localSlotBgStyle("marketFlow:themeTrackerPanel")}
+              data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "themeTrackerPanel")}
+            >
+              <PanelHeader
+                bodySlotId="marketFlow:themeTrackerPanel"
+                title={lensMode === "race" ? "Theme race" : lensMode === "flowMap" ? "Theme Flow Map" : "Theme Heatmap"}
+                tooltip="Visual grid of all themes. Click to select."
+              />
+              <div className="flex-1 overflow-auto min-h-0">
+                {lensMode === "race" ? (
+                  renderThemeRaceLanes()
+                ) : lensMode === "flowMap" ? (
+                  <FlowMapPanel
+                    selectedTheme={selectedTheme}
+                    onThemeSelect={handleThemeSelect}
+                    sizeFilter={sizeFilter}
+                    onFocusDataChange={setFlowMapFocusData}
+                  />
+                ) : (
+                  <ThemeHeatmapGrid
+                    themes={sortedThemes}
+                    selectedTheme={selectedTheme}
+                    onThemeSelect={handleThemeSelect}
+                    totalThemes={themes.length}
+                    timeSlice={timeSlice}
+                  />
+                )}
+              </div>
+            </div>
+          </Panel>
+
+          <ResizeHandle direction="horizontal" />
+
+          <Panel defaultSize={50} minSize={25}>
+            {renderCompactFocusedContent()}
+          </Panel>
+        </PanelGroup>
+      );
+    }
+
+    return (
+    <PanelGroup direction="horizontal" autoSaveId="market-condition-top">
+      <Panel defaultSize={45} minSize={25}>
         <div
           className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
           style={localSlotBgStyle("marketFlow:themeTrackerPanel")}
@@ -1341,7 +1503,8 @@ export default function MarketConditionPage() {
         </>
       )}
     </PanelGroup>
-  );
+    );
+  };
 
   return (
     <div
@@ -1406,8 +1569,8 @@ export default function MarketConditionPage() {
           <Tooltip>
             <TooltipTrigger>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">Market Condition</span>
-                <span className="text-xs text-muted-foreground">/ Flow Mode</span>
+                <span className="text-sm font-medium text-foreground">{responsive.isCompact ? "Flow" : "Market Condition"}</span>
+                {!responsive.isCompact && <span className="text-xs text-muted-foreground">/ Flow Mode</span>}
                 {shouldUseLive ? (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">LIVE</span>
                 ) : (
@@ -1436,14 +1599,16 @@ export default function MarketConditionPage() {
           </Tooltip>
 
           {/* Data Source Toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => setUseLiveData(!useLiveData)}
-          >
-            {useLiveData ? "Switch to Mock" : "Switch to Live"}
-          </Button>
+          {!responsive.isCompact && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setUseLiveData(!useLiveData)}
+            >
+              {useLiveData ? "Switch to Mock" : "Switch to Live"}
+            </Button>
+          )}
 
           {/* Force Refresh */}
           {shouldUseLive && (
@@ -1489,20 +1654,21 @@ export default function MarketConditionPage() {
           )}
 
           {/* Lens Mode Toggle */}
-          <div className="flex items-center bg-slate-800/50 rounded-lg p-0.5">
+          <div className={cn("flex items-center bg-slate-800/50 rounded-lg p-0.5", responsive.isCompact && "flex-wrap")}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-7 px-3 text-xs gap-1.5",
+                    "text-xs gap-1.5",
+                    responsive.isCompact ? "h-6 px-1.5" : "h-7 px-3",
                     lensMode === "flow" && "bg-slate-700 text-cyan-400"
                   )}
                   onClick={() => handleLensMode("flow")}
                 >
                   <TrendingUp className="w-3 h-3" />
-                  FLOW
+                  {!responsive.isCompact && "FLOW"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -1516,13 +1682,14 @@ export default function MarketConditionPage() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-7 px-3 text-xs gap-1.5",
+                    "text-xs gap-1.5",
+                    responsive.isCompact ? "h-6 px-1.5" : "h-7 px-3",
                     lensMode === "flowMap" && "bg-slate-700 text-cyan-300"
                   )}
                   onClick={() => handleLensMode("flowMap")}
                 >
                   <LayoutGrid className="w-3 h-3" />
-                  FLOW MAP
+                  {!responsive.isCompact && "FLOW MAP"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -1538,13 +1705,14 @@ export default function MarketConditionPage() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-7 px-3 text-xs gap-1.5",
+                    "text-xs gap-1.5",
+                    responsive.isCompact ? "h-6 px-1.5" : "h-7 px-3",
                     lensMode === "rotation" && "bg-slate-700 text-admin-market-flow"
                   )}
                   onClick={() => handleLensMode("rotation")}
                 >
                   <ArrowUpDown className="w-3 h-3" />
-                  ROTATION
+                  {!responsive.isCompact && "ROTATION"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -1558,13 +1726,14 @@ export default function MarketConditionPage() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-7 px-3 text-xs gap-1.5",
+                    "text-xs gap-1.5",
+                    responsive.isCompact ? "h-6 px-1.5" : "h-7 px-3",
                     lensMode === "concentration" && "bg-slate-700 text-yellow-400"
                   )}
                   onClick={() => handleLensMode("concentration")}
                 >
                   <PieChart className="w-3 h-3" />
-                  CONC
+                  {!responsive.isCompact && "CONC"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -1578,13 +1747,14 @@ export default function MarketConditionPage() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-7 px-3 text-xs gap-1.5",
+                    "text-xs gap-1.5",
+                    responsive.isCompact ? "h-6 px-1.5" : "h-7 px-3",
                     lensMode === "accumulation" && "bg-slate-700 text-green-400"
                   )}
                   onClick={() => handleLensMode("accumulation")}
                 >
                   <BarChart3 className="w-3 h-3" />
-                  A/D
+                  {!responsive.isCompact && "A/D"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
@@ -1598,13 +1768,14 @@ export default function MarketConditionPage() {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-7 px-3 text-xs gap-1.5",
+                    "text-xs gap-1.5",
+                    responsive.isCompact ? "h-6 px-1.5" : "h-7 px-3",
                     lensMode === "race" && "bg-slate-700 text-amber-400"
                   )}
                   onClick={() => handleLensMode("race")}
                 >
                   <Car className="w-3 h-3" />
-                  RACE
+                  {!responsive.isCompact && "RACE"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
