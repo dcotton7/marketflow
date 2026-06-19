@@ -263,25 +263,24 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
     <WatchlistModal open={watchlistModalOpen} onOpenChange={setWatchlistModalOpen} />
     <AlertCenterDialog open={alertCenterOpen} onOpenChange={setAlertCenterOpen} />
     <div
-      className={`flex items-center justify-between flex-wrap border-b ${responsive.isCompact ? "gap-2 px-2 py-1.5" : "gap-4 px-4 py-3"}`}
+      className={`flex items-center justify-between flex-wrap border-b ${responsive.isCompact ? "gap-1 px-2 py-0.5" : "gap-4 px-4 py-3"}`}
       style={{ backgroundColor: cssVariables.headerBg }}
     >
-      <div className="flex items-center gap-4">
+      <div className={`flex items-center ${responsive.isCompact ? "gap-1" : "gap-4"}`}>
         <Link href="/sentinel">
           <div
-            className="flex items-center gap-2 cursor-pointer hover-elevate rounded-md px-0.5 py-0.5"
+            className="flex items-center gap-1 cursor-pointer hover-elevate rounded-md px-0.5 py-0.5"
             data-testid="link-sentinel-home"
           >
-            {/* Mark only (structuremap-mark.png) — no glow; as tall as the bar allows */}
             <div
-              className={`${responsive.isCompact ? "h-10 max-h-[2.5rem]" : "h-16 max-h-[4.25rem]"} shrink-0 flex items-center justify-center rounded-sm`}
+              className={`${responsive.isCompact ? "h-7 max-h-[1.75rem]" : "h-16 max-h-[4.25rem]"} shrink-0 flex items-center justify-center rounded-sm`}
               style={{ opacity: cssVariables.logoOpacity }}
               data-testid="img-sentinel-header-logo-wrap"
             >
               <img
                 src="/structuremap-mark.png"
                 alt="StructureMap"
-                className={`${responsive.isCompact ? "h-10" : "h-16"} w-auto max-h-full object-contain object-left block select-none pointer-events-none`}
+                className={`${responsive.isCompact ? "h-7" : "h-16"} w-auto max-h-full object-contain object-left block select-none pointer-events-none`}
                 draggable={false}
                 data-testid="img-sentinel-header-logo"
               />
@@ -289,50 +288,50 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
           </div>
         </Link>
         
-        <nav className="flex items-center gap-1">
+        <nav className={`flex items-center ${responsive.isCompact ? "gap-0" : "gap-1"}`}>
           {/* Primary nav — always visible */}
           <Link href="/sentinel/start-here">
             <Button
               variant={isStartHerePage ? "secondary" : "ghost"}
               size="sm"
-              className="gap-2"
+              className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
               data-testid="nav-start-here"
             >
               <House className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Start</span>
+              {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Start</span>}
             </Button>
           </Link>
           <Link href="/sentinel/market-condition">
             <Button 
               variant={isMarketConditionPage ? "secondary" : "ghost"} 
               size="sm"
-              className="gap-2"
+              className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
               data-testid="nav-market-condition"
             >
               <Layers className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Flow</span>
+              {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Flow</span>}
             </Button>
           </Link>
           <Link href="/sentinel/charts">
             <Button 
               variant={isChartsPage ? "secondary" : "ghost"} 
               size="sm"
-              className="gap-2"
+              className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
               data-testid="nav-charts"
             >
               <BarChart3 className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Charts</span>
+              {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Charts</span>}
             </Button>
           </Link>
           <Button 
             variant="ghost" 
             size="sm"
-            className="gap-2"
+            className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
             onClick={() => setAlertCenterOpen(true)}
             data-testid="nav-alerts"
           >
             <Bell className="w-4 h-4" />
-            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Alerts</span>
+            {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Alerts</span>}
           </Button>
 
           {/* Secondary nav — visible on wide screens, collapsed into dropdown on compact */}
@@ -435,9 +434,9 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1.5" data-testid="nav-more-menu">
+                <Button variant="ghost" size="sm" className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-1.5"} data-testid="nav-more-menu">
                   <Menu className="w-4 h-4" />
-                  <span style={{ fontSize: cssVariables.fontSizeSmall }}>More</span>
+                  {!responsive.isCompact && <span style={{ fontSize: cssVariables.fontSizeSmall }}>More</span>}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="min-w-[180px]">

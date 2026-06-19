@@ -249,6 +249,7 @@ function PanelHeader({
   action,
   headerSlotId = "marketFlow:panelHeader",
   bodySlotId,
+  compact = false,
 }: {
   title: string;
   tooltip: string;
@@ -260,24 +261,28 @@ function PanelHeader({
   headerSlotId?: string;
   /** Optional panel body slot — second chip for section background */
   bodySlotId?: string;
+  compact?: boolean;
 }) {
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2 border-b border-slate-700/50 shrink-0"
+      className={cn(
+        "flex items-center border-b border-slate-700/50 shrink-0",
+        compact ? "gap-1 px-2 py-0.5" : "gap-2 px-3 py-2"
+      )}
       style={localSlotHeaderStyle(headerSlotId)}
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex items-center gap-2 cursor-help">
-            <span className="text-sm font-medium">{title}</span>
-            {subtitle && (
+          <div className="flex items-center gap-1.5 cursor-help">
+            <span className={cn("font-medium", compact ? "text-xs" : "text-sm")}>{title}</span>
+            {subtitle && !compact && (
               <span className="text-xs text-muted-foreground">
                 {subtitle}
               </span>
             )}
             <Info className="w-3 h-3 text-muted-foreground" />
             {titleAfterInfo && (
-              <span className="text-sm font-medium">{titleAfterInfo}</span>
+              <span className={cn("font-medium", compact ? "text-xs" : "text-sm")}>{titleAfterInfo}</span>
             )}
           </div>
         </TooltipTrigger>
@@ -285,12 +290,14 @@ function PanelHeader({
           <p className="text-xs">{tooltip}</p>
         </TooltipContent>
       </Tooltip>
-      <div className="flex items-center gap-1.5">
-        {titleTrailing}
-        <ThemeColorChip slotId={headerSlotId} />
-        {bodySlotId ? <ThemeColorChip slotId={bodySlotId} /> : null}
-      </div>
-      {action ? <div className="ml-auto flex items-center gap-2">{action}</div> : null}
+      {!compact && (
+        <div className="flex items-center gap-1.5">
+          {titleTrailing}
+          <ThemeColorChip slotId={headerSlotId} />
+          {bodySlotId ? <ThemeColorChip slotId={bodySlotId} /> : null}
+        </div>
+      )}
+      {action ? <div className="ml-auto flex items-center gap-1">{action}</div> : null}
     </div>
   );
 }
@@ -349,6 +356,10 @@ export default function MarketConditionPage() {
   const [showMembersPanel, setShowMembersPanel] = useState(true);
   const [showRotationTablePanel, setShowRotationTablePanel] = useState(true);
   const [compactBottomTab, setCompactBottomTab] = useState<"focused" | "members">("focused");
+
+  useEffect(() => {
+    if (responsive.isCompact) setShowRotationTablePanel(false);
+  }, [responsive.isCompact]);
 
   useEffect(() => {
     if (lensMode !== "flowMap") {
@@ -1019,8 +1030,9 @@ export default function MarketConditionPage() {
             >
               <PanelHeader
                 bodySlotId="marketFlow:themeTrackerPanel"
-                title={lensMode === "race" ? "Theme race" : lensMode === "flowMap" ? "Theme Flow Map" : "Theme Heatmap"}
+                title={lensMode === "race" ? "Theme race" : lensMode === "flowMap" ? "Flow Map" : "Heatmap"}
                 tooltip="Visual grid of all themes. Click to select."
+                compact
               />
               <div className="flex-1 overflow-auto min-h-0">
                 {lensMode === "race" ? (
@@ -1515,14 +1527,16 @@ export default function MarketConditionPage() {
       {/* Main App Navigation */}
       <SentinelHeader showSentiment={false} />
       
-      {/* Market Condition Header - RAI, Regime, Metrics */}
-      <HeaderBar 
-        summary={marketSummary} 
-        themes={themes} 
-        lastUpdated={lastUpdated} 
-        marketSession={pollingStatus?.marketSession}
-        universeParticipation={pollingStatus?.universeParticipation}
-      />
+      {/* Market Condition Header - RAI, Regime, Metrics — hidden on compact to save vertical space */}
+      {!responsive.isCompact && (
+        <HeaderBar 
+          summary={marketSummary} 
+          themes={themes} 
+          lastUpdated={lastUpdated} 
+          marketSession={pollingStatus?.marketSession}
+          universeParticipation={pollingStatus?.universeParticipation}
+        />
+      )}
 
       {/* Error Banner - shown when API fails */}
       {themesError && (
@@ -1558,8 +1572,8 @@ export default function MarketConditionPage() {
       {/* Toolbar */}
       <div
         className={cn(
-          "flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/50 shrink-0",
-          responsive.isCompact ? "px-2 py-1.5" : "px-4 py-2"
+          "flex flex-wrap items-center justify-between border-b border-slate-700/50 shrink-0",
+          responsive.isCompact ? "px-1.5 py-1 gap-1" : "px-4 py-2 gap-2"
         )}
         style={localSlotHeaderStyle("marketFlow:commandToolbar")}
         data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "commandToolbar")}
@@ -1568,18 +1582,36 @@ export default function MarketConditionPage() {
           <ThemeColorChip slotId="marketFlow:commandToolbar" />
           <Tooltip>
             <TooltipTrigger>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">{responsive.isCompact ? "Flow" : "Market Condition"}</span>
+              <div className="flex items-center gap-1.5">
+                <span className={cn("font-medium text-foreground", responsive.isCompact ? "text-xs" : "text-sm")}>{responsive.isCompact ? "Flow" : "Market Condition"}</span>
                 {!responsive.isCompact && <span className="text-xs text-muted-foreground">/ Flow Mode</span>}
                 {shouldUseLive ? (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">LIVE</span>
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400">LIVE</span>
                 ) : (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">MOCK</span>
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">MOCK</span>
                 )}
                 {shouldUseLive && isStale && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">STALE</span>
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-orange-500/20 text-orange-400">STALE</span>
                 )}
-                <Info className="w-3 h-3 text-muted-foreground" />
+                {responsive.isCompact && (
+                  <>
+                    <span className={cn(
+                      "text-[10px] px-1 py-0.5 rounded font-bold",
+                      marketSummary.rai.score >= 60 ? "bg-green-500/20 text-green-400" :
+                      marketSummary.rai.score >= 40 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"
+                    )}>
+                      RAI {marketSummary.rai.score}
+                    </span>
+                    <span className={cn(
+                      "text-[10px] px-1 py-0.5 rounded font-bold",
+                      marketSummary.regime === "RISK_ON" ? "bg-green-500/20 text-green-400" :
+                      marketSummary.regime === "RISK_OFF" ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400"
+                    )}>
+                      {marketSummary.regime.replace("_", " ")}
+                    </span>
+                  </>
+                )}
+                {!responsive.isCompact && <Info className="w-3 h-3 text-muted-foreground" />}
               </div>
             </TooltipTrigger>
             <TooltipContent className="max-w-sm">
