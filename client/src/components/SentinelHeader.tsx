@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
@@ -13,6 +13,7 @@ import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { playAlertChime } from "@/lib/alert-sound";
 import { SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT } from "@/lib/sentinel-ui-events";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -214,6 +215,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
 
   const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
   const [alertCenterOpen, setAlertCenterOpen] = useState(false);
+  const responsive = useResponsiveLayout();
 
   useEffect(() => {
     const openWatchlistManager = () => setWatchlistModalOpen(true);
@@ -261,7 +263,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
     <WatchlistModal open={watchlistModalOpen} onOpenChange={setWatchlistModalOpen} />
     <AlertCenterDialog open={alertCenterOpen} onOpenChange={setAlertCenterOpen} />
     <div
-      className="flex items-center justify-between gap-4 flex-wrap border-b px-4 py-3"
+      className={`flex items-center justify-between flex-wrap border-b ${responsive.isCompact ? "gap-2 px-2 py-1.5" : "gap-4 px-4 py-3"}`}
       style={{ backgroundColor: cssVariables.headerBg }}
     >
       <div className="flex items-center gap-4">
@@ -272,14 +274,14 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
           >
             {/* Mark only (structuremap-mark.png) — no glow; as tall as the bar allows */}
             <div
-              className="h-16 max-h-[4.25rem] shrink-0 flex items-center justify-center rounded-sm"
+              className={`${responsive.isCompact ? "h-10 max-h-[2.5rem]" : "h-16 max-h-[4.25rem]"} shrink-0 flex items-center justify-center rounded-sm`}
               style={{ opacity: cssVariables.logoOpacity }}
               data-testid="img-sentinel-header-logo-wrap"
             >
               <img
                 src="/structuremap-mark.png"
                 alt="StructureMap"
-                className="h-16 w-auto max-h-full object-contain object-left block select-none pointer-events-none"
+                className={`${responsive.isCompact ? "h-10" : "h-16"} w-auto max-h-full object-contain object-left block select-none pointer-events-none`}
                 draggable={false}
                 data-testid="img-sentinel-header-logo"
               />
@@ -288,6 +290,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
         </Link>
         
         <nav className="flex items-center gap-1">
+          {/* Primary nav — always visible */}
           <Link href="/sentinel/start-here">
             <Button
               variant={isStartHerePage ? "secondary" : "ghost"}
@@ -297,17 +300,6 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             >
               <House className="w-4 h-4" />
               <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Start</span>
-            </Button>
-          </Link>
-          <Link href="/sentinel/bigidea">
-            <Button 
-              variant={isBigIdeaPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-bigidea"
-            >
-              <Lightbulb className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Big Idea</span>
             </Button>
           </Link>
           <Link href="/sentinel/market-condition">
@@ -342,91 +334,146 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             <Bell className="w-4 h-4" />
             <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Alerts</span>
           </Button>
-          <WatchlistSelector
-            compact
-            showAddButton={false}
-            onManageWatchlists={() => setWatchlistModalOpen(true)}
-          />
-          <Link href="/sentinel/evaluate">
-            <Button 
-              variant={isEvaluatePage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-evaluate"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Ivy AI</span>
-            </Button>
-          </Link>
-          <Link href="/sentinel/import">
-            <Button 
-              variant={isImportPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-import"
-            >
-              <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Import</span>
-            </Button>
-          </Link>
-          <Link href="/sentinel/trade-journal">
-            <Button
-              variant={isTradeJournalPage ? "secondary" : "ghost"}
-              size="sm"
-              className="gap-2"
-              data-testid="nav-trade-journal"
-            >
-              <CalendarDays className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Trade Journal</span>
-            </Button>
-          </Link>
-          <Link href="/sentinel/patterns">
-            <Button 
-              variant={isPatternsPage ? "secondary" : "ghost"} 
-              size="sm"
-              className="gap-2"
-              data-testid="nav-patterns"
-            >
-              <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
-            </Button>
-          </Link>
-          {authUser?.isAdmin && (
-            <Link href="/sentinel/admin">
+
+          {/* Secondary nav — visible on wide screens, collapsed into dropdown on compact */}
+          {!responsive.collapseNav ? (
+            <>
+              <Link href="/sentinel/bigidea">
+                <Button 
+                  variant={isBigIdeaPage ? "secondary" : "ghost"} 
+                  size="sm"
+                  className="gap-2"
+                  data-testid="nav-bigidea"
+                >
+                  <Lightbulb className="w-4 h-4" />
+                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Big Idea</span>
+                </Button>
+              </Link>
+              <WatchlistSelector
+                compact
+                showAddButton={false}
+                onManageWatchlists={() => setWatchlistModalOpen(true)}
+              />
+              <Link href="/sentinel/evaluate">
+                <Button 
+                  variant={isEvaluatePage ? "secondary" : "ghost"} 
+                  size="sm"
+                  className="gap-2"
+                  data-testid="nav-evaluate"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Ivy AI</span>
+                </Button>
+              </Link>
+              <Link href="/sentinel/import">
+                <Button 
+                  variant={isImportPage ? "secondary" : "ghost"} 
+                  size="sm"
+                  className="gap-2"
+                  data-testid="nav-import"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Import</span>
+                </Button>
+              </Link>
+              <Link href="/sentinel/trade-journal">
+                <Button
+                  variant={isTradeJournalPage ? "secondary" : "ghost"}
+                  size="sm"
+                  className="gap-2"
+                  data-testid="nav-trade-journal"
+                >
+                  <CalendarDays className="w-4 h-4" />
+                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Trade Journal</span>
+                </Button>
+              </Link>
+              <Link href="/sentinel/patterns">
+                <Button 
+                  variant={isPatternsPage ? "secondary" : "ghost"} 
+                  size="sm"
+                  className="gap-2"
+                  data-testid="nav-patterns"
+                >
+                  <Brain className="w-4 h-4" />
+                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
+                </Button>
+              </Link>
+              {authUser?.isAdmin && (
+                <Link href="/sentinel/admin">
+                  <Button 
+                    variant={isAdminPage ? "secondary" : "ghost"} 
+                    size="sm"
+                    className="gap-2"
+                    data-testid="nav-admin"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Admin</span>
+                  </Button>
+                </Link>
+              )}
               <Button 
-                variant={isAdminPage ? "secondary" : "ghost"} 
+                variant="ghost"
                 size="sm"
-                className="gap-2"
-                data-testid="nav-admin"
+                className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
+                disabled
+                data-testid="nav-dashboard"
               >
-                <Settings className="w-4 h-4" />
-                <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Admin</span>
+                <LayoutDashboard className="w-4 h-4" />
+                <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
               </Button>
-            </Link>
+              <Button 
+                variant="ghost"
+                size="sm"
+                className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
+                disabled
+                data-testid="nav-rules"
+              >
+                <BookOpen className="w-4 h-4" />
+                <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
+              </Button>
+            </>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-1.5" data-testid="nav-more-menu">
+                  <Menu className="w-4 h-4" />
+                  <span style={{ fontSize: cssVariables.fontSizeSmall }}>More</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-[180px]">
+                <DropdownMenuItem onClick={() => setLocation("/sentinel/bigidea")} className="gap-2">
+                  <Lightbulb className="w-4 h-4" /> Big Idea
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setWatchlistModalOpen(true)} className="gap-2">
+                  <Layers className="w-4 h-4" /> Watchlists
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation("/sentinel/evaluate")} className="gap-2">
+                  <Sparkles className="w-4 h-4" /> Ivy AI
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setLocation("/sentinel/import")} className="gap-2">
+                  <Upload className="w-4 h-4" /> Import
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation("/sentinel/trade-journal")} className="gap-2">
+                  <CalendarDays className="w-4 h-4" /> Trade Journal
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation("/sentinel/patterns")} className="gap-2">
+                  <Brain className="w-4 h-4" /> Patterns
+                </DropdownMenuItem>
+                {authUser?.isAdmin && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setLocation("/sentinel/admin")} className="gap-2">
+                      <Settings className="w-4 h-4" /> Admin
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
-          <Button 
-            variant="ghost"
-            size="sm"
-            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
-            disabled
-            data-testid="nav-dashboard"
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
-          </Button>
-          <Button 
-            variant="ghost"
-            size="sm"
-            className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
-            disabled
-            data-testid="nav-rules"
-          >
-            <BookOpen className="w-4 h-4" />
-            <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
-          </Button>
         </nav>
         
-        <MarketTimeDisplay />
+        {!responsive.collapseNav && <MarketTimeDisplay />}
       </div>
 
       <div className="flex items-center gap-4">

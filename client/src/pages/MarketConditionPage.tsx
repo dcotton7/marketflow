@@ -87,6 +87,7 @@ import type { FlowMapFocusData } from "@/components/market-condition/FlowMapPane
 import { MARKET_FLOW_SURFACE, uiRegion } from "@shared/ui-surfaces";
 import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
 import { localSlotBgStyle, localSlotHeaderStyle } from "@/lib/local-slot-style";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 type ViewMode = "grid" | "table" | "split";
 type LensMode = "flow" | "rotation" | "flowMap" | "concentration" | "accumulation" | "race";
@@ -296,6 +297,7 @@ function PanelHeader({
 
 export default function MarketConditionPage() {
   const { pageShellStyle } = useSystemSettings();
+  const responsive = useResponsiveLayout();
   const [, navigate] = useLocation();
   const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -888,8 +890,11 @@ export default function MarketConditionPage() {
   );
 
   const renderSplitTopSection = () => (
-    <PanelGroup direction="horizontal" autoSaveId="market-condition-top">
-      <Panel defaultSize={45} minSize={25}>
+    <PanelGroup
+      direction={responsive.stackPanels ? "vertical" : "horizontal"}
+      autoSaveId={responsive.stackPanels ? "market-condition-top-v" : "market-condition-top"}
+    >
+      <Panel defaultSize={responsive.stackPanels ? 40 : 45} minSize={responsive.stackPanels ? 20 : 25}>
         <div
           className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
           style={localSlotBgStyle("marketFlow:themeTrackerPanel")}
@@ -1039,8 +1044,8 @@ export default function MarketConditionPage() {
 
       {showFocusedPanel && (
         <>
-          <ResizeHandle direction="vertical" />
-          <Panel defaultSize={showMembersPanel ? 35 : 45} minSize={20}>
+          <ResizeHandle direction={responsive.stackPanels ? "horizontal" : "vertical"} />
+          <Panel defaultSize={responsive.stackPanels ? 35 : (showMembersPanel ? 35 : 45)} minSize={responsive.stackPanels ? 15 : 20}>
             <div
               className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
               style={localSlotBgStyle("marketFlow:focusedThemePanel")}
@@ -1224,8 +1229,8 @@ export default function MarketConditionPage() {
 
       {showMembersPanel && (
         <>
-          <ResizeHandle direction="vertical" />
-          <Panel defaultSize={showFocusedPanel ? 20 : 28} minSize={15}>
+          <ResizeHandle direction={responsive.stackPanels ? "horizontal" : "vertical"} />
+          <Panel defaultSize={responsive.stackPanels ? 25 : (showFocusedPanel ? 20 : 28)} minSize={responsive.stackPanels ? 10 : 15}>
             <div
               className="h-full rounded-lg border border-slate-700/50 overflow-hidden flex flex-col"
               style={localSlotBgStyle("marketFlow:membersPanel")}
@@ -1389,7 +1394,10 @@ export default function MarketConditionPage() {
 
       {/* Toolbar */}
       <div
-        className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-slate-700/50 shrink-0"
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/50 shrink-0",
+          responsive.isCompact ? "px-2 py-1.5" : "px-4 py-2"
+        )}
         style={localSlotHeaderStyle("marketFlow:commandToolbar")}
         data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "commandToolbar")}
       >
@@ -2040,7 +2048,7 @@ export default function MarketConditionPage() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 overflow-hidden p-2">
+      <div className={cn("flex-1 overflow-hidden", responsive.isCompact ? "p-1" : "p-2")}>
         {viewMode === "split" ? (
           showRotationTablePanel ? (
             <PanelGroup

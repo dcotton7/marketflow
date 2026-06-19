@@ -7,6 +7,7 @@ import { ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThemeMarketTooltipContent } from "@/components/market-condition/ThemeMarketTooltipContent";
 import { getThemeRaceIcon } from "@/components/market-condition/themeRaceIcons";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 interface ThemeHeatmapGridProps {
   themes: ThemeRow[];
@@ -81,6 +82,7 @@ export function ThemeHeatmapGrid({
 }: ThemeHeatmapGridProps) {
   const total = totalThemes || themes.length;
   const isHistorical = timeSlice !== "TODAY";
+  const responsive = useResponsiveLayout();
 
   useEffect(() => {
     if (themes.length === 0) return;
@@ -104,7 +106,10 @@ export function ThemeHeatmapGrid({
 
   return (
     <div className="h-full overflow-auto p-2">
-      <div className="grid grid-cols-3 gap-2">
+      <div className={cn(
+        "grid gap-2",
+        responsive.isNarrow ? "grid-cols-1" : responsive.isCompact ? "grid-cols-2" : "grid-cols-3"
+      )}>
         {themes.map((theme, idx) => {
           const h = theme.historicalMetrics;
           const displayPct = displayValues[idx];

@@ -8,6 +8,7 @@ import type { MarketSession, UniverseParticipation } from "@/hooks/useMarketCond
 import { MarketFlowButton } from "./MarketFlowButton";
 import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
 import { localSlotHeaderStyle } from "@/lib/local-slot-style";
+import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
 interface HeaderBarProps {
   summary: MarketConditionSummary;
@@ -220,6 +221,7 @@ export function HeaderBar({
   const isWeak = weakPct > 40;
 
   const { rai, megaOverlay } = summary;
+  const responsive = useResponsiveLayout();
 
   const breadth = useMemo(() => {
     if (universeParticipation && universeParticipation.total > 0) {
@@ -236,7 +238,7 @@ export function HeaderBar({
 
   return (
     <div
-      className="flex items-center justify-between p-3 border-b border-slate-700/50 gap-4 flex-wrap"
+      className={`flex items-center justify-between ${responsive.isCompact ? "p-2 gap-2" : "p-3 gap-4"} border-b border-slate-700/50 flex-wrap`}
       style={localSlotHeaderStyle("marketFlow:regimeBar")}
       data-ui-region="marketFlow:regimeBar"
     >
@@ -369,8 +371,8 @@ export function HeaderBar({
         </Tooltip>
       </div>
 
-      {/* Center section: Key Metrics */}
-      <div className="flex items-center gap-3">
+      {/* Center section: Key Metrics — hidden on compact screens */}
+      <div className={`flex items-center gap-3${responsive.isCompact ? " hidden" : ""}`}>
         <div className="flex items-center gap-2" data-ui-region="marketFlow:benchmarkStrip">
           <Tooltip>
             <TooltipTrigger>
