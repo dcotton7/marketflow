@@ -1,7 +1,10 @@
 [
+  "COMM",
   "CONE",
+  "LTHM",
   "NEP",
   "PLYA",
   "QTS",
-  "UNIT"
+  "UNIT",
+  "VORB"
 ]

@@ -1,3 +1,6 @@
+/** Discovery Scanner floating overlay (above charts, below viewers). */
+export const SCANNER_OVERLAY_Z = 2500;
+
 /** Ticker Review / Theme Charts full-screen viewer layer. */
 export const CHART_VIEWER_Z = "z-[3200]";
 

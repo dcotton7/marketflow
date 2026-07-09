@@ -17,7 +17,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
 import { historicalBars } from "../../shared/schema";
-import { fetchAlpacaMultiSymbolDailyBars } from "../alpaca";
+import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getConstituents } from "../universe/constituents";
 
 const { Pool } = pg;
@@ -101,19 +101,24 @@ async function main() {
   for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
     const chunk = chunks[chunkIdx];
     console.log(
-      `\nBatch ${chunkIdx + 1}/${chunks.length}: ${chunk.length} symbols (multi-symbol fetch)`
+      `\nBatch ${chunkIdx + 1}/${chunks.length}: ${chunk.length} symbols (single-symbol fetch)`
     );
 
     try {
-      const barsBySymbol = await fetchAlpacaMultiSymbolDailyBars(
-        chunk,
-        startDate,
-        endDate
+      const results = await Promise.allSettled(
+        chunk.map(async (symbol) => {
+          const bars = await fetchAlpacaIntradayBars(symbol, startDate, endDate, "1Day", true);
+          return { symbol, bars };
+        })
       );
 
       let batchUpserted = 0;
-      for (const symbol of chunk) {
-        const bars = barsBySymbol.get(symbol.toUpperCase()) || [];
+      for (const r of results) {
+        if (r.status !== "fulfilled") {
+          failed.push("unknown");
+          continue;
+        }
+        const { symbol, bars } = r.value;
         if (bars.length === 0) {
           console.log(`  ${symbol}: No data`);
           failed.push(symbol);
@@ -124,7 +129,7 @@ async function main() {
 
         const values = bars.map((bar) => ({
           symbol: symbol.toUpperCase(),
-          barDate: bar.date.split("T")[0],
+          barDate: new Date(bar.date).toISOString().split("T")[0],
           open: bar.open.toString(),
           high: bar.high.toString(),
           low: bar.low.toString(),

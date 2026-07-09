@@ -7410,11 +7410,21 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const validDaily = dailyQuotes.filter((q) => q.open != null && q.close != null && q.high != null && q.low != null);
       const currentPrice = quoteData?.lastPrice || validDaily[validDaily.length - 1]?.close || 0;
 
+      let adr14 = 0;
+      if (validDaily.length >= 14) {
+        const last14 = validDaily.slice(-14);
+        const dailyRanges14 = last14.map((q: any) => q.high - q.low);
+        adr14 = dailyRanges14.reduce((s: number, v: number) => s + v, 0) / 14;
+      }
+
+      // 20-day ADR used for extension calculations (ADRx50d, ADRx20d) — standard lookback
       let adr20 = 0;
       if (validDaily.length >= 20) {
         const last20 = validDaily.slice(-20);
-        const dailyRanges = last20.map((q: any) => q.high - q.low);
-        adr20 = dailyRanges.reduce((s: number, v: number) => s + v, 0) / 20;
+        const dailyRanges20 = last20.map((q: any) => q.high - q.low);
+        adr20 = dailyRanges20.reduce((s: number, v: number) => s + v, 0) / 20;
+      } else {
+        adr20 = adr14; // fallback when <20 days available
       }
 
       let extensionFrom200d = 0;
@@ -7536,6 +7546,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf = "N/A";
       }
 
+      const adr14Dollar = Math.round(adr14 * 100) / 100;
+      const adr14Pct = currentPrice > 0 ? Math.round((adr14 / currentPrice) * 10000) / 100 : 0;
       const adr20Dollar = Math.round(adr20 * 100) / 100;
       const adr20Pct = currentPrice > 0 ? Math.round((adr20 / currentPrice) * 10000) / 100 : 0;
 
@@ -7602,6 +7614,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         adr20: adr20Dollar,
         adr20Dollar,
         adr20Pct,
+        adr14Dollar,
+        adr14Pct,
         extensionFrom50dAdr,
         extensionFrom50dPct,
         extensionFrom20dAdr,

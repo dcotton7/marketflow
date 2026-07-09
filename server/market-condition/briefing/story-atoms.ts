@@ -386,6 +386,69 @@ export async function buildStoryContext(
   const macroAtoms = buildMacroLinkAtoms(direction, macroNews);
   const persistenceAtoms = await buildPersistenceAtoms(dossier);
 
+  // Scanner intelligence: load active catalysts and session patterns
+  let catalystAtoms: StoryAtom[] = [];
+  let sessionPatternAtoms: StoryAtom[] = [];
+  let activeCatalysts: import("@shared/catalyst-types").CatalystEntry[] = [];
+  let sessionPatterns: import("@shared/catalyst-types").SessionPattern[] = [];
+
+  try {
+    const catalystModule = await import("../../scanner/catalyst");
+    await catalystModule.ensureSynced();
+    activeCatalysts = catalystModule.getAllActiveCatalysts();
+
+    if (activeCatalysts.length > 0) {
+      const topCatalysts = activeCatalysts
+        .sort((a, b) => b.decayWeight - a.decayWeight)
+        .slice(0, 5);
+
+      for (const cat of topCatalysts) {
+        catalystAtoms.push({
+          id: `catalyst_${cat.id}`,
+          category: "catalyst_watch",
+          headline: `[Catalyst] ${cat.subject} — ${cat.catalystType.replace(/_/g, " ")}: ${cat.headline.slice(0, 80)}`,
+          detail:
+            `Fired ${new Date(cat.firedAt).toLocaleDateString()}, ` +
+            `decay weight ${cat.decayWeight.toFixed(2)}, ` +
+            `initial reaction: ${cat.initialReaction}, ` +
+            `expected: ${cat.expectedDirection}.`,
+          confidence: cat.decayWeight >= 0.7 ? "high" : cat.decayWeight >= 0.4 ? "medium" : "low",
+          evidence: [
+            `Type: ${cat.catalystType}`,
+            `Source: ${cat.source}`,
+            `Expires: ${new Date(cat.expiresAt).toLocaleDateString()}`,
+          ],
+        });
+      }
+    }
+  } catch {
+    // Scanner not initialized yet — skip catalyst injection
+  }
+
+  try {
+    const { detectSessionPatterns } = await import("../../scanner/session-patterns");
+    sessionPatterns = await detectSessionPatterns(10);
+
+    for (const pat of sessionPatterns) {
+      sessionPatternAtoms.push({
+        id: `session_pattern_${pat.pattern}`,
+        category: "session_pattern",
+        headline: pat.description,
+        detail:
+          `Pattern frequency: ${(pat.frequency * 100).toFixed(0)}% ` +
+          `(${pat.occurrences}/${pat.totalDays} days). ` +
+          `Last seen: ${pat.lastOccurrence}.`,
+        confidence: pat.confidence,
+        evidence: [
+          `Pattern: ${pat.pattern}`,
+          pat.avgMagnitude ? `Avg magnitude: ${pat.avgMagnitude.toFixed(2)}%` : "",
+        ].filter(Boolean),
+      });
+    }
+  } catch {
+    // Session patterns not available yet — skip
+  }
+
   const rotationWhy = rotationAtoms
     .filter((a) => a.category === "rotation_why" || a.category === "theme_pattern")
     .map((a) => a.headline)
@@ -409,6 +472,8 @@ export async function buildStoryContext(
     ...sessionAtoms,
     ...persistenceAtoms,
     ...macroAtoms,
+    ...catalystAtoms,
+    ...sessionPatternAtoms,
   ];
 
   for (const t of dossier.leaders.slice(0, 3)) {
@@ -431,5 +496,7 @@ export async function buildStoryContext(
     rotationSummary: rotationWhy || "Rotation drivers unclear from theme spread alone — see macro context.",
     atoms,
     macroNews,
+    activeCatalysts: activeCatalysts.length > 0 ? activeCatalysts : undefined,
+    sessionPatterns: sessionPatterns.length > 0 ? sessionPatterns : undefined,
   };
 }

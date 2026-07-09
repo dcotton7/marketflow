@@ -185,6 +185,26 @@ export function buildRulesNarrative(
     });
   }
 
+  // Scanner intelligence: catalyst watch section
+  const catalystAtoms = atomsByCategory(ctx.atoms, "catalyst_watch");
+  if (catalystAtoms.length) {
+    sections.push({
+      id: "catalyst_watch",
+      title: "Catalyst watch — delayed reaction setups",
+      body: formatAtomBlock(catalystAtoms),
+    });
+  }
+
+  // Scanner intelligence: session structure patterns
+  const patternAtoms = atomsByCategory(ctx.atoms, "session_pattern");
+  if (patternAtoms.length) {
+    sections.push({
+      id: "session_structure",
+      title: "Recent session structure",
+      body: formatAtomBlock(patternAtoms),
+    });
+  }
+
   const cautionAtoms = atomsByCategory(ctx.atoms, "caution");
   if (cautionAtoms.length) {
     sections.push({

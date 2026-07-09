@@ -15,7 +15,10 @@ export type StoryAtomCategory =
   | "theme_pattern"
   | "session_arc"
   | "macro_link"
-  | "caution";
+  | "caution"
+  | "catalyst_watch"
+  | "session_pattern"
+  | "scanner_insight";
 
 export interface StoryAtom {
   id: string;
@@ -32,6 +35,10 @@ export interface BriefingStoryContext {
   rotationSummary: string;
   atoms: StoryAtom[];
   macroNews: CategorizedNewsItem[];
+  /** Active catalyst entries injected from scanner (if available) */
+  activeCatalysts?: import("@shared/catalyst-types").CatalystEntry[];
+  /** Multi-day session patterns (AM/PM trends) */
+  sessionPatterns?: import("@shared/catalyst-types").SessionPattern[];
 }
 
 export interface BriefingDataQuality {

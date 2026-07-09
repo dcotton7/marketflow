@@ -23,6 +23,8 @@ Connect index action, theme ranks, rotation deltas, and macro headlines into a c
 - Structured dossier (themes, benchmarks, rotation deltas)
 - Pre-computed story atoms (rule-derived inferences with confidence)
 - Categorized macro news: presidential/policy, geopolitical/world, economic/Fed, defense
+- Active catalyst detectors: tickers/themes with pending delayed reactions from recent news/events
+- Session patterns: multi-day intraday behavior (e.g., AM strong / PM fade occurring 6/10 days)
 
 ## OUTPUT — valid JSON only, no markdown wrapper.
 Every value below MUST be a plain string (not an array or nested object). Use \\n for line breaks inside strings.
@@ -34,6 +36,8 @@ Every value below MUST be a plain string (not an array or nested object). Use \\
   "session_arc": "string — 1-2 paragraphs",
   "macro_context": "string — 2 paragraphs",
   "leaders_summary": "string — brief bullets as one string",
+  "catalyst_watch": "string — 1-2 paragraphs about active catalysts and delayed reaction setups, or empty if none",
+  "session_structure": "string — 1-2 sentences about recent multi-day intraday patterns (AM/PM behavior), or empty if none",
   "watch_list": [{"theme_name": "string", "reason": "string"}],
   "cautions": ["string"]
 }
@@ -44,7 +48,10 @@ Every value below MUST be a plain string (not an array or nested object). Use \\
 3. If macro news is thin, say so — do not fabricate geopolitical events
 4. Distinguish correlation from causation for news links
 5. If market is mixed, explain rotation over direction
-6. Include defense/geopolitical context when risk_off or haven themes lead`;
+6. Include defense/geopolitical context when risk_off or haven themes lead
+7. If catalyst_watch entries exist, reference them — explain why the market may react to these later
+8. If session_structure patterns exist, warn the trader about intraday tendencies (e.g., "Morning pushes have faded in PM 6/10 days — consider tightening stops after lunch")
+9. When combining catalysts + session patterns + rotation, synthesize a forward-looking read — not just a recap`;
 
 export function buildBriefingSynthesisPrompt(
   dossier: ThemeBriefingDossier,
@@ -70,6 +77,23 @@ export function buildBriefingSynthesisPrompt(
     general: ctx.macroNews.filter((n) => n.category === "general").slice(0, 2),
   };
 
+  const catalystWatch = (ctx.activeCatalysts ?? []).slice(0, 6).map((c) => ({
+    subject: c.subject,
+    type: c.catalystType,
+    headline: c.headline.slice(0, 100),
+    firedAt: c.firedAt,
+    decay: c.decayWeight,
+    reaction: c.initialReaction,
+    expected: c.expectedDirection,
+  }));
+
+  const sessionPatternsCompact = (ctx.sessionPatterns ?? []).map((p) => ({
+    pattern: p.pattern,
+    description: p.description,
+    frequency: p.frequency,
+    confidence: p.confidence,
+  }));
+
   return JSON.stringify(
     {
       mode: dossier.mode,
@@ -91,6 +115,8 @@ export function buildBriefingSynthesisPrompt(
       laggards: dossier.laggards.slice(0, 5).map((t) => t.name),
       topMembers: dossier.topMembers.slice(0, 5),
       catalysts: dossier.catalysts.slice(0, 4),
+      catalystWatch,
+      sessionPatterns: sessionPatternsCompact,
       macroNews: macroByCategory,
       dataQuality: {
         warnings: dossier.dataQuality.warnings,

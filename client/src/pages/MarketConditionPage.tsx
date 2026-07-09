@@ -39,7 +39,7 @@ import {
 } from "@/data/mockThemeData";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search, Car, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -306,7 +306,19 @@ export default function MarketConditionPage() {
   const { pageShellStyle } = useSystemSettings();
   const responsive = useResponsiveLayout();
   const [, navigate] = useLocation();
-  const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(null);
+
+  // Read ?theme= from URL for deep-linking from scanner cards
+  const searchString = useSearch();
+  const urlTheme = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    return (params.get("theme") as ThemeId) || null;
+  }, [searchString]);
+
+  const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(urlTheme);
+
+  useEffect(() => {
+    if (urlTheme) setSelectedTheme(urlTheme);
+  }, [urlTheme]);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [lensMode, setLensMode] = useState<LensMode>("flowMap");
   const timeSliceDisabledModes = new Set<LensMode>(["flowMap", "concentration", "accumulation", "race"]);

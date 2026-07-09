@@ -1,0 +1,876 @@
+// ---------------------------------------------------------------------------
+// Discovery Scanner — Signal Producer
+//
+// Sits inside the MC polling loop. After each snapshot refresh, compares
+// the current state to a ring buffer of recent snapshots and emits raw
+// Signal objects for anything noteworthy.
+// ---------------------------------------------------------------------------
+
+import { randomUUID } from "crypto";
+import type { Signal, SignalType, SignalDirection, MarketSession } from "@shared/scanner-types";
+import { DEFAULT_SCANNER_CONFIG, type ScannerConfig } from "@shared/scanner-config";
+import { isDailyBarApiHealthy } from "../data-layer/daily-bar-refresh";
+import { getClusterTickers, type ClusterId } from "../market-condition/universe";
+
+// ── Live config (mutable, updated via admin API) ────────────────────────────
+
+let cfg: ScannerConfig = { ...DEFAULT_SCANNER_CONFIG };
+
+export function getScannerConfig(): ScannerConfig { return cfg; }
+export function setScannerConfig(next: Partial<ScannerConfig>): void {
+  cfg = { ...cfg, ...next };
+}
+
+// ── Snapshot frame (lightweight slice of MC state) ──────────────────────────
+
+export interface TickerFrame {
+  price: number;
+  changePct: number;
+  volume: number;
+  avgVolume14d: number;
+  extensionFrom20dAdr: number;
+  prevClose: number;
+  todayOpen: number;
+  todayHigh: number;
+  todayLow: number;
+  sma20d: number | null;
+  sma50d: number | null;
+  sma200d: number | null;
+  prevDayHigh: number;
+  prevDayLow: number;
+}
+
+export interface ThemeFrame {
+  score: number;
+  acceleration: number;
+  membersUp: number;
+  membersDown: number;
+  memberCount: number;
+}
+
+export interface SnapshotFrame {
+  timestamp: Date;
+  tickers: Map<string, TickerFrame>;
+  themes: Map<string, ThemeFrame>;
+  rai: number;
+  regime: string;
+  spyChangePct: number;
+}
+
+// ── Ring buffer ─────────────────────────────────────────────────────────────
+
+const BUFFER_SIZE = 40; // ~20 minutes at 30s intervals, supports 20-frame lookback with margin
+const ringBuffer: SnapshotFrame[] = [];
+
+export function pushFrame(frame: SnapshotFrame): void {
+  ringBuffer.push(frame);
+  if (ringBuffer.length > BUFFER_SIZE) ringBuffer.shift();
+}
+
+export function getFrame(offset: number): SnapshotFrame | null {
+  const idx = ringBuffer.length - 1 - offset;
+  return idx >= 0 ? ringBuffer[idx]! : null;
+}
+
+export function currentFrame(): SnapshotFrame | null {
+  return ringBuffer.length > 0 ? ringBuffer[ringBuffer.length - 1]! : null;
+}
+
+export function getBufferLength(): number {
+  return ringBuffer.length;
+}
+
+// ── Cooldown tracker ────────────────────────────────────────────────────────
+
+const cooldowns = new Map<string, number>();
+
+function isCoolingDown(key: string, cooldownMs: number): boolean {
+  const lastFired = cooldowns.get(key);
+  if (lastFired && Date.now() - lastFired < cooldownMs) return true;
+  return false;
+}
+
+function markFired(key: string): void {
+  cooldowns.set(key, Date.now());
+}
+
+/** Prune cooldown entries older than 30 minutes to prevent unbounded growth. */
+export function pruneCooldowns(): void {
+  const cutoff = Date.now() - 30 * 60_000;
+  for (const [key, ts] of cooldowns) {
+    if (ts < cutoff) cooldowns.delete(key);
+  }
+}
+
+// ── Signal factory ──────────────────────────────────────────────────────────
+
+function makeSignal(
+  type: SignalType,
+  subjectKind: Signal["subjectKind"],
+  subject: string,
+  magnitude: number,
+  direction: SignalDirection,
+  meta?: Record<string, unknown>
+): Signal {
+  return {
+    id: randomUUID(),
+    type,
+    subjectKind,
+    subject,
+    magnitude,
+    direction,
+    timestamp: new Date(),
+    meta,
+  };
+}
+
+// ── Helper: minutes → ms from live config ───────────────────────────────────
+
+function min2ms(minutes: number): number { return minutes * 60_000; }
+
+// Track pending breakout confirmations (must hold for N frames)
+const pendingBreaks = new Map<string, { level: number; framesAbove: number; direction: "up" | "down"; meta: Record<string, unknown> }>();
+
+// Track recent MA positions for U&R detection (50d + 200d only; 20d uses proximity watch)
+const maPositionHistory = new Map<string, {
+  below200: number; below50: number;
+  frames200: number; frames50: number;
+}>();
+
+const MA_MIN_FRAMES_BELOW = 3; // Must be below for 3+ consecutive frames (~90s) to count
+
+// Track whether ticker was above break level recently (for freshness)
+const recentlyAboveLevel = new Map<string, number>();
+
+// ── Ticker-level detectors ──────────────────────────────────────────────────
+
+function detectVolumeSpikes(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.avgVolume14d <= 0) continue;
+    const ratio = tick.volume / tick.avgVolume14d;
+    if (ratio < cfg.volumeSpikeThreshold) continue;
+
+    const key = `volume_spike:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.volumeSpikeCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("volume_spike", "ticker", symbol, Math.round(ratio * 10) / 10,
+        tick.changePct >= 0 ? "up" : "down",
+        { volumeRatio: ratio, changePct: tick.changePct })
+    );
+  }
+  return signals;
+}
+
+function detectVelocityMoves(current: SnapshotFrame): Signal[] {
+  const prev = getFrame(cfg.velocityWindowFrames);
+  if (!prev) return [];
+
+  const signals: Signal[] = [];
+  for (const [symbol, tick] of current.tickers) {
+    const prevTick = prev.tickers.get(symbol);
+    if (!prevTick || prevTick.price <= 0) continue;
+
+    const pctMove = ((tick.price - prevTick.price) / prevTick.price) * 100;
+    if (Math.abs(pctMove) < cfg.velocityThresholdPct) continue;
+
+    const key = `velocity_move:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.velocityCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("velocity_move", "ticker", symbol,
+        Math.round(Math.abs(pctMove) * 100) / 100,
+        pctMove >= 0 ? "up" : "down",
+        { pctMove: Math.round(pctMove * 100) / 100 })
+    );
+  }
+  return signals;
+}
+
+function detectAdrBlowouts(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+  for (const [symbol, tick] of current.tickers) {
+    const ext = tick.extensionFrom20dAdr;
+    if (Math.abs(ext) < cfg.adrBlowoutThreshold) continue;
+
+    const key = `adr_blowout:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.adrBlowoutCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("adr_blowout", "ticker", symbol,
+        Math.round(Math.abs(ext) * 10) / 10,
+        ext >= 0 ? "up" : "down",
+        { extensionFrom20dAdr: ext })
+    );
+  }
+  return signals;
+}
+
+function detectGaps(current: SnapshotFrame): Signal[] {
+  const prev = getFrame(1);
+  if (prev) return []; // gaps only fire on first frame of session (no prior frame)
+
+  const signals: Signal[] = [];
+  for (const [symbol, tick] of current.tickers) {
+    const gapPct = tick.changePct;
+    if (Math.abs(gapPct) < cfg.gapThresholdPct) continue;
+
+    const key = `gap:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.gapCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("gap", "ticker", symbol,
+        Math.round(Math.abs(gapPct) * 100) / 100,
+        gapPct >= 0 ? "up" : "down",
+        { gapPct: Math.round(gapPct * 100) / 100 })
+    );
+  }
+  return signals;
+}
+
+// ── Theme-level detectors ───────────────────────────────────────────────────
+
+const MIN_ACTIVE_THEME_TICKERS = 4;
+
+function countActiveThemeTickers(themeId: string, current: SnapshotFrame): number {
+  const tickers = getClusterTickers(themeId as ClusterId);
+  let active = 0;
+  for (const sym of tickers) {
+    const tick = current.tickers.get(sym);
+    if (!tick) continue;
+    if (Math.abs(tick.changePct) > 0.01 || (tick.avgVolume14d > 0 && tick.volume / tick.avgVolume14d > 0)) {
+      active++;
+    }
+  }
+  return active;
+}
+
+function detectBreadthShifts(current: SnapshotFrame, session?: MarketSession): Signal[] {
+  const prev = getFrame(cfg.breadthShiftWindowFrames);
+  if (!prev) return [];
+
+  const extendedHours = session === "after_hours" || session === "pre_market";
+  const signals: Signal[] = [];
+  for (const [themeId, theme] of current.themes) {
+    const prevTheme = prev.themes.get(themeId);
+    if (!prevTheme || prevTheme.memberCount === 0 || theme.memberCount === 0) continue;
+
+    if (extendedHours && countActiveThemeTickers(themeId, current) < MIN_ACTIVE_THEME_TICKERS) continue;
+
+    const currRatio = theme.membersUp / theme.memberCount;
+    const prevRatio = prevTheme.membersUp / prevTheme.memberCount;
+    const delta = currRatio - prevRatio;
+    if (Math.abs(delta) < cfg.breadthShiftThreshold) continue;
+
+    const key = `breadth_shift:${themeId}`;
+    if (isCoolingDown(key, min2ms(cfg.breadthShiftCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("breadth_shift", "theme", themeId,
+        Math.round(Math.abs(delta) * 100) / 100,
+        delta >= 0 ? "up" : "down",
+        { currRatio, prevRatio, delta })
+    );
+  }
+  return signals;
+}
+
+function detectThemeAccelerations(current: SnapshotFrame, session?: MarketSession): Signal[] {
+  const prev = getFrame(cfg.breadthShiftWindowFrames);
+  if (!prev) return [];
+
+  const extendedHours = session === "after_hours" || session === "pre_market";
+  const signals: Signal[] = [];
+  for (const [themeId, theme] of current.themes) {
+    const prevTheme = prev.themes.get(themeId);
+    if (!prevTheme) continue;
+
+    if (extendedHours && countActiveThemeTickers(themeId, current) < MIN_ACTIVE_THEME_TICKERS) continue;
+
+    const scoreDelta = theme.score - prevTheme.score;
+    if (Math.abs(scoreDelta) < cfg.themeAccelThreshold) continue;
+
+    const key = `theme_acceleration:${themeId}`;
+    if (isCoolingDown(key, min2ms(cfg.themeAccelCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("theme_acceleration", "theme", themeId,
+        Math.round(Math.abs(scoreDelta) * 10) / 10,
+        scoreDelta >= 0 ? "up" : "down",
+        { scoreDelta, currentScore: theme.score })
+    );
+  }
+  return signals;
+}
+
+// ── Market-level detectors ──────────────────────────────────────────────────
+
+function detectRegimeChange(current: SnapshotFrame): Signal[] {
+  const prev = getFrame(1);
+  if (!prev || prev.regime === current.regime) return [];
+
+  const key = `regime_change:${current.regime}`;
+  if (isCoolingDown(key, 30 * 60_000)) return [];
+
+  markFired(key);
+  return [
+    makeSignal("regime_change", "market", "MARKET", 1, "neutral",
+      { from: prev.regime, to: current.regime })
+  ];
+}
+
+function detectRaiShift(current: SnapshotFrame): Signal[] {
+  const prev = getFrame(cfg.raiShiftWindowFrames);
+  if (!prev) return [];
+
+  const delta = current.rai - prev.rai;
+  if (Math.abs(delta) < cfg.raiShiftThreshold) return [];
+
+  const key = `rai_shift:MARKET`;
+  if (isCoolingDown(key, min2ms(cfg.raiShiftCooldownMin))) return [];
+
+  markFired(key);
+  return [
+    makeSignal("rai_shift", "market", "MARKET",
+      Math.round(Math.abs(delta) * 10) / 10,
+      delta >= 0 ? "up" : "down",
+      { raiDelta: delta, currentRai: current.rai })
+  ];
+}
+
+function detectBroadMoves(current: SnapshotFrame, session?: MarketSession): Signal[] {
+  const prev = getFrame(cfg.breadthShiftWindowFrames);
+  if (!prev) return [];
+
+  const extendedHours = session === "after_hours" || session === "pre_market";
+  let themesDown = 0;
+  let themesUp = 0;
+  for (const [themeId, theme] of current.themes) {
+    const prevTheme = prev.themes.get(themeId);
+    if (!prevTheme) continue;
+    if (extendedHours && countActiveThemeTickers(themeId, current) < MIN_ACTIVE_THEME_TICKERS) continue;
+    const scoreDelta = theme.score - prevTheme.score;
+    if (scoreDelta < -2.0) themesDown++;
+    if (scoreDelta > 2.0) themesUp++;
+  }
+
+  // Mutually exclusive: net direction wins
+  const net = themesUp - themesDown;
+
+  if (net <= -3 && themesDown >= cfg.broadMoveThemeCount) {
+    const key = "broad_weakness:MARKET";
+    if (!isCoolingDown(key, min2ms(cfg.broadMoveCooldownMin))) {
+      markFired(key);
+      return [
+        makeSignal("broad_weakness", "market", "MARKET", themesDown, "down",
+          { themesDown, themesUp, net })
+      ];
+    }
+  }
+
+  if (net >= 3 && themesUp >= cfg.broadMoveThemeCount) {
+    const key = "broad_strength:MARKET";
+    if (!isCoolingDown(key, min2ms(cfg.broadMoveCooldownMin))) {
+      markFired(key);
+      return [
+        makeSignal("broad_strength", "market", "MARKET", themesUp, "up",
+          { themesUp, themesDown, net })
+      ];
+    }
+  }
+
+  return [];
+}
+
+// ── Intraday trade setup detectors ──────────────────────────────────────────
+
+function detectLodBounce(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.todayLow <= 0 || tick.price <= 0) continue;
+
+    const pctAboveLod = ((tick.price - tick.todayLow) / tick.todayLow) * 100;
+    if (pctAboveLod < cfg.lodBounceTier1Pct) continue;
+
+    if (Math.abs(tick.extensionFrom20dAdr) > cfg.lodBounceMaxAtrExt) continue;
+    if (tick.sma200d != null && tick.price < tick.sma200d) continue;
+
+    const tier = pctAboveLod >= cfg.lodBounceTier2Pct ? 2 : 1;
+    const key = `lod_bounce:${symbol}:t${tier}`;
+    if (isCoolingDown(key, min2ms(cfg.lodBounceCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("lod_bounce", "ticker", symbol,
+        Math.round(pctAboveLod * 100) / 100,
+        "up",
+        { pctAboveLod: Math.round(pctAboveLod * 100) / 100, tier, todayLow: tick.todayLow })
+    );
+  }
+  return signals;
+}
+
+function detectMaReclaim(current: SnapshotFrame): Signal[] {
+  if (!isDailyBarApiHealthy()) return [];
+
+  const signals: Signal[] = [];
+  const now = Date.now();
+  const twoDaysMs = 2 * 24 * 60 * 60_000;
+
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0) continue;
+
+    const history = maPositionHistory.get(symbol) ?? {
+      below200: 0, below50: 0,
+      frames200: 0, frames50: 0,
+    };
+
+    if (tick.sma200d != null && tick.price < tick.sma200d) {
+      history.frames200++;
+      if (history.frames200 >= MA_MIN_FRAMES_BELOW) history.below200 = now;
+    } else {
+      history.frames200 = 0;
+    }
+    if (tick.sma50d != null && tick.price < tick.sma50d) {
+      history.frames50++;
+      if (history.frames50 >= MA_MIN_FRAMES_BELOW) history.below50 = now;
+    } else {
+      history.frames50 = 0;
+    }
+    maPositionHistory.set(symbol, history);
+
+    const checks: Array<{ ma: number | null; label: string; lastBelow: number; priority: number; maxExtPct: number }> = [
+      { ma: tick.sma200d, label: "200d", lastBelow: history.below200, priority: 3, maxExtPct: cfg.maReclaim200dMaxExtPct },
+      { ma: tick.sma50d, label: "50d", lastBelow: history.below50, priority: 2, maxExtPct: cfg.maReclaim50dMaxExtPct },
+    ];
+
+    for (const check of checks) {
+      if (check.ma == null || check.lastBelow === 0) continue;
+      if (tick.price <= check.ma) continue;
+      if (now - check.lastBelow > twoDaysMs) continue;
+
+      const extAboveMa = ((tick.price - check.ma) / check.ma) * 100;
+      if (extAboveMa > check.maxExtPct) continue;
+
+      const key = `ur_ma_reclaim:${symbol}:${check.label}`;
+      if (isCoolingDown(key, min2ms(cfg.maReclaimCooldownMin))) continue;
+
+      markFired(key);
+      signals.push(
+        makeSignal("ur_ma_reclaim", "ticker", symbol,
+          check.priority,
+          "up",
+          { maLevel: check.label, maValue: check.ma, price: tick.price, extAboveMaPct: Math.round(extAboveMa * 100) / 100 })
+      );
+      break;
+    }
+  }
+  return signals;
+}
+
+// ── 20d MA Proximity Watch ──────────────────────────────────────────────────
+// Fires when price is within N% of the 20d SMA (above or below).
+// Repeats every 30 min intraday; resets each new trading day.
+
+let lastProximityDate = "";
+
+function detectMaProximity(current: SnapshotFrame): Signal[] {
+  if (!isDailyBarApiHealthy()) return [];
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastProximityDate && lastProximityDate !== today) {
+    for (const [key] of cooldowns) {
+      if (key.startsWith("ma_proximity:")) cooldowns.delete(key);
+    }
+  }
+  lastProximityDate = today;
+
+  const signals: Signal[] = [];
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0 || tick.sma20d == null) continue;
+
+    const distancePct = ((tick.price - tick.sma20d) / tick.sma20d) * 100;
+    if (Math.abs(distancePct) > cfg.maProximityThresholdPct) continue;
+
+    const key = `ma_proximity:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.maProximityCooldownMin))) continue;
+
+    markFired(key);
+    signals.push(
+      makeSignal("ma_proximity", "ticker", symbol,
+        Math.round(Math.abs(distancePct) * 100) / 100,
+        distancePct >= 0 ? "up" : "down",
+        {
+          maLevel: "20d",
+          maValue: tick.sma20d,
+          price: tick.price,
+          distancePct: Math.round(distancePct * 100) / 100,
+          side: distancePct >= 0 ? "above" : "below",
+        })
+    );
+  }
+  return signals;
+}
+
+/**
+ * Check if a ticker was on the other side of a level recently (freshness gate).
+ * Prevents firing for tickers that were already beyond the level when scanner started.
+ */
+function wasRecentlyAbove(key: string): boolean {
+  if (!cfg.breakFreshnessRequired) return true;
+  const ts = recentlyAboveLevel.get(key);
+  if (!ts) return false;
+  // Must have been above within the freshness window
+  const maxAge = cfg.breakFreshnessWindowFrames * 30_000;
+  return Date.now() - ts < maxAge;
+}
+
+function detectPrevDayBreaks(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+  const clearance = cfg.breakClearancePct / 100;
+
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0 || tick.prevDayHigh <= 0 || tick.prevDayLow <= 0) continue;
+
+    // ── Long: breaking above prev day high ──
+    const longKey = `prev_day_high_break:${symbol}`;
+    const longLevel = tick.prevDayHigh * (1 + clearance);
+
+    if (tick.price <= longLevel) {
+      // Ticker is below the break level → record as "recently above" for freshness
+      recentlyAboveLevel.set(longKey, Date.now());
+      pendingBreaks.delete(longKey);
+    } else if (tick.price > longLevel && tick.sma200d != null && tick.price > tick.sma200d) {
+      if (!wasRecentlyAbove(longKey)) { /* skip — was already above when scanner started */ }
+      else {
+        const pending = pendingBreaks.get(longKey);
+        if (pending && pending.direction === "up") {
+          pending.framesAbove++;
+          if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
+            markFired(longKey);
+            pendingBreaks.delete(longKey);
+            signals.push(
+              makeSignal("prev_day_high_break", "ticker", symbol,
+                Math.round(((tick.price - tick.prevDayHigh) / tick.prevDayHigh) * 10000) / 100,
+                "up",
+                { prevDayHigh: tick.prevDayHigh, above200d: true })
+            );
+          }
+        } else if (!isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
+          pendingBreaks.set(longKey, { level: tick.prevDayHigh, framesAbove: 1, direction: "up", meta: {} });
+        }
+      }
+    }
+
+    // ── Short: breaking below prev day low ──
+    const shortKey = `prev_day_low_break:${symbol}`;
+    const shortLevel = tick.prevDayLow * (1 - clearance);
+
+    if (tick.price >= shortLevel) {
+      recentlyAboveLevel.set(shortKey, Date.now());
+      pendingBreaks.delete(shortKey);
+    } else if (tick.price < shortLevel) {
+      if (!wasRecentlyAbove(shortKey)) { /* skip — stale */ }
+      else {
+        const pending = pendingBreaks.get(shortKey);
+        if (pending && pending.direction === "down") {
+          pending.framesAbove++;
+          if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
+            markFired(shortKey);
+            pendingBreaks.delete(shortKey);
+            const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+            const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+            signals.push(
+              makeSignal("prev_day_low_break", "ticker", symbol,
+                Math.round(((tick.prevDayLow - tick.price) / tick.prevDayLow) * 10000) / 100,
+                "down",
+                { prevDayLow: tick.prevDayLow, below200d: below200, below50d: below50, shortPriority: below200 && below50 ? "urgent" : below200 ? "high" : below50 ? "elevated" : "low" })
+            );
+          }
+        } else if (!isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
+          pendingBreaks.set(shortKey, { level: tick.prevDayLow, framesAbove: 1, direction: "down", meta: {} });
+        }
+      }
+    }
+  }
+  return signals;
+}
+
+// 5-day high/low tracking: maintained per-ticker across frames
+const fiveDayHighLow = new Map<string, { high5d: number; low5d: number }>();
+
+export function setFiveDayHighLow(data: Map<string, { high5d: number; low5d: number }>): void {
+  data.forEach((v, k) => fiveDayHighLow.set(k, v));
+}
+
+function detectFiveDayBreaks(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+  const clearance = cfg.breakClearancePct / 100;
+
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0) continue;
+    const levels = fiveDayHighLow.get(symbol);
+    if (!levels) continue;
+
+    // ── Long: breaking above 5-day high ──
+    const longKey = `five_day_high_break:${symbol}`;
+    const longLevel = levels.high5d * (1 + clearance);
+
+    if (tick.price <= longLevel) {
+      recentlyAboveLevel.set(longKey, Date.now());
+      pendingBreaks.delete(longKey);
+    } else if (tick.price > longLevel && tick.sma200d != null && tick.price > tick.sma200d) {
+      if (!wasRecentlyAbove(longKey)) { /* stale */ }
+      else {
+        const pending = pendingBreaks.get(longKey);
+        if (pending && pending.direction === "up") {
+          pending.framesAbove++;
+          if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
+            markFired(longKey);
+            pendingBreaks.delete(longKey);
+            signals.push(
+              makeSignal("five_day_high_break", "ticker", symbol,
+                Math.round(((tick.price - levels.high5d) / levels.high5d) * 10000) / 100,
+                "up",
+                { fiveDayHigh: levels.high5d, above200d: true })
+            );
+          }
+        } else if (!isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
+          pendingBreaks.set(longKey, { level: levels.high5d, framesAbove: 1, direction: "up", meta: {} });
+        }
+      }
+    }
+
+    // ── Short: breaking below 5-day low ──
+    const shortKey = `five_day_low_break:${symbol}`;
+    const shortLevel = levels.low5d * (1 - clearance);
+
+    if (tick.price >= shortLevel) {
+      recentlyAboveLevel.set(shortKey, Date.now());
+      pendingBreaks.delete(shortKey);
+    } else if (tick.price < shortLevel) {
+      if (!wasRecentlyAbove(shortKey)) { /* stale */ }
+      else {
+        const pending = pendingBreaks.get(shortKey);
+        if (pending && pending.direction === "down") {
+          pending.framesAbove++;
+          if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
+            markFired(shortKey);
+            pendingBreaks.delete(shortKey);
+            const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+            const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+            signals.push(
+              makeSignal("five_day_low_break", "ticker", symbol,
+                Math.round(((levels.low5d - tick.price) / levels.low5d) * 10000) / 100,
+                "down",
+                { fiveDayLow: levels.low5d, below200d: below200, below50d: below50, shortPriority: below200 && below50 ? "urgent" : below200 ? "high" : below50 ? "elevated" : "low" })
+            );
+          }
+        } else if (!isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
+          pendingBreaks.set(shortKey, { level: levels.low5d, framesAbove: 1, direction: "down", meta: {} });
+        }
+      }
+    }
+  }
+  return signals;
+}
+
+// ── Short-side detectors ─────────────────────────────────────────────────────
+
+// Track when tickers were last seen above key break levels (for failed-breakout detection)
+const lastAboveBreakLevel = new Map<string, { frame: number; level: number; levelType: "prev_day" | "5day" }>();
+
+function detectFailedBreakout(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+  const clearance = cfg.failedBreakoutReversalPct / 100;
+
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0 || tick.prevDayHigh <= 0) continue;
+
+    const levels: Array<{ level: number; label: string; levelType: "prev_day" | "5day" }> = [
+      { level: tick.prevDayHigh, label: "prev day high", levelType: "prev_day" },
+    ];
+    const fiveDay = fiveDayHighLow.get(symbol);
+    if (fiveDay) levels.push({ level: fiveDay.high5d, label: "5-day high", levelType: "5day" });
+
+    for (const { level, label, levelType } of levels) {
+      const trackKey = `failed_breakout:${symbol}:${levelType}`;
+
+      if (tick.price > level) {
+        lastAboveBreakLevel.set(trackKey, { frame: ringBuffer.length, level, levelType });
+        continue;
+      }
+
+      // Price is now at or below the level — check if it was above recently
+      const lastAbove = lastAboveBreakLevel.get(trackKey);
+      if (!lastAbove) continue;
+
+      const framesAgo = ringBuffer.length - lastAbove.frame;
+      if (framesAgo < cfg.failedBreakoutLookbackMin || framesAgo > cfg.failedBreakoutLookbackMax) continue;
+
+      const reversalPct = ((level - tick.price) / level);
+      if (reversalPct < clearance) continue;
+
+      const key = `failed_breakout:${symbol}`;
+      if (isCoolingDown(key, min2ms(cfg.failedBreakoutCooldownMin))) continue;
+
+      markFired(key);
+      lastAboveBreakLevel.delete(trackKey);
+
+      const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+      const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+      signals.push(
+        makeSignal("failed_breakout", "ticker", symbol,
+          Math.round(reversalPct * 10000) / 100,
+          "down",
+          {
+            failedLevel: level,
+            levelType: label,
+            framesAboveBeforeReversal: framesAgo,
+            reversalPct: Math.round(reversalPct * 10000) / 100,
+            below200d: below200,
+            below50d: below50,
+          })
+      );
+      break; // one signal per ticker per frame
+    }
+  }
+  return signals;
+}
+
+// Track when the HOD was last updated per ticker
+const hodFrameTracker = new Map<string, { hodPrice: number; hodFrame: number }>();
+
+function detectHodFade(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0 || tick.todayHigh <= 0) continue;
+
+    const tracker = hodFrameTracker.get(symbol);
+    if (!tracker || tick.todayHigh > tracker.hodPrice) {
+      hodFrameTracker.set(symbol, { hodPrice: tick.todayHigh, hodFrame: ringBuffer.length });
+      continue;
+    }
+
+    const framesSinceHod = ringBuffer.length - tracker.hodFrame;
+    if (framesSinceHod < cfg.hodFadeMinFramesSinceHod) continue;
+
+    const fadeFromHod = ((tracker.hodPrice - tick.price) / tracker.hodPrice) * 100;
+    if (fadeFromHod < cfg.hodFadeMinPct) continue;
+
+    const key = `hod_fade:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.hodFadeCooldownMin))) continue;
+
+    markFired(key);
+    const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+    const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+    signals.push(
+      makeSignal("hod_fade", "ticker", symbol,
+        Math.round(fadeFromHod * 100) / 100,
+        "down",
+        {
+          hodPrice: tracker.hodPrice,
+          fadeFromHodPct: Math.round(fadeFromHod * 100) / 100,
+          framesSinceHod,
+          below200d: below200,
+          below50d: below50,
+        })
+    );
+  }
+  return signals;
+}
+
+function detectGapDownContinuation(current: SnapshotFrame): Signal[] {
+  const signals: Signal[] = [];
+
+  if (ringBuffer.length < cfg.gapDownContinuationMinFrames) return signals;
+
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.price <= 0 || tick.prevClose <= 0 || tick.todayOpen <= 0) continue;
+
+    const gapPct = ((tick.todayOpen - tick.prevClose) / tick.prevClose) * 100;
+    if (gapPct > -cfg.gapDownContinuationMinGapPct) continue; // must be a gap DOWN
+
+    const fadeBelowOpen = ((tick.todayOpen - tick.price) / tick.todayOpen) * 100;
+    if (fadeBelowOpen < cfg.gapDownContinuationMinFadePct) continue;
+
+    const key = `gap_down_continuation:${symbol}`;
+    if (isCoolingDown(key, min2ms(cfg.gapDownContinuationCooldownMin))) continue;
+
+    markFired(key);
+    const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+    const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+    signals.push(
+      makeSignal("gap_down_continuation", "ticker", symbol,
+        Math.round(Math.abs(gapPct) * 100) / 100,
+        "down",
+        {
+          gapPct: Math.round(gapPct * 100) / 100,
+          fadeBelowOpenPct: Math.round(fadeBelowOpen * 100) / 100,
+          todayOpen: tick.todayOpen,
+          prevClose: tick.prevClose,
+          below200d: below200,
+          below50d: below50,
+        })
+    );
+  }
+  return signals;
+}
+
+// ── Main process function ───────────────────────────────────────────────────
+
+export function processSnapshot(frame: SnapshotFrame, session?: MarketSession): Signal[] {
+  pushFrame(frame);
+
+  if (ringBuffer.length < 2) return [];
+
+  const isPreMarket = session === "pre_market";
+  const isAfterHours = session === "after_hours";
+
+  const signals: Signal[] = [];
+
+  // volume_spike: runs in all sessions
+  signals.push(...detectVolumeSpikes(frame));
+
+  if (isPreMarket) {
+    // Pre-market (4 AM – 9:30 AM): gap + volume_spike only
+    signals.push(...detectGaps(frame));
+  } else if (isAfterHours) {
+    // After hours (4 PM – 8 PM): volume_spike + velocity_move (news gated in index.ts)
+    signals.push(...detectVelocityMoves(frame));
+  } else {
+    // Regular hours: full detector suite
+    signals.push(...detectVelocityMoves(frame));
+    signals.push(...detectAdrBlowouts(frame));
+    signals.push(...detectGaps(frame));
+    signals.push(...detectBreadthShifts(frame, session));
+    signals.push(...detectThemeAccelerations(frame, session));
+    signals.push(...detectRegimeChange(frame));
+    signals.push(...detectRaiShift(frame));
+    signals.push(...detectBroadMoves(frame, session));
+    signals.push(...detectLodBounce(frame));
+    signals.push(...detectMaReclaim(frame));
+    signals.push(...detectMaProximity(frame));
+    signals.push(...detectPrevDayBreaks(frame));
+    signals.push(...detectFiveDayBreaks(frame));
+    signals.push(...detectFailedBreakout(frame));
+    signals.push(...detectHodFade(frame));
+    signals.push(...detectGapDownContinuation(frame));
+  }
+
+  if (ringBuffer.length % 60 === 0) pruneCooldowns();
+
+  if (signals.length > 0) {
+    console.log(`[Scanner] Emitted ${signals.length} signal(s) [${session ?? "unknown"}]: ${signals.map(s => `${s.type}:${s.subject}`).join(", ")}`);
+  }
+
+  return signals;
+}

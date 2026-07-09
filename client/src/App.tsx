@@ -9,6 +9,8 @@ import { SentinelProtectedRoute } from "@/components/SentinelProtectedRoute";
 import { SystemSettingsProvider } from "@/context/SystemSettingsContext";
 import { ThemeEditorProvider } from "@/context/ThemeEditorContext";
 import { WorkspacePaletteProvider } from "@/context/WorkspacePaletteContext";
+import { ScannerProvider } from "@/context/ScannerContext";
+import { DiscoveryFeedPanel } from "@/components/scanner/DiscoveryFeed";
 import NotFound from "@/pages/not-found";
 import SentinelLoginPage from "@/pages/SentinelLoginPage";
 import SentinelDashboardPage from "@/pages/SentinelDashboardPage";
@@ -157,12 +159,15 @@ function App() {
         <SentinelAuthProvider>
           <WorkspacePaletteProvider>
             <SystemSettingsProvider>
-              <ThemeEditorProvider>
-                <TimeframeProvider>
-                  <Toaster />
-                  <Router />
-                </TimeframeProvider>
-              </ThemeEditorProvider>
+              <ScannerProvider>
+                <ThemeEditorProvider>
+                  <TimeframeProvider>
+                    <Toaster />
+                    <Router />
+                    <DiscoveryFeedPanel />
+                  </TimeframeProvider>
+                </ThemeEditorProvider>
+              </ScannerProvider>
             </SystemSettingsProvider>
           </WorkspacePaletteProvider>
         </SentinelAuthProvider>

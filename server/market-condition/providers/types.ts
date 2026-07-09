@@ -19,6 +19,8 @@ export interface TickerSnapshot {
   change: number;       // Price change from prev close
   changePct: number;    // Percent change from prev close
   avgVolume20D?: number; // 20-day average volume (if available)
+  prevDayHigh?: number;  // Previous day's high (for breakout detection)
+  prevDayLow?: number;   // Previous day's low (for breakdown detection)
   timestamp: Date;
 }
 

@@ -23,6 +23,7 @@ interface CacheEntry {
   timestamp: number;
 }
 const stockHistoryCache = new Map<string, CacheEntry>();
+const STOCK_HISTORY_MAX_ENTRIES = 100;
 const INTRADAY_CACHE_TTL_MS = 45 * 1000;  // 45s — under 60s client refetch so each poll gets fresh bars
 const DAILY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes for daily/weekly/monthly
 
@@ -39,6 +40,10 @@ function getCachedHistory(key: string, interval: string): any | null {
 }
 
 function setCachedHistory(key: string, data: any): void {
+  if (stockHistoryCache.size >= STOCK_HISTORY_MAX_ENTRIES) {
+    const oldest = stockHistoryCache.keys().next().value;
+    if (oldest) stockHistoryCache.delete(oldest);
+  }
   stockHistoryCache.set(key, { data, timestamp: Date.now() });
 }
 
@@ -944,6 +949,16 @@ export async function registerRoutes(
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
   await initMarketCondition();
+
+  // Register Discovery Scanner routes and wire into MC polling
+  const scannerRoutes = (await import("./scanner/routes")).default;
+  app.use("/api/scanner", scannerRoutes);
+  const { initScanner } = await import("./scanner/index");
+  initScanner();
+
+  // Start automated daily bar refresh scheduler
+  const { startDailyBarRefreshScheduler } = await import("./data-layer/daily-bar-refresh");
+  startDailyBarRefreshScheduler();
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {

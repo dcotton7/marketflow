@@ -56,6 +56,8 @@ export interface ChartMetrics {
   adr20: number;
   adr20Dollar: number;
   adr20Pct: number;
+  adr14Dollar?: number;
+  adr14Pct?: number;
   extensionFrom50dAdr: number;
   extensionFrom50dPct: number;
   extensionFrom20dAdr?: number;
@@ -420,6 +422,46 @@ export function DualChartGrid({
   const dailySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const intradayChartRef = useRef<IChartApi | null>(null);
   const intradaySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const syncingCrosshairRef = useRef(false);
+
+  const syncCrosshairToTarget = useCallback(
+    (
+      sourceParam: any,
+      targetChart: IChartApi | null,
+      targetSeries: ISeriesApi<"Candlestick"> | null
+    ) => {
+      if (!targetChart || !targetSeries || syncingCrosshairRef.current) return;
+      if (!sourceParam.point || sourceParam.point.x < 0 || sourceParam.point.y < 0) {
+        targetChart.clearCrosshairPosition();
+        return;
+      }
+      const sourceData = sourceParam.seriesData;
+      if (!sourceData || sourceData.size === 0) {
+        targetChart.clearCrosshairPosition();
+        return;
+      }
+      const ohlc = sourceData.values().next().value as any;
+      const price = ohlc?.close ?? ohlc?.value;
+      if (price == null) {
+        targetChart.clearCrosshairPosition();
+        return;
+      }
+      const visibleRange = targetChart.timeScale().getVisibleLogicalRange();
+      if (!visibleRange) return;
+      const lastIdx = Math.floor(visibleRange.to);
+      const coord = targetChart.timeScale().logicalToCoordinate(lastIdx);
+      if (coord == null) return;
+      const time = targetChart.timeScale().coordinateToTime(coord);
+      if (time == null) return;
+      syncingCrosshairRef.current = true;
+      try {
+        targetChart.setCrosshairPosition(price, time, targetSeries);
+      } finally {
+        syncingCrosshairRef.current = false;
+      }
+    },
+    []
+  );
 
   const dailyDrawings = useChartDrawings({
     ticker: symbol || "",
@@ -436,6 +478,22 @@ export function DualChartGrid({
     seriesRef: intradaySeriesRef,
     enabled: !!symbol && !!intradayData,
   });
+
+  const handleDailyCrosshairMove = useCallback(
+    (param: any) => {
+      dailyDrawings.handleMouseMove(param);
+      syncCrosshairToTarget(param, intradayChartRef.current, intradaySeriesRef.current);
+    },
+    [dailyDrawings.handleMouseMove, syncCrosshairToTarget]
+  );
+
+  const handleIntradayCrosshairMove = useCallback(
+    (param: any) => {
+      intradayDrawings.handleMouseMove(param);
+      syncCrosshairToTarget(param, dailyChartRef.current, dailySeriesRef.current);
+    },
+    [intradayDrawings.handleMouseMove, syncCrosshairToTarget]
+  );
 
   const mergedDailyChartProps = useMemo(() => {
     const base = dailyChartProps ?? {};
@@ -705,7 +763,7 @@ export function DualChartGrid({
             }}
             onChartClick={dailyDrawings.handleChartClick}
             onChartMouseDown={dailyDrawings.handleMouseDown}
-            onChartCrosshairMove={dailyDrawings.handleMouseMove}
+            onChartCrosshairMove={handleDailyCrosshairMove}
             onChartMouseUp={dailyDrawings.handleMouseUp}
             {...mergedDailyChartProps}
           />
@@ -854,7 +912,7 @@ export function DualChartGrid({
               }}
               onChartClick={intradayDrawings.handleChartClick}
               onChartMouseDown={intradayDrawings.handleMouseDown}
-              onChartCrosshairMove={intradayDrawings.handleMouseMove}
+              onChartCrosshairMove={handleIntradayCrosshairMove}
               onChartMouseUp={intradayDrawings.handleMouseUp}
               {...mergedIntradayChartProps}
               whiteExtendedHoursCandles={showETH}

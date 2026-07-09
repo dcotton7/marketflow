@@ -116,15 +116,15 @@ router.get("/themes", async (req: Request, res: Response) => {
     const validatedSizeFilter = validSizeFilters.includes(sizeFilter) ? sizeFilter : "ALL";
     const useOpenBaselineForToday = validatedTimeSlice === "TODAY" && rotationBaseline === "open930";
     
-    // Refresh theme metrics when filters require it, then apply TODAY vs historical.
-    // Important: non-ALL sizeFilter must NOT skip getMarketConditionWithTimeSlice — otherwise
-    // Flow Map / MC with e.g. MID + 15M never gets comparisonTime or historical deltas.
+    // Only refresh when data is stale or missing — background polling handles the normal cadence.
+    // Non-ALL sizeFilter or intraday baseline still need a targeted refresh for correct deltas.
+    const currentCondition = getMarketCondition();
+    const dataIsStale = currentCondition.isStale;
     const needsFilteredRefresh = useIntradayBaseline || validatedSizeFilter !== "ALL";
-    const needsAllTodayRefresh = validatedSizeFilter === "ALL" && validatedTimeSlice === "TODAY";
 
     if (needsFilteredRefresh) {
       await refreshSnapshot(useIntradayBaseline, validatedSizeFilter as any);
-    } else if (needsAllTodayRefresh) {
+    } else if (dataIsStale) {
       await refreshSnapshot(useIntradayBaseline, "ALL");
     }
 

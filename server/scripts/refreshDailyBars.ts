@@ -18,13 +18,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { eq, desc, sql } from "drizzle-orm";
 import { historicalBars, tickerMa } from "../../shared/schema";
-import { fetchAlpacaMultiSymbolDailyBars } from "../alpaca";
+import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getConstituents } from "../universe/constituents";
 
 const { Pool } = pg;
 
 const REFRESH_DAYS = 5;
-const BATCH_SIZE = 100; // Multi-symbol API: 100 symbols per request
+const BATCH_SIZE = 15; // Single-symbol API: parallelize in small batches
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -98,37 +98,39 @@ async function main() {
     chunks.push(allTickers.slice(i, i + BATCH_SIZE));
   }
 
-  console.log("PHASE 1: Fetching recent bars from Alpaca (multi-symbol)\n");
+  console.log("PHASE 1: Fetching recent bars from Alpaca (single-symbol)\n");
 
   for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
     const chunk = chunks[chunkIdx];
     console.log(`Batch ${chunkIdx + 1}/${chunks.length}: ${chunk.length} symbols`);
 
-    try {
-      const barsBySymbol = await fetchAlpacaMultiSymbolDailyBars(
-        chunk,
-        startDate,
-        endDate
-      );
+    const results = await Promise.allSettled(
+      chunk.map(async (symbol) => {
+        const bars = await fetchAlpacaIntradayBars(symbol, startDate, endDate, "1Day", true);
+        return { symbol, bars };
+      })
+    );
 
-      for (const symbol of chunk) {
-        const bars = barsBySymbol.get(symbol.toUpperCase()) || [];
-        if (bars.length === 0) {
-          failed.push(symbol);
-          continue;
-        }
+    for (const r of results) {
+      if (r.status !== "fulfilled" || r.value.bars.length === 0) {
+        if (r.status === "fulfilled") failed.push(r.value.symbol);
+        else failed.push("unknown");
+        continue;
+      }
 
-        const values = bars.map((bar) => ({
-          symbol: symbol.toUpperCase(),
-          barDate: bar.date.split("T")[0],
-          open: bar.open.toString(),
-          high: bar.high.toString(),
-          low: bar.low.toString(),
-          close: bar.close.toString(),
-          volume: bar.volume,
-          vwap: null as string | null,
-        }));
+      const { symbol, bars } = r.value;
+      const values = bars.map((bar) => ({
+        symbol: symbol.toUpperCase(),
+        barDate: new Date(bar.date).toISOString().split("T")[0],
+        open: bar.open.toString(),
+        high: bar.high.toString(),
+        low: bar.low.toString(),
+        close: bar.close.toString(),
+        volume: bar.volume,
+        vwap: null as string | null,
+      }));
 
+      try {
         await db
           .insert(historicalBars)
           .values(values)
@@ -142,16 +144,15 @@ async function main() {
               volume: sql`excluded.volume`,
             },
           });
-
         totalBarsUpdated += bars.length;
+      } catch (error: any) {
+        console.error(`  Insert error for ${symbol}: ${error.message}`);
+        failed.push(symbol);
       }
-    } catch (error: any) {
-      console.error(`  Batch ERROR - ${error.message}`);
-      failed.push(...chunk);
     }
 
     if (chunkIdx < chunks.length - 1) {
-      await sleep(500);
+      await sleep(1000);
     }
   }
 

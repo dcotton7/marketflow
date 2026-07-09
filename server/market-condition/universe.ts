@@ -384,7 +384,6 @@ export const CLUSTERS: ClusterDefinition[] = [
     core: ["LITE", "CIEN", "FN", "GLW", "CALX", "VIAV", "AAOI", "COHR"],
     candidates: ["COMM"],
     etfProxies: [
-      { symbol: "FIVG", name: "Defiance Next Gen Connectivity ETF", proxyType: "direct" },
       { symbol: "XLC", name: "Communication Services SPDR", proxyType: "macro" },
       { symbol: "TECS", name: "Direxion Daily Technology Bear 3X", proxyType: "inverse" },
       { symbol: "TECL", name: "Direxion Daily Technology Bull 3X", proxyType: "leveraged" },

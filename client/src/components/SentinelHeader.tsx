@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
@@ -14,6 +14,7 @@ import { playAlertChime } from "@/lib/alert-sound";
 import { SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT } from "@/lib/sentinel-ui-events";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
+import { useScanner } from "@/context/ScannerContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -186,6 +187,34 @@ function supportsInAppSound(deliveryConfig: unknown): boolean {
   return config.soundEnabled === true && Array.isArray(config.channels) && config.channels.includes("in_app");
 }
 
+function ScannerNavButton() {
+  const { panelOpen, setPanelOpen, unreadCount, mode } = useScanner();
+  const responsive = useResponsiveLayout();
+  const { cssVariables } = useSystemSettings();
+
+  return (
+    <Button
+      variant={panelOpen ? "secondary" : "ghost"}
+      size="sm"
+      className={`relative ${responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}`}
+      onClick={() => setPanelOpen(!panelOpen)}
+      data-testid="nav-scanner"
+    >
+      <Radar className={`w-4 h-4 ${mode === "on" ? "text-cyan-400" : mode === "silent" ? "text-amber-400" : "text-slate-500"}`} />
+      {!responsive.isCompact && (
+        <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>
+          Scanner
+        </span>
+      )}
+      {unreadCount > 0 && (
+        <span className="absolute -top-1 -right-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-cyan-500 px-1 text-[9px] font-bold text-white">
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </span>
+      )}
+    </Button>
+  );
+}
+
 export function SentinelHeader({ showSentiment = true, rightContent }: SentinelHeaderProps) {
   const [location, setLocation] = useLocation();
   const { user: authUser, logout } = useSentinelAuth();
@@ -263,10 +292,10 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
     <WatchlistModal open={watchlistModalOpen} onOpenChange={setWatchlistModalOpen} />
     <AlertCenterDialog open={alertCenterOpen} onOpenChange={setAlertCenterOpen} />
     <div
-      className={`flex items-center justify-between flex-wrap border-b ${responsive.isCompact ? "gap-1 px-2 py-0.5" : "gap-4 px-4 py-3"}`}
+      className={`flex items-center justify-between border-b overflow-hidden ${responsive.isCompact ? "gap-1 px-2 py-0.5" : "gap-4 px-4 py-3"}`}
       style={{ backgroundColor: cssVariables.headerBg }}
     >
-      <div className={`flex items-center ${responsive.isCompact ? "gap-1" : "gap-4"}`}>
+      <div className={`flex items-center min-w-0 ${responsive.isCompact ? "gap-1" : "gap-4"}`}>
         <Link href="/sentinel">
           <div
             className="flex items-center gap-1 cursor-pointer hover-elevate rounded-md px-0.5 py-0.5"
@@ -333,6 +362,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             <Bell className="w-4 h-4" />
             {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Alerts</span>}
           </Button>
+          <ScannerNavButton />
 
           {/* Secondary nav — visible on wide screens, collapsed into dropdown on compact */}
           {!responsive.collapseNav ? (
@@ -475,7 +505,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
         {!responsive.collapseNav && <MarketTimeDisplay />}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 shrink-0">
       {showSentiment && (
         <div className="flex items-center gap-4" data-testid="container-market-sentiment">
           {isLoading ? (

@@ -684,14 +684,16 @@ export function FlowMapPanel({
 
     if (!initialThemeSelectDoneRef.current) {
       initialThemeSelectDoneRef.current = true;
-      setHeaderSelection({ axis: "row", themeId: topRow });
+      const initialTheme = selectedTheme && orderedThemes.includes(selectedTheme)
+        ? selectedTheme
+        : topRow;
+      setHeaderSelection({ axis: "row", themeId: initialTheme });
       setSelectedRoute(null);
-      if (selectedTheme !== topRow) onThemeSelect(topRow);
+      if (selectedTheme !== initialTheme) onThemeSelect(initialTheme);
       return;
     }
 
     const themeInList = !!(selectedTheme && orderedThemes.includes(selectedTheme));
-    const rowHighlighted = !!(selectedRow && orderedThemes.includes(selectedRow));
 
     if (!themeInList) {
       setHeaderSelection({ axis: "row", themeId: topRow });
@@ -700,8 +702,9 @@ export function FlowMapPanel({
       return;
     }
 
-    if (!rowHighlighted && !selectedRoute && !selectedCol) {
+    if (selectedRow !== selectedTheme) {
       setHeaderSelection({ axis: "row", themeId: selectedTheme });
+      setSelectedRoute(null);
     }
   }, [
     isLoading,

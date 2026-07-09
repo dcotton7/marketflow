@@ -84,9 +84,24 @@ async function loadDailyBarsForSymbols(
     barsBySymbol.set(bar.symbol, existing);
   }
 
+  const MAX_STALE_DAYS = 5;
+  let staleSkipCount = 0;
+
   for (const symbol of upperSymbols) {
     const symbolBars = barsBySymbol.get(symbol) || [];
     if (symbolBars.length < MIN_BARS_FOR_SESSION_MA) continue;
+
+    // Reject stale data — if newest DB bar is more than MAX_STALE_DAYS old,
+    // the MA would be garbage (averaging today's price with month-old closes).
+    const mostRecentDbDate = symbolBars[0]?.barDate;
+    if (mostRecentDbDate) {
+      const dbDate = new Date(mostRecentDbDate + "T00:00:00Z");
+      const ageDays = (Date.now() - dbDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > MAX_STALE_DAYS) {
+        staleSkipCount++;
+        continue;
+      }
+    }
 
     const candles: DailyBar[] = symbolBars.slice(0, days + 5).map((b) => ({
       date: b.barDate,
@@ -100,7 +115,6 @@ async function loadDailyBarsForSymbols(
 
     const snapshot = snapshots.get(symbol);
     if (snapshot && snapshot.open > 0) {
-      const mostRecentDbDate = symbolBars[0]?.barDate;
       if (!mostRecentDbDate || today > mostRecentDbDate) {
         candles.unshift({
           date: today,
@@ -125,6 +139,10 @@ async function loadDailyBarsForSymbols(
     }
 
     result.set(symbol, candles.slice(0, days));
+  }
+
+  if (staleSkipCount > 0) {
+    console.warn(`[SessionMA] Skipped ${staleSkipCount} symbols with stale DB data (>${MAX_STALE_DAYS} days old). Run refreshDailyBars.ts to update.`);
   }
 
   return result;

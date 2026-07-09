@@ -414,7 +414,7 @@ export function SetupInfoPanel({
             className="flex items-center gap-2 text-left text-muted-foreground hover:text-slate-200 transition-colors min-w-0 flex-1"
             aria-expanded={!panelCollapsed}
           >
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-sm font-semibold uppercase tracking-wide text-sky-400">
               Setup Info
             </span>
             {enrichResult && !enriching ? (

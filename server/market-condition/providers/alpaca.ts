@@ -414,10 +414,12 @@ export class AlpacaProvider implements MarketDataProvider {
       high: minuteBar?.h || dailyBar?.h || price,
       low: minuteBar?.l || dailyBar?.l || price,
       volume: minuteBar?.v || dailyBar?.v || 0,
-      prevDayVolume: prevBar?.v || 0,  // Previous full session volume for D-Close split
+      prevDayVolume: prevBar?.v || 0,
       vwap: minuteBar?.vw || dailyBar?.vw || price,
       change,
       changePct,
+      prevDayHigh: prevBar?.h || 0,
+      prevDayLow: prevBar?.l || 0,
       timestamp: new Date(trade?.t || quote?.t || minuteBar?.t || dailyBar?.t || Date.now()),
     };
   }

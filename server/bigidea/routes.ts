@@ -27,6 +27,7 @@ function getOpenAI(): OpenAI | null {
 }
 
 const ohlcvCache = new Map<string, { data: CandleData[]; timestamp: number }>();
+const OHLCV_MAX_ENTRIES = 80;
 const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
 
@@ -308,6 +309,10 @@ async function fetchOHLCV(symbol: string, timeframe: string = "daily"): Promise<
         .reverse();
     }
 
+    if (ohlcvCache.size >= OHLCV_MAX_ENTRIES) {
+      const oldest = ohlcvCache.keys().next().value;
+      if (oldest) ohlcvCache.delete(oldest);
+    }
     ohlcvCache.set(cacheKey, { data: candles, timestamp: Date.now() });
     return candles;
   } catch (err) {

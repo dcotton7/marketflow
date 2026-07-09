@@ -126,7 +126,7 @@ function FooterInfoLine({
   valueClassName,
   testId,
 }: {
-  label: string;
+  label: ReactNode;
   value: ReactNode;
   valueClassName?: string;
   testId?: string;
@@ -148,6 +148,10 @@ function FooterColumn({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
+}
+
+function FooterDivider() {
+  return <hr className="w-full border-t border-slate-500/60 my-0" />;
 }
 
 
@@ -215,6 +219,59 @@ export function ChartInfoFooter({
         ? formatVolumeShort(todayVol)
         : "N/A";
 
+  const amGapPct = (() => {
+    const candles = dailyData?.candles;
+    if (!candles || candles.length < 2) return null;
+    const today = candles[candles.length - 1]!;
+    const yesterday = candles[candles.length - 2]!;
+    if (!yesterday.close || yesterday.close === 0) return null;
+    return ((today.open - yesterday.close) / yesterday.close) * 100;
+  })();
+
+  const { pctFromLOD, pctFromHOD } = (() => {
+    const candles = dailyData?.candles;
+    if (!candles?.length || !chartMetrics?.currentPrice) return { pctFromLOD: null, pctFromHOD: null };
+    const today = candles[candles.length - 1]!;
+    const price = chartMetrics.currentPrice;
+    const lod = today.low;
+    const hod = today.high;
+    return {
+      pctFromLOD: lod > 0 ? ((price - lod) / lod) * 100 : null,
+      pctFromHOD: hod > 0 ? ((price - hod) / hod) * 100 : null,
+    };
+  })();
+
+  const rthPct = (() => {
+    const candles = dailyData?.candles;
+    if (!candles?.length || !chartMetrics?.currentPrice) return null;
+    const today = candles[candles.length - 1]!;
+    const todayOpen = today.open;
+    if (!todayOpen || todayOpen === 0) return null;
+    return ((chartMetrics.currentPrice - todayOpen) / todayOpen) * 100;
+  })();
+
+  const ethPct = (() => {
+    if (!chartMetrics?.currentPrice) return null;
+    // Find regular session close from intraday candles (last candle at or before 4:00 PM ET)
+    const iCandles = intradayData?.candles;
+    if (!iCandles?.length) return null;
+    let rthClose: number | null = null;
+    for (let i = iCandles.length - 1; i >= 0; i--) {
+      const c = iCandles[i]!;
+      const d = new Date(c.timestamp * 1000);
+      const etH = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }), 10);
+      const etM = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }), 10);
+      if (etH < 16 || (etH === 16 && etM === 0)) {
+        rthClose = c.close;
+        break;
+      }
+    }
+    if (!rthClose || rthClose === 0) return null;
+    const pct = ((chartMetrics.currentPrice - rthClose) / rthClose) * 100;
+    if (Math.abs(pct) < 0.005) return null;
+    return pct;
+  })();
+
   const handleSectorClick = () => {
 
     if (chartMetrics?.sectorEtf && chartMetrics.sectorEtf !== "N/A" && onNavigateToTicker) {
@@ -267,7 +324,7 @@ export function ChartInfoFooter({
           data-testid={`${pid}box-daily-metrics`}
         >
           <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
-            <span className="text-[0.65em] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-sm font-semibold uppercase tracking-wide text-sky-400">
               Daily metrics
             </span>
             <ChartFooterFontSizeControl
@@ -277,7 +334,7 @@ export function ChartInfoFooter({
             />
           </div>
           {chartMetrics ? (
-            <div className="grid w-full min-h-0 flex-1 grid-cols-4 items-start gap-x-3 overflow-y-auto overflow-x-hidden pr-0.5">
+            <div className="grid w-full min-h-0 flex-1 grid-cols-3 items-start gap-x-3 overflow-y-auto overflow-x-hidden pr-0.5">
               <FooterColumn>
                 <FooterInfoLine
                   label="14d Avg Vol"
@@ -289,42 +346,86 @@ export function ChartInfoFooter({
                   value={volTodayLabel}
                   testId={`${pid}metric-vol-today`}
                 />
+                <FooterDivider />
                 <FooterInfoLine
-                  label="ADR×50d SMA"
+                  label="ADR (14d avg)"
+                  value={
+                    (chartMetrics.adr14Pct ?? chartMetrics.adr20Pct) != null
+                      ? `${(chartMetrics.adr14Pct ?? chartMetrics.adr20Pct)?.toFixed(2)}%  ·  $${(chartMetrics.adr14Dollar ?? chartMetrics.adr20Dollar)?.toFixed(2)}`
+                      : "N/A"
+                  }
+                  testId={`${pid}metric-adr14`}
+                />
+                <FooterInfoLine
+                  label="ADRx50d"
                   value={
                     chartMetrics.extensionFrom50dAdr != null
                       ? `${chartMetrics.extensionFrom50dAdr >= 0 ? "+" : ""}${chartMetrics.extensionFrom50dAdr}`
                       : "N/A"
                   }
                   valueClassName={
-                    (chartMetrics.extensionFrom50dAdr ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"
+                    chartMetrics.extensionFrom50dAdr == null ? undefined
+                    : chartMetrics.extensionFrom50dAdr < 0 ? "text-rs-red"
+                    : chartMetrics.extensionFrom50dAdr <= 3 ? "text-rs-green"
+                    : "text-rs-yellow"
                   }
                   testId={`${pid}metric-50d-adr`}
                 />
                 <FooterInfoLine
-                  label="ADR×20d SMA"
+                  label="ADRx20d"
                   value={
                     chartMetrics.extensionFrom20dAdr != null
                       ? `${chartMetrics.extensionFrom20dAdr >= 0 ? "+" : ""}${chartMetrics.extensionFrom20dAdr}`
                       : "N/A"
                   }
                   valueClassName={
-                    (chartMetrics.extensionFrom20dAdr ?? 0) >= 0 ? "text-rs-green" : "text-rs-red"
+                    chartMetrics.extensionFrom20dAdr == null ? undefined
+                    : (chartMetrics.extensionFrom20dAdr < -2 || chartMetrics.extensionFrom20dAdr > 10) ? "text-rs-red"
+                    : "text-rs-green"
                   }
                   testId={`${pid}metric-20d-adr`}
                 />
-              </FooterColumn>
-
-              <FooterColumn>
+                <FooterDivider />
                 <FooterInfoLine
-                  label="ADR(20) %"
-                  value={`${chartMetrics.adr20Pct?.toFixed(2) ?? "N/A"}%`}
-                  testId={`${pid}metric-adr20-pct`}
+                  label={<>RTH<span title="% change from pre-market high to close (Regular Trading Hours)" className="cursor-help">*</span></>}
+                  value={
+                    rthPct != null
+                      ? `${rthPct >= 0 ? "+" : ""}${rthPct.toFixed(2)}%`
+                      : "—"
+                  }
+                  valueClassName={rthPct != null ? (rthPct >= 0 ? "text-rs-green" : "text-rs-red") : undefined}
+                  testId={`${pid}metric-rth-pct`}
                 />
                 <FooterInfoLine
-                  label="ADR(20) $"
-                  value={`$${chartMetrics.adr20Dollar?.toFixed(2) ?? chartMetrics.adr20 ?? "N/A"}`}
-                  testId={`${pid}metric-adr20-dollar`}
+                  label={<>ETH<span title="% change since market close (Extended Trading Hours)" className="cursor-help">*</span></>}
+                  value={
+                    ethPct != null
+                      ? `${ethPct >= 0 ? "+" : ""}${ethPct.toFixed(2)}%`
+                      : "—"
+                  }
+                  valueClassName={ethPct != null ? (ethPct >= 0 ? "text-rs-green" : "text-rs-red") : undefined}
+                  testId={`${pid}metric-eth-pct`}
+                />
+                <FooterDivider />
+                <FooterInfoLine
+                  label="% from LOD"
+                  value={
+                    pctFromLOD != null
+                      ? `+${pctFromLOD.toFixed(2)}%`
+                      : "N/A"
+                  }
+                  valueClassName={pctFromLOD != null ? "text-rs-green" : undefined}
+                  testId={`${pid}metric-pct-lod`}
+                />
+                <FooterInfoLine
+                  label="% from HOD"
+                  value={
+                    pctFromHOD != null
+                      ? `${pctFromHOD >= 0 ? "+" : ""}${pctFromHOD.toFixed(2)}%`
+                      : "N/A"
+                  }
+                  valueClassName={pctFromHOD != null && pctFromHOD < 0 ? "text-rs-red" : pctFromHOD != null ? "text-rs-green" : undefined}
+                  testId={`${pid}metric-pct-hod`}
                 />
               </FooterColumn>
 
@@ -348,6 +449,21 @@ export function ChartInfoFooter({
                       : undefined
                   }
                   testId={`${pid}metric-next-earnings`}
+                />
+                <FooterDivider />
+                <FooterInfoLine
+                  label="AM Gap"
+                  value={
+                    amGapPct != null
+                      ? `${amGapPct >= 0 ? "+" : ""}${amGapPct.toFixed(2)}%`
+                      : "N/A"
+                  }
+                  valueClassName={
+                    amGapPct == null ? undefined
+                    : amGapPct >= 0 ? "text-rs-green"
+                    : "text-rs-red"
+                  }
+                  testId={`${pid}metric-am-gap`}
                 />
               </FooterColumn>
 

@@ -120,6 +120,22 @@ const HOURLY_SNAPSHOT_RETENTION_DAYS = Number.isFinite(Number(process.env.HOURLY
   : 400;
 
 // =============================================================================
+// Post-refresh callback (used by Discovery Scanner)
+// =============================================================================
+
+type PostRefreshCallback = (
+  themeMetrics: ThemeMetrics[],
+  snapshots: Map<string, any>,
+  spyBenchmark: any
+) => void;
+
+let postRefreshCallback: PostRefreshCallback | null = null;
+
+export function registerPostRefreshCallback(cb: PostRefreshCallback): void {
+  postRefreshCallback = cb;
+}
+
+// =============================================================================
 // Core Functions
 // =============================================================================
 
@@ -274,6 +290,15 @@ export async function refreshSnapshot(
     const elapsed = Date.now() - startTime;
     console.log(`[MC-Snapshot] Refresh complete in ${elapsed}ms - ${snapshots.size} tickers, ${state.themeMetrics.length} themes (sizeFilter=${sizeFilter})`);
     
+    // Notify scanner (non-blocking — errors here should not break MC polling)
+    if (postRefreshCallback) {
+      try {
+        postRefreshCallback(state.themeMetrics, state.snapshots, state.spyBenchmark);
+      } catch (err) {
+        console.warn("[MC-Snapshot] Post-refresh callback error:", err);
+      }
+    }
+
     // Save historical snapshots if needed
     await saveHistoricalSnapshotsIfNeeded(state.themeMetrics);
     
@@ -640,6 +665,14 @@ export function getMaMetadata(): { maAsOf: string | null; maMode: MaMode } {
     maAsOf: state.maAsOf?.toISOString() ?? null,
     maMode: state.maMode,
   };
+}
+
+export function getMaDataForScanner(): Map<string, { sma20d: number | null; sma50d: number | null; sma200d: number | null }> {
+  return state.maData;
+}
+
+export function getRawSnapshotsForScanner(): Map<string, any> {
+  return state.snapshots;
 }
 
 export function getMarketCondition(): MarketConditionSnapshot {
