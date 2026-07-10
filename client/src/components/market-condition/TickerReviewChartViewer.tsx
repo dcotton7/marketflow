@@ -42,6 +42,10 @@ export interface TickerReviewChartViewerProps {
 
   themeRank?: number;
 
+  themeName?: string | null;
+
+  totalThemes?: number | null;
+
   themeBreakdownWatch?: import("@shared/theme-breakdown-watch").BreakdownWatchAssessment | null;
 
   rowBySymbol?: Map<string, TickerReviewResultRow>;
@@ -73,6 +77,10 @@ export function TickerReviewChartViewer({
   themeId,
 
   themeRank,
+
+  themeName,
+
+  totalThemes,
 
   themeBreakdownWatch,
 
@@ -493,6 +501,10 @@ export function TickerReviewChartViewer({
           themeId={themeId}
 
           themeRank={themeRank}
+
+          themeName={themeName}
+
+          totalThemes={totalThemes}
 
           themeBreakdownWatch={themeBreakdownWatch}
 

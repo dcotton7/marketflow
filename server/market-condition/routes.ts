@@ -14,7 +14,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
-import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice } from "./universe";
+import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getTickerPrimaryCluster, getClusterById } from "./universe";
 import { db } from "../db";
 import { subthemes, themes, tickers as tickerTable, tickerSliceMemberships, tnnSettings } from "@shared/schema";
 import {
@@ -207,6 +207,39 @@ const TRADING_DAYS_BACK: Partial<Record<TimeSlice, number>> = {
   "1W": 5,
   "1M": 21,
 };
+
+/**
+ * GET /api/market-condition/ticker-theme/:symbol
+ * Returns the theme rank info for a given ticker symbol from the latest snapshot.
+ */
+router.get("/ticker-theme/:symbol", async (req: Request, res: Response) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const clusterId = getTickerPrimaryCluster(symbol);
+    if (!clusterId) {
+      return res.json({ themeId: null, themeName: null, rank: null, totalThemes: null });
+    }
+    const cluster = getClusterById(clusterId);
+    const mc = getMarketCondition();
+    if (!mc?.themes?.length) {
+      return res.json({ themeId: clusterId, themeName: cluster?.name ?? clusterId, rank: null, totalThemes: null });
+    }
+    const sorted = [...mc.themes].sort((a, b) => b.score - a.score);
+    const idx = sorted.findIndex((t) => t.id === clusterId);
+    const rank = idx >= 0 ? idx + 1 : null;
+    return res.json({
+      themeId: clusterId,
+      themeName: cluster?.name ?? clusterId,
+      rank,
+      totalThemes: sorted.length,
+      score: sorted[idx]?.score ?? null,
+      medianPct: sorted[idx]?.medianPct ?? null,
+    });
+  } catch (error) {
+    console.error("[MC-API] Failed to get ticker theme:", error);
+    res.status(500).json({ error: "Failed to lookup ticker theme" });
+  }
+});
 
 /**
  * GET /api/market-condition/themes/:id/members

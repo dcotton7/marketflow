@@ -73,6 +73,7 @@ export interface ChartMetrics {
   sectorEtfChange: number;
   nextEarningsDate: string;
   nextEarningsDays: number;
+  earningsTime?: string | null;
   marketCap: number;
   pe: number | null;
   beta: number | null;
@@ -136,6 +137,8 @@ interface DualChartGridProps {
   setupInfo?: ChartSetupInfo | null;
   themeId?: string | null;
   themeRank?: number | null;
+  themeName?: string | null;
+  totalThemes?: number | null;
   themeBreakdownWatch?: import("@shared/theme-breakdown-watch").BreakdownWatchAssessment | null;
   intradayTimeframe: string;
   onIntradayTimeframeChange: (tf: string) => void;
@@ -344,6 +347,8 @@ export function DualChartGrid({
   setupInfo,
   themeId,
   themeRank,
+  themeName,
+  totalThemes,
   themeBreakdownWatch,
   intradayTimeframe,
   onIntradayTimeframeChange,
@@ -457,7 +462,8 @@ export function DualChartGrid({
       try {
         targetChart.setCrosshairPosition(price, time, targetSeries);
       } finally {
-        syncingCrosshairRef.current = false;
+        // Keep the guard up briefly to block the re-entrant callback
+        setTimeout(() => { syncingCrosshairRef.current = false; }, 0);
       }
     },
     []
@@ -948,6 +954,8 @@ export function DualChartGrid({
       intradayTimeframe={intradayTimeframe}
       themeId={themeId}
       themeRank={themeRank}
+      themeName={themeName}
+      totalThemes={totalThemes}
       themeBreakdownWatch={themeBreakdownWatch}
       chartsReady={enrichChartsReady}
       testIdPrefix={testIdPrefix}

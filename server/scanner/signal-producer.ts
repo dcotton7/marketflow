@@ -10,7 +10,8 @@ import { randomUUID } from "crypto";
 import type { Signal, SignalType, SignalDirection, MarketSession } from "@shared/scanner-types";
 import { DEFAULT_SCANNER_CONFIG, type ScannerConfig } from "@shared/scanner-config";
 import { isDailyBarApiHealthy } from "../data-layer/daily-bar-refresh";
-import { getClusterTickers, type ClusterId } from "../market-condition/universe";
+import { getClusterTickers, CLUSTERS, type ClusterId } from "../market-condition/universe";
+import { getCachedEarningsData } from "../fundamentals";
 
 // ── Live config (mutable, updated via admin API) ────────────────────────────
 
@@ -210,18 +211,22 @@ function detectAdrBlowouts(current: SnapshotFrame): Signal[] {
   return signals;
 }
 
+const gapFiredForSession = new Map<string, string>();
+
 function detectGaps(current: SnapshotFrame): Signal[] {
-  const prev = getFrame(1);
-  if (prev) return []; // gaps only fire on first frame of session (no prior frame)
+  const today = new Date().toISOString().slice(0, 10);
 
   const signals: Signal[] = [];
   for (const [symbol, tick] of current.tickers) {
     const gapPct = tick.changePct;
     if (Math.abs(gapPct) < cfg.gapThresholdPct) continue;
 
+    if (gapFiredForSession.get(symbol) === today) continue;
+
     const key = `gap:${symbol}`;
     if (isCoolingDown(key, min2ms(cfg.gapCooldownMin))) continue;
 
+    gapFiredForSession.set(symbol, today);
     markFired(key);
     signals.push(
       makeSignal("gap", "ticker", symbol,
@@ -234,6 +239,56 @@ function detectGaps(current: SnapshotFrame): Signal[] {
 }
 
 // ── Theme-level detectors ───────────────────────────────────────────────────
+
+interface TopMover {
+  symbol: string;
+  changePct: number;
+  volumeRatio: number;
+}
+
+// Inverse/leveraged ETFs move opposite to their sector — exclude from theme mover lists
+const INVERSE_LEVERAGED_ETFS: Set<string> = (() => {
+  const s = new Set<string>();
+  for (const c of CLUSTERS) {
+    for (const etf of c.etfProxies) {
+      if (etf.proxyType === "inverse" || etf.proxyType === "leveraged") {
+        s.add(etf.symbol.toUpperCase());
+      }
+    }
+  }
+  return s;
+})();
+
+function getTopMovers(
+  themeId: string,
+  current: SnapshotFrame,
+  direction: SignalDirection,
+  limit = 5,
+): TopMover[] {
+  const members = getClusterTickers(themeId as ClusterId);
+  const movers: TopMover[] = [];
+  for (const sym of members) {
+    if (INVERSE_LEVERAGED_ETFS.has(sym)) continue;
+    const tick = current.tickers.get(sym);
+    if (!tick) continue;
+    const volRatio = tick.avgVolume14d > 0 ? tick.volume / tick.avgVolume14d : 0;
+    movers.push({
+      symbol: sym,
+      changePct: Math.round(tick.changePct * 100) / 100,
+      volumeRatio: Math.round(volRatio * 10) / 10,
+    });
+  }
+
+  if (direction === "up") {
+    movers.sort((a, b) => b.changePct - a.changePct);
+  } else if (direction === "down") {
+    movers.sort((a, b) => a.changePct - b.changePct);
+  } else {
+    movers.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+  }
+
+  return movers.slice(0, limit);
+}
 
 const MIN_ACTIVE_THEME_TICKERS = 4;
 
@@ -271,11 +326,13 @@ function detectBreadthShifts(current: SnapshotFrame, session?: MarketSession): S
     if (isCoolingDown(key, min2ms(cfg.breadthShiftCooldownMin))) continue;
 
     markFired(key);
+    const dir: SignalDirection = delta >= 0 ? "up" : "down";
+    const topMovers = getTopMovers(themeId, current, dir);
     signals.push(
       makeSignal("breadth_shift", "theme", themeId,
         Math.round(Math.abs(delta) * 100) / 100,
-        delta >= 0 ? "up" : "down",
-        { currRatio, prevRatio, delta })
+        dir,
+        { currRatio, prevRatio, delta, topMovers })
     );
   }
   return signals;
@@ -300,11 +357,13 @@ function detectThemeAccelerations(current: SnapshotFrame, session?: MarketSessio
     if (isCoolingDown(key, min2ms(cfg.themeAccelCooldownMin))) continue;
 
     markFired(key);
+    const dir: SignalDirection = scoreDelta >= 0 ? "up" : "down";
+    const topMovers = getTopMovers(themeId, current, dir);
     signals.push(
       makeSignal("theme_acceleration", "theme", themeId,
         Math.round(Math.abs(scoreDelta) * 10) / 10,
-        scoreDelta >= 0 ? "up" : "down",
-        { scoreDelta, currentScore: theme.score })
+        dir,
+        { scoreDelta, currentScore: theme.score, topMovers })
     );
   }
   return signals;
@@ -825,29 +884,137 @@ function detectGapDownContinuation(current: SnapshotFrame): Signal[] {
   return signals;
 }
 
+// ── Post-Earnings Reaction detector ─────────────────────────────────────────
+
+const earningsReactionFiredToday = new Map<string, string>();
+
+async function detectPostEarningsReaction(current: SnapshotFrame): Promise<Signal[]> {
+  const signals: Signal[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+
+  for (const [symbol, tick] of current.tickers) {
+    if (earningsReactionFiredToday.get(symbol) === today) continue;
+    if (Math.abs(tick.changePct) < 3.0) continue;
+
+    const cached = await getCachedEarningsData(symbol);
+    if (!cached?.lastEarningsDate) continue;
+    if (cached.lastEarningsDate !== today && cached.lastEarningsDate !== yesterday) continue;
+
+    const key = `earnings_reaction:${symbol}`;
+    if (isCoolingDown(key, 24 * 60 * 60_000)) continue;
+
+    earningsReactionFiredToday.set(symbol, today);
+    markFired(key);
+
+    const epsActual = cached.epsActual;
+    const epsEstimate = cached.epsEstimate;
+    let epsSurprisePct: number | null = null;
+    if (epsActual != null && epsEstimate != null && epsEstimate !== 0) {
+      epsSurprisePct = Math.round(((epsActual - epsEstimate) / Math.abs(epsEstimate)) * 100);
+    }
+    const revActual = cached.revenueActual;
+    const revEstimate = cached.revenueEstimate;
+    let revSurprisePct: number | null = null;
+    if (revActual != null && revEstimate != null && revEstimate !== 0) {
+      revSurprisePct = Math.round(((revActual - revEstimate) / Math.abs(revEstimate)) * 100);
+    }
+
+    signals.push(
+      makeSignal("earnings_reaction", "ticker", symbol,
+        Math.round(Math.abs(tick.changePct) * 100) / 100,
+        tick.changePct >= 0 ? "up" : "down",
+        {
+          gapPct: Math.round(tick.changePct * 100) / 100,
+          epsActual, epsEstimate, epsSurprisePct,
+          revenueActual: revActual, revenueEstimate: revEstimate, revenueSurprisePct: revSurprisePct,
+          earningsTime: cached.earningsTime,
+        })
+    );
+  }
+  return signals;
+}
+
+// ── Theme Earnings Density detector ─────────────────────────────────────────
+
+const earningsDensityFiredToday = new Map<string, string>();
+
+async function detectThemeEarningsDensity(current: SnapshotFrame): Promise<Signal[]> {
+  const signals: Signal[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().slice(0, 10);
+  const fiveTradingDaysMs = 7 * 24 * 60 * 60_000; // ~5 trading days ≈ 7 calendar days
+
+  for (const cluster of CLUSTERS) {
+    if (earningsDensityFiredToday.get(cluster.id) === todayStr) continue;
+
+    const memberSymbols = getClusterTickers(cluster.id);
+    const reportingTickers: string[] = [];
+
+    for (const sym of memberSymbols) {
+      const cached = await getCachedEarningsData(sym);
+      if (!cached?.nextEarningsDate || cached.nextEarningsDate === "N/A") continue;
+      const earningsDate = new Date(cached.nextEarningsDate);
+      const daysUntil = (earningsDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysUntil >= 0 && daysUntil <= 5) {
+        reportingTickers.push(sym);
+      }
+    }
+
+    if (reportingTickers.length >= 3) {
+      const key = `theme_earnings_density:${cluster.id}`;
+      if (isCoolingDown(key, 24 * 60 * 60_000)) continue;
+
+      earningsDensityFiredToday.set(cluster.id, todayStr);
+      markFired(key);
+
+      signals.push(
+        makeSignal("theme_earnings_density", "theme", cluster.id,
+          reportingTickers.length,
+          "neutral",
+          { reportingTickers, count: reportingTickers.length })
+      );
+    }
+  }
+  return signals;
+}
+
 // ── Main process function ───────────────────────────────────────────────────
 
-export function processSnapshot(frame: SnapshotFrame, session?: MarketSession): Signal[] {
+let firstFrameDiagnosticDone = false;
+
+export async function processSnapshot(frame: SnapshotFrame, session?: MarketSession): Promise<Signal[]> {
   pushFrame(frame);
 
-  if (ringBuffer.length < 2) return [];
+  if (!firstFrameDiagnosticDone) {
+    firstFrameDiagnosticDone = true;
+    let gapCount = 0;
+    let movingCount = 0;
+    for (const [, tick] of frame.tickers) {
+      if (Math.abs(tick.changePct) >= cfg.gapThresholdPct) gapCount++;
+      if (Math.abs(tick.changePct) > 0) movingCount++;
+    }
+    console.log(
+      `[Scanner] First frame diagnostic: ${frame.tickers.size} tickers, ` +
+      `${gapCount} with >=${cfg.gapThresholdPct}% gap, ${movingCount} with movement, ` +
+      `buffer length: ${ringBuffer.length}, session: ${session ?? "unknown"}`
+    );
+  }
 
   const isPreMarket = session === "pre_market";
   const isAfterHours = session === "after_hours";
 
   const signals: Signal[] = [];
 
-  // volume_spike: runs in all sessions
+  // volume_spike: runs in all sessions (no prev frame needed)
   signals.push(...detectVolumeSpikes(frame));
 
   if (isPreMarket) {
-    // Pre-market (4 AM – 9:30 AM): gap + volume_spike only
     signals.push(...detectGaps(frame));
   } else if (isAfterHours) {
-    // After hours (4 PM – 8 PM): volume_spike + velocity_move (news gated in index.ts)
     signals.push(...detectVelocityMoves(frame));
   } else {
-    // Regular hours: full detector suite
     signals.push(...detectVelocityMoves(frame));
     signals.push(...detectAdrBlowouts(frame));
     signals.push(...detectGaps(frame));
@@ -864,6 +1031,12 @@ export function processSnapshot(frame: SnapshotFrame, session?: MarketSession): 
     signals.push(...detectFailedBreakout(frame));
     signals.push(...detectHodFade(frame));
     signals.push(...detectGapDownContinuation(frame));
+    // Earnings detectors (async, cache-only reads)
+    const [earningsReactions, earningsDensity] = await Promise.all([
+      detectPostEarningsReaction(frame),
+      detectThemeEarningsDensity(frame),
+    ]);
+    signals.push(...earningsReactions, ...earningsDensity);
   }
 
   if (ringBuffer.length % 60 === 0) pruneCooldowns();

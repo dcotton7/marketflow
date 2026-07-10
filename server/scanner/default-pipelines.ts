@@ -211,6 +211,39 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     visibility: "global",
   },
 
+  // ── Earnings Pipelines ───────────────────────────────────────────────
+
+  {
+    id: "post_earnings_scan",
+    name: "Post-Earnings Reaction",
+    enabled: true,
+    trigger: {
+      signalTypes: ["earnings_reaction"],
+      subjectKind: "ticker",
+    },
+    lensIds: ["theme_membership", "regime_context"],
+    reactions: ["discovery_brief"],
+    cooldownMs: 24 * 60 * 60_000,
+    priority: "normal",
+    ownerId: "system",
+    visibility: "global",
+  },
+  {
+    id: "theme_earnings_density_scan",
+    name: "Theme Earnings Density",
+    enabled: true,
+    trigger: {
+      signalTypes: ["theme_earnings_density"],
+      subjectKind: "theme",
+    },
+    lensIds: ["regime_context"],
+    reactions: ["discovery_brief"],
+    cooldownMs: 24 * 60 * 60_000,
+    priority: "normal",
+    ownerId: "system",
+    visibility: "global",
+  },
+
   // ── Short-Side Setup Pipelines ─────────────────────────────────────────
 
   {

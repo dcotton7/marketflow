@@ -123,6 +123,45 @@ export async function evaluateForCatalysts(
 }
 
 /**
+ * Auto-create an earnings catalyst when a ticker just reported.
+ * Called from the scanner's earnings_reaction signal processing.
+ * Only creates if no active earnings_beat/earnings_miss catalyst exists for this ticker.
+ */
+export async function createEarningsCatalyst(
+  symbol: string,
+  epsActual: number,
+  epsEstimate: number,
+  changePct: number
+): Promise<void> {
+  const existing = getActiveCatalystsForSubject(symbol);
+  const hasEarningsCatalyst = existing.some(
+    (c) => c.catalystType === "earnings_beat" || c.catalystType === "earnings_miss" || c.catalystType === "earnings_flat"
+  );
+  if (hasEarningsCatalyst) return;
+
+  const isBeat = epsActual > epsEstimate;
+  const isMiss = epsActual < epsEstimate;
+  const catalystType: CatalystType = isBeat ? "earnings_beat" : isMiss ? "earnings_miss" : "earnings_flat";
+  const surprise = epsActual - epsEstimate;
+  const surprisePct = epsEstimate !== 0 ? Math.round((surprise / Math.abs(epsEstimate)) * 100) : 0;
+
+  const direction: "up" | "down" | "volatile" = isBeat ? "up" : isMiss ? "down" : "volatile";
+  const reaction: InitialReaction = changePct > 2 ? "positive" : changePct < -2 ? "negative" : "flat";
+
+  await createCatalyst({
+    subject: symbol,
+    subjectKind: "ticker",
+    catalystType,
+    headline: `${symbol} ${isBeat ? "beat" : isMiss ? "missed" : "met"} EPS by ${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${surprisePct}%), stock ${changePct >= 0 ? "+" : ""}${changePct.toFixed(1)}%`,
+    source: "system",
+    initialReaction: reaction,
+    expectedDirection: direction,
+    windowDays: 5,
+    decayShape: "linear",
+  });
+}
+
+/**
  * Check if an active catalyst should be resolved based on a new signal.
  * Called when a ticker with active catalysts fires a velocity_move or volume_spike.
  */

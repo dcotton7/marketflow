@@ -7511,7 +7511,6 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       let fundamentalData = { sector: "Unknown", industry: "Unknown", companyName: "", marketCap: 0 };
       let companyDescription = "";
       try {
-        // Fetch fundamentals (includes company name)
         const fundData = await getFundamentals(ticker);
         
         fundamentalData = {
@@ -7521,6 +7520,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           marketCap: fundData.marketCap || 0,
         };
         
+        // companyDescription will be overridden by real FMP description if available (see below)
         const displayName = fundamentalData.companyName || ticker;
         const industryOrSector =
           fundamentalData.industry !== "Unknown"
@@ -7609,6 +7609,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         } catch {}
       }
 
+      // Prefer real FMP company description over generated fallback
+      const realDescription = extFundamentals.companyDescription || companyDescription;
+
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
         adr20: adr20Dollar,
@@ -7631,7 +7634,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtfChange,
         rsMomentum,
         companyName: fundamentalData.companyName || ticker,
-        companyDescription,
+        companyDescription: realDescription,
         sectorName: fundamentalData.sector !== "Unknown" ? fundamentalData.sector : "",
         marketCap: extFundamentals.marketCap,
         pe: extFundamentals.pe,
@@ -7642,6 +7645,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         targetPrice: extFundamentals.targetPrice,
         nextEarningsDate: extFundamentals.nextEarningsDate,
         nextEarningsDays: extFundamentals.nextEarningsDays,
+        earningsTime: extFundamentals.earningsTime,
         epsCurrentQYoY: extFundamentals.epsCurrentQYoY,
         salesGrowth3QYoY: extFundamentals.salesGrowth3QYoY,
         lastEpsSurprise: extFundamentals.lastEpsSurprise,

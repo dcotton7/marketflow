@@ -17,8 +17,11 @@ export interface FundamentalData {
   exchange?: string;
 }
 
-// Cache rule: No data → run query. If we have data and not expired → use cache.
-const CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
+// ── Tiered cache TTLs ──────────────────────────────────────────────────────
+const PROFILE_CACHE_TTL = 365 * 24 * 60 * 60 * 1000; // 1 year — company profile rarely changes
+const EARNINGS_CACHE_TTL = 24 * 60 * 60 * 1000;       // 1 day — earnings dates shift
+const METRICS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;    // 7 days — PE, beta, analyst consensus
+const CACHE_TTL = METRICS_CACHE_TTL;                   // backward-compat alias for basic getFundamentals
 const pendingRequests = new Map<string, Promise<any>>();
 
 // Cap concurrent DB cache reads so scans don't exhaust the pool (BATCH_SIZE can be 12+).
@@ -55,6 +58,139 @@ async function withFinnhubLimit<T>(fn: () => Promise<T>): Promise<T> {
     finnhubInFlight--;
     const next = finnhubQueue.shift();
     if (next) next();
+  }
+}
+
+// ── FMP rate limiter (max 4 concurrent, 60s backoff on 429) ────────────────
+
+const FMP_CONCURRENCY = 4;
+let fmpInFlight = 0;
+const fmpQueue: Array<() => void> = [];
+let fmpBackoffUntil = 0;
+
+async function withFmpLimit<T>(fn: () => Promise<T>): Promise<T> {
+  if (Date.now() < fmpBackoffUntil) {
+    throw new Error("[FMP] Rate-limited, backing off");
+  }
+  while (fmpInFlight >= FMP_CONCURRENCY) {
+    await new Promise<void>((r) => fmpQueue.push(r));
+  }
+  fmpInFlight++;
+  try {
+    return await fn();
+  } finally {
+    fmpInFlight--;
+    const next = fmpQueue.shift();
+    if (next) next();
+  }
+}
+
+// ── FMP Company Profile fetch ──────────────────────────────────────────────
+
+interface FmpProfileRow {
+  companyName?: string;
+  description?: string;
+  sector?: string;
+  industry?: string;
+  exchange?: string;
+  mktCap?: number;
+  symbol?: string;
+}
+
+async function fetchFmpProfile(symbol: string): Promise<FmpProfileRow | null> {
+  if (!FMP_API_KEY) return null;
+  const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+  try {
+    const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
+    if (resp.status === 429) {
+      fmpBackoffUntil = Date.now() + 60_000;
+      console.warn("[FMP] 429 rate limit hit, backing off 60s");
+      return null;
+    }
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const row = Array.isArray(data) ? data[0] : data;
+    return row ?? null;
+  } catch (err) {
+    console.warn(`[FMP] Profile fetch failed for ${symbol}:`, err);
+    return null;
+  }
+}
+
+// ── FMP Earnings Calendar fetch ────────────────────────────────────────────
+
+interface FmpEarningsRow {
+  date: string;
+  symbol: string;
+  eps: number | null;
+  epsEstimated: number | null;
+  revenue: number | null;
+  revenueEstimated: number | null;
+  time?: string; // "bmo" | "amc"
+}
+
+interface ParsedEarnings {
+  nextEarningsDate: string;
+  nextEarningsDays: number;
+  earningsTime: string | null;
+  lastEarningsDate: string | null;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
+}
+
+async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> {
+  if (!FMP_API_KEY) return null;
+  const url = `${FMP_BASE}/earning_calendar?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+  try {
+    const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
+    if (resp.status === 429) {
+      fmpBackoffUntil = Date.now() + 60_000;
+      console.warn("[FMP] 429 rate limit hit, backing off 60s");
+      return null;
+    }
+    if (!resp.ok) return null;
+    const data: FmpEarningsRow[] = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date));
+
+    // Next upcoming (date > today)
+    const upcoming = sorted.find((e) => e.date > todayStr);
+    // Most recent past (date <= today)
+    const pastEvents = sorted.filter((e) => e.date <= todayStr);
+    const recent = pastEvents.length > 0 ? pastEvents[pastEvents.length - 1]! : null;
+
+    let nextEarningsDate = "N/A";
+    let nextEarningsDays = -1;
+    let earningsTime: string | null = null;
+
+    if (upcoming) {
+      nextEarningsDate = upcoming.date;
+      nextEarningsDays = Math.ceil(
+        (new Date(upcoming.date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      earningsTime = upcoming.time || null;
+    }
+
+    return {
+      nextEarningsDate,
+      nextEarningsDays,
+      earningsTime,
+      lastEarningsDate: recent?.date ?? null,
+      epsActual: recent?.eps ?? null,
+      epsEstimate: recent?.epsEstimated ?? null,
+      revenueActual: recent?.revenue ?? null,
+      revenueEstimate: recent?.revenueEstimated ?? null,
+    };
+  } catch (err) {
+    console.warn(`[FMP] Earnings fetch failed for ${symbol}:`, err);
+    return null;
   }
 }
 
@@ -193,24 +329,37 @@ async function getStaleFromDbCache(symbol: string): Promise<FundamentalData | nu
   }
 }
 
-async function getExtendedFromDbCache(symbol: string): Promise<ExtendedFundamentals | null> {
-  if (!db) return null;
+/** Returns { profileStale, earningsStale, metricsStale } flags and cached data. */
+interface TieredCacheResult {
+  data: ExtendedFundamentals | null;
+  profileStale: boolean;
+  earningsStale: boolean;
+  metricsStale: boolean;
+  row: any; // raw DB row for reuse
+}
+
+async function getExtendedFromDbCacheTiered(symbol: string): Promise<TieredCacheResult> {
+  const empty: TieredCacheResult = { data: null, profileStale: true, earningsStale: true, metricsStale: true, row: null };
+  if (!db) return empty;
+  const _db = db;
   try {
     const rows = await withCacheReadLimit(() =>
-      withRetry(() => db.select().from(tickers).where(eq(tickers.symbol, symbol)).limit(1))
+      withRetry(() => _db.select().from(tickers).where(eq(tickers.symbol, symbol)).limit(1))
     );
-    if (rows.length === 0) return null;
+    if (rows.length === 0) return empty;
 
     const row = rows[0];
-    const age = Date.now() - new Date(row.fetchedAt).getTime();
-    if (age > CACHE_TTL) return null;
+    const now = Date.now();
 
-    // Check if we have extended data (pe might be null but fetchedAt proves we tried)
-    if (row.pe === null && row.analystConsensus === null) {
-      return null; // No extended data cached yet
-    }
+    const profileAge = row.profileFetchedAt ? now - new Date(row.profileFetchedAt).getTime() : Infinity;
+    const earningsAge = row.earningsFetchedAt ? now - new Date(row.earningsFetchedAt).getTime() : Infinity;
+    const metricsAge = now - new Date(row.fetchedAt).getTime();
 
-    return {
+    const profileStale = profileAge > PROFILE_CACHE_TTL;
+    const earningsStale = earningsAge > EARNINGS_CACHE_TTL;
+    const metricsStale = metricsAge > METRICS_CACHE_TTL || (row.pe === null && row.analystConsensus === null);
+
+    const data: ExtendedFundamentals = {
       marketCap: row.marketCap || 0,
       pe: row.pe,
       beta: row.beta,
@@ -219,18 +368,46 @@ async function getExtendedFromDbCache(symbol: string): Promise<ExtendedFundament
       analystConsensus: row.analystConsensus || "N/A",
       targetPrice: row.targetPrice,
       nextEarningsDate: row.nextEarningsDate || "N/A",
-      nextEarningsDays: row.nextEarningsDays || -1,
+      nextEarningsDays: row.nextEarningsDays ?? -1,
       epsCurrentQYoY: row.epsCurrentQYoY || "N/A",
       salesGrowth3QYoY: row.salesGrowth3QYoY || "N/A",
       lastEpsSurprise: row.lastEpsSurprise || "N/A",
+      companyDescription: row.companyDescription || null,
+      earningsTime: row.earningsTime || null,
+      lastEarningsDate: row.lastEarningsDate || null,
+      epsActual: row.epsActual ?? null,
+      epsEstimate: row.epsEstimate ?? null,
+      revenueActual: row.revenueActual ?? null,
+      revenueEstimate: row.revenueEstimate ?? null,
     };
+
+    return { data, profileStale, earningsStale, metricsStale, row };
   } catch (err) {
     console.error(`[Fundamentals] Extended DB cache read failed for ${symbol} (after retries):`, err);
-    return null;
+    return empty;
   }
 }
 
-async function saveToDbCache(symbol: string, data: FundamentalData, extended?: ExtendedFundamentals): Promise<void> {
+async function getExtendedFromDbCache(symbol: string): Promise<ExtendedFundamentals | null> {
+  const { data, metricsStale } = await getExtendedFromDbCacheTiered(symbol);
+  if (!data || metricsStale) return null;
+  return data;
+}
+
+interface SaveOptions {
+  profileData?: {
+    companyDescription?: string | null;
+    companyName?: string;
+    sector?: string;
+    industry?: string;
+    exchange?: string;
+    marketCap?: number;
+  };
+  earningsData?: ParsedEarnings;
+  metricsData?: Partial<ExtendedFundamentals>;
+}
+
+async function saveToDbCache(symbol: string, data: FundamentalData, extended?: ExtendedFundamentals, opts?: SaveOptions): Promise<void> {
   if (!db) return;
   try {
     const values: any = {
@@ -243,7 +420,6 @@ async function saveToDbCache(symbol: string, data: FundamentalData, extended?: E
       fetchedAt: new Date(),
     };
 
-    // If extended fundamentals are provided, include them
     if (extended) {
       values.pe = extended.pe;
       values.beta = extended.beta;
@@ -256,6 +432,35 @@ async function saveToDbCache(symbol: string, data: FundamentalData, extended?: E
       values.epsCurrentQYoY = extended.epsCurrentQYoY;
       values.salesGrowth3QYoY = extended.salesGrowth3QYoY;
       values.lastEpsSurprise = extended.lastEpsSurprise;
+      values.companyDescription = extended.companyDescription;
+      values.earningsTime = extended.earningsTime;
+      values.lastEarningsDate = extended.lastEarningsDate;
+      values.epsActual = extended.epsActual;
+      values.epsEstimate = extended.epsEstimate;
+      values.revenueActual = extended.revenueActual;
+      values.revenueEstimate = extended.revenueEstimate;
+    }
+
+    if (opts?.profileData) {
+      values.profileFetchedAt = new Date();
+      if (opts.profileData.companyDescription != null) values.companyDescription = opts.profileData.companyDescription;
+      if (opts.profileData.companyName) values.companyName = opts.profileData.companyName;
+      if (opts.profileData.sector) values.sector = opts.profileData.sector;
+      if (opts.profileData.industry) values.industry = opts.profileData.industry;
+      if (opts.profileData.exchange) values.exchange = opts.profileData.exchange;
+      if (opts.profileData.marketCap) values.marketCap = opts.profileData.marketCap;
+    }
+
+    if (opts?.earningsData) {
+      values.earningsFetchedAt = new Date();
+      values.nextEarningsDate = opts.earningsData.nextEarningsDate;
+      values.nextEarningsDays = opts.earningsData.nextEarningsDays;
+      values.earningsTime = opts.earningsData.earningsTime;
+      values.lastEarningsDate = opts.earningsData.lastEarningsDate;
+      values.epsActual = opts.earningsData.epsActual;
+      values.epsEstimate = opts.earningsData.epsEstimate;
+      values.revenueActual = opts.earningsData.revenueActual;
+      values.revenueEstimate = opts.earningsData.revenueEstimate;
     }
 
     await db.insert(tickers)
@@ -374,154 +579,288 @@ export interface ExtendedFundamentals {
   epsCurrentQYoY: string;
   salesGrowth3QYoY: string;
   lastEpsSurprise: string;
+  // New FMP-sourced earnings fields
+  companyDescription: string | null;
+  earningsTime: string | null;
+  lastEarningsDate: string | null;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
 }
 
-// Remove in-memory cache - now using DB cache only
-// All old FMP helper functions removed - now using Finnhub via server/finnhub.ts
+// ── Cache-only reader for scanner (never triggers API calls) ────────────────
+
+export async function getCachedEarningsData(symbol: string): Promise<{
+  nextEarningsDate: string | null;
+  nextEarningsDays: number;
+  earningsTime: string | null;
+  lastEarningsDate: string | null;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
+} | null> {
+  if (!db) return null;
+  const _db = db;
+  try {
+    const rows = await withCacheReadLimit(() =>
+      withRetry(() => _db.select().from(tickers).where(eq(tickers.symbol, symbol.toUpperCase())).limit(1))
+    );
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    if (!row.nextEarningsDate && !row.lastEarningsDate) return null;
+    return {
+      nextEarningsDate: row.nextEarningsDate || null,
+      nextEarningsDays: row.nextEarningsDays ?? -1,
+      earningsTime: row.earningsTime || null,
+      lastEarningsDate: row.lastEarningsDate || null,
+      epsActual: row.epsActual ?? null,
+      epsEstimate: row.epsEstimate ?? null,
+      revenueActual: row.revenueActual ?? null,
+      revenueEstimate: row.revenueEstimate ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function getExtendedFundamentals(symbol: string): Promise<ExtendedFundamentals> {
   const upper = symbol.toUpperCase();
 
-  // Check DB cache first
-  const dbCached = await getExtendedFromDbCache(upper);
-  if (dbCached) {
-    console.log(`[Fundamentals] Using cached extended fundamentals for ${upper}`);
-    return dbCached;
-  }
+  // Deduplication: if an in-flight request exists for this symbol, await it
+  let pending = pendingRequests.get(`ext:${upper}`);
+  if (pending) return pending as Promise<ExtendedFundamentals>;
 
-  console.log(`[Fundamentals] Fetching extended fundamentals for ${upper} from Finnhub`);
+  const doWork = async (): Promise<ExtendedFundamentals> => {
+    // ── Step 1: Read tiered cache ──────────────────────────────────────────
+    const cached = await getExtendedFromDbCacheTiered(upper);
+    let result = cached.data;
+    const saveOpts: SaveOptions = {};
 
-  // Fetch comprehensive data from Finnhub
-  const finnhubData = await finnhub.getComprehensiveFundamentals(upper);
-
-  const profile = finnhubData.profile;
-  const metrics = finnhubData.metrics?.metric;
-  const recommendations = finnhubData.recommendations;
-  const priceTarget = finnhubData.priceTarget;
-  const earningsSurprises = finnhubData.earningsSurprises;
-
-  // Calculate market cap (in dollars)
-  // Try profile first, then metrics, default to 0 if neither has valid data
-  let marketCap = 0;
-  if (profile?.marketCapitalization && profile.marketCapitalization > 0) {
-    marketCap = profile.marketCapitalization * 1000000; // Finnhub returns in millions
-  } else if (metrics?.marketCapitalization && metrics.marketCapitalization > 0) {
-    marketCap = metrics.marketCapitalization * 1000000; // Also in millions
-  }
-  // If both are null/0/undefined, marketCap stays 0 (meaning "no data")
-
-  // Get PE ratio
-  const pe = metrics?.peTTM ?? metrics?.peExclExtraTTM ?? null;
-
-  // Get beta
-  const beta = metrics?.beta ?? null;
-
-  // Get debt to equity
-  const debtToEquity = metrics?.totalDebtToEquity ?? null;
-
-  // Get pre-tax margin (using ROA as proxy if not available)
-  const preTaxMargin = metrics?.roaRfy ?? null;
-
-  // Calculate analyst consensus
-  let analystConsensus = "N/A";
-  if (recommendations.length > 0) {
-    const latest = recommendations[0];
-    const totalRecs = latest.buy + latest.hold + latest.sell + latest.strongBuy + latest.strongSell;
-    if (totalRecs > 0) {
-      const bullishScore = (latest.strongBuy * 2 + latest.buy) / totalRecs;
-      const bearishScore = (latest.strongSell * 2 + latest.sell) / totalRecs;
-      if (bullishScore > 1.0) analystConsensus = "Strong Buy";
-      else if (bullishScore > 0.5) analystConsensus = "Buy";
-      else if (bearishScore > 0.5) analystConsensus = "Sell";
-      else analystConsensus = "Hold";
+    // ── Step 2: If profile stale → fetch FMP profile ────────────────────
+    if (cached.profileStale) {
+      console.log(`[Fundamentals] Profile stale for ${upper}, fetching from FMP`);
+      const fmpProfile = await fetchFmpProfile(upper).catch(() => null);
+      if (fmpProfile) {
+        const desc = fmpProfile.description || null;
+        const sector = fmpProfile.sector || result?.companyDescription ? undefined : "Unknown";
+        const industry = fmpProfile.industry || undefined;
+        saveOpts.profileData = {
+          companyDescription: desc,
+          companyName: fmpProfile.companyName || undefined,
+          sector: fmpProfile.sector || sector,
+          industry: fmpProfile.industry || industry,
+          exchange: fmpProfile.exchange || undefined,
+          marketCap: fmpProfile.mktCap || undefined,
+        };
+        if (result) {
+          result = { ...result, companyDescription: desc };
+          if (fmpProfile.mktCap && fmpProfile.mktCap > 0) result.marketCap = fmpProfile.mktCap;
+        }
+      }
     }
-  }
 
-  // Get target price
-  const targetPrice = priceTarget?.targetMean ?? priceTarget?.targetMedian ?? null;
-
-  // Calculate next earnings date and days
-  let nextEarningsDate = "N/A";
-  let nextEarningsDays = -1;
-  
-  if (earningsSurprises.length > 0) {
-    // Find the most recent earnings date
-    const sortedEarnings = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
-    const lastEarnings = new Date(sortedEarnings[0].period);
-    
-    // Estimate next earnings (roughly 90 days later)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let nextEstimate = new Date(lastEarnings);
-    nextEstimate.setMonth(nextEstimate.getMonth() + 3);
-    
-    while (nextEstimate <= today) {
-      nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+    // ── Step 3: If earnings stale → fetch FMP earnings calendar ─────────
+    if (cached.earningsStale) {
+      console.log(`[Fundamentals] Earnings stale for ${upper}, fetching from FMP`);
+      const fmpEarnings = await fetchFmpEarnings(upper).catch(() => null);
+      if (fmpEarnings) {
+        saveOpts.earningsData = fmpEarnings;
+        if (result) {
+          result = {
+            ...result,
+            nextEarningsDate: fmpEarnings.nextEarningsDate,
+            nextEarningsDays: fmpEarnings.nextEarningsDays,
+            earningsTime: fmpEarnings.earningsTime,
+            lastEarningsDate: fmpEarnings.lastEarningsDate,
+            epsActual: fmpEarnings.epsActual,
+            epsEstimate: fmpEarnings.epsEstimate,
+            revenueActual: fmpEarnings.revenueActual,
+            revenueEstimate: fmpEarnings.revenueEstimate,
+          };
+          // Update lastEpsSurprise from real data
+          if (fmpEarnings.epsActual != null && fmpEarnings.epsEstimate != null && fmpEarnings.epsEstimate !== 0) {
+            const surprise = fmpEarnings.epsActual - fmpEarnings.epsEstimate;
+            const surprisePct = (surprise / Math.abs(fmpEarnings.epsEstimate)) * 100;
+            result.lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
+          }
+        }
+      }
     }
-    
-    nextEarningsDate = nextEstimate.toISOString().split("T")[0];
-    nextEarningsDays = Math.ceil((nextEstimate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  }
 
-  // Calculate EPS growth
-  let epsCurrentQYoY = "N/A";
-  if (earningsSurprises.length >= 2) {
-    const sorted = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
-    const current = sorted[0];
-    const yearAgo = sorted.find((e, i) => i > 0 && i <= 4); // Look within last 4 quarters for YoY comparison
-    
-    if (current.actual != null && yearAgo?.actual != null && yearAgo.actual !== 0) {
-      const yoyPct = ((current.actual - yearAgo.actual) / Math.abs(yearAgo.actual)) * 100;
-      epsCurrentQYoY = `${yoyPct >= 0 ? "+" : ""}${Math.round(yoyPct)}%`;
-    } else if (current.actual != null) {
-      epsCurrentQYoY = `$${current.actual.toFixed(2)}`;
+    // ── Step 4: If metrics stale → fetch Finnhub comprehensive ──────────
+    if (cached.metricsStale) {
+      console.log(`[Fundamentals] Metrics stale for ${upper}, fetching from Finnhub`);
+      const finnhubData = await finnhub.getComprehensiveFundamentals(upper);
+
+      const profile = finnhubData.profile;
+      const metrics = finnhubData.metrics?.metric;
+      const recommendations = finnhubData.recommendations;
+      const priceTargetData = finnhubData.priceTarget;
+      const earningsSurprises = finnhubData.earningsSurprises;
+
+      let marketCap = result?.marketCap ?? 0;
+      if (!marketCap || marketCap === 0) {
+        if (profile?.marketCapitalization && profile.marketCapitalization > 0) {
+          marketCap = profile.marketCapitalization * 1000000;
+        } else if (metrics?.marketCapitalization && metrics.marketCapitalization > 0) {
+          marketCap = metrics.marketCapitalization * 1000000;
+        }
+      }
+
+      const pe = metrics?.peTTM ?? metrics?.peExclExtraTTM ?? null;
+      const beta = metrics?.beta ?? null;
+      const debtToEquity = metrics?.totalDebtToEquity ?? null;
+      const preTaxMargin = metrics?.roaRfy ?? null;
+
+      let analystConsensus = "N/A";
+      if (recommendations.length > 0) {
+        const latest = recommendations[0];
+        const totalRecs = latest.buy + latest.hold + latest.sell + latest.strongBuy + latest.strongSell;
+        if (totalRecs > 0) {
+          const bullishScore = (latest.strongBuy * 2 + latest.buy) / totalRecs;
+          const bearishScore = (latest.strongSell * 2 + latest.sell) / totalRecs;
+          if (bullishScore > 1.0) analystConsensus = "Strong Buy";
+          else if (bullishScore > 0.5) analystConsensus = "Buy";
+          else if (bearishScore > 0.5) analystConsensus = "Sell";
+          else analystConsensus = "Hold";
+        }
+      }
+
+      const targetPrice = priceTargetData?.targetMean ?? priceTargetData?.targetMedian ?? null;
+
+      // EPS growth from Finnhub surprises (fallback if FMP didn't provide)
+      let epsCurrentQYoY = result?.epsCurrentQYoY ?? "N/A";
+      if (epsCurrentQYoY === "N/A" && earningsSurprises.length >= 2) {
+        const sorted = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
+        const current = sorted[0];
+        const yearAgo = sorted.find((_e, i) => i > 0 && i <= 4);
+        if (current.actual != null && yearAgo?.actual != null && yearAgo.actual !== 0) {
+          const yoyPct = ((current.actual - yearAgo.actual) / Math.abs(yearAgo.actual)) * 100;
+          epsCurrentQYoY = `${yoyPct >= 0 ? "+" : ""}${Math.round(yoyPct)}%`;
+        } else if (current.actual != null) {
+          epsCurrentQYoY = `$${current.actual.toFixed(2)}`;
+        }
+      }
+
+      const salesGrowth3QYoY = metrics?.revenueGrowthTTMYoy
+        ? `${metrics.revenueGrowthTTMYoy >= 0 ? "+" : ""}${Math.round(metrics.revenueGrowthTTMYoy)}%`
+        : (metrics?.revenueGrowth3Y ? `${metrics.revenueGrowth3Y >= 0 ? "+" : ""}${Math.round(metrics.revenueGrowth3Y)}%` : (result?.salesGrowth3QYoY ?? "N/A"));
+
+      // Last EPS surprise from Finnhub (fallback if not already set by FMP)
+      let lastEpsSurprise = result?.lastEpsSurprise ?? "N/A";
+      if (lastEpsSurprise === "N/A" && earningsSurprises.length > 0) {
+        const latest = earningsSurprises[0];
+        if (latest.actual != null && latest.estimate != null && latest.estimate !== 0) {
+          const surprise = latest.actual - latest.estimate;
+          const surprisePct = (surprise / Math.abs(latest.estimate)) * 100;
+          lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
+        }
+      }
+
+      // If FMP earnings didn't provide a next date, fall back to Finnhub +90d estimate
+      let nextEarningsDate = result?.nextEarningsDate ?? "N/A";
+      let nextEarningsDays = result?.nextEarningsDays ?? -1;
+      if (nextEarningsDate === "N/A" && earningsSurprises.length > 0) {
+        const sortedEarnings = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
+        const lastEarnings = new Date(sortedEarnings[0].period);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        let nextEstimate = new Date(lastEarnings);
+        nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+        while (nextEstimate <= today) {
+          nextEstimate.setMonth(nextEstimate.getMonth() + 3);
+        }
+        nextEarningsDate = nextEstimate.toISOString().split("T")[0];
+        nextEarningsDays = Math.ceil((nextEstimate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      // If Finnhub provided earnings data and FMP didn't, persist Finnhub's as the earnings source
+      if (!saveOpts.earningsData && earningsSurprises.length > 0) {
+        const sorted = [...earningsSurprises].sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
+        saveOpts.earningsData = {
+          nextEarningsDate,
+          nextEarningsDays,
+          earningsTime: result?.earningsTime ?? null,
+          lastEarningsDate: sorted[0]?.period ?? null,
+          epsActual: sorted[0]?.actual ?? null,
+          epsEstimate: sorted[0]?.estimate ?? null,
+          revenueActual: null,
+          revenueEstimate: null,
+        };
+      }
+
+      result = {
+        marketCap,
+        pe,
+        beta,
+        debtToEquity,
+        preTaxMargin,
+        analystConsensus,
+        targetPrice,
+        nextEarningsDate,
+        nextEarningsDays,
+        epsCurrentQYoY,
+        salesGrowth3QYoY,
+        lastEpsSurprise,
+        companyDescription: result?.companyDescription ?? null,
+        earningsTime: result?.earningsTime ?? null,
+        lastEarningsDate: saveOpts.earningsData?.lastEarningsDate ?? result?.lastEarningsDate ?? null,
+        epsActual: saveOpts.earningsData?.epsActual ?? result?.epsActual ?? null,
+        epsEstimate: saveOpts.earningsData?.epsEstimate ?? result?.epsEstimate ?? null,
+        revenueActual: result?.revenueActual ?? null,
+        revenueEstimate: result?.revenueEstimate ?? null,
+      };
+
+      // Build basic data for cache write
+      const basicData: FundamentalData = {
+        sector: profile?.finnhubIndustry ? mapIndustryToSector(profile.finnhubIndustry) : (cached.row?.sector || "Unknown"),
+        industry: profile?.finnhubIndustry || (cached.row?.industry || "Unknown"),
+        marketCap,
+        companyName: profile?.name || cached.row?.companyName,
+        exchange: profile?.exchange || cached.row?.exchange,
+      };
+
+      await saveToDbCache(upper, basicData, result, saveOpts);
+      console.log(`[Fundamentals] Saved extended fundamentals for ${upper} to DB cache`);
+      return result;
     }
-  }
 
-  // Calculate sales growth (using revenue growth from metrics)
-  const salesGrowth3QYoY = metrics?.revenueGrowthTTMYoy 
-    ? `${metrics.revenueGrowthTTMYoy >= 0 ? "+" : ""}${Math.round(metrics.revenueGrowthTTMYoy)}%`
-    : (metrics?.revenueGrowth3Y ? `${metrics.revenueGrowth3Y >= 0 ? "+" : ""}${Math.round(metrics.revenueGrowth3Y)}%` : "N/A");
-
-  // Calculate last EPS surprise
-  let lastEpsSurprise = "N/A";
-  if (earningsSurprises.length > 0) {
-    const latest = earningsSurprises[0];
-    if (latest.actual != null && latest.estimate != null && latest.estimate !== 0) {
-      const surprise = latest.actual - latest.estimate;
-      const surprisePct = (surprise / Math.abs(latest.estimate)) * 100;
-      lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
+    // ── Only profile or earnings were stale (metrics still fresh) ──────────
+    if (Object.keys(saveOpts).length > 0 && result) {
+      const basicData: FundamentalData = {
+        sector: cached.row?.sector || "Unknown",
+        industry: cached.row?.industry || "Unknown",
+        marketCap: result.marketCap,
+        companyName: cached.row?.companyName,
+        exchange: cached.row?.exchange,
+      };
+      await saveToDbCache(upper, basicData, result, saveOpts);
     }
-  }
 
-  const result: ExtendedFundamentals = {
-    marketCap,
-    pe,
-    beta,
-    debtToEquity,
-    preTaxMargin,
-    analystConsensus,
-    targetPrice,
-    nextEarningsDate,
-    nextEarningsDays,
-    epsCurrentQYoY,
-    salesGrowth3QYoY,
-    lastEpsSurprise,
+    if (result) {
+      console.log(`[Fundamentals] Using cached extended fundamentals for ${upper} (refreshed stale tiers)`);
+      return result;
+    }
+
+    // No cached data at all — full fetch needed
+    return {
+      marketCap: 0, pe: null, beta: null, debtToEquity: null, preTaxMargin: null,
+      analystConsensus: "N/A", targetPrice: null, nextEarningsDate: "N/A", nextEarningsDays: -1,
+      epsCurrentQYoY: "N/A", salesGrowth3QYoY: "N/A", lastEpsSurprise: "N/A",
+      companyDescription: null, earningsTime: null, lastEarningsDate: null,
+      epsActual: null, epsEstimate: null, revenueActual: null, revenueEstimate: null,
+    };
   };
 
-  // Save to DB cache - need basic fundamental data too
-  const basicData: FundamentalData = {
-    sector: profile?.finnhubIndustry ? mapIndustryToSector(profile.finnhubIndustry) : 'Unknown',
-    industry: profile?.finnhubIndustry || 'Unknown',
-    marketCap,
-    companyName: profile?.name,
-    exchange: profile?.exchange,
-  };
-
-  await saveToDbCache(upper, basicData, result);
-  console.log(`[Fundamentals] Saved extended fundamentals for ${upper} to DB cache`);
-
-  return result;
+  const promise = doWork();
+  pendingRequests.set(`ext:${upper}`, promise);
+  try {
+    return await promise;
+  } finally {
+    pendingRequests.delete(`ext:${upper}`);
+  }
 }
 
 const fmpPeersCache = new Map<string, { data: { symbol: string; name: string; industry: string; marketCap: number }[]; ts: number }>();

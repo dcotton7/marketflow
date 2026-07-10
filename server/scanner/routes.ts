@@ -12,7 +12,7 @@ import { Router, type Request, type Response } from "express";
 import type { DiscoveryCard, ScannerMode, ScannerStatus } from "@shared/scanner-types";
 import { DEFAULT_SCANNER_CONFIG } from "@shared/scanner-config";
 import { getScannerState, setScannerMode } from "./index";
-import { getScannerConfig, setScannerConfig } from "./signal-producer";
+import { getScannerConfig, setScannerConfig, currentFrame } from "./signal-producer";
 import {
   getAllActiveCatalysts,
   getCatalystRules,
@@ -24,6 +24,9 @@ import { getMaDataForScanner } from "../market-condition/engine/snapshot";
 import { getDailyBarRefreshStatus, isDailyBarApiHealthy } from "../data-layer/daily-bar-refresh";
 import { getScannerPicks } from "./reactions/watchlist-add";
 import { getHeatScores } from "./reactions/score-update";
+import { db } from "../db";
+import { scannerDiscoveries } from "@shared/schema";
+import { desc, eq, and, gte, lte, sql, isNull, isNotNull } from "drizzle-orm";
 
 const router = Router();
 
@@ -46,7 +49,7 @@ export function broadcastBatch(cards: DiscoveryCard[]): void {
   for (const card of cards) broadcastDiscovery(card);
 }
 
-// ── In-memory discovery buffer (last 200, flushed to DB periodically) ───────
+// ── In-memory discovery buffer + DB persistence ────────────────────────────
 
 const DISCOVERY_BUFFER_MAX = 200;
 const discoveryBuffer: DiscoveryCard[] = [];
@@ -56,7 +59,53 @@ export function pushDiscoveries(cards: DiscoveryCard[]): void {
   if (discoveryBuffer.length > DISCOVERY_BUFFER_MAX) {
     discoveryBuffer.splice(0, discoveryBuffer.length - DISCOVERY_BUFFER_MAX);
   }
+  persistToDb(cards);
 }
+
+function persistToDb(cards: DiscoveryCard[]): void {
+  if (!db || cards.length === 0) return;
+  const frame = currentFrame();
+  const rows = cards.map((c) => {
+    let priceAtSignal: number | null = null;
+    if (c.subjectKind === "ticker" && frame) {
+      const tick = frame.tickers.get(c.subject);
+      if (tick) priceAtSignal = tick.price;
+    }
+    return {
+      pipelineId: c.pipelineId,
+      pipelineName: c.pipelineName,
+      signalType: c.signalType,
+      subject: c.subject,
+      subjectKind: c.subjectKind,
+      direction: c.direction,
+      magnitude: String(c.magnitude ?? 0),
+      priority: c.priority ?? "normal",
+      headline: c.headline,
+      narrative: c.narrative,
+      tickers: c.tickers ?? [],
+      themeId: c.themeId ?? null,
+      qualifyScore: String(c.qualifyScore ?? 0),
+      contextJson: c.context ?? null,
+      createdAt: new Date(c.createdAt),
+      priceAtSignal,
+      regimeAtSignal: frame?.regime ?? null,
+      sessionAtSignal: frame ? getScannerState().sessionMode : null,
+      raiAtSignal: frame?.rai ?? null,
+    };
+  });
+  db.insert(scannerDiscoveries)
+    .values(rows)
+    .then(() => {})
+    .catch((err) => console.warn("[Scanner DB] Persist failed:", String(err).slice(0, 150)));
+}
+
+// Flush any cards already in memory to DB on first import (catches cards created before wiring)
+setTimeout(() => {
+  if (discoveryBuffer.length > 0) {
+    console.log(`[Scanner DB] Flushing ${discoveryBuffer.length} in-memory cards to DB...`);
+    persistToDb(discoveryBuffer);
+  }
+}, 5_000);
 
 // ── GET /stream — SSE endpoint ──────────────────────────────────────────────
 
@@ -79,12 +128,69 @@ router.get("/stream", (req: Request, res: Response) => {
   });
 });
 
-// ── GET /history — recent discoveries ───────────────────────────────────────
+// ── GET /history — recent discoveries (DB-backed with memory fallback) ──────
 
-router.get("/history", (_req: Request, res: Response) => {
-  const limit = Math.min(100, parseInt(String(_req.query.limit) || "50", 10));
-  const recent = discoveryBuffer.slice(-limit).reverse();
-  res.json({ discoveries: recent, total: discoveryBuffer.length });
+router.get("/history", async (_req: Request, res: Response) => {
+  const limit = Math.min(200, parseInt(String(_req.query.limit) || "50", 10));
+  const dateFilter = _req.query.date as string | undefined;
+  const signalFilter = _req.query.signal_type as string | undefined;
+  const subjectFilter = (_req.query.subject as string | undefined)?.toUpperCase();
+
+  if (!db) {
+    const recent = discoveryBuffer.slice(-limit).reverse();
+    return res.json({ discoveries: recent, total: discoveryBuffer.length, source: "memory" });
+  }
+
+  try {
+    const conditions = [];
+    if (dateFilter) {
+      conditions.push(gte(scannerDiscoveries.createdAt, new Date(dateFilter + "T00:00:00Z")));
+    }
+    if (signalFilter) {
+      conditions.push(eq(scannerDiscoveries.signalType, signalFilter));
+    }
+    if (subjectFilter) {
+      conditions.push(eq(scannerDiscoveries.subject, subjectFilter));
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+    const rows = await db
+      .select()
+      .from(scannerDiscoveries)
+      .where(where)
+      .orderBy(desc(scannerDiscoveries.createdAt))
+      .limit(limit);
+
+    const countResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(scannerDiscoveries)
+      .where(where);
+
+    const cards: DiscoveryCard[] = rows.map((r) => ({
+      id: r.id,
+      pipelineId: r.pipelineId,
+      pipelineName: r.pipelineName,
+      signalType: r.signalType as DiscoveryCard["signalType"],
+      subject: r.subject,
+      subjectKind: r.subjectKind as "ticker" | "theme" | "market",
+      direction: r.direction as "up" | "down" | "neutral",
+      magnitude: Number(r.magnitude),
+      priority: r.priority as "normal" | "high" | "urgent",
+      headline: r.headline,
+      narrative: r.narrative,
+      tickers: r.tickers ?? [],
+      themeId: r.themeId ?? undefined,
+      qualifyScore: Number(r.qualifyScore),
+      context: (r.contextJson as Record<string, unknown>) ?? {},
+      createdAt: r.createdAt.toISOString(),
+    }));
+
+    res.json({ discoveries: cards, total: Number(countResult[0]?.count ?? 0), source: "db" });
+  } catch (err) {
+    console.warn("[Scanner DB] History query failed, falling back to memory:", String(err).slice(0, 150));
+    const recent = discoveryBuffer.slice(-limit).reverse();
+    res.json({ discoveries: recent, total: discoveryBuffer.length, source: "memory" });
+  }
 });
 
 // ── GET /status — scanner state ─────────────────────────────────────────────
@@ -237,6 +343,196 @@ router.get("/heat-scores", (_req: Request, res: Response) => {
   const limit = Math.min(100, parseInt(String(_req.query.limit) || "50", 10));
   const scores = getHeatScores(limit);
   res.json({ scores, total: scores.length });
+});
+
+// ── Workbench: GET /workbench/hit-rates — aggregated signal hit rate data ─────
+
+type WindowKey = "15m" | "30m" | "1hr" | "4hr" | "d1_close" | "d2_open" | "d2_close" | "1w" | "1mo";
+const WINDOW_MOVE_COL: Record<WindowKey, string> = {
+  "15m": "move15m", "30m": "move30m", "1hr": "move1hr", "4hr": "move4hr",
+  d1_close: "moveD1Close", d2_open: "moveD2Open", d2_close: "moveD2Close",
+  "1w": "move1w", "1mo": "move1mo",
+};
+
+router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
+  if (!db) return res.status(503).json({ error: "Database not available" });
+
+  const from = (req.query.from as string) || new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
+  const hitThreshold = parseFloat(String(req.query.hit_threshold ?? "0.5"));
+  const minSamples = parseInt(String(req.query.min_samples ?? "5"), 10);
+  const sessionFilter = req.query.session as string | undefined;
+  const window = (req.query.window as WindowKey) || "1hr";
+
+  try {
+    const conditions = [
+      gte(scannerDiscoveries.createdAt, new Date(from + "T00:00:00Z")),
+      lte(scannerDiscoveries.createdAt, new Date(to + "T23:59:59Z")),
+    ];
+    if (sessionFilter && sessionFilter !== "all") {
+      conditions.push(eq(scannerDiscoveries.sessionAtSignal, sessionFilter));
+    }
+
+    const rows = await db
+      .select()
+      .from(scannerDiscoveries)
+      .where(and(...conditions))
+      .orderBy(desc(scannerDiscoveries.createdAt));
+
+    const grouped = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const list = grouped.get(row.signalType) || [];
+      list.push(row);
+      grouped.set(row.signalType, list);
+    }
+
+    const moveCol = WINDOW_MOVE_COL[window] || "move1hr";
+
+    const signalTypes = [];
+    for (const [signalType, entries] of grouped) {
+      const totalFired = entries.length;
+      const tracked = entries.filter((r) => (r as any)[moveCol] != null).length;
+
+      if (tracked < minSamples) {
+        signalTypes.push({ signalType, totalFired, tracked, hitRate: null, avgMove: null, avgPeakMove: null, avgGiveback: null, failRate: null, reversalRate: null });
+        continue;
+      }
+
+      const withData = entries.filter((r) => (r as any)[moveCol] != null);
+      let hits = 0;
+      let totalMove = 0;
+      for (const r of withData) {
+        const move = Number((r as any)[moveCol]);
+        totalMove += move;
+        const isHit =
+          (r.direction === "up" && move >= hitThreshold) ||
+          (r.direction === "down" && move <= -hitThreshold);
+        if (isHit) hits++;
+      }
+
+      const withPeak = entries.filter((r) => r.peakMove != null);
+      const avgPeakMove = withPeak.length > 0
+        ? Math.round((withPeak.reduce((s, r) => s + Number(r.peakMove), 0) / withPeak.length) * 100) / 100
+        : null;
+
+      const withGiveback = entries.filter((r) => r.givebackPct != null);
+      const avgGiveback = withGiveback.length > 0
+        ? Math.round((withGiveback.reduce((s, r) => s + Number(r.givebackPct), 0) / withGiveback.length) * 100) / 100
+        : null;
+
+      const failCount = entries.filter((r) => r.outcomeFailed === true).length;
+      const reversalCount = entries.filter((r) => r.outcomeStatus === "reversed").length;
+
+      signalTypes.push({
+        signalType,
+        totalFired,
+        tracked,
+        hitRate: withData.length > 0 ? Math.round((hits / withData.length) * 1000) / 1000 : 0,
+        avgMove: withData.length > 0 ? Math.round((totalMove / withData.length) * 100) / 100 : 0,
+        avgPeakMove,
+        avgGiveback,
+        failRate: totalFired > 0 ? Math.round((failCount / totalFired) * 1000) / 1000 : 0,
+        reversalRate: totalFired > 0 ? Math.round((reversalCount / totalFired) * 1000) / 1000 : 0,
+      });
+    }
+
+    signalTypes.sort((a, b) => b.totalFired - a.totalFired);
+
+    res.json({
+      signalTypes,
+      dateRange: { from, to },
+      hitThreshold,
+      window,
+    });
+  } catch (err) {
+    console.warn("[Workbench] hit-rates error:", String(err).slice(0, 150));
+    res.status(500).json({ error: "Query failed" });
+  }
+});
+
+// ── Workbench: GET /workbench/cards — individual cards with outcomes ──────────
+
+router.get("/workbench/cards", async (req: Request, res: Response) => {
+  if (!db) return res.status(503).json({ error: "Database not available" });
+
+  const signalType = req.query.signal_type as string | undefined;
+  const from = (req.query.from as string) || new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
+  const statusFilter = (req.query.status as string) || "all";
+  const limit = Math.min(100, parseInt(String(req.query.limit ?? "50"), 10));
+  const offset = parseInt(String(req.query.offset ?? "0"), 10);
+
+  try {
+    const conditions = [
+      gte(scannerDiscoveries.createdAt, new Date(from + "T00:00:00Z")),
+      lte(scannerDiscoveries.createdAt, new Date(to + "T23:59:59Z")),
+    ];
+    if (signalType) conditions.push(eq(scannerDiscoveries.signalType, signalType));
+    if (statusFilter && statusFilter !== "all") {
+      conditions.push(eq(scannerDiscoveries.outcomeStatus, statusFilter));
+    }
+
+    let rows = await db
+      .select()
+      .from(scannerDiscoveries)
+      .where(and(...conditions))
+      .orderBy(desc(scannerDiscoveries.createdAt))
+      .limit(limit + offset);
+
+    rows = rows.slice(offset);
+
+    const cards = rows.slice(0, limit).map((r) => ({
+      id: r.id,
+      pipelineId: r.pipelineId,
+      pipelineName: r.pipelineName,
+      signalType: r.signalType,
+      subject: r.subject,
+      subjectKind: r.subjectKind,
+      direction: r.direction,
+      magnitude: Number(r.magnitude),
+      priority: r.priority,
+      headline: r.headline,
+      narrative: r.narrative,
+      tickers: r.tickers ?? [],
+      themeId: r.themeId ?? null,
+      qualifyScore: Number(r.qualifyScore),
+      context: (r.contextJson as Record<string, unknown>) ?? {},
+      createdAt: r.createdAt.toISOString(),
+      priceAtSignal: r.priceAtSignal,
+      // 9 checkpoints
+      price15m: r.price15m, move15m: r.move15m,
+      price30m: r.price30m, move30m: r.move30m,
+      price1hr: r.price1hr, move1hr: r.move1hr,
+      price4hr: r.price4hr, move4hr: r.move4hr,
+      priceD1Close: r.priceD1Close, moveD1Close: r.moveD1Close,
+      priceD2Open: r.priceD2Open, moveD2Open: r.moveD2Open,
+      priceD2Close: r.priceD2Close, moveD2Close: r.moveD2Close,
+      price1w: r.price1w, move1w: r.move1w,
+      price1mo: r.price1mo, move1mo: r.move1mo,
+      // MFE/MAE
+      peakMove: r.peakMove,
+      peakPrice: r.peakPrice,
+      peakAt: r.peakAt?.toISOString() ?? null,
+      worstDrawdown: r.worstDrawdown,
+      troughPrice: r.troughPrice,
+      troughAt: r.troughAt?.toISOString() ?? null,
+      givebackPct: r.givebackPct,
+      // Status
+      outcomeStatus: r.outcomeStatus,
+      outcomeFailed: r.outcomeFailed,
+      failedAt: r.failedAt?.toISOString() ?? null,
+      // Metadata
+      regimeAtSignal: r.regimeAtSignal,
+      sessionAtSignal: r.sessionAtSignal,
+      raiAtSignal: r.raiAtSignal,
+      outcomeTrackedAt: r.outcomeTrackedAt?.toISOString() ?? null,
+    }));
+
+    res.json({ cards, total: cards.length });
+  } catch (err) {
+    console.warn("[Workbench] cards error:", String(err).slice(0, 150));
+    res.status(500).json({ error: "Query failed" });
+  }
 });
 
 export default router;

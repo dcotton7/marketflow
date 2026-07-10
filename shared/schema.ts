@@ -73,10 +73,77 @@ export const tickers = pgTable("tickers", {
   epsCurrentQYoY: text("eps_current_q_yoy"),
   salesGrowth3QYoY: text("sales_growth_3q_yoy"),
   lastEpsSurprise: text("last_eps_surprise"),
+  // Earnings detail (from FMP earning_calendar)
+  companyDescription: text("company_description"),
+  earningsTime: text("earnings_time"), // "bmo" | "amc"
+  lastEarningsDate: text("last_earnings_date"),
+  epsActual: doublePrecision("eps_actual"),
+  epsEstimate: doublePrecision("eps_estimate"),
+  revenueActual: doublePrecision("revenue_actual"),
+  revenueEstimate: doublePrecision("revenue_estimate"),
   // Market condition metrics
   accDistDays: integer("acc_dist_days").default(0), // Accumulation/Distribution streak (William O'Neal style)
-  // Cache metadata
+  // Cache metadata — tiered TTLs: profile (1yr), earnings (1day), metrics (7day via fetchedAt)
   fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  profileFetchedAt: timestamp("profile_fetched_at"),
+  earningsFetchedAt: timestamp("earnings_fetched_at"),
+});
+
+// Scanner discoveries — persisted feed history for AI feedback loop
+export const scannerDiscoveries = pgTable("scanner_discoveries", {
+  id: serial("id").primaryKey(),
+  pipelineId: varchar("pipeline_id", { length: 64 }).notNull(),
+  pipelineName: varchar("pipeline_name", { length: 128 }).notNull(),
+  signalType: varchar("signal_type", { length: 32 }).notNull(),
+  subject: varchar("subject", { length: 16 }).notNull(),
+  subjectKind: varchar("subject_kind", { length: 16 }).notNull(),
+  direction: varchar("direction", { length: 8 }).notNull(),
+  magnitude: decimal("magnitude", { precision: 8, scale: 2 }).notNull().default("0"),
+  priority: varchar("priority", { length: 8 }).notNull().default("normal"),
+  headline: text("headline").notNull(),
+  narrative: text("narrative").notNull(),
+  tickers: text("tickers").array().notNull().default([]),
+  themeId: varchar("theme_id", { length: 64 }),
+  qualifyScore: decimal("qualify_score", { precision: 5, scale: 1 }).notNull().default("0"),
+  contextJson: jsonb("context_json"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  // Outcome tracking columns (migration 021 + 022)
+  priceAtSignal: doublePrecision("price_at_signal"),
+  price15m: doublePrecision("price_15m"),
+  move15m: doublePrecision("move_15m"),
+  price30m: doublePrecision("price_30m"),
+  move30m: doublePrecision("move_30m"),
+  price1hr: doublePrecision("price_1hr"),
+  move1hr: doublePrecision("move_1hr"),
+  price4hr: doublePrecision("price_4hr"),
+  move4hr: doublePrecision("move_4hr"),
+  priceD1Close: doublePrecision("price_d1_close"),
+  moveD1Close: doublePrecision("move_d1_close"),
+  priceD2Open: doublePrecision("price_d2_open"),
+  moveD2Open: doublePrecision("move_d2_open"),
+  priceD2Close: doublePrecision("price_d2_close"),
+  moveD2Close: doublePrecision("move_d2_close"),
+  price1w: doublePrecision("price_1w"),
+  move1w: doublePrecision("move_1w"),
+  price1mo: doublePrecision("price_1mo"),
+  move1mo: doublePrecision("move_1mo"),
+  // MFE/MAE behavior tracking
+  peakMove: doublePrecision("peak_move"),
+  peakPrice: doublePrecision("peak_price"),
+  peakAt: timestamp("peak_at", { withTimezone: true }),
+  worstDrawdown: doublePrecision("worst_drawdown"),
+  troughPrice: doublePrecision("trough_price"),
+  troughAt: timestamp("trough_at", { withTimezone: true }),
+  givebackPct: doublePrecision("giveback_pct"),
+  // Status tracking
+  outcomeStatus: varchar("outcome_status", { length: 16 }).default("tracking"),
+  outcomeFailed: boolean("outcome_failed").default(false),
+  failedAt: timestamp("failed_at", { withTimezone: true }),
+  // Metadata
+  regimeAtSignal: varchar("regime_at_signal", { length: 32 }),
+  sessionAtSignal: varchar("session_at_signal", { length: 32 }),
+  raiAtSignal: doublePrecision("rai_at_signal"),
+  outcomeTrackedAt: timestamp("outcome_tracked_at", { withTimezone: true }),
 });
 
 // Many-to-many ticker slice memberships (theme and/or sub-theme)

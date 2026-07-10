@@ -14,12 +14,15 @@ import type {
   RelativeStrengthResult,
   ThemeMembershipResult,
   NewsResult,
+  EarningsProximityResult,
 } from "@shared/scanner-types";
+import { getClusterById, type ClusterId } from "../../market-condition/universe";
 
 let nextId = 1;
 
 function sign(n: number): string {
-  return n >= 0 ? `+${n}` : `${n}`;
+  const r = n.toFixed(2);
+  return n >= 0 ? `+${r}` : r;
 }
 
 function buildVolumeClusterBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
@@ -276,9 +279,147 @@ function buildNewsAlertBrief(es: EnrichedSignal): { headline: string; narrative:
   return { headline, narrative: parts.join(" "), tickers: [es.signal.subject] };
 }
 
+interface TopMoverMeta {
+  symbol: string;
+  changePct: number;
+  volumeRatio: number;
+}
+
+function resolveThemeName(themeId: string): string {
+  const cluster = getClusterById(themeId as ClusterId);
+  return cluster?.name ?? themeId.replace(/_/g, " ");
+}
+
+function formatMoverList(movers: TopMoverMeta[], includeVol = false): string {
+  return movers
+    .map((m) => {
+      const pct = `${sign(m.changePct)}%`;
+      return includeVol && m.volumeRatio > 0
+        ? `${m.symbol} ${pct} (${m.volumeRatio.toFixed(1)}x vol)`
+        : `${m.symbol} ${pct}`;
+    })
+    .join(", ");
+}
+
+function buildThemeAccelerationBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
+  const rc = es.context.regime_context as RegimeContextResult | undefined;
+  const scoreDelta = (es.signal.meta?.scoreDelta as number) ?? es.signal.magnitude;
+  const currentScore = (es.signal.meta?.currentScore as number) ?? 0;
+  const topMovers = (es.signal.meta?.topMovers as TopMoverMeta[] | undefined) ?? [];
+  const themeName = resolveThemeName(es.signal.subject);
+  const isUp = es.signal.direction === "up";
+
+  const verb = isUp ? "surging" : "weakening";
+  const moversSnippet = topMovers.length > 0
+    ? ` — led by ${formatMoverList(topMovers.slice(0, 2))}`
+    : "";
+  const headline = `${themeName} ${verb}${moversSnippet}`;
+
+  const parts: string[] = [];
+  parts.push(`Theme score ${sign(scoreDelta)} to ${currentScore.toFixed(2)}.`);
+  if (topMovers.length > 0) {
+    parts.push(`Top movers: ${formatMoverList(topMovers, true)}.`);
+  }
+  if (rc) {
+    parts.push(`Market: RAI ${rc.rai}, ${rc.regime.replace(/_/g, " ")}, ${rc.session.replace(/_/g, " ")}.`);
+  }
+
+  const tickers = topMovers.map((m) => m.symbol);
+  return { headline, narrative: parts.join(" "), tickers };
+}
+
+function buildBreadthShiftBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
+  const rc = es.context.regime_context as RegimeContextResult | undefined;
+  const delta = (es.signal.meta?.delta as number) ?? 0;
+  const currRatio = (es.signal.meta?.currRatio as number) ?? 0;
+  const topMovers = (es.signal.meta?.topMovers as TopMoverMeta[] | undefined) ?? [];
+  const themeName = resolveThemeName(es.signal.subject);
+  const isUp = es.signal.direction === "up";
+
+  const verb = isUp ? "breadth expanding" : "breadth contracting";
+  const moversSnippet = topMovers.length > 0
+    ? ` — ${formatMoverList(topMovers.slice(0, 2))}`
+    : "";
+  const headline = `${themeName} ${verb}${moversSnippet}`;
+
+  const parts: string[] = [];
+  const pctUp = Math.round(currRatio * 100);
+  parts.push(`${pctUp}% of members green (shifted ${sign(Math.round(delta * 100))}%).`);
+  if (topMovers.length > 0) {
+    parts.push(`Top movers: ${formatMoverList(topMovers, true)}.`);
+  }
+  if (rc) {
+    parts.push(`Market: RAI ${rc.rai}, ${rc.regime.replace(/_/g, " ")}, ${rc.session.replace(/_/g, " ")}.`);
+  }
+
+  const tickers = topMovers.map((m) => m.symbol);
+  return { headline, narrative: parts.join(" "), tickers };
+}
+
+function buildPostEarningsReactionBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
+  const gapPct = (es.signal.meta?.gapPct as number) ?? es.signal.magnitude;
+  const epsActual = es.signal.meta?.epsActual as number | null;
+  const epsEstimate = es.signal.meta?.epsEstimate as number | null;
+  const epsSurprisePct = es.signal.meta?.epsSurprisePct as number | null;
+  const revActual = es.signal.meta?.revenueActual as number | null;
+  const revEstimate = es.signal.meta?.revenueEstimate as number | null;
+  const revSurprisePct = es.signal.meta?.revenueSurprisePct as number | null;
+  const earningsTime = (es.signal.meta?.earningsTime as string) ?? "";
+  const timeLabel = earningsTime === "bmo" ? " BMO" : earningsTime === "amc" ? " AMC" : "";
+
+  const beatMiss = epsActual != null && epsEstimate != null
+    ? (epsActual > epsEstimate ? "beat" : epsActual < epsEstimate ? "miss" : "inline")
+    : "reported";
+
+  const headline = `${es.signal.subject} earnings ${beatMiss}${timeLabel} — ${sign(gapPct)}% reaction`;
+
+  const parts: string[] = [];
+  parts.push(`${es.signal.subject} ${sign(gapPct)}% after reporting earnings${timeLabel}.`);
+  if (epsActual != null && epsEstimate != null) {
+    parts.push(`EPS: $${epsActual.toFixed(2)} vs est $${epsEstimate.toFixed(2)} (${epsSurprisePct != null ? `${sign(epsSurprisePct)}%` : "N/A"}).`);
+  }
+  if (revActual != null && revEstimate != null) {
+    const revActualM = revActual >= 1e9 ? `$${(revActual / 1e9).toFixed(2)}B` : `$${(revActual / 1e6).toFixed(1)}M`;
+    const revEstM = revEstimate >= 1e9 ? `$${(revEstimate / 1e9).toFixed(2)}B` : `$${(revEstimate / 1e6).toFixed(1)}M`;
+    parts.push(`Revenue: ${revActualM} vs est ${revEstM}${revSurprisePct != null ? ` (${sign(revSurprisePct)}%)` : ""}.`);
+  }
+
+  const rc = es.context.regime_context as RegimeContextResult | undefined;
+  if (rc) parts.push(`Market: RAI ${rc.rai}, ${rc.regime.replace(/_/g, " ")}.`);
+
+  return { headline, narrative: parts.join(" "), tickers: [es.signal.subject] };
+}
+
+function buildThemeEarningsDensityBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
+  const reportingTickers = (es.signal.meta?.reportingTickers as string[]) ?? [];
+  const count = reportingTickers.length;
+  const themeName = resolveThemeName(es.signal.subject);
+
+  const headline = `${themeName} — ${count} tickers reporting earnings this week`;
+
+  const parts: string[] = [];
+  parts.push(`${count} members of ${themeName} have earnings within the next 5 trading days.`);
+  if (reportingTickers.length > 0) {
+    parts.push(`Reporting: ${reportingTickers.slice(0, 8).join(", ")}${reportingTickers.length > 8 ? ` (+${reportingTickers.length - 8} more)` : ""}.`);
+  }
+  parts.push("Watch for coordinated post-earnings moves in this group.");
+
+  const rc = es.context.regime_context as RegimeContextResult | undefined;
+  if (rc) parts.push(`Market: RAI ${rc.rai}, ${rc.regime.replace(/_/g, " ")}.`);
+
+  return { headline, narrative: parts.join(" "), tickers: reportingTickers.slice(0, 10) };
+}
+
 function buildGenericBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
   const rc = es.context.regime_context as RegimeContextResult | undefined;
   const news = es.context.news as NewsResult | undefined;
+
+  switch (es.signal.type) {
+    case "theme_acceleration":
+      return buildThemeAccelerationBrief(es);
+    case "breadth_shift":
+      return buildBreadthShiftBrief(es);
+  }
 
   let headline: string;
   switch (es.signal.type) {
@@ -361,6 +502,12 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
       break;
     case "news_alert_scan":
       brief = buildNewsAlertBrief(es);
+      break;
+    case "post_earnings_scan":
+      brief = buildPostEarningsReactionBrief(es);
+      break;
+    case "theme_earnings_density_scan":
+      brief = buildThemeEarningsDensityBrief(es);
       break;
     default:
       brief = buildGenericBrief(es);

@@ -103,7 +103,24 @@ async function loadDailyBarsForSymbols(
       }
     }
 
-    const candles: DailyBar[] = symbolBars.slice(0, days + 5).map((b) => ({
+    // Check for large gaps in bar dates — indicates incomplete backfill.
+    // If any two consecutive bars are >7 calendar days apart, MAs would be garbage.
+    const barSlice = symbolBars.slice(0, days + 5);
+    let hasLargeGap = false;
+    for (let i = 0; i < barSlice.length - 1; i++) {
+      const d1 = new Date(barSlice[i]!.barDate + "T00:00:00Z").getTime();
+      const d2 = new Date(barSlice[i + 1]!.barDate + "T00:00:00Z").getTime();
+      if (d1 - d2 > 7 * 86_400_000) { // bars are newest-first, so d1 > d2
+        hasLargeGap = true;
+        break;
+      }
+    }
+    if (hasLargeGap) {
+      staleSkipCount++;
+      continue;
+    }
+
+    const candles: DailyBar[] = barSlice.map((b) => ({
       date: b.barDate,
       open: Number(b.open),
       high: Number(b.high),

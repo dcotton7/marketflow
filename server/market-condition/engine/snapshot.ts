@@ -232,14 +232,9 @@ export async function refreshSnapshot(
       state.maAsOf = sessionMa.asOf;
       state.maMode = sessionMa.mode;
 
-      const eodMa = await getMADataForThemes();
-      for (const sym of allTickers) {
-        const key = sym.toUpperCase();
-        if (!state.maData.has(key)) {
-          const fallback = eodMa.get(key) ?? eodMa.get(sym);
-          if (fallback) state.maData.set(key, fallback);
-        }
-      }
+      // EOD fallback disabled — stale historical_bars produce garbage MAs.
+      // Only session-adjusted MAs (with gap/staleness checks) are used.
+      // Once daily bar backfill completes, session-adjusted will populate correctly.
 
       smaData = new Map();
       for (const [sym, ma] of state.maData) {

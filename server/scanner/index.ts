@@ -28,6 +28,8 @@ import {
 } from "./catalyst";
 import { captureSessionSegment } from "./session-segment-capture";
 import { detectNewsAlerts } from "./news-detector";
+import { createEarningsCatalyst } from "./catalyst/auto-detector";
+import { startOutcomeTracker } from "./outcome-tracker";
 
 // ── Scanner state ───────────────────────────────────────────────────────────
 
@@ -179,12 +181,15 @@ async function onSnapshotRefreshed(
       }).catch(() => {});
     }
 
-    const priceSignals = processSnapshot(frame, session);
+    const priceSignals = await processSnapshot(frame, session);
 
     // News alerts: skip during pre-market (only gap + volume_spike there)
     const newsSignals = session === "pre_market"
       ? []
-      : await detectNewsAlerts(frame).catch(() => [] as Signal[]);
+      : await detectNewsAlerts(frame).catch((err) => {
+          console.warn("[Scanner] News detection error:", String(err).slice(0, 150));
+          return [] as Signal[];
+        });
 
     const signals = [...priceSignals, ...newsSignals];
     if (signals.length === 0) return;
@@ -219,6 +224,16 @@ async function onSnapshotRefreshed(
       const newsCtx = es.context.news as import("@shared/scanner-types").NewsResult | undefined;
       await evaluateForCatalysts(es.signal, newsCtx ?? null).catch(() => {});
       await checkCatalystResolution(es.signal).catch(() => {});
+
+      // Auto-create earnings catalyst on post-earnings reaction signals
+      if (es.signal.type === "earnings_reaction") {
+        const epsA = es.signal.meta?.epsActual as number | undefined;
+        const epsE = es.signal.meta?.epsEstimate as number | undefined;
+        const changePct = (es.signal.meta?.gapPct as number) ?? 0;
+        if (epsA != null && epsE != null) {
+          await createEarningsCatalyst(es.signal.subject, epsA, epsE, changePct).catch(() => {});
+        }
+      }
     }
 
     if (enriched.length === 0) return;
@@ -299,6 +314,9 @@ export async function initScanner(): Promise<void> {
 
   // Load 5-day high/low data (fire and forget to not block init)
   refreshFiveDayLevels().catch(() => {});
+
+  // Start outcome tracker background job
+  startOutcomeTracker();
 
   registerPostRefreshCallback((themeMetrics, snapshots, spyBenchmark) => {
     // Periodic refresh of 5-day levels

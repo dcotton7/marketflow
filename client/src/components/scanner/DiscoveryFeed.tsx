@@ -2,14 +2,14 @@
 // DiscoveryFeed — main scanner panel content
 // ---------------------------------------------------------------------------
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useAdminTheme } from "@/context/SystemSettingsContext";
 import { useScanner } from "@/context/ScannerContext";
 import {
   Radar, Wifi, WifiOff, ListFilter, Expand, Shrink,
-  Beaker, BookOpen, Settings2, Check, X,
-  Layers, Newspaper, Crosshair, Zap, Globe, Sunrise, Flame,
+  Beaker, BookOpen, Settings2, Check, X, PictureInPicture2, MonitorDown,
+  Layers, Newspaper, Crosshair, Zap, Globe, Sunrise, Flame, FlaskConical, CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingOverlayPanel } from "@/components/FloatingOverlayPanel";
@@ -21,6 +21,8 @@ import {
 import type { ScannerMode, DiscoveryCard as DiscoveryCardType, SignalType } from "@shared/scanner-types";
 import { SCANNER_CONFIG_FIELDS, type ScannerConfig, type ConfigFieldMeta } from "@shared/scanner-config";
 import type { CatalystRuleDefinition, CatalystEntry, DecayShape } from "@shared/catalyst-types";
+import { useLocation } from "wouter";
+import { SCANNER_POPOUT_CHANNEL, type ScannerPopoutMessage } from "./scanner-popout-channel";
 
 const SCANNER_OVERLAY_STORAGE = "scanner-overlay-position-v1";
 
@@ -32,6 +34,34 @@ const DEFAULT_OVERLAY = {
 const MODE_LABELS: Record<ScannerMode, string> = { on: "Active", silent: "Silent", off: "Off" };
 const MODE_COLORS: Record<ScannerMode, string> = { on: "text-emerald-400", silent: "text-amber-400", off: "text-slate-500" };
 
+// ── Signal type friendly labels ──────────────────────────────────────────────
+
+const SIGNAL_TYPE_LABELS: Record<SignalType, string> = {
+  gap: "Gap Up/Down",
+  volume_spike: "Volume Surge",
+  velocity_move: "Velocity Move",
+  adr_blowout: "ADR Blowout",
+  breadth_shift: "Breadth Shift",
+  theme_acceleration: "Theme Acceleration",
+  regime_change: "Regime Change",
+  rai_shift: "RAI Shift",
+  broad_weakness: "Broad Weakness",
+  broad_strength: "Broad Strength",
+  news_alert: "News Alert",
+  ma_proximity: "MA Proximity",
+  ur_ma_reclaim: "MA Reclaim",
+  prev_day_high_break: "Prev Day High Break",
+  prev_day_low_break: "Prev Day Low Break",
+  five_day_high_break: "5-Day High Break",
+  five_day_low_break: "5-Day Low Break",
+  lod_bounce: "LOD Bounce",
+  failed_breakout: "Failed Breakout",
+  hod_fade: "HOD Fade",
+  gap_down_continuation: "Gap Down Continuation",
+  earnings_reaction: "Earnings Reaction",
+  theme_earnings_density: "Theme Earnings Density",
+};
+
 // ── Category filter definitions ──────────────────────────────────────────────
 
 type CategoryFilter = "all" | "theme" | "news" | "setups" | "catalyst" | "premarket";
@@ -42,11 +72,13 @@ const CATEGORY_ICONS: Record<CategoryFilter, typeof Globe> = {
 
 const THEME_SIGNAL_TYPES: Set<SignalType> = new Set([
   "breadth_shift", "theme_acceleration", "broad_weakness", "broad_strength",
+  "theme_earnings_density",
 ]);
 const SETUP_SIGNAL_TYPES: Set<SignalType> = new Set([
   "lod_bounce", "ur_ma_reclaim", "prev_day_high_break", "prev_day_low_break",
   "five_day_high_break", "five_day_low_break",
   "failed_breakout", "hod_fade", "gap_down_continuation",
+  "earnings_reaction",
 ]);
 const MARKET_SIGNAL_TYPES: Set<SignalType> = new Set([
   "regime_change", "rai_shift",
@@ -56,10 +88,13 @@ const NEWS_SIGNAL_TYPES: Set<SignalType> = new Set(["news_alert"]);
 
 const PREMARKET_SIGNAL_TYPES: Set<SignalType> = new Set(["gap", "volume_spike", "news_alert"]);
 
-function isPreMarketTime(isoString: string): boolean {
+function isPreMarketSession(isoString: string): boolean {
   const d = new Date(isoString);
   const et = new Date(d.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  return et.getHours() < 9 || (et.getHours() === 9 && et.getMinutes() < 30);
+  const h = et.getHours();
+  const m = et.getMinutes();
+  // Include anything from overnight through 10:00 AM ET (covers gaps detected shortly after open)
+  return h < 10;
 }
 
 function matchesCategory(card: DiscoveryCardType, cat: CategoryFilter): boolean {
@@ -69,7 +104,7 @@ function matchesCategory(card: DiscoveryCardType, cat: CategoryFilter): boolean 
   if (cat === "setups") return SETUP_SIGNAL_TYPES.has(card.signalType);
   if (cat === "news") return NEWS_SIGNAL_TYPES.has(card.signalType);
   if (cat === "catalyst") return (card.qualifyScore ?? 0) > 70;
-  if (cat === "premarket") return PREMARKET_SIGNAL_TYPES.has(card.signalType) && isPreMarketTime(card.createdAt);
+  if (cat === "premarket") return PREMARKET_SIGNAL_TYPES.has(card.signalType) && isPreMarketSession(card.createdAt);
   return true;
 }
 
@@ -117,9 +152,18 @@ function ConfigField({ field, value, onChange, css, fo }: {
   );
 }
 
+// ── Storage keys ─────────────────────────────────────────────────────────────
+
+const SCANNER_POPOUT_STORAGE = "scanner-popout-active";
+
+function isPoppedOut(): boolean {
+  try { return localStorage.getItem(SCANNER_POPOUT_STORAGE) === "true"; } catch { return false; }
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 export function DiscoveryFeedPanel() {
+  const [location, navigate] = useLocation();
   const { panelOpen, setPanelOpen, mode, setMode, discoveries, connected, status } = useScanner();
   const { cssVariables } = useAdminTheme();
 
@@ -127,6 +171,7 @@ export function DiscoveryFeedPanel() {
   const [globalExpanded, setGlobalExpanded] = useState(false);
   const [showUrgentOnly, setShowUrgentOnly] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
+  const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | "all">("all");
   const [adminPanel, setAdminPanel] = useState<"none" | "rules" | "queue" | "config">("none");
   const [catalystRules, setCatalystRules] = useState<CatalystRuleDefinition[]>([]);
   const [catalystQueue, setCatalystQueue] = useState<CatalystEntry[]>([]);
@@ -134,6 +179,49 @@ export function DiscoveryFeedPanel() {
   const [configDirty, setConfigDirty] = useState(false);
   const [rulesSaving, setRulesSaving] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<number | null>(null);
+  const [poppedOut, setPoppedOut] = useState(() => isPoppedOut());
+  const popoutWindowRef = useRef<Window | null>(null);
+  const channelRef = useRef<BroadcastChannel | null>(null);
+  const [historyMode, setHistoryMode] = useState(false);
+  const [historyCards, setHistoryCards] = useState<DiscoveryCardType[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const isOnPopoutRoute = location.startsWith("/scanner-popout");
+
+  // ── BroadcastChannel: listen for popout close/navigate ────────────────────
+  useEffect(() => {
+    if (isOnPopoutRoute) return;
+    const ch = new BroadcastChannel(SCANNER_POPOUT_CHANNEL);
+    channelRef.current = ch;
+    ch.onmessage = (ev: MessageEvent<ScannerPopoutMessage>) => {
+      if (ev.data.type === "SCANNER_POPOUT_CLOSED") {
+        setPoppedOut(false);
+        try { localStorage.removeItem(SCANNER_POPOUT_STORAGE); } catch {}
+      } else if (ev.data.type === "SCANNER_NAVIGATE") {
+        navigate(ev.data.path);
+      }
+    };
+    return () => { ch.close(); channelRef.current = null; };
+  }, [isOnPopoutRoute, navigate]);
+
+  const fetchTodayHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const res = await fetch(`/api/scanner/history?date=${today}&limit=200`);
+      if (res.ok) {
+        const data = await res.json();
+        setHistoryCards(data.discoveries ?? []);
+        setHistoryMode(true);
+      }
+    } catch { /* ignore */ }
+    setHistoryLoading(false);
+  }, []);
+
+  const exitHistoryMode = useCallback(() => {
+    setHistoryMode(false);
+    setHistoryCards([]);
+  }, []);
 
   const fetchCatalystRules = useCallback(async () => {
     try {
@@ -223,12 +311,25 @@ export function DiscoveryFeedPanel() {
 
   const fo = fontOffset; // shorthand for all scannerPx calls
 
+  // Signal types present in current discoveries (for dropdown options)
+  const availableSignalTypes = useMemo(() => {
+    const types = new Set<SignalType>();
+    for (const d of discoveries) types.add(d.signalType);
+    return Array.from(types).sort((a, b) =>
+      SIGNAL_TYPE_LABELS[a].localeCompare(SIGNAL_TYPE_LABELS[b])
+    );
+  }, [discoveries]);
+
   const filteredCards = useMemo(() => {
-    let cards = discoveries;
-    if (categoryFilter !== "all") cards = cards.filter((d) => matchesCategory(d, categoryFilter));
+    let cards = historyMode ? historyCards : discoveries;
+    if (signalTypeFilter !== "all") {
+      cards = cards.filter((d) => d.signalType === signalTypeFilter);
+    } else if (categoryFilter !== "all") {
+      cards = cards.filter((d) => matchesCategory(d, categoryFilter));
+    }
     if (showUrgentOnly) cards = cards.filter((d) => d.priority === "urgent" || (d.qualifyScore ?? 0) >= 80);
     return cards;
-  }, [discoveries, showUrgentOnly, categoryFilter]);
+  }, [discoveries, historyCards, historyMode, showUrgentOnly, categoryFilter, signalTypeFilter]);
 
   const cycleMode = () => {
     const order: ScannerMode[] = ["on", "silent", "off"];
@@ -241,6 +342,30 @@ export function DiscoveryFeedPanel() {
     setConfigDirty(true);
   };
 
+  // ── Pop-out / Dock handlers ───────────────────────────────────────────────
+
+  const handlePopOut = useCallback(() => {
+    const w = window.open(
+      "/scanner-popout",
+      "scanner-popout",
+      "width=420,height=700,menubar=no,toolbar=no,location=no,status=no"
+    );
+    if (w) {
+      popoutWindowRef.current = w;
+      setPoppedOut(true);
+      try { localStorage.setItem(SCANNER_POPOUT_STORAGE, "true"); } catch {}
+    }
+  }, []);
+
+  const handleDock = useCallback(() => {
+    if (popoutWindowRef.current && !popoutWindowRef.current.closed) {
+      popoutWindowRef.current.close();
+    }
+    channelRef.current?.postMessage({ type: "SCANNER_DOCK_REQUEST" } satisfies ScannerPopoutMessage);
+    setPoppedOut(false);
+    try { localStorage.removeItem(SCANNER_POPOUT_STORAGE); } catch {}
+  }, []);
+
   // Group config fields
   const configGroups = useMemo(() => {
     const groups = new Map<string, ConfigFieldMeta[]>();
@@ -252,6 +377,9 @@ export function DiscoveryFeedPanel() {
     return groups;
   }, []);
 
+  // Don't render the floating overlay on the popout route itself
+  if (isOnPopoutRoute) return null;
+
   const titleBar = (
     <div className="flex items-center gap-2 min-w-0">
       <Radar className="h-4 w-4 text-cyan-400 shrink-0" />
@@ -262,8 +390,53 @@ export function DiscoveryFeedPanel() {
         {MODE_LABELS[mode]}
       </span>
       {connected ? <Wifi className="h-3 w-3 text-emerald-400 shrink-0" /> : <WifiOff className="h-3 w-3 text-red-400 shrink-0" />}
+      {!poppedOut && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5 text-slate-400 hover:text-cyan-400 shrink-0 ml-auto"
+          onClick={(e) => { e.stopPropagation(); handlePopOut(); }}
+          title="Pop out scanner to separate window. Pro tip: once popped out, hit Win+Ctrl+T (requires Windows PowerToys) to pin it above everything — Excel, TOS, whatever."
+        >
+          <PictureInPicture2 className="h-3 w-3" />
+        </Button>
+      )}
     </div>
   );
+
+  // If scanner is popped out, show placeholder inside the overlay
+  if (poppedOut) {
+    return (
+      <FloatingOverlayPanel
+        open={panelOpen}
+        onOpenChange={setPanelOpen}
+        storageKey={SCANNER_OVERLAY_STORAGE}
+        defaultState={DEFAULT_OVERLAY}
+        titleBar={titleBar}
+        surfaceBg={cssVariables.secondaryBgSolid}
+        borderColor={cssVariables.borderOnSecondary}
+        titleBarBg={cssVariables.headerBg}
+        surfaceSlotId="scanner:panel"
+        titleBarSlotId="scanner:titleBar"
+      >
+        <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
+          <PictureInPicture2 className="h-8 w-8 text-cyan-400/60" />
+          <p className="text-sm" style={{ color: cssVariables.textSmall }}>
+            Scanner is in a separate window
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs border-cyan-700/50 text-cyan-400 hover:bg-cyan-950/30"
+            onClick={handleDock}
+          >
+            <MonitorDown className="h-3.5 w-3.5" />
+            Bring Back
+          </Button>
+        </div>
+      </FloatingOverlayPanel>
+    );
+  }
 
   return (
     <FloatingOverlayPanel
@@ -295,6 +468,20 @@ export function DiscoveryFeedPanel() {
             )}
           </div>
           <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-6 w-6 transition-colors",
+                historyMode
+                  ? "text-cyan-400 bg-cyan-950/30 ring-1 ring-cyan-700/40"
+                  : "text-slate-500 hover:text-slate-300",
+              )}
+              onClick={historyMode ? exitHistoryMode : fetchTodayHistory}
+              title={historyMode ? "Back to live feed" : "Show all of today's signals from DB"}
+            >
+              <CalendarDays className="h-3 w-3" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -335,6 +522,7 @@ export function DiscoveryFeedPanel() {
                 onClick={(e) => {
                   e.stopPropagation();
                   setCategoryFilter(cat);
+                  setSignalTypeFilter("all");
                 }}
               >
                 <Icon className="h-3 w-3" />
@@ -343,6 +531,36 @@ export function DiscoveryFeedPanel() {
             );
           })}
         </div>
+
+        {/* Signal type dropdown filter */}
+        {availableSignalTypes.length > 0 && (
+          <div className="flex items-center gap-1.5 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
+            <ListFilter className="h-3 w-3 text-slate-500 shrink-0" />
+            <select
+              value={signalTypeFilter}
+              onChange={(e) => setSignalTypeFilter(e.target.value as SignalType | "all")}
+              className="flex-1 h-6 rounded border border-slate-700/60 bg-slate-900/80 px-1.5 text-slate-200 truncate appearance-auto cursor-pointer focus:outline-none focus:ring-1 focus:ring-cyan-700/50"
+              style={{ fontSize: scannerPx("small", fo) }}
+            >
+              <option value="all">All Signals</option>
+              {availableSignalTypes.map((st) => (
+                <option key={st} value={st}>{SIGNAL_TYPE_LABELS[st]}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* History mode banner */}
+        {historyMode && (
+          <div className="flex items-center justify-between rounded border px-2 py-1 shrink-0" style={{ borderColor: "rgba(34,211,238,0.3)", backgroundColor: "rgba(34,211,238,0.05)" }}>
+            <span style={{ color: cssVariables.textMarketFlow, fontSize: scannerPx("small", fo) }}>
+              {historyLoading ? "Loading..." : `Showing all ${historyCards.length} signals from today`}
+            </span>
+            <Button variant="ghost" size="sm" className="h-5 px-2 text-cyan-400 hover:text-cyan-300" style={{ fontSize: scannerPx("small", fo) }} onClick={exitHistoryMode}>
+              Back to Live
+            </Button>
+          </div>
+        )}
 
         {/* Discovery feed */}
         <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0 pr-1">
@@ -585,6 +803,9 @@ export function DiscoveryFeedPanel() {
             </span>
           </div>
           <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-5 px-1.5 gap-0.5 text-slate-500 hover:text-purple-400" style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => window.open("/signal-workbench", "signal-workbench", "width=1200,height=900,menubar=no,toolbar=no,location=no,status=no")} title="Signal Workbench (Admin)">
+              <FlaskConical className="h-2.5 w-2.5" />Lab
+            </Button>
             <Button variant="ghost" size="sm" className={cn("h-5 px-1.5 gap-0.5", adminPanel === "rules" ? "text-cyan-400" : "text-slate-500")} style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => setAdminPanel(adminPanel === "rules" ? "none" : "rules")} title="Catalyst Rules (Admin)">
               <BookOpen className="h-2.5 w-2.5" />Rules
             </Button>

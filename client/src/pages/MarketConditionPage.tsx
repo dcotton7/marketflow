@@ -2449,6 +2449,8 @@ export default function MarketConditionPage() {
         tickers={visibleThemeTickers}
         themeMedianPct={selectedThemeData?.medianPct}
         themeRank={selectedThemeData?.rank}
+        themeName={selectedThemeData?.name ?? null}
+        totalThemes={themes.length}
         themeBreakdownWatch={selectedThemeData?.breakdownWatch}
         raiLabel={marketSummary.rai.label}
         chartSyncEnabled={chartSyncEnabled}

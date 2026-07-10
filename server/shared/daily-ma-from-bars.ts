@@ -42,7 +42,8 @@ export function computeTickerMasFromClosesNewestFirst(
   const ema10 = emaNewestFirst(closesNewestFirst, 10);
   const ema20 = emaNewestFirst(closesNewestFirst, 20);
   const sma20 = smaNewestFirst(closesNewestFirst, 20);
-  const sma50 = smaNewestFirst(closesNewestFirst, 50);
+  const sma50 =
+    closesNewestFirst.length >= 50 ? smaNewestFirst(closesNewestFirst, 50) : null;
   const sma200 =
     closesNewestFirst.length >= 200 ? smaNewestFirst(closesNewestFirst, 200) : null;
 

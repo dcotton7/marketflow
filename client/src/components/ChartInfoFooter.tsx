@@ -1,4 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import type { ChartMetrics, ChartDataResponse } from "@/components/DualChartGrid";
 
@@ -76,6 +77,10 @@ interface ChartInfoFooterProps {
   themeId?: string | null;
 
   themeRank?: number | null;
+
+  themeName?: string | null;
+
+  totalThemes?: number | null;
 
   chartsReady?: boolean;
 
@@ -174,6 +179,10 @@ export function ChartInfoFooter({
 
   themeRank,
 
+  themeName,
+
+  totalThemes,
+
   chartsReady = true,
 
   testIdPrefix = "",
@@ -190,6 +199,28 @@ export function ChartInfoFooter({
 
   const pid = testIdPrefix ? `${testIdPrefix}-` : "";
   const { user } = useSentinelAuth();
+
+  // Self-fetch theme rank when not provided via props
+  const needsThemeLookup = themeRank == null && !!symbol;
+  const { data: tickerThemeData } = useQuery<{
+    themeId: string | null;
+    themeName: string | null;
+    rank: number | null;
+    totalThemes: number | null;
+  }>({
+    queryKey: ["/api/market-condition/ticker-theme", symbol],
+    queryFn: async () => {
+      const res = await fetch(`/api/market-condition/ticker-theme/${symbol}`);
+      if (!res.ok) return { themeId: null, themeName: null, rank: null, totalThemes: null };
+      return res.json();
+    },
+    enabled: needsThemeLookup,
+    staleTime: 60_000,
+  });
+
+  const resolvedThemeRank = themeRank ?? tickerThemeData?.rank ?? null;
+  const resolvedThemeName = themeName ?? tickerThemeData?.themeName ?? null;
+  const resolvedTotalThemes = totalThemes ?? tickerThemeData?.totalThemes ?? null;
   const [fontPrefs, setFontPrefs] = useState<ChartFooterFontPrefs>(() => loadChartFooterFontPrefs(undefined));
 
   useEffect(() => {
@@ -440,7 +471,11 @@ export function ChartInfoFooter({
                   label="Next earnings"
                   value={
                     chartMetrics.nextEarningsDate !== "N/A"
-                      ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)`
+                      ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)${
+                          chartMetrics.earningsTime === "bmo" ? " BMO"
+                          : chartMetrics.earningsTime === "amc" ? " AMC"
+                          : ""
+                        }`
                       : "N/A"
                   }
                   valueClassName={
@@ -465,6 +500,21 @@ export function ChartInfoFooter({
                   }
                   testId={`${pid}metric-am-gap`}
                 />
+                <FooterInfoLine
+                  label="Theme Rank"
+                  value={
+                    resolvedThemeRank != null
+                      ? `#${resolvedThemeRank}${resolvedTotalThemes ? ` / ${resolvedTotalThemes}` : ""}${resolvedThemeName ? ` · ${resolvedThemeName}` : ""}`
+                      : "N/A"
+                  }
+                  valueClassName={
+                    resolvedThemeRank == null ? undefined
+                    : resolvedThemeRank <= 5 ? "text-rs-green"
+                    : resolvedThemeRank <= 14 ? "text-gray-100"
+                    : "text-rs-red"
+                  }
+                  testId={`${pid}metric-theme-rank`}
+                />
               </FooterColumn>
 
               <FooterColumn>
@@ -483,15 +533,6 @@ export function ChartInfoFooter({
                       : "text-rs-red"
                   }
                   testId={`${pid}metric-rs-spy`}
-                />
-                <FooterInfoLine
-                  label="Theme rank"
-                  value={
-                    chartMetrics.themeRank != null
-                      ? `#${chartMetrics.themeRank}${chartMetrics.themeName ? ` · ${chartMetrics.themeName}` : ""}`
-                      : "N/A"
-                  }
-                  testId={`${pid}metric-theme-rank`}
                 />
                 <FooterInfoLine
                   label="Sector"

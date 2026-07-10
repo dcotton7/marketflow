@@ -73,6 +73,8 @@ interface ThemeTickerReviewPanelProps {
   tickers: TickerRow[];
   themeMedianPct?: number;
   themeRank?: number;
+  themeName?: string | null;
+  totalThemes?: number | null;
   themeBreakdownWatch?: import("@shared/theme-breakdown-watch").BreakdownWatchAssessment | null;
   raiLabel?: "AGGRESSIVE" | "NEUTRAL" | "DEFENSIVE";
   onOpenAnalysis?: (symbol: string) => void;
@@ -131,6 +133,8 @@ export function ThemeTickerReviewPanel({
   tickers,
   themeMedianPct = 0,
   themeRank,
+  themeName: themeNameProp,
+  totalThemes,
   themeBreakdownWatch,
   raiLabel,
   onOpenAnalysis,
@@ -669,6 +673,8 @@ export function ThemeTickerReviewPanel({
         symbolTags={chartSymbolTags}
         themeId={themeId}
         themeRank={themeRank}
+        themeName={themeNameProp}
+        totalThemes={totalThemes}
         themeBreakdownWatch={themeBreakdownWatch}
         rowBySymbol={rowBySymbol}
         onClose={() => setChartViewerOpen(false)}

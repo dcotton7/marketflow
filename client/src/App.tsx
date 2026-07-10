@@ -32,6 +32,8 @@ import SymbolPage from "@/pages/SymbolPage";
 import StartHerePage from "@/pages/StartHerePage";
 import { lazy, Suspense } from "react";
 const MarketConditionPage = lazy(() => import("@/pages/MarketConditionPage"));
+const ScannerPopoutPage = lazy(() => import("@/pages/ScannerPopoutPage"));
+const SignalWorkbenchPage = lazy(() => import("@/pages/SignalWorkbenchPage"));
 
 function Router() {
   return (
@@ -144,6 +146,20 @@ function Router() {
         <SentinelProtectedRoute>
           <SymbolPage />
         </SentinelProtectedRoute>
+      </Route>
+
+      {/* Scanner pop-out window */}
+      <Route path="/scanner-popout">
+        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Scanner...</div>}>
+          <ScannerPopoutPage />
+        </Suspense>
+      </Route>
+
+      {/* Signal Workbench pop-out */}
+      <Route path="/signal-workbench">
+        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workbench...</div>}>
+          <SignalWorkbenchPage />
+        </Suspense>
       </Route>
       
       {/* Catch-all 404 */}

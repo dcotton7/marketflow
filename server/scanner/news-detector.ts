@@ -14,8 +14,8 @@ import type { SnapshotFrame } from "./signal-producer";
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
 const FMP_API_KEY = process.env.FMP_API_KEY ?? "";
 
-const MIN_SEVERITY_TO_FIRE = 5;
-const BATCH_SIZE = 8;
+const MIN_SEVERITY_TO_FIRE = 3;
+const BATCH_SIZE = 20;
 const COOLDOWN_MS = 60 * 60_000;
 
 let rotationIndex = 0;

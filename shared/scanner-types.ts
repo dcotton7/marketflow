@@ -25,7 +25,9 @@ export type SignalType =
   | "failed_breakout"
   | "hod_fade"
   | "gap_down_continuation"
-  | "news_alert";
+  | "news_alert"
+  | "earnings_reaction"
+  | "theme_earnings_density";
 
 export type SignalSubjectKind = "ticker" | "theme" | "market";
 
@@ -153,6 +155,7 @@ export interface EarningsProximityResult {
   withinNDays: boolean;
   daysUntil: number | null;
   date: string | null;
+  earningsTime?: string | null;
 }
 
 export interface NewsHeadline {

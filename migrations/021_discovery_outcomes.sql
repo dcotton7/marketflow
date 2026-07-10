@@ -1,0 +1,15 @@
+ALTER TABLE scanner_discoveries
+  ADD COLUMN IF NOT EXISTS price_at_signal DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS price_1hr DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS price_4hr DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS price_eod DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS move_1hr DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS move_4hr DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS move_eod DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS regime_at_signal VARCHAR(32),
+  ADD COLUMN IF NOT EXISTS session_at_signal VARCHAR(32),
+  ADD COLUMN IF NOT EXISTS rai_at_signal DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS outcome_tracked_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_scanner_disc_signal_type ON scanner_discoveries (signal_type);
+CREATE INDEX IF NOT EXISTS idx_scanner_disc_outcome ON scanner_discoveries (outcome_tracked_at) WHERE outcome_tracked_at IS NOT NULL;

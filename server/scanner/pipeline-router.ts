@@ -258,6 +258,27 @@ function qualifySignal(
       return { qualified: true, score: capScore(raw) };
     }
 
+    case "post_earnings_scan": {
+      const gapPctER = Math.abs((signal.meta?.gapPct as number) ?? signal.magnitude);
+      raw += Math.min(30, gapPctER * 5);
+      const surprisePct = signal.meta?.epsSurprisePct as number | undefined;
+      if (surprisePct != null && Math.abs(surprisePct) > 10) raw += 15;
+      if (gapPctER >= 5) raw += 15;
+      const erScore = capScore(raw);
+      return {
+        qualified: true,
+        score: erScore,
+        priorityOverride: erScore >= 60 ? "urgent" : undefined,
+      };
+    }
+
+    case "theme_earnings_density_scan": {
+      const count = (signal.meta?.count as number) ?? signal.magnitude;
+      raw += count * 10;
+      if (count >= 5) raw += 15;
+      return { qualified: true, score: capScore(raw) };
+    }
+
     default:
       return { qualified: true, score: capScore(raw) };
   }

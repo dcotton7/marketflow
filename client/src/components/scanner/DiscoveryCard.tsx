@@ -78,12 +78,14 @@ function directionIcon(direction: string) {
 }
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+  const clock = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  if (mins < 1) return `just now · ${clock}`;
+  if (mins < 60) return `${mins}m ago · ${clock}`;
   const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m ago`;
+  return `${hrs}h ${mins % 60}m ago · ${clock}`;
 }
 
 function sign(n: number): string {
@@ -131,6 +133,7 @@ interface DiscoveryCardProps {
   fontSize: number;
   headlineFontSize: number;
   onOpenChart?: (symbol: string) => void;
+  onNavigateTheme?: (themeId: string) => void;
   globalExpanded?: boolean;
 }
 
@@ -139,6 +142,7 @@ export function DiscoveryCard({
   fontSize,
   headlineFontSize,
   onOpenChart,
+  onNavigateTheme,
   globalExpanded = false,
 }: DiscoveryCardProps) {
   const [localExpanded, setLocalExpanded] = useState(false);
@@ -147,8 +151,12 @@ export function DiscoveryCard({
   const [, navigate] = useLocation();
 
   const navigateToTheme = useCallback((themeId: string) => {
-    navigate(`/sentinel/market-condition?theme=${themeId}`);
-  }, [navigate]);
+    if (onNavigateTheme) {
+      onNavigateTheme(themeId);
+    } else {
+      navigate(`/sentinel/market-condition?theme=${themeId}`);
+    }
+  }, [navigate, onNavigateTheme]);
 
   const hoverDetail = useMemo(() => buildHoverDetail(card), [card]);
 
@@ -174,7 +182,7 @@ export function DiscoveryCard({
         borderColor
       )}
       style={{
-        backgroundColor: cssVariables.secondaryBg,
+        backgroundColor: cssVariables.mainBg,
         fontSize: `${fontSize}px`,
       }}
       data-testid={`scanner-card-${card.id}`}
@@ -182,7 +190,10 @@ export function DiscoveryCard({
       {/* Compact view: hover shows details */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex items-start gap-2 cursor-default">
+          <div
+            className="flex items-start gap-2 cursor-pointer select-none"
+            onClick={() => setLocalExpanded(!localExpanded)}
+          >
             <div className="mt-0.5 shrink-0">{directionIcon(card.direction)}</div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -216,20 +227,11 @@ export function DiscoveryCard({
             </div>
 
             {/* Expand toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLocalExpanded(!localExpanded);
-              }}
-              aria-label={expanded ? "Collapse" : "Expand"}
-            >
+            <div className="h-6 w-6 shrink-0 flex items-center justify-center opacity-50">
               {expanded
                 ? <ChevronUp className="h-3.5 w-3.5" />
                 : <ChevronDown className="h-3.5 w-3.5" />}
-            </Button>
+            </div>
           </div>
         </TooltipTrigger>
         <TooltipContent
