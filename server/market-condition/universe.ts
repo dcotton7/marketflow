@@ -537,7 +537,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Macro",
     leadersTarget: 5,
     core: ["UNH", "LLY", "JNJ", "ABBV", "MRK", "TMO", "DHR", "ISRG", "AMGN", "BMY", "GILD", "PFE", "CVS", "CI", "HUM", "ELV", "MDT", "SYK", "ABT", "ZTS"],
-    candidates: ["BSX", "BDX", "EW", "DXCM", "IDXX", "A", "IQV", "HOLX"],
+    candidates: ["BSX", "BDX", "EW", "DXCM", "IDXX", "A", "IQV", "HOLX", "HIMS"],
     etfProxies: [
       { symbol: "XLV", name: "Health Care Select SPDR", proxyType: "direct" },
       { symbol: "VHT", name: "Vanguard Health Care ETF", proxyType: "direct" },
@@ -876,6 +876,89 @@ export function getAllUniverseTickers(): string[] {
   return Array.from(tickerSet).sort();
 }
 
+// =============================================================================
+// Runtime Candidate Registry (in-memory, resets on restart)
+// =============================================================================
+
+const runtimeCandidates = new Map<string, ClusterId>();
+
+export function addRuntimeCandidate(symbol: string, clusterId: ClusterId): void {
+  runtimeCandidates.set(symbol.toUpperCase(), clusterId);
+}
+
+export function getRuntimeCandidates(): Map<string, ClusterId> {
+  return runtimeCandidates;
+}
+
+// =============================================================================
+// Auto-Map Function
+// =============================================================================
+
+const INDUSTRY_KEYWORD_MAP: [string[], ClusterId][] = [
+  [["semiconductor", "chip"], "SEMIS"],
+  [["software", "saas", "cloud"], "ENTERPRISE_SOFT"],
+  [["biotech", "biotechnology"], "BIOTECH"],
+  [["pharma", "drug", "healthcare", "medical", "telehealth"], "HEALTHCARE"],
+  [["bank", "financial", "insurance"], "FINANCIAL_CORE"],
+  [["oil", "gas", "energy", "petroleum"], "ENERGY"],
+  [["mining", "metal", "steel"], "MATERIALS_METALS"],
+  [["real estate", "reit"], "DATA_CENTER_REITS"],
+  [["retail", "consumer", "e-commerce"], "CONSUMER_DISC"],
+  [["transport", "airline", "shipping", "trucking", "railroad"], "TRANSPORTS"],
+  [["homebuilder", "home construction", "residential"], "HOMEBUILDERS"],
+  [["crypto", "blockchain", "bitcoin"], "CRYPTO_EQ"],
+  [["nuclear", "uranium"], "NUCLEAR_URANIUM"],
+  [["solar", "renewable", "clean energy"], "SOLAR"],
+  [["gaming", "casino", "gambling"], "GAMING_CASINOS"],
+  [["hotel", "hospitality", "leisure", "cruise", "restaurant"], "HOSPITALITY_LEISURE"],
+  [["aerospace", "defense"], "DEFENSE"],
+  [["quantum", "quantum computing"], "QUANTUM"],
+  [["fiber", "optical", "telecom", "5g"], "FIBER_OPTICAL"],
+  [["cybersecurity", "security", "cyber"], "CYBER"],
+  [["data center", "cloud infrastructure"], "AI_INFRA"],
+];
+
+const SECTOR_FALLBACK_MAP: Record<string, ClusterId> = {
+  "Technology": "ENTERPRISE_SOFT",
+  "Healthcare": "HEALTHCARE",
+  "Financials": "FINANCIAL_CORE",
+  "Energy": "ENERGY",
+  "Real Estate": "DATA_CENTER_REITS",
+  "Industrials": "TRANSPORTS",
+  "Basic Materials": "MATERIALS_METALS",
+  "Consumer": "CONSUMER_DISC",
+  "Consumer Cyclical": "CONSUMER_DISC",
+  "Consumer Defensive": "CONSUMER_STAPLES",
+  "Communication Services": "ENTERPRISE_SOFT",
+  "Utilities": "ENERGY",
+};
+
+/**
+ * Auto-map a ticker to the best-fit cluster based on sector/industry strings.
+ * Pure function — no async or DB calls.
+ */
+export function autoMapTickerToCluster(symbol: string, sector: string, industry: string): ClusterId | null {
+  const upper = symbol.toUpperCase();
+
+  // Already assigned statically?
+  const existing = getTickerPrimaryCluster(upper);
+  if (existing) return existing;
+
+  // Match by industry keywords (case-insensitive)
+  const lowerIndustry = industry.toLowerCase();
+  for (const [keywords, clusterId] of INDUSTRY_KEYWORD_MAP) {
+    if (keywords.some(kw => lowerIndustry.includes(kw))) {
+      return clusterId;
+    }
+  }
+
+  // Fall back to sector
+  const mapped = SECTOR_FALLBACK_MAP[sector];
+  if (mapped) return mapped;
+
+  return null;
+}
+
 /**
  * Get cluster by ID
  */
@@ -884,17 +967,23 @@ export function getClusterById(id: ClusterId): ClusterDefinition | undefined {
 }
 
 /**
- * Get all tickers for a specific cluster (core + candidates)
+ * Get all tickers for a specific cluster (core + candidates + runtime)
  */
 export function getClusterTickers(id: ClusterId): string[] {
   const cluster = getClusterById(id);
   if (!cluster) return [];
-  return [...cluster.core, ...cluster.candidates];
+  const base = [...cluster.core, ...cluster.candidates];
+  for (const [sym, cid] of runtimeCandidates) {
+    if (cid === id && !base.includes(sym)) {
+      base.push(sym);
+    }
+  }
+  return base;
 }
 
 /**
  * Find which cluster a ticker belongs to (primary assignment)
- * Returns the first cluster where ticker is in core, then candidates
+ * Returns the first cluster where ticker is in core, then candidates, then runtime
  */
 export function getTickerPrimaryCluster(symbol: string): ClusterId | null {
   const upper = symbol.toUpperCase();
@@ -910,6 +999,9 @@ export function getTickerPrimaryCluster(symbol: string): ClusterId | null {
       return cluster.id;
     }
   }
+  // Then check runtime candidates
+  const runtime = runtimeCandidates.get(upper);
+  if (runtime) return runtime;
   return null;
 }
 

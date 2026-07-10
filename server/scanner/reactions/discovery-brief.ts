@@ -308,12 +308,22 @@ function buildThemeAccelerationBrief(es: EnrichedSignal): { headline: string; na
   const topMovers = (es.signal.meta?.topMovers as TopMoverMeta[] | undefined) ?? [];
   const themeName = resolveThemeName(es.signal.subject);
   const isUp = es.signal.direction === "up";
+  const contradictory = (es.signal.meta?.contradictory as boolean) ?? false;
 
-  const verb = isUp ? "surging" : "weakening";
+  // Pick an honest verb: "surging" only when actually strong, "bouncing" if still weak
+  let verb: string;
+  if (isUp) {
+    verb = contradictory ? "bouncing" : "surging";
+  } else {
+    verb = contradictory ? "fading" : "weakening";
+  }
   const moversSnippet = topMovers.length > 0
     ? ` — led by ${formatMoverList(topMovers.slice(0, 2))}`
     : "";
-  const headline = `${themeName} ${verb}${moversSnippet}`;
+  const scoreLabel = contradictory
+    ? ` (score: ${currentScore.toFixed(0)})`
+    : "";
+  const headline = `${themeName} ${verb}${moversSnippet}${scoreLabel}`;
 
   const parts: string[] = [];
   parts.push(`Theme score ${sign(scoreDelta)} to ${currentScore.toFixed(2)}.`);
@@ -408,6 +418,27 @@ function buildThemeEarningsDensityBrief(es: EnrichedSignal): { headline: string;
   if (rc) parts.push(`Market: RAI ${rc.rai}, ${rc.regime.replace(/_/g, " ")}.`);
 
   return { headline, narrative: parts.join(" "), tickers: reportingTickers.slice(0, 10) };
+}
+
+function buildIpoDebutBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
+  const company = (es.signal.meta?.company as string) ?? es.signal.subject;
+  const exchange = (es.signal.meta?.exchange as string) ?? "Unknown";
+  const priceRange = (es.signal.meta?.priceRange as string) ?? "";
+  const shares = (es.signal.meta?.sharesOffered as number) ?? 0;
+  const marketCapFormatted = (es.signal.meta?.marketCapFormatted as string) ?? "";
+  const ipoDate = (es.signal.meta?.ipoDate as string) ?? "";
+  const actionStatus = (es.signal.meta?.actionStatus as string) ?? "";
+
+  const headline = `IPO: ${company} (${es.signal.subject}) debuts on ${exchange}`;
+
+  const parts: string[] = [];
+  if (priceRange) parts.push(`Priced at ${priceRange}, offering ${shares > 0 ? shares.toLocaleString() : "?"} shares.`);
+  if (marketCapFormatted) parts.push(`Market cap ~${marketCapFormatted}.`);
+  parts.push(`${exchange} listing.`);
+  if (ipoDate) parts.push(`IPO date: ${ipoDate}.`);
+  if (actionStatus) parts.push(`Status: ${actionStatus}.`);
+
+  return { headline, narrative: parts.join(" "), tickers: [es.signal.subject] };
 }
 
 function buildGenericBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
@@ -508,6 +539,9 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
       break;
     case "theme_earnings_density_scan":
       brief = buildThemeEarningsDensityBrief(es);
+      break;
+    case "ipo_debut_scan":
+      brief = buildIpoDebutBrief(es);
       break;
     default:
       brief = buildGenericBrief(es);

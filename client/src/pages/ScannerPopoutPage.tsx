@@ -12,7 +12,7 @@ import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useScanner } from "@/context/ScannerContext";
 import {
   Radar, Wifi, WifiOff, ListFilter, Expand, Shrink,
-  Beaker, BookOpen, Settings2, X, MonitorDown,
+  Beaker, BookOpen, Settings2, X, MonitorDown, FlaskConical,
   Layers, Newspaper, Crosshair, Zap, Globe, Sunrise, Flame, CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ const SIGNAL_TYPE_LABELS: Record<SignalType, string> = {
   gap_down_continuation: "Gap Down Continuation",
   earnings_reaction: "Earnings Reaction",
   theme_earnings_density: "Theme Earnings Density",
+  ipo_debut: "IPO Debut",
 };
 
 // ── Category filter logic ────────────────────────────────────────────────────
@@ -144,6 +145,7 @@ export default function ScannerPopoutPage() {
   const [showUrgentOnly, setShowUrgentOnly] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | "all">("all");
+  const [directionFilter, setDirectionFilter] = useState<"all" | "up" | "down">("all");
   const [adminPanel, setAdminPanel] = useState<"none" | "rules" | "queue" | "config">("none");
   const [catalystRules, setCatalystRules] = useState<CatalystRuleDefinition[]>([]);
   const [catalystQueue, setCatalystQueue] = useState<CatalystEntry[]>([]);
@@ -272,9 +274,10 @@ export default function ScannerPopoutPage() {
     let cards = historyMode ? historyCards : discoveries;
     if (signalTypeFilter !== "all") cards = cards.filter((d) => d.signalType === signalTypeFilter);
     else if (categoryFilter !== "all") cards = cards.filter((d) => matchesCategory(d, categoryFilter));
+    if (directionFilter !== "all") cards = cards.filter((d) => d.direction === directionFilter);
     if (showUrgentOnly) cards = cards.filter((d) => d.priority === "urgent" || (d.qualifyScore ?? 0) >= 80);
     return cards;
-  }, [discoveries, historyCards, historyMode, showUrgentOnly, categoryFilter, signalTypeFilter]);
+  }, [discoveries, historyCards, historyMode, showUrgentOnly, categoryFilter, signalTypeFilter, directionFilter]);
 
   const configGroups = useMemo(() => {
     const groups = new Map<string, ConfigFieldMeta[]>();
@@ -291,9 +294,10 @@ export default function ScannerPopoutPage() {
       >
         <div className="flex items-center gap-2 min-w-0">
           <Radar className="h-4 w-4 text-cyan-400 shrink-0" />
-          <span className="font-semibold text-sm" style={{ color: cssVariables.textTitle }}>Scanner</span>
+          <span className="font-semibold text-sm" style={{ color: cssVariables.textTitle }} title="Pin this window on top: Win+Ctrl+T (requires PowerToys)">Scanner</span>
           <span className={cn("text-[10px] font-bold uppercase", MODE_COLORS[mode])}>{MODE_LABELS[mode]}</span>
           {connected ? <Wifi className="h-3 w-3 text-emerald-400" /> : <WifiOff className="h-3 w-3 text-red-400" />}
+          <span className="text-[9px] text-slate-600 hidden sm:inline" title="Pin this window on top: Win+Ctrl+T (requires Windows PowerToys)">📌 Win+Ctrl+T to pin on top</span>
         </div>
         <Button
           variant="ghost"
@@ -384,6 +388,30 @@ export default function ScannerPopoutPage() {
             </select>
           </div>
         )}
+
+        {/* Direction filter (Long / Short / All) */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          {(["all", "up", "down"] as const).map((dir) => {
+            const active = directionFilter === dir;
+            const label = dir === "all" ? "All" : dir === "up" ? "Long" : "Short";
+            return (
+              <button
+                key={dir}
+                onClick={() => setDirectionFilter(dir)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                  active
+                    ? dir === "up" ? "bg-emerald-800/50 text-emerald-300 border border-emerald-600/50"
+                    : dir === "down" ? "bg-red-800/50 text-red-300 border border-red-600/50"
+                    : "bg-cyan-800/40 text-cyan-300 border border-cyan-600/50"
+                    : "text-slate-400 hover:text-slate-200 border border-transparent"
+                }`}
+                style={{ fontSize: scannerPx("small", fo) }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
         {/* History mode banner */}
         {historyMode && (
@@ -545,6 +573,9 @@ export default function ScannerPopoutPage() {
             </span>
           </div>
           <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-5 px-1.5 gap-0.5 text-slate-500 hover:text-purple-400" style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => window.open("/signal-workbench", "signal-workbench", "width=1200,height=900,menubar=no,toolbar=no,location=no,status=no")} title="Signal Workbench (Admin)">
+              <FlaskConical className="h-2.5 w-2.5" />Lab
+            </Button>
             <Button variant="ghost" size="sm" className={cn("h-5 px-1.5 gap-0.5", adminPanel === "rules" ? "text-cyan-400" : "text-slate-500")} style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => setAdminPanel(adminPanel === "rules" ? "none" : "rules")} title="Catalyst Rules">
               <BookOpen className="h-2.5 w-2.5" />Rules
             </Button>

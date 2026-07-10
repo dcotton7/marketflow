@@ -95,6 +95,11 @@ interface FmpProfileRow {
   exchange?: string;
   mktCap?: number;
   symbol?: string;
+  range?: string;        // "123.45-234.56" (52-week range)
+  lastDiv?: number;
+  volAvg?: number;
+  fullTimeEmployees?: number;
+  sharesOutstanding?: number;
 }
 
 async function fetchFmpProfile(symbol: string): Promise<FmpProfileRow | null> {
@@ -379,6 +384,11 @@ async function getExtendedFromDbCacheTiered(symbol: string): Promise<TieredCache
       epsEstimate: row.epsEstimate ?? null,
       revenueActual: row.revenueActual ?? null,
       revenueEstimate: row.revenueEstimate ?? null,
+      week52High: row.week52High ?? null,
+      week52Low: row.week52Low ?? null,
+      dividendYield: row.dividendYield ?? null,
+      roe: row.roe ?? null,
+      sharesOutstanding: row.sharesOutstanding ?? null,
     };
 
     return { data, profileStale, earningsStale, metricsStale, row };
@@ -439,6 +449,11 @@ async function saveToDbCache(symbol: string, data: FundamentalData, extended?: E
       values.epsEstimate = extended.epsEstimate;
       values.revenueActual = extended.revenueActual;
       values.revenueEstimate = extended.revenueEstimate;
+      values.week52High = extended.week52High;
+      values.week52Low = extended.week52Low;
+      values.dividendYield = extended.dividendYield;
+      values.roe = extended.roe;
+      values.sharesOutstanding = extended.sharesOutstanding;
     }
 
     if (opts?.profileData) {
@@ -587,6 +602,12 @@ export interface ExtendedFundamentals {
   epsEstimate: number | null;
   revenueActual: number | null;
   revenueEstimate: number | null;
+  // Extended profile + metrics fields
+  week52High: number | null;
+  week52Low: number | null;
+  dividendYield: number | null;
+  roe: number | null;
+  sharesOutstanding: number | null;
 }
 
 // ── Cache-only reader for scanner (never triggers API calls) ────────────────
@@ -625,6 +646,96 @@ export async function getCachedEarningsData(symbol: string): Promise<{
   }
 }
 
+// ── Quarterly earnings history (4-quarter table) ──────────────────────────
+
+export interface QuarterlyEarning {
+  quarter: string;       // e.g. "Q2 '25"
+  date: string;          // fiscal date ending or report date
+  epsActual: number | null;
+  epsEstimate: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
+}
+
+const earningsHistoryCache = new Map<string, { data: QuarterlyEarning[]; ts: number }>();
+
+function formatQuarterLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  const month = d.getUTCMonth(); // 0-indexed
+  const q = month < 3 ? 1 : month < 6 ? 2 : month < 9 ? 3 : 4;
+  const yr = String(d.getUTCFullYear()).slice(2);
+  return `Q${q} '${yr}`;
+}
+
+export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEarning[]> {
+  const upper = symbol.toUpperCase();
+  const cached = earningsHistoryCache.get(upper);
+  if (cached && Date.now() - cached.ts < EARNINGS_CACHE_TTL) return cached.data;
+
+  // Try FMP first
+  if (FMP_API_KEY) {
+    try {
+      const url = `${FMP_BASE}/earning_calendar?symbol=${encodeURIComponent(upper)}&apikey=${FMP_API_KEY}`;
+      const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
+      if (resp.status === 429) {
+        fmpBackoffUntil = Date.now() + 60_000;
+        console.warn("[FMP] 429 rate limit hit on earnings history, backing off 60s");
+      } else if (resp.ok) {
+        const data: FmpEarningsRow[] = await resp.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const today = new Date().toISOString().slice(0, 10);
+          const pastEntries = data
+            .filter((e) => e.date <= today && (e.eps != null || e.revenue != null))
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .slice(0, 4);
+
+          if (pastEntries.length > 0) {
+            const result: QuarterlyEarning[] = pastEntries.map((e) => ({
+              quarter: formatQuarterLabel(e.date),
+              date: e.date,
+              epsActual: e.eps,
+              epsEstimate: e.epsEstimated,
+              revenueActual: e.revenue,
+              revenueEstimate: e.revenueEstimated,
+            }));
+            earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
+            return result;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[FMP] Earnings history fetch failed for ${upper}:`, err);
+    }
+  }
+
+  // Fallback to Finnhub /stock/earnings
+  try {
+    const surprises = await finnhub.fetchEarningsSurprises(upper);
+    if (Array.isArray(surprises) && surprises.length > 0) {
+      const sorted = [...surprises]
+        .filter((e) => e.period)
+        .sort((a, b) => b.period.localeCompare(a.period))
+        .slice(0, 4);
+
+      const result: QuarterlyEarning[] = sorted.map((e) => ({
+        quarter: formatQuarterLabel(e.period),
+        date: e.period,
+        epsActual: e.actual ?? null,
+        epsEstimate: e.estimate ?? null,
+        revenueActual: null,
+        revenueEstimate: null,
+      }));
+      earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
+      return result;
+    }
+  } catch (err) {
+    console.warn(`[Finnhub] Earnings history fallback failed for ${upper}:`, err);
+  }
+
+  earningsHistoryCache.set(upper, { data: [], ts: Date.now() });
+  return [];
+}
+
 export async function getExtendedFundamentals(symbol: string): Promise<ExtendedFundamentals> {
   const upper = symbol.toUpperCase();
 
@@ -639,24 +750,52 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
     const saveOpts: SaveOptions = {};
 
     // ── Step 2: If profile stale → fetch FMP profile ────────────────────
+    let fmpProfileData: FmpProfileRow | null = null;
     if (cached.profileStale) {
       console.log(`[Fundamentals] Profile stale for ${upper}, fetching from FMP`);
-      const fmpProfile = await fetchFmpProfile(upper).catch(() => null);
-      if (fmpProfile) {
-        const desc = fmpProfile.description || null;
-        const sector = fmpProfile.sector || result?.companyDescription ? undefined : "Unknown";
-        const industry = fmpProfile.industry || undefined;
+      fmpProfileData = await fetchFmpProfile(upper).catch(() => null);
+      if (fmpProfileData) {
+        const desc = fmpProfileData.description || null;
+        const sector = fmpProfileData.sector || result?.companyDescription ? undefined : "Unknown";
+        const industry = fmpProfileData.industry || undefined;
         saveOpts.profileData = {
           companyDescription: desc,
-          companyName: fmpProfile.companyName || undefined,
-          sector: fmpProfile.sector || sector,
-          industry: fmpProfile.industry || industry,
-          exchange: fmpProfile.exchange || undefined,
-          marketCap: fmpProfile.mktCap || undefined,
+          companyName: fmpProfileData.companyName || undefined,
+          sector: fmpProfileData.sector || sector,
+          industry: fmpProfileData.industry || industry,
+          exchange: fmpProfileData.exchange || undefined,
+          marketCap: fmpProfileData.mktCap || undefined,
         };
+
+        // Extract 52-week range from FMP "range" field (format "123.45-234.56")
+        let w52High: number | null = null;
+        let w52Low: number | null = null;
+        if (fmpProfileData.range) {
+          const parts = fmpProfileData.range.split("-");
+          if (parts.length === 2) {
+            const lo = parseFloat(parts[0]);
+            const hi = parseFloat(parts[1]);
+            if (!isNaN(lo) && !isNaN(hi)) { w52Low = lo; w52High = hi; }
+          }
+        }
+
+        // Compute dividend yield from lastDiv if available
+        let fmpDividendYield: number | null = null;
+        if (fmpProfileData.lastDiv && fmpProfileData.lastDiv > 0 && fmpProfileData.mktCap && fmpProfileData.sharesOutstanding) {
+          const priceEst = fmpProfileData.mktCap / fmpProfileData.sharesOutstanding;
+          if (priceEst > 0) fmpDividendYield = (fmpProfileData.lastDiv / priceEst) * 100;
+        }
+
         if (result) {
-          result = { ...result, companyDescription: desc };
-          if (fmpProfile.mktCap && fmpProfile.mktCap > 0) result.marketCap = fmpProfile.mktCap;
+          result = {
+            ...result,
+            companyDescription: desc,
+            week52High: w52High ?? result.week52High,
+            week52Low: w52Low ?? result.week52Low,
+            dividendYield: fmpDividendYield ?? result.dividendYield,
+            sharesOutstanding: fmpProfileData.sharesOutstanding ?? result.sharesOutstanding,
+          };
+          if (fmpProfileData.mktCap && fmpProfileData.mktCap > 0) result.marketCap = fmpProfileData.mktCap;
         }
       }
     }
@@ -700,13 +839,18 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
       const priceTargetData = finnhubData.priceTarget;
       const earningsSurprises = finnhubData.earningsSurprises;
 
-      let marketCap = result?.marketCap ?? 0;
-      if (!marketCap || marketCap === 0) {
-        if (profile?.marketCapitalization && profile.marketCapitalization > 0) {
-          marketCap = profile.marketCapitalization * 1000000;
-        } else if (metrics?.marketCapitalization && metrics.marketCapitalization > 0) {
-          marketCap = metrics.marketCapitalization * 1000000;
-        }
+      // Market cap refreshes on metrics TTL (7d) — always update from latest source
+      let marketCap = 0;
+      if (profile?.marketCapitalization && profile.marketCapitalization > 0) {
+        marketCap = profile.marketCapitalization * 1000000;
+      } else if (metrics?.marketCapitalization && Number(metrics.marketCapitalization) > 0) {
+        marketCap = Number(metrics.marketCapitalization) * 1000000;
+      }
+      if (!marketCap && fmpProfileData?.mktCap && fmpProfileData.mktCap > 0) {
+        marketCap = fmpProfileData.mktCap;
+      }
+      if (!marketCap && result?.marketCap) {
+        marketCap = result.marketCap;
       }
 
       const pe = metrics?.peTTM ?? metrics?.peExclExtraTTM ?? null;
@@ -791,6 +935,12 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
         };
       }
 
+      // Extract ROE, 52w high/low, dividend yield from Finnhub metrics
+      const finnhubRoe = metrics?.roeTTM != null ? Number(metrics.roeTTM) : null;
+      const finnhub52High = metrics?.["52WeekHigh"] != null ? Number(metrics["52WeekHigh"]) : null;
+      const finnhub52Low = metrics?.["52WeekLow"] != null ? Number(metrics["52WeekLow"]) : null;
+      const finnhubDivYield = metrics?.dividendYieldIndicatedAnnual != null ? Number(metrics.dividendYieldIndicatedAnnual) : null;
+
       result = {
         marketCap,
         pe,
@@ -811,13 +961,41 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
         epsEstimate: saveOpts.earningsData?.epsEstimate ?? result?.epsEstimate ?? null,
         revenueActual: result?.revenueActual ?? null,
         revenueEstimate: result?.revenueEstimate ?? null,
+        week52High: result?.week52High ?? finnhub52High,
+        week52Low: result?.week52Low ?? finnhub52Low,
+        dividendYield: result?.dividendYield ?? finnhubDivYield,
+        roe: finnhubRoe ?? result?.roe ?? null,
+        sharesOutstanding: result?.sharesOutstanding ?? null,
       };
+
+      // ── Fill-on-miss: attempt to fill remaining nulls from alternate sources ──
+      if ((!result.marketCap || result.marketCap === 0) && result.sharesOutstanding && result.sharesOutstanding > 0) {
+        // Last-resort: try FMP profile market cap or compute from shares * estimated price
+        if (fmpProfileData?.mktCap && fmpProfileData.mktCap > 0) {
+          result.marketCap = fmpProfileData.mktCap;
+        }
+      }
+      if (result.week52High == null && finnhub52High != null) result.week52High = finnhub52High;
+      if (result.week52Low == null && finnhub52Low != null) result.week52Low = finnhub52Low;
+      if (result.dividendYield == null && finnhubDivYield != null) result.dividendYield = finnhubDivYield;
+      if (result.roe == null && finnhubRoe != null) result.roe = finnhubRoe;
+
+      // Log warnings for fields still null after all attempts
+      const missingFields: string[] = [];
+      if (!result.marketCap) missingFields.push("marketCap");
+      if (result.pe == null) missingFields.push("pe");
+      if (result.week52High == null) missingFields.push("week52High");
+      if (result.week52Low == null) missingFields.push("week52Low");
+      if (result.roe == null) missingFields.push("roe");
+      if (missingFields.length > 0) {
+        console.warn(`[Fundamentals] ${upper} still missing after fill-on-miss: ${missingFields.join(", ")}`);
+      }
 
       // Build basic data for cache write
       const basicData: FundamentalData = {
         sector: profile?.finnhubIndustry ? mapIndustryToSector(profile.finnhubIndustry) : (cached.row?.sector || "Unknown"),
         industry: profile?.finnhubIndustry || (cached.row?.industry || "Unknown"),
-        marketCap,
+        marketCap: result.marketCap,
         companyName: profile?.name || cached.row?.companyName,
         exchange: profile?.exchange || cached.row?.exchange,
       };
@@ -851,6 +1029,7 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
       epsCurrentQYoY: "N/A", salesGrowth3QYoY: "N/A", lastEpsSurprise: "N/A",
       companyDescription: null, earningsTime: null, lastEarningsDate: null,
       epsActual: null, epsEstimate: null, revenueActual: null, revenueEstimate: null,
+      week52High: null, week52Low: null, dividendYield: null, roe: null, sharesOutstanding: null,
     };
   };
 

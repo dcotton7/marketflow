@@ -353,17 +353,23 @@ function detectThemeAccelerations(current: SnapshotFrame, session?: MarketSessio
     const scoreDelta = theme.score - prevTheme.score;
     if (Math.abs(scoreDelta) < cfg.themeAccelThreshold) continue;
 
+    // Don't label a theme "surging" if its absolute score is still weak,
+    // or "weakening" if it's still strong — use softer verbs via metadata
+    const isUp = scoreDelta >= 0;
+    const absScore = theme.score;
+    const contradictory = (isUp && absScore < 30) || (!isUp && absScore > 70);
+
     const key = `theme_acceleration:${themeId}`;
     if (isCoolingDown(key, min2ms(cfg.themeAccelCooldownMin))) continue;
 
     markFired(key);
-    const dir: SignalDirection = scoreDelta >= 0 ? "up" : "down";
+    const dir: SignalDirection = isUp ? "up" : "down";
     const topMovers = getTopMovers(themeId, current, dir);
     signals.push(
       makeSignal("theme_acceleration", "theme", themeId,
         Math.round(Math.abs(scoreDelta) * 10) / 10,
         dir,
-        { scoreDelta, currentScore: theme.score, topMovers })
+        { scoreDelta, currentScore: theme.score, contradictory, topMovers })
     );
   }
   return signals;

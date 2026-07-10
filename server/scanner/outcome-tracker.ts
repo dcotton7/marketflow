@@ -8,13 +8,23 @@
 
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
-import { eq, and, isNull, isNotNull, sql } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray } from "drizzle-orm";
 import { currentFrame } from "./signal-producer";
+import { getClusterById, type ClusterId } from "../market-condition/universe";
 
 const INTERVAL_MS = 5 * 60_000;
 const BATCH_SIZE = 200;
 
-const CATALYST_SIGNAL_TYPES = new Set(["earnings_reaction", "news_alert"]);
+const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
+
+const MARKET_LEVEL_SIGNAL_TYPES = new Set([
+  "regime_change", "rai_shift", "broad_weakness", "broad_strength",
+]);
+
+// Market-level proxy mapping: broad signals track SPY+QQQ+IWM,
+// strength/weakness signals track the best-performing of QQQ or SPY
+const BROAD_MARKET_PROXIES = ["SPY", "QQQ", "IWM"];
+const MARKET_STRENGTH_PROXIES = ["QQQ", "SPY"];
 
 // ── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -107,8 +117,7 @@ async function processOutcomes(): Promise<void> {
       .where(
         and(
           isNull(scannerDiscoveries.outcomeTrackedAt),
-          isNotNull(scannerDiscoveries.priceAtSignal),
-          eq(scannerDiscoveries.subjectKind, "ticker")
+          inArray(scannerDiscoveries.subjectKind, ["ticker", "theme", "market"])
         )
       )
       .orderBy(sql`peak_move IS NOT NULL, id`)
@@ -124,20 +133,58 @@ async function processOutcomes(): Promise<void> {
     let updatedCount = 0;
 
     for (const row of pending) {
-      if (CATALYST_SIGNAL_TYPES.has(row.signalType)) continue;
+      if (SKIP_SIGNAL_TYPES.has(row.signalType)) continue;
       if (row.outcomeFailed) continue;
 
       const elapsedMs = nowMs - row.createdAt.getTime();
       if (!shouldProcessRow(elapsedMs, now)) continue;
 
-      const ticker = row.subject;
-      const tickerData = frame.tickers.get(ticker);
+      // Determine the price lookup symbol(s) based on subjectKind
+      let lookupSymbols: string[];
+      if (row.signalType === "broad_weakness" || row.signalType === "broad_strength") {
+        // Broad market: track SPY, QQQ, IWM — use the one moving most in signal direction
+        lookupSymbols = BROAD_MARKET_PROXIES;
+      } else if (row.subjectKind === "market" || MARKET_LEVEL_SIGNAL_TYPES.has(row.signalType)) {
+        // Regime/RAI: QQQ or SPY — whichever is pushing harder
+        lookupSymbols = MARKET_STRENGTH_PROXIES;
+      } else if (row.subjectKind === "theme") {
+        const cluster = getClusterById(row.subject as ClusterId);
+        const directProxy = cluster?.etfProxies.find(p => p.proxyType === "direct");
+        lookupSymbols = [directProxy?.symbol ?? cluster?.etfProxies[0]?.symbol ?? "SPY"];
+      } else {
+        lookupSymbols = [row.subject];
+      }
+
+      // For multi-proxy signals, pick the proxy with the largest move in signal direction
+      let lookupSymbol = lookupSymbols[0]!;
+      if (lookupSymbols.length > 1) {
+        let bestMove = -Infinity;
+        const isUp = row.direction === "up";
+        for (const sym of lookupSymbols) {
+          const td = frame.tickers.get(sym);
+          if (!td) continue;
+          const move = isUp ? (td.changePct ?? 0) : -(td.changePct ?? 0);
+          if (move > bestMove) { bestMove = move; lookupSymbol = sym; }
+        }
+      }
+
+      const tickerData = frame.tickers.get(lookupSymbol);
       if (!tickerData) continue;
 
-      const signalPrice = Number(row.priceAtSignal);
+      const currentPrice = tickerData.price;
+
+      // Backfill priceAtSignal for theme/market signals that lack one
+      let signalPrice = row.priceAtSignal != null ? Number(row.priceAtSignal) : 0;
+      if (signalPrice <= 0 && (row.subjectKind === "theme" || row.subjectKind === "market")) {
+        // Set current ETF price as baseline on first encounter
+        await db
+          .update(scannerDiscoveries)
+          .set({ priceAtSignal: String(currentPrice) })
+          .where(eq(scannerDiscoveries.id, row.id));
+        signalPrice = currentPrice;
+      }
       if (signalPrice <= 0) continue;
 
-      const currentPrice = tickerData.price;
       const currentMove = ((currentPrice - signalPrice) / signalPrice) * 100;
       const direction = row.direction as "up" | "down" | "neutral";
 

@@ -27,7 +27,8 @@ export type SignalType =
   | "gap_down_continuation"
   | "news_alert"
   | "earnings_reaction"
-  | "theme_earnings_density";
+  | "theme_earnings_density"
+  | "ipo_debut";
 
 export type SignalSubjectKind = "ticker" | "theme" | "market";
 

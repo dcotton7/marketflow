@@ -38,7 +38,7 @@ import {
   SENTINEL_ACCESS_TIERS,
 } from "@shared/sentinelTierAccess";
 import { parseIntradayChartTimeframe, DEFAULT_INTRADAY_CHART_TIMEFRAME } from "@shared/chart-timeframes";
-import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals } from "../fundamentals";
+import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals, fetchEarningsHistory } from "../fundamentals";
 import { resolveSessionMaLevelsForSymbol } from "../data-layer/session-adjusted-ma";
 import { isDelistedSymbol, scheduleDelistedTickerCheck } from "../market-condition/utils/delisted-ticker-registry";
 
@@ -7546,6 +7546,19 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         sectorEtf = "N/A";
       }
 
+      // Auto-map unrecognized ticker to a theme cluster on demand
+      try {
+        const { getTickerPrimaryCluster, autoMapTickerToCluster, addRuntimeCandidate } = await import("../market-condition/universe");
+        const existingCluster = getTickerPrimaryCluster(ticker);
+        if (!existingCluster && fundamentalData.sector !== "Unknown") {
+          const autoCluster = autoMapTickerToCluster(ticker, fundamentalData.sector, fundamentalData.industry);
+          if (autoCluster) {
+            addRuntimeCandidate(ticker, autoCluster);
+            console.log(`[AutoMap] ${ticker} → ${autoCluster} (${fundamentalData.industry})`);
+          }
+        }
+      } catch {}
+
       const adr14Dollar = Math.round(adr14 * 100) / 100;
       const adr14Pct = currentPrice > 0 ? Math.round((adr14 / currentPrice) * 10000) / 100 : 0;
       const adr20Dollar = Math.round(adr20 * 100) / 100;
@@ -7577,19 +7590,29 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         analystConsensus: "N/A", targetPrice: null as number | null,
         nextEarningsDate: "N/A", nextEarningsDays: -1,
         epsCurrentQYoY: "N/A", salesGrowth3QYoY: "N/A", lastEpsSurprise: "N/A",
+        companyDescription: null as string | null,
+        earningsTime: null as string | null,
+        lastEarningsDate: null as string | null,
+        epsActual: null as number | null,
+        epsEstimate: null as number | null,
+        revenueActual: null as number | null,
+        revenueEstimate: null as number | null,
       };
       let industryPeers: { symbol: string; name: string }[] = [];
       let industryName = fundamentalData.industry;
+      let earningsHistory: { quarter: string; date: string; epsActual: number | null; epsEstimate: number | null; revenueActual: number | null; revenueEstimate: number | null }[] = [];
 
       try {
-        const [ef, peers] = await Promise.all([
+        const [ef, peers, earningsHist] = await Promise.all([
           getExtendedFundamentals(ticker),
           fundamentalData.industry !== "Unknown" && fundamentalData.sector !== "Unknown"
             ? fetchIndustryPeersFromFMP(fundamentalData.industry, fundamentalData.sector, ticker, 5)
             : Promise.resolve([]),
+          fetchEarningsHistory(ticker),
         ]);
         extFundamentals = ef;
         industryPeers = peers.map(p => ({ symbol: p.symbol, name: p.name }));
+        earningsHistory = earningsHist;
       } catch {}
 
       let rsVsSpy: number | undefined;
@@ -7646,11 +7669,21 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         nextEarningsDate: extFundamentals.nextEarningsDate,
         nextEarningsDays: extFundamentals.nextEarningsDays,
         earningsTime: extFundamentals.earningsTime,
+        lastEarningsDate: extFundamentals.lastEarningsDate ?? null,
+        epsActual: extFundamentals.epsActual ?? null,
+        epsEstimate: extFundamentals.epsEstimate ?? null,
+        revenueActual: extFundamentals.revenueActual ?? null,
+        revenueEstimate: extFundamentals.revenueEstimate ?? null,
         epsCurrentQYoY: extFundamentals.epsCurrentQYoY,
         salesGrowth3QYoY: extFundamentals.salesGrowth3QYoY,
         lastEpsSurprise: extFundamentals.lastEpsSurprise,
+        week52High: extFundamentals.week52High ?? null,
+        week52Low: extFundamentals.week52Low ?? null,
+        dividendYield: extFundamentals.dividendYield ?? null,
+        roe: extFundamentals.roe ?? null,
         industryPeers,
         industryName,
+        earningsHistory,
       });
     } catch (error) {
       console.error("Trade chart metrics error:", error);

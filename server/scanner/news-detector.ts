@@ -30,10 +30,20 @@ function headlineKey(headline: string, symbol: string): string {
   return `${symbol}:${headline.slice(0, 60).toLowerCase()}`;
 }
 
+function globalHeadlineKey(headline: string): string {
+  return headline.slice(0, 80).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// Tracks first-fire timestamp per normalized headline — each headline fires at most once
+const seenGlobalHeadlines = new Map<string, number>();
+
 function pruneSeenHeadlines(): void {
   const cutoff = Date.now() - 12 * 60 * 60_000;
   for (const [k, ts] of seenHeadlines) {
     if (ts < cutoff) seenHeadlines.delete(k);
+  }
+  for (const [k, ts] of seenGlobalHeadlines) {
+    if (ts < cutoff) seenGlobalHeadlines.delete(k);
   }
 }
 
@@ -41,24 +51,29 @@ function pruneSeenHeadlines(): void {
  * Check if a headline is actually about the queried ticker.
  * Reject headlines that are about other companies returned tangentially.
  */
+const BROAD_ARTICLE_THRESHOLD = 8;
+
 function isRelevantHeadline(hl: NewsHeadline, symbol: string): boolean {
   const text = hl.headline.toUpperCase();
 
+  // Reject broad market articles (8+ related tickers) from per-ticker signals.
+  // These are "Trump traded 327 stocks" / "S&P 500 roundup" type articles —
+  // they mention your ticker but aren't ABOUT your ticker.
+  if (hl.relatedTickers && hl.relatedTickers.length >= BROAD_ARTICLE_THRESHOLD) {
+    return false;
+  }
+
   // Direct ticker mention in headline text — strong relevance
-  // Use word boundary to avoid matching substrings (e.g. "ALK" inside "WALK")
   const tickerPattern = new RegExp(`\\b${symbol}\\b`);
   if (tickerPattern.test(text)) return true;
 
   // Finnhub's `related` field lists tickers the article covers
   if (hl.relatedTickers && hl.relatedTickers.length > 0) {
     const related = hl.relatedTickers.map((t) => t.toUpperCase().trim());
-    // If the article lists related tickers and our symbol is among them, relevant
     if (related.includes(symbol)) return true;
-    // If the article lists related tickers but our symbol is NOT among them, reject
     if (related.length > 0 && !related.includes(symbol)) return false;
   }
 
-  // Fallback: headline doesn't mention ticker and no related field — ambiguous, reject
   return false;
 }
 
@@ -156,6 +171,10 @@ export async function detectNewsAlerts(frame?: SnapshotFrame): Promise<Signal[]>
       const key = headlineKey(hl.headline, symbol);
       if (seenHeadlines.has(key)) continue;
 
+      // Global dedup: same headline text fires at most once across all tickers
+      const gKey = globalHeadlineKey(hl.headline);
+      if (seenGlobalHeadlines.has(gKey)) continue;
+
       const severity = scoreHeadlineSeverity(hl.headline);
       if (severity > bestSeverity) {
         bestSeverity = severity;
@@ -165,6 +184,10 @@ export async function detectNewsAlerts(frame?: SnapshotFrame): Promise<Signal[]>
     }
 
     if (!bestHeadline || bestSeverity < MIN_SEVERITY_TO_FIRE) continue;
+
+    // Mark global headline as fired (store timestamp for pruning)
+    const gKey = globalHeadlineKey(bestHeadline.headline);
+    seenGlobalHeadlines.set(gKey, Date.now());
 
     cooldowns.set(cdKey, Date.now());
 

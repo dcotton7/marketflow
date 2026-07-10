@@ -51,6 +51,15 @@ export type ChartDataResponse = {
   timeframe: string;
 };
 
+export interface QuarterlyEarning {
+  quarter: string;
+  date: string;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
+}
+
 export interface ChartMetrics {
   currentPrice: number;
   adr20: number;
@@ -74,7 +83,17 @@ export interface ChartMetrics {
   nextEarningsDate: string;
   nextEarningsDays: number;
   earningsTime?: string | null;
+  lastEarningsDate?: string | null;
+  epsActual?: number | null;
+  epsEstimate?: number | null;
+  revenueActual?: number | null;
+  revenueEstimate?: number | null;
+  week52High?: number | null;
+  week52Low?: number | null;
+  dividendYield?: number | null;
+  roe?: number | null;
   marketCap: number;
+  earningsHistory?: QuarterlyEarning[];
   pe: number | null;
   beta: number | null;
   debtToEquity: number | null;
@@ -1029,7 +1048,7 @@ export function DualChartGrid({
               {/* Right frame: Description */}
               {chartMetrics.companyDescription && (
                 <div className="flex-1 flex items-start px-2 py-1 rounded border border-border/50 bg-card/50 min-w-0 overflow-hidden text-left">
-                  <p className="line-clamp-2 overflow-hidden leading-tight text-left" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeTiny }} title={chartMetrics.companyDescription}>
+                  <p className="line-clamp-4 overflow-hidden leading-tight text-left" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeTiny }} title={chartMetrics.companyDescription}>
                     {chartMetrics.companyDescription}
                   </p>
                 </div>

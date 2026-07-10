@@ -30,6 +30,7 @@ import { captureSessionSegment } from "./session-segment-capture";
 import { detectNewsAlerts } from "./news-detector";
 import { createEarningsCatalyst } from "./catalyst/auto-detector";
 import { startOutcomeTracker } from "./outcome-tracker";
+import { startIpoDetector } from "./ipo-detector";
 
 // ── Scanner state ───────────────────────────────────────────────────────────
 
@@ -317,6 +318,34 @@ export async function initScanner(): Promise<void> {
 
   // Start outcome tracker background job
   startOutcomeTracker();
+
+  // Start IPO detector on its own 30-minute timer
+  startIpoDetector(async (signals) => {
+    if (scannerMode === "off") return;
+    try {
+      lastSignalAt = new Date().toISOString();
+      const current = currentFrame();
+      if (!current) return;
+
+      const lensCtx: LensContext = {
+        currentFrame: current,
+        getFrame,
+        bufferLength: getBufferLength(),
+      };
+
+      const enriched = await routeSignals(signals, lensCtx, getCurrentSession());
+      if (enriched.length === 0) return;
+
+      const cards = await executeReactions(enriched);
+      if (cards.length === 0) return;
+
+      pushDiscoveries(cards);
+      if (scannerMode === "on") broadcastBatch(cards);
+      console.log(`[Scanner/IPO] ${signals.length} IPO signals → ${cards.length} discoveries`);
+    } catch (err) {
+      console.error("[Scanner/IPO] Processing error:", err);
+    }
+  }, 100);
 
   registerPostRefreshCallback((themeMetrics, snapshots, spyBenchmark) => {
     // Periodic refresh of 5-day levels

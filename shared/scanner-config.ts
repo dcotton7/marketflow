@@ -80,6 +80,10 @@ export interface ScannerConfig {
   gapDownContinuationMinFadePct: number;
   gapDownContinuationMinFrames: number;
   gapDownContinuationCooldownMin: number;
+
+  // ── IPO Detection ───────────────────────────────────────────────────────
+  ipoDetectionEnabled: boolean;
+  ipoMinMarketCapM: number;
 }
 
 export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
@@ -141,6 +145,9 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   gapDownContinuationMinFadePct: 0.5,
   gapDownContinuationMinFrames: 120,
   gapDownContinuationCooldownMin: 60,
+
+  ipoDetectionEnabled: true,
+  ipoMinMarketCapM: 100,
 };
 
 /** Config field metadata for rendering the admin UI */
@@ -214,4 +221,7 @@ export const SCANNER_CONFIG_FIELDS: ConfigFieldMeta[] = [
   { key: "gapDownContinuationMinFadePct", label: "Min Fade Below Open", group: "Gap Down Cont.", type: "number", min: 0.25, max: 3, step: 0.25, unit: "%" },
   { key: "gapDownContinuationMinFrames", label: "Min Frames (1st hour)", group: "Gap Down Cont.", type: "number", min: 30, max: 240, step: 10, unit: "frames" },
   { key: "gapDownContinuationCooldownMin", label: "Cooldown", group: "Gap Down Cont.", type: "number", min: 15, max: 240, step: 15, unit: "min" },
+
+  { key: "ipoDetectionEnabled", label: "IPO Detection Enabled", group: "IPO", type: "boolean" },
+  { key: "ipoMinMarketCapM", label: "Min Market Cap", group: "IPO", type: "number", min: 0, max: 5000, step: 50, unit: "$M" },
 ];

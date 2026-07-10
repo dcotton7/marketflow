@@ -11,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useChartSetupEnrich } from "@/hooks/useChartSetupEnrich";
 import { buildChartSetupDossier } from "@/lib/chart-setup-dossier";
 import type { ChartDataResponse, ChartMetrics } from "@/components/DualChartGrid";
+import { formatMarketCap } from "@/components/DualChartGrid";
+import type { QuarterlyEarning } from "@/components/DualChartGrid";
 import { CHART_FOOTER_FONT_DEFAULTS } from "@/lib/chart-footer-font-prefs";
 import type { ChartSetupBaseMeta } from "@shared/chart-setup-base-meta";
 import type { ChartSetupUrMeta } from "@shared/chart-setup-ur-meta";
@@ -49,6 +51,8 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
+
+type SetupTab = "ai" | "fundamentals";
 
 const OPTIONAL_LABEL = Object.fromEntries(
   OPTIONAL_CRITERIA.map((c) => [c.id, c.shortLabel])
@@ -191,6 +195,416 @@ function scanSummaryOneLine(row: TickerReviewResultRow): string {
   return tags ? `${short} (${tags})` : short;
 }
 
+function formatRevenue(n: number): string {
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
+  return `$${n.toLocaleString()}`;
+}
+
+function FundSectionHeader({ label }: { label: string }) {
+  return (
+    <span className="text-[0.72em] uppercase tracking-wide text-sky-400/80 font-semibold block pb-0.5 mb-1 border-b border-slate-700/30">
+      {label}
+    </span>
+  );
+}
+
+function FundamentalsTabContent({ metrics }: { metrics: ChartMetrics | null | undefined }) {
+  const [descExpanded, setDescExpanded] = useState(false);
+
+  if (!metrics) {
+    return (
+      <p className="text-[0.875em] text-muted-foreground">
+        Waiting for chart data…
+      </p>
+    );
+  }
+
+  const desc = metrics.companyDescription || null;
+  const descTruncated = desc && desc.length > 200 && !descExpanded
+    ? `${desc.slice(0, 200)}…`
+    : desc;
+
+  const epsBeat = metrics.epsActual != null && metrics.epsEstimate != null
+    ? metrics.epsActual >= metrics.epsEstimate
+    : null;
+  const revBeat = metrics.revenueActual != null && metrics.revenueEstimate != null
+    ? metrics.revenueActual >= metrics.revenueEstimate
+    : null;
+
+  const epsSurprisePct = metrics.epsActual != null && metrics.epsEstimate != null && metrics.epsEstimate !== 0
+    ? ((metrics.epsActual - metrics.epsEstimate) / Math.abs(metrics.epsEstimate)) * 100
+    : null;
+  const revSurprisePct = metrics.revenueActual != null && metrics.revenueEstimate != null && metrics.revenueEstimate !== 0
+    ? ((metrics.revenueActual - metrics.revenueEstimate) / Math.abs(metrics.revenueEstimate)) * 100
+    : null;
+
+  return (
+    <div className="space-y-3">
+      {/* ── Company Profile ── */}
+      <div className="space-y-1">
+        <FundSectionHeader label="Company Profile" />
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className="text-[1em] font-medium text-slate-100">
+            {metrics.companyName || metrics.symbol}
+          </span>
+        </div>
+        {(metrics.sectorName || metrics.industryName) && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {metrics.sectorName && (
+              <span className="text-[0.75em] px-1.5 py-0.5 rounded bg-sky-900/30 text-sky-300 border border-sky-700/30">
+                {metrics.sectorName}
+              </span>
+            )}
+            {metrics.industryName && metrics.industryName !== "Unknown" && (
+              <span className="text-[0.75em] px-1.5 py-0.5 rounded bg-slate-800/50 text-slate-300 border border-slate-700/30">
+                {metrics.industryName}
+              </span>
+            )}
+          </div>
+        )}
+        {descTruncated && (
+          <p className="text-[0.82em] text-slate-400 leading-snug mt-1">
+            {descTruncated}
+            {desc && desc.length > 200 && (
+              <button
+                type="button"
+                className="ml-1 text-sky-400/80 hover:text-sky-300 text-[0.9em]"
+                onClick={() => setDescExpanded((e) => !e)}
+              >
+                {descExpanded ? "less" : "more"}
+              </button>
+            )}
+          </p>
+        )}
+      </div>
+
+      {/* ── 52-Week Range ── */}
+      {metrics.week52High != null && metrics.week52Low != null && metrics.week52High > metrics.week52Low && (
+        <div className="space-y-1">
+          <FundSectionHeader label="52-Week Range" />
+          <Week52RangeBar low={metrics.week52Low} high={metrics.week52High} current={metrics.currentPrice} />
+        </div>
+      )}
+
+      {/* ── Key Metrics Grid ── */}
+      <div className="space-y-1">
+        <FundSectionHeader label="Key Metrics" />
+        <div className="grid grid-cols-3 gap-x-3 gap-y-1.5">
+          {metrics.marketCap > 0 && (
+            <FundMetric label="Mkt Cap" value={formatMarketCap(metrics.marketCap)} />
+          )}
+          {metrics.pe != null && (
+            <FundMetric
+              label="P/E"
+              value={metrics.pe.toFixed(1)}
+              valueClass={metrics.pe > 50 ? "text-red-400" : metrics.pe > 30 ? "text-amber-400" : undefined}
+            />
+          )}
+          {metrics.beta != null && (
+            <FundMetric
+              label="Beta"
+              value={metrics.beta.toFixed(2)}
+              valueClass={metrics.beta > 2 ? "text-amber-400" : undefined}
+            />
+          )}
+          {metrics.debtToEquity != null && (
+            <FundMetric
+              label="D/E Ratio"
+              value={metrics.debtToEquity.toFixed(2)}
+              valueClass={metrics.debtToEquity > 2 ? "text-red-400" : metrics.debtToEquity > 1 ? "text-amber-400" : undefined}
+            />
+          )}
+          {metrics.preTaxMargin != null && (
+            <FundMetric
+              label="Margin"
+              value={`${metrics.preTaxMargin.toFixed(1)}%`}
+              valueClass={metrics.preTaxMargin < 0 ? "text-red-400" : metrics.preTaxMargin > 20 ? "text-green-400" : undefined}
+            />
+          )}
+          {metrics.roe != null && (
+            <FundMetric
+              label="ROE"
+              value={`${metrics.roe.toFixed(1)}%`}
+              valueClass={metrics.roe > 15 ? "text-green-400" : metrics.roe >= 5 ? "text-amber-400" : "text-red-400"}
+            />
+          )}
+          {metrics.dividendYield != null && metrics.dividendYield > 0 && (
+            <FundMetric
+              label="Div Yield"
+              value={`${metrics.dividendYield.toFixed(2)}%`}
+              valueClass={metrics.dividendYield > 4 ? "text-green-400" : undefined}
+            />
+          )}
+          {metrics.analystConsensus && metrics.analystConsensus !== "N/A" && (
+            <FundMetric
+              label="Analysts"
+              value={metrics.analystConsensus}
+              valueClass={
+                metrics.analystConsensus.includes("Buy") ? "text-green-400"
+                : metrics.analystConsensus.includes("Sell") ? "text-red-400"
+                : undefined
+              }
+            />
+          )}
+          {metrics.targetPrice != null && (
+            <FundMetric label="Target" value={`$${metrics.targetPrice.toFixed(2)}`} />
+          )}
+          {metrics.salesGrowth3QYoY && metrics.salesGrowth3QYoY !== "N/A" && (
+            <FundMetric
+              label="Rev Growth"
+              value={metrics.salesGrowth3QYoY}
+              valueClass={metrics.salesGrowth3QYoY.startsWith("+") ? "text-green-400" : metrics.salesGrowth3QYoY.startsWith("-") ? "text-red-400" : undefined}
+            />
+          )}
+          {metrics.epsCurrentQYoY && metrics.epsCurrentQYoY !== "N/A" && (
+            <FundMetric
+              label="EPS YoY"
+              value={metrics.epsCurrentQYoY}
+              valueClass={metrics.epsCurrentQYoY.startsWith("+") ? "text-green-400" : metrics.epsCurrentQYoY.startsWith("-") ? "text-red-400" : undefined}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* ── Earnings Detail ── */}
+      <div className="space-y-1">
+        <FundSectionHeader label="Earnings" />
+        <div className="rounded border border-slate-700/40 bg-slate-900/25 p-2 space-y-1.5">
+          {/* 4-quarter history table */}
+          {metrics.earningsHistory && metrics.earningsHistory.length > 0 ? (
+            <EarningsHistoryTable history={metrics.earningsHistory} />
+          ) : metrics.lastEarningsDate ? (
+            <div className="space-y-1">
+              <p className="text-[0.85em] text-slate-300">
+                <span className="text-slate-500">Last reported: </span>
+                {metrics.lastEarningsDate}
+              </p>
+
+              {metrics.epsActual != null && (
+                <div className="flex items-center gap-1.5 flex-wrap text-[0.85em]">
+                  <span className="text-slate-500 w-8">EPS</span>
+                  <span className={cn("font-mono font-medium", epsBeat ? "text-green-400" : "text-red-400")}>
+                    ${metrics.epsActual.toFixed(2)}
+                  </span>
+                  {metrics.epsEstimate != null && (
+                    <>
+                      <span className="text-slate-600">vs</span>
+                      <span className="font-mono text-slate-400">${metrics.epsEstimate.toFixed(2)}</span>
+                      <span className={cn(
+                        "text-[0.9em] font-bold px-1 py-px rounded",
+                        epsBeat
+                          ? "bg-green-900/30 text-green-400 border border-green-700/30"
+                          : "bg-red-900/30 text-red-400 border border-red-700/30"
+                      )}>
+                        {epsBeat ? "BEAT" : "MISS"}
+                        {epsSurprisePct != null && ` ${epsSurprisePct >= 0 ? "+" : ""}${epsSurprisePct.toFixed(1)}%`}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {metrics.revenueActual != null && (
+                <div className="flex items-center gap-1.5 flex-wrap text-[0.85em]">
+                  <span className="text-slate-500 w-8">Rev</span>
+                  <span className={cn("font-mono font-medium", revBeat ? "text-green-400" : "text-red-400")}>
+                    {formatRevenue(metrics.revenueActual)}
+                  </span>
+                  {metrics.revenueEstimate != null && (
+                    <>
+                      <span className="text-slate-600">vs</span>
+                      <span className="font-mono text-slate-400">{formatRevenue(metrics.revenueEstimate)}</span>
+                      <span className={cn(
+                        "text-[0.9em] font-bold px-1 py-px rounded",
+                        revBeat
+                          ? "bg-green-900/30 text-green-400 border border-green-700/30"
+                          : "bg-red-900/30 text-red-400 border border-red-700/30"
+                      )}>
+                        {revBeat ? "BEAT" : "MISS"}
+                        {revSurprisePct != null && ` ${revSurprisePct >= 0 ? "+" : ""}${revSurprisePct.toFixed(1)}%`}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {metrics.lastEpsSurprise && metrics.lastEpsSurprise !== "N/A" && !metrics.epsActual && (
+                <p className="text-[0.85em]">
+                  <span className="text-slate-500">Surprise: </span>
+                  <span className={metrics.lastEpsSurprise.startsWith("+") ? "text-green-400" : "text-red-400"}>
+                    {metrics.lastEpsSurprise}
+                  </span>
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-[0.85em] text-muted-foreground">No recent earnings data</p>
+          )}
+
+          {/* Next earnings */}
+          {metrics.nextEarningsDate && metrics.nextEarningsDate !== "N/A" && (
+            <div className="pt-1 border-t border-slate-700/30">
+              <p className="text-[0.85em] text-slate-300">
+                <span className="text-slate-500">Next: </span>
+                <span className="font-medium">{metrics.nextEarningsDate}</span>
+                {metrics.nextEarningsDays >= 0 && (
+                  <span className={cn(
+                    "ml-1 text-[0.9em] font-bold px-1 py-px rounded",
+                    metrics.nextEarningsDays <= 7
+                      ? "bg-amber-900/30 text-amber-400 border border-amber-700/30"
+                      : "text-slate-400"
+                  )}>
+                    {metrics.nextEarningsDays === 0 ? "TODAY" : `in ${metrics.nextEarningsDays}d`}
+                  </span>
+                )}
+                {metrics.earningsTime === "bmo" && <span className="text-slate-500 ml-1">BMO</span>}
+                {metrics.earningsTime === "amc" && <span className="text-slate-500 ml-1">AMC</span>}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Industry Peers ── */}
+      {metrics.industryPeers && metrics.industryPeers.length > 0 && (
+        <div className="space-y-1">
+          <FundSectionHeader label="Industry Peers" />
+          <div className="flex flex-wrap gap-1.5">
+            {metrics.industryPeers.slice(0, 8).map((p) => (
+              <span
+                key={p.symbol}
+                className="text-[0.8em] px-1.5 py-0.5 rounded bg-slate-800/50 text-slate-300 border border-slate-700/30 font-mono"
+              >
+                {p.symbol}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Week52RangeBar({ low, high, current }: { low: number; high: number; current: number }) {
+  const range = high - low;
+  const pct = range > 0 ? Math.max(0, Math.min(100, ((current - low) / range) * 100)) : 50;
+
+  return (
+    <div className="rounded border border-slate-700/40 bg-slate-900/25 px-2 py-1.5">
+      <div className="flex items-center gap-2 text-[0.82em]">
+        <span className="font-mono text-slate-400 shrink-0">${low.toFixed(2)}</span>
+        <div className="relative flex-1 h-2 rounded-full bg-slate-700/60 overflow-hidden">
+          <div
+            className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-red-500/60 via-amber-500/60 to-green-500/60"
+            style={{ width: "100%" }}
+          />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-sky-400 border border-sky-200 shadow-sm shadow-sky-400/50"
+            style={{ left: `calc(${pct}% - 5px)` }}
+            title={`Current: $${current.toFixed(2)} (${pct.toFixed(0)}% of 52w range)`}
+          />
+        </div>
+        <span className="font-mono text-slate-400 shrink-0">${high.toFixed(2)}</span>
+      </div>
+      <p className="text-[0.72em] text-slate-500 text-center mt-0.5">
+        Current ${current.toFixed(2)} — {pct.toFixed(0)}% of range
+      </p>
+    </div>
+  );
+}
+
+function FundMetric({
+  label,
+  value,
+  valueClass,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <span className="text-[0.72em] text-slate-500 block leading-tight">{label}</span>
+      <span className={cn("text-[0.9em] font-medium text-slate-200 leading-tight", valueClass)}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function EarningsHistoryTable({ history }: { history: QuarterlyEarning[] }) {
+  return (
+    <div className="space-y-1">
+      {history.map((q) => {
+        const epsBeat = q.epsActual != null && q.epsEstimate != null
+          ? q.epsActual >= q.epsEstimate
+          : null;
+        const epsSurprisePct = q.epsActual != null && q.epsEstimate != null && q.epsEstimate !== 0
+          ? ((q.epsActual - q.epsEstimate) / Math.abs(q.epsEstimate)) * 100
+          : null;
+        const revBeat = q.revenueActual != null && q.revenueEstimate != null
+          ? q.revenueActual >= q.revenueEstimate
+          : null;
+
+        return (
+          <div key={q.date} className="flex items-center gap-2 flex-wrap text-[0.82em] leading-snug">
+            <span className="text-slate-400 font-medium w-12 shrink-0">{q.quarter}</span>
+
+            {q.epsActual != null && (
+              <>
+                <span className="text-slate-500">EPS</span>
+                <span className={cn("font-mono", epsBeat != null ? (epsBeat ? "text-green-400" : "text-red-400") : "text-slate-300")}>
+                  ${q.epsActual.toFixed(2)}
+                </span>
+                {q.epsEstimate != null && (
+                  <>
+                    <span className="text-slate-600">vs</span>
+                    <span className="font-mono text-slate-400">${q.epsEstimate.toFixed(2)}</span>
+                    <span className={cn(
+                      "text-[0.85em] font-bold px-1 py-px rounded",
+                      epsBeat
+                        ? "bg-green-900/30 text-green-400 border border-green-700/30"
+                        : "bg-red-900/30 text-red-400 border border-red-700/30"
+                    )}>
+                      {epsBeat ? "BEAT" : "MISS"}
+                      {epsSurprisePct != null && ` ${epsSurprisePct >= 0 ? "+" : ""}${epsSurprisePct.toFixed(1)}%`}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+
+            {q.revenueActual != null && (
+              <>
+                <span className="text-slate-600 ml-1">Rev</span>
+                <span className={cn("font-mono", revBeat != null ? (revBeat ? "text-green-400" : "text-red-400") : "text-slate-300")}>
+                  {formatRevenue(q.revenueActual)}
+                </span>
+                {q.revenueEstimate != null && (
+                  <>
+                    <span className="text-slate-600">vs</span>
+                    <span className="font-mono text-slate-400">{formatRevenue(q.revenueEstimate)}</span>
+                    <span className={cn(
+                      "text-[0.85em] font-bold px-1 py-px rounded",
+                      revBeat
+                        ? "bg-green-900/30 text-green-400 border border-green-700/30"
+                        : "bg-red-900/30 text-red-400 border border-red-700/30"
+                    )}>
+                      {revBeat ? "BEAT" : "MISS"}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SetupInfoPanel({
   symbol,
   scanRow,
@@ -221,6 +635,7 @@ export function SetupInfoPanel({
   } = useChartSetupEnrich();
 
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useState<SetupTab>(() => "ai");
   const [scanCollapsed, setScanCollapsed] = useState(true);
   const [includeVisual, setIncludeVisual] = useState(() => {
     try {
@@ -260,6 +675,7 @@ export function SetupInfoPanel({
     const cached = getCached(sym, includeVisual);
     setEnrichEntry(cached);
     setScanCollapsed(!!cached);
+    setActiveTab(cached ? "ai" : "fundamentals");
   }, [sym, includeVisual, getCached]);
 
   const persistVisualPref = useCallback((v: boolean) => {
@@ -304,6 +720,7 @@ export function SetupInfoPanel({
         setScanCollapsed(true);
         setHelpful(null);
         setCorrectionKind(null);
+        setActiveTab("ai");
         toast({ title: "Setup analysis ready" });
         requestAnimationFrame(() => {
           enrichResultRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -411,28 +828,53 @@ export function SetupInfoPanel({
           <button
             type="button"
             onClick={() => setPanelCollapsed((c) => !c)}
-            className="flex items-center gap-2 text-left text-muted-foreground hover:text-slate-200 transition-colors min-w-0 flex-1"
+            className="flex items-center gap-1 text-left text-muted-foreground hover:text-slate-200 transition-colors min-w-0"
             aria-expanded={!panelCollapsed}
           >
             <span className="text-sm font-semibold uppercase tracking-wide text-sky-400">
               Setup Info
             </span>
-            {enrichResult && !enriching ? (
-              <Badge
-                variant="outline"
-                className="h-5 px-1.5 text-[10px] font-medium text-cyan-300 border-cyan-500/40"
-              >
-                AI
-              </Badge>
-            ) : null}
             <ChevronDown
-              className={cn("ml-auto h-4 w-4 shrink-0 transition-transform", panelCollapsed && "rotate-180")}
+              className={cn("h-4 w-4 shrink-0 transition-transform", panelCollapsed && "rotate-180")}
             />
           </button>
 
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Tab switcher */}
+          {!panelCollapsed && (
+            <div className="flex items-center gap-0.5 ml-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("ai")}
+                className={cn(
+                  "px-2 py-0.5 text-[11px] font-medium rounded transition-colors",
+                  activeTab === "ai"
+                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                    : "text-slate-400 hover:text-slate-200 border border-transparent"
+                )}
+              >
+                AI Analysis
+                {enrichResult && !enriching && (
+                  <Sparkles className="inline-block ml-0.5 h-2.5 w-2.5" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("fundamentals")}
+                className={cn(
+                  "px-2 py-0.5 text-[11px] font-medium rounded transition-colors",
+                  activeTab === "fundamentals"
+                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/40"
+                    : "text-slate-400 hover:text-slate-200 border border-transparent"
+                )}
+              >
+                Fundamentals
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-1 shrink-0 ml-auto">
             {fontSizeControl}
-            {enrichResult && (
+            {activeTab === "ai" && enrichResult && (
               <Button
                 type="button"
                 size="icon"
@@ -445,48 +887,61 @@ export function SetupInfoPanel({
                 <RefreshCw className={cn("h-3.5 w-3.5", enriching && "animate-spin")} />
               </Button>
             )}
-            <Button
-              type="button"
-              size="sm"
-              variant="default"
-              className="h-7 text-xs gap-1"
-              disabled={enriching}
-              title={
-                chartsReady
-                  ? enrichResult
-                    ? "Re-run setup analysis"
-                    : "Analyze this chart setup"
-                  : "Waiting for daily chart data…"
-              }
-              onClick={() => void runEnrich(!!enrichResult)}
-              data-testid={`${pid}button-enrich`}
-            >
-              {enriching ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Sparkles className="h-3 w-3" />
-              )}
-              Enrich
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" size="icon" variant="outline" className="h-7 w-7" title="Enrich options">
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuCheckboxItem
-                  checked={includeVisual}
-                  onCheckedChange={(c) => persistVisualPref(!!c)}
-                >
-                  Include visual read
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {activeTab === "ai" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                className="h-7 text-xs gap-1"
+                disabled={enriching}
+                title={
+                  chartsReady
+                    ? enrichResult
+                      ? "Re-run setup analysis"
+                      : "Analyze this chart setup"
+                    : "Waiting for daily chart data…"
+                }
+                onClick={() => void runEnrich(!!enrichResult)}
+                data-testid={`${pid}button-enrich`}
+              >
+                {enriching ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                Enrich
+              </Button>
+            )}
+            {activeTab === "ai" && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" size="icon" variant="outline" className="h-7 w-7" title="Enrich options">
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuCheckboxItem
+                    checked={includeVisual}
+                    onCheckedChange={(c) => persistVisualPref(!!c)}
+                  >
+                    Include visual read
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
 
-        {!panelCollapsed && (
+        {!panelCollapsed && activeTab === "fundamentals" && (
+          <div
+            className="flex-1 min-h-0 overflow-y-auto text-left pr-0.5"
+            style={{ fontSize: contentFontPx }}
+          >
+            <FundamentalsTabContent metrics={chartMetrics} />
+          </div>
+        )}
+
+        {!panelCollapsed && activeTab === "ai" && (
           <div
             className="flex-1 min-h-0 overflow-y-auto space-y-2 text-left pr-0.5"
             style={{ fontSize: contentFontPx }}

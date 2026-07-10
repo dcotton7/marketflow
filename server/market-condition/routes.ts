@@ -14,7 +14,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
-import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getTickerPrimaryCluster, getClusterById } from "./universe";
+import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getTickerPrimaryCluster, getClusterById, autoMapTickerToCluster, addRuntimeCandidate } from "./universe";
 import { db } from "../db";
 import { subthemes, themes, tickers as tickerTable, tickerSliceMemberships, tnnSettings } from "@shared/schema";
 import {
@@ -215,7 +215,22 @@ const TRADING_DAYS_BACK: Partial<Record<TimeSlice, number>> = {
 router.get("/ticker-theme/:symbol", async (req: Request, res: Response) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const clusterId = getTickerPrimaryCluster(symbol);
+    let clusterId = getTickerPrimaryCluster(symbol);
+    if (!clusterId) {
+      // Try auto-mapping from fundamentals
+      try {
+        const { getFundamentals } = await import("../fundamentals");
+        const fund = await getFundamentals(symbol);
+        if (fund.sector !== "Unknown") {
+          const autoCluster = autoMapTickerToCluster(symbol, fund.sector, fund.industry);
+          if (autoCluster) {
+            addRuntimeCandidate(symbol, autoCluster);
+            clusterId = autoCluster;
+            console.log(`[AutoMap] ${symbol} → ${autoCluster} (${fund.industry})`);
+          }
+        }
+      } catch {}
+    }
     if (!clusterId) {
       return res.json({ themeId: null, themeName: null, rank: null, totalThemes: null });
     }

@@ -60,6 +60,7 @@ const SIGNAL_TYPE_LABELS: Record<SignalType, string> = {
   gap_down_continuation: "Gap Down Continuation",
   earnings_reaction: "Earnings Reaction",
   theme_earnings_density: "Theme Earnings Density",
+  ipo_debut: "IPO Debut",
 };
 
 // ── Category filter definitions ──────────────────────────────────────────────
@@ -172,6 +173,7 @@ export function DiscoveryFeedPanel() {
   const [showUrgentOnly, setShowUrgentOnly] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | "all">("all");
+  const [directionFilter, setDirectionFilter] = useState<"all" | "up" | "down">("all");
   const [adminPanel, setAdminPanel] = useState<"none" | "rules" | "queue" | "config">("none");
   const [catalystRules, setCatalystRules] = useState<CatalystRuleDefinition[]>([]);
   const [catalystQueue, setCatalystQueue] = useState<CatalystEntry[]>([]);
@@ -327,9 +329,10 @@ export function DiscoveryFeedPanel() {
     } else if (categoryFilter !== "all") {
       cards = cards.filter((d) => matchesCategory(d, categoryFilter));
     }
+    if (directionFilter !== "all") cards = cards.filter((d) => d.direction === directionFilter);
     if (showUrgentOnly) cards = cards.filter((d) => d.priority === "urgent" || (d.qualifyScore ?? 0) >= 80);
     return cards;
-  }, [discoveries, historyCards, historyMode, showUrgentOnly, categoryFilter, signalTypeFilter]);
+  }, [discoveries, historyCards, historyMode, showUrgentOnly, categoryFilter, signalTypeFilter, directionFilter]);
 
   const cycleMode = () => {
     const order: ScannerMode[] = ["on", "silent", "off"];
@@ -549,6 +552,30 @@ export function DiscoveryFeedPanel() {
             </select>
           </div>
         )}
+
+        {/* Direction filter (Long / Short / All) */}
+        <div className="flex items-center gap-0.5 shrink-0" onPointerDown={(e) => e.stopPropagation()}>
+          {(["all", "up", "down"] as const).map((dir) => {
+            const active = directionFilter === dir;
+            const label = dir === "all" ? "All" : dir === "up" ? "Long" : "Short";
+            return (
+              <button
+                key={dir}
+                onClick={(e) => { e.stopPropagation(); setDirectionFilter(dir); }}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                  active
+                    ? dir === "up" ? "bg-emerald-800/50 text-emerald-300 border border-emerald-600/50"
+                    : dir === "down" ? "bg-red-800/50 text-red-300 border border-red-600/50"
+                    : "bg-cyan-800/40 text-cyan-300 border border-cyan-600/50"
+                    : "text-slate-400 hover:text-slate-200 border border-transparent"
+                }`}
+                style={{ fontSize: scannerPx("small", fo) }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
         {/* History mode banner */}
         {historyMode && (

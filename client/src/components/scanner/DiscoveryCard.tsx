@@ -18,6 +18,8 @@ import {
   AlertTriangle,
   ExternalLink,
   BarChart3,
+  Copy,
+  Check,
 } from "lucide-react";
 import type {
   DiscoveryCard as DiscoveryCardType,
@@ -128,6 +130,38 @@ function buildHoverDetail(card: DiscoveryCardType): string {
   return lines.join("\n");
 }
 
+function buildDiscordText(card: DiscoveryCardType): string {
+  const arrow = card.direction === "up" ? "🟢" : card.direction === "down" ? "🔴" : "🟡";
+  const priority = card.priority === "urgent" ? " 🔥 **URGENT**" : "";
+  const time = new Date(card.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+
+  const lines: string[] = [];
+  lines.push(`${arrow} **${card.headline}**${priority}`);
+  lines.push(card.narrative);
+
+  const tickers = card.tickers.filter(isRealTicker);
+  if (tickers.length > 0) {
+    const links = tickers.slice(0, 6).map(t => `[$${t}](<https://tradingview.com/chart/?symbol=${t}>)`);
+    lines.push(links.join(" "));
+  }
+
+  // News article
+  const newsUrl = (card.context as any)?._newsUrl;
+  if (newsUrl) {
+    const src = (card.context as any)?._newsSource ?? "article";
+    lines.push(`[Read ${src}](${newsUrl})`);
+  }
+
+  // Theme
+  if (card.themeId && isThemeId(card.themeId)) {
+    lines.push(`Theme: **${card.themeId.replace(/_/g, " ")}**`);
+  }
+
+  lines.push(`Score: ${card.qualifyScore.toFixed(0)}/100 · ${card.pipelineName} · ${time}`);
+
+  return lines.join("\n");
+}
+
 interface DiscoveryCardProps {
   card: DiscoveryCardType;
   fontSize: number;
@@ -146,9 +180,19 @@ export function DiscoveryCard({
   globalExpanded = false,
 }: DiscoveryCardProps) {
   const [localExpanded, setLocalExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const expanded = globalExpanded || localExpanded;
   const { cssVariables } = useAdminTheme();
   const [, navigate] = useLocation();
+
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const text = buildDiscordText(card);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [card]);
 
   const navigateToTheme = useCallback((themeId: string) => {
     if (onNavigateTheme) {
@@ -226,11 +270,23 @@ export function DiscoveryCard({
               </div>
             </div>
 
-            {/* Expand toggle */}
-            <div className="h-6 w-6 shrink-0 flex items-center justify-center opacity-50">
-              {expanded
-                ? <ChevronUp className="h-3.5 w-3.5" />
-                : <ChevronDown className="h-3.5 w-3.5" />}
+            {/* Copy + Expand toggle */}
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="h-6 w-6 flex items-center justify-center rounded opacity-40 hover:opacity-100 hover:bg-slate-700/50 transition-all"
+                title="Copy to clipboard (Discord format)"
+              >
+                {copied
+                  ? <Check className="h-3 w-3 text-emerald-400" />
+                  : <Copy className="h-3 w-3" />}
+              </button>
+              <div className="h-6 w-6 flex items-center justify-center opacity-50">
+                {expanded
+                  ? <ChevronUp className="h-3.5 w-3.5" />
+                  : <ChevronDown className="h-3.5 w-3.5" />}
+              </div>
             </div>
           </div>
         </TooltipTrigger>

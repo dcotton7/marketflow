@@ -81,6 +81,12 @@ export const tickers = pgTable("tickers", {
   epsEstimate: doublePrecision("eps_estimate"),
   revenueActual: doublePrecision("revenue_actual"),
   revenueEstimate: doublePrecision("revenue_estimate"),
+  // Extended profile + metrics fields
+  week52High: doublePrecision("week_52_high"),
+  week52Low: doublePrecision("week_52_low"),
+  dividendYield: doublePrecision("dividend_yield"),
+  roe: doublePrecision("roe"),
+  sharesOutstanding: doublePrecision("shares_outstanding"),
   // Market condition metrics
   accDistDays: integer("acc_dist_days").default(0), // Accumulation/Distribution streak (William O'Neal style)
   // Cache metadata — tiered TTLs: profile (1yr), earnings (1day), metrics (7day via fetchedAt)

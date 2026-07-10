@@ -279,6 +279,22 @@ function qualifySignal(
       return { qualified: true, score: capScore(raw) };
     }
 
+    case "ipo_debut_scan": {
+      const marketCap = (signal.meta?.marketCap as number) ?? 0;
+      const capM = marketCap / 1e6;
+      raw += Math.min(30, capM / 100);
+      const exchange = (signal.meta?.exchange as string) ?? "";
+      if (exchange === "NASDAQ" || exchange === "NYSE") raw += 15;
+      if (capM >= 1000) raw += 20;
+      if (capM >= 5000) raw += 15;
+      const ipoScore = capScore(raw);
+      return {
+        qualified: true,
+        score: ipoScore,
+        priorityOverride: capM >= 1000 ? "urgent" : undefined,
+      };
+    }
+
     default:
       return { qualified: true, score: capScore(raw) };
   }

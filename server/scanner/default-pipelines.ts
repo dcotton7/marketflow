@@ -294,4 +294,22 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     ownerId: "system",
     visibility: "global",
   },
+
+  // ── IPO Debut Pipeline ──────────────────────────────────────────────────
+
+  {
+    id: "ipo_debut_scan",
+    name: "IPO Debut",
+    enabled: true,
+    trigger: {
+      signalTypes: ["ipo_debut"],
+      subjectKind: "ticker",
+    },
+    lensIds: ["theme_membership", "regime_context"],
+    reactions: ["discovery_brief"],
+    cooldownMs: 24 * 60 * 60_000,
+    priority: "normal",
+    ownerId: "system",
+    visibility: "global",
+  },
 ];
