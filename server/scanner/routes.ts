@@ -394,7 +394,7 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
       const tracked = entries.filter((r) => (r as any)[moveCol] != null).length;
 
       if (tracked < minSamples) {
-        signalTypes.push({ signalType, totalFired, tracked, hitRate: null, avgMove: null, avgPeakMove: null, avgGiveback: null, failRate: null, reversalRate: null });
+        signalTypes.push({ signalType, totalFired, tracked, hitRate: null, avgMove: null, avgPeakMove: null, avgGiveback: null, failRate: null, reversalRate: null, mfe3Rate: null, mae3Rate: null });
         continue;
       }
 
@@ -423,6 +423,14 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
       const failCount = entries.filter((r) => r.outcomeFailed === true).length;
       const reversalCount = entries.filter((r) => r.outcomeStatus === "reversed").length;
 
+      // MFE/MAE distribution: % of tracked signals that hit +3% or worse than -3%
+      const mfe3PctCount = withPeak.filter((r) => Number(r.peakMove) >= 3).length;
+      const mae3PctCount = entries.filter((r) => r.worstDrawdown != null && Number(r.worstDrawdown) <= -3).length;
+      const mfe3Rate = withPeak.length > 0 ? Math.round((mfe3PctCount / withPeak.length) * 1000) / 1000 : null;
+      const mae3Rate = entries.filter((r) => r.worstDrawdown != null).length > 0
+        ? Math.round((mae3PctCount / entries.filter((r) => r.worstDrawdown != null).length) * 1000) / 1000
+        : null;
+
       signalTypes.push({
         signalType,
         totalFired,
@@ -433,6 +441,8 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
         avgGiveback,
         failRate: totalFired > 0 ? Math.round((failCount / totalFired) * 1000) / 1000 : 0,
         reversalRate: totalFired > 0 ? Math.round((reversalCount / totalFired) * 1000) / 1000 : 0,
+        mfe3Rate,
+        mae3Rate,
       });
     }
 

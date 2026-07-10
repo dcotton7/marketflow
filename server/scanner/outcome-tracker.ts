@@ -8,12 +8,12 @@
 
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
-import { eq, and, isNull, sql, inArray } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray, notInArray, gte, lt } from "drizzle-orm";
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
 
 const INTERVAL_MS = 5 * 60_000;
-const BATCH_SIZE = 200;
+const BATCH_SIZE = 400;
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
 
@@ -107,37 +107,74 @@ function shouldProcessRow(elapsedMs: number, now: Date): boolean {
 // ── Main processing ──────────────────────────────────────────────────────────
 
 async function processOutcomes(): Promise<void> {
-  if (!db) return;
+  if (!db) { console.warn("[Outcome Tracker] No DB, skipping"); return; }
   cycleCount++;
+  console.log(`[Outcome Tracker] Cycle ${cycleCount} starting...`);
 
   try {
-    const pending = await db
+    // Mark skipped signal types as tracked so they don't permanently clog the batch
+    await db
+      .update(scannerDiscoveries)
+      .set({ outcomeTrackedAt: new Date() })
+      .where(
+        and(
+          isNull(scannerDiscoveries.outcomeTrackedAt),
+          inArray(scannerDiscoveries.signalType, [...SKIP_SIGNAL_TYPES])
+        )
+      )
+      .catch(() => {});
+
+    // Round-robin fetch: get up to PER_TYPE_LIMIT from each signal type
+    // so no single type (e.g., ma_proximity with 3000+) starves others
+    const PER_TYPE_LIMIT = 30;
+
+    const allPending = await db
       .select()
       .from(scannerDiscoveries)
       .where(
         and(
           isNull(scannerDiscoveries.outcomeTrackedAt),
-          inArray(scannerDiscoveries.subjectKind, ["ticker", "theme", "market"])
+          inArray(scannerDiscoveries.subjectKind, ["ticker", "theme", "market"]),
+          notInArray(scannerDiscoveries.signalType, [...SKIP_SIGNAL_TYPES])
         )
       )
-      .orderBy(sql`peak_move IS NOT NULL, id`)
-      .limit(BATCH_SIZE);
+      .orderBy(sql`id DESC`)
+      .limit(5000);
 
+    // Group by signal type, take PER_TYPE_LIMIT from each, prioritizing never-processed
+    const byType = new Map<string, typeof allPending>();
+    for (const row of allPending) {
+      const list = byType.get(row.signalType) ?? [];
+      list.push(row);
+      byType.set(row.signalType, list);
+    }
+
+    const pending: typeof allPending = [];
+    for (const [, rows] of byType) {
+      // Never-processed first, then already-have-peak
+      const neverProcessed = rows.filter(r => r.peakMove == null && r.worstDrawdown == null);
+      const alreadyStarted = rows.filter(r => r.peakMove != null || r.worstDrawdown != null);
+      const selected = [...neverProcessed.slice(0, PER_TYPE_LIMIT), ...alreadyStarted.slice(0, Math.max(0, PER_TYPE_LIMIT - neverProcessed.length))].slice(0, PER_TYPE_LIMIT);
+      pending.push(...selected);
+    }
+
+    console.log(`[Outcome Tracker] Fetched ${pending.length} across ${byType.size} signal types (${PER_TYPE_LIMIT}/type max)`);
     if (pending.length === 0) return;
 
     const frame = currentFrame();
-    if (!frame) return;
+    if (!frame) { console.warn("[Outcome Tracker] No snapshot frame available, skipping"); return; }
 
     const now = new Date();
     const nowMs = now.getTime();
     let updatedCount = 0;
 
     for (const row of pending) {
-      if (SKIP_SIGNAL_TYPES.has(row.signalType)) continue;
       if (row.outcomeFailed) continue;
 
       const elapsedMs = nowMs - row.createdAt.getTime();
-      if (!shouldProcessRow(elapsedMs, now)) continue;
+      // Always process rows that have never been tracked (no peak data yet)
+      const neverProcessed = row.peakMove == null && row.worstDrawdown == null;
+      if (!neverProcessed && !shouldProcessRow(elapsedMs, now)) continue;
 
       // Determine the price lookup symbol(s) based on subjectKind
       let lookupSymbols: string[];
@@ -179,7 +216,7 @@ async function processOutcomes(): Promise<void> {
         // Set current ETF price as baseline on first encounter
         await db
           .update(scannerDiscoveries)
-          .set({ priceAtSignal: String(currentPrice) })
+          .set({ priceAtSignal: currentPrice })
           .where(eq(scannerDiscoveries.id, row.id));
         signalPrice = currentPrice;
       }
@@ -376,9 +413,7 @@ async function processOutcomes(): Promise<void> {
       }
     }
 
-    if (updatedCount > 0) {
-      console.log(`[Outcome Tracker] Updated ${updatedCount}/${pending.length} discoveries`);
-    }
+    console.log(`[Outcome Tracker] Updated ${updatedCount}/${pending.length} discoveries (cycle ${cycleCount})`);
   } catch (err) {
     console.warn("[Outcome Tracker] Error:", String(err).slice(0, 200));
   }

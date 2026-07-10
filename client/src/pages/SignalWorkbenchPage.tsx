@@ -11,6 +11,7 @@ import { DiscoveryCard } from "@/components/scanner/DiscoveryCard";
 import { scannerPx, loadScannerFontOffset, saveScannerFontOffset } from "@/components/scanner/scanner-font-prefs";
 import { ScannerFontSizeControl } from "@/components/scanner/ScannerFontSizeControl";
 import type { DiscoveryCard as DiscoveryCardType } from "@shared/scanner-types";
+import { DEFAULT_SCANNER_CONFIG, type ScannerConfig } from "@shared/scanner-config";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ interface SignalTypeStats {
   avgGiveback: number | null;
   failRate: number | null;
   reversalRate: number | null;
+  mfe3Rate: number | null;
+  mae3Rate: number | null;
 }
 
 interface WorkbenchCard extends DiscoveryCardType {
@@ -93,7 +96,38 @@ const SIGNAL_TYPE_LABELS: Record<string, string> = {
   gap_down_continuation: "Gap Down Continuation",
   earnings_reaction: "Earnings Reaction",
   theme_earnings_density: "Theme Earnings Density",
+  ipo_debut: "IPO Debut",
 };
+
+function buildSignalCriteria(cfg: ScannerConfig | null): Record<string, string> {
+  const c = cfg ?? DEFAULT_SCANNER_CONFIG;
+  return {
+    gap: `Gap ≥${c.gapThresholdPct}% from prev close at open. Urgent if ≥5% with high volume. Cooldown: ${c.gapCooldownMin}min.`,
+    volume_spike: `Intraday volume ≥${c.volumeSpikeThreshold}x the 14d average. Cooldown: ${c.volumeSpikeCooldownMin}min.`,
+    velocity_move: `Price moves ≥${c.velocityThresholdPct}% within ${c.velocityWindowFrames} frames. Cooldown: ${c.velocityCooldownMin}min.`,
+    adr_blowout: `Today's range exceeds ${c.adrBlowoutThreshold}x the 14d ADR. Cooldown: ${c.adrBlowoutCooldownMin}min.`,
+    breadth_shift: `Theme A/D ratio shifts ≥${c.breadthShiftThreshold} over ${c.breadthShiftWindowFrames} frames. Cooldown: ${c.breadthShiftCooldownMin}min.`,
+    theme_acceleration: `Theme score changes ≥${c.themeAccelThreshold} pts between snapshots. "Bouncing" if score <30, "Surging" if strong. Cooldown: ${c.themeAccelCooldownMin}min.`,
+    regime_change: "Market regime shifts (e.g., NEUTRAL → AGGRESSIVE or DEFENSIVE). Cooldown: 30min.",
+    rai_shift: `RAI shifts ≥${c.raiShiftThreshold} pts over ${c.raiShiftWindowFrames} frames. Cooldown: ${c.raiShiftCooldownMin}min.`,
+    broad_weakness: `≥${c.broadMoveThemeCount} themes declining. Cooldown: ${c.broadMoveCooldownMin}min.`,
+    broad_strength: `≥${c.broadMoveThemeCount} themes advancing. Cooldown: ${c.broadMoveCooldownMin}min.`,
+    news_alert: "Headline severity ≥3 from Finnhub/FMP. Corroboration boosts score. Cooldown: 60min per ticker.",
+    ma_proximity: `Price within ${c.maProximityThresholdPct}% of 20d/50d/200d SMA. Repeats every ${c.maProximityCooldownMin}min intraday.`,
+    ur_ma_reclaim: `Price reclaims key SMA after ≥3 frames below. 50d: within ${c.maReclaim50dMaxExtPct}%, 200d: within ${c.maReclaim200dMaxExtPct}%. Cooldown: ${c.maReclaimCooldownMin}min.`,
+    prev_day_high_break: `Price breaks ≥${c.breakClearancePct}% above prev day high AND above 200d SMA. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
+    prev_day_low_break: `Price breaks ≥${c.breakClearancePct}% below prev day low. Priority if below 50d+200d. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
+    five_day_high_break: `Price breaks ≥${c.breakClearancePct}% above 5-day high AND above 200d SMA. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
+    five_day_low_break: `Price breaks ≥${c.breakClearancePct}% below 5-day low. Priority if below 50d+200d. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
+    lod_bounce: `Stock up ≥${c.lodBounceTier1Pct}% (tier 1) or ≥${c.lodBounceTier2Pct}% (tier 2) from LOD. Max ${c.lodBounceMaxAtrExt}x ATR extension. Cooldown: ${c.lodBounceCooldownMin}min.`,
+    failed_breakout: `Broke above prev day high then reversed ≥${c.failedBreakoutReversalPct}% back below. Lookback: ${c.failedBreakoutLookbackMin}-${c.failedBreakoutLookbackMax} frames. Cooldown: ${c.failedBreakoutCooldownMin}min.`,
+    hod_fade: `Faded ≥${c.hodFadeMinPct}% from HOD after ${c.hodFadeMinFramesSinceHod}+ frames. Cooldown: ${c.hodFadeCooldownMin}min.`,
+    gap_down_continuation: `Gapped down ≥${c.gapDownContinuationMinGapPct}%, continued ≥${c.gapDownContinuationMinFadePct}% below open after ${c.gapDownContinuationMinFrames} frames. Cooldown: ${c.gapDownContinuationCooldownMin}min.`,
+    earnings_reaction: "Post-earnings price reaction — EPS/revenue beat or miss with significant move.",
+    theme_earnings_density: "Multiple tickers in a theme reporting earnings within the same week.",
+    ipo_debut: `New IPO from FMP calendar. Min market cap: $${c.ipoMinMarketCapM}M. Urgent if >$1B.`,
+  };
+}
 
 function hitRateColor(rate: number | null | undefined): string {
   if (rate == null) return "text-slate-500";
@@ -158,6 +192,16 @@ function SignalWorkbenchInner() {
   const [cardsLoading, setCardsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [scannerConfig, setScannerConfig] = useState<ScannerConfig | null>(null);
+
+  // Fetch live scanner config for tooltip thresholds
+  useEffect(() => {
+    fetch("/api/scanner/config").then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.config) setScannerConfig(d.config);
+    }).catch(() => {});
+  }, []);
+
+  const signalCriteria = useMemo(() => buildSignalCriteria(scannerConfig), [scannerConfig]);
 
   // Fetch hit rates
   const fetchHitRates = useCallback(async () => {
@@ -268,11 +312,11 @@ function SignalWorkbenchInner() {
           <label className="flex items-center gap-1.5 text-xs" style={{ color: cssVariables.textSmall }}>
             Hit %
             <input
-              type="range" min={0.1} max={3.0} step={0.1} value={hitThreshold}
-              onChange={(e) => setHitThreshold(parseFloat(e.target.value))}
-              className="w-20 h-1 accent-purple-500"
+              type="number" min={0.1} max={20} step={0.1} value={hitThreshold}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) setHitThreshold(v); }}
+              className="w-16 h-7 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-right tabular-nums"
+              style={{ color: cssVariables.textTitle }}
             />
-            <span className="w-10 text-right tabular-nums font-mono" style={{ color: cssVariables.textTitle }}>{hitThreshold.toFixed(1)}%</span>
           </label>
           <label className="flex items-center gap-1.5 text-xs" style={{ color: cssVariables.textSmall }}>
             Session
@@ -315,6 +359,8 @@ function SignalWorkbenchInner() {
                 <th className="text-right px-2 py-2 font-medium" title="Average giveback (%) — how much of the peak move was lost. High giveback = signals fade quickly">Avg Give</th>
                 <th className="text-right px-2 py-2 font-medium" title="Percentage of signals that failed — never moved favorably (>1%) and went >5% adverse">Fail%</th>
                 <th className="text-right px-2 py-2 font-medium" title="Percentage of signals that reversed — initially moved favorably (>3%) but then gave it all back and went adverse">Rev%</th>
+                <th className="text-right px-2 py-2 font-medium text-emerald-500" title="% of tracked signals where MFE (max favorable excursion) reached +3% or better — strong winners">MFE 3%+</th>
+                <th className="text-right px-2 py-2 font-medium text-red-500" title="% of tracked signals where MAE (max adverse excursion) hit -3% or worse — painful losers">MAE 3%-</th>
                 <th className="w-5"></th>
               </tr>
             </thead>
@@ -338,7 +384,11 @@ function SignalWorkbenchInner() {
                     style={{ borderColor: "rgba(100,116,139,0.15)" }}
                     onClick={() => setSelectedSignal(isSelected ? null : s.signalType)}
                   >
-                    <td className="px-3 py-2 font-medium" style={{ color: cssVariables.textTitle }}>
+                    <td
+                      className="px-3 py-2 font-medium cursor-help"
+                      style={{ color: cssVariables.textTitle }}
+                      title={signalCriteria[s.signalType] ?? ""}
+                    >
                       {SIGNAL_TYPE_LABELS[s.signalType] ?? s.signalType}
                     </td>
                     <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textSmall }}>{s.totalFired}</td>
@@ -360,6 +410,12 @@ function SignalWorkbenchInner() {
                     </td>
                     <td className="text-right px-2 py-2 tabular-nums text-amber-400">
                       {formatRate(s.reversalRate)}
+                    </td>
+                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", s.mfe3Rate != null && s.mfe3Rate > 0.15 ? "text-emerald-400" : "text-slate-400")}>
+                      {formatRate(s.mfe3Rate)}
+                    </td>
+                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", s.mae3Rate != null && s.mae3Rate > 0.15 ? "text-red-400" : "text-slate-400")}>
+                      {formatRate(s.mae3Rate)}
                     </td>
                     <td className="px-1">
                       <ChevronRight className={cn("h-3 w-3 transition-transform", isSelected && "rotate-90")} style={{ color: cssVariables.textTiny }} />
