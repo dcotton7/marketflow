@@ -139,6 +139,8 @@ interface FmpEarningsRow {
   epsEstimated: number | null;
   revenue: number | null;
   revenueEstimated: number | null;
+  epsActual?: number | null;
+  revenueActual?: number | null;
   time?: string; // "bmo" | "amc"
 }
 
@@ -155,7 +157,7 @@ interface ParsedEarnings {
 
 async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> {
   if (!FMP_API_KEY) return null;
-  const url = `${FMP_BASE}/earning_calendar?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
+  const url = `${FMP_BASE}/earnings?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
   try {
     const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
     if (resp.status === 429) {
@@ -196,9 +198,9 @@ async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> 
       nextEarningsDays,
       earningsTime,
       lastEarningsDate: recent?.date ?? null,
-      epsActual: recent?.eps ?? null,
+      epsActual: recent?.epsActual ?? recent?.eps ?? null,
       epsEstimate: recent?.epsEstimated ?? null,
-      revenueActual: recent?.revenue ?? null,
+      revenueActual: recent?.revenueActual ?? recent?.revenue ?? null,
       revenueEstimate: recent?.revenueEstimated ?? null,
     };
   } catch (err) {
@@ -684,7 +686,7 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
   // Try FMP first
   if (FMP_API_KEY) {
     try {
-      const url = `${FMP_BASE}/earning_calendar?symbol=${encodeURIComponent(upper)}&apikey=${FMP_API_KEY}`;
+      const url = `${FMP_BASE}/earnings?symbol=${encodeURIComponent(upper)}&apikey=${FMP_API_KEY}`;
       const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
       if (resp.status === 429) {
         fmpBackoffUntil = Date.now() + 60_000;
@@ -694,7 +696,7 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
         if (Array.isArray(data) && data.length > 0) {
           const today = new Date().toISOString().slice(0, 10);
           const pastEntries = data
-            .filter((e) => e.date <= today && (e.eps != null || e.revenue != null))
+            .filter((e) => e.date <= today && ((e.epsActual ?? e.eps) != null || (e.revenueActual ?? e.revenue) != null))
             .sort((a, b) => b.date.localeCompare(a.date))
             .slice(0, 4);
 
@@ -702,9 +704,9 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
             const result: QuarterlyEarning[] = pastEntries.map((e) => ({
               quarter: formatQuarterLabel(e.date),
               date: e.date,
-              epsActual: e.eps,
+              epsActual: e.epsActual ?? e.eps,
               epsEstimate: e.epsEstimated,
-              revenueActual: e.revenue,
+              revenueActual: e.revenueActual ?? e.revenue,
               revenueEstimate: e.revenueEstimated,
             }));
             pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
