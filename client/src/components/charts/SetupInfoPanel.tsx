@@ -214,6 +214,17 @@ function FundSectionHeader({ label }: { label: string }) {
 function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | null | undefined; symbol: string }) {
   const [descExpanded, setDescExpanded] = useState(false);
 
+  // Recalculate nextEarningsDays relative to today (server value is a snapshot)
+  const nextEarnings = useMemo(() => {
+    if (!metrics?.nextEarningsDate || metrics.nextEarningsDate === "N/A") return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const nextDate = new Date(metrics.nextEarningsDate + "T00:00:00");
+    const daysUntil = Math.ceil((nextDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysUntil < 0) return null; // past date — suppress
+    return { date: metrics.nextEarningsDate, days: daysUntil, time: metrics.earningsTime };
+  }, [metrics?.nextEarningsDate, metrics?.earningsTime]);
+
   if (!metrics) {
     return (
       <p className="text-[0.875em] text-muted-foreground">
@@ -444,24 +455,22 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
             <p className="text-[0.85em] text-muted-foreground">No recent earnings data</p>
           )}
 
-          {/* Next earnings */}
-          {metrics.nextEarningsDate && metrics.nextEarningsDate !== "N/A" && (
+          {/* Next earnings (recalculated client-side, past dates suppressed) */}
+          {nextEarnings && (
             <div className="pt-1 border-t border-slate-700/30">
               <p className="text-[0.85em] text-slate-300">
                 <span className="text-slate-500">Next: </span>
-                <span className="font-medium">{metrics.nextEarningsDate}</span>
-                {metrics.nextEarningsDays >= 0 && (
-                  <span className={cn(
-                    "ml-1 text-[0.9em] font-bold px-1 py-px rounded",
-                    metrics.nextEarningsDays <= 7
-                      ? "bg-amber-900/30 text-amber-400 border border-amber-700/30"
-                      : "text-slate-400"
-                  )}>
-                    {metrics.nextEarningsDays === 0 ? "TODAY" : `in ${metrics.nextEarningsDays}d`}
-                  </span>
-                )}
-                {metrics.earningsTime === "bmo" && <span className="text-slate-500 ml-1">BMO</span>}
-                {metrics.earningsTime === "amc" && <span className="text-slate-500 ml-1">AMC</span>}
+                <span className="font-medium">{nextEarnings.date}</span>
+                <span className={cn(
+                  "ml-1 text-[0.9em] font-bold px-1 py-px rounded",
+                  nextEarnings.days <= 7
+                    ? "bg-amber-900/30 text-amber-400 border border-amber-700/30"
+                    : "text-slate-400"
+                )}>
+                  {nextEarnings.days === 0 ? "TODAY" : `in ${nextEarnings.days}d`}
+                </span>
+                {nextEarnings.time === "bmo" && <span className="text-slate-500 ml-1">BMO</span>}
+                {nextEarnings.time === "amc" && <span className="text-slate-500 ml-1">AMC</span>}
               </p>
             </div>
           )}
@@ -659,21 +668,35 @@ function UpcomingEarningsSection({
 
   const allEntries = useMemo(() => {
     const entries: UpcomingEarningsEntry[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayMs = today.getTime();
 
-    if (currentNextDate && currentNextDate !== "N/A" && (currentNextDays ?? -1) >= 0) {
-      entries.push({
-        symbol: currentSymbol,
-        nextEarningsDate: currentNextDate,
-        nextEarningsDays: currentNextDays ?? -1,
-        earningsTime: currentEarningsTime ?? null,
-      });
+    // Recalculate days relative to today and filter out past dates
+    const recalcDays = (dateStr: string | null): number => {
+      if (!dateStr || dateStr === "N/A") return -1;
+      return Math.ceil((new Date(dateStr + "T00:00:00").getTime() - todayMs) / (1000 * 60 * 60 * 24));
+    };
+
+    if (currentNextDate && currentNextDate !== "N/A") {
+      const days = recalcDays(currentNextDate);
+      if (days >= 0) {
+        entries.push({
+          symbol: currentSymbol,
+          nextEarningsDate: currentNextDate,
+          nextEarningsDays: days,
+          earningsTime: currentEarningsTime ?? null,
+        });
+      }
     }
 
     if (peerEarnings?.earnings) {
       for (const e of peerEarnings.earnings) {
         if (e.symbol === currentSymbol) continue;
-        if (!e.nextEarningsDate || e.nextEarningsDays < 0) continue;
-        entries.push(e);
+        if (!e.nextEarningsDate) continue;
+        const days = recalcDays(e.nextEarningsDate);
+        if (days < 0) continue;
+        entries.push({ ...e, nextEarningsDays: days });
       }
     }
 

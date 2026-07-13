@@ -135,12 +135,13 @@ async function fetchFmpProfile(symbol: string): Promise<FmpProfileRow | null> {
 interface FmpEarningsRow {
   date: string;
   symbol: string;
-  eps: number | null;
+  epsActual: number | null;
   epsEstimated: number | null;
-  revenue: number | null;
+  revenueActual: number | null;
   revenueEstimated: number | null;
-  epsActual?: number | null;
-  revenueActual?: number | null;
+  // Legacy fields from old /stable/earning_calendar endpoint (kept for backward compat)
+  eps?: number | null;
+  revenue?: number | null;
   time?: string; // "bmo" | "amc"
 }
 
@@ -371,8 +372,24 @@ async function getExtendedFromDbCacheTiered(symbol: string): Promise<TieredCache
     const metricsAge = now - new Date(row.fetchedAt).getTime();
 
     const profileStale = profileAge > PROFILE_CACHE_TTL;
-    const earningsStale = earningsAge > EARNINGS_CACHE_TTL;
+    let earningsStale = earningsAge > EARNINGS_CACHE_TTL;
     const metricsStale = metricsAge > METRICS_CACHE_TTL || (row.pe === null && row.analystConsensus === null);
+
+    // Force refetch when cached nextEarningsDate is in the past
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (!earningsStale && row.nextEarningsDate && row.nextEarningsDate !== "N/A" && row.nextEarningsDate <= todayStr) {
+      earningsStale = true;
+    }
+
+    // Recalculate nextEarningsDays relative to today (stored value is a snapshot)
+    let recalcDays = row.nextEarningsDays ?? -1;
+    if (row.nextEarningsDate && row.nextEarningsDate !== "N/A") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      recalcDays = Math.ceil(
+        (new Date(row.nextEarningsDate + "T00:00:00").getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+    }
 
     const data: ExtendedFundamentals = {
       marketCap: row.marketCap || 0,
@@ -383,7 +400,7 @@ async function getExtendedFromDbCacheTiered(symbol: string): Promise<TieredCache
       analystConsensus: row.analystConsensus || "N/A",
       targetPrice: row.targetPrice,
       nextEarningsDate: row.nextEarningsDate || "N/A",
-      nextEarningsDays: row.nextEarningsDays ?? -1,
+      nextEarningsDays: recalcDays,
       epsCurrentQYoY: row.epsCurrentQYoY || "N/A",
       salesGrowth3QYoY: row.salesGrowth3QYoY || "N/A",
       lastEpsSurprise: row.lastEpsSurprise || "N/A",
@@ -641,9 +658,18 @@ export async function getCachedEarningsData(symbol: string): Promise<{
     if (rows.length === 0) return null;
     const row = rows[0];
     if (!row.nextEarningsDate && !row.lastEarningsDate) return null;
+    // Recalculate nextEarningsDays relative to today
+    let nextEarningsDays = row.nextEarningsDays ?? -1;
+    if (row.nextEarningsDate && row.nextEarningsDate !== "N/A") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      nextEarningsDays = Math.ceil(
+        (new Date(row.nextEarningsDate + "T00:00:00").getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      );
+    }
     return {
       nextEarningsDate: row.nextEarningsDate || null,
-      nextEarningsDays: row.nextEarningsDays ?? -1,
+      nextEarningsDays,
       earningsTime: row.earningsTime || null,
       lastEarningsDate: row.lastEarningsDate || null,
       epsActual: row.epsActual ?? null,
@@ -917,9 +943,9 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
         }
       }
 
-      // If FMP earnings didn't provide a next date, fall back to Finnhub +90d estimate
-      let nextEarningsDate = result?.nextEarningsDate ?? "N/A";
-      let nextEarningsDays = result?.nextEarningsDays ?? -1;
+      // Use FMP earnings data (from step 3) when result is null (first fetch)
+      let nextEarningsDate = result?.nextEarningsDate ?? saveOpts.earningsData?.nextEarningsDate ?? "N/A";
+      let nextEarningsDays = result?.nextEarningsDays ?? saveOpts.earningsData?.nextEarningsDays ?? -1;
       if (nextEarningsDate === "N/A" && earningsSurprises.length > 0) {
         const sortedEarnings = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
         const lastEarnings = new Date(sortedEarnings[0].period);
@@ -955,6 +981,18 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
       const finnhub52Low = metrics?.["52WeekLow"] != null ? Number(metrics["52WeekLow"]) : null;
       const finnhubDivYield = metrics?.dividendYieldIndicatedAnnual != null ? Number(metrics.dividendYieldIndicatedAnnual) : null;
 
+      // Extract FMP 52-week range from profile as final fallback
+      let fmpW52High: number | null = null;
+      let fmpW52Low: number | null = null;
+      if (fmpProfileData?.range) {
+        const rangeParts = fmpProfileData.range.split("-");
+        if (rangeParts.length === 2) {
+          const lo = parseFloat(rangeParts[0]);
+          const hi = parseFloat(rangeParts[1]);
+          if (!isNaN(lo) && !isNaN(hi)) { fmpW52Low = lo; fmpW52High = hi; }
+        }
+      }
+
       result = {
         marketCap,
         pe,
@@ -969,14 +1007,14 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
         salesGrowth3QYoY,
         lastEpsSurprise,
         companyDescription: result?.companyDescription ?? null,
-        earningsTime: result?.earningsTime ?? null,
+        earningsTime: result?.earningsTime ?? saveOpts.earningsData?.earningsTime ?? null,
         lastEarningsDate: saveOpts.earningsData?.lastEarningsDate ?? result?.lastEarningsDate ?? null,
         epsActual: saveOpts.earningsData?.epsActual ?? result?.epsActual ?? null,
         epsEstimate: saveOpts.earningsData?.epsEstimate ?? result?.epsEstimate ?? null,
-        revenueActual: result?.revenueActual ?? null,
-        revenueEstimate: result?.revenueEstimate ?? null,
-        week52High: result?.week52High ?? finnhub52High,
-        week52Low: result?.week52Low ?? finnhub52Low,
+        revenueActual: saveOpts.earningsData?.revenueActual ?? result?.revenueActual ?? null,
+        revenueEstimate: saveOpts.earningsData?.revenueEstimate ?? result?.revenueEstimate ?? null,
+        week52High: result?.week52High ?? finnhub52High ?? fmpW52High,
+        week52Low: result?.week52Low ?? finnhub52Low ?? fmpW52Low,
         dividendYield: result?.dividendYield ?? finnhubDivYield,
         roe: finnhubRoe ?? result?.roe ?? null,
         sharesOutstanding: result?.sharesOutstanding ?? null,
@@ -984,13 +1022,14 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
 
       // ── Fill-on-miss: attempt to fill remaining nulls from alternate sources ──
       if ((!result.marketCap || result.marketCap === 0) && result.sharesOutstanding && result.sharesOutstanding > 0) {
-        // Last-resort: try FMP profile market cap or compute from shares * estimated price
         if (fmpProfileData?.mktCap && fmpProfileData.mktCap > 0) {
           result.marketCap = fmpProfileData.mktCap;
         }
       }
       if (result.week52High == null && finnhub52High != null) result.week52High = finnhub52High;
       if (result.week52Low == null && finnhub52Low != null) result.week52Low = finnhub52Low;
+      if (result.week52High == null && fmpW52High != null) result.week52High = fmpW52High;
+      if (result.week52Low == null && fmpW52Low != null) result.week52Low = fmpW52Low;
       if (result.dividendYield == null && finnhubDivYield != null) result.dividendYield = finnhubDivYield;
       if (result.roe == null && finnhubRoe != null) result.roe = finnhubRoe;
 

@@ -712,6 +712,14 @@ router.get("/upcoming-earnings", async (req: Request, res: Response) => {
     symbols.map(async (sym) => {
       const cached = upcomingEarningsCache.get(sym);
       if (cached && Date.now() - cached.ts < UPCOMING_EARNINGS_TTL) {
+        // Recalculate days for cached entries (stored value is a snapshot)
+        if (cached.data.nextEarningsDate && cached.data.nextEarningsDate !== "N/A") {
+          const now = new Date();
+          now.setHours(0, 0, 0, 0);
+          cached.data.nextEarningsDays = Math.ceil(
+            (new Date(cached.data.nextEarningsDate + "T00:00:00").getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+          );
+        }
         results.push(cached.data);
         return;
       }
