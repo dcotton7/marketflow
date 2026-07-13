@@ -945,10 +945,16 @@ export async function registerRoutes(
   registerBigIdeaRoutes(app);
   registerUploadRoutes(app);
   
-  // Register Market Condition routes and initialize module
+  // Register Market Condition routes (mount immediately for API availability)
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
-  await initMarketCondition();
+
+  // Initialize MC polling in background — do NOT await so the HTTP listener
+  // can bind immediately. The first snapshot poll loads 676+ tickers and can
+  // take 30-60s; blocking here causes Render to see the server as failed.
+  initMarketCondition().catch((err) => {
+    console.error("[Startup] Market condition init failed (non-fatal):", err);
+  });
 
   // ─── Health / Diagnostics endpoints ──────────────────────────────────────
   app.get("/api/health/memory", async (_req, res) => {
