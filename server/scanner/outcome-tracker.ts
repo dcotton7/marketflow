@@ -178,7 +178,7 @@ async function processOutcomes(): Promise<void> {
     if (pending.length === 0) return;
 
     const frame = currentFrame();
-    if (!frame) { console.warn("[Outcome Tracker] No snapshot frame available, skipping"); return; }
+    if (!frame) { if (cycleCount % 10 === 1) console.warn("[Outcome Tracker] No snapshot frame yet, skipping"); return; }
 
     const now = new Date();
     const nowMs = now.getTime();
