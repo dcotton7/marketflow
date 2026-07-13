@@ -309,46 +309,13 @@ async function refreshFiveDayLevels(): Promise<void> {
 }
 
 export async function initScanner(): Promise<void> {
-  // Seed default catalyst rules and load existing catalysts
+  // Seed default catalyst rules and load existing catalysts (lightweight DB reads)
   await seedDefaultCatalystRules().catch(() => {});
   await syncCatalystsFromDb().catch(() => {});
 
-  // Load 5-day high/low data (fire and forget to not block init)
-  refreshFiveDayLevels().catch(() => {});
-
-  // Start outcome tracker background job
-  startOutcomeTracker();
-
-  // Start IPO detector on its own 30-minute timer
-  startIpoDetector(async (signals) => {
-    if (scannerMode === "off") return;
-    try {
-      lastSignalAt = new Date().toISOString();
-      const current = currentFrame();
-      if (!current) return;
-
-      const lensCtx: LensContext = {
-        currentFrame: current,
-        getFrame,
-        bufferLength: getBufferLength(),
-      };
-
-      const enriched = await routeSignals(signals, lensCtx, getCurrentSession());
-      if (enriched.length === 0) return;
-
-      const cards = await executeReactions(enriched);
-      if (cards.length === 0) return;
-
-      pushDiscoveries(cards);
-      if (scannerMode === "on") broadcastBatch(cards);
-      console.log(`[Scanner/IPO] ${signals.length} IPO signals → ${cards.length} discoveries`);
-    } catch (err) {
-      console.error("[Scanner/IPO] Processing error:", err);
-    }
-  }, 100);
-
+  // Register the MC callback immediately so signals start flowing once MC refreshes
   registerPostRefreshCallback((themeMetrics, snapshots, spyBenchmark) => {
-    // Periodic refresh of 5-day levels
+    // Periodic refresh of 5-day levels (throttled internally)
     refreshFiveDayLevels().catch(() => {});
 
     onSnapshotRefreshed(themeMetrics, snapshots, spyBenchmark).catch((err) => {
@@ -356,5 +323,52 @@ export async function initScanner(): Promise<void> {
     });
   });
 
-  console.log("[Scanner] Initialized — mode:", scannerMode);
+  // ─── Staggered sub-system startup ───────────────────────────────────────────
+  // Defer heavy background jobs to avoid overlapping with MC snapshot memory peak.
+  // Delays are relative to scanner init (which is already 30s after boot).
+
+  // 5-day high/low: deferred 15s — fetches bars for all tickers
+  setTimeout(() => {
+    console.log("[Scanner] Starting 5-day high/low refresh (deferred)...");
+    refreshFiveDayLevels().catch(() => {});
+  }, 15_000);
+
+  // Outcome tracker: deferred 30s — DB-heavy, processes discoveries
+  setTimeout(() => {
+    console.log("[Scanner] Starting outcome tracker (deferred)...");
+    startOutcomeTracker();
+  }, 30_000);
+
+  // IPO detector: deferred 45s — polls external API
+  setTimeout(() => {
+    console.log("[Scanner] Starting IPO detector (deferred)...");
+    startIpoDetector(async (signals) => {
+      if (scannerMode === "off") return;
+      try {
+        lastSignalAt = new Date().toISOString();
+        const current = currentFrame();
+        if (!current) return;
+
+        const lensCtx: LensContext = {
+          currentFrame: current,
+          getFrame,
+          bufferLength: getBufferLength(),
+        };
+
+        const enriched = await routeSignals(signals, lensCtx, getCurrentSession());
+        if (enriched.length === 0) return;
+
+        const cards = await executeReactions(enriched);
+        if (cards.length === 0) return;
+
+        pushDiscoveries(cards);
+        if (scannerMode === "on") broadcastBatch(cards);
+        console.log(`[Scanner/IPO] ${signals.length} IPO signals → ${cards.length} discoveries`);
+      } catch (err) {
+        console.error("[Scanner/IPO] Processing error:", err);
+      }
+    }, 100);
+  }, 45_000);
+
+  console.log("[Scanner] Initialized (subsystems staggered) — mode:", scannerMode);
 }

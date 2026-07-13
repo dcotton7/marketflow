@@ -293,13 +293,15 @@ async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
  * Also runs immediately on startup if bars are stale.
  */
 export function startDailyBarRefreshScheduler(): void {
-  // Startup check (delayed to ensure DB is ready, non-blocking)
+  // Startup check deferred 60s from when this function is called (which is
+  // already 120s after boot due to staggered startup). This avoids loading
+  // hundreds of symbols' bars while MC snapshot and scanner are still settling.
   setTimeout(() => {
     checkAndRefreshDailyBars().catch((err) => {
       console.error("[DailyBarRefresh] Startup check failed (non-fatal):", String(err).slice(0, 200));
       apiKeyBroken = true;
     });
-  }, 10_000);
+  }, 60_000);
 
   // Schedule refresh every 6 hours (covers market close regardless of timezone)
   const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
@@ -309,5 +311,5 @@ export function startDailyBarRefreshScheduler(): void {
     });
   }, SIX_HOURS_MS);
 
-  console.log("[DailyBarRefresh] Scheduler started — checks every 6 hours.");
+  console.log("[DailyBarRefresh] Scheduler started — first check in 60s, then every 6 hours.");
 }

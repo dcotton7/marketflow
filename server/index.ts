@@ -67,12 +67,20 @@ app.use((req, res, next) => {
 
 (async () => {
   try {
+    const bootStart = Date.now();
+    const logMem = (label: string) => {
+      const mem = process.memoryUsage();
+      const elapsed = ((Date.now() - bootStart) / 1000).toFixed(1);
+      console.log(`[Boot +${elapsed}s] ${label} — Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}MB, RSS: ${Math.round(mem.rss / 1024 / 1024)}MB`);
+    };
     console.log("Starting application initialization...");
+    logMem("init");
     
     // Initialize database FIRST
     console.log("Attempting database connection...");
     const { initializeDatabase } = await import("./db");
     await initializeDatabase();
+    logMem("DB connected");
     
     // Strip persisted delisted symbols from in-memory universe before theme cache
     console.log("Initializing delisted ticker registry...");
@@ -99,12 +107,22 @@ app.use((req, res, next) => {
     await getConstituents("russell2000");
     console.log("Universe constituents preloaded");
     
-    // NOW register routes (which starts polling)
+    logMem("pre-routes");
+    // NOW register routes (which starts MC polling)
     await registerRoutes(httpServer, app);
     console.log("Routes registered successfully");
+    logMem("routes registered (MC polling started)");
 
-    const { startAlertPollingWorker } = await import("./alerts/poller");
-    startAlertPollingWorker();
+    // Defer alert poller 15s — it's lightweight but depends on MC snapshot prices
+    setTimeout(async () => {
+      try {
+        const { startAlertPollingWorker } = await import("./alerts/poller");
+        startAlertPollingWorker();
+        console.log("[Startup Stagger] Alert poller started (t+15s)");
+      } catch (err) {
+        console.error("[Startup Stagger] Alert poller init failed:", err);
+      }
+    }, 15_000);
 
     app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
       const status = err.status || err.statusCode || 500;

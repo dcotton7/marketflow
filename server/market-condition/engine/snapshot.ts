@@ -185,6 +185,8 @@ export async function refreshSnapshot(
   
   state.isPolling = true;
   const startTime = Date.now();
+  const memBefore = process.memoryUsage();
+  console.log(`[MC-Snapshot] Heap before refresh: ${Math.round(memBefore.heapUsed / 1024 / 1024)}MB / ${Math.round(memBefore.rss / 1024 / 1024)}MB RSS`);
   
   try {
     const provider = getAlpacaProvider();
@@ -283,7 +285,9 @@ export async function refreshSnapshot(
     state.lastSizeFilter = sizeFilter;
     
     const elapsed = Date.now() - startTime;
+    const memAfter = process.memoryUsage();
     console.log(`[MC-Snapshot] Refresh complete in ${elapsed}ms - ${snapshots.size} tickers, ${state.themeMetrics.length} themes (sizeFilter=${sizeFilter})`);
+    console.log(`[MC-Snapshot] Heap after refresh: ${Math.round(memAfter.heapUsed / 1024 / 1024)}MB / ${Math.round(memAfter.rss / 1024 / 1024)}MB RSS (delta +${Math.round((memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024)}MB)`);
     
     // Notify scanner (non-blocking — errors here should not break MC polling)
     if (postRefreshCallback) {

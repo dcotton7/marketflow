@@ -199,14 +199,15 @@ export class AlpacaProvider implements MarketDataProvider {
     try {
       const result = new Map<string, TickerSnapshot>();
       
-      // Batch into chunks of 200 (Alpaca limit)
-      const chunks = this.chunkArray(symbols, 200);
+      // Batch into chunks of 100 (reduced from 200 to lower per-request memory spike)
+      const chunks = this.chunkArray(symbols, 100);
       
-      for (const chunk of chunks) {
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
         const symbolList = chunk.join(",");
         const url = `${ALPACA_DATA_URL}/v2/stocks/snapshots?symbols=${encodeURIComponent(symbolList)}&feed=sip`;
         
-        console.log(`[MC-Alpaca] Fetching snapshots for ${chunk.length} symbols`);
+        console.log(`[MC-Alpaca] Fetching snapshots for ${chunk.length} symbols (chunk ${ci + 1}/${chunks.length})`);
         const data = await alpacaFetchWithRetry(url);
         
         // Parse response  
@@ -217,6 +218,11 @@ export class AlpacaProvider implements MarketDataProvider {
               result.set(symbol, parsed);
             }
           }
+        }
+
+        // Stagger chunks: yield to GC between batches to flatten memory peak
+        if (ci < chunks.length - 1) {
+          await new Promise((r) => setTimeout(r, 500));
         }
       }
       
@@ -447,10 +453,12 @@ export class AlpacaProvider implements MarketDataProvider {
       sort: "asc",
     });
 
-    // Alpaca multi-bar endpoint supports up to 200 symbols per request
-    const chunks = this.chunkArray(symbols, 200);
+    // Alpaca multi-bar endpoint supports up to 200 symbols per request;
+    // use 100 to reduce per-request memory spike on constrained instances
+    const chunks = this.chunkArray(symbols, 100);
 
-    for (const chunk of chunks) {
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
       params.set("symbols", chunk.join(","));
       const url = `${ALPACA_DATA_URL}/v2/stocks/bars?${params}`;
 
@@ -476,6 +484,10 @@ export class AlpacaProvider implements MarketDataProvider {
         }
       } catch (error) {
         console.error(`[MC-Alpaca] Failed to fetch multi-symbol bars for chunk:`, error);
+      }
+
+      if (ci < chunks.length - 1) {
+        await new Promise((r) => setTimeout(r, 300));
       }
     }
 
@@ -503,9 +515,10 @@ export class AlpacaProvider implements MarketDataProvider {
       sort: "asc",
     });
 
-    const chunks = this.chunkArray(symbols, 200);
+    const chunks = this.chunkArray(symbols, 100);
 
-    for (const chunk of chunks) {
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
       params.set("symbols", chunk.join(","));
       const url = `${ALPACA_DATA_URL}/v2/stocks/bars?${params}`;
 
@@ -530,6 +543,10 @@ export class AlpacaProvider implements MarketDataProvider {
         }
       } catch (error) {
         console.error(`[MC-Alpaca] Failed to fetch multi-symbol intraday bars (${timeframe}):`, error);
+      }
+
+      if (ci < chunks.length - 1) {
+        await new Promise((r) => setTimeout(r, 300));
       }
     }
 

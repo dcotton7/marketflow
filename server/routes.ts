@@ -950,15 +950,36 @@ export async function registerRoutes(
   app.use("/api/marketflow", marketflowAnalysisRoutes);
   await initMarketCondition();
 
-  // Register Discovery Scanner routes and wire into MC polling
+  // Register Discovery Scanner routes (mount routes immediately for API availability)
   const scannerRoutes = (await import("./scanner/routes")).default;
   app.use("/api/scanner", scannerRoutes);
-  const { initScanner } = await import("./scanner/index");
-  initScanner();
 
-  // Start automated daily bar refresh scheduler
-  const { startDailyBarRefreshScheduler } = await import("./data-layer/daily-bar-refresh");
-  startDailyBarRefreshScheduler();
+  // ─── Staggered startup: spread peak memory load ───────────────────────────
+  // MC snapshot is already running (first refresh). Defer heavy subsystems so
+  // the 590-ticker snapshot can complete and GC before the next system loads.
+
+  const SCANNER_DELAY_MS = 30_000;       // 30s — let MC snapshot settle
+  const DAILY_BAR_DELAY_MS = 120_000;     // 2 min — heaviest backfill last
+
+  setTimeout(async () => {
+    try {
+      console.log("[Startup Stagger] Initializing scanner (t+30s)...");
+      const { initScanner } = await import("./scanner/index");
+      await initScanner();
+    } catch (err) {
+      console.error("[Startup Stagger] Scanner init failed (non-fatal):", err);
+    }
+  }, SCANNER_DELAY_MS);
+
+  setTimeout(async () => {
+    try {
+      console.log("[Startup Stagger] Starting daily bar refresh scheduler (t+120s)...");
+      const { startDailyBarRefreshScheduler } = await import("./data-layer/daily-bar-refresh");
+      startDailyBarRefreshScheduler();
+    } catch (err) {
+      console.error("[Startup Stagger] Daily bar refresh init failed (non-fatal):", err);
+    }
+  }, DAILY_BAR_DELAY_MS);
 
   // --- Stock History ---
   app.get(api.stocks.history.path, async (req, res) => {

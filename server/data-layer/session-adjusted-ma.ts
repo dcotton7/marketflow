@@ -66,16 +66,23 @@ async function loadDailyBarsForSymbols(
   const cutoffStr = cutoffDate.toISOString().split("T")[0];
   const today = new Date().toISOString().split("T")[0];
 
-  const dbBars = await db
-    .select()
-    .from(historicalBars)
-    .where(
-      and(
-        inArray(historicalBars.symbol, upperSymbols),
-        gte(historicalBars.barDate, cutoffStr)
+  // Chunk DB queries to avoid loading 590*250 rows into memory at once
+  const DB_CHUNK_SIZE = 80;
+  const dbBars: (typeof historicalBars.$inferSelect)[] = [];
+  for (let i = 0; i < upperSymbols.length; i += DB_CHUNK_SIZE) {
+    const chunk = upperSymbols.slice(i, i + DB_CHUNK_SIZE);
+    const chunkBars = await db
+      .select()
+      .from(historicalBars)
+      .where(
+        and(
+          inArray(historicalBars.symbol, chunk),
+          gte(historicalBars.barDate, cutoffStr)
+        )
       )
-    )
-    .orderBy(historicalBars.symbol, desc(historicalBars.barDate));
+      .orderBy(historicalBars.symbol, desc(historicalBars.barDate));
+    dbBars.push(...chunkBars);
+  }
 
   const barsBySymbol = new Map<string, typeof dbBars>();
   for (const bar of dbBars) {
