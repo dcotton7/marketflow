@@ -7597,23 +7597,27 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         epsEstimate: null as number | null,
         revenueActual: null as number | null,
         revenueEstimate: null as number | null,
+        week52High: null as number | null,
+        week52Low: null as number | null,
+        dividendYield: null as number | null,
+        roe: null as number | null,
+        sharesOutstanding: null as number | null,
       };
       let industryPeers: { symbol: string; name: string }[] = [];
       let industryName = fundamentalData.industry;
       let earningsHistory: { quarter: string; date: string; epsActual: number | null; epsEstimate: number | null; revenueActual: number | null; revenueEstimate: number | null }[] = [];
 
+      // Fetch extended fundamentals, peers, and earnings independently so one failure doesn't block others
+      try { extFundamentals = await getExtendedFundamentals(ticker); } catch (err) {
+        console.warn(`[ChartMetrics] getExtendedFundamentals failed for ${ticker}:`, err);
+      }
       try {
-        const [ef, peers, earningsHist] = await Promise.all([
-          getExtendedFundamentals(ticker),
-          fundamentalData.industry !== "Unknown" && fundamentalData.sector !== "Unknown"
-            ? fetchIndustryPeersFromFMP(fundamentalData.industry, fundamentalData.sector, ticker, 5)
-            : Promise.resolve([]),
-          fetchEarningsHistory(ticker),
-        ]);
-        extFundamentals = ef;
-        industryPeers = peers.map(p => ({ symbol: p.symbol, name: p.name }));
-        earningsHistory = earningsHist;
+        if (fundamentalData.industry !== "Unknown" && fundamentalData.sector !== "Unknown") {
+          const peers = await fetchIndustryPeersFromFMP(fundamentalData.industry, fundamentalData.sector, ticker, 5);
+          industryPeers = peers.map(p => ({ symbol: p.symbol, name: p.name }));
+        }
       } catch {}
+      try { earningsHistory = await fetchEarningsHistory(ticker); } catch {}
 
       let rsVsSpy: number | undefined;
       let themeRank: number | undefined;
@@ -7634,6 +7638,23 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       // Prefer real FMP company description over generated fallback
       const realDescription = extFundamentals.companyDescription || companyDescription;
+
+      // Compute 52-week high/low from daily candles as fallback when FMP/Finnhub data is missing
+      let week52High = extFundamentals.week52High ?? null;
+      let week52Low = extFundamentals.week52Low ?? null;
+      if ((week52High == null || week52Low == null) && validDaily.length >= 20) {
+        const barsForRange = validDaily.slice(-Math.min(validDaily.length, 252));
+        let candleHigh = -Infinity;
+        let candleLow = Infinity;
+        for (const bar of barsForRange) {
+          if (bar.high > candleHigh) candleHigh = bar.high;
+          if (bar.low < candleLow) candleLow = bar.low;
+        }
+        if (candleHigh > -Infinity && candleLow < Infinity) {
+          week52High = week52High ?? candleHigh;
+          week52Low = week52Low ?? candleLow;
+        }
+      }
 
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
@@ -7677,8 +7698,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         epsCurrentQYoY: extFundamentals.epsCurrentQYoY,
         salesGrowth3QYoY: extFundamentals.salesGrowth3QYoY,
         lastEpsSurprise: extFundamentals.lastEpsSurprise,
-        week52High: extFundamentals.week52High ?? null,
-        week52Low: extFundamentals.week52Low ?? null,
+        week52High,
+        week52Low,
         dividendYield: extFundamentals.dividendYield ?? null,
         roe: extFundamentals.roe ?? null,
         industryPeers,

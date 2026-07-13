@@ -373,7 +373,8 @@ async function getExtendedFromDbCacheTiered(symbol: string): Promise<TieredCache
 
     const profileStale = profileAge > PROFILE_CACHE_TTL;
     let earningsStale = earningsAge > EARNINGS_CACHE_TTL;
-    const metricsStale = metricsAge > METRICS_CACHE_TTL || (row.pe === null && row.analystConsensus === null);
+    const extendedFieldsAllNull = row.pe === null && row.beta === null && row.week52High === null && row.lastEarningsDate === null;
+    const metricsStale = metricsAge > METRICS_CACHE_TTL || (row.pe === null && row.analystConsensus === null) || extendedFieldsAllNull;
 
     // Force refetch when cached nextEarningsDate is in the past
     const todayStr = new Date().toISOString().slice(0, 10);
