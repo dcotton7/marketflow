@@ -364,13 +364,36 @@ export function useRemoveFromWatchlist() {
       });
       if (!res.ok) throw new Error("Failed to remove from watchlist");
     },
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/sentinel/watchlist"], exact: false });
+
+      const queryCache = queryClient.getQueryCache();
+      const watchlistQueries = queryCache.findAll({ queryKey: ["/api/sentinel/watchlist"] });
+      const previousData = new Map<string, SentinelWatchlistItem[]>();
+
+      for (const query of watchlistQueries) {
+        const items = queryClient.getQueryData<SentinelWatchlistItem[]>(query.queryKey);
+        if (items) {
+          previousData.set(JSON.stringify(query.queryKey), items);
+          queryClient.setQueryData(query.queryKey, items.filter((item) => item.id !== id));
+        }
+      }
+      return { previousData };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
       toast({ title: "Removed", description: "Symbol removed from Watching List." });
     },
-    onError: (err) => {
+    onError: (err, _vars, context) => {
+      if (context?.previousData) {
+        for (const [keyStr, items] of context.previousData) {
+          queryClient.setQueryData(JSON.parse(keyStr), items);
+        }
+      }
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
     },
   });
 }

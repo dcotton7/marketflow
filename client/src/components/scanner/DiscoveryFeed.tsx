@@ -188,7 +188,7 @@ export function DiscoveryFeedPanel() {
   const [historyCards, setHistoryCards] = useState<DiscoveryCardType[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const isOnPopoutRoute = location.startsWith("/scanner-popout");
+  const isOnPopoutRoute = location.startsWith("/scanner-popout") || location.startsWith("/workspace-popout");
 
   // ── BroadcastChannel: listen for popout close/navigate ────────────────────
   useEffect(() => {

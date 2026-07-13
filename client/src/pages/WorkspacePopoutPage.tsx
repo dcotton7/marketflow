@@ -135,7 +135,7 @@ function PopoutGridHost() {
       if (msSyncEnabled) syncToMarketSurge(s, "day");
       if (chartSyncEnabled) syncToChart(s);
       if (!msSyncEnabled && !chartSyncEnabled && !analysisSyncEnabled) {
-        navigate(`/sentinel/charts?symbol=${encodeURIComponent(s)}`);
+        window.open(`/sentinel/charts?symbol=${encodeURIComponent(s)}`, "main-app");
       }
     },
     [analysisSyncEnabled, chartSyncEnabled, msSyncEnabled, navigate, syncToChart, syncToMarketSurge]
