@@ -9,6 +9,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "volume_cluster",
     name: "Volume Cluster",
     enabled: true,
+    category: "signal",
     trigger: {
       signalTypes: ["volume_spike"],
       subjectKind: "ticker",
@@ -25,6 +26,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "weakness_cascade",
     name: "Weakness Cascade",
     enabled: true,
+    category: "signal",
     trigger: {
       signalTypes: ["breadth_shift", "broad_weakness"],
       direction: "down",
@@ -40,6 +42,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "strength_surge",
     name: "Strength Surge",
     enabled: true,
+    category: "signal",
     trigger: {
       signalTypes: ["theme_acceleration", "broad_strength"],
       direction: "up",
@@ -55,6 +58,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "leadership_divergence",
     name: "Leadership Divergence",
     enabled: true,
+    category: "signal",
     trigger: {
       signalTypes: ["velocity_move"],
       subjectKind: "ticker",
@@ -71,6 +75,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "gap_morning_scan",
     name: "Gap Morning Scan",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["gap"],
       subjectKind: "ticker",
@@ -87,6 +92,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "regime_shift",
     name: "Regime Shift",
     enabled: true,
+    category: "regime",
     trigger: {
       signalTypes: ["regime_change", "rai_shift"],
       subjectKind: "market",
@@ -102,6 +108,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "adr_blowout_watch",
     name: "ADR Blowout Watch",
     enabled: true,
+    category: "signal",
     trigger: {
       signalTypes: ["adr_blowout"],
       subjectKind: "ticker",
@@ -121,6 +128,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "news_alert_scan",
     name: "News Alert",
     enabled: true,
+    category: "alert",
     trigger: {
       signalTypes: ["news_alert"],
       subjectKind: "ticker",
@@ -139,6 +147,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "lod_bounce_scan",
     name: "LOD Bounce",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["lod_bounce"],
       subjectKind: "ticker",
@@ -154,6 +163,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "ma_reclaim_scan",
     name: "MA Reclaim (U&R)",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["ur_ma_reclaim"],
       subjectKind: "ticker",
@@ -169,6 +179,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "ma_proximity_watch",
     name: "20d MA Proximity",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["ma_proximity"],
       subjectKind: "ticker",
@@ -184,6 +195,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "prev_day_break_scan",
     name: "Prev Day Break",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["prev_day_high_break", "prev_day_low_break"],
       subjectKind: "ticker",
@@ -199,6 +211,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "five_day_break_scan",
     name: "5-Day Break",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["five_day_high_break", "five_day_low_break"],
       subjectKind: "ticker",
@@ -217,6 +230,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "post_earnings_scan",
     name: "Post-Earnings Reaction",
     enabled: true,
+    category: "earnings",
     trigger: {
       signalTypes: ["earnings_reaction"],
       subjectKind: "ticker",
@@ -232,6 +246,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "theme_earnings_density_scan",
     name: "Theme Earnings Density",
     enabled: true,
+    category: "earnings",
     trigger: {
       signalTypes: ["theme_earnings_density"],
       subjectKind: "theme",
@@ -250,6 +265,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "failed_breakout_scan",
     name: "Failed Breakout",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["failed_breakout"],
       subjectKind: "ticker",
@@ -266,6 +282,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "hod_fade_scan",
     name: "HOD Fade / Distribution",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["hod_fade"],
       subjectKind: "ticker",
@@ -282,6 +299,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "gap_down_continuation_scan",
     name: "Gap Down Continuation",
     enabled: true,
+    category: "setup",
     trigger: {
       signalTypes: ["gap_down_continuation"],
       subjectKind: "ticker",
@@ -301,6 +319,7 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     id: "ipo_debut_scan",
     name: "IPO Debut",
     enabled: true,
+    category: "alert",
     trigger: {
       signalTypes: ["ipo_debut"],
       subjectKind: "ticker",

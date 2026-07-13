@@ -197,6 +197,7 @@ export type ReactionId =
 
 export type PipelinePriority = "low" | "normal" | "urgent";
 export type PipelineVisibility = "private" | "role" | "global";
+export type PipelineCategory = "signal" | "setup" | "alert" | "earnings" | "regime";
 
 export interface PipelineTrigger {
   signalTypes: SignalType[];
@@ -209,6 +210,7 @@ export interface PipelineDefinition {
   id: string;
   name: string;
   enabled: boolean;
+  category?: PipelineCategory;
   trigger: PipelineTrigger;
   lensIds: LensId[];
   /** TypeScript predicate evaluated against the context map */
@@ -227,6 +229,7 @@ export interface EnrichedSignal {
   signal: Signal;
   pipelineId: string;
   pipelineName: string;
+  category?: PipelineCategory;
   context: Partial<Record<LensId, LensResult>>;
   qualified: boolean;
   qualifyScore: number;
@@ -240,6 +243,7 @@ export interface DiscoveryCard {
   id: number;
   pipelineId: string;
   pipelineName: string;
+  category?: PipelineCategory;
   signalType: SignalType;
   subject: string;
   subjectKind: SignalSubjectKind;

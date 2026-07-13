@@ -39,7 +39,10 @@ export type ClusterId =
   | "MATERIALS_METALS"
   | "TRANSPORTS"
   | "HOMEBUILDERS"
-  // Narrative (8)
+  // Macro (new)
+  | "RESTAURANTS"
+  | "INSURANCE"
+  // Narrative (8 + 2 new)
   | "CRYPTO_EQ"
   | "NUCLEAR_URANIUM"
   | "SPACE_FRONTIER"
@@ -49,7 +52,9 @@ export type ClusterId =
   | "BIOTECH"
   | "SOLAR"
   | "GAMING_CASINOS"
-  | "HOSPITALITY_LEISURE";
+  | "HOSPITALITY_LEISURE"
+  | "AUTOS_EV"
+  | "MEDIA_STREAM";
 
 export type OverlayId =
   | "MEGA_OVERLAY"
@@ -333,8 +338,8 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Storage / Data Infrastructure",
     tier: "Structural",
     leadersTarget: 3,
-    core: ["WDC", "STX", "PSTG", "NTAP"],
-    candidates: ["NTNX", "BOX", "DBX", "NEWR"],
+    core: ["WDC", "STX", "PSTG", "NTAP", "NTNX", "BOX"],
+    candidates: ["DBX", "NEWR", "MNDT", "TDC", "VRNT"],
     etfProxies: [
       { symbol: "CLOU", name: "Global X Cloud Computing ETF", proxyType: "adjacent" },
       { symbol: "XLK", name: "Technology Select SPDR", proxyType: "macro" },
@@ -382,7 +387,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 4,
     core: ["LITE", "CIEN", "FN", "GLW", "CALX", "VIAV", "AAOI", "COHR"],
-    candidates: ["COMM"],
+    candidates: ["COMM", "CCOI", "LUMN", "USM", "SATS"],
     etfProxies: [
       { symbol: "XLC", name: "Communication Services SPDR", proxyType: "macro" },
       { symbol: "TECS", name: "Direxion Daily Technology Bear 3X", proxyType: "inverse" },
@@ -396,7 +401,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 4,
     core: ["EQIX", "DLR", "AMT", "CCI", "SBAC", "IRM", "PLD"],
-    candidates: [],
+    candidates: ["UNIT", "LMRK", "SIFY", "QTS"],
     etfProxies: [
       { symbol: "VNQ", name: "Vanguard Real Estate ETF", proxyType: "adjacent" },
       { symbol: "XLRE", name: "Real Estate Select SPDR", proxyType: "macro" },
@@ -446,7 +451,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 5,
     core: ["JPM", "BAC", "WFC", "C", "GS", "MS", "BLK", "SCHW", "AXP", "CME", "ICE", "SPGI", "MCO"],
-    candidates: ["PGR", "TRV", "ALL", "MET", "PRU", "USB", "PNC", "TFC", "FITB", "KEY"],
+    candidates: ["USB", "PNC", "TFC", "FITB", "KEY"],
     etfProxies: [
       { symbol: "XLF", name: "Financial Select SPDR", proxyType: "direct" },
       { symbol: "KBE", name: "SPDR S&P Bank ETF", proxyType: "direct" },
@@ -503,8 +508,8 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Consumer Discretionary",
     tier: "Macro",
     leadersTarget: 5,
-    core: ["AMZN", "TSLA", "HD", "LOW", "NKE", "SBUX", "CMG", "BKNG", "ABNB", "TJX", "DKNG", "RCL", "CCL"],
-    candidates: ["MCD", "LULU", "ROST", "DG", "DLTR", "YUM", "MAR", "HLT", "EXPE", "LVS", "WYNN", "MGM"],
+    core: ["AMZN", "HD", "LOW", "NKE", "TJX", "LULU", "ROST", "DG", "DLTR"],
+    candidates: ["BBY", "POOL", "WSM", "TPR", "DECK", "BIRK", "ONON"],
     etfProxies: [
       { symbol: "XLY", name: "Consumer Discretionary SPDR", proxyType: "direct" },
       { symbol: "VCR", name: "Vanguard Consumer Discretionary ETF", proxyType: "direct" },
@@ -655,7 +660,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Narrative",
     leadersTarget: 3,
     core: ["IONQ", "RGTI", "QBTS", "ARQQ", "QUBT"],
-    candidates: ["QTUM", "FORM"],
+    candidates: ["QTUM", "FORM", "DMYI", "SOUN"],
     etfProxies: [
       { symbol: "QTUM", name: "Defiance Quantum ETF", proxyType: "direct" },
       { symbol: "XLK", name: "Technology Select SPDR", proxyType: "macro" },
@@ -803,6 +808,85 @@ export const CLUSTERS: ClusterDefinition[] = [
     ],
     notes: "Hotels, cruises, travel booking, theme parks. Consumer discretionary, post-COVID recovery play.",
   },
+
+  // -------------------------------------------------------------------------
+  // NEW MACRO CLUSTERS
+  // -------------------------------------------------------------------------
+  {
+    id: "RESTAURANTS",
+    name: "Restaurants",
+    tier: "Macro",
+    leadersTarget: 4,
+    core: [
+      "CMG", "MCD", "SBUX", "YUM", "DRI", "TXRH", "DPZ",
+      "WING", "CAVA", "SHAK", "WEN", "QSR", "EAT", "JACK",
+    ],
+    candidates: ["DINE", "CAKE", "BROS", "TOST", "PZZA", "ARCO", "FAT"],
+    etfProxies: [
+      { symbol: "XLY", name: "Consumer Discretionary SPDR", proxyType: "macro" },
+      { symbol: "PEJ", name: "Invesco Leisure & Entertainment ETF", proxyType: "adjacent" },
+      { symbol: "SCC", name: "ProShares UltraShort Consumer Services", proxyType: "inverse" },
+      { symbol: "UCC", name: "ProShares Ultra Consumer Services 2X", proxyType: "leveraged" },
+    ],
+    notes: "QSR + fast-casual + casual dining. Consumer spending/inflation barometer.",
+  },
+  {
+    id: "INSURANCE",
+    name: "Insurance",
+    tier: "Macro",
+    leadersTarget: 4,
+    core: [
+      "PGR", "TRV", "ALL", "MET", "PRU", "AIG", "AFL", "CINF", "HIG", "CB",
+    ],
+    candidates: ["GL", "WRB", "RNR", "ACGL", "RGA", "AIZ", "KNSL"],
+    etfProxies: [
+      { symbol: "KIE", name: "SPDR S&P Insurance ETF", proxyType: "direct" },
+      { symbol: "XLF", name: "Financial Select SPDR", proxyType: "macro" },
+      { symbol: "FAZ", name: "Direxion Daily Financial Bear 3X", proxyType: "inverse" },
+      { symbol: "FAS", name: "Direxion Daily Financial Bull 3X", proxyType: "leveraged" },
+    ],
+    notes: "P&C, life, specialty insurance. Yield-sensitive, catastrophe-driven.",
+  },
+
+  // -------------------------------------------------------------------------
+  // NEW NARRATIVE CLUSTERS
+  // -------------------------------------------------------------------------
+  {
+    id: "AUTOS_EV",
+    name: "Autos / EV",
+    tier: "Narrative",
+    leadersTarget: 4,
+    core: [
+      "TSLA", "GM", "F", "RIVN", "LCID", "LI", "XPEV", "NIO",
+      "STLA", "APTV", "LEA", "BWA",
+    ],
+    candidates: ["VFS", "PSNY", "GOEV", "RIDE", "HMC", "TM"],
+    etfProxies: [
+      { symbol: "CARZ", name: "First Trust S-Network Future Vehicles ETF", proxyType: "direct" },
+      { symbol: "DRIV", name: "Global X Autonomous & EV ETF", proxyType: "direct" },
+      { symbol: "LIT", name: "Global X Lithium & Battery Tech ETF", proxyType: "adjacent" },
+      { symbol: "XLY", name: "Consumer Discretionary SPDR", proxyType: "macro" },
+      { symbol: "SCC", name: "ProShares UltraShort Consumer Services", proxyType: "inverse" },
+    ],
+    notes: "Legacy auto + EV pure-play. Tariff, battery, China-demand sensitive.",
+  },
+  {
+    id: "MEDIA_STREAM",
+    name: "Media / Streaming",
+    tier: "Narrative",
+    leadersTarget: 4,
+    core: [
+      "NFLX", "DIS", "WBD", "PARA", "CMCSA", "ROKU", "SPOT",
+      "RBLX", "EA", "TTWO",
+    ],
+    candidates: ["IMAX", "AMC", "CNK", "LSXMA", "FOX", "SIRI"],
+    etfProxies: [
+      { symbol: "XLC", name: "Communication Services SPDR", proxyType: "direct" },
+      { symbol: "NERD", name: "Roundhill Video Games ETF", proxyType: "adjacent" },
+      { symbol: "XLY", name: "Consumer Discretionary SPDR", proxyType: "macro" },
+    ],
+    notes: "Streaming wars + gaming + content studios. Ad/subscription revenue mix.",
+  },
 ];
 
 // =============================================================================
@@ -899,18 +983,22 @@ const INDUSTRY_KEYWORD_MAP: [string[], ClusterId][] = [
   [["software", "saas", "cloud"], "ENTERPRISE_SOFT"],
   [["biotech", "biotechnology"], "BIOTECH"],
   [["pharma", "drug", "healthcare", "medical", "telehealth"], "HEALTHCARE"],
-  [["bank", "financial", "insurance"], "FINANCIAL_CORE"],
+  [["bank", "financial"], "FINANCIAL_CORE"],
+  [["insurance", "reinsurance", "underwriter"], "INSURANCE"],
   [["oil", "gas", "energy", "petroleum"], "ENERGY"],
   [["mining", "metal", "steel"], "MATERIALS_METALS"],
   [["real estate", "reit"], "DATA_CENTER_REITS"],
+  [["restaurant", "fast food", "fast casual", "dining"], "RESTAURANTS"],
   [["retail", "consumer", "e-commerce"], "CONSUMER_DISC"],
+  [["automobile", "auto", "electric vehicle", "ev manufacturer"], "AUTOS_EV"],
+  [["streaming", "media", "entertainment", "broadcast", "film"], "MEDIA_STREAM"],
   [["transport", "airline", "shipping", "trucking", "railroad"], "TRANSPORTS"],
   [["homebuilder", "home construction", "residential"], "HOMEBUILDERS"],
   [["crypto", "blockchain", "bitcoin"], "CRYPTO_EQ"],
   [["nuclear", "uranium"], "NUCLEAR_URANIUM"],
   [["solar", "renewable", "clean energy"], "SOLAR"],
   [["gaming", "casino", "gambling"], "GAMING_CASINOS"],
-  [["hotel", "hospitality", "leisure", "cruise", "restaurant"], "HOSPITALITY_LEISURE"],
+  [["hotel", "hospitality", "leisure", "cruise"], "HOSPITALITY_LEISURE"],
   [["aerospace", "defense"], "DEFENSE"],
   [["quantum", "quantum computing"], "QUANTUM"],
   [["fiber", "optical", "telecom", "5g"], "FIBER_OPTICAL"],

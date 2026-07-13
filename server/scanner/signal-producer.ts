@@ -168,6 +168,17 @@ export function pruneTrackers(): void {
     }
   }
 
+  // Cap lodTracker
+  if (lodTracker.size > TRACKER_MAX_ENTRIES) {
+    const excess = lodTracker.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of lodTracker.keys()) {
+      if (removed >= excess) break;
+      lodTracker.delete(key);
+      removed++;
+    }
+  }
+
   // Cap fiveDayHighLow
   if (fiveDayHighLow.size > TRACKER_MAX_ENTRIES) {
     const excess = fiveDayHighLow.size - TRACKER_MAX_ENTRIES;
@@ -545,8 +556,67 @@ function detectBroadMoves(current: SnapshotFrame, session?: MarketSession): Sign
 
 // ── Intraday trade setup detectors ──────────────────────────────────────────
 
+// Track LOD touch per ticker: the frame index and price when the LOD was last set
+const lodTracker = new Map<string, { lodPrice: number; lodFrame: number }>();
+
+/**
+ * Walk backward through the ring buffer from the LOD frame to count
+ * consecutive rising-price frames (proxy for up bars on the bounce)
+ * and capture the volume spike on the first frame after the LOD.
+ */
+function measureBounceQuality(symbol: string, current: SnapshotFrame): {
+  consecutiveUpFrames: number;
+  bounceBarVolumeRatio: number;
+} {
+  const tracker = lodTracker.get(symbol);
+  if (!tracker) return { consecutiveUpFrames: 0, bounceBarVolumeRatio: 0 };
+
+  const startIdx = tracker.lodFrame;
+  const bufLen = ringBuffer.length;
+  let consecutiveUp = 0;
+  let bounceBarVolRatio = 0;
+
+  // Walk forward from the frame after the LOD touch to the current frame
+  for (let i = startIdx + 1; i < bufLen; i++) {
+    const frameTick = ringBuffer[i]?.tickers.get(symbol);
+    const prevFrameTick = ringBuffer[i - 1]?.tickers.get(symbol);
+    if (!frameTick || !prevFrameTick) break;
+    if (frameTick.price > prevFrameTick.price) {
+      consecutiveUp++;
+      if (consecutiveUp === 1 && frameTick.avgVolume14d > 0) {
+        bounceBarVolRatio = frameTick.volume / frameTick.avgVolume14d;
+      }
+    } else {
+      break;
+    }
+  }
+
+  // Fallback: if we didn't capture bounceBarVolRatio (e.g. LOD was recent), use current
+  if (bounceBarVolRatio === 0) {
+    const tick = current.tickers.get(symbol);
+    if (tick && tick.avgVolume14d > 0) {
+      bounceBarVolRatio = tick.volume / tick.avgVolume14d;
+    }
+  }
+
+  return {
+    consecutiveUpFrames: consecutiveUp,
+    bounceBarVolumeRatio: Math.round(bounceBarVolRatio * 100) / 100,
+  };
+}
+
 function detectLodBounce(current: SnapshotFrame): Signal[] {
   const signals: Signal[] = [];
+
+  // Update LOD tracker: record (or reset) the frame when a new LOD is made
+  for (const [symbol, tick] of current.tickers) {
+    if (tick.todayLow <= 0) continue;
+    const tracker = lodTracker.get(symbol);
+    if (!tracker || tick.todayLow < tracker.lodPrice) {
+      lodTracker.set(symbol, { lodPrice: tick.todayLow, lodFrame: ringBuffer.length - 1 });
+    }
+  }
+
   for (const [symbol, tick] of current.tickers) {
     if (tick.todayLow <= 0 || tick.price <= 0) continue;
 
@@ -555,6 +625,13 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
 
     if (Math.abs(tick.extensionFrom20dAdr) > cfg.lodBounceMaxAtrExt) continue;
     if (tick.sma200d != null && tick.price < tick.sma200d) continue;
+
+    const volumeRatio = tick.avgVolume14d > 0 ? tick.volume / tick.avgVolume14d : 0;
+    const aboveSma20 = tick.sma20d != null && tick.price > tick.sma20d;
+    const aboveSma50 = tick.sma50d != null && tick.price > tick.sma50d;
+    const changePct = tick.changePct;
+
+    const { consecutiveUpFrames, bounceBarVolumeRatio } = measureBounceQuality(symbol, current);
 
     const tier = pctAboveLod >= cfg.lodBounceTier2Pct ? 2 : 1;
     const key = `lod_bounce:${symbol}:t${tier}`;
@@ -565,7 +642,17 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
       makeSignal("lod_bounce", "ticker", symbol,
         Math.round(pctAboveLod * 100) / 100,
         "up",
-        { pctAboveLod: Math.round(pctAboveLod * 100) / 100, tier, todayLow: tick.todayLow })
+        {
+          pctAboveLod: Math.round(pctAboveLod * 100) / 100,
+          tier,
+          todayLow: tick.todayLow,
+          volumeRatio: Math.round(volumeRatio * 100) / 100,
+          bounceBarVolumeRatio,
+          consecutiveUpFrames,
+          aboveSma20,
+          aboveSma50,
+          changePct: Math.round(changePct * 100) / 100,
+        })
     );
   }
   return signals;

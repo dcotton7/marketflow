@@ -195,10 +195,33 @@ function qualifySignal(
     // ── New intraday trade setup pipelines ──────────────────────────────
 
     case "lod_bounce_scan": {
+      const volRatio = (signal.meta?.volumeRatio as number) ?? 0;
+      if (volRatio < 1.0) return { qualified: false, score: 0 };
+
       const tier = (signal.meta?.tier as number) ?? 1;
-      raw += tier === 2 ? 20 : 10;
+      raw += tier === 2 ? 30 : 15;
       raw += signal.magnitude * 5;
-      return { qualified: true, score: capScore(raw) };
+
+      // Bounce bar volume: the first 5-min bar off LOD with heavy volume is key
+      const bounceBarVol = (signal.meta?.bounceBarVolumeRatio as number) ?? volRatio;
+      if (bounceBarVol >= 2.0) raw += 25;
+      else if (bounceBarVol >= 1.5) raw += 15;
+      else if (bounceBarVol >= 1.0) raw += 5;
+
+      // Consecutive up frames: 2-3+ rising frames = stronger bounce conviction
+      const upFrames = (signal.meta?.consecutiveUpFrames as number) ?? 0;
+      if (upFrames >= 3) raw += 20;
+      else if (upFrames >= 2) raw += 12;
+      else if (upFrames >= 1) raw += 5;
+
+      if (signal.meta?.aboveSma20) raw += 8;
+      if (signal.meta?.aboveSma50) raw += 8;
+      const lodScore = capScore(raw);
+      return {
+        qualified: true,
+        score: lodScore,
+        priorityOverride: lodScore >= 60 ? "urgent" : undefined,
+      };
     }
 
     case "ma_reclaim_scan": {
@@ -341,6 +364,7 @@ export async function routeSignals(
         signal,
         pipelineId: pipeline.id,
         pipelineName: pipeline.name,
+        category: pipeline.category,
         context,
         qualified: true,
         qualifyScore: score,

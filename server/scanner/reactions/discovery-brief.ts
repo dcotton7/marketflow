@@ -111,11 +111,19 @@ function buildDivergenceBrief(es: EnrichedSignal): { headline: string; narrative
 function buildLodBounceBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
   const tier = (es.signal.meta?.tier as number) ?? 1;
   const pctAbove = (es.signal.meta?.pctAboveLod as number) ?? es.signal.magnitude;
-  const headline = `${es.signal.subject} LOD bounce — ${sign(pctAbove)}% off low${tier === 2 ? " (strong)" : ""}`;
+  const upFrames = (es.signal.meta?.consecutiveUpFrames as number) ?? 0;
+  const bounceVol = (es.signal.meta?.bounceBarVolumeRatio as number) ?? 0;
+  const volRatio = (es.signal.meta?.volumeRatio as number) ?? 0;
+
+  const qualityTag = upFrames >= 3 ? " (3+ up bars, strong)" : upFrames >= 2 ? " (2 up bars)" : "";
+  const headline = `${es.signal.subject} LOD bounce — ${sign(pctAbove)}% off low${qualityTag}`;
 
   const parts: string[] = [];
   parts.push(`${es.signal.subject} is ${pctAbove.toFixed(1)}% above today's low.`);
-  if (tier === 2) parts.push("Strong Tier 2 bounce (>2% from LOD).");
+  if (tier === 2) parts.push("Tier 2 bounce (>2% from LOD).");
+  if (upFrames >= 2) parts.push(`${upFrames} consecutive up bars on the bounce.`);
+  if (bounceVol >= 1.5) parts.push(`Bounce bar volume: ${bounceVol.toFixed(1)}x avg.`);
+  else if (volRatio >= 1.0) parts.push(`Session volume: ${volRatio.toFixed(1)}x avg.`);
 
   const rc = es.context.regime_context as RegimeContextResult | undefined;
   if (rc) parts.push(`Market: RAI ${rc.rai}, ${rc.regime.replace(/_/g, " ")}.`);
@@ -490,6 +498,7 @@ const THEME_IDS = new Set([
   "HEALTHCARE", "MATERIALS_METALS", "TRANSPORTS", "HOMEBUILDERS", "CRYPTO_EQ",
   "NUCLEAR_URANIUM", "SPACE_FRONTIER", "QUANTUM", "RARE_EARTH",
   "PRECIOUS_METALS", "BIOTECH", "SOLAR", "GAMING_CASINOS", "HOSPITALITY_LEISURE",
+  "RESTAURANTS", "INSURANCE", "AUTOS_EV", "MEDIA_STREAM",
   "MARKET",
 ]);
 
@@ -553,6 +562,7 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
     id: nextId++,
     pipelineId: es.pipelineId,
     pipelineName: es.pipelineName,
+    category: es.category,
     signalType: es.signal.type,
     subject: es.signal.subject,
     subjectKind: es.signal.subjectKind,
