@@ -951,18 +951,18 @@ export async function registerRoutes(
   await initMarketCondition();
 
   // ─── Health / Diagnostics endpoints ──────────────────────────────────────
-  app.get("/api/health/memory", (_req, res) => {
+  app.get("/api/health/memory", async (_req, res) => {
     try {
-      const { getMemorySnapshot } = require("./infra/memory-gate");
+      const { getMemorySnapshot } = await import("./infra/memory-gate");
       res.json(getMemorySnapshot());
     } catch {
       res.status(500).json({ error: "memory-gate not loaded" });
     }
   });
 
-  app.get("/api/health/circuits", (_req, res) => {
+  app.get("/api/health/circuits", async (_req, res) => {
     try {
-      const { getAllBreakerStatuses } = require("./infra/circuit-breaker");
+      const { getAllBreakerStatuses } = await import("./infra/circuit-breaker");
       res.json({ breakers: getAllBreakerStatuses() });
     } catch {
       res.status(500).json({ error: "circuit-breaker not loaded" });

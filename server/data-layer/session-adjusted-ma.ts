@@ -66,9 +66,13 @@ async function loadDailyBarsForSymbols(
   const cutoffStr = cutoffDate.toISOString().split("T")[0];
   const today = new Date().toISOString().split("T")[0];
 
-  // Chunk DB queries to avoid loading 590*250 rows into memory at once
-  const DB_CHUNK_SIZE = 80;
-  const dbBars: (typeof historicalBars.$inferSelect)[] = [];
+  const MAX_STALE_DAYS = 5;
+  let staleSkipCount = 0;
+
+  // Process DB in chunks — critically, process each chunk's bars immediately
+  // and discard the raw DB rows so they can be GC'd, instead of accumulating
+  // 170K+ rows in a single array.
+  const DB_CHUNK_SIZE = 50;
   for (let i = 0; i < upperSymbols.length; i += DB_CHUNK_SIZE) {
     const chunk = upperSymbols.slice(i, i + DB_CHUNK_SIZE);
     const chunkBars = await db
@@ -81,88 +85,86 @@ async function loadDailyBarsForSymbols(
         )
       )
       .orderBy(historicalBars.symbol, desc(historicalBars.barDate));
-    dbBars.push(...chunkBars);
-  }
 
-  const barsBySymbol = new Map<string, typeof dbBars>();
-  for (const bar of dbBars) {
-    const existing = barsBySymbol.get(bar.symbol) || [];
-    existing.push(bar);
-    barsBySymbol.set(bar.symbol, existing);
-  }
+    // Group by symbol within this chunk only
+    const barsBySymbol = new Map<string, typeof chunkBars>();
+    for (const bar of chunkBars) {
+      const existing = barsBySymbol.get(bar.symbol) || [];
+      existing.push(bar);
+      barsBySymbol.set(bar.symbol, existing);
+    }
 
-  const MAX_STALE_DAYS = 5;
-  let staleSkipCount = 0;
+    for (const symbol of chunk) {
+      const symbolBars = barsBySymbol.get(symbol) || [];
+      if (symbolBars.length < MIN_BARS_FOR_SESSION_MA) continue;
 
-  for (const symbol of upperSymbols) {
-    const symbolBars = barsBySymbol.get(symbol) || [];
-    if (symbolBars.length < MIN_BARS_FOR_SESSION_MA) continue;
+      const mostRecentDbDate = symbolBars[0]?.barDate;
+      if (mostRecentDbDate) {
+        const dbDate = new Date(mostRecentDbDate + "T00:00:00Z");
+        const ageDays = (Date.now() - dbDate.getTime()) / (1000 * 60 * 60 * 24);
+        if (ageDays > MAX_STALE_DAYS) {
+          staleSkipCount++;
+          continue;
+        }
+      }
 
-    // Reject stale data — if newest DB bar is more than MAX_STALE_DAYS old,
-    // the MA would be garbage (averaging today's price with month-old closes).
-    const mostRecentDbDate = symbolBars[0]?.barDate;
-    if (mostRecentDbDate) {
-      const dbDate = new Date(mostRecentDbDate + "T00:00:00Z");
-      const ageDays = (Date.now() - dbDate.getTime()) / (1000 * 60 * 60 * 24);
-      if (ageDays > MAX_STALE_DAYS) {
+      const barSlice = symbolBars.slice(0, days + 5);
+      let hasLargeGap = false;
+      for (let j = 0; j < barSlice.length - 1; j++) {
+        const d1 = new Date(barSlice[j]!.barDate + "T00:00:00Z").getTime();
+        const d2 = new Date(barSlice[j + 1]!.barDate + "T00:00:00Z").getTime();
+        if (d1 - d2 > 7 * 86_400_000) {
+          hasLargeGap = true;
+          break;
+        }
+      }
+      if (hasLargeGap) {
         staleSkipCount++;
         continue;
       }
-    }
 
-    // Check for large gaps in bar dates — indicates incomplete backfill.
-    // If any two consecutive bars are >7 calendar days apart, MAs would be garbage.
-    const barSlice = symbolBars.slice(0, days + 5);
-    let hasLargeGap = false;
-    for (let i = 0; i < barSlice.length - 1; i++) {
-      const d1 = new Date(barSlice[i]!.barDate + "T00:00:00Z").getTime();
-      const d2 = new Date(barSlice[i + 1]!.barDate + "T00:00:00Z").getTime();
-      if (d1 - d2 > 7 * 86_400_000) { // bars are newest-first, so d1 > d2
-        hasLargeGap = true;
-        break;
+      const candles: DailyBar[] = barSlice.map((b) => ({
+        date: b.barDate,
+        open: Number(b.open),
+        high: Number(b.high),
+        low: Number(b.low),
+        close: Number(b.close),
+        volume: Number(b.volume),
+        vwap: b.vwap ? Number(b.vwap) : undefined,
+      }));
+
+      const snapshot = snapshots.get(symbol);
+      if (snapshot && snapshot.open > 0) {
+        if (!mostRecentDbDate || today > mostRecentDbDate) {
+          candles.unshift({
+            date: today,
+            open: snapshot.open,
+            high: snapshot.high,
+            low: snapshot.low,
+            close: snapshot.price,
+            volume: snapshot.volume,
+            vwap: snapshot.vwap,
+          });
+        } else if (mostRecentDbDate === today) {
+          candles[0] = {
+            date: today,
+            open: snapshot.open,
+            high: snapshot.high,
+            low: snapshot.low,
+            close: snapshot.price,
+            volume: snapshot.volume,
+            vwap: snapshot.vwap,
+          };
+        }
       }
-    }
-    if (hasLargeGap) {
-      staleSkipCount++;
-      continue;
+
+      result.set(symbol, candles.slice(0, days));
     }
 
-    const candles: DailyBar[] = barSlice.map((b) => ({
-      date: b.barDate,
-      open: Number(b.open),
-      high: Number(b.high),
-      low: Number(b.low),
-      close: Number(b.close),
-      volume: Number(b.volume),
-      vwap: b.vwap ? Number(b.vwap) : undefined,
-    }));
-
-    const snapshot = snapshots.get(symbol);
-    if (snapshot && snapshot.open > 0) {
-      if (!mostRecentDbDate || today > mostRecentDbDate) {
-        candles.unshift({
-          date: today,
-          open: snapshot.open,
-          high: snapshot.high,
-          low: snapshot.low,
-          close: snapshot.price,
-          volume: snapshot.volume,
-          vwap: snapshot.vwap,
-        });
-      } else if (mostRecentDbDate === today) {
-        candles[0] = {
-          date: today,
-          open: snapshot.open,
-          high: snapshot.high,
-          low: snapshot.low,
-          close: snapshot.price,
-          volume: snapshot.volume,
-          vwap: snapshot.vwap,
-        };
-      }
+    // Yield between chunks so GC can reclaim the chunkBars memory
+    if (i + DB_CHUNK_SIZE < upperSymbols.length) {
+      await new Promise((r) => setTimeout(r, 5));
     }
-
-    result.set(symbol, candles.slice(0, days));
   }
 
   if (staleSkipCount > 0) {
