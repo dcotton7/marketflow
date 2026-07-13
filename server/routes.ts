@@ -950,6 +950,25 @@ export async function registerRoutes(
   app.use("/api/marketflow", marketflowAnalysisRoutes);
   await initMarketCondition();
 
+  // ─── Health / Diagnostics endpoints ──────────────────────────────────────
+  app.get("/api/health/memory", (_req, res) => {
+    try {
+      const { getMemorySnapshot } = require("./infra/memory-gate");
+      res.json(getMemorySnapshot());
+    } catch {
+      res.status(500).json({ error: "memory-gate not loaded" });
+    }
+  });
+
+  app.get("/api/health/circuits", (_req, res) => {
+    try {
+      const { getAllBreakerStatuses } = require("./infra/circuit-breaker");
+      res.json({ breakers: getAllBreakerStatuses() });
+    } catch {
+      res.status(500).json({ error: "circuit-breaker not loaded" });
+    }
+  });
+
   // Register Discovery Scanner routes (mount routes immediately for API availability)
   const scannerRoutes = (await import("./scanner/routes")).default;
   app.use("/api/scanner", scannerRoutes);

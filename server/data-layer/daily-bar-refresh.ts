@@ -2,11 +2,12 @@
  * Automated Daily Bar Refresh
  *
  * Ensures historical_bars stays current. Runs:
- *   1. On server startup (if bars are stale)
- *   2. On a scheduled timer (5:30 PM ET daily — after market close)
+ *   1. On server startup (if bars are stale or missing)
+ *   2. On a scheduled timer (every 6 hours)
  *
- * If the Alpaca API key is invalid (401), logs a critical warning
- * and disables MA-based scanner signals until fixed.
+ * Smart refresh: only fetches symbols that are actually stale or missing,
+ * not the entire universe. Respects a memory gate to avoid OOM during
+ * concurrent MC snapshot polling.
  */
 
 import { getDb } from "../db";
@@ -14,10 +15,11 @@ import { historicalBars, tickerMa } from "@shared/schema";
 import { sql, eq, desc } from "drizzle-orm";
 import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
+import { isMemoryPressureHigh } from "../infra/memory-gate";
 
 const STALE_THRESHOLD_DAYS = 3;
 const REFRESH_LOOKBACK_DAYS = 10;
-const BATCH_SIZE = 15;
+const BATCH_SIZE = 5;
 
 let lastRefreshAttempt: Date | null = null;
 let lastRefreshSuccess: Date | null = null;
@@ -38,12 +40,14 @@ export function getDailyBarRefreshStatus() {
 }
 
 /**
- * Check per-symbol freshness: for each symbol, what's the newest bar_date?
- * Returns the count of symbols whose newest bar is older than STALE_THRESHOLD_DAYS.
+ * Identify which universe symbols have stale or missing bars.
+ * Returns the actual list of symbols that need refreshing.
  */
-async function countStaleSymbols(): Promise<{ stale: number; total: number; oldestDate: string | null }> {
+async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: number }> {
   const db = getDb();
-  if (!db) return { stale: 0, total: 0, oldestDate: null };
+  if (!db) return { staleSymbols: [], freshCount: 0 };
+
+  const universeTickers = getAllUniverseTickers();
 
   try {
     const result = await db.execute(sql`
@@ -53,55 +57,55 @@ async function countStaleSymbols(): Promise<{ stale: number; total: number; olde
     `);
 
     const rows = (result as any)?.rows ?? result ?? [];
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return { stale: 0, total: 0, oldestDate: null };
+    const freshMap = new Map<string, string>();
+
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const sym = (row.symbol as string)?.toUpperCase();
+        const newest = row.newest_bar ?? row.newestBar ?? row.newest ?? null;
+        if (sym && newest) freshMap.set(sym, newest);
+      }
     }
 
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - STALE_THRESHOLD_DAYS);
-    const cutoffStr = cutoff.toISOString().split("T")[0];
+    const cutoffStr = cutoff.toISOString().split("T")[0]!;
 
-    let stale = 0;
-    let oldestDate: string | null = null;
-    for (const row of rows) {
-      const newest = row.newest_bar ?? row.newestBar ?? row.newest ?? null;
+    const staleSymbols: string[] = [];
+    let freshCount = 0;
+
+    for (const ticker of universeTickers) {
+      const newest = freshMap.get(ticker.toUpperCase());
       if (!newest || newest < cutoffStr) {
-        stale++;
-        if (!oldestDate || (newest && newest < oldestDate)) oldestDate = newest;
+        staleSymbols.push(ticker);
+      } else {
+        freshCount++;
       }
     }
-    return { stale, total: rows.length, oldestDate };
-  } catch (err) {
-    console.warn("[DailyBarRefresh] countStaleSymbols error:", err);
-    return { stale: 0, total: 0, oldestDate: null };
-  }
-}
 
-function daysBetween(dateStr: string): number {
-  const d = new Date(dateStr + "T00:00:00Z");
-  return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
+    return { staleSymbols, freshCount };
+  } catch (err) {
+    console.warn("[DailyBarRefresh] getStaleSymbols error:", err);
+    return { staleSymbols: [], freshCount: 0 };
+  }
 }
 
 export async function checkAndRefreshDailyBars(): Promise<void> {
   if (refreshInProgress) return;
 
-  const { stale, total, oldestDate } = await countStaleSymbols();
-  if (total === 0) {
-    console.warn("[DailyBarRefresh] No bars in DB — cannot determine staleness.");
+  const { staleSymbols, freshCount } = await getStaleSymbols();
+  const total = staleSymbols.length + freshCount;
+
+  if (staleSymbols.length === 0) {
+    console.log(`[DailyBarRefresh] All ${total} symbols are fresh. No refresh needed.`);
     return;
   }
 
-  const staleRatio = stale / total;
-  if (staleRatio < 0.1) {
-    console.log(`[DailyBarRefresh] Bars are fresh (${stale}/${total} stale, <10%). No refresh needed.`);
-    return;
-  }
-
-  console.warn(`[DailyBarRefresh] ⚠️ ${stale}/${total} symbols have STALE bars (oldest: ${oldestDate}). Refreshing...`);
-  await refreshDailyBars();
+  console.log(`[DailyBarRefresh] ${staleSymbols.length}/${total} symbols need refresh (${freshCount} fresh). Starting smart refresh...`);
+  await refreshDailyBars(staleSymbols);
 }
 
-async function refreshDailyBars(): Promise<void> {
+async function refreshDailyBars(symbols: string[]): Promise<void> {
   const db = getDb();
   if (!db) {
     console.warn("[DailyBarRefresh] No database available.");
@@ -111,9 +115,8 @@ async function refreshDailyBars(): Promise<void> {
   refreshInProgress = true;
   lastRefreshAttempt = new Date();
 
-  const tickers = getAllUniverseTickers();
-  if (tickers.length === 0) {
-    console.warn("[DailyBarRefresh] No universe tickers to refresh.");
+  if (symbols.length === 0) {
+    console.log("[DailyBarRefresh] No symbols to refresh.");
     refreshInProgress = false;
     return;
   }
@@ -124,10 +127,24 @@ async function refreshDailyBars(): Promise<void> {
 
   let totalUpserted = 0;
   let totalFailed = 0;
+  let memorySkipped = 0;
 
-  // Use single-symbol endpoint (works with current API key — multi-symbol returns 401)
-  for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
-    const batch = tickers.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+    // Memory gate: pause if heap is under pressure, let GC + MC polling settle
+    if (isMemoryPressureHigh()) {
+      memorySkipped++;
+      if (memorySkipped <= 3) {
+        console.warn(`[DailyBarRefresh] Memory pressure high — pausing 10s (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
+      }
+      await new Promise((r) => setTimeout(r, 10_000));
+      // Re-check after pause; if still high, skip this batch entirely
+      if (isMemoryPressureHigh()) {
+        console.warn(`[DailyBarRefresh] Memory still high after pause — skipping batch`);
+        continue;
+      }
+    }
+
+    const batch = symbols.slice(i, i + BATCH_SIZE);
 
     const results = await Promise.allSettled(
       batch.map(async (symbol) => {
@@ -177,7 +194,7 @@ async function refreshDailyBars(): Promise<void> {
       } else if (r.status === "rejected") {
         const msg = String(r.reason?.message ?? "");
         if (msg.includes("401")) {
-          console.error(`[DailyBarRefresh] ❌ CRITICAL: Alpaca API key is INVALID (401). Cannot refresh bars. Fix the ALPACA_API_KEY/ALPACA_API_SECRET in .env`);
+          console.error(`[DailyBarRefresh] ❌ CRITICAL: Alpaca API key is INVALID (401). Cannot refresh bars.`);
           apiKeyBroken = true;
           refreshInProgress = false;
           return;
@@ -189,21 +206,22 @@ async function refreshDailyBars(): Promise<void> {
     }
 
     // Rate limit: pause between batches
-    if (i + BATCH_SIZE < tickers.length) {
-      await new Promise((r) => setTimeout(r, 1000));
+    if (i + BATCH_SIZE < symbols.length) {
+      await new Promise((r) => setTimeout(r, 1500));
     }
 
-    // Progress log every 5 batches
-    if ((Math.floor(i / BATCH_SIZE) + 1) % 5 === 0) {
-      console.log(`[DailyBarRefresh] Progress: ${i + BATCH_SIZE}/${tickers.length} symbols processed, ${totalUpserted} bars upserted`);
+    // Progress log every 10 batches
+    if ((Math.floor(i / BATCH_SIZE) + 1) % 10 === 0) {
+      const mem = process.memoryUsage();
+      console.log(`[DailyBarRefresh] Progress: ${Math.min(i + BATCH_SIZE, symbols.length)}/${symbols.length} symbols, ${totalUpserted} bars upserted, heap ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
     }
   }
 
   if (totalUpserted > 0) {
     apiKeyBroken = false;
     lastRefreshSuccess = new Date();
-    console.log(`[DailyBarRefresh] ✅ Refreshed ${totalUpserted} bars (${totalFailed} symbols failed). Now recalculating MAs...`);
-    await recalculateTickerMAs(db, tickers);
+    console.log(`[DailyBarRefresh] ✅ Refreshed ${totalUpserted} bars for ${symbols.length} symbols (${totalFailed} failed${memorySkipped > 0 ? `, ${memorySkipped} batches deferred for memory` : ""}). Now recalculating MAs...`);
+    await recalculateTickerMAs(db, symbols);
   } else if (totalFailed > 0) {
     console.warn(`[DailyBarRefresh] ⚠️ All ${totalFailed} symbols failed. Check API key.`);
   }
@@ -280,7 +298,6 @@ async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
       }
     }
 
-    // Yield control every 50 symbols to avoid blocking the event loop
     if (i > 0 && i % 50 === 0) {
       await new Promise((r) => setTimeout(r, 10));
     }
@@ -289,13 +306,9 @@ async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
 }
 
 /**
- * Schedule daily refresh at 5:30 PM ET (21:30 UTC in winter, 21:30 UTC - adjust as needed).
- * Also runs immediately on startup if bars are stale.
+ * Schedule daily refresh. Runs on startup (deferred 60s) and every 6 hours.
  */
 export function startDailyBarRefreshScheduler(): void {
-  // Startup check deferred 60s from when this function is called (which is
-  // already 120s after boot due to staggered startup). This avoids loading
-  // hundreds of symbols' bars while MC snapshot and scanner are still settling.
   setTimeout(() => {
     checkAndRefreshDailyBars().catch((err) => {
       console.error("[DailyBarRefresh] Startup check failed (non-fatal):", String(err).slice(0, 200));
@@ -303,7 +316,6 @@ export function startDailyBarRefreshScheduler(): void {
     });
   }, 60_000);
 
-  // Schedule refresh every 6 hours (covers market close regardless of timezone)
   const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
   setInterval(() => {
     checkAndRefreshDailyBars().catch((err) => {

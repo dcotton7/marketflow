@@ -113,6 +113,10 @@ app.use((req, res, next) => {
     console.log("Routes registered successfully");
     logMem("routes registered (MC polling started)");
 
+    // Start periodic memory logging (every 60s during market hours)
+    const { startMemoryLogging } = await import("./infra/memory-gate");
+    startMemoryLogging(60_000);
+
     // Defer alert poller 15s — it's lightweight but depends on MC snapshot prices
     setTimeout(async () => {
       try {

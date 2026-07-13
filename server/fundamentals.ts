@@ -56,12 +56,15 @@ let finnhubInFlight = 0;
 const finnhubQueue: Array<() => void> = [];
 
 async function withFinnhubLimit<T>(fn: () => Promise<T>): Promise<T> {
+  if (!finnhubBreaker.isAvailable()) {
+    throw new Error("[Finnhub] Circuit breaker OPEN — skipping call");
+  }
   while (finnhubInFlight >= FINNHUB_CONCURRENCY) {
     await new Promise<void>((r) => finnhubQueue.push(r));
   }
   finnhubInFlight++;
   try {
-    return await fn();
+    return await finnhubBreaker.call(() => fn());
   } finally {
     finnhubInFlight--;
     const next = finnhubQueue.shift();
@@ -69,7 +72,13 @@ async function withFinnhubLimit<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// ── FMP rate limiter (max 4 concurrent, 60s backoff on 429) ────────────────
+// ── FMP rate limiter (max 4 concurrent, 60s backoff on 429, circuit breaker) ─
+
+import { getOrCreateBreaker } from "./infra/circuit-breaker";
+import { retryWithBackoff } from "./infra/retry";
+
+const fmpBreaker = getOrCreateBreaker("FMP", { failureThreshold: 5, resetTimeoutMs: 120_000 });
+const finnhubBreaker = getOrCreateBreaker("Finnhub", { failureThreshold: 5, resetTimeoutMs: 120_000 });
 
 const FMP_CONCURRENCY = 4;
 let fmpInFlight = 0;
@@ -80,12 +89,16 @@ async function withFmpLimit<T>(fn: () => Promise<T>): Promise<T> {
   if (Date.now() < fmpBackoffUntil) {
     throw new Error("[FMP] Rate-limited, backing off");
   }
+  if (!fmpBreaker.isAvailable()) {
+    throw new Error("[FMP] Circuit breaker OPEN — skipping call");
+  }
   while (fmpInFlight >= FMP_CONCURRENCY) {
     await new Promise<void>((r) => fmpQueue.push(r));
   }
   fmpInFlight++;
   try {
-    return await fn();
+    const result = await fmpBreaker.call(() => fn());
+    return result;
   } finally {
     fmpInFlight--;
     const next = fmpQueue.shift();
@@ -114,7 +127,10 @@ async function fetchFmpProfile(symbol: string): Promise<FmpProfileRow | null> {
   if (!FMP_API_KEY) return null;
   const url = `${FMP_BASE}/profile?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
   try {
-    const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
+    const resp = await retryWithBackoff(
+      () => withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) })),
+      { label: `FMP profile ${symbol}`, maxRetries: 2 }
+    );
     if (resp.status === 429) {
       fmpBackoffUntil = Date.now() + 60_000;
       console.warn("[FMP] 429 rate limit hit, backing off 60s");
@@ -160,7 +176,10 @@ async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> 
   if (!FMP_API_KEY) return null;
   const url = `${FMP_BASE}/earnings?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
   try {
-    const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
+    const resp = await retryWithBackoff(
+      () => withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) })),
+      { label: `FMP earnings ${symbol}`, maxRetries: 2 }
+    );
     if (resp.status === 429) {
       fmpBackoffUntil = Date.now() + 60_000;
       console.warn("[FMP] 429 rate limit hit, backing off 60s");
@@ -714,7 +733,10 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
   if (FMP_API_KEY) {
     try {
       const url = `${FMP_BASE}/earnings?symbol=${encodeURIComponent(upper)}&apikey=${FMP_API_KEY}`;
-      const resp = await withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) }));
+      const resp = await retryWithBackoff(
+        () => withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) })),
+        { label: `FMP earnings history ${upper}`, maxRetries: 2 }
+      );
       if (resp.status === 429) {
         fmpBackoffUntil = Date.now() + 60_000;
         console.warn("[FMP] 429 rate limit hit on earnings history, backing off 60s");
@@ -1111,7 +1133,10 @@ export async function fetchIndustryPeersFromFMP(industry: string, sector: string
 
   try {
     const url = `https://financialmodelingprep.com/api/v3/stock-screener?industry=${encodeURIComponent(industry)}&sector=${encodeURIComponent(sector)}&exchange=NYSE,NASDAQ&isActivelyTrading=true&marketCapMoreThan=500000000&limit=30&apikey=${FMP_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const res = await retryWithBackoff(
+      () => withFmpLimit(() => fetch(url, { signal: AbortSignal.timeout(10000) })),
+      { label: `FMP peers ${industry}`, maxRetries: 2 }
+    );
     if (!res.ok) return [];
 
     const data = await res.json();
