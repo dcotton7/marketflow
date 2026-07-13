@@ -229,7 +229,14 @@ export async function refreshSnapshot(
       }
 
       const forceMaRefresh = shouldRefreshSessionMa();
-      const sessionMa = await getSessionAdjustedMADataForSymbols(allTickers, snapshotInputs, forceMaRefresh);
+      // Cap MA computation to first 300 symbols to stay within Render 2GB memory.
+      // Core tickers appear first in allTickers (from CLUSTERS.core then candidates).
+      const maTickerCap = 300;
+      const maTickers = allTickers.length > maTickerCap ? allTickers.slice(0, maTickerCap) : allTickers;
+      if (allTickers.length > maTickerCap && forceMaRefresh) {
+        console.log(`[MC-Snapshot] MA computation capped at ${maTickerCap}/${allTickers.length} symbols to limit memory`);
+      }
+      const sessionMa = await getSessionAdjustedMADataForSymbols(maTickers, snapshotInputs, forceMaRefresh);
       state.maData = new Map(sessionMa.data);
       state.maAsOf = sessionMa.asOf;
       state.maMode = sessionMa.mode;
