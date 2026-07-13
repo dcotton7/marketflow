@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { Router, type Request, type Response } from "express";
+import OpenAI from "openai";
 import type { DiscoveryCard, ScannerMode, ScannerStatus } from "@shared/scanner-types";
 import { DEFAULT_SCANNER_CONFIG } from "@shared/scanner-config";
 import { getScannerState, setScannerMode } from "./index";
@@ -27,6 +28,7 @@ import { getHeatScores } from "./reactions/score-update";
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
 import { desc, eq, and, gte, lte, sql, isNull, isNotNull } from "drizzle-orm";
+import { getCachedEarningsData } from "../fundamentals";
 
 const router = Router();
 
@@ -543,6 +545,208 @@ router.get("/workbench/cards", async (req: Request, res: Response) => {
     console.warn("[Workbench] cards error:", String(err).slice(0, 150));
     res.status(500).json({ error: "Query failed" });
   }
+});
+
+// ── Workbench: POST /workbench/ai-analyze — AI-powered signal analysis ────────
+
+const WORKBENCH_AI_MODEL = "gpt-4.1-mini";
+
+const WORKBENCH_ANALYZE_SYSTEM_PROMPT = `You are a quantitative trading signal analyst. You're reviewing scanner signal performance data from a stock market scanning system. You have both aggregate statistics AND individual signal details (sample of recent signals with their checkpoint moves, MFE, MAE, and outcomes). Analyze the data and provide:
+
+1. Which signal types are performing best and worst
+2. What the hit rates, MFE, and MAE tell us about signal quality
+3. How a trader following the best signals would have fared
+4. Any patterns or concerns (e.g., high giveback, high fail rates, time-of-day effects)
+5. Specific recommendations for which signals to trust vs ignore
+6. Notable individual signals (outliers, best/worst performers, interesting patterns in the sample data)
+
+Be direct, specific, and use the actual numbers. Reference individual signals when they illustrate a point. Think like a prop desk analyst.`;
+
+const WORKBENCH_QUESTION_SYSTEM_PROMPT = `You are a quantitative trading signal analyst. You have access to scanner signal performance data from a stock market scanning system, including both aggregate stats and individual signal details (checkpoint moves, MFE/MAE, outcomes, time of day, regime). The user will ask you a specific question about this data. Answer using the actual numbers from the data provided. Reference individual signals when relevant. Be direct and specific. Think like a prop desk analyst.`;
+
+function formatStatsForPrompt(stats: any[], window: string, hitThreshold: number, dateRange: { from: string; to: string }, cards?: any[]): string {
+  let text = `Signal Performance Data\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `Date Range: ${dateRange.from} to ${dateRange.to}\n`;
+  text += `Measurement Window: ${window}\n`;
+  text += `Hit Threshold: ${hitThreshold}%\n\n`;
+
+  if (!stats || stats.length === 0) {
+    text += `No signal data available for this period.\n`;
+    return text;
+  }
+
+  text += `AGGREGATE STATS:\n`;
+  text += `Signal Type | Fired | Tracked | Hit% | Avg Move | Avg Peak (MFE) | Avg Giveback | Fail% | Reversal% | MFE≥3% | MAE≤-3%\n`;
+  text += `${"─".repeat(120)}\n`;
+
+  for (const s of stats) {
+    const hitRate = s.hitRate != null ? `${Math.round(s.hitRate * 100)}%` : "—";
+    const avgMove = s.avgMove != null ? `${s.avgMove >= 0 ? "+" : ""}${s.avgMove.toFixed(2)}%` : "—";
+    const avgPeak = s.avgPeakMove != null ? `+${s.avgPeakMove.toFixed(2)}%` : "—";
+    const avgGive = s.avgGiveback != null ? `${s.avgGiveback.toFixed(1)}%` : "—";
+    const failRate = s.failRate != null ? `${Math.round(s.failRate * 100)}%` : "—";
+    const revRate = s.reversalRate != null ? `${Math.round(s.reversalRate * 100)}%` : "—";
+    const mfe3 = s.mfe3Rate != null ? `${Math.round(s.mfe3Rate * 100)}%` : "—";
+    const mae3 = s.mae3Rate != null ? `${Math.round(s.mae3Rate * 100)}%` : "—";
+
+    text += `${s.signalType} | ${s.totalFired} | ${s.tracked} | ${hitRate} | ${avgMove} | ${avgPeak} | ${avgGive} | ${failRate} | ${revRate} | ${mfe3} | ${mae3}\n`;
+  }
+
+  // Detailed individual signals section
+  if (cards && cards.length > 0) {
+    const sample = cards.slice(0, 50);
+    text += `\n\nDETAILED SIGNALS (sample of ${sample.length}/${cards.length} signals):\n`;
+    text += `${"─".repeat(120)}\n`;
+
+    for (const c of sample) {
+      const time = c.createdAt ? new Date(c.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "?";
+      const dir = c.direction === "up" ? "LONG" : c.direction === "down" ? "SHORT" : "NEUT";
+      const price = c.priceAtSignal != null ? `$${Number(c.priceAtSignal).toFixed(2)}` : "—";
+
+      // Checkpoint moves (only filled ones)
+      const moves: string[] = [];
+      if (c.move15m != null) moves.push(`15m:${Number(c.move15m) >= 0 ? "+" : ""}${Number(c.move15m).toFixed(1)}%`);
+      if (c.move30m != null) moves.push(`30m:${Number(c.move30m) >= 0 ? "+" : ""}${Number(c.move30m).toFixed(1)}%`);
+      if (c.move1hr != null) moves.push(`1hr:${Number(c.move1hr) >= 0 ? "+" : ""}${Number(c.move1hr).toFixed(1)}%`);
+      if (c.move4hr != null) moves.push(`4hr:${Number(c.move4hr) >= 0 ? "+" : ""}${Number(c.move4hr).toFixed(1)}%`);
+      if (c.moveD1Close != null) moves.push(`D1C:${Number(c.moveD1Close) >= 0 ? "+" : ""}${Number(c.moveD1Close).toFixed(1)}%`);
+      const movesStr = moves.length > 0 ? moves.join(" ") : "no checkpoints yet";
+
+      const mfe = c.peakMove != null ? `MFE:+${Number(c.peakMove).toFixed(1)}%` : "";
+      const mae = c.worstDrawdown != null ? `MAE:${Number(c.worstDrawdown).toFixed(1)}%` : "";
+      const status = c.outcomeStatus ?? "pending";
+      const regime = c.regimeAtSignal ?? "?";
+
+      text += `[${c.signalType}] ${c.subject} ${dir} ${price} | ${time} | ${movesStr} | ${mfe} ${mae} | ${status} | regime:${regime}\n`;
+      if (c.headline) text += `  "${c.headline}"\n`;
+    }
+  }
+
+  return text;
+}
+
+router.post("/workbench/ai-analyze", async (req: Request, res: Response) => {
+  const { mode, question, stats: clientStats, window: winParam, hitThreshold: htParam, dateRange, cards: clientCards } = req.body as {
+    mode: "analyze" | "question";
+    question?: string;
+    stats: any[];
+    cards?: any[];
+    window: string;
+    hitThreshold: number;
+    dateRange: { from: string; to: string };
+  };
+
+  if (!mode || !["analyze", "question"].includes(mode)) {
+    return res.status(400).json({ error: "Invalid mode. Use: analyze, question" });
+  }
+  if (mode === "question" && (!question || !question.trim())) {
+    return res.status(400).json({ error: "Question is required for question mode" });
+  }
+
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: "OpenAI API key not configured" });
+  }
+
+  const openai = new OpenAI({ apiKey, baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL });
+
+  const dataContext = formatStatsForPrompt(
+    clientStats ?? [],
+    winParam ?? "1hr",
+    htParam ?? 0.5,
+    dateRange ?? { from: "unknown", to: "unknown" },
+    clientCards
+  );
+
+  const systemPrompt = mode === "analyze" ? WORKBENCH_ANALYZE_SYSTEM_PROMPT : WORKBENCH_QUESTION_SYSTEM_PROMPT;
+  let userPrompt: string;
+
+  if (mode === "analyze") {
+    userPrompt = `Here is the current signal performance data from our scanner workbench:\n\n${dataContext}\n\nPlease analyze this data comprehensively.`;
+  } else {
+    userPrompt = `Here is the current signal performance data from our scanner workbench:\n\n${dataContext}\n\nUser question: ${question}`;
+  }
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: WORKBENCH_AI_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.4,
+      max_tokens: 3000,
+    });
+
+    const analysis = completion.choices[0]?.message?.content ?? "No response generated.";
+    res.json({ analysis });
+  } catch (err: any) {
+    console.warn("[Workbench AI] Analysis failed:", String(err).slice(0, 200));
+    res.status(500).json({ error: "AI analysis failed: " + (err?.message ?? "Unknown error") });
+  }
+});
+
+// ── GET /upcoming-earnings — batch next-earnings dates for given symbols ─────
+
+export interface UpcomingEarningsEntry {
+  symbol: string;
+  nextEarningsDate: string | null;
+  nextEarningsDays: number;
+  earningsTime: string | null;
+}
+
+const upcomingEarningsCache = new Map<string, { data: UpcomingEarningsEntry; ts: number }>();
+const UPCOMING_EARNINGS_TTL = 24 * 60 * 60 * 1000;
+
+router.get("/upcoming-earnings", async (req: Request, res: Response) => {
+  const raw = String(req.query.symbols || "");
+  if (!raw) return res.status(400).json({ error: "symbols query param required" });
+
+  const symbols = raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).slice(0, 20);
+  if (symbols.length === 0) return res.status(400).json({ error: "No valid symbols provided" });
+
+  const results: UpcomingEarningsEntry[] = [];
+
+  await Promise.all(
+    symbols.map(async (sym) => {
+      const cached = upcomingEarningsCache.get(sym);
+      if (cached && Date.now() - cached.ts < UPCOMING_EARNINGS_TTL) {
+        results.push(cached.data);
+        return;
+      }
+
+      const earningsData = await getCachedEarningsData(sym);
+      const entry: UpcomingEarningsEntry = {
+        symbol: sym,
+        nextEarningsDate: earningsData?.nextEarningsDate ?? null,
+        nextEarningsDays: earningsData?.nextEarningsDays ?? -1,
+        earningsTime: earningsData?.earningsTime ?? null,
+      };
+
+      // Recalculate days if we have a date but days might be stale
+      if (entry.nextEarningsDate && entry.nextEarningsDate !== "N/A") {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const earningsDate = new Date(entry.nextEarningsDate);
+        entry.nextEarningsDays = Math.ceil(
+          (earningsDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+        );
+      }
+
+      upcomingEarningsCache.set(sym, { data: entry, ts: Date.now() });
+      results.push(entry);
+    })
+  );
+
+  results.sort((a, b) => {
+    if (a.nextEarningsDays < 0 && b.nextEarningsDays < 0) return 0;
+    if (a.nextEarningsDays < 0) return 1;
+    if (b.nextEarningsDays < 0) return -1;
+    return a.nextEarningsDays - b.nextEarningsDays;
+  });
+
+  res.json({ earnings: results });
 });
 
 export default router;

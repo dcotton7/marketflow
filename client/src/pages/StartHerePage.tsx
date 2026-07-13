@@ -55,7 +55,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Copy, Eraser, ExternalLink, FileText, LayoutGrid, LineChart, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, Eraser, ExternalLink, FileText, LayoutGrid, LineChart, Loader2, Maximize2, Pencil, Plus, Trash2 } from "lucide-react";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
 import { MiniMaSettingsDialog } from "@/components/MiniMaSettingsDialog";
 import { isMiniMaSettingsEnabled } from "@/lib/chart-preferences-shared";
@@ -198,6 +198,29 @@ function StartWorkspaceToolbar() {
           <Trash2 className="h-3.5 w-3.5" />
           Delete
         </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs"
+              onClick={() =>
+                window.open(
+                  "/workspace-popout",
+                  "workspace-popout",
+                  "width=1600,height=900,menubar=no,toolbar=no,location=no,status=no"
+                )
+              }
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              Pop out
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Open workspace in a clean pop-out window — no nav, max chart space. Pin on top with Win+Ctrl+T.
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <Dialog open={newOpen} onOpenChange={setNewOpen}>

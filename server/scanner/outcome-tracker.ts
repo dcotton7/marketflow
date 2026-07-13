@@ -12,7 +12,7 @@ import { eq, and, isNull, sql, inArray, notInArray, gte, lt } from "drizzle-orm"
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
 
-const INTERVAL_MS = 5 * 60_000;
+const INTERVAL_MS = 2 * 60_000; // 2 min — faster for initial backlog processing
 const BATCH_SIZE = 400;
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
@@ -106,9 +106,25 @@ function shouldProcessRow(elapsedMs: number, now: Date): boolean {
 
 // ── Main processing ──────────────────────────────────────────────────────────
 
+function isMarketActive(): boolean {
+  const { h, m, dayOfWeek } = getEtParts(new Date());
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false; // Weekend
+  const etMins = h * 60 + m;
+  // Active from 4:00 AM (pre-market) to 8:00 PM (after-hours) ET
+  return etMins >= 240 && etMins < 1200;
+}
+
 async function processOutcomes(): Promise<void> {
   if (!db) { console.warn("[Outcome Tracker] No DB, skipping"); return; }
   cycleCount++;
+
+  if (!isMarketActive()) {
+    if (cycleCount % 15 === 0) {
+      console.log(`[Outcome Tracker] Market closed — skipping (cycle ${cycleCount})`);
+    }
+    return;
+  }
+
   console.log(`[Outcome Tracker] Cycle ${cycleCount} starting...`);
 
   try {
@@ -125,8 +141,8 @@ async function processOutcomes(): Promise<void> {
       .catch(() => {});
 
     // Round-robin fetch: get up to PER_TYPE_LIMIT from each signal type
-    // so no single type (e.g., ma_proximity with 3000+) starves others
-    const PER_TYPE_LIMIT = 30;
+    // so no single type (e.g., ma_proximity with 6000+) starves others
+    const PER_TYPE_LIMIT = 60;
 
     const allPending = await db
       .select()
@@ -206,7 +222,23 @@ async function processOutcomes(): Promise<void> {
       }
 
       const tickerData = frame.tickers.get(lookupSymbol);
-      if (!tickerData) continue;
+      if (!tickerData) {
+        // For theme/market subjects where no proxy ticker is in frame, mark tracked
+        // immediately so they don't clog the queue forever
+        if (row.subjectKind === "theme" || row.subjectKind === "market") {
+          await db
+            .update(scannerDiscoveries)
+            .set({
+              outcomeTrackedAt: now,
+              outcomeStatus: "flat",
+              peakMove: 0,
+              worstDrawdown: 0,
+            })
+            .where(eq(scannerDiscoveries.id, row.id));
+          updatedCount++;
+        }
+        continue;
+      }
 
       const currentPrice = tickerData.price;
 
@@ -397,10 +429,14 @@ async function processOutcomes(): Promise<void> {
       const has1w = row.price1w != null || updates.price1w != null;
       const has1mo = row.price1mo != null || updates.price1mo != null;
 
-      const allCheckpointsFilled = has15m && has30m && has1hr && has4hr && hasD1Close && hasD2Open && hasD2Close && has1w && has1mo;
+      // Mark as tracked once the intraday checkpoints are filled (15m-4hr + D1 close)
+      // so the row leaves the hot processing queue. Weekly/monthly get filled via
+      // a slower pass that queries rows WITH outcomeTrackedAt but missing 1w/1mo.
+      const intradayDone = has15m && has30m && has1hr && has4hr && hasD1Close;
+      const allCheckpointsFilled = intradayDone && hasD2Open && hasD2Close && has1w && has1mo;
       const isFailed = updates.outcomeFailed === true || row.outcomeFailed;
 
-      if (allCheckpointsFilled || isFailed) {
+      if (intradayDone || allCheckpointsFilled || isFailed) {
         updates.outcomeTrackedAt = now;
       }
 
@@ -427,7 +463,7 @@ export function startOutcomeTracker(): void {
   if (intervalId) return;
   intervalId = setInterval(processOutcomes, INTERVAL_MS);
   setTimeout(processOutcomes, 30_000);
-  console.log("[Outcome Tracker] Started V2 (every 5 min, 9 checkpoints + MFE/MAE)");
+  console.log("[Outcome Tracker] Started V2 (every 2 min, 60/type, 9 checkpoints + MFE/MAE)");
 }
 
 export function stopOutcomeTracker(): void {

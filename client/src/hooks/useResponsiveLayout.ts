@@ -1,17 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 
-const FLAG_KEY = "layout";
-const FLAG_VALUE = "responsive";
-
-function hasResponsiveFlag(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const params = new URLSearchParams(window.location.search);
-    return params.get(FLAG_KEY) === FLAG_VALUE;
-  } catch {
-    return false;
-  }
-}
+const NAV_COLLAPSED_KEY = "nav-collapsed";
 
 export type BreakpointTier = "xl" | "lg" | "md" | "sm";
 
@@ -26,7 +15,7 @@ export interface ResponsiveLayout {
   enabled: boolean;
   width: number;
   tier: BreakpointTier;
-  /** Below 1440px — tighter spacing, collapsed nav, hidden header metrics */
+  /** Below 1200px — tighter spacing, icon-only or collapsed nav */
   isCompact: boolean;
   /** Below 1100px — single-column heatmap, very tight */
   isNarrow: boolean;
@@ -34,30 +23,62 @@ export interface ResponsiveLayout {
   stackPanels: boolean;
   /** Below 1440px — secondary nav items go into "More" dropdown */
   collapseNav: boolean;
+  /** Between 1200-1440px — show nav icons only, hide text labels */
+  iconOnlyNav: boolean;
+  /** True if manually collapsed OR auto-collapsed via breakpoint */
+  navCollapsed: boolean;
+  /** Toggle manual nav collapse (persists in localStorage) */
+  toggleNavCollapse: () => void;
+  /** True if user has manually collapsed the nav */
+  isManuallyCollapsed: boolean;
+}
+
+function getStoredCollapse(): boolean {
+  try {
+    return localStorage.getItem(NAV_COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
 }
 
 export function useResponsiveLayout(): ResponsiveLayout {
-  const enabled = useMemo(() => hasResponsiveFlag(), []);
   const [width, setWidth] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth : 1920
   );
+  const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(getStoredCollapse);
 
   useEffect(() => {
-    if (!enabled) return;
     const onResize = () => setWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [enabled]);
+  }, []);
 
-  const tier = enabled ? getTier(width) : "xl";
+  const toggleNavCollapse = useCallback(() => {
+    setIsManuallyCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(NAV_COLLAPSED_KEY, String(next));
+      } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  const tier = getTier(width);
+  const collapseNav = tier === "md" || tier === "sm" || tier === "lg";
+  const iconOnlyNav = false; // handled by collapseNav dropdown instead
+  const navCollapsed = isManuallyCollapsed || collapseNav;
 
   return {
-    enabled,
+    enabled: true,
     width,
     tier,
-    isCompact: enabled && (tier === "md" || tier === "sm" || tier === "lg"),
-    isNarrow: enabled && tier === "sm",
-    stackPanels: enabled && (tier === "md" || tier === "sm" || tier === "lg"),
-    collapseNav: enabled && (tier === "md" || tier === "sm" || tier === "lg"),
+    isCompact: tier === "md" || tier === "sm",
+    isNarrow: tier === "sm",
+    stackPanels: collapseNav,
+    collapseNav,
+    iconOnlyNav,
+    navCollapsed,
+    toggleNavCollapse,
+    isManuallyCollapsed,
   };
 }

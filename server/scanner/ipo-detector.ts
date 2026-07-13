@@ -175,6 +175,16 @@ export function startIpoDetector(
 
   const poll = async () => {
     if (Date.now() - lastPollAt < POLL_INTERVAL_MS - 5000) return;
+
+    // Skip weekends and overnight (before 7 AM or after 8 PM ET)
+    const etParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric", hour12: false, weekday: "short",
+    }).formatToParts(new Date());
+    const day = etParts.find(p => p.type === "weekday")?.value ?? "";
+    const hour = parseInt(etParts.find(p => p.type === "hour")?.value ?? "0", 10);
+    if (["Sat", "Sun"].includes(day) || hour < 7 || hour >= 20) return;
+
     lastPollAt = Date.now();
     try {
       const signals = await detectIpoAlerts(minMarketCapM);

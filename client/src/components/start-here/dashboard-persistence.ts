@@ -1161,7 +1161,17 @@ export function setDefaultChartTemplate(
   if (!meta || meta.type !== "chart") return dashboard;
   const defaultChartInterval =
     meta.chartInterval ?? dashboard.defaultChartInterval ?? "1d";
-  return { ...dashboard, defaultChartInstanceId: instanceId, defaultChartInterval };
+
+  const instances: Record<string, StartHereInstanceMeta> = {};
+  for (const [id, m] of Object.entries(dashboard.instances)) {
+    if (id === instanceId || m.type !== "chart" || m.linkedSetLocked) {
+      instances[id] = m;
+    } else {
+      instances[id] = { ...m, chartInterval: defaultChartInterval };
+    }
+  }
+
+  return { ...dashboard, instances, defaultChartInstanceId: instanceId, defaultChartInterval };
 }
 
 export function setDefaultWatchlistTemplate(

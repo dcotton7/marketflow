@@ -34,6 +34,7 @@ import { lazy, Suspense } from "react";
 const MarketConditionPage = lazy(() => import("@/pages/MarketConditionPage"));
 const ScannerPopoutPage = lazy(() => import("@/pages/ScannerPopoutPage"));
 const SignalWorkbenchPage = lazy(() => import("@/pages/SignalWorkbenchPage"));
+const WorkspacePopoutPage = lazy(() => import("@/pages/WorkspacePopoutPage"));
 
 function Router() {
   return (
@@ -152,6 +153,13 @@ function Router() {
       <Route path="/scanner-popout">
         <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Scanner...</div>}>
           <ScannerPopoutPage />
+        </Suspense>
+      </Route>
+
+      {/* Workspace pop-out window */}
+      <Route path="/workspace-popout">
+        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workspace...</div>}>
+          <WorkspacePopoutPage />
         </Suspense>
       </Route>
 

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api, buildUrl, type ScannerRunInput } from "@shared/routes";
 
 const INTRADAY_INTERVALS = ['1m', '5m', '15m', '30m', '60m'] as const;
@@ -29,6 +29,7 @@ export function useStockHistory(symbol: string, interval: string = '1d') {
     // Re-poll intraday charts every minute to get the latest bar; daily+ don't need live refresh
     refetchInterval: stockHistoryIsIntradayInterval(interval) ? STOCK_HISTORY_INTRADAY_REFETCH_MS : false,
     refetchIntervalInBackground: stockHistoryIsIntradayInterval(interval), // keep 5m/15m/30m/60m updating every minute even when tab unfocused
+    placeholderData: keepPreviousData,
   });
 }
 

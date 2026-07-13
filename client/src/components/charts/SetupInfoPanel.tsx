@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +51,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 type SetupTab = "ai" | "fundamentals";
 
@@ -210,7 +211,7 @@ function FundSectionHeader({ label }: { label: string }) {
   );
 }
 
-function FundamentalsTabContent({ metrics }: { metrics: ChartMetrics | null | undefined }) {
+function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | null | undefined; symbol: string }) {
   const [descExpanded, setDescExpanded] = useState(false);
 
   if (!metrics) {
@@ -247,7 +248,7 @@ function FundamentalsTabContent({ metrics }: { metrics: ChartMetrics | null | un
         <FundSectionHeader label="Company Profile" />
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className="text-[1em] font-medium text-slate-100">
-            {metrics.companyName || metrics.symbol}
+            {metrics.companyName || symbol}
           </span>
         </div>
         {(metrics.sectorName || metrics.industryName) && (
@@ -483,6 +484,15 @@ function FundamentalsTabContent({ metrics }: { metrics: ChartMetrics | null | un
           </div>
         </div>
       )}
+
+      {/* ── Upcoming Earnings (current + peers) ── */}
+      <UpcomingEarningsSection
+        currentSymbol={symbol}
+        currentNextDate={metrics.nextEarningsDate}
+        currentNextDays={metrics.nextEarningsDays}
+        currentEarningsTime={metrics.earningsTime}
+        peerSymbols={metrics.industryPeers?.map((p) => p.symbol) ?? []}
+      />
     </div>
   );
 }
@@ -605,6 +615,133 @@ function EarningsHistoryTable({ history }: { history: QuarterlyEarning[] }) {
   );
 }
 
+interface UpcomingEarningsEntry {
+  symbol: string;
+  nextEarningsDate: string | null;
+  nextEarningsDays: number;
+  earningsTime: string | null;
+}
+
+function formatEarningsDateShort(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function UpcomingEarningsSection({
+  currentSymbol,
+  currentNextDate,
+  currentNextDays,
+  currentEarningsTime,
+  peerSymbols,
+}: {
+  currentSymbol: string;
+  currentNextDate?: string | null;
+  currentNextDays?: number;
+  currentEarningsTime?: string | null;
+  peerSymbols: string[];
+}) {
+  const symbolsParam = useMemo(
+    () => peerSymbols.filter((s) => s !== currentSymbol).slice(0, 8).join(","),
+    [peerSymbols, currentSymbol]
+  );
+
+  const { data: peerEarnings } = useQuery<{ earnings: UpcomingEarningsEntry[] }>({
+    queryKey: ["/api/scanner/upcoming-earnings", symbolsParam],
+    queryFn: async () => {
+      if (!symbolsParam) return { earnings: [] };
+      const res = await fetch(`/api/scanner/upcoming-earnings?symbols=${encodeURIComponent(symbolsParam)}`);
+      if (!res.ok) return { earnings: [] };
+      return res.json();
+    },
+    enabled: symbolsParam.length > 0,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const allEntries = useMemo(() => {
+    const entries: UpcomingEarningsEntry[] = [];
+
+    if (currentNextDate && currentNextDate !== "N/A" && (currentNextDays ?? -1) >= 0) {
+      entries.push({
+        symbol: currentSymbol,
+        nextEarningsDate: currentNextDate,
+        nextEarningsDays: currentNextDays ?? -1,
+        earningsTime: currentEarningsTime ?? null,
+      });
+    }
+
+    if (peerEarnings?.earnings) {
+      for (const e of peerEarnings.earnings) {
+        if (e.symbol === currentSymbol) continue;
+        if (!e.nextEarningsDate || e.nextEarningsDays < 0) continue;
+        entries.push(e);
+      }
+    }
+
+    return entries.sort((a, b) => a.nextEarningsDays - b.nextEarningsDays);
+  }, [currentSymbol, currentNextDate, currentNextDays, currentEarningsTime, peerEarnings]);
+
+  if (allEntries.length === 0) return null;
+
+  return (
+    <div className="space-y-1">
+      <FundSectionHeader label="Upcoming Earnings" />
+      <div className="rounded border border-slate-700/40 bg-slate-900/25 p-2 space-y-0.5">
+        {allEntries.map((e) => {
+          const isToday = e.nextEarningsDays === 0;
+          const isUrgent = e.nextEarningsDays <= 2;
+          const isWarning = e.nextEarningsDays <= 7;
+          const isCurrent = e.symbol === currentSymbol;
+
+          return (
+            <div
+              key={e.symbol}
+              className={cn(
+                "flex items-center gap-2 text-[0.85em] leading-snug",
+                isCurrent && "font-medium"
+              )}
+            >
+              <span
+                className={cn(
+                  "font-mono w-12 shrink-0",
+                  isCurrent ? "text-sky-300" : "text-slate-300"
+                )}
+              >
+                {e.symbol}
+              </span>
+              <span className="text-slate-400 w-16 shrink-0">
+                {e.nextEarningsDate ? formatEarningsDateShort(e.nextEarningsDate) : "—"}
+              </span>
+              {isToday ? (
+                <span className="text-[0.85em] font-bold px-1.5 py-px rounded bg-red-900/40 text-red-300 border border-red-700/40">
+                  TODAY
+                </span>
+              ) : (
+                <span
+                  className={cn(
+                    "text-[0.85em] font-medium",
+                    isUrgent
+                      ? "text-red-400"
+                      : isWarning
+                        ? "text-amber-400"
+                        : "text-slate-500"
+                  )}
+                >
+                  ({e.nextEarningsDays}d)
+                </span>
+              )}
+              {e.earningsTime && (
+                <span className="text-slate-500 text-[0.85em] uppercase">
+                  {e.earningsTime}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function SetupInfoPanel({
   symbol,
   scanRow,
@@ -664,6 +801,7 @@ export function SetupInfoPanel({
 
   const sym = symbol.toUpperCase();
   const enrichResultRef = useRef<HTMLDivElement | null>(null);
+  const autoEnrichedSymbolsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setHelpful(null);
@@ -747,6 +885,19 @@ export function SetupInfoPanel({
       toast,
     ]
   );
+
+  // Auto-trigger enrichment when AI tab is selected with no cached result
+  useEffect(() => {
+    if (activeTab !== "ai") return;
+    if (enrichEntry) return;
+    if (!chartsReady) return;
+    if (enriching) return;
+    if (!sym) return;
+    if (autoEnrichedSymbolsRef.current.has(sym)) return;
+
+    autoEnrichedSymbolsRef.current.add(sym);
+    void runEnrich(false);
+  }, [activeTab, enrichEntry, chartsReady, enriching, sym, runEnrich]);
 
   const sendFeedback = useCallback(
     async (opts: {
@@ -937,7 +1088,7 @@ export function SetupInfoPanel({
             className="flex-1 min-h-0 overflow-y-auto text-left pr-0.5"
             style={{ fontSize: contentFontPx }}
           >
-            <FundamentalsTabContent metrics={chartMetrics} />
+            <FundamentalsTabContent metrics={chartMetrics} symbol={sym} />
           </div>
         )}
 

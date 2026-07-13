@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useMemo, useCallback, Component } from "react";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { cn } from "@/lib/utils";
-import { FlaskConical, RefreshCw, ChevronRight, X, TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
+import { FlaskConical, RefreshCw, ChevronRight, X, TrendingUp, TrendingDown, Minus, Activity, Sparkles, ChevronDown, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DiscoveryCard } from "@/components/scanner/DiscoveryCard";
 import { scannerPx, loadScannerFontOffset, saveScannerFontOffset } from "@/components/scanner/scanner-font-prefs";
@@ -194,6 +194,14 @@ function SignalWorkbenchInner() {
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [scannerConfig, setScannerConfig] = useState<ScannerConfig | null>(null);
 
+  // AI Lab state
+  const [aiLabExpanded, setAiLabExpanded] = useState(false);
+  const [aiMode, setAiMode] = useState<"idle" | "analyzing" | "asking">("idle");
+  const [aiResponse, setAiResponse] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [userQuestion, setUserQuestion] = useState("");
+  const [showQuestionInput, setShowQuestionInput] = useState(false);
+
   // Fetch live scanner config for tooltip thresholds
   useEffect(() => {
     fetch("/api/scanner/config").then(r => r.ok ? r.json() : null).then(d => {
@@ -272,6 +280,69 @@ function SignalWorkbenchInner() {
     }
     return sorted;
   }, [cards, sortMode]);
+
+  const handleAiAnalyze = useCallback(async () => {
+    setAiLoading(true);
+    setAiMode("analyzing");
+    setAiResponse(null);
+    setShowQuestionInput(false);
+    try {
+      const res = await fetch("/api/scanner/workbench/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "analyze",
+          stats,
+          cards: (sortedCards.length > 0 ? sortedCards : cards).slice(0, 200),
+          window,
+          hitThreshold,
+          dateRange: { from: fromDate, to: toDate },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAiResponse(data.analysis);
+      } else {
+        setAiResponse(`Error: ${data.error ?? "Analysis failed"}`);
+      }
+    } catch {
+      setAiResponse("Error: Failed to connect to AI service");
+    }
+    setAiLoading(false);
+    setAiMode("idle");
+  }, [stats, cards, sortedCards, window, hitThreshold, fromDate, toDate]);
+
+  const handleAiQuestion = useCallback(async () => {
+    if (!userQuestion.trim()) return;
+    setAiLoading(true);
+    setAiMode("asking");
+    setAiResponse(null);
+    try {
+      const res = await fetch("/api/scanner/workbench/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "question",
+          question: userQuestion.trim(),
+          stats,
+          cards: (sortedCards.length > 0 ? sortedCards : cards).slice(0, 200),
+          window,
+          hitThreshold,
+          dateRange: { from: fromDate, to: toDate },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAiResponse(data.analysis);
+      } else {
+        setAiResponse(`Error: ${data.error ?? "Analysis failed"}`);
+      }
+    } catch {
+      setAiResponse("Error: Failed to connect to AI service");
+    }
+    setAiLoading(false);
+    setAiMode("idle");
+  }, [userQuestion, stats, cards, sortedCards, window, hitThreshold, fromDate, toDate]);
 
   return (
     <div className="flex flex-col h-dvh min-h-0" style={{ backgroundColor: cssVariables.mainBg, color: cssVariables.primaryText }}>
@@ -493,6 +564,113 @@ function SignalWorkbenchInner() {
             </>
           )}
         </div>
+      </div>
+
+      {/* ── AI Lab Section ──────────────────────────────────────────────── */}
+      <div
+        className="shrink-0 border-t"
+        style={{ borderColor: cssVariables.borderOnSecondary }}
+      >
+        <button
+          type="button"
+          onClick={() => setAiLabExpanded(e => !e)}
+          className="flex items-center gap-2 w-full px-4 py-2 text-left hover:bg-slate-800/30 transition-colors"
+        >
+          <Sparkles className="h-4 w-4 text-purple-400" />
+          <span className="text-sm font-bold uppercase tracking-wide" style={{ color: "rgb(125,211,252)" }}>
+            AI Lab
+          </span>
+          <ChevronDown className={cn("h-4 w-4 transition-transform", !aiLabExpanded && "-rotate-90")} style={{ color: cssVariables.textSmall }} />
+          {aiLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-400 ml-auto" />}
+        </button>
+
+        {aiLabExpanded && (
+          <div className="px-4 pb-3 space-y-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20 border border-purple-700/30"
+                onClick={handleAiAnalyze}
+                disabled={aiLoading || stats.length === 0}
+                style={{ fontSize: scannerPx("small", fo) }}
+              >
+                {aiLoading && aiMode === "analyzing" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                Analyze Performance
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-7 gap-1.5 border border-slate-700/40",
+                  showQuestionInput ? "text-cyan-400 bg-cyan-950/20 border-cyan-700/30" : "text-slate-400 hover:text-slate-200"
+                )}
+                onClick={() => setShowQuestionInput(q => !q)}
+                style={{ fontSize: scannerPx("small", fo) }}
+              >
+                <Send className="h-3 w-3" />
+                Ask a Question
+              </Button>
+              {stats.length === 0 && (
+                <span className="text-[11px] text-slate-500">Load signal data first</span>
+              )}
+            </div>
+
+            {showQuestionInput && (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={userQuestion}
+                  onChange={e => setUserQuestion(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !aiLoading) handleAiQuestion(); }}
+                  placeholder="e.g., Which signals have the best follow-through? Are LOD bounces worth trading?"
+                  className="flex-1 h-8 rounded border border-slate-700/60 bg-slate-900/80 px-3 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-700/50"
+                  style={{ fontSize: scannerPx("small", fo) }}
+                  disabled={aiLoading}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-3 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20 border border-purple-700/30"
+                  onClick={handleAiQuestion}
+                  disabled={aiLoading || !userQuestion.trim()}
+                >
+                  {aiLoading && aiMode === "asking" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                </Button>
+              </div>
+            )}
+
+            {(aiLoading || aiResponse) && (
+              <div
+                className="rounded border p-3 max-h-[300px] overflow-y-auto"
+                style={{
+                  borderColor: aiResponse?.startsWith("Error:") ? "rgba(239,68,68,0.3)" : "rgba(168,85,247,0.3)",
+                  backgroundColor: aiResponse?.startsWith("Error:") ? "rgba(239,68,68,0.05)" : "rgba(168,85,247,0.05)",
+                }}
+              >
+                {aiLoading && !aiResponse && (
+                  <div className="flex items-center gap-2 py-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-purple-400" />
+                    <span style={{ color: cssVariables.textSmall, fontSize: scannerPx("small", fo) }}>
+                      {aiMode === "analyzing" ? "Analyzing signal performance..." : "Thinking..."}
+                    </span>
+                  </div>
+                )}
+                {aiResponse && (
+                  <pre
+                    className="whitespace-pre-wrap font-sans leading-relaxed"
+                    style={{
+                      color: aiResponse.startsWith("Error:") ? "rgb(248,113,113)" : cssVariables.primaryText,
+                      fontSize: scannerPx("small", fo),
+                    }}
+                  >
+                    {aiResponse}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

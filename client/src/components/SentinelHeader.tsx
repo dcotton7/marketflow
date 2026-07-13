@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
@@ -317,7 +317,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
           </div>
         </Link>
         
-        <nav className={`flex items-center ${responsive.isCompact ? "gap-0" : "gap-1"}`}>
+        <nav className={`flex items-center flex-shrink min-w-0 flex-wrap ${responsive.isCompact ? "gap-0" : "gap-1"}`}>
           {/* Primary nav — always visible */}
           <Link href="/sentinel/start-here">
             <Button
@@ -364,8 +364,8 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
           </Button>
           <ScannerNavButton />
 
-          {/* Secondary nav — visible on wide screens, collapsed into dropdown on compact */}
-          {!responsive.collapseNav ? (
+          {/* Secondary nav — visible on wide screens, collapsed into dropdown when narrow or manually collapsed */}
+          {!responsive.navCollapsed ? (
             <>
               <Link href="/sentinel/bigidea">
                 <Button 
@@ -501,12 +501,34 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             </DropdownMenu>
           )}
         </nav>
+
+        {/* Collapse/Restore toggle — outside nav so it's never clipped */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 shrink-0 opacity-40 hover:opacity-100 transition-opacity"
+              onClick={responsive.toggleNavCollapse}
+              data-testid="nav-collapse-toggle"
+            >
+              {responsive.navCollapsed ? (
+                <PanelLeftOpen className="w-4 h-4" />
+              ) : (
+                <PanelLeftClose className="w-4 h-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {responsive.navCollapsed ? "Restore Menu" : "Collapse Menu"}
+          </TooltipContent>
+        </Tooltip>
         
-        {!responsive.collapseNav && <MarketTimeDisplay />}
+        {!responsive.navCollapsed && <MarketTimeDisplay />}
       </div>
 
       <div className="flex items-center gap-4 shrink-0">
-      {showSentiment && (
+      {showSentiment && !responsive.navCollapsed && (
         <div className="flex items-center gap-4" data-testid="container-market-sentiment">
           {isLoading ? (
             <div className="flex items-center gap-2" style={{ color: cssVariables.textColorSmall, fontSize: cssVariables.fontSizeSmall }}>
