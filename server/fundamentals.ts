@@ -9,6 +9,14 @@ const FMP_API_KEY = process.env.FMP_API_KEY;
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 const FMP_BATCH_CHUNK = 100; // symbols per batch request to avoid URL length limits
 
+/** Evict oldest entries from a ts-keyed cache Map when it exceeds maxSize. */
+function pruneMapCache<V extends { ts: number }>(cache: Map<string, V>, maxSize: number): void {
+  if (cache.size <= maxSize) return;
+  const sorted = [...cache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+  const toRemove = sorted.slice(0, cache.size - maxSize);
+  for (const [k] of toRemove) cache.delete(k);
+}
+
 export interface FundamentalData {
   sector: string;
   industry: string;
@@ -658,6 +666,7 @@ export interface QuarterlyEarning {
 }
 
 const earningsHistoryCache = new Map<string, { data: QuarterlyEarning[]; ts: number }>();
+const MAX_EARNINGS_HISTORY_CACHE = 200;
 
 function formatQuarterLabel(dateStr: string): string {
   const d = new Date(dateStr);
@@ -698,6 +707,7 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
               revenueActual: e.revenue,
               revenueEstimate: e.revenueEstimated,
             }));
+            pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
             earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
             return result;
           }
@@ -725,6 +735,7 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
         revenueActual: null,
         revenueEstimate: null,
       }));
+      pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
       earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
       return result;
     }
@@ -732,6 +743,7 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
     console.warn(`[Finnhub] Earnings history fallback failed for ${upper}:`, err);
   }
 
+  pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
   earningsHistoryCache.set(upper, { data: [], ts: Date.now() });
   return [];
 }
@@ -1044,6 +1056,7 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
 
 const fmpPeersCache = new Map<string, { data: { symbol: string; name: string; industry: string; marketCap: number }[]; ts: number }>();
 const FMP_PEERS_CACHE_TTL = 12 * 60 * 60 * 1000;
+const MAX_PEERS_CACHE = 50;
 
 export async function fetchIndustryPeersFromFMP(industry: string, sector: string, excludeSymbol: string, limit: number = 20): Promise<{ symbol: string; name: string; industry: string; marketCap: number }[]> {
   if (!FMP_API_KEY) return [];
@@ -1072,6 +1085,7 @@ export async function fetchIndustryPeersFromFMP(industry: string, sector: string
       }))
       .sort((a: { marketCap: number }, b: { marketCap: number }) => b.marketCap - a.marketCap);
 
+    pruneMapCache(fmpPeersCache, MAX_PEERS_CACHE);
     fmpPeersCache.set(cacheKey, { data: peers, ts: Date.now() });
     return peers.filter(s => s.symbol !== excludeSymbol).slice(0, limit);
   } catch (err) {

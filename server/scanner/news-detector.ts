@@ -18,6 +18,10 @@ const MIN_SEVERITY_TO_FIRE = 3;
 const BATCH_SIZE = 20;
 const COOLDOWN_MS = 60 * 60_000;
 
+const MAX_SEEN_HEADLINES = 2000;
+const MAX_SEEN_GLOBAL = 1000;
+const MAX_COOLDOWNS = 500;
+
 let rotationIndex = 0;
 const seenHeadlines = new Map<string, number>();
 const cooldowns = new Map<string, number>();
@@ -44,6 +48,26 @@ function pruneSeenHeadlines(): void {
   }
   for (const [k, ts] of seenGlobalHeadlines) {
     if (ts < cutoff) seenGlobalHeadlines.delete(k);
+  }
+  for (const [k, ts] of cooldowns) {
+    if (ts < cutoff) cooldowns.delete(k);
+  }
+
+  // Hard cap: evict oldest entries if still over limit
+  if (seenHeadlines.size > MAX_SEEN_HEADLINES) {
+    const sorted = [...seenHeadlines.entries()].sort((a, b) => a[1] - b[1]);
+    const toRemove = sorted.slice(0, seenHeadlines.size - MAX_SEEN_HEADLINES);
+    for (const [k] of toRemove) seenHeadlines.delete(k);
+  }
+  if (seenGlobalHeadlines.size > MAX_SEEN_GLOBAL) {
+    const sorted = [...seenGlobalHeadlines.entries()].sort((a, b) => a[1] - b[1]);
+    const toRemove = sorted.slice(0, seenGlobalHeadlines.size - MAX_SEEN_GLOBAL);
+    for (const [k] of toRemove) seenGlobalHeadlines.delete(k);
+  }
+  if (cooldowns.size > MAX_COOLDOWNS) {
+    const sorted = [...cooldowns.entries()].sort((a, b) => a[1] - b[1]);
+    const toRemove = sorted.slice(0, cooldowns.size - MAX_COOLDOWNS);
+    for (const [k] of toRemove) cooldowns.delete(k);
   }
 }
 

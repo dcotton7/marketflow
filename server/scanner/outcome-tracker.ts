@@ -12,8 +12,8 @@ import { eq, and, isNull, sql, inArray, notInArray, gte, lt } from "drizzle-orm"
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
 
-const INTERVAL_MS = 2 * 60_000; // 2 min — faster for initial backlog processing
-const BATCH_SIZE = 400;
+const INTERVAL_MS = 3 * 60_000; // 3 min
+const BATCH_SIZE = 150;
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
 
@@ -142,7 +142,7 @@ async function processOutcomes(): Promise<void> {
 
     // Round-robin fetch: get up to PER_TYPE_LIMIT from each signal type
     // so no single type (e.g., ma_proximity with 6000+) starves others
-    const PER_TYPE_LIMIT = 60;
+    const PER_TYPE_LIMIT = 25;
 
     const allPending = await db
       .select()
@@ -155,7 +155,7 @@ async function processOutcomes(): Promise<void> {
         )
       )
       .orderBy(sql`id DESC`)
-      .limit(5000);
+      .limit(1000);
 
     // Group by signal type, take PER_TYPE_LIMIT from each, prioritizing never-processed
     const byType = new Map<string, typeof allPending>();

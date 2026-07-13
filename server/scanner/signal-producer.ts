@@ -60,7 +60,7 @@ export interface SnapshotFrame {
 
 // ── Ring buffer ─────────────────────────────────────────────────────────────
 
-const BUFFER_SIZE = 40; // ~20 minutes at 30s intervals, supports 20-frame lookback with margin
+const BUFFER_SIZE = 20; // ~10 minutes at 30s intervals
 const ringBuffer: SnapshotFrame[] = [];
 
 export function pushFrame(frame: SnapshotFrame): void {
@@ -100,6 +100,95 @@ export function pruneCooldowns(): void {
   const cutoff = Date.now() - 30 * 60_000;
   for (const [key, ts] of cooldowns) {
     if (ts < cutoff) cooldowns.delete(key);
+  }
+}
+
+const TRACKER_MAX_ENTRIES = 500;
+const TRACKER_PRUNE_AGE_MS = 60 * 60_000; // 1 hour
+
+/** Prune all secondary tracker Maps to prevent unbounded growth. */
+export function pruneTrackers(): void {
+  const now = Date.now();
+  const cutoff = now - TRACKER_PRUNE_AGE_MS;
+
+  for (const [key, ts] of recentlyAboveLevel) {
+    if (ts < cutoff) recentlyAboveLevel.delete(key);
+  }
+  if (recentlyAboveLevel.size > TRACKER_MAX_ENTRIES) {
+    const excess = recentlyAboveLevel.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of recentlyAboveLevel.keys()) {
+      if (removed >= excess) break;
+      recentlyAboveLevel.delete(key);
+      removed++;
+    }
+  }
+
+  // Cap maPositionHistory
+  if (maPositionHistory.size > TRACKER_MAX_ENTRIES) {
+    const excess = maPositionHistory.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of maPositionHistory.keys()) {
+      if (removed >= excess) break;
+      maPositionHistory.delete(key);
+      removed++;
+    }
+  }
+
+  // Cap pendingBreaks
+  if (pendingBreaks.size > TRACKER_MAX_ENTRIES) {
+    const excess = pendingBreaks.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of pendingBreaks.keys()) {
+      if (removed >= excess) break;
+      pendingBreaks.delete(key);
+      removed++;
+    }
+  }
+
+  // Cap lastAboveBreakLevel
+  if (lastAboveBreakLevel.size > TRACKER_MAX_ENTRIES) {
+    const excess = lastAboveBreakLevel.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of lastAboveBreakLevel.keys()) {
+      if (removed >= excess) break;
+      lastAboveBreakLevel.delete(key);
+      removed++;
+    }
+  }
+
+  // Cap hodFrameTracker
+  if (hodFrameTracker.size > TRACKER_MAX_ENTRIES) {
+    const excess = hodFrameTracker.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of hodFrameTracker.keys()) {
+      if (removed >= excess) break;
+      hodFrameTracker.delete(key);
+      removed++;
+    }
+  }
+
+  // Cap fiveDayHighLow
+  if (fiveDayHighLow.size > TRACKER_MAX_ENTRIES) {
+    const excess = fiveDayHighLow.size - TRACKER_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of fiveDayHighLow.keys()) {
+      if (removed >= excess) break;
+      fiveDayHighLow.delete(key);
+      removed++;
+    }
+  }
+
+  // Daily session maps: clear if date has changed
+  const today = new Date().toISOString().slice(0, 10);
+  for (const [sym, date] of gapFiredForSession) {
+    if (date !== today) gapFiredForSession.delete(sym);
+  }
+  for (const [sym, date] of earningsReactionFiredToday) {
+    if (date !== today) earningsReactionFiredToday.delete(sym);
+  }
+  for (const [sym, date] of earningsDensityFiredToday) {
+    if (date !== today) earningsDensityFiredToday.delete(sym);
   }
 }
 
@@ -1045,7 +1134,10 @@ export async function processSnapshot(frame: SnapshotFrame, session?: MarketSess
     signals.push(...earningsReactions, ...earningsDensity);
   }
 
-  if (ringBuffer.length % 60 === 0) pruneCooldowns();
+  if (ringBuffer.length % 60 === 0) {
+    pruneCooldowns();
+    pruneTrackers();
+  }
 
   if (signals.length > 0) {
     console.log(`[Scanner] Emitted ${signals.length} signal(s) [${session ?? "unknown"}]: ${signals.map(s => `${s.type}:${s.subject}`).join(", ")}`);

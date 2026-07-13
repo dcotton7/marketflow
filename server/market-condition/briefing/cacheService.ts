@@ -12,6 +12,7 @@ interface CacheEntry {
 }
 
 const briefingCache = new Map<string, CacheEntry>();
+const MAX_BRIEFING_CACHE = 10;
 
 export function getBriefingCacheKey(mode: BriefingMode, referenceSession: string): string {
   return `${mode}:${referenceSession}`;
@@ -66,6 +67,14 @@ export function getCachedBriefing(key: string): CacheEntry | null {
 }
 
 export function setCachedBriefing(key: string, response: ThemeBriefingResponse): void {
+  if (briefingCache.size >= MAX_BRIEFING_CACHE) {
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [k, v] of briefingCache) {
+      if (v.cachedAt < oldestTime) { oldestTime = v.cachedAt; oldestKey = k; }
+    }
+    if (oldestKey) briefingCache.delete(oldestKey);
+  }
   briefingCache.set(key, { response, cachedAt: Date.now() });
 }
 
