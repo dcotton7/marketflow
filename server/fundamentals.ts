@@ -714,7 +714,7 @@ export interface QuarterlyEarning {
 }
 
 const earningsHistoryCache = new Map<string, { data: QuarterlyEarning[]; ts: number }>();
-const MAX_EARNINGS_HISTORY_CACHE = 200;
+const MAX_EARNINGS_HISTORY_CACHE = 50;
 
 function formatQuarterLabel(dateStr: string): string {
   const d = new Date(dateStr);

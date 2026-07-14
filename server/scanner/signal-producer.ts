@@ -60,7 +60,7 @@ export interface SnapshotFrame {
 
 // ── Ring buffer ─────────────────────────────────────────────────────────────
 
-const BUFFER_SIZE = 20; // ~10 minutes at 30s intervals
+const BUFFER_SIZE = 10; // ~5 minutes at 30s intervals (reduced from 20 to save memory)
 const ringBuffer: SnapshotFrame[] = [];
 
 export function pushFrame(frame: SnapshotFrame): void {

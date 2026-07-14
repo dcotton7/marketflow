@@ -47,7 +47,7 @@ async function alpacaFetch(url: string): Promise<any> {
 }
 
 /** Cap in-memory historical bar cache keys (symbol+days); avoids unbounded Map growth on Render. */
-const DEFAULT_HISTORICAL_CACHE_MAX_KEYS = 400;
+const DEFAULT_HISTORICAL_CACHE_MAX_KEYS = 50;
 
 function getHistoricalCacheMaxKeys(): number {
   const raw = process.env.MC_ALPACA_HISTORICAL_CACHE_MAX;

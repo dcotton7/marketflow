@@ -27,7 +27,7 @@ function getOpenAI(): OpenAI | null {
 }
 
 const ohlcvCache = new Map<string, { data: CandleData[]; timestamp: number }>();
-const OHLCV_MAX_ENTRIES = 80;
+const OHLCV_MAX_ENTRIES = 20;
 const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
 

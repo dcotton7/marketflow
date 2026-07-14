@@ -37,7 +37,7 @@ interface IntradayCacheValue {
 }
 
 const intradayCache = new Map<string, IntradayCacheValue>();
-const MAX_CACHE_ENTRIES = 150;
+const MAX_CACHE_ENTRIES = 30;
 
 function getTTLMs(): number {
   const session = getMarketSession();

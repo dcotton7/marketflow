@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
-    "start": "cross-env NODE_ENV=production node --max-old-space-size=1400 dist/index.cjs",
+    "start": "cross-env NODE_ENV=production node --max-old-space-size=1024 dist/index.cjs",
     "check": "tsc",
     "test:start-here-smoke": "tsx client/src/components/start-here/dashboard-persistence.smoke.test.ts && tsx client/src/components/MiniChart.entry-line.smoke.test.ts",
     "db:push": "drizzle-kit push",

@@ -23,7 +23,7 @@ interface CacheEntry {
   timestamp: number;
 }
 const stockHistoryCache = new Map<string, CacheEntry>();
-const STOCK_HISTORY_MAX_ENTRIES = 100;
+const STOCK_HISTORY_MAX_ENTRIES = 30;
 const INTRADAY_CACHE_TTL_MS = 45 * 1000;  // 45s — under 60s client refetch so each poll gets fresh bars
 const DAILY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes for daily/weekly/monthly
 

@@ -9,7 +9,7 @@
  * Also provides periodic memory logging and a health endpoint payload.
  */
 
-const HEAP_LIMIT_MB = parseInt(process.env.HEAP_LIMIT_MB || "1400", 10);
+const HEAP_LIMIT_MB = parseInt(process.env.HEAP_LIMIT_MB || "1024", 10);
 const PRESSURE_THRESHOLD = 0.70; // 70% of heap limit = pressure
 
 let memoryLogInterval: ReturnType<typeof setInterval> | null = null;
