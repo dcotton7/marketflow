@@ -91,7 +91,7 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   volumeSpikeCooldownMin: 5,
 
   velocityThresholdPct: 2.0,
-  velocityWindowFrames: 20,
+  velocityWindowFrames: 8,
   velocityCooldownMin: 5,
 
   adrBlowoutThreshold: 2.5,
@@ -101,14 +101,14 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   gapCooldownMin: 240,
 
   breadthShiftThreshold: 0.25,
-  breadthShiftWindowFrames: 20,
+  breadthShiftWindowFrames: 8,
   breadthShiftCooldownMin: 15,
 
   themeAccelThreshold: 6.0,
   themeAccelCooldownMin: 10,
 
   raiShiftThreshold: 5,
-  raiShiftWindowFrames: 20,
+  raiShiftWindowFrames: 8,
   raiShiftCooldownMin: 10,
 
   broadMoveThemeCount: 8,
