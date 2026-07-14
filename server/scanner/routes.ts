@@ -24,7 +24,7 @@ import { getSessionPatternsForApi } from "./session-patterns";
 import { getMaDataForScanner } from "../market-condition/engine/snapshot";
 import { getDailyBarRefreshStatus, isDailyBarApiHealthy } from "../data-layer/daily-bar-refresh";
 import { getScannerPicks } from "./reactions/watchlist-add";
-import { getHeatScores } from "./reactions/score-update";
+// heat map disabled — no frontend consumer
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
 import { desc, eq, and, gte, lte, sql, isNull, isNotNull } from "drizzle-orm";
@@ -337,14 +337,6 @@ router.get("/debug/ma", (_req: Request, res: Response) => {
 router.get("/picks", (_req: Request, res: Response) => {
   const picks = getScannerPicks();
   res.json({ picks, total: picks.length, date: new Date().toISOString().slice(0, 10) });
-});
-
-// ── GET /heat-scores — per-ticker accumulated heat with decay ────────────────
-
-router.get("/heat-scores", (_req: Request, res: Response) => {
-  const limit = Math.min(100, parseInt(String(_req.query.limit) || "50", 10));
-  const scores = getHeatScores(limit);
-  res.json({ scores, total: scores.length });
 });
 
 // ── Workbench: GET /workbench/hit-rates — aggregated signal hit rate data ─────

@@ -12,7 +12,7 @@ import { autoMapTickerToCluster } from "../market-condition/universe";
 const FMP_API_KEY = process.env.FMP_API_KEY ?? "";
 const FMP_BASE = "https://financialmodelingprep.com/stable";
 
-const POLL_INTERVAL_MS = 30 * 60_000; // 30 minutes
+const POLL_INTERVAL_MS = 24 * 60 * 60_000; // once per day
 const COOLDOWN_MS = 24 * 60 * 60_000; // 24 hours per symbol
 const PRUNE_AFTER_MS = 7 * 24 * 60 * 60_000; // 7 days
 
@@ -194,10 +194,10 @@ export function startIpoDetector(
     }
   };
 
-  // Initial poll after short delay
-  setTimeout(poll, 10_000);
+  // Run once on startup (after short delay), then once per day
+  setTimeout(poll, 30_000);
   intervalHandle = setInterval(poll, POLL_INTERVAL_MS);
-  console.log("[IPO Detector] Started — polling every 30 minutes");
+  console.log("[IPO Detector] Started — runs once per day");
 }
 
 export function stopIpoDetector(): void {

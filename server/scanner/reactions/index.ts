@@ -6,7 +6,7 @@
 import type { EnrichedSignal, DiscoveryCard, ReactionId } from "@shared/scanner-types";
 import { buildDiscoveryCard } from "./discovery-brief";
 import { processWatchlistAdd } from "./watchlist-add";
-import { processScoreUpdate } from "./score-update";
+// heat map accumulator disabled — no frontend consumer, leaked memory
 
 /**
  * Run reactions for an enriched signal.
@@ -24,7 +24,6 @@ export async function executeReactions(
     }
 
     processWatchlistAdd(es);
-    processScoreUpdate(es);
   }
 
   return cards;

@@ -253,7 +253,7 @@ function SignalWorkbenchInner() {
   }, [fromDate, toDate, statusFilter]);
 
   useEffect(() => {
-    document.title = "Signal Workbench";
+    document.title = "Signals Lab";
     fetchHitRates();
   }, [fetchHitRates]);
 
@@ -353,7 +353,7 @@ function SignalWorkbenchInner() {
       >
         <div className="flex items-center gap-2">
           <FlaskConical className="h-5 w-5 text-purple-400" />
-          <h1 className="font-bold text-base" style={{ color: cssVariables.textTitle }}>Signal Workbench</h1>
+          <h1 className="font-bold text-base" style={{ color: cssVariables.textTitle }}>Signals Lab</h1>
           <span className="text-xs px-2 py-0.5 rounded bg-purple-900/30 text-purple-300 font-medium">V2 — MFE/MAE</span>
         </div>
 

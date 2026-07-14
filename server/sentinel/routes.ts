@@ -11,7 +11,7 @@ import { clearLoginFailures, isLoginRateLimited, recordLoginFailure } from "../m
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
-import { startMonitoring } from "./monitor";
+// monitor.ts removed — was a stub that only console.logged active trades
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
 import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
@@ -8497,7 +8497,6 @@ Be concise and actionable.`;
 
   registerChartSetupEnrichRoutes(app, requireAuth);
 
-  startMonitoring(60000);
 }
 
 // Helper to parse CSV row handling quoted fields with commas
