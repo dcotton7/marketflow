@@ -249,6 +249,9 @@ router.get("/ticker-theme/:symbol", async (req: Request, res: Response) => {
       totalThemes: sorted.length,
       score: sorted[idx]?.score ?? null,
       medianPct: sorted[idx]?.medianPct ?? null,
+      breadthPct: sorted[idx]?.breadthPct ?? null,
+      rsVsBenchmark: sorted[idx]?.rsVsBenchmark ?? null,
+      acceleration: sorted[idx]?.acceleration ?? null,
     });
   } catch (error) {
     console.error("[MC-API] Failed to get ticker theme:", error);

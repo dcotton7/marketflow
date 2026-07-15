@@ -15,8 +15,19 @@ export interface SetupQualityInputs {
   extensionFrom20d: number | null | undefined;
   /** % above today's low */
   pctFromLod: number | null | undefined;
+  /** Relative: where this theme finishes vs other themes */
   themeRank: number | null | undefined;
   totalThemes: number | null | undefined;
+  /** Absolute ThemeScore 0–100 (independent of place finish) */
+  themeScore: number | null | undefined;
+  /** Theme median member % change today */
+  themeMedianPct: number | null | undefined;
+  /** % of theme members green */
+  themeBreadthPct: number | null | undefined;
+  /** Theme RS vs benchmark */
+  themeRsVsBenchmark: number | null | undefined;
+  /** Theme acceleration */
+  themeAcceleration: number | null | undefined;
   /** true = price > last VWAP; false = below; null = unknown */
   overVwap: boolean | null | undefined;
   rsMomentum: number | null | undefined;
@@ -42,17 +53,77 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-function themePoints(
+/**
+ * Theme rank (~40% of theme budget): competitive place finish.
+ * Mid-pack themes stay near zero so strength can still carry the long.
+ */
+function themeRankPoints(
   rank: number | null | undefined,
   total: number | null | undefined
 ): { points: number; detail: string } | null {
   if (rank == null || total == null || total <= 0) return null;
-  const pctile = rank / total; // 1 = best rank
-  // Theme is weighted 2x vs other single factors (plan base was ±15 / ±8)
-  if (pctile <= 0.2) return { points: 30, detail: `Theme #${rank}/${total} (top 20%)` };
-  if (pctile <= 0.5) return { points: 16, detail: `Theme #${rank}/${total} (top half)` };
-  if (pctile <= 0.8) return { points: -16, detail: `Theme #${rank}/${total} (bottom half)` };
-  return { points: -30, detail: `Theme #${rank}/${total} (bottom 20%)` };
+  const pctile = rank / total;
+  if (pctile <= 0.2) return { points: 12, detail: `Theme rank #${rank}/${total} (top 20%)` };
+  if (pctile <= 0.5) return { points: 6, detail: `Theme rank #${rank}/${total} (top half)` };
+  if (pctile <= 0.8) return { points: -6, detail: `Theme rank #${rank}/${total} (bottom half)` };
+  return { points: -12, detail: `Theme rank #${rank}/${total} (bottom 20%)` };
+}
+
+/**
+ * Theme strength (~60% of theme budget): absolute health, "all ships rise".
+ * Mid-rank themes with score/breadth/RS can still add long points.
+ */
+function themeStrengthPoints(input: {
+  themeScore: number | null | undefined;
+  themeMedianPct: number | null | undefined;
+  themeBreadthPct: number | null | undefined;
+  themeRsVsBenchmark: number | null | undefined;
+  themeAcceleration: number | null | undefined;
+}): { points: number; detail: string } | null {
+  let points = 0;
+  const parts: string[] = [];
+
+  if (input.themeScore != null && Number.isFinite(input.themeScore)) {
+    const s = input.themeScore;
+    if (s >= 65) { points += 10; parts.push(`score ${s.toFixed(0)} strong`); }
+    else if (s >= 55) { points += 6; parts.push(`score ${s.toFixed(0)} firm`); }
+    else if (s >= 45) { parts.push(`score ${s.toFixed(0)} neutral`); }
+    else if (s >= 35) { points -= 6; parts.push(`score ${s.toFixed(0)} soft`); }
+    else { points -= 10; parts.push(`score ${s.toFixed(0)} weak`); }
+  }
+
+  if (input.themeMedianPct != null && Number.isFinite(input.themeMedianPct)) {
+    const m = input.themeMedianPct;
+    if (m > 0.5) { points += 4; parts.push(`median +${m.toFixed(1)}%`); }
+    else if (m > 0) { points += 2; parts.push(`median +${m.toFixed(1)}%`); }
+    else if (m < -0.5) { points -= 4; parts.push(`median ${m.toFixed(1)}%`); }
+    else if (m < 0) { points -= 2; parts.push(`median ${m.toFixed(1)}%`); }
+  }
+
+  if (input.themeBreadthPct != null && Number.isFinite(input.themeBreadthPct)) {
+    const b = input.themeBreadthPct;
+    if (b >= 70) { points += 4; parts.push(`breadth ${b.toFixed(0)}%`); }
+    else if (b < 50) { points -= 4; parts.push(`breadth ${b.toFixed(0)}%`); }
+  }
+
+  if (input.themeRsVsBenchmark != null && Number.isFinite(input.themeRsVsBenchmark)) {
+    const rs = input.themeRsVsBenchmark;
+    if (rs > 0.5) { points += 3; parts.push(`theme RS +${rs.toFixed(1)}`); }
+    else if (rs < -0.5) { points -= 3; parts.push(`theme RS ${rs.toFixed(1)}`); }
+  }
+
+  if (input.themeAcceleration != null && Number.isFinite(input.themeAcceleration)) {
+    const a = input.themeAcceleration;
+    if (a > 0.5) { points += 3; parts.push("accel+"); }
+    else if (a < -0.5) { points -= 3; parts.push("accel-"); }
+  }
+
+  if (parts.length === 0) return null;
+  const capped = clamp(points, -18, 18);
+  return {
+    points: capped,
+    detail: `Theme strength ${capped >= 0 ? "+" : ""}${capped} (${parts.join(", ")})`,
+  };
 }
 
 function tightTo50dPoints(adrExt: number | null | undefined): { points: number; detail: string } | null {
@@ -136,9 +207,25 @@ export function computeSetupQuality(input: SetupQualityInputs): SetupQualityResu
     factors.push({ id: "lod", label: "% from LOD", points: lod.points, detail: lod.detail });
   }
 
-  const theme = themePoints(input.themeRank, input.totalThemes);
-  if (theme) {
-    factors.push({ id: "theme", label: "Theme", points: theme.points, detail: theme.detail });
+  const themeRank = themeRankPoints(input.themeRank, input.totalThemes);
+  if (themeRank) {
+    factors.push({ id: "theme-rank", label: "Theme rank", points: themeRank.points, detail: themeRank.detail });
+  }
+
+  const themeStrength = themeStrengthPoints({
+    themeScore: input.themeScore,
+    themeMedianPct: input.themeMedianPct,
+    themeBreadthPct: input.themeBreadthPct,
+    themeRsVsBenchmark: input.themeRsVsBenchmark,
+    themeAcceleration: input.themeAcceleration,
+  });
+  if (themeStrength) {
+    factors.push({
+      id: "theme-strength",
+      label: "Theme strength",
+      points: themeStrength.points,
+      detail: themeStrength.detail,
+    });
   }
 
   if (input.overVwap === true) {

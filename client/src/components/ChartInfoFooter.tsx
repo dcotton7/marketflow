@@ -202,27 +202,38 @@ export function ChartInfoFooter({
   const pid = testIdPrefix ? `${testIdPrefix}-` : "";
   const { user } = useSentinelAuth();
 
-  // Self-fetch theme rank when not provided via props
-  const needsThemeLookup = themeRank == null && !!symbol;
+  // Theme lookup for rank display + setup-quality strength inputs
   const { data: tickerThemeData } = useQuery<{
     themeId: string | null;
     themeName: string | null;
     rank: number | null;
     totalThemes: number | null;
+    score?: number | null;
+    medianPct?: number | null;
+    breadthPct?: number | null;
+    rsVsBenchmark?: number | null;
+    acceleration?: number | null;
   }>({
     queryKey: ["/api/market-condition/ticker-theme", symbol],
     queryFn: async () => {
       const res = await fetch(`/api/market-condition/ticker-theme/${symbol}`);
-      if (!res.ok) return { themeId: null, themeName: null, rank: null, totalThemes: null };
+      if (!res.ok) {
+        return { themeId: null, themeName: null, rank: null, totalThemes: null };
+      }
       return res.json();
     },
-    enabled: needsThemeLookup,
+    enabled: !!symbol,
     staleTime: 60_000,
   });
 
   const resolvedThemeRank = themeRank ?? tickerThemeData?.rank ?? null;
   const resolvedThemeName = themeName ?? tickerThemeData?.themeName ?? null;
   const resolvedTotalThemes = totalThemes ?? tickerThemeData?.totalThemes ?? null;
+  const resolvedThemeScore = tickerThemeData?.score ?? null;
+  const resolvedThemeMedianPct = tickerThemeData?.medianPct ?? null;
+  const resolvedThemeBreadthPct = tickerThemeData?.breadthPct ?? null;
+  const resolvedThemeRs = tickerThemeData?.rsVsBenchmark ?? null;
+  const resolvedThemeAccel = tickerThemeData?.acceleration ?? null;
   const [fontPrefs, setFontPrefs] = useState<ChartFooterFontPrefs>(() => loadChartFooterFontPrefs(undefined));
 
   useEffect(() => {
@@ -290,6 +301,11 @@ export function ChartInfoFooter({
       pctFromLod: pctFromLOD,
       themeRank: resolvedThemeRank,
       totalThemes: resolvedTotalThemes,
+      themeScore: resolvedThemeScore,
+      themeMedianPct: resolvedThemeMedianPct,
+      themeBreadthPct: resolvedThemeBreadthPct,
+      themeRsVsBenchmark: resolvedThemeRs,
+      themeAcceleration: resolvedThemeAccel,
       overVwap,
       rsMomentum: chartMetrics.rsMomentum,
       adrPct: chartMetrics.adr14Pct ?? chartMetrics.adr20Pct,
@@ -300,6 +316,11 @@ export function ChartInfoFooter({
     pctFromLOD,
     resolvedThemeRank,
     resolvedTotalThemes,
+    resolvedThemeScore,
+    resolvedThemeMedianPct,
+    resolvedThemeBreadthPct,
+    resolvedThemeRs,
+    resolvedThemeAccel,
   ]);
 
   const rthPct = (() => {
