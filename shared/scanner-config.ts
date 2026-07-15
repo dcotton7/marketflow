@@ -114,7 +114,7 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   broadMoveThemeCount: 8,
   broadMoveCooldownMin: 15,
 
-  lodBounceTier1Pct: 1.5,
+  lodBounceTier1Pct: 1.0,
   lodBounceTier2Pct: 2.0,
   lodBounceMaxAtrExt: 6.0,
   lodBounceCooldownMin: 30,

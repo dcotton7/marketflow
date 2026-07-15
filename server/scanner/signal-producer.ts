@@ -649,7 +649,8 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
     if (pctAboveLod < cfg.lodBounceTier1Pct) continue;
 
     if (Math.abs(tick.extensionFrom20dAdr) > cfg.lodBounceMaxAtrExt) continue;
-    if (tick.sma200d != null && tick.price < tick.sma200d) continue;
+    // Soft structure: below-200d still allowed (shows up in scoring). Hard-blocking
+    // here was discarding real LOD bounces when MA data disagreed across sources.
 
     const volumeRatio = tick.avgVolume14d > 0 ? tick.volume / tick.avgVolume14d : 0;
     // Do not fire (or burn cooldown) until volume is plausibly on pace for the session
@@ -657,6 +658,7 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
 
     const aboveSma20 = tick.sma20d != null && tick.price > tick.sma20d;
     const aboveSma50 = tick.sma50d != null && tick.price > tick.sma50d;
+    const aboveSma200 = tick.sma200d != null ? tick.price > tick.sma200d : null;
     const changePct = tick.changePct;
 
     const { consecutiveUpFrames, bounceBarVolumeRatio } = measureBounceQuality(symbol, current);
@@ -679,6 +681,7 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
           consecutiveUpFrames,
           aboveSma20,
           aboveSma50,
+          aboveSma200,
           changePct: Math.round(changePct * 100) / 100,
           minVolRatio: Math.round(minVolRatio * 100) / 100,
         })

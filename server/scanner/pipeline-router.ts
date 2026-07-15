@@ -220,6 +220,9 @@ function qualifySignal(
 
       if (signal.meta?.aboveSma20) raw += 8;
       if (signal.meta?.aboveSma50) raw += 8;
+      // Prefer bounces that hold above the 200d, but do not require it to qualify
+      if (signal.meta?.aboveSma200 === true) raw += 10;
+      else if (signal.meta?.aboveSma200 === false) raw -= 5;
       const lodScore = capScore(raw);
       return {
         qualified: true,
