@@ -556,8 +556,14 @@ function detectBroadMoves(current: SnapshotFrame, session?: MarketSession): Sign
 
 // ── Intraday trade setup detectors ──────────────────────────────────────────
 
-// Track LOD touch per ticker: the frame index and price when the LOD was last set
-const lodTracker = new Map<string, { lodPrice: number; lodFrame: number }>();
+// Track LOD per ticker + highest price since that LOD (peak of the bounce).
+// Firing only on current-%-above-LOD misses DELL-style spikes (397→412) that pull back.
+const lodTracker = new Map<string, {
+  lodPrice: number;
+  lodFrame: number;
+  maxSinceLod: number;
+  firedPeakPct: number;
+}>();
 
 /**
  * Walk backward through the ring buffer from the LOD frame to count
@@ -633,27 +639,48 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
   const signals: Signal[] = [];
   const minVolRatio = lodBounceMinVolumeRatio();
 
-  // Update LOD tracker: record (or reset) the frame when a new LOD is made
+  // Update LOD tracker + peak price since that LOD
   for (const [symbol, tick] of current.tickers) {
-    if (tick.todayLow <= 0) continue;
+    if (tick.todayLow <= 0 || tick.price <= 0) continue;
     const tracker = lodTracker.get(symbol);
-    if (!tracker || tick.todayLow < tracker.lodPrice) {
-      lodTracker.set(symbol, { lodPrice: tick.todayLow, lodFrame: ringBuffer.length - 1 });
+
+    // New session LOD (lower low) → reset peak tracking
+    if (!tracker || tick.todayLow < tracker.lodPrice - 1e-6) {
+      lodTracker.set(symbol, {
+        lodPrice: tick.todayLow,
+        lodFrame: ringBuffer.length - 1,
+        maxSinceLod: tick.price,
+        firedPeakPct: 0,
+      });
+      continue;
     }
+
+    // Same LOD: raise peak from snapshot prices only.
+    // Never use todayHigh — on dump days that high printed *before* the LOD (DELL ~461).
+    tracker.maxSinceLod = Math.max(tracker.maxSinceLod, tick.price);
   }
 
   for (const [symbol, tick] of current.tickers) {
     if (tick.todayLow <= 0 || tick.price <= 0) continue;
+    const tracker = lodTracker.get(symbol);
+    if (!tracker) continue;
 
-    const pctAboveLod = ((tick.price - tick.todayLow) / tick.todayLow) * 100;
-    if (pctAboveLod < cfg.lodBounceTier1Pct) continue;
+    const lod = tracker.lodPrice;
+    const pctCurrentAboveLod = ((tick.price - lod) / lod) * 100;
+    // Still on / under the low — not a bounce structure
+    if (pctCurrentAboveLod < 0.25) continue;
+
+    const peak = tracker.maxSinceLod;
+    const pctPeakAboveLod = ((peak - lod) / lod) * 100;
+    // Fire on peak excursion off LOD (412 on DELL), not only where price sits now
+    if (pctPeakAboveLod < cfg.lodBounceTier1Pct) continue;
+
+    // Don't re-fire near-identical peaks off the same LOD
+    if (pctPeakAboveLod <= tracker.firedPeakPct + 0.25) continue;
 
     if (Math.abs(tick.extensionFrom20dAdr) > cfg.lodBounceMaxAtrExt) continue;
-    // Soft structure: below-200d still allowed (shows up in scoring). Hard-blocking
-    // here was discarding real LOD bounces when MA data disagreed across sources.
 
     const volumeRatio = tick.avgVolume14d > 0 ? tick.volume / tick.avgVolume14d : 0;
-    // Do not fire (or burn cooldown) until volume is plausibly on pace for the session
     if (volumeRatio < minVolRatio) continue;
 
     const aboveSma20 = tick.sma20d != null && tick.price > tick.sma20d;
@@ -663,19 +690,23 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
 
     const { consecutiveUpFrames, bounceBarVolumeRatio } = measureBounceQuality(symbol, current);
 
-    const tier = pctAboveLod >= cfg.lodBounceTier2Pct ? 2 : 1;
+    const tier = pctPeakAboveLod >= cfg.lodBounceTier2Pct ? 2 : 1;
     const key = `lod_bounce:${symbol}:t${tier}`;
     if (isCoolingDown(key, min2ms(cfg.lodBounceCooldownMin))) continue;
 
     markFired(key);
+    tracker.firedPeakPct = pctPeakAboveLod;
+
     signals.push(
       makeSignal("lod_bounce", "ticker", symbol,
-        Math.round(pctAboveLod * 100) / 100,
+        Math.round(pctPeakAboveLod * 100) / 100,
         "up",
         {
-          pctAboveLod: Math.round(pctAboveLod * 100) / 100,
+          pctAboveLod: Math.round(pctCurrentAboveLod * 100) / 100,
+          pctPeakAboveLod: Math.round(pctPeakAboveLod * 100) / 100,
+          peakPrice: Math.round(peak * 100) / 100,
           tier,
-          todayLow: tick.todayLow,
+          todayLow: lod,
           volumeRatio: Math.round(volumeRatio * 100) / 100,
           bounceBarVolumeRatio,
           consecutiveUpFrames,

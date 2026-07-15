@@ -110,16 +110,25 @@ function buildDivergenceBrief(es: EnrichedSignal): { headline: string; narrative
 
 function buildLodBounceBrief(es: EnrichedSignal): { headline: string; narrative: string; tickers: string[] } {
   const tier = (es.signal.meta?.tier as number) ?? 1;
-  const pctAbove = (es.signal.meta?.pctAboveLod as number) ?? es.signal.magnitude;
+  const pctPeak = (es.signal.meta?.pctPeakAboveLod as number) ?? es.signal.magnitude;
+  const pctNow = (es.signal.meta?.pctAboveLod as number) ?? pctPeak;
+  const peakPrice = es.signal.meta?.peakPrice as number | undefined;
   const upFrames = (es.signal.meta?.consecutiveUpFrames as number) ?? 0;
   const bounceVol = (es.signal.meta?.bounceBarVolumeRatio as number) ?? 0;
   const volRatio = (es.signal.meta?.volumeRatio as number) ?? 0;
 
   const qualityTag = upFrames >= 3 ? " (3+ up bars, strong)" : upFrames >= 2 ? " (2 up bars)" : "";
-  const headline = `${es.signal.subject} LOD bounce — ${sign(pctAbove)}% off low${qualityTag}`;
+  const headline = `${es.signal.subject} LOD bounce — peak ${sign(pctPeak)}% off low${qualityTag}`;
 
   const parts: string[] = [];
-  parts.push(`${es.signal.subject} is ${pctAbove.toFixed(1)}% above today's low.`);
+  if (peakPrice != null && Math.abs(pctPeak - pctNow) > 0.3) {
+    parts.push(
+      `${es.signal.subject} peaked ${pctPeak.toFixed(1)}% above today's low` +
+        ` ($${peakPrice.toFixed(2)}); now ${pctNow.toFixed(1)}% off the low.`
+    );
+  } else {
+    parts.push(`${es.signal.subject} is ${pctPeak.toFixed(1)}% above today's low.`);
+  }
   if (tier === 2) parts.push("Tier 2 bounce (>2% from LOD).");
   if (upFrames >= 2) parts.push(`${upFrames} consecutive up bars on the bounce.`);
   if (bounceVol >= 1.5) parts.push(`Bounce bar volume: ${bounceVol.toFixed(1)}x avg.`);
