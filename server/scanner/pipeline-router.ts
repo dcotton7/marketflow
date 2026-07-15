@@ -196,7 +196,11 @@ function qualifySignal(
 
     case "lod_bounce_scan": {
       const volRatio = (signal.meta?.volumeRatio as number) ?? 0;
-      if (volRatio < 1.0) return { qualified: false, score: 0 };
+      // Session-aware floor: mid-morning cumulative vol vs full-day avg is often ~0.2–0.4,
+      // so a hard 1.0x gate silently killed every LOD bounce until late day.
+      const metaMin = (signal.meta?.minVolRatio as number) ?? 0.25;
+      const minVol = Math.max(0.2, metaMin);
+      if (volRatio < minVol) return { qualified: false, score: 0 };
 
       const tier = (signal.meta?.tier as number) ?? 1;
       raw += tier === 2 ? 30 : 15;
@@ -206,7 +210,7 @@ function qualifySignal(
       const bounceBarVol = (signal.meta?.bounceBarVolumeRatio as number) ?? volRatio;
       if (bounceBarVol >= 2.0) raw += 25;
       else if (bounceBarVol >= 1.5) raw += 15;
-      else if (bounceBarVol >= 1.0) raw += 5;
+      else if (bounceBarVol >= Math.max(1.0, minVol)) raw += 5;
 
       // Consecutive up frames: 2-3+ rising frames = stronger bounce conviction
       const upFrames = (signal.meta?.consecutiveUpFrames as number) ?? 0;

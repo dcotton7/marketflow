@@ -605,8 +605,33 @@ function measureBounceQuality(symbol: string, current: SnapshotFrame): {
   };
 }
 
+function rthVolumeProgress(): number {
+  // Fraction of the RTH session elapsed (0.05–1.0). Used to compare cumulative
+  // volume vs full-day average volume so morning setups aren't rejected.
+  const et = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  }).formatToParts(new Date());
+  const h = parseInt(et.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const m = parseInt(et.find((p) => p.type === "minute")?.value ?? "0", 10);
+  const mins = h * 60 + m;
+  const open = 9 * 60 + 30;
+  const close = 16 * 60;
+  if (mins <= open) return 0.05;
+  if (mins >= close) return 1;
+  return Math.min(1, Math.max(0.05, (mins - open) / (close - open)));
+}
+
+/** Minimum cumulative-volume / 14d-avg ratio for LOD bounce at current time of day. */
+function lodBounceMinVolumeRatio(): number {
+  return Math.max(0.2, rthVolumeProgress() * 0.6);
+}
+
 function detectLodBounce(current: SnapshotFrame): Signal[] {
   const signals: Signal[] = [];
+  const minVolRatio = lodBounceMinVolumeRatio();
 
   // Update LOD tracker: record (or reset) the frame when a new LOD is made
   for (const [symbol, tick] of current.tickers) {
@@ -627,6 +652,9 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
     if (tick.sma200d != null && tick.price < tick.sma200d) continue;
 
     const volumeRatio = tick.avgVolume14d > 0 ? tick.volume / tick.avgVolume14d : 0;
+    // Do not fire (or burn cooldown) until volume is plausibly on pace for the session
+    if (volumeRatio < minVolRatio) continue;
+
     const aboveSma20 = tick.sma20d != null && tick.price > tick.sma20d;
     const aboveSma50 = tick.sma50d != null && tick.price > tick.sma50d;
     const changePct = tick.changePct;
@@ -652,6 +680,7 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
           aboveSma20,
           aboveSma50,
           changePct: Math.round(changePct * 100) / 100,
+          minVolRatio: Math.round(minVolRatio * 100) / 100,
         })
     );
   }

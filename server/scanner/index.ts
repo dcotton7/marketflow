@@ -108,7 +108,13 @@ function buildSnapshotFrame(
       changePct: snap.changePct ?? 0,
       volume: snap.volume ?? 0,
       avgVolume14d: snap.avgVolume ?? 0,
-      extensionFrom20dAdr: 0,
+      extensionFrom20dAdr: (() => {
+        const sma20 = ma?.sma20d;
+        const adr = snap.adr20 ?? snap.avgDailyRange ?? null;
+        if (sma20 == null || sma20 <= 0 || adr == null || adr <= 0) return 0;
+        const price = snap.price ?? 0;
+        return (price - sma20) / adr;
+      })(),
       prevClose: raw?.prevClose ?? 0,
       todayOpen: raw?.open ?? 0,
       todayHigh: raw?.high ?? 0,

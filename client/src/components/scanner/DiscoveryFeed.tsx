@@ -314,14 +314,30 @@ export function DiscoveryFeedPanel() {
 
   const fo = fontOffset; // shorthand for all scannerPx calls
 
-  // Signal types present in current discoveries (for dropdown options)
+  // Always show the full catalog so missing pipelines (e.g. LOD Bounce) are visible —
+  // not only types that happen to be in the current in-memory feed.
   const availableSignalTypes = useMemo(() => {
-    const types = new Set<SignalType>();
-    for (const d of discoveries) types.add(d.signalType);
-    return Array.from(types).sort((a, b) =>
-      SIGNAL_TYPE_LABELS[a].localeCompare(SIGNAL_TYPE_LABELS[b])
-    );
-  }, [discoveries]);
+    const present = new Set<SignalType>();
+    for (const d of discoveries) present.add(d.signalType);
+    if (historyMode) {
+      for (const d of historyCards) present.add(d.signalType);
+    }
+    return (Object.keys(SIGNAL_TYPE_LABELS) as SignalType[]).sort((a, b) => {
+      const aPresent = present.has(a) ? 0 : 1;
+      const bPresent = present.has(b) ? 0 : 1;
+      if (aPresent !== bPresent) return aPresent - bPresent;
+      return SIGNAL_TYPE_LABELS[a].localeCompare(SIGNAL_TYPE_LABELS[b]);
+    });
+  }, [discoveries, historyCards, historyMode]);
+
+  const signalTypeCounts = useMemo(() => {
+    const cards = historyMode ? historyCards : discoveries;
+    const counts = new Map<SignalType, number>();
+    for (const d of cards) {
+      counts.set(d.signalType, (counts.get(d.signalType) ?? 0) + 1);
+    }
+    return counts;
+  }, [discoveries, historyCards, historyMode]);
 
   const filteredCards = useMemo(() => {
     let cards = historyMode ? historyCards : discoveries;
@@ -538,24 +554,26 @@ export function DiscoveryFeedPanel() {
           })}
         </div>
 
-        {/* Signal type dropdown filter */}
-        {availableSignalTypes.length > 0 && (
-          <div className="flex items-center gap-1.5 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
-            <ListFilter className="h-3 w-3 text-slate-500 shrink-0" />
-            <select
-              value={signalTypeFilter}
-              onChange={(e) => setSignalTypeFilter(e.target.value as SignalType | "all")}
-              className="flex-1 h-6 rounded border border-slate-700/60 bg-slate-900/80 px-1.5 text-slate-200 truncate appearance-auto cursor-pointer focus:outline-none focus:ring-1 focus:ring-cyan-700/50"
-              style={{ fontSize: scannerPx("small", fo) }}
-            >
+        {/* Signal type dropdown filter — full catalog (counts show what’s in the feed) */}
+        <div className="flex items-center gap-1.5 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
+          <ListFilter className="h-3 w-3 text-slate-500 shrink-0" />
+          <select
+            value={signalTypeFilter}
+            onChange={(e) => setSignalTypeFilter(e.target.value as SignalType | "all")}
+            className="flex-1 h-6 rounded border border-slate-700/60 bg-slate-900/80 px-1.5 text-slate-200 truncate appearance-auto cursor-pointer focus:outline-none focus:ring-1 focus:ring-cyan-700/50"
+            style={{ fontSize: scannerPx("small", fo) }}
+          >
               <option value="all">All Signals</option>
-              {availableSignalTypes.map((st) => (
-                <option key={st} value={st}>{SIGNAL_TYPE_LABELS[st]}</option>
-              ))}
+              {availableSignalTypes.map((st) => {
+                const n = signalTypeCounts.get(st) ?? 0;
+                return (
+                  <option key={st} value={st}>
+                    {SIGNAL_TYPE_LABELS[st]}{n > 0 ? ` (${n})` : ""}
+                  </option>
+                );
+              })}
             </select>
-          </div>
-        )}
-
+        </div>
         {/* Direction filter (Long / Short / All) */}
         <div className="flex items-center gap-0.5 shrink-0" onPointerDown={(e) => e.stopPropagation()}>
           {(["all", "up", "down"] as const).map((dir) => {
