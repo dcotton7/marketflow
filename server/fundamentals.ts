@@ -121,6 +121,9 @@ interface FmpProfileRow {
   volAvg?: number;
   fullTimeEmployees?: number;
   sharesOutstanding?: number;
+  /** FMP flags — treat true as non-corporate-issuer for earnings. */
+  isEtf?: boolean;
+  isFund?: boolean;
 }
 
 async function fetchFmpProfile(symbol: string): Promise<FmpProfileRow | null> {
@@ -172,8 +175,147 @@ interface ParsedEarnings {
   revenueEstimate: number | null;
 }
 
+// ── Earnings data integrity (position-critical) ─────────────────────────────
+// Never invent or surface junk earnings for ETFs/funds — that can mislead a buy.
+
+/** Reject "last reported" / history older than this (~18 months). */
+const MAX_EARNINGS_REPORT_AGE_MS = 548 * 24 * 60 * 60 * 1000;
+
+/** Common charted ETFs / index vehicles that never report corporate EPS. */
+const WELL_KNOWN_NON_EARNINGS_SYMBOLS = new Set([
+  "SPY", "QQQ", "IWM", "DIA", "MDY", "VOO", "IVV", "VTI", "RSP", "SPXG",
+  "XLK", "XLF", "XLE", "XLI", "XLV", "XLY", "XLP", "XLU", "XLB", "XLC", "XLRE",
+  "SMH", "SOXX", "IGV", "BOTZ", "CIBR", "HACK", "CLOU", "WCLD", "ARKK", "ARKW",
+  "TQQQ", "SQQQ", "UPRO", "SPXU", "TNA", "TZA", "UVXY", "SVXY", "VIXY",
+  "IYT", "ITA", "XAR", "KBE", "KRE", "VNQ", "VIS", "DRAM", "AIIQ",
+]);
+
+function nameImpliesFundVehicle(name?: string | null): boolean {
+  if (!name) return false;
+  const n = name.toUpperCase();
+  return (
+    /\b(ETF|ETN|ETP|SPDR|ISHARES|VANGUARD|PROSHARES|DIREXION|VANECK|INVESCO|WISDOMTREE|SELECT SECTOR)\b/.test(n) ||
+    n.includes(" ETF") ||
+    n.includes("ETFMG") ||
+    /\b(TRUST|FUND)\b/.test(n) && /\b(SPDR|ISHARES|VANGUARD|PROSHARES|ROUNDHILL|GLOBAL X)\b/.test(n)
+  );
+}
+
+export function isNonEarningsIssuer(opts: {
+  symbol: string;
+  companyName?: string | null;
+  industry?: string | null;
+  sector?: string | null;
+  profile?: Pick<FmpProfileRow, "isEtf" | "isFund" | "companyName" | "industry" | "sector"> | null;
+}): boolean {
+  const sym = opts.symbol.toUpperCase();
+  if (WELL_KNOWN_NON_EARNINGS_SYMBOLS.has(sym)) return true;
+  const profile = opts.profile;
+  if (profile?.isEtf === true || profile?.isFund === true) return true;
+  if (nameImpliesFundVehicle(opts.companyName) || nameImpliesFundVehicle(profile?.companyName)) return true;
+  const ind = `${opts.industry ?? ""} ${opts.sector ?? ""} ${profile?.industry ?? ""} ${profile?.sector ?? ""}`.toLowerCase();
+  if (
+    ind.includes("etf") ||
+    ind.includes("exchange traded") ||
+    ind.includes("closed-end fund") ||
+    ind.includes("asset management - etf")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function emptyCorporateEarnings(): ParsedEarnings {
+  return {
+    nextEarningsDate: "N/A",
+    nextEarningsDays: -1,
+    earningsTime: null,
+    lastEarningsDate: null,
+    epsActual: null,
+    epsEstimate: null,
+    revenueActual: null,
+    revenueEstimate: null,
+  };
+}
+
+export function isFreshEarningsDate(dateStr: string | null | undefined): boolean {
+  if (!dateStr || dateStr === "N/A") return false;
+  const t = Date.parse(dateStr.length === 10 ? dateStr + "T00:00:00Z" : dateStr);
+  if (!Number.isFinite(t)) return false;
+  const age = Date.now() - t;
+  if (age < 0) return true; // future / upcoming calendar date
+  return age <= MAX_EARNINGS_REPORT_AGE_MS;
+}
+
+/** Drop ancient / empty vendor junk so stale ETF rows (e.g. 2005) never reach the UI. */
+export function sanitizeQuarterlyHistory(rows: QuarterlyEarning[]): QuarterlyEarning[] {
+  return rows
+    .filter((r) => isFreshEarningsDate(r.date) && (r.epsActual != null || r.revenueActual != null))
+    .slice(0, 4);
+}
+
+function stripUnusablePastEarnings(parsed: ParsedEarnings): ParsedEarnings {
+  if (parsed.lastEarningsDate && !isFreshEarningsDate(parsed.lastEarningsDate)) {
+    return {
+      ...parsed,
+      lastEarningsDate: null,
+      epsActual: null,
+      epsEstimate: null,
+      revenueActual: null,
+      revenueEstimate: null,
+    };
+  }
+  return parsed;
+}
+
+/** Final gate before any ExtendedFundamentals leaves this module. */
+export function sanitizeExtendedEarningsForDisplay(
+  symbol: string,
+  data: ExtendedFundamentals,
+  meta?: { companyName?: string | null; industry?: string | null; sector?: string | null; profile?: FmpProfileRow | null }
+): ExtendedFundamentals {
+  if (
+    isNonEarningsIssuer({
+      symbol,
+      companyName: meta?.companyName,
+      industry: meta?.industry,
+      sector: meta?.sector,
+      profile: meta?.profile,
+    })
+  ) {
+    return {
+      ...data,
+      ...emptyCorporateEarnings(),
+      lastEpsSurprise: "N/A",
+      epsCurrentQYoY: "N/A",
+      salesGrowth3QYoY: "N/A",
+    };
+  }
+  const stripped = stripUnusablePastEarnings({
+    nextEarningsDate: data.nextEarningsDate,
+    nextEarningsDays: data.nextEarningsDays,
+    earningsTime: data.earningsTime,
+    lastEarningsDate: data.lastEarningsDate,
+    epsActual: data.epsActual,
+    epsEstimate: data.epsEstimate,
+    revenueActual: data.revenueActual,
+    revenueEstimate: data.revenueEstimate,
+  });
+  return {
+    ...data,
+    ...stripped,
+    lastEpsSurprise: stripped.lastEarningsDate == null ? "N/A" : data.lastEpsSurprise,
+  };
+}
+
 async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> {
   if (!FMP_API_KEY) return null;
+
+  // Hard skip for known vehicles — never trust vendor EPS rows for these.
+  if (isNonEarningsIssuer({ symbol })) {
+    return emptyCorporateEarnings();
+  }
+
   const url = `${FMP_BASE}/earnings?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`;
   try {
     const resp = await retryWithBackoff(
@@ -197,8 +339,8 @@ async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> 
 
     // Next upcoming (date > today)
     const upcoming = sorted.find((e) => e.date > todayStr);
-    // Most recent past (date <= today)
-    const pastEvents = sorted.filter((e) => e.date <= todayStr);
+    // Most recent past (date <= today) — ignore ancient junk
+    const pastEvents = sorted.filter((e) => e.date <= todayStr && isFreshEarningsDate(e.date));
     const recent = pastEvents.length > 0 ? pastEvents[pastEvents.length - 1]! : null;
 
     let nextEarningsDate = "N/A";
@@ -213,7 +355,7 @@ async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> 
       earningsTime = upcoming.time || null;
     }
 
-    return {
+    return stripUnusablePastEarnings({
       nextEarningsDate,
       nextEarningsDays,
       earningsTime,
@@ -222,7 +364,7 @@ async function fetchFmpEarnings(symbol: string): Promise<ParsedEarnings | null> 
       epsEstimate: recent?.epsEstimated ?? null,
       revenueActual: recent?.revenueActual ?? recent?.revenue ?? null,
       revenueEstimate: recent?.revenueEstimated ?? null,
-    };
+    });
   } catch (err) {
     console.warn(`[FMP] Earnings fetch failed for ${symbol}:`, err);
     return null;
@@ -727,7 +869,14 @@ function formatQuarterLabel(dateStr: string): string {
 export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEarning[]> {
   const upper = symbol.toUpperCase();
   const cached = earningsHistoryCache.get(upper);
-  if (cached && Date.now() - cached.ts < EARNINGS_CACHE_TTL) return cached.data;
+  if (cached && Date.now() - cached.ts < EARNINGS_CACHE_TTL) return sanitizeQuarterlyHistory(cached.data);
+
+  // ETFs / funds: never surface vendor EPS history (XLI returned 2005 junk from FMP).
+  if (isNonEarningsIssuer({ symbol: upper })) {
+    pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
+    earningsHistoryCache.set(upper, { data: [], ts: Date.now() });
+    return [];
+  }
 
   // Try FMP first
   if (FMP_API_KEY) {
@@ -745,23 +894,23 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
         if (Array.isArray(data) && data.length > 0) {
           const today = new Date().toISOString().slice(0, 10);
           const pastEntries = data
-            .filter((e) => e.date <= today && ((e.epsActual ?? e.eps) != null || (e.revenueActual ?? e.revenue) != null))
+            .filter((e) => e.date <= today && isFreshEarningsDate(e.date) && ((e.epsActual ?? e.eps) != null || (e.revenueActual ?? e.revenue) != null))
             .sort((a, b) => b.date.localeCompare(a.date))
             .slice(0, 4);
 
-          if (pastEntries.length > 0) {
-            const result: QuarterlyEarning[] = pastEntries.map((e) => ({
+          const result = sanitizeQuarterlyHistory(
+            pastEntries.map((e) => ({
               quarter: formatQuarterLabel(e.date),
               date: e.date,
-              epsActual: e.epsActual ?? e.eps,
-              epsEstimate: e.epsEstimated,
-              revenueActual: e.revenueActual ?? e.revenue,
-              revenueEstimate: e.revenueEstimated,
-            }));
-            pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
-            earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
-            return result;
-          }
+              epsActual: e.epsActual ?? e.eps ?? null,
+              epsEstimate: e.epsEstimated ?? null,
+              revenueActual: e.revenueActual ?? e.revenue ?? null,
+              revenueEstimate: e.revenueEstimated ?? null,
+            }))
+          );
+          pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
+          earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
+          return result;
         }
       }
     } catch (err) {
@@ -769,23 +918,25 @@ export async function fetchEarningsHistory(symbol: string): Promise<QuarterlyEar
     }
   }
 
-  // Fallback to Finnhub /stock/earnings
+  // Fallback to Finnhub /stock/earnings — still freshness-gated
   try {
     const surprises = await finnhub.fetchEarningsSurprises(upper);
     if (Array.isArray(surprises) && surprises.length > 0) {
       const sorted = [...surprises]
-        .filter((e) => e.period)
+        .filter((e) => e.period && isFreshEarningsDate(e.period))
         .sort((a, b) => b.period.localeCompare(a.period))
         .slice(0, 4);
 
-      const result: QuarterlyEarning[] = sorted.map((e) => ({
-        quarter: formatQuarterLabel(e.period),
-        date: e.period,
-        epsActual: e.actual ?? null,
-        epsEstimate: e.estimate ?? null,
-        revenueActual: null,
-        revenueEstimate: null,
-      }));
+      const result = sanitizeQuarterlyHistory(
+        sorted.map((e) => ({
+          quarter: formatQuarterLabel(e.period),
+          date: e.period,
+          epsActual: e.actual ?? null,
+          epsEstimate: e.estimate ?? null,
+          revenueActual: null,
+          revenueEstimate: null,
+        }))
+      );
       pruneMapCache(earningsHistoryCache, MAX_EARNINGS_HISTORY_CACHE);
       earningsHistoryCache.set(upper, { data: result, ts: Date.now() });
       return result;
@@ -864,25 +1015,50 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
     }
 
     // ── Step 3: If earnings stale → fetch FMP earnings calendar ─────────
-    if (cached.earningsStale) {
+    // Never invent or reuse junk EPS for ETFs/funds.
+    const nonEarningsIssuer = isNonEarningsIssuer({
+      symbol: upper,
+      companyName: fmpProfileData?.companyName ?? saveOpts.profileData?.companyName,
+      industry: fmpProfileData?.industry ?? saveOpts.profileData?.industry,
+      sector: fmpProfileData?.sector ?? saveOpts.profileData?.sector,
+      profile: fmpProfileData,
+    });
+
+    if (nonEarningsIssuer) {
+      saveOpts.earningsData = emptyCorporateEarnings();
+      if (result) {
+        result = {
+          ...result,
+          ...emptyCorporateEarnings(),
+          lastEpsSurprise: "N/A",
+          epsCurrentQYoY: "N/A",
+          salesGrowth3QYoY: "N/A",
+        };
+      }
+    } else if (cached.earningsStale) {
       console.log(`[Fundamentals] Earnings stale for ${upper}, fetching from FMP`);
       const fmpEarnings = await fetchFmpEarnings(upper).catch(() => null);
       if (fmpEarnings) {
-        saveOpts.earningsData = fmpEarnings;
+        saveOpts.earningsData = stripUnusablePastEarnings(fmpEarnings);
         if (result) {
           result = {
             ...result,
             nextEarningsDate: fmpEarnings.nextEarningsDate,
             nextEarningsDays: fmpEarnings.nextEarningsDays,
             earningsTime: fmpEarnings.earningsTime,
-            lastEarningsDate: fmpEarnings.lastEarningsDate,
-            epsActual: fmpEarnings.epsActual,
-            epsEstimate: fmpEarnings.epsEstimate,
-            revenueActual: fmpEarnings.revenueActual,
-            revenueEstimate: fmpEarnings.revenueEstimate,
+            lastEarningsDate: saveOpts.earningsData.lastEarningsDate,
+            epsActual: saveOpts.earningsData.epsActual,
+            epsEstimate: saveOpts.earningsData.epsEstimate,
+            revenueActual: saveOpts.earningsData.revenueActual,
+            revenueEstimate: saveOpts.earningsData.revenueEstimate,
           };
-          // Update lastEpsSurprise from real data
-          if (fmpEarnings.epsActual != null && fmpEarnings.epsEstimate != null && fmpEarnings.epsEstimate !== 0) {
+          // Update lastEpsSurprise from real, fresh data only
+          if (
+            fmpEarnings.epsActual != null &&
+            fmpEarnings.epsEstimate != null &&
+            fmpEarnings.epsEstimate !== 0 &&
+            fmpEarnings.lastEarningsDate
+          ) {
             const surprise = fmpEarnings.epsActual - fmpEarnings.epsEstimate;
             const surprisePct = (surprise / Math.abs(fmpEarnings.epsEstimate)) * 100;
             result.lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
@@ -957,45 +1133,45 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
 
       // Last EPS surprise from Finnhub (fallback if not already set by FMP)
       let lastEpsSurprise = result?.lastEpsSurprise ?? "N/A";
-      if (lastEpsSurprise === "N/A" && earningsSurprises.length > 0) {
-        const latest = earningsSurprises[0];
-        if (latest.actual != null && latest.estimate != null && latest.estimate !== 0) {
-          const surprise = latest.actual - latest.estimate;
-          const surprisePct = (surprise / Math.abs(latest.estimate)) * 100;
-          lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
-        }
-      }
-
-      // Use FMP earnings data (from step 3) when result is null (first fetch)
+      // Use FMP earnings data (from step 3) when result is null (first fetch).
+      // Never invent a "next earnings" date by +3 months — that is guesswork and unsafe for positions.
       let nextEarningsDate = result?.nextEarningsDate ?? saveOpts.earningsData?.nextEarningsDate ?? "N/A";
       let nextEarningsDays = result?.nextEarningsDays ?? saveOpts.earningsData?.nextEarningsDays ?? -1;
-      if (nextEarningsDate === "N/A" && earningsSurprises.length > 0) {
-        const sortedEarnings = earningsSurprises.sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
-        const lastEarnings = new Date(sortedEarnings[0].period);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        let nextEstimate = new Date(lastEarnings);
-        nextEstimate.setMonth(nextEstimate.getMonth() + 3);
-        while (nextEstimate <= today) {
-          nextEstimate.setMonth(nextEstimate.getMonth() + 3);
-        }
-        nextEarningsDate = nextEstimate.toISOString().split("T")[0];
-        nextEarningsDays = Math.ceil((nextEstimate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (nonEarningsIssuer) {
+        const empty = emptyCorporateEarnings();
+        nextEarningsDate = empty.nextEarningsDate;
+        nextEarningsDays = empty.nextEarningsDays;
+        saveOpts.earningsData = empty;
+        lastEpsSurprise = "N/A";
       }
 
-      // If Finnhub provided earnings data and FMP didn't, persist Finnhub's as the earnings source
-      if (!saveOpts.earningsData && earningsSurprises.length > 0) {
-        const sorted = [...earningsSurprises].sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
-        saveOpts.earningsData = {
-          nextEarningsDate,
-          nextEarningsDays,
-          earningsTime: result?.earningsTime ?? null,
-          lastEarningsDate: sorted[0]?.period ?? null,
-          epsActual: sorted[0]?.actual ?? null,
-          epsEstimate: sorted[0]?.estimate ?? null,
-          revenueActual: null,
-          revenueEstimate: null,
-        };
+      // If Finnhub provided fresh earnings data and FMP didn't, persist Finnhub's as the earnings source
+      if (!nonEarningsIssuer && !saveOpts.earningsData && earningsSurprises.length > 0) {
+        const sorted = [...earningsSurprises]
+          .filter((e) => e.period && isFreshEarningsDate(e.period))
+          .sort((a, b) => new Date(b.period).getTime() - new Date(a.period).getTime());
+        if (sorted.length > 0) {
+          saveOpts.earningsData = stripUnusablePastEarnings({
+            nextEarningsDate,
+            nextEarningsDays,
+            earningsTime: result?.earningsTime ?? null,
+            lastEarningsDate: sorted[0]?.period ?? null,
+            epsActual: sorted[0]?.actual ?? null,
+            epsEstimate: sorted[0]?.estimate ?? null,
+            revenueActual: null,
+            revenueEstimate: null,
+          });
+        }
+      }
+
+      if (lastEpsSurprise === "N/A" && !nonEarningsIssuer && earningsSurprises.length > 0) {
+        const fresh = earningsSurprises.find((e) => e.period && isFreshEarningsDate(e.period));
+        if (fresh && fresh.actual != null && fresh.estimate != null && fresh.estimate !== 0) {
+          const surprise = fresh.actual - fresh.estimate;
+          const surprisePct = (surprise / Math.abs(fresh.estimate)) * 100;
+          lastEpsSurprise = `${surprise >= 0 ? "+" : ""}$${surprise.toFixed(2)} (${surprisePct >= 0 ? "+" : ""}${Math.round(surprisePct)}%)`;
+        }
       }
 
       // Extract ROE, 52w high/low, dividend yield from Finnhub metrics
@@ -1078,7 +1254,12 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
 
       await saveToDbCache(upper, basicData, result, saveOpts);
       console.log(`[Fundamentals] Saved extended fundamentals for ${upper} to DB cache`);
-      return result;
+      return sanitizeExtendedEarningsForDisplay(upper, result, {
+        companyName: profile?.name || fmpProfileData?.companyName || cached.row?.companyName,
+        industry: fmpProfileData?.industry ?? cached.row?.industry,
+        sector: fmpProfileData?.sector ?? cached.row?.sector,
+        profile: fmpProfileData,
+      });
     }
 
     // ── Only profile or earnings were stale (metrics still fresh) ──────────
@@ -1095,7 +1276,12 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
 
     if (result) {
       console.log(`[Fundamentals] Using cached extended fundamentals for ${upper} (refreshed stale tiers)`);
-      return result;
+      return sanitizeExtendedEarningsForDisplay(upper, result, {
+        companyName: fmpProfileData?.companyName ?? cached.row?.companyName,
+        industry: fmpProfileData?.industry ?? cached.row?.industry,
+        sector: fmpProfileData?.sector ?? cached.row?.sector,
+        profile: fmpProfileData,
+      });
     }
 
     // No cached data at all — full fetch needed

@@ -384,8 +384,11 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
       <div className="space-y-1">
         <FundSectionHeader label="Earnings" />
         <div className="rounded border border-slate-700/40 bg-slate-900/25 p-2 space-y-1.5">
-          {/* 4-quarter history table */}
-          {metrics.earningsHistory && metrics.earningsHistory.length > 0 ? (
+          {metrics.earningsApplicable === false ? (
+            <p className="text-[0.85em] text-slate-400 leading-snug">
+              Not applicable — ETF / fund (no corporate earnings). Vendor EPS rows are suppressed so they cannot mislead a position.
+            </p>
+          ) : metrics.earningsHistory && metrics.earningsHistory.length > 0 ? (
             <EarningsHistoryTable history={metrics.earningsHistory} />
           ) : metrics.lastEarningsDate ? (
             <div className="space-y-1">
@@ -452,11 +455,11 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
               )}
             </div>
           ) : (
-            <p className="text-[0.85em] text-muted-foreground">No recent earnings data</p>
+            <p className="text-[0.85em] text-muted-foreground">No verified recent earnings on file</p>
           )}
 
           {/* Next earnings (recalculated client-side, past dates suppressed) */}
-          {nextEarnings && (
+          {metrics.earningsApplicable !== false && nextEarnings && (
             <div className="pt-1 border-t border-slate-700/30">
               <p className="text-[0.85em] text-slate-300">
                 <span className="text-slate-500">Next: </span>

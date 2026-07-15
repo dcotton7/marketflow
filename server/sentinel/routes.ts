@@ -38,7 +38,7 @@ import {
   SENTINEL_ACCESS_TIERS,
 } from "@shared/sentinelTierAccess";
 import { parseIntradayChartTimeframe, DEFAULT_INTRADAY_CHART_TIMEFRAME } from "@shared/chart-timeframes";
-import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals, fetchEarningsHistory } from "../fundamentals";
+import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals, fetchEarningsHistory, isNonEarningsIssuer, emptyCorporateEarnings, sanitizeQuarterlyHistory } from "../fundamentals";
 import { resolveSessionMaLevelsForSymbol } from "../data-layer/session-adjusted-ma";
 import { isDelistedSymbol, scheduleDelistedTickerCheck } from "../market-condition/utils/delisted-ticker-registry";
 
@@ -7619,6 +7619,29 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       } catch {}
       try { earningsHistory = await fetchEarningsHistory(ticker); } catch {}
 
+      // Position-critical: never show corporate earnings for ETFs/funds or ancient vendor junk.
+      const earningsApplicable = !isNonEarningsIssuer({
+        symbol: ticker,
+        companyName: fundamentalData.companyName ?? extFundamentals.companyDescription,
+        industry: fundamentalData.industry,
+        sector: fundamentalData.sector,
+      });
+      if (!earningsApplicable) {
+        earningsHistory = [];
+        Object.assign(extFundamentals, emptyCorporateEarnings(), {
+          lastEpsSurprise: "N/A",
+          epsCurrentQYoY: "N/A",
+          salesGrowth3QYoY: "N/A",
+        });
+      } else {
+        earningsHistory = sanitizeQuarterlyHistory(earningsHistory);
+        // If calendar says no usable last/next, do not show a contradictory history table
+        const hasCalendar =
+          (extFundamentals.nextEarningsDate && extFundamentals.nextEarningsDate !== "N/A") ||
+          !!extFundamentals.lastEarningsDate;
+        if (!hasCalendar) earningsHistory = [];
+      }
+
       let rsVsSpy: number | undefined;
       let themeRank: number | undefined;
       let themeName: string | undefined;
@@ -7705,6 +7728,7 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         industryPeers,
         industryName,
         earningsHistory,
+        earningsApplicable,
       });
     } catch (error) {
       console.error("Trade chart metrics error:", error);

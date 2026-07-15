@@ -522,14 +522,20 @@ export function ChartInfoFooter({
               <FooterColumn>
                 <FooterInfoLine
                   label="Last earnings"
-                  value={chartMetrics.lastEpsSurprise}
-                  valueClassName={epsSurpriseTone(chartMetrics.lastEpsSurprise)}
+                  value={chartMetrics.earningsApplicable === false ? "N/A" : chartMetrics.lastEpsSurprise}
+                  valueClassName={
+                    chartMetrics.earningsApplicable === false
+                      ? undefined
+                      : epsSurpriseTone(chartMetrics.lastEpsSurprise)
+                  }
                   testId={`${pid}metric-eps-surprise`}
                 />
                 <FooterInfoLine
                   label="Next earnings"
                   value={
-                    chartMetrics.nextEarningsDate !== "N/A"
+                    chartMetrics.earningsApplicable === false
+                      ? "N/A"
+                      : chartMetrics.nextEarningsDate !== "N/A"
                       ? `${chartMetrics.nextEarningsDate} (${chartMetrics.nextEarningsDays}d)${
                           chartMetrics.earningsTime === "bmo" ? " BMO"
                           : chartMetrics.earningsTime === "amc" ? " AMC"
@@ -538,7 +544,9 @@ export function ChartInfoFooter({
                       : "N/A"
                   }
                   valueClassName={
-                    chartMetrics.nextEarningsDays >= 0 && chartMetrics.nextEarningsDays <= 7
+                    chartMetrics.earningsApplicable !== false &&
+                    chartMetrics.nextEarningsDays >= 0 &&
+                    chartMetrics.nextEarningsDays <= 7
                       ? "text-rs-yellow"
                       : undefined
                   }

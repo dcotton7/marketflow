@@ -94,6 +94,8 @@ export interface ChartMetrics {
   roe?: number | null;
   marketCap: number;
   earningsHistory?: QuarterlyEarning[];
+  /** False for ETFs/funds — UI must not show corporate EPS / beat-miss. */
+  earningsApplicable?: boolean;
   pe: number | null;
   beta: number | null;
   debtToEquity: number | null;
