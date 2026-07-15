@@ -513,8 +513,9 @@ export function ThemeRaceLanes({
     if (themes.length === 0) return;
     const selectionInList =
       selectedTheme != null && themes.some((t) => t.id === selectedTheme);
-    if (!selectionInList) onThemeSelect(themes[0].id);
-  }, [themes, selectedTheme, onThemeSelect]);
+    if (!selectionInList) onThemeSelect(themes[0]!.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themes.map((t) => t.id).join("|"), selectedTheme, onThemeSelect]);
 
   const leaderId = useMemo(() => {
     if (themes.length === 0) return null;

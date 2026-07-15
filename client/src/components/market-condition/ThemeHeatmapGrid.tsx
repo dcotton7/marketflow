@@ -84,17 +84,21 @@ export function ThemeHeatmapGrid({
   const isHistorical = timeSlice !== "TODAY";
   const responsive = useResponsiveLayout();
 
+  const themeIdsKey = themes.map((t) => t.id).join("|");
+
   useEffect(() => {
     if (themes.length === 0) return;
     const selectionInList =
       selectedTheme != null && themes.some((t) => t.id === selectedTheme);
-    if (!selectionInList) onThemeSelect(themes[0].id);
-  }, [themes, selectedTheme, onThemeSelect]);
+    if (!selectionInList) onThemeSelect(themes[0]!.id);
+    // Only re-check when the *set* of theme ids or selection changes — not every score refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themeIdsKey, selectedTheme, onThemeSelect]);
 
   useEffect(() => {
     if (!selectedTheme) return;
     const el = document.querySelector(`[data-mc-theme-card="${selectedTheme}"]`);
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    el?.scrollIntoView({ block: "nearest", behavior: "auto" });
   }, [selectedTheme]);
 
   // In comparison mode, scale bars by diff magnitude; otherwise by current pct

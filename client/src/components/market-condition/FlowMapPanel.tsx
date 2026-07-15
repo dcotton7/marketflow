@@ -412,12 +412,18 @@ export function FlowMapPanel({
   const [headerSelection, setHeaderSelection] = useState<HeaderSelection | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<{ from: ThemeId; to: ThemeId } | null>(null);
   const [panelSize, setPanelSize] = useState({ w: 1200, h: 800 });
+  const [isCompact, setIsCompact] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(true);
   const [fontPrefs, setFontPrefs] = useState<FlowMapFontPrefs>(() =>
     loadFlowMapFontPrefs(undefined)
   );
 
-  const isCompact = panelSize.w < 720 || panelSize.h < 520;
+  // Hysteresis so opening members/focus panels doesn't chatter compact↔full around the breakpoint.
+  const COMPACT_ENTER_W = 700;
+  const COMPACT_EXIT_W = 760;
+  const COMPACT_ENTER_H = 500;
+  const COMPACT_EXIT_H = 560;
+
   const showDetailCards = detailsExpanded || !isCompact;
 
   useEffect(() => {
@@ -438,17 +444,41 @@ export function FlowMapPanel({
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
+    let debounceTimer: number | null = null;
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (!rect) return;
-      setPanelSize({ w: rect.width, h: rect.height });
+      if (debounceTimer != null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+        setPanelSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+      }, 80);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      if (debounceTimer != null) window.clearTimeout(debounceTimer);
+      ro.disconnect();
+    };
   }, []);
 
   useEffect(() => {
-    if (isCompact) setDetailsExpanded(false);
+    setIsCompact((prev) => {
+      const enter = panelSize.w < COMPACT_ENTER_W || panelSize.h < COMPACT_ENTER_H;
+      const exit = panelSize.w > COMPACT_EXIT_W && panelSize.h > COMPACT_EXIT_H;
+      if (!prev && enter) return true;
+      if (prev && exit) return false;
+      return prev;
+    });
+  }, [panelSize.w, panelSize.h]);
+
+  // Collapse extras once when entering compact — never auto-expand (avoids layout loop).
+  const wasCompactRef = useRef(false);
+  useEffect(() => {
+    if (isCompact && !wasCompactRef.current) {
+      setDetailsExpanded(false);
+    }
+    wasCompactRef.current = isCompact;
   }, [isCompact]);
 
   const queries = useQueries({
@@ -457,10 +487,11 @@ export function FlowMapPanel({
       queryFn: () => fetchThemeSlice(tf.apiSlice, sizeFilter),
       staleTime: 30_000,
       refetchInterval: tf.key === "current" ? 60_000 : false,
+      placeholderData: (prev: SliceData | undefined) => prev,
     })),
   });
 
-  const isLoading = queries.some((q) => q.isLoading);
+  const isLoading = queries.some((q) => q.isLoading && !q.data);
   const dataByTf = useMemo(() => {
     const empty: SliceData = { rows: [], lastUpdated: null, comparisonTime: null, comparisonUnavailable: null };
     const out: Record<TfKey, SliceData> = {
@@ -673,8 +704,9 @@ export function FlowMapPanel({
   }, [themeIds, sortKey, sortDir, activeTf, compareEnabled, selectedRow, activeMap, mapsByTf, currentMap]);
 
   useEffect(() => {
-    if (isLoading) initialThemeSelectDoneRef.current = false;
-  }, [isLoading]);
+    // Only reset auto-select gate when filter changes (hard reload of map rows), not on refetch.
+    initialThemeSelectDoneRef.current = false;
+  }, [sizeFilter]);
 
   // Auto-select the top row in the left theme list (first visible row, not API/mock array order).
   useEffect(() => {
@@ -706,13 +738,14 @@ export function FlowMapPanel({
       setHeaderSelection({ axis: "row", themeId: selectedTheme });
       setSelectedRoute(null);
     }
+    // Intentionally omit orderedThemes array identity — use length + join for stability across score refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isLoading,
-    orderedThemes,
+    orderedThemes.length,
+    orderedThemes.join("|"),
     selectedTheme,
     selectedRow,
-    selectedRoute,
-    selectedCol,
     onThemeSelect,
   ]);
 

@@ -535,12 +535,18 @@ export function TickerWorkbench({
     return Math.max(...tickers.map((t) => Math.abs(t.pct)), 1);
   }, [tickers]);
 
-  // Auto-scroll to highlighted ticker
+  // Auto-scroll to highlighted ticker once (search result), not on every members refetch.
+  const lastScrolledHighlightRef = useRef<string | null>(null);
   useEffect(() => {
-    if (highlightedTicker && highlightedRowRef.current) {
-      highlightedRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!highlightedTicker) {
+      lastScrolledHighlightRef.current = null;
+      return;
     }
-  }, [highlightedTicker]);
+    if (lastScrolledHighlightRef.current === highlightedTicker) return;
+    if (!highlightedRowRef.current) return;
+    lastScrolledHighlightRef.current = highlightedTicker;
+    highlightedRowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightedTicker, tickers.length]);
 
   if (!themeName) {
     return (
