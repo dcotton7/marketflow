@@ -8,12 +8,15 @@
 
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
-import { eq, and, isNull, sql, inArray, notInArray, gte, lt } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray, notInArray, lt } from "drizzle-orm";
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
+import { fetchAlpacaDailyBars, fetchAlpacaIntradayBars, fetchAlpacaQuote } from "../alpaca";
 
 const INTERVAL_MS = 3 * 60_000; // 3 min
-const BATCH_SIZE = 150;
+
+/** If a checkpoint was due this many minutes ago, fill from historical bars (not live print). */
+const LATE_INTRADAY_GRACE_MIN = 90;
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
 
@@ -166,6 +169,46 @@ function rowNeedsDueCheckpoint(
   return false;
 }
 
+// ── Historical price helpers (point-in-time backfill for starved rows) ────────
+
+type BarClose = { t: number; c: number };
+type DailyBar = BarClose & { o?: number };
+
+function moveFrom(price: number, signalPrice: number): number {
+  return ((price - signalPrice) / signalPrice) * 100;
+}
+
+function closestBarClose(bars: BarClose[], targetMs: number, maxSkewMs: number): number | null {
+  let best: BarClose | null = null;
+  let bestDiff = Infinity;
+  for (const b of bars) {
+    const d = Math.abs(b.t - targetMs);
+    if (d < bestDiff) {
+      bestDiff = d;
+      best = b;
+    }
+  }
+  if (!best || bestDiff > maxSkewMs) return null;
+  return best.c;
+}
+
+async function loadIntradayCloses(symbol: string, from: Date, to: Date): Promise<BarClose[]> {
+  const bars = await fetchAlpacaIntradayBars(symbol, from, to, "5Min", true).catch(() => []);
+  return bars.map((b) => ({ t: new Date(b.date).getTime(), c: b.close }));
+}
+
+async function loadDailyCloses(symbol: string, from: Date, to: Date): Promise<DailyBar[]> {
+  const bars = await fetchAlpacaDailyBars(symbol, from, to).catch(() => []);
+  return bars.map((b) => ({ t: new Date(b.date).getTime(), c: b.close, o: b.open }));
+}
+
+function dailyBarOnEtDate(bars: DailyBar[], etDate: string): DailyBar | null {
+  for (const b of bars) {
+    if (getEtDate(new Date(b.t)) === etDate) return b;
+  }
+  return null;
+}
+
 async function processOutcomes(): Promise<void> {
   if (!db) { console.warn("[Outcome Tracker] No DB, skipping"); return; }
   cycleCount++;
@@ -195,20 +238,49 @@ async function processOutcomes(): Promise<void> {
     // Round-robin fetch: get up to PER_TYPE_LIMIT from each signal type
     // so no single type (e.g., ma_proximity with 6000+) starves others
     const PER_TYPE_LIMIT = 40;
+    const OVERDUE_BACKLOG = 500;
     const nowForSelect = new Date();
+    const overdueAgeCutoff = new Date(nowForSelect.getTime() - 20 * 60_000);
 
-    const allPending = await db
+    const eligibleWhere = and(
+      isNull(scannerDiscoveries.outcomeTrackedAt),
+      inArray(scannerDiscoveries.subjectKind, ["ticker", "theme", "market"]),
+      notInArray(scannerDiscoveries.signalType, [...SKIP_SIGNAL_TYPES])
+    );
+
+    // Newest hot queue (live tracking)
+    const newestPending = await db
+      .select()
+      .from(scannerDiscoveries)
+      .where(eligibleWhere)
+      .orderBy(sql`id DESC`)
+      .limit(2000);
+
+    // Oldest overdue backlog — Jul 13 LITE-style rows fall off the newest-2k window
+    // when ma_proximity / gap / hod_fade floods untracked ids.
+    const overduePending = await db
       .select()
       .from(scannerDiscoveries)
       .where(
         and(
-          isNull(scannerDiscoveries.outcomeTrackedAt),
-          inArray(scannerDiscoveries.subjectKind, ["ticker", "theme", "market"]),
-          notInArray(scannerDiscoveries.signalType, [...SKIP_SIGNAL_TYPES])
+          eligibleWhere,
+          lt(scannerDiscoveries.createdAt, overdueAgeCutoff),
+          sql`(
+            price_15m IS NULL OR price_30m IS NULL OR price_1hr IS NULL OR
+            price_4hr IS NULL OR price_d1_close IS NULL OR price_d2_open IS NULL OR
+            price_d2_close IS NULL OR price_1w IS NULL OR price_1mo IS NULL
+          )`
         )
       )
-      .orderBy(sql`id DESC`)
-      .limit(2000);
+      .orderBy(sql`id ASC`)
+      .limit(OVERDUE_BACKLOG);
+
+    const mergedById = new Map<number, (typeof newestPending)[number]>();
+    for (const r of overduePending) mergedById.set(r.id, r);
+    for (const r of newestPending) {
+      if (!mergedById.has(r.id)) mergedById.set(r.id, r);
+    }
+    const allPending = Array.from(mergedById.values());
 
     // Group by signal type; prioritize rows with OVERDUE checkpoints so mid-session
     // partial rows (e.g. status set before 15m) are not starved by a flood of new fires.
@@ -222,6 +294,8 @@ async function processOutcomes(): Promise<void> {
     const pending: typeof allPending = [];
     for (const [, rows] of byType) {
       const due = rows.filter((r) => rowNeedsDueCheckpoint(r, nowForSelect));
+      // Within due bucket, oldest first so backlog heals before brand-new dues
+      due.sort((a, b) => a.id - b.id);
       const neverProcessed = rows.filter(
         (r) => !due.includes(r) && r.peakMove == null && r.worstDrawdown == null
       );
@@ -239,7 +313,10 @@ async function processOutcomes(): Promise<void> {
       pending.push(...selected);
     }
 
-    console.log(`[Outcome Tracker] Fetched ${pending.length} across ${byType.size} signal types (${PER_TYPE_LIMIT}/type max)`);
+    console.log(
+      `[Outcome Tracker] Fetched ${pending.length} across ${byType.size} types ` +
+        `(${PER_TYPE_LIMIT}/type; overdueBacklog=${overduePending.length}, newest=${newestPending.length})`
+    );
     if (pending.length === 0) return;
 
     const frame = currentFrame();
@@ -248,6 +325,46 @@ async function processOutcomes(): Promise<void> {
     const now = new Date();
     const nowMs = now.getTime();
     let updatedCount = 0;
+    const intradayCache = new Map<string, BarClose[]>();
+    const dailyCache = new Map<string, DailyBar[]>();
+
+    const ensureIntraday = async (symbol: string, signalAt: Date): Promise<BarClose[]> => {
+      const key = `${symbol}:${getEtDate(signalAt)}`;
+      const hit = intradayCache.get(key);
+      if (hit) return hit;
+      const from = new Date(signalAt.getTime() - 15 * 60_000);
+      const to = new Date(Math.min(nowMs, signalAt.getTime() + 6 * 60 * 60_000));
+      const bars = await loadIntradayCloses(symbol, from, to);
+      intradayCache.set(key, bars);
+      return bars;
+    };
+
+    const ensureDaily = async (symbol: string, signalAt: Date): Promise<DailyBar[]> => {
+      const key = symbol;
+      const hit = dailyCache.get(key);
+      if (hit) return hit;
+      const from = new Date(signalAt.getTime() - 2 * 24 * 60_000);
+      const to = new Date(nowMs + 24 * 60_000);
+      const bars = await loadDailyCloses(symbol, from, to);
+      dailyCache.set(key, bars);
+      return bars;
+    };
+
+    const resolveIntradayCheckpoint = async (
+      symbol: string,
+      signalAt: Date,
+      offsetMin: number,
+      elapsedMin: number,
+      livePrice: number | null
+    ): Promise<number | null> => {
+      const late = elapsedMin > offsetMin + LATE_INTRADAY_GRACE_MIN;
+      if (!late && livePrice != null && livePrice > 0) return livePrice;
+      const bars = await ensureIntraday(symbol, signalAt);
+      const targetMs = signalAt.getTime() + offsetMin * 60_000;
+      const hist = closestBarClose(bars, targetMs, 25 * 60_000);
+      if (hist != null) return hist;
+      return livePrice != null && livePrice > 0 ? livePrice : null;
+    };
 
     for (const row of pending) {
       // Still fill time checkpoints for failed setups — Lab hit-rates need the clocks
@@ -286,29 +403,35 @@ async function processOutcomes(): Promise<void> {
       }
 
       const tickerData = frame.tickers.get(lookupSymbol);
-      if (!tickerData) {
-        // For theme/market subjects where no proxy ticker is in frame, mark tracked
-        // immediately so they don't clog the queue forever
-        if (row.subjectKind === "theme" || row.subjectKind === "market") {
-          await db
-            .update(scannerDiscoveries)
-            .set({
-              outcomeTrackedAt: now,
-              outcomeStatus: "flat",
-              peakMove: 0,
-              worstDrawdown: 0,
-            })
-            .where(eq(scannerDiscoveries.id, row.id));
-          updatedCount++;
+      let currentPrice = tickerData?.price ?? null;
+      if (currentPrice == null || currentPrice <= 0) {
+        // Overdue ticker rows may sit outside the current scanner frame — quote fallback
+        if (needsDue && row.subjectKind === "ticker") {
+          const q = await fetchAlpacaQuote(lookupSymbol).catch(() => null);
+          currentPrice = q?.lastPrice ?? null;
         }
-        continue;
+        if (currentPrice == null || currentPrice <= 0) {
+          if (row.subjectKind === "theme" || row.subjectKind === "market") {
+            await db
+              .update(scannerDiscoveries)
+              .set({
+                outcomeTrackedAt: now,
+                outcomeStatus: "flat",
+                peakMove: 0,
+                worstDrawdown: 0,
+              })
+              .where(eq(scannerDiscoveries.id, row.id));
+            updatedCount++;
+            continue;
+          }
+          // Ticker overdue with no frame/quote: still fill from historical bars below
+          if (!needsDue) continue;
+        }
       }
-
-      const currentPrice = tickerData.price;
 
       // Backfill priceAtSignal for theme/market signals that lack one
       let signalPrice = row.priceAtSignal != null ? Number(row.priceAtSignal) : 0;
-      if (signalPrice <= 0 && (row.subjectKind === "theme" || row.subjectKind === "market")) {
+      if (signalPrice <= 0 && (row.subjectKind === "theme" || row.subjectKind === "market") && currentPrice != null) {
         // Set current ETF price as baseline on first encounter
         await db
           .update(scannerDiscoveries)
@@ -318,55 +441,61 @@ async function processOutcomes(): Promise<void> {
       }
       if (signalPrice <= 0) continue;
 
-      const currentMove = ((currentPrice - signalPrice) / signalPrice) * 100;
+      const liveMove =
+        currentPrice != null && currentPrice > 0
+          ? moveFrom(currentPrice, signalPrice)
+          : null;
       const direction = row.direction as "up" | "down" | "neutral";
 
       const updates: Record<string, unknown> = {};
 
-      // ── MFE/MAE tracking ─────────────────────────────────────────────
+      // ── MFE/MAE tracking (live print only) ───────────────────────────
       const existingPeak = row.peakMove != null ? Number(row.peakMove) : 0;
       const existingDrawdown = row.worstDrawdown != null ? Number(row.worstDrawdown) : 0;
 
-      if (direction === "up") {
-        if (currentMove > existingPeak) {
-          updates.peakMove = currentMove;
-          updates.peakPrice = currentPrice;
-          updates.peakAt = now;
-        }
-        if (currentMove < existingDrawdown) {
-          updates.worstDrawdown = currentMove;
-          updates.troughPrice = currentPrice;
-          updates.troughAt = now;
-        }
-        const favorableMove = Math.max(currentMove, 0);
-        const peakForGiveback = updates.peakMove != null ? (updates.peakMove as number) : existingPeak;
-        updates.givebackPct = Math.max(0, peakForGiveback - favorableMove);
-      } else if (direction === "down") {
-        const favorableForShort = -currentMove; // positive when price drops
-        if (favorableForShort > existingPeak) {
-          updates.peakMove = favorableForShort;
-          updates.peakPrice = currentPrice;
-          updates.peakAt = now;
-        }
-        if (currentMove > 0 && currentMove > -existingDrawdown) {
-          updates.worstDrawdown = -currentMove; // stored as negative
-          updates.troughPrice = currentPrice;
-          updates.troughAt = now;
-        }
-        const peakForGiveback = updates.peakMove != null ? (updates.peakMove as number) : existingPeak;
-        updates.givebackPct = Math.max(0, peakForGiveback - Math.max(favorableForShort, 0));
-      } else {
-        // Neutral: track max absolute move
-        const absMove = Math.abs(currentMove);
-        if (absMove > existingPeak) {
-          updates.peakMove = absMove;
-          updates.peakPrice = currentPrice;
-          updates.peakAt = now;
-        }
-        if (currentMove < existingDrawdown) {
-          updates.worstDrawdown = currentMove;
-          updates.troughPrice = currentPrice;
-          updates.troughAt = now;
+      if (liveMove != null && currentPrice != null) {
+        const currentMove = liveMove;
+        if (direction === "up") {
+          if (currentMove > existingPeak) {
+            updates.peakMove = currentMove;
+            updates.peakPrice = currentPrice;
+            updates.peakAt = now;
+          }
+          if (currentMove < existingDrawdown) {
+            updates.worstDrawdown = currentMove;
+            updates.troughPrice = currentPrice;
+            updates.troughAt = now;
+          }
+          const favorableMove = Math.max(currentMove, 0);
+          const peakForGiveback = updates.peakMove != null ? (updates.peakMove as number) : existingPeak;
+          updates.givebackPct = Math.max(0, peakForGiveback - favorableMove);
+        } else if (direction === "down") {
+          const favorableForShort = -currentMove; // positive when price drops
+          if (favorableForShort > existingPeak) {
+            updates.peakMove = favorableForShort;
+            updates.peakPrice = currentPrice;
+            updates.peakAt = now;
+          }
+          if (currentMove > 0 && currentMove > -existingDrawdown) {
+            updates.worstDrawdown = -currentMove; // stored as negative
+            updates.troughPrice = currentPrice;
+            updates.troughAt = now;
+          }
+          const peakForGiveback = updates.peakMove != null ? (updates.peakMove as number) : existingPeak;
+          updates.givebackPct = Math.max(0, peakForGiveback - Math.max(favorableForShort, 0));
+        } else {
+          // Neutral: track max absolute move
+          const absMove = Math.abs(currentMove);
+          if (absMove > existingPeak) {
+            updates.peakMove = absMove;
+            updates.peakPrice = currentPrice;
+            updates.peakAt = now;
+          }
+          if (currentMove < existingDrawdown) {
+            updates.worstDrawdown = currentMove;
+            updates.troughPrice = currentPrice;
+            updates.troughAt = now;
+          }
         }
       }
 
@@ -375,20 +504,32 @@ async function processOutcomes(): Promise<void> {
       const signalDate = row.createdAt;
 
       if (row.price15m == null && elapsedMin >= 15) {
-        updates.price15m = currentPrice;
-        updates.move15m = currentMove;
+        const px = await resolveIntradayCheckpoint(lookupSymbol, signalDate, 15, elapsedMin, currentPrice);
+        if (px != null) {
+          updates.price15m = px;
+          updates.move15m = moveFrom(px, signalPrice);
+        }
       }
       if (row.price30m == null && elapsedMin >= 30) {
-        updates.price30m = currentPrice;
-        updates.move30m = currentMove;
+        const px = await resolveIntradayCheckpoint(lookupSymbol, signalDate, 30, elapsedMin, currentPrice);
+        if (px != null) {
+          updates.price30m = px;
+          updates.move30m = moveFrom(px, signalPrice);
+        }
       }
       if (row.price1hr == null && elapsedMin >= 60) {
-        updates.price1hr = currentPrice;
-        updates.move1hr = currentMove;
+        const px = await resolveIntradayCheckpoint(lookupSymbol, signalDate, 60, elapsedMin, currentPrice);
+        if (px != null) {
+          updates.price1hr = px;
+          updates.move1hr = moveFrom(px, signalPrice);
+        }
       }
       if (row.price4hr == null && elapsedMin >= 240) {
-        updates.price4hr = currentPrice;
-        updates.move4hr = currentMove;
+        const px = await resolveIntradayCheckpoint(lookupSymbol, signalDate, 240, elapsedMin, currentPrice);
+        if (px != null) {
+          updates.price4hr = px;
+          updates.move4hr = moveFrom(px, signalPrice);
+        }
       }
 
       // D1 Close: after 4:15 PM ET on signal's calendar day
@@ -399,8 +540,16 @@ async function processOutcomes(): Promise<void> {
           (signalEtDate === nowEtDate && isAfterEtTime(now, 16, 15)) ||
           signalEtDate < nowEtDate;
         if (pastD1Close) {
-          updates.priceD1Close = currentPrice;
-          updates.moveD1Close = currentMove;
+          let px: number | null = null;
+          if (signalEtDate < nowEtDate) {
+            const daily = await ensureDaily(lookupSymbol, signalDate);
+            px = dailyBarOnEtDate(daily, signalEtDate)?.c ?? null;
+          }
+          if (px == null) px = currentPrice;
+          if (px != null) {
+            updates.priceD1Close = px;
+            updates.moveD1Close = moveFrom(px, signalPrice);
+          }
         }
       }
 
@@ -413,8 +562,16 @@ async function processOutcomes(): Promise<void> {
           (nowEtDate === d2EtDate && isAfterEtTime(now, 9, 35)) ||
           nowEtDate > d2EtDate;
         if (pastD2Open) {
-          updates.priceD2Open = currentPrice;
-          updates.moveD2Open = currentMove;
+          let px: number | null = null;
+          if (nowEtDate > d2EtDate || (nowEtDate === d2EtDate && isAfterEtTime(now, 16, 0))) {
+            const daily = await ensureDaily(lookupSymbol, signalDate);
+            px = dailyBarOnEtDate(daily, d2EtDate)?.o ?? null;
+          }
+          if (px == null) px = currentPrice;
+          if (px != null) {
+            updates.priceD2Open = px;
+            updates.moveD2Open = moveFrom(px, signalPrice);
+          }
         }
       }
 
@@ -427,8 +584,16 @@ async function processOutcomes(): Promise<void> {
           (nowEtDate === d2EtDate && isAfterEtTime(now, 16, 15)) ||
           nowEtDate > d2EtDate;
         if (pastD2Close) {
-          updates.priceD2Close = currentPrice;
-          updates.moveD2Close = currentMove;
+          let px: number | null = null;
+          if (nowEtDate > d2EtDate || (nowEtDate === d2EtDate && isAfterEtTime(now, 16, 15))) {
+            const daily = await ensureDaily(lookupSymbol, signalDate);
+            px = dailyBarOnEtDate(daily, d2EtDate)?.c ?? null;
+          }
+          if (px == null) px = currentPrice;
+          if (px != null) {
+            updates.priceD2Close = px;
+            updates.moveD2Close = moveFrom(px, signalPrice);
+          }
         }
       }
 
@@ -441,8 +606,16 @@ async function processOutcomes(): Promise<void> {
           (nowEtDate === d5EtDate && isAfterEtTime(now, 16, 15)) ||
           nowEtDate > d5EtDate;
         if (past1w) {
-          updates.price1w = currentPrice;
-          updates.move1w = currentMove;
+          let px: number | null = null;
+          if (nowEtDate > d5EtDate) {
+            const daily = await ensureDaily(lookupSymbol, signalDate);
+            px = dailyBarOnEtDate(daily, d5EtDate)?.c ?? null;
+          }
+          if (px == null) px = currentPrice;
+          if (px != null) {
+            updates.price1w = px;
+            updates.move1w = moveFrom(px, signalPrice);
+          }
         }
       }
 
@@ -455,17 +628,25 @@ async function processOutcomes(): Promise<void> {
           (nowEtDate === d20EtDate && isAfterEtTime(now, 16, 15)) ||
           nowEtDate > d20EtDate;
         if (past1mo) {
-          updates.price1mo = currentPrice;
-          updates.move1mo = currentMove;
+          let px: number | null = null;
+          if (nowEtDate > d20EtDate) {
+            const daily = await ensureDaily(lookupSymbol, signalDate);
+            px = dailyBarOnEtDate(daily, d20EtDate)?.c ?? null;
+          }
+          if (px == null) px = currentPrice;
+          if (px != null) {
+            updates.price1mo = px;
+            updates.move1mo = moveFrom(px, signalPrice);
+          }
         }
       }
 
       // ── Outcome status evaluation ───────────────────────────────────
-      if (direction !== "neutral") {
-        const favorableMove = direction === "up" ? Math.max(currentMove, 0) : Math.max(-currentMove, 0);
-        const adverseMove = direction === "up" ? Math.max(-currentMove, 0) : Math.max(currentMove, 0);
+      if (direction !== "neutral" && liveMove != null) {
+        const favorableMove = direction === "up" ? Math.max(liveMove, 0) : Math.max(-liveMove, 0);
+        const adverseMove = direction === "up" ? Math.max(-liveMove, 0) : Math.max(liveMove, 0);
         const peakMoveVal = updates.peakMove != null ? (updates.peakMove as number) : existingPeak;
-        const netInWrongDirection = direction === "up" ? currentMove < 0 : currentMove > 0;
+        const netInWrongDirection = direction === "up" ? liveMove < 0 : liveMove > 0;
 
         if (favorableMove < 1 && adverseMove > 5) {
           updates.outcomeStatus = "failed";
@@ -475,7 +656,7 @@ async function processOutcomes(): Promise<void> {
           updates.outcomeStatus = "reversed";
         } else if (favorableMove >= 1) {
           updates.outcomeStatus = "profitable";
-        } else if (Math.abs(currentMove) < 1) {
+        } else if (Math.abs(liveMove) < 1) {
           updates.outcomeStatus = "flat";
         } else {
           updates.outcomeStatus = "tracking";
