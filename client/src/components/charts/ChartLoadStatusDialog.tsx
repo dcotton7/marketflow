@@ -32,12 +32,16 @@ interface ChartLoadStatusDialogProps {
   isComplete: boolean;
   title?: string;
   onDismiss?: () => void;
-  /** Show explicit dismiss while still loading (errors / long waits). */
+  /** @deprecated Always dismissible when onDismiss is set — kept for call-site compat. */
   showContinue?: boolean;
-  /** When true, allow Escape and outside click to dismiss (requires onDismiss). */
+  /** @deprecated Always dismissible when onDismiss is set — kept for call-site compat. */
   allowDismiss?: boolean;
 }
 
+/**
+ * Chart load progress — non-modal so Signals / charts behind stay clickable.
+ * Escape, X, and Dismiss always work when onDismiss is provided.
+ */
 export function ChartLoadStatusDialog({
   open,
   symbol,
@@ -47,30 +51,33 @@ export function ChartLoadStatusDialog({
   isComplete,
   title,
   onDismiss,
-  showContinue = false,
-  allowDismiss = false,
 }: ChartLoadStatusDialogProps) {
   const heading =
     title ??
     (isComplete ? `${symbol} charts ready` : `Loading ${symbol} charts`);
 
   const hasError = steps.some((s) => s.status === "error");
-  const canDismiss = !!onDismiss && (allowDismiss || hasError || showContinue);
+  const canDismiss = !!onDismiss;
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next && canDismiss) onDismiss?.(); }}>
+    <Dialog
+      open={open}
+      modal={false}
+      onOpenChange={(next) => {
+        if (!next && canDismiss) onDismiss?.();
+      }}
+    >
       <DialogContent
-        className={cn(
-          "max-w-md",
-          !canDismiss && "[&>button]:hidden",
-          CHART_VIEWER_DIALOG_Z
-        )}
-        overlayClassName={CHART_VIEWER_DIALOG_Z}
-        onPointerDownOutside={(e) => {
-          if (!canDismiss) e.preventDefault();
+        className={cn("max-w-md pointer-events-auto", CHART_VIEWER_DIALOG_Z)}
+        // Fade for context only — never capture clicks (that was locking Signals/UI).
+        overlayClassName={cn(CHART_VIEWER_DIALOG_Z, "pointer-events-none bg-black/35")}
+        onInteractOutside={(e) => {
+          // Non-modal: outside interaction must reach charts/Signals — don't treat as dismiss.
+          e.preventDefault();
         }}
         onEscapeKeyDown={(e) => {
-          if (!canDismiss) e.preventDefault();
+          if (canDismiss) onDismiss?.();
+          else e.preventDefault();
         }}
       >
         <DialogHeader>
@@ -87,6 +94,10 @@ export function ChartLoadStatusDialog({
             {hasError ? (
               <span className="mt-1 block text-rs-red">
                 Chart data failed to load. Dismiss this dialog to keep using the app — try logging in again if bars keep failing.
+              </span>
+            ) : !isComplete ? (
+              <span className="mt-1 block text-muted-foreground">
+                Charts and Signals stay usable — dismiss anytime.
               </span>
             ) : null}
           </DialogDescription>
@@ -121,7 +132,7 @@ export function ChartLoadStatusDialog({
           ))}
         </ul>
 
-        {canDismiss && !isComplete && onDismiss ? (
+        {canDismiss && !isComplete ? (
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" size="sm" variant="secondary" onClick={onDismiss}>
               {hasError ? "Dismiss" : "Continue to charts"}
