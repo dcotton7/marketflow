@@ -222,7 +222,7 @@ export const SCANNER_CONFIG_FIELDS: ConfigFieldMeta[] = [
   { key: "failedBreakoutCooldownMin", label: "Cooldown", group: "Failed Breakout", type: "number", min: 5, max: 120, step: 5, unit: "min" },
 
   { key: "hodFadeMinPct", label: "Min Fade from HOD", group: "HOD Fade", type: "number", min: 0.5, max: 5, step: 0.25, unit: "%" },
-  { key: "hodFadeMinFramesSinceHod", label: "Min Frames Since HOD", group: "HOD Fade", type: "number", min: 20, max: 200, step: 10, unit: "frames" },
+  { key: "hodFadeMinFramesSinceHod", label: "Min Frames Since HOD", group: "HOD Fade", type: "number", min: 10, max: 200, step: 5, unit: "frames (~30s)" },
   { key: "hodFadeCooldownMin", label: "Cooldown", group: "HOD Fade", type: "number", min: 15, max: 240, step: 15, unit: "min" },
 
   { key: "gapDownContinuationMinGapPct", label: "Min Gap Down", group: "Gap Down Cont.", type: "number", min: 0.5, max: 5, step: 0.25, unit: "%" },

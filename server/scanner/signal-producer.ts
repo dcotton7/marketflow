@@ -63,7 +63,11 @@ export interface SnapshotFrame {
 const BUFFER_SIZE = 10; // ~5 minutes at 30s intervals (reduced from 20 to save memory)
 const ringBuffer: SnapshotFrame[] = [];
 
+/** Monotonic frame id — ringBuffer.length caps at BUFFER_SIZE and cannot be used for "frames since X". */
+let frameSeq = 0;
+
 export function pushFrame(frame: SnapshotFrame): void {
+  frameSeq += 1;
   ringBuffer.push(frame);
   if (ringBuffer.length > BUFFER_SIZE) ringBuffer.shift();
 }
@@ -79,6 +83,10 @@ export function currentFrame(): SnapshotFrame | null {
 
 export function getBufferLength(): number {
   return ringBuffer.length;
+}
+
+export function getFrameSeq(): number {
+  return frameSeq;
 }
 
 // ── Cooldown tracker ────────────────────────────────────────────────────────
@@ -560,15 +568,14 @@ function detectBroadMoves(current: SnapshotFrame, session?: MarketSession): Sign
 // Firing only on current-%-above-LOD misses DELL-style spikes (397→412) that pull back.
 const lodTracker = new Map<string, {
   lodPrice: number;
-  lodFrame: number;
+  lodFrameSeq: number;
   maxSinceLod: number;
   firedPeakPct: number;
 }>();
 
 /**
- * Walk backward through the ring buffer from the LOD frame to count
- * consecutive rising-price frames (proxy for up bars on the bounce)
- * and capture the volume spike on the first frame after the LOD.
+ * Count recent rising-price frames after the LOD (bounded by ring buffer).
+ * lodFrameSeq is absolute; map it into the ring so shifted frames still work.
  */
 function measureBounceQuality(symbol: string, current: SnapshotFrame): {
   consecutiveUpFrames: number;
@@ -577,12 +584,12 @@ function measureBounceQuality(symbol: string, current: SnapshotFrame): {
   const tracker = lodTracker.get(symbol);
   if (!tracker) return { consecutiveUpFrames: 0, bounceBarVolumeRatio: 0 };
 
-  const startIdx = tracker.lodFrame;
+  const framesAgo = Math.max(0, frameSeq - tracker.lodFrameSeq);
+  const startIdx = Math.max(0, ringBuffer.length - 1 - framesAgo);
   const bufLen = ringBuffer.length;
   let consecutiveUp = 0;
   let bounceBarVolRatio = 0;
 
-  // Walk forward from the frame after the LOD touch to the current frame
   for (let i = startIdx + 1; i < bufLen; i++) {
     const frameTick = ringBuffer[i]?.tickers.get(symbol);
     const prevFrameTick = ringBuffer[i - 1]?.tickers.get(symbol);
@@ -597,7 +604,6 @@ function measureBounceQuality(symbol: string, current: SnapshotFrame): {
     }
   }
 
-  // Fallback: if we didn't capture bounceBarVolRatio (e.g. LOD was recent), use current
   if (bounceBarVolRatio === 0) {
     const tick = current.tickers.get(symbol);
     if (tick && tick.avgVolume14d > 0) {
@@ -648,16 +654,16 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
     if (!tracker || tick.todayLow < tracker.lodPrice - 1e-6) {
       lodTracker.set(symbol, {
         lodPrice: tick.todayLow,
-        lodFrame: ringBuffer.length - 1,
+        lodFrameSeq: frameSeq,
         maxSinceLod: tick.price,
         firedPeakPct: 0,
       });
-      continue;
+      // Fall through — if price already bounced off this new/seeded LOD, fire same frame
+    } else {
+      // Same LOD: raise peak from snapshot prices only.
+      // Never use todayHigh — on dump days that high printed *before* the LOD (DELL ~461).
+      tracker.maxSinceLod = Math.max(tracker.maxSinceLod, tick.price);
     }
-
-    // Same LOD: raise peak from snapshot prices only.
-    // Never use todayHigh — on dump days that high printed *before* the LOD (DELL ~461).
-    tracker.maxSinceLod = Math.max(tracker.maxSinceLod, tick.price);
   }
 
   for (const [symbol, tick] of current.tickers) {
@@ -1010,7 +1016,7 @@ function detectFailedBreakout(current: SnapshotFrame): Signal[] {
       const trackKey = `failed_breakout:${symbol}:${levelType}`;
 
       if (tick.price > level) {
-        lastAboveBreakLevel.set(trackKey, { frame: ringBuffer.length, level, levelType });
+        lastAboveBreakLevel.set(trackKey, { frame: frameSeq, level, levelType });
         continue;
       }
 
@@ -1018,7 +1024,7 @@ function detectFailedBreakout(current: SnapshotFrame): Signal[] {
       const lastAbove = lastAboveBreakLevel.get(trackKey);
       if (!lastAbove) continue;
 
-      const framesAgo = ringBuffer.length - lastAbove.frame;
+      const framesAgo = frameSeq - lastAbove.frame;
       if (framesAgo < cfg.failedBreakoutLookbackMin || framesAgo > cfg.failedBreakoutLookbackMax) continue;
 
       const reversalPct = ((level - tick.price) / level);
@@ -1051,8 +1057,8 @@ function detectFailedBreakout(current: SnapshotFrame): Signal[] {
   return signals;
 }
 
-// Track when the HOD was last updated per ticker
-const hodFrameTracker = new Map<string, { hodPrice: number; hodFrame: number }>();
+// Track when the HOD was last updated per ticker (monotonic frameSeq, not ring length)
+const hodFrameTracker = new Map<string, { hodPrice: number; hodFrameSeq: number }>();
 
 function detectHodFade(current: SnapshotFrame): Signal[] {
   const signals: Signal[] = [];
@@ -1062,11 +1068,11 @@ function detectHodFade(current: SnapshotFrame): Signal[] {
 
     const tracker = hodFrameTracker.get(symbol);
     if (!tracker || tick.todayHigh > tracker.hodPrice) {
-      hodFrameTracker.set(symbol, { hodPrice: tick.todayHigh, hodFrame: ringBuffer.length });
+      hodFrameTracker.set(symbol, { hodPrice: tick.todayHigh, hodFrameSeq: frameSeq });
       continue;
     }
 
-    const framesSinceHod = ringBuffer.length - tracker.hodFrame;
+    const framesSinceHod = frameSeq - tracker.hodFrameSeq;
     if (framesSinceHod < cfg.hodFadeMinFramesSinceHod) continue;
 
     const fadeFromHod = ((tracker.hodPrice - tick.price) / tracker.hodPrice) * 100;
@@ -1097,7 +1103,8 @@ function detectHodFade(current: SnapshotFrame): Signal[] {
 function detectGapDownContinuation(current: SnapshotFrame): Signal[] {
   const signals: Signal[] = [];
 
-  if (ringBuffer.length < cfg.gapDownContinuationMinFrames) return signals;
+  // Need enough wall-clock frames since session start (not ring length — ring caps at 10)
+  if (frameSeq < cfg.gapDownContinuationMinFrames) return signals;
 
   for (const [symbol, tick] of current.tickers) {
     if (tick.price <= 0 || tick.prevClose <= 0 || tick.todayOpen <= 0) continue;
