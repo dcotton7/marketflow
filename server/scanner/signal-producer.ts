@@ -674,6 +674,8 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
     const pctPeakAboveLod = ((peak - lod) / lod) * 100;
     // Fire on peak excursion off LOD (412 on DELL), not only where price sits now
     if (pctPeakAboveLod < cfg.lodBounceTier1Pct) continue;
+    // Already too extended for a bounce entry — leave feed space for earlier cards to clear
+    if (pctPeakAboveLod >= cfg.lodBounceClearMaxPct) continue;
 
     // Don't re-fire near-identical peaks off the same LOD
     if (pctPeakAboveLod <= tracker.firedPeakPct + 0.25) continue;

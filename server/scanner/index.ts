@@ -12,7 +12,11 @@ import { processSnapshot, setFiveDayHighLow, type SnapshotFrame, type TickerFram
 import { routeSignals } from "./pipeline-router";
 import { getActivePipelines } from "./pipeline-router";
 import { executeReactions } from "./reactions";
-import { broadcastBatch, pushDiscoveries } from "./routes";
+import { broadcastBatch, broadcastClear, pushDiscoveries, removeDiscoveries } from "./routes";
+import {
+  trackLodBounceDiscoveries,
+  evaluateActiveLodBounces,
+} from "./active-lod-bounces";
 import type { LensContext } from "./lenses";
 import { getFrame, getBufferLength, currentFrame } from "./signal-producer";
 import { getCachedRAI } from "../market-condition/engine/rai";
@@ -190,6 +194,20 @@ async function onSnapshotRefreshed(
 
     const priceSignals = await processSnapshot(frame, session);
 
+    const current = currentFrame();
+    if (current) {
+      const clears = evaluateActiveLodBounces(current);
+      if (clears.length > 0) {
+        const clearIds = clears.flatMap((c) => c.cardIds);
+        removeDiscoveries(clearIds);
+        if (scannerMode === "on") broadcastClear(clears);
+        console.log(
+          `[Scanner] Cleared ${clearIds.length} LOD bounce card(s): ` +
+            clears.map((c) => `${c.subject}(${c.reason})`).join(", ")
+        );
+      }
+    }
+
     // News alerts: skip during pre-market (only gap + volume_spike there)
     const newsSignals = session === "pre_market"
       ? []
@@ -203,7 +221,6 @@ async function onSnapshotRefreshed(
 
     lastSignalAt = new Date().toISOString();
 
-    const current = currentFrame();
     if (!current) return;
 
     const lensCtx: LensContext = {
@@ -250,6 +267,7 @@ async function onSnapshotRefreshed(
 
     // Persist to in-memory buffer
     pushDiscoveries(cards);
+    trackLodBounceDiscoveries(cards, current);
 
     // Broadcast to SSE clients (skip if mode is "silent" — they get history on open)
     if (scannerMode === "on") {

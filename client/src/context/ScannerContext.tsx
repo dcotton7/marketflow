@@ -137,6 +137,25 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
         const data = JSON.parse(event.data);
         if (data.type === "connected") return;
 
+        // Setup invalidated (e.g. LOD bounce gave up or extended too far)
+        if (data.type === "discovery_clear") {
+          const cardIds = new Set<number>(
+            Array.isArray(data.cardIds) ? data.cardIds : []
+          );
+          const subject = typeof data.subject === "string" ? data.subject : null;
+          const signalType = typeof data.signalType === "string" ? data.signalType : null;
+          setDiscoveries((prev) =>
+            prev.filter((c) => {
+              if (cardIds.has(c.id)) return false;
+              if (subject && signalType && c.subject === subject && c.signalType === signalType) {
+                return false;
+              }
+              return true;
+            })
+          );
+          return;
+        }
+
         const card = data as DiscoveryCard;
         setDiscoveries((prev) => {
           const next = [card, ...prev];

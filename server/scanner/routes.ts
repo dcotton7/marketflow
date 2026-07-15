@@ -51,6 +51,25 @@ export function broadcastBatch(cards: DiscoveryCard[]): void {
   for (const card of cards) broadcastDiscovery(card);
 }
 
+export function broadcastClear(events: Array<{
+  type: "discovery_clear";
+  signalType: string;
+  subject: string;
+  cardIds: number[];
+  reason: string;
+}>): void {
+  for (const event of events) {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const client of sseClients) {
+      try {
+        client.write(payload);
+      } catch {
+        sseClients.delete(client);
+      }
+    }
+  }
+}
+
 // ── In-memory discovery buffer + DB persistence ────────────────────────────
 
 const DISCOVERY_BUFFER_MAX = 200;
@@ -62,6 +81,17 @@ export function pushDiscoveries(cards: DiscoveryCard[]): void {
     discoveryBuffer.splice(0, discoveryBuffer.length - DISCOVERY_BUFFER_MAX);
   }
   persistToDb(cards);
+}
+
+/** Drop cards from the live memory buffer (e.g. LOD bounce invalidated). */
+export function removeDiscoveries(cardIds: number[]): void {
+  if (cardIds.length === 0) return;
+  const idSet = new Set(cardIds);
+  for (let i = discoveryBuffer.length - 1; i >= 0; i--) {
+    if (idSet.has(discoveryBuffer[i]!.id)) {
+      discoveryBuffer.splice(i, 1);
+    }
+  }
 }
 
 function persistToDb(cards: DiscoveryCard[]): void {

@@ -47,6 +47,10 @@ export interface ScannerConfig {
   lodBounceTier2Pct: number;
   lodBounceMaxAtrExt: number;
   lodBounceCooldownMin: number;
+  /** Clear live LOD card when price falls back within this % of the tracked LOD. */
+  lodBounceGiveUpPct: number;
+  /** Clear live LOD card when peak % above LOD reaches this (setup too extended). */
+  lodBounceClearMaxPct: number;
 
   // ── U&R MA Reclaim (50d + 200d) ──────────────────────────────────────
   maReclaim200dMaxExtPct: number;
@@ -118,6 +122,8 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   lodBounceTier2Pct: 2.0,
   lodBounceMaxAtrExt: 6.0,
   lodBounceCooldownMin: 30,
+  lodBounceGiveUpPct: 0.35,
+  lodBounceClearMaxPct: 5.0,
 
   maReclaim200dMaxExtPct: 4.0,
   maReclaim50dMaxExtPct: 2.0,
@@ -194,6 +200,8 @@ export const SCANNER_CONFIG_FIELDS: ConfigFieldMeta[] = [
   { key: "lodBounceTier2Pct", label: "LOD Bounce Tier 2", group: "LOD Bounce", type: "number", min: 1, max: 10, step: 0.25, unit: "%" },
   { key: "lodBounceMaxAtrExt", label: "Max ATR Extension", group: "LOD Bounce", type: "number", min: 1, max: 15, step: 0.5, unit: "x" },
   { key: "lodBounceCooldownMin", label: "Cooldown", group: "LOD Bounce", type: "number", min: 5, max: 120, step: 5, unit: "min" },
+  { key: "lodBounceGiveUpPct", label: "Clear if Give-Up", group: "LOD Bounce", type: "number", min: 0.1, max: 2, step: 0.05, unit: "%" },
+  { key: "lodBounceClearMaxPct", label: "Clear if Extended", group: "LOD Bounce", type: "number", min: 2, max: 15, step: 0.5, unit: "%" },
 
   { key: "maReclaim200dMaxExtPct", label: "200d Max Extension", group: "MA Reclaim", type: "number", min: 0.5, max: 10, step: 0.5, unit: "%" },
   { key: "maReclaim50dMaxExtPct", label: "50d Max Extension", group: "MA Reclaim", type: "number", min: 0.5, max: 10, step: 0.5, unit: "%" },

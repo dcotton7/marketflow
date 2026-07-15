@@ -119,7 +119,7 @@ function buildSignalCriteria(cfg: ScannerConfig | null): Record<string, string> 
     prev_day_low_break: `Price breaks ≥${c.breakClearancePct}% below prev day low. Priority if below 50d+200d. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
     five_day_high_break: `Price breaks ≥${c.breakClearancePct}% above 5-day high AND above 200d SMA. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
     five_day_low_break: `Price breaks ≥${c.breakClearancePct}% below 5-day low. Priority if below 50d+200d. ${c.breakConfirmFrames}-frame hold. Cooldown: ${c.breakCooldownMin}min.`,
-    lod_bounce: `Stock up ≥${c.lodBounceTier1Pct}% (tier 1) or ≥${c.lodBounceTier2Pct}% (tier 2) from LOD. Max ${c.lodBounceMaxAtrExt}x ATR extension. Cooldown: ${c.lodBounceCooldownMin}min.`,
+    lod_bounce: `Stock up ≥${c.lodBounceTier1Pct}% (tier 1) or ≥${c.lodBounceTier2Pct}% (tier 2) from LOD (peak). Max ${c.lodBounceMaxAtrExt}x ATR. Clears if back within ${c.lodBounceGiveUpPct}% of LOD or peak ≥${c.lodBounceClearMaxPct}% / over ATR. Cooldown: ${c.lodBounceCooldownMin}min.`,
     failed_breakout: `Broke above prev day high then reversed ≥${c.failedBreakoutReversalPct}% back below. Lookback: ${c.failedBreakoutLookbackMin}-${c.failedBreakoutLookbackMax} frames. Cooldown: ${c.failedBreakoutCooldownMin}min.`,
     hod_fade: `Faded ≥${c.hodFadeMinPct}% from HOD after ${c.hodFadeMinFramesSinceHod}+ frames. Cooldown: ${c.hodFadeCooldownMin}min.`,
     gap_down_continuation: `Gapped down ≥${c.gapDownContinuationMinGapPct}%, continued ≥${c.gapDownContinuationMinFadePct}% below open after ${c.gapDownContinuationMinFrames} frames. Cooldown: ${c.gapDownContinuationCooldownMin}min.`,
