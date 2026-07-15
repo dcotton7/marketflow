@@ -258,7 +258,29 @@ async function processOutcomes(): Promise<void> {
 
     // Oldest overdue backlog — Jul 13 LITE-style rows fall off the newest-2k window
     // when ma_proximity / gap / hod_fade floods untracked ids.
-    const overduePending = await db
+    // Prefer PARTIAL rows (15m filled, later clocks empty) so mid-flight cards heal
+    // before a wall of ancient never-touched ma_proximity ids monopolizes the batch.
+    const missingLaterSql = sql`(
+      price_30m IS NULL OR price_1hr IS NULL OR price_4hr IS NULL OR
+      price_d1_close IS NULL OR price_d2_open IS NULL OR
+      price_d2_close IS NULL OR price_1w IS NULL OR price_1mo IS NULL
+    )`;
+
+    const partialOverdue = await db
+      .select()
+      .from(scannerDiscoveries)
+      .where(
+        and(
+          eligibleWhere,
+          lt(scannerDiscoveries.createdAt, overdueAgeCutoff),
+          sql`price_15m IS NOT NULL`,
+          missingLaterSql
+        )
+      )
+      .orderBy(sql`id ASC`)
+      .limit(300);
+
+    const oldestOverdue = await db
       .select()
       .from(scannerDiscoveries)
       .where(
@@ -274,6 +296,12 @@ async function processOutcomes(): Promise<void> {
       )
       .orderBy(sql`id ASC`)
       .limit(OVERDUE_BACKLOG);
+
+    const overduePending = [...partialOverdue];
+    const partialIds = new Set(partialOverdue.map((r) => r.id));
+    for (const r of oldestOverdue) {
+      if (!partialIds.has(r.id)) overduePending.push(r);
+    }
 
     const mergedById = new Map<number, (typeof newestPending)[number]>();
     for (const r of overduePending) mergedById.set(r.id, r);
@@ -315,7 +343,8 @@ async function processOutcomes(): Promise<void> {
 
     console.log(
       `[Outcome Tracker] Fetched ${pending.length} across ${byType.size} types ` +
-        `(${PER_TYPE_LIMIT}/type; overdueBacklog=${overduePending.length}, newest=${newestPending.length})`
+        `(${PER_TYPE_LIMIT}/type; partialOverdue=${partialOverdue.length}, ` +
+        `oldestOverdue=${oldestOverdue.length}, newest=${newestPending.length})`
     );
     if (pending.length === 0) return;
 
