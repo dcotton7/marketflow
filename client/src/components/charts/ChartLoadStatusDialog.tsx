@@ -32,7 +32,10 @@ interface ChartLoadStatusDialogProps {
   isComplete: boolean;
   title?: string;
   onDismiss?: () => void;
+  /** Show explicit dismiss while still loading (errors / long waits). */
   showContinue?: boolean;
+  /** When true, allow Escape and outside click to dismiss (requires onDismiss). */
+  allowDismiss?: boolean;
 }
 
 export function ChartLoadStatusDialog({
@@ -45,18 +48,30 @@ export function ChartLoadStatusDialog({
   title,
   onDismiss,
   showContinue = false,
+  allowDismiss = false,
 }: ChartLoadStatusDialogProps) {
   const heading =
     title ??
     (isComplete ? `${symbol} charts ready` : `Loading ${symbol} charts`);
 
+  const hasError = steps.some((s) => s.status === "error");
+  const canDismiss = !!onDismiss && (allowDismiss || hasError || showContinue);
+
   return (
-    <Dialog open={open}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && canDismiss) onDismiss?.(); }}>
       <DialogContent
-        className={cn("max-w-md [&>button]:hidden", CHART_VIEWER_DIALOG_Z)}
+        className={cn(
+          "max-w-md",
+          !canDismiss && "[&>button]:hidden",
+          CHART_VIEWER_DIALOG_Z
+        )}
         overlayClassName={CHART_VIEWER_DIALOG_Z}
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => {
+          if (!canDismiss) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (!canDismiss) e.preventDefault();
+        }}
       >
         <DialogHeader>
           <DialogTitle className="text-left">{heading}</DialogTitle>
@@ -68,6 +83,11 @@ export function ChartLoadStatusDialog({
                 : "Preparing chart workspace…"}
             {!isComplete ? (
               <span className="ml-2 tabular-nums text-muted-foreground">({formatElapsed(elapsedMs)})</span>
+            ) : null}
+            {hasError ? (
+              <span className="mt-1 block text-rs-red">
+                Chart data failed to load. Dismiss this dialog to keep using the app — try logging in again if bars keep failing.
+              </span>
             ) : null}
           </DialogDescription>
         </DialogHeader>
@@ -101,10 +121,10 @@ export function ChartLoadStatusDialog({
           ))}
         </ul>
 
-        {showContinue && !isComplete && onDismiss ? (
-          <div className="flex justify-end pt-2">
+        {canDismiss && !isComplete && onDismiss ? (
+          <div className="flex justify-end gap-2 pt-2">
             <Button type="button" size="sm" variant="secondary" onClick={onDismiss}>
-              Continue to charts
+              {hasError ? "Dismiss" : "Continue to charts"}
             </Button>
           </div>
         ) : null}

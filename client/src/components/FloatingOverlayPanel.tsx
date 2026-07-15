@@ -20,6 +20,8 @@ export interface FloatingOverlayPanelProps {
   surfaceSlotId?: string;
   /** Local theme slot for overlay title bar */
   titleBarSlotId?: string;
+  /** Base z-index when unpinned (pinned uses max(this, 9999)). */
+  zIndex?: number;
 }
 
 const DEFAULT_FLOAT = { x: 80, y: 60, w: 560, h: 620, pinned: false };
@@ -71,6 +73,7 @@ export function FloatingOverlayPanel({
   titleBarBg,
   surfaceSlotId,
   titleBarSlotId,
+  zIndex = 1500,
 }: FloatingOverlayPanelProps) {
   const [floatState, setFloatState] = useState(() =>
     typeof window !== "undefined" ? loadState(storageKey, defaultState) : defaultState
@@ -150,7 +153,7 @@ export function FloatingOverlayPanel({
         top: floatState.y,
         width: floatState.w,
         height: floatState.h,
-        zIndex: floatState.pinned ? 9999 : 1500,
+        zIndex: floatState.pinned ? Math.max(zIndex, 9999) : zIndex,
         backgroundColor: surfaceBg,
         borderColor: borderColor,
       }}

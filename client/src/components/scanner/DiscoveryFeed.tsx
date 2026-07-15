@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingOverlayPanel } from "@/components/FloatingOverlayPanel";
+import { SCANNER_OVERLAY_Z } from "@/lib/overlay-z-index";
 import { DiscoveryCard } from "./DiscoveryCard";
 import { ScannerFontSizeControl } from "./ScannerFontSizeControl";
 import {
@@ -421,6 +422,7 @@ export function DiscoveryFeedPanel() {
         titleBarBg={cssVariables.headerBg}
         surfaceSlotId="scanner:panel"
         titleBarSlotId="scanner:titleBar"
+        zIndex={SCANNER_OVERLAY_Z}
       >
         <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
           <PictureInPicture2 className="h-8 w-8 text-cyan-400/60" />
@@ -453,6 +455,7 @@ export function DiscoveryFeedPanel() {
       titleBarBg={cssVariables.headerBg}
       surfaceSlotId="scanner:panel"
       titleBarSlotId="scanner:titleBar"
+      zIndex={SCANNER_OVERLAY_Z}
     >
       <div className="flex flex-col h-full gap-1.5">
         {/* Status + controls bar */}

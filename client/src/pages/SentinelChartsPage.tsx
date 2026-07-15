@@ -454,16 +454,29 @@ export default function SentinelChartsPage() {
   });
 
   const [loadDialogOpen, setLoadDialogOpen] = useState(!!initialSymbol);
+  const [loadWaitMs, setLoadWaitMs] = useState(0);
 
   useEffect(() => {
-    if (activeSymbol) setLoadDialogOpen(true);
+    if (activeSymbol) {
+      setLoadDialogOpen(true);
+      setLoadWaitMs(0);
+    }
   }, [activeSymbol]);
+
+  useEffect(() => {
+    if (!loadDialogOpen || chartLoadStatus.isComplete) return;
+    const id = window.setInterval(() => setLoadWaitMs((ms) => ms + 1000), 1000);
+    return () => window.clearInterval(id);
+  }, [loadDialogOpen, chartLoadStatus.isComplete]);
 
   useEffect(() => {
     if (!chartLoadStatus.isComplete || !loadDialogOpen) return;
     const t = window.setTimeout(() => setLoadDialogOpen(false), 600);
     return () => window.clearTimeout(t);
   }, [chartLoadStatus.isComplete, loadDialogOpen]);
+
+  const chartLoadHasError = chartLoadStatus.steps.some((s) => s.status === "error");
+  const allowChartLoadDismiss = chartLoadHasError || loadWaitMs >= 12_000;
 
   // Normalize /sentinel/charts/SYM from Theme Charts external link → query param
   useEffect(() => {
@@ -778,6 +791,9 @@ export default function SentinelChartsPage() {
         activeStep={chartLoadStatus.activeStep}
         elapsedMs={chartLoadStatus.elapsedMs}
         isComplete={chartLoadStatus.isComplete}
+        showContinue={allowChartLoadDismiss}
+        allowDismiss={allowChartLoadDismiss}
+        onDismiss={() => setLoadDialogOpen(false)}
       />
       <SentinelHeader showSentiment={false} />
 
