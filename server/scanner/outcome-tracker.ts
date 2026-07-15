@@ -9,6 +9,7 @@
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
 import { eq, and, isNull, sql, inArray, notInArray, lt } from "drizzle-orm";
+// eq used for per-type overdue fetches
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
 import { fetchAlpacaDailyBars, fetchAlpacaIntradayBars, fetchAlpacaQuote } from "../alpaca";
@@ -238,7 +239,6 @@ async function processOutcomes(): Promise<void> {
     // Round-robin fetch: get up to PER_TYPE_LIMIT from each signal type
     // so no single type (e.g., ma_proximity with 6000+) starves others
     const PER_TYPE_LIMIT = 40;
-    const OVERDUE_BACKLOG = 500;
     const nowForSelect = new Date();
     const overdueAgeCutoff = new Date(nowForSelect.getTime() - 20 * 60_000);
 
@@ -256,46 +256,62 @@ async function processOutcomes(): Promise<void> {
       .orderBy(sql`id DESC`)
       .limit(2000);
 
-    // Oldest overdue backlog — Jul 13 LITE-style rows fall off the newest-2k window
-    // when ma_proximity / gap / hod_fade floods untracked ids.
-    // Prefer PARTIAL rows (15m filled, later clocks empty) so mid-flight cards heal
-    // before a wall of ancient never-touched ma_proximity ids monopolizes the batch.
+    // Per-type overdue — a global oldest-N is monopolized by ma_proximity / gap floods
+    // and never reaches mid-id lod_bounce rows like LITE 27721.
+    const OVERDUE_SIGNAL_TYPES = [
+      "lod_bounce", "hod_fade", "gap", "ma_proximity", "failed_breakout",
+      "volume_spike", "velocity_move", "ur_ma_reclaim", "prev_day_high_break",
+      "prev_day_low_break", "five_day_high_break", "five_day_low_break",
+      "earnings_reaction", "gap_down_continuation", "ipo_debut",
+      "theme_acceleration", "breadth_shift", "adr_blowout", "regime_change",
+      "rai_shift", "broad_strength", "broad_weakness", "theme_earnings_density",
+    ];
+    const PER_TYPE_PARTIAL = 40;
+    const PER_TYPE_OLDEST = 20;
     const missingLaterSql = sql`(
       price_30m IS NULL OR price_1hr IS NULL OR price_4hr IS NULL OR
       price_d1_close IS NULL OR price_d2_open IS NULL OR
       price_d2_close IS NULL OR price_1w IS NULL OR price_1mo IS NULL
     )`;
 
-    const partialOverdue = await db
-      .select()
-      .from(scannerDiscoveries)
-      .where(
-        and(
-          eligibleWhere,
-          lt(scannerDiscoveries.createdAt, overdueAgeCutoff),
-          sql`price_15m IS NOT NULL`,
-          missingLaterSql
+    const partialOverdue: typeof newestPending = [];
+    const oldestOverdue: typeof newestPending = [];
+    for (const signalType of OVERDUE_SIGNAL_TYPES) {
+      const partialRows = await db
+        .select()
+        .from(scannerDiscoveries)
+        .where(
+          and(
+            eligibleWhere,
+            eq(scannerDiscoveries.signalType, signalType),
+            lt(scannerDiscoveries.createdAt, overdueAgeCutoff),
+            sql`price_15m IS NOT NULL`,
+            missingLaterSql
+          )
         )
-      )
-      .orderBy(sql`id ASC`)
-      .limit(300);
+        .orderBy(sql`id ASC`)
+        .limit(PER_TYPE_PARTIAL);
+      partialOverdue.push(...partialRows);
 
-    const oldestOverdue = await db
-      .select()
-      .from(scannerDiscoveries)
-      .where(
-        and(
-          eligibleWhere,
-          lt(scannerDiscoveries.createdAt, overdueAgeCutoff),
-          sql`(
-            price_15m IS NULL OR price_30m IS NULL OR price_1hr IS NULL OR
-            price_4hr IS NULL OR price_d1_close IS NULL OR price_d2_open IS NULL OR
-            price_d2_close IS NULL OR price_1w IS NULL OR price_1mo IS NULL
-          )`
+      const oldestRows = await db
+        .select()
+        .from(scannerDiscoveries)
+        .where(
+          and(
+            eligibleWhere,
+            eq(scannerDiscoveries.signalType, signalType),
+            lt(scannerDiscoveries.createdAt, overdueAgeCutoff),
+            sql`(
+              price_15m IS NULL OR price_30m IS NULL OR price_1hr IS NULL OR
+              price_4hr IS NULL OR price_d1_close IS NULL OR price_d2_open IS NULL OR
+              price_d2_close IS NULL OR price_1w IS NULL OR price_1mo IS NULL
+            )`
+          )
         )
-      )
-      .orderBy(sql`id ASC`)
-      .limit(OVERDUE_BACKLOG);
+        .orderBy(sql`id ASC`)
+        .limit(PER_TYPE_OLDEST);
+      oldestOverdue.push(...oldestRows);
+    }
 
     const overduePending = [...partialOverdue];
     const partialIds = new Set(partialOverdue.map((r) => r.id));
