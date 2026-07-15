@@ -114,6 +114,58 @@ function isMarketActive(): boolean {
   return etMins >= 240 && etMins < 1200;
 }
 
+// ── Checkpoint due helpers ───────────────────────────────────────────────────
+
+function rowNeedsDueCheckpoint(
+  row: {
+    createdAt: Date;
+    price15m: number | null;
+    price30m: number | null;
+    price1hr: number | null;
+    price4hr: number | null;
+    priceD1Close: number | null;
+    priceD2Open: number | null;
+    priceD2Close: number | null;
+    price1w: number | null;
+    price1mo: number | null;
+  },
+  now: Date = new Date()
+): boolean {
+  const elapsedMin = (now.getTime() - row.createdAt.getTime()) / 60_000;
+  if (elapsedMin >= 15 && row.price15m == null) return true;
+  if (elapsedMin >= 30 && row.price30m == null) return true;
+  if (elapsedMin >= 60 && row.price1hr == null) return true;
+  if (elapsedMin >= 240 && row.price4hr == null) return true;
+
+  const signalDate = row.createdAt;
+  const signalEtDate = getEtDate(signalDate);
+  const nowEtDate = getEtDate(now);
+
+  if (row.priceD1Close == null) {
+    const pastD1Close =
+      (signalEtDate === nowEtDate && isAfterEtTime(now, 16, 15)) ||
+      signalEtDate < nowEtDate;
+    if (pastD1Close) return true;
+  }
+  if (row.priceD2Open == null) {
+    const d2EtDate = getEtDate(addTradingDays(signalDate, 1));
+    if ((nowEtDate === d2EtDate && isAfterEtTime(now, 9, 35)) || nowEtDate > d2EtDate) return true;
+  }
+  if (row.priceD2Close == null) {
+    const d2EtDate = getEtDate(addTradingDays(signalDate, 1));
+    if ((nowEtDate === d2EtDate && isAfterEtTime(now, 16, 15)) || nowEtDate > d2EtDate) return true;
+  }
+  if (row.price1w == null) {
+    const d5EtDate = getEtDate(addTradingDays(signalDate, 5));
+    if ((nowEtDate === d5EtDate && isAfterEtTime(now, 16, 15)) || nowEtDate > d5EtDate) return true;
+  }
+  if (row.price1mo == null) {
+    const d20EtDate = getEtDate(addTradingDays(signalDate, 20));
+    if ((nowEtDate === d20EtDate && isAfterEtTime(now, 16, 15)) || nowEtDate > d20EtDate) return true;
+  }
+  return false;
+}
+
 async function processOutcomes(): Promise<void> {
   if (!db) { console.warn("[Outcome Tracker] No DB, skipping"); return; }
   cycleCount++;
@@ -142,7 +194,8 @@ async function processOutcomes(): Promise<void> {
 
     // Round-robin fetch: get up to PER_TYPE_LIMIT from each signal type
     // so no single type (e.g., ma_proximity with 6000+) starves others
-    const PER_TYPE_LIMIT = 25;
+    const PER_TYPE_LIMIT = 40;
+    const nowForSelect = new Date();
 
     const allPending = await db
       .select()
@@ -155,9 +208,10 @@ async function processOutcomes(): Promise<void> {
         )
       )
       .orderBy(sql`id DESC`)
-      .limit(1000);
+      .limit(2000);
 
-    // Group by signal type, take PER_TYPE_LIMIT from each, prioritizing never-processed
+    // Group by signal type; prioritize rows with OVERDUE checkpoints so mid-session
+    // partial rows (e.g. status set before 15m) are not starved by a flood of new fires.
     const byType = new Map<string, typeof allPending>();
     for (const row of allPending) {
       const list = byType.get(row.signalType) ?? [];
@@ -167,10 +221,21 @@ async function processOutcomes(): Promise<void> {
 
     const pending: typeof allPending = [];
     for (const [, rows] of byType) {
-      // Never-processed first, then already-have-peak
-      const neverProcessed = rows.filter(r => r.peakMove == null && r.worstDrawdown == null);
-      const alreadyStarted = rows.filter(r => r.peakMove != null || r.worstDrawdown != null);
-      const selected = [...neverProcessed.slice(0, PER_TYPE_LIMIT), ...alreadyStarted.slice(0, Math.max(0, PER_TYPE_LIMIT - neverProcessed.length))].slice(0, PER_TYPE_LIMIT);
+      const due = rows.filter((r) => rowNeedsDueCheckpoint(r, nowForSelect));
+      const neverProcessed = rows.filter(
+        (r) => !due.includes(r) && r.peakMove == null && r.worstDrawdown == null
+      );
+      const alreadyStarted = rows.filter(
+        (r) => !due.includes(r) && (r.peakMove != null || r.worstDrawdown != null)
+      );
+      let remaining = PER_TYPE_LIMIT;
+      const selected: typeof allPending = [];
+      for (const bucket of [due, neverProcessed, alreadyStarted]) {
+        if (remaining <= 0) break;
+        const take = bucket.slice(0, remaining);
+        selected.push(...take);
+        remaining -= take.length;
+      }
       pending.push(...selected);
     }
 
@@ -185,12 +250,11 @@ async function processOutcomes(): Promise<void> {
     let updatedCount = 0;
 
     for (const row of pending) {
-      if (row.outcomeFailed) continue;
-
+      // Still fill time checkpoints for failed setups — Lab hit-rates need the clocks
       const elapsedMs = nowMs - row.createdAt.getTime();
-      // Always process rows that have never been tracked (no peak data yet)
       const neverProcessed = row.peakMove == null && row.worstDrawdown == null;
-      if (!neverProcessed && !shouldProcessRow(elapsedMs, now)) continue;
+      const needsDue = rowNeedsDueCheckpoint(row, now);
+      if (!neverProcessed && !needsDue && !shouldProcessRow(elapsedMs, now)) continue;
 
       // Determine the price lookup symbol(s) based on subjectKind
       let lookupSymbols: string[];
@@ -418,7 +482,9 @@ async function processOutcomes(): Promise<void> {
         }
       }
 
-      // ── Completion check ─────────────────────────────────────────────
+      // Mark as tracked only when every intraday clock that is DUE is filled.
+      // Do NOT leave the queue on early fail — that stranded LITE-style cards at
+      // "flat" with only a status and no 15m/30m/1hr snapshots for the Lab.
       const has15m = row.price15m != null || updates.price15m != null;
       const has30m = row.price30m != null || updates.price30m != null;
       const has1hr = row.price1hr != null || updates.price1hr != null;
@@ -429,14 +495,24 @@ async function processOutcomes(): Promise<void> {
       const has1w = row.price1w != null || updates.price1w != null;
       const has1mo = row.price1mo != null || updates.price1mo != null;
 
-      // Mark as tracked once the intraday checkpoints are filled (15m-4hr + D1 close)
-      // so the row leaves the hot processing queue. Weekly/monthly get filled via
-      // a slower pass that queries rows WITH outcomeTrackedAt but missing 1w/1mo.
       const intradayDone = has15m && has30m && has1hr && has4hr && hasD1Close;
       const allCheckpointsFilled = intradayDone && hasD2Open && hasD2Close && has1w && has1mo;
-      const isFailed = updates.outcomeFailed === true || row.outcomeFailed;
 
-      if (intradayDone || allCheckpointsFilled || isFailed) {
+      const projected = {
+        ...row,
+        price15m: has15m ? (row.price15m ?? 1) : null,
+        price30m: has30m ? (row.price30m ?? 1) : null,
+        price1hr: has1hr ? (row.price1hr ?? 1) : null,
+        price4hr: has4hr ? (row.price4hr ?? 1) : null,
+        priceD1Close: hasD1Close ? (row.priceD1Close ?? 1) : null,
+        priceD2Open: hasD2Open ? (row.priceD2Open ?? 1) : null,
+        priceD2Close: hasD2Close ? (row.priceD2Close ?? 1) : null,
+        price1w: has1w ? (row.price1w ?? 1) : null,
+        price1mo: has1mo ? (row.price1mo ?? 1) : null,
+      };
+      const stillDue = rowNeedsDueCheckpoint(projected, now);
+
+      if ((intradayDone || allCheckpointsFilled) && !stillDue) {
         updates.outcomeTrackedAt = now;
       }
 
