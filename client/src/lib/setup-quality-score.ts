@@ -48,10 +48,11 @@ function themePoints(
 ): { points: number; detail: string } | null {
   if (rank == null || total == null || total <= 0) return null;
   const pctile = rank / total; // 1 = best rank
-  if (pctile <= 0.2) return { points: 15, detail: `Theme #${rank}/${total} (top 20%)` };
-  if (pctile <= 0.5) return { points: 8, detail: `Theme #${rank}/${total} (top half)` };
-  if (pctile <= 0.8) return { points: -8, detail: `Theme #${rank}/${total} (bottom half)` };
-  return { points: -15, detail: `Theme #${rank}/${total} (bottom 20%)` };
+  // Theme is weighted 2x vs other single factors (plan base was ±15 / ±8)
+  if (pctile <= 0.2) return { points: 30, detail: `Theme #${rank}/${total} (top 20%)` };
+  if (pctile <= 0.5) return { points: 16, detail: `Theme #${rank}/${total} (top half)` };
+  if (pctile <= 0.8) return { points: -16, detail: `Theme #${rank}/${total} (bottom half)` };
+  return { points: -30, detail: `Theme #${rank}/${total} (bottom 20%)` };
 }
 
 function tightTo50dPoints(adrExt: number | null | undefined): { points: number; detail: string } | null {
