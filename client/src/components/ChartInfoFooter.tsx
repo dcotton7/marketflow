@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { TickerReviewResultRow } from "@/lib/ticker-review-engine";
 
 import { SetupInfoPanel } from "@/components/charts/SetupInfoPanel";
+import { SetupQualityBar } from "@/components/charts/SetupQualityBar";
 import type { BreakdownWatchAssessment } from "@shared/theme-breakdown-watch";
 import { ChartFooterFontSizeControl } from "@/components/ChartFooterFontSizeControl";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
@@ -17,6 +18,7 @@ import {
   type ChartFooterFontPrefs,
   type ChartFooterFontSection,
 } from "@/lib/chart-footer-font-prefs";
+import { computeSetupQuality, lastVwap } from "@/lib/setup-quality-score";
 
 
 
@@ -272,6 +274,34 @@ export function ChartInfoFooter({
     };
   })();
 
+  const setupQuality = useMemo(() => {
+    if (!chartMetrics) return null;
+    const vwap = lastVwap(intradayData?.indicators?.vwap);
+    const price = chartMetrics.currentPrice;
+    const overVwap =
+      vwap != null && price != null && Number.isFinite(price) && vwap > 0
+        ? price > vwap
+        : null;
+    return computeSetupQuality({
+      extensionFrom50dPct: chartMetrics.extensionFrom50dPct,
+      extensionFrom200d: chartMetrics.extensionFrom200d,
+      extensionFrom50dAdr: chartMetrics.extensionFrom50dAdr,
+      extensionFrom20d: chartMetrics.extensionFrom20d,
+      pctFromLod: pctFromLOD,
+      themeRank: resolvedThemeRank,
+      totalThemes: resolvedTotalThemes,
+      overVwap,
+      rsMomentum: chartMetrics.rsMomentum,
+      adrPct: chartMetrics.adr14Pct ?? chartMetrics.adr20Pct,
+    });
+  }, [
+    chartMetrics,
+    intradayData?.indicators?.vwap,
+    pctFromLOD,
+    resolvedThemeRank,
+    resolvedTotalThemes,
+  ]);
+
   const rthPct = (() => {
     const candles = dailyData?.candles;
     if (!candles?.length || !chartMetrics?.currentPrice) return null;
@@ -355,9 +385,17 @@ export function ChartInfoFooter({
           data-testid={`${pid}box-daily-metrics`}
         >
           <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
-            <span className="text-sm font-semibold uppercase tracking-wide text-sky-400">
-              Daily metrics
-            </span>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-sm font-semibold uppercase tracking-wide text-sky-400">
+                Daily metrics
+              </span>
+              {setupQuality ? (
+                <SetupQualityBar
+                  result={setupQuality}
+                  testId={`${pid}setup-quality-bar`}
+                />
+              ) : null}
+            </div>
             <ChartFooterFontSizeControl
               section="metrics"
               value={fontPrefs.metrics}
