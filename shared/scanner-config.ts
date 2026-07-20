@@ -67,6 +67,8 @@ export interface ScannerConfig {
   breakCooldownMin: number;
   breakFreshnessRequired: boolean;
   breakFreshnessWindowFrames: number;
+  /** Skip break fire if price is already this far through the level (gap-and-gone). */
+  breakMaxThruPct: number;
 
   // ── Failed Breakout ────────────────────────────────────────────────────
   failedBreakoutReversalPct: number;
@@ -137,6 +139,7 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   breakCooldownMin: 45,
   breakFreshnessRequired: true,
   breakFreshnessWindowFrames: 6,
+  breakMaxThruPct: 1.5,
 
   failedBreakoutReversalPct: 0.25,
   failedBreakoutLookbackMin: 5,
@@ -215,6 +218,7 @@ export const SCANNER_CONFIG_FIELDS: ConfigFieldMeta[] = [
   { key: "breakCooldownMin", label: "Cooldown", group: "Breaks", type: "number", min: 5, max: 120, step: 5, unit: "min" },
   { key: "breakFreshnessRequired", label: "Freshness Required", group: "Breaks", type: "boolean" },
   { key: "breakFreshnessWindowFrames", label: "Freshness Window", group: "Breaks", type: "number", min: 2, max: 20, step: 1, unit: "frames" },
+  { key: "breakMaxThruPct", label: "Max Through Level", group: "Breaks", type: "number", min: 0.5, max: 10, step: 0.25, unit: "%" },
 
   { key: "failedBreakoutReversalPct", label: "Reversal Threshold", group: "Failed Breakout", type: "number", min: 0.1, max: 2, step: 0.05, unit: "%" },
   { key: "failedBreakoutLookbackMin", label: "Lookback Min", group: "Failed Breakout", type: "number", min: 2, max: 10, step: 1, unit: "frames" },

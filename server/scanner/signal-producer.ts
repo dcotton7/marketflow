@@ -848,6 +848,19 @@ function wasRecentlyAbove(key: string): boolean {
   return Date.now() - ts < maxAge;
 }
 
+/** % price is already through a break level (positive = beyond in break direction). */
+function thruLevelPct(price: number, level: number, direction: "up" | "down"): number {
+  if (level <= 0) return 0;
+  return direction === "up"
+    ? ((price - level) / level) * 100
+    : ((level - price) / level) * 100;
+}
+
+function isTooFarThrough(price: number, level: number, direction: "up" | "down"): boolean {
+  const maxThru = cfg.breakMaxThruPct ?? 1.5;
+  return thruLevelPct(price, level, direction) > maxThru;
+}
+
 function detectPrevDayBreaks(current: SnapshotFrame): Signal[] {
   const signals: Signal[] = [];
   const clearance = cfg.breakClearancePct / 100;
@@ -864,20 +877,26 @@ function detectPrevDayBreaks(current: SnapshotFrame): Signal[] {
       recentlyAboveLevel.set(longKey, Date.now());
       pendingBreaks.delete(longKey);
     } else if (tick.price > longLevel && tick.sma200d != null && tick.price > tick.sma200d) {
-      if (!wasRecentlyAbove(longKey)) { /* skip — was already above when scanner started */ }
+      if (isTooFarThrough(tick.price, tick.prevDayHigh, "up")) {
+        pendingBreaks.delete(longKey);
+      } else if (!wasRecentlyAbove(longKey)) { /* skip — was already above when scanner started */ }
       else {
         const pending = pendingBreaks.get(longKey);
         if (pending && pending.direction === "up") {
           pending.framesAbove++;
           if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
-            markFired(longKey);
-            pendingBreaks.delete(longKey);
-            signals.push(
-              makeSignal("prev_day_high_break", "ticker", symbol,
-                Math.round(((tick.price - tick.prevDayHigh) / tick.prevDayHigh) * 10000) / 100,
-                "up",
-                { prevDayHigh: tick.prevDayHigh, above200d: true })
-            );
+            if (isTooFarThrough(tick.price, tick.prevDayHigh, "up")) {
+              pendingBreaks.delete(longKey);
+            } else {
+              markFired(longKey);
+              pendingBreaks.delete(longKey);
+              signals.push(
+                makeSignal("prev_day_high_break", "ticker", symbol,
+                  Math.round(((tick.price - tick.prevDayHigh) / tick.prevDayHigh) * 10000) / 100,
+                  "up",
+                  { prevDayHigh: tick.prevDayHigh, above200d: true })
+              );
+            }
           }
         } else if (!isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
           pendingBreaks.set(longKey, { level: tick.prevDayHigh, framesAbove: 1, direction: "up", meta: {} });
@@ -893,22 +912,28 @@ function detectPrevDayBreaks(current: SnapshotFrame): Signal[] {
       recentlyAboveLevel.set(shortKey, Date.now());
       pendingBreaks.delete(shortKey);
     } else if (tick.price < shortLevel) {
-      if (!wasRecentlyAbove(shortKey)) { /* skip — stale */ }
+      if (isTooFarThrough(tick.price, tick.prevDayLow, "down")) {
+        pendingBreaks.delete(shortKey);
+      } else if (!wasRecentlyAbove(shortKey)) { /* skip — stale */ }
       else {
         const pending = pendingBreaks.get(shortKey);
         if (pending && pending.direction === "down") {
           pending.framesAbove++;
           if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
-            markFired(shortKey);
-            pendingBreaks.delete(shortKey);
-            const below200 = tick.sma200d != null && tick.price < tick.sma200d;
-            const below50 = tick.sma50d != null && tick.price < tick.sma50d;
-            signals.push(
-              makeSignal("prev_day_low_break", "ticker", symbol,
-                Math.round(((tick.prevDayLow - tick.price) / tick.prevDayLow) * 10000) / 100,
-                "down",
-                { prevDayLow: tick.prevDayLow, below200d: below200, below50d: below50, shortPriority: below200 && below50 ? "urgent" : below200 ? "high" : below50 ? "elevated" : "low" })
-            );
+            if (isTooFarThrough(tick.price, tick.prevDayLow, "down")) {
+              pendingBreaks.delete(shortKey);
+            } else {
+              markFired(shortKey);
+              pendingBreaks.delete(shortKey);
+              const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+              const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+              signals.push(
+                makeSignal("prev_day_low_break", "ticker", symbol,
+                  Math.round(((tick.prevDayLow - tick.price) / tick.prevDayLow) * 10000) / 100,
+                  "down",
+                  { prevDayLow: tick.prevDayLow, below200d: below200, below50d: below50, shortPriority: below200 && below50 ? "urgent" : below200 ? "high" : below50 ? "elevated" : "low" })
+              );
+            }
           }
         } else if (!isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
           pendingBreaks.set(shortKey, { level: tick.prevDayLow, framesAbove: 1, direction: "down", meta: {} });
@@ -943,20 +968,27 @@ function detectFiveDayBreaks(current: SnapshotFrame): Signal[] {
       recentlyAboveLevel.set(longKey, Date.now());
       pendingBreaks.delete(longKey);
     } else if (tick.price > longLevel && tick.sma200d != null && tick.price > tick.sma200d) {
-      if (!wasRecentlyAbove(longKey)) { /* stale */ }
+      // Gap-and-gone / already extended through — not a fresh break
+      if (isTooFarThrough(tick.price, levels.high5d, "up")) {
+        pendingBreaks.delete(longKey);
+      } else if (!wasRecentlyAbove(longKey)) { /* stale */ }
       else {
         const pending = pendingBreaks.get(longKey);
         if (pending && pending.direction === "up") {
           pending.framesAbove++;
           if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
-            markFired(longKey);
-            pendingBreaks.delete(longKey);
-            signals.push(
-              makeSignal("five_day_high_break", "ticker", symbol,
-                Math.round(((tick.price - levels.high5d) / levels.high5d) * 10000) / 100,
-                "up",
-                { fiveDayHigh: levels.high5d, above200d: true })
-            );
+            if (isTooFarThrough(tick.price, levels.high5d, "up")) {
+              pendingBreaks.delete(longKey);
+            } else {
+              markFired(longKey);
+              pendingBreaks.delete(longKey);
+              signals.push(
+                makeSignal("five_day_high_break", "ticker", symbol,
+                  Math.round(((tick.price - levels.high5d) / levels.high5d) * 10000) / 100,
+                  "up",
+                  { fiveDayHigh: levels.high5d, above200d: true })
+              );
+            }
           }
         } else if (!isCoolingDown(longKey, min2ms(cfg.breakCooldownMin))) {
           pendingBreaks.set(longKey, { level: levels.high5d, framesAbove: 1, direction: "up", meta: {} });
@@ -972,22 +1004,28 @@ function detectFiveDayBreaks(current: SnapshotFrame): Signal[] {
       recentlyAboveLevel.set(shortKey, Date.now());
       pendingBreaks.delete(shortKey);
     } else if (tick.price < shortLevel) {
-      if (!wasRecentlyAbove(shortKey)) { /* stale */ }
+      if (isTooFarThrough(tick.price, levels.low5d, "down")) {
+        pendingBreaks.delete(shortKey);
+      } else if (!wasRecentlyAbove(shortKey)) { /* stale */ }
       else {
         const pending = pendingBreaks.get(shortKey);
         if (pending && pending.direction === "down") {
           pending.framesAbove++;
           if (pending.framesAbove >= cfg.breakConfirmFrames && !isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
-            markFired(shortKey);
-            pendingBreaks.delete(shortKey);
-            const below200 = tick.sma200d != null && tick.price < tick.sma200d;
-            const below50 = tick.sma50d != null && tick.price < tick.sma50d;
-            signals.push(
-              makeSignal("five_day_low_break", "ticker", symbol,
-                Math.round(((levels.low5d - tick.price) / levels.low5d) * 10000) / 100,
-                "down",
-                { fiveDayLow: levels.low5d, below200d: below200, below50d: below50, shortPriority: below200 && below50 ? "urgent" : below200 ? "high" : below50 ? "elevated" : "low" })
-            );
+            if (isTooFarThrough(tick.price, levels.low5d, "down")) {
+              pendingBreaks.delete(shortKey);
+            } else {
+              markFired(shortKey);
+              pendingBreaks.delete(shortKey);
+              const below200 = tick.sma200d != null && tick.price < tick.sma200d;
+              const below50 = tick.sma50d != null && tick.price < tick.sma50d;
+              signals.push(
+                makeSignal("five_day_low_break", "ticker", symbol,
+                  Math.round(((levels.low5d - tick.price) / levels.low5d) * 10000) / 100,
+                  "down",
+                  { fiveDayLow: levels.low5d, below200d: below200, below50d: below50, shortPriority: below200 && below50 ? "urgent" : below200 ? "high" : below50 ? "elevated" : "low" })
+              );
+            }
           }
         } else if (!isCoolingDown(shortKey, min2ms(cfg.breakCooldownMin))) {
           pendingBreaks.set(shortKey, { level: levels.low5d, framesAbove: 1, direction: "down", meta: {} });

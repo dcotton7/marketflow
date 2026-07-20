@@ -165,7 +165,12 @@ function buildDayBreakBrief(es: EnrichedSignal): { headline: string; narrative: 
   else if (shortPriority === "high") headline += " — high priority short";
 
   const parts: string[] = [];
-  parts.push(`${es.signal.subject} confirmed ${BREAK_HOLD_LABEL} at $${level.toFixed(2)} (${label}).`);
+  parts.push(
+    `${es.signal.subject} cleared prior ${label} of $${level.toFixed(2)} (${BREAK_HOLD_LABEL}).`
+  );
+  if (es.signal.magnitude != null && Number.isFinite(es.signal.magnitude)) {
+    parts.push(`Now ${es.signal.magnitude >= 0 ? "+" : ""}${es.signal.magnitude.toFixed(2)}% through.`);
+  }
   if (isShort && es.signal.meta?.below200d) parts.push("Below 200d SMA.");
   if (isShort && es.signal.meta?.below50d) parts.push("Below 50d SMA.");
 
@@ -187,7 +192,12 @@ function buildFiveDayBreakBrief(es: EnrichedSignal): { headline: string; narrati
   else if (shortPriority === "high") headline += " — high priority short";
 
   const parts: string[] = [];
-  parts.push(`${es.signal.subject} confirmed ${BREAK_HOLD_LABEL} at $${level.toFixed(2)} (${label}).`);
+  parts.push(
+    `${es.signal.subject} cleared prior ${label} of $${level.toFixed(2)} (${BREAK_HOLD_LABEL}).`
+  );
+  if (es.signal.magnitude != null && Number.isFinite(es.signal.magnitude)) {
+    parts.push(`Now ${es.signal.magnitude >= 0 ? "+" : ""}${es.signal.magnitude.toFixed(2)}% through.`);
+  }
   if (isShort && es.signal.meta?.below200d) parts.push("Below 200d SMA.");
   if (isShort && es.signal.meta?.below50d) parts.push("Below 50d SMA.");
 
