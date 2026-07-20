@@ -300,10 +300,10 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
         </div>
       )}
 
-      {/* ── Key Metrics Grid ── */}
-      <div className="space-y-1">
+      {/* ── Key Metrics Grid: 4 × label:value per row, tight vertical ── */}
+      <div className="space-y-0.5">
         <FundSectionHeader label="Key Metrics" />
-        <div className="grid grid-cols-3 gap-x-3 gap-y-1.5">
+        <div className="grid grid-cols-4 gap-x-2 gap-y-0.5">
           {metrics.marketCap > 0 && (
             <FundMetric label="Mkt Cap" value={formatMarketCap(metrics.marketCap)} />
           )}
@@ -323,7 +323,7 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
           )}
           {metrics.debtToEquity != null && (
             <FundMetric
-              label="D/E Ratio"
+              label="D/E"
               value={metrics.debtToEquity.toFixed(2)}
               valueClass={metrics.debtToEquity > 2 ? "text-red-400" : metrics.debtToEquity > 1 ? "text-amber-400" : undefined}
             />
@@ -344,7 +344,7 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
           )}
           {metrics.dividendYield != null && metrics.dividendYield > 0 && (
             <FundMetric
-              label="Div Yield"
+              label="Div"
               value={`${metrics.dividendYield.toFixed(2)}%`}
               valueClass={metrics.dividendYield > 4 ? "text-green-400" : undefined}
             />
@@ -365,7 +365,7 @@ function FundamentalsTabContent({ metrics, symbol }: { metrics: ChartMetrics | n
           )}
           {metrics.salesGrowth3QYoY && metrics.salesGrowth3QYoY !== "N/A" && (
             <FundMetric
-              label="Rev Growth"
+              label="Rev"
               value={metrics.salesGrowth3QYoY}
               valueClass={metrics.salesGrowth3QYoY.startsWith("+") ? "text-green-400" : metrics.salesGrowth3QYoY.startsWith("-") ? "text-red-400" : undefined}
             />
@@ -547,12 +547,10 @@ function FundMetric({
   valueClass?: string;
 }) {
   return (
-    <div className="min-w-0">
-      <span className="text-[0.72em] text-slate-500 block leading-tight">{label}</span>
-      <span className={cn("text-[0.9em] font-medium text-slate-200 leading-tight", valueClass)}>
-        {value}
-      </span>
-    </div>
+    <p className="min-w-0 truncate text-[0.85em] leading-tight text-left">
+      <span className="text-slate-500">{label}: </span>
+      <span className={cn("font-medium text-slate-200", valueClass)}>{value}</span>
+    </p>
   );
 }
 
