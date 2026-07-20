@@ -40,14 +40,19 @@ export interface SessionMaSnapshotInput {
 
 let sessionMaCache: SessionMaCache | null = null;
 
-/** Full-universe MA cycle = 5 shards × 1 minute. */
+/**
+ * Full-universe MA cycle: 5 batches of ceil(N/5), 2s pause between batches,
+ * kicked at most once per minute (full pass finishes inside the first minute).
+ */
 export const MA_SHARD_COUNT = 5;
+export const MA_BATCH_PAUSE_MS = 2_000;
 export const MA_SHARD_INTERVAL_MS = 60_000;
 
 /** @deprecated Prefer shard cadence; kept for single-symbol helpers. */
 const SESSION_MA_REFRESH_MS = 5 * 60 * 1000;
 
 let maRefreshInFlight = false;
+let maIsPausing = false;
 let nextShardIndex = 0;
 let lastShardKickAt: Date | null = null;
 let lastShardStartedAt: Date | null = null;
@@ -58,22 +63,32 @@ let lastShardRequested = 0;
 let lastShardComputed = 0;
 let lastUniverseSize = 0;
 let lastBatchSize = 0;
+let lastChainElapsedMs: number | null = null;
 
 export interface MaShardProgress {
   inFlight: boolean;
+  isPausing: boolean;
   shardCount: number;
   shardIntervalMs: number;
+  batchPauseMs: number;
   nextShardIndex: number;
   lastShardIndex: number;
   lastShardStartedAt: string | null;
   lastShardFinishedAt: string | null;
   lastShardElapsedMs: number | null;
+  lastChainElapsedMs: number | null;
   lastShardRequested: number;
   lastShardComputed: number;
   universeSize: number;
   batchSize: number;
   coveredCount: number;
   msUntilNextShard: number | null;
+}
+
+export type MaBatchMergedCallback = (cache: SessionMaCache) => void;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function getSessionMaCache(): SessionMaCache | null {
@@ -93,13 +108,16 @@ export function getMaShardProgress(): MaShardProgress {
   }
   return {
     inFlight: maRefreshInFlight,
+    isPausing: maIsPausing,
     shardCount: MA_SHARD_COUNT,
     shardIntervalMs: MA_SHARD_INTERVAL_MS,
+    batchPauseMs: MA_BATCH_PAUSE_MS,
     nextShardIndex,
     lastShardIndex,
     lastShardStartedAt: lastShardStartedAt?.toISOString() ?? null,
     lastShardFinishedAt: lastShardFinishedAt?.toISOString() ?? null,
     lastShardElapsedMs,
+    lastChainElapsedMs,
     lastShardRequested,
     lastShardComputed,
     universeSize: lastUniverseSize,
@@ -271,7 +289,7 @@ function mergeIntoSessionMaCache(entries: Map<string, MaDataEntry>): SessionMaCa
 
 /**
  * Recompute session-adjusted MAs for the given symbols and replace the cache
- * (legacy full-replace path). Prefer refreshNextSessionMaShard for MC polling.
+ * (legacy full-replace path). Prefer kickSessionMaBatchChain for MC polling.
  */
 export async function computeSessionAdjustedMADataForSymbols(
   symbols: string[],
@@ -298,23 +316,82 @@ export async function getSessionAdjustedMADataForSymbols(
 }
 
 /**
- * Refresh the next universe shard (ceil(N/5) symbols) at most once per minute.
- * Merges into the shared cache so coverage accumulates across the full cycle.
+ * Run all 5 × ceil(N/5) batches with MA_BATCH_PAUSE_MS between them.
+ * Full universe completes inside the first minute of each cycle.
  */
-export async function refreshNextSessionMaShard(
-  allSymbols: string[],
-  snapshots: Map<string, SessionMaSnapshotInput>
+async function runSessionMaBatchChain(
+  universe: string[],
+  snapshots: Map<string, SessionMaSnapshotInput>,
+  onBatchMerged?: MaBatchMergedCallback
 ): Promise<SessionMaCache> {
+  const batchSize = Math.ceil(universe.length / MA_SHARD_COUNT);
+  lastBatchSize = batchSize;
+  lastUniverseSize = universe.length;
+  const chainStartedAt = Date.now();
+  let merged =
+    sessionMaCache ?? { data: new Map<string, MaDataEntry>(), asOf: new Date(), mode: "session_adjusted" as MaMode };
+
+  for (let shardIndex = 0; shardIndex < MA_SHARD_COUNT; shardIndex++) {
+    const shardStart = shardIndex * batchSize;
+    if (shardStart >= universe.length) break;
+    const shard = universe.slice(shardStart, shardStart + batchSize);
+    const batchStartedAt = Date.now();
+    lastShardStartedAt = new Date(batchStartedAt);
+    lastShardIndex = shardIndex;
+    nextShardIndex = shardIndex;
+    lastShardRequested = shard.length;
+    lastShardComputed = 0;
+    maIsPausing = false;
+
+    const entries = await computeMaEntriesForSymbols(shard, snapshots);
+    lastShardComputed = entries.size;
+    merged = mergeIntoSessionMaCache(entries);
+    lastShardFinishedAt = new Date();
+    lastShardElapsedMs = lastShardFinishedAt.getTime() - batchStartedAt;
+    onBatchMerged?.(merged);
+
+    console.log(
+      `[SessionMA] Batch ${shardIndex + 1}/${MA_SHARD_COUNT}: ` +
+        `${lastShardComputed}/${lastShardRequested} computed, ` +
+        `coverage ${merged.data.size}/${universe.length}, ` +
+        `${lastShardElapsedMs}ms`
+    );
+
+    if (shardIndex < MA_SHARD_COUNT - 1 && shardStart + batchSize < universe.length) {
+      maIsPausing = true;
+      await sleep(MA_BATCH_PAUSE_MS);
+      maIsPausing = false;
+    }
+  }
+
+  nextShardIndex = 0;
+  lastChainElapsedMs = Date.now() - chainStartedAt;
+  console.log(
+    `[SessionMA] Chain complete: coverage ${merged.data.size}/${universe.length} in ${lastChainElapsedMs}ms`
+  );
+  return merged;
+}
+
+/**
+ * Kick a full 5-batch MA chain at most once per minute (fire-and-forget friendly).
+ * Returns current cache immediately; chain updates merge in the background.
+ */
+export function kickSessionMaBatchChain(
+  allSymbols: string[],
+  snapshots: Map<string, SessionMaSnapshotInput>,
+  onBatchMerged?: MaBatchMergedCallback
+): SessionMaCache {
   const universe = Array.from(new Set(allSymbols.map((s) => s.toUpperCase())));
   lastUniverseSize = universe.length;
   lastBatchSize = universe.length > 0 ? Math.ceil(universe.length / MA_SHARD_COUNT) : 0;
+  const empty: SessionMaCache = { data: new Map(), asOf: new Date(), mode: "session_adjusted" };
 
   if (universe.length === 0) {
-    return sessionMaCache ?? { data: new Map(), asOf: new Date(), mode: "session_adjusted" };
+    return sessionMaCache ?? empty;
   }
 
   if (maRefreshInFlight) {
-    return sessionMaCache ?? { data: new Map(), asOf: new Date(), mode: "session_adjusted" };
+    return sessionMaCache ?? empty;
   }
 
   const now = Date.now();
@@ -326,40 +403,34 @@ export async function refreshNextSessionMaShard(
     return sessionMaCache;
   }
 
-  if (nextShardIndex >= MA_SHARD_COUNT) nextShardIndex = 0;
-  const batchSize = lastBatchSize;
-  const start = nextShardIndex * batchSize;
-  if (start >= universe.length) {
-    nextShardIndex = 0;
-  }
-  const shardStart = nextShardIndex * batchSize;
-  const shard = universe.slice(shardStart, shardStart + batchSize);
-  const shardIndex = nextShardIndex;
-
   maRefreshInFlight = true;
   lastShardKickAt = new Date();
   lastShardStartedAt = lastShardKickAt;
-  lastShardRequested = shard.length;
-  lastShardComputed = 0;
+  lastChainElapsedMs = null;
 
-  try {
-    const entries = await computeMaEntriesForSymbols(shard, snapshots);
-    lastShardComputed = entries.size;
-    const merged = mergeIntoSessionMaCache(entries);
-    lastShardIndex = shardIndex;
-    nextShardIndex = (shardIndex + 1) % MA_SHARD_COUNT;
-    lastShardFinishedAt = new Date();
-    lastShardElapsedMs = lastShardFinishedAt.getTime() - lastShardStartedAt.getTime();
-    console.log(
-      `[SessionMA] Shard ${shardIndex + 1}/${MA_SHARD_COUNT}: ` +
-        `${lastShardComputed}/${lastShardRequested} computed, ` +
-        `coverage ${merged.data.size}/${universe.length}, ` +
-        `${lastShardElapsedMs}ms`
-    );
-    return merged;
-  } finally {
-    maRefreshInFlight = false;
-  }
+  void (async () => {
+    try {
+      await runSessionMaBatchChain(universe, snapshots, onBatchMerged);
+    } catch (err) {
+      console.error("[SessionMA] Batch chain failed:", err);
+    } finally {
+      maRefreshInFlight = false;
+      maIsPausing = false;
+    }
+  })();
+
+  return sessionMaCache ?? empty;
+}
+
+/**
+ * @deprecated Prefer kickSessionMaBatchChain (non-blocking). Kept for callers that await.
+ * Starts the batch chain and returns the cache immediately (chain continues in background).
+ */
+export async function refreshNextSessionMaShard(
+  allSymbols: string[],
+  snapshots: Map<string, SessionMaSnapshotInput>
+): Promise<SessionMaCache> {
+  return kickSessionMaBatchChain(allSymbols, snapshots);
 }
 
 export function maEntryToTickerMas(symbol: string, entry: MaDataEntry) {
@@ -391,9 +462,11 @@ export function clearSessionMaCache(): void {
   lastShardStartedAt = null;
   lastShardFinishedAt = null;
   lastShardElapsedMs = null;
+  lastChainElapsedMs = null;
   lastShardIndex = -1;
   lastShardRequested = 0;
   lastShardComputed = 0;
+  maIsPausing = false;
 }
 
 /** Prefer MC poll cache when fresh; otherwise compute from live snapshot OHLC. */

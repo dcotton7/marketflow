@@ -117,16 +117,8 @@ app.use((req, res, next) => {
     const { startMemoryLogging } = await import("./infra/memory-gate");
     startMemoryLogging(60_000);
 
-    // Defer alert poller 15s — it's lightweight but depends on MC snapshot prices
-    setTimeout(async () => {
-      try {
-        const { startAlertPollingWorker } = await import("./alerts/poller");
-        startAlertPollingWorker();
-        console.log("[Startup Stagger] Alert poller started (t+15s)");
-      } catch (err) {
-        console.error("[Startup Stagger] Alert poller init failed:", err);
-      }
-    }, 15_000);
+    // Alert evaluation temporarily paused — re-enable by restoring startAlertPollingWorker().
+    console.log("[Startup Stagger] Alert poller PAUSED (not started)");
 
     app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
       const status = err.status || err.statusCode || 500;

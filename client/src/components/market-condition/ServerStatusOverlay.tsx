@@ -36,13 +36,16 @@ type ServerStatusPayload = {
     universeSize: number;
     shard: {
       inFlight: boolean;
+      isPausing?: boolean;
       shardCount: number;
       shardIntervalMs: number;
+      batchPauseMs?: number;
       nextShardIndex: number;
       lastShardIndex: number;
       lastShardStartedAt: string | null;
       lastShardFinishedAt: string | null;
       lastShardElapsedMs: number | null;
+      lastChainElapsedMs?: number | null;
       lastShardRequested: number;
       lastShardComputed: number;
       universeSize: number;
@@ -218,19 +221,19 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
     if (shard.inFlight) {
       return Math.max(0, Math.round((nowMs - new Date(shard.lastShardStartedAt).getTime()) / 1000));
     }
+    if (shard.lastChainElapsedMs != null) return Math.round(shard.lastChainElapsedMs / 1000);
     if (shard.lastShardElapsedMs != null) return Math.round(shard.lastShardElapsedMs / 1000);
     return null;
   })();
-  const nextShardSec = (() => {
+  const nextCycleSec = (() => {
     if (!shard || shard.inFlight) return null;
+    if (shard.msUntilNextShard != null) {
+      return Math.max(0, Math.ceil(shard.msUntilNextShard / 1000));
+    }
     const interval = shard.shardIntervalMs || 60_000;
     const baseIso = shard.lastShardFinishedAt ?? shard.lastShardStartedAt;
     if (baseIso) {
-      const base = new Date(baseIso).getTime();
-      return Math.max(0, Math.ceil((interval - (nowMs - base)) / 1000));
-    }
-    if (shard.msUntilNextShard != null) {
-      return Math.max(0, Math.ceil(shard.msUntilNextShard / 1000));
+      return Math.max(0, Math.ceil((interval - (nowMs - new Date(baseIso).getTime())) / 1000));
     }
     return null;
   })();
@@ -303,27 +306,35 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
                 <Dot tone={maTone === "idle" ? "idle" : maTone} />
                 MA refresh
               </div>
-              <Row label="Refresh start">
+              <Row label="Cycle start">
                 {formatEtTime(shard?.lastShardStartedAt)} ET
                 {elapsedSec != null ? ` · ${elapsedSec}s` : ""}
               </Row>
-              <Row label="This shard">
+              <Row label="Batch">
                 {shard
                   ? `${shard.lastShardComputed}/${shard.lastShardRequested}` +
                     (shard.lastShardIndex >= 0
-                      ? ` · shard ${shard.lastShardIndex + 1}/${shard.shardCount}`
+                      ? ` · ${shard.lastShardIndex + 1}/${shard.shardCount}`
+                      : "") +
+                    (shard.inFlight
+                      ? shard.isPausing
+                        ? " · pause 2s"
+                        : " · running"
                       : "")
                   : "—"}
               </Row>
               <Row label="Coverage">
                 {status.ma.coverage}/{status.ma.universeSize}
                 {shard?.inFlight
-                  ? " · running"
-                  : nextShardSec != null
-                    ? ` · next ${nextShardSec}s`
+                  ? ""
+                  : nextCycleSec != null
+                    ? ` · next ${nextCycleSec}s`
                     : ""}
               </Row>
-              <Row label="Batch size">{shard?.batchSize ?? "—"} / min</Row>
+              <Row label="Batch size">
+                {shard?.batchSize ?? "—"} × {shard?.shardCount ?? 5}
+                {shard?.batchPauseMs != null ? ` · ${shard.batchPauseMs / 1000}s gap` : " · 2s gap"}
+              </Row>
             </section>
 
             <section className="space-y-1 border-t border-slate-800 pt-2">

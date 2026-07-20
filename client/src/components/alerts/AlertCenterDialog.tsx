@@ -36,6 +36,14 @@ export function AlertCenterDialog({ open, onOpenChange }: AlertCenterDialogProps
           </DialogDescription>
         </DialogHeader>
 
+        <div
+          className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200"
+          role="status"
+        >
+          Alert evaluation is paused temporarily. You can still create and manage alerts; background
+          checks will not run until this is re-enabled.
+        </div>
+
         <Tabs defaultValue="alerts" className="space-y-4">
           <TabsList>
             <TabsTrigger value="alerts">Active Alerts</TabsTrigger>

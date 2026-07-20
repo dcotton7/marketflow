@@ -26,7 +26,8 @@ import {
 } from "./theme-snapshots";
 import {
   getMADataForThemes,
-  refreshNextSessionMaShard,
+  kickSessionMaBatchChain,
+  getSessionMaCache,
   getMaShardProgress,
   type MaMode,
 } from "../../data-layer";
@@ -233,12 +234,26 @@ export async function refreshSnapshot(
         });
       }
 
-      // Staggered full-universe MA refresh: ceil(N/5) symbols per minute, merged into cache.
-      // Keeps peak DB/memory load ~1/5 of a full-universe burst (Render 2GB spike guard).
-      const sessionMa = await refreshNextSessionMaShard(allTickers, snapshotInputs);
-      state.maData = new Map(sessionMa.data);
-      state.maAsOf = sessionMa.asOf;
-      state.maMode = sessionMa.mode;
+      // Full-universe MA chain: 5 × ceil(N/5) with 2s pauses, kicked at most once/min.
+      // Fire-and-forget so MC poll is not blocked; peak load stays at one shard.
+      const applyMaCache = (cache: {
+        data: Map<string, {
+          ema10d: number | null;
+          ema20d: number | null;
+          sma20d: number | null;
+          sma50d: number | null;
+          sma200d: number | null;
+        }>;
+        asOf: Date;
+        mode: MaMode;
+      }) => {
+        state.maData = new Map(cache.data);
+        state.maAsOf = cache.asOf;
+        state.maMode = cache.mode;
+      };
+      kickSessionMaBatchChain(allTickers, snapshotInputs, applyMaCache);
+      const sessionMa = getSessionMaCache();
+      if (sessionMa) applyMaCache(sessionMa);
 
       // EOD fallback disabled — stale historical_bars produce garbage MAs.
       // Only session-adjusted MAs (with gap/staleness checks) are used.
@@ -252,9 +267,9 @@ export async function refreshSnapshot(
       }
       const shard = getMaShardProgress();
       console.log(
-        `[MC-Snapshot] Session-adjusted MAs: coverage ${sessionMa.data.size}/${shard.universeSize}` +
-          ` (shard ${shard.lastShardIndex >= 0 ? shard.lastShardIndex + 1 : "-"}/${shard.shardCount}` +
-          `, asOf=${sessionMa.asOf.toISOString()})`
+        `[MC-Snapshot] Session-adjusted MAs: coverage ${state.maData.size}/${shard.universeSize}` +
+          ` (batch ${shard.lastShardIndex >= 0 ? shard.lastShardIndex + 1 : "-"}/${shard.shardCount}` +
+          `, inFlight=${shard.inFlight}, asOf=${state.maAsOf?.toISOString() ?? "null"})`
       );
     } catch (err) {
       console.warn("[MC-Snapshot] Could not load session-adjusted MAs, falling back to EOD DB:", err);
@@ -1036,7 +1051,7 @@ export function getServerStatusSnapshot(): {
     ma: {
       asOf: state.maAsOf?.toISOString() ?? null,
       mode: state.maMode,
-      coverage: state.maData.size,
+      coverage: Math.max(state.maData.size, shard.coveredCount),
       universeSize: shard.universeSize || getAllUniverseTickers().length,
       shard,
     },
