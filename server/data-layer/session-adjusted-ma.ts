@@ -137,8 +137,11 @@ async function loadDailyBarsForSymbols(
   if (!db || symbols.length === 0) return result;
 
   const upperSymbols = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
+  // Calendar lookback must cover ~days trading sessions (weekends/holidays).
+  // 250 calendar days ≈ 170 sessions — too short for SMA200. Use ~1.6× + buffer.
+  const calendarLookbackDays = Math.ceil(days * 1.65) + 30;
   const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days - 10);
+  cutoffDate.setDate(cutoffDate.getDate() - calendarLookbackDays);
   const cutoffStr = cutoffDate.toISOString().split("T")[0];
   const today = new Date().toISOString().split("T")[0];
 
