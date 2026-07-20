@@ -13,8 +13,8 @@ export const SCANNER_OVERLAY_Z = 3400;
 /** Popovers/selects portaled from chart viewer dialogs (must sit above dialog + overlay). */
 export const CHART_VIEWER_DIALOG_POPOVER_Z = "z-[3450]";
 
-/** MarketFlow / app server-status monitor (portaled to body). Below toasts. */
-export const SERVER_STATUS_OVERLAY_Z = "z-[3480]";
+/** MarketFlow / app server-status monitor (portaled to body). Numeric for inline style. */
+export const SERVER_STATUS_OVERLAY_Z_INDEX = 100_000;
 
 /** Toasts must clear chart viewer + scanner + dialogs. */
 export const APP_TOAST_Z = "z-[3500]";

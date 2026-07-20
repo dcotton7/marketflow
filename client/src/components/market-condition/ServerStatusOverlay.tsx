@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Activity, GripVertical, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SERVER_STATUS_OVERLAY_Z } from "@/lib/overlay-z-index";
+import { SERVER_STATUS_OVERLAY_Z_INDEX } from "@/lib/overlay-z-index";
 
 const STORAGE_KEY = "marketflow:serverStatusOverlay";
 const POLL_MS = 2500;
@@ -225,11 +225,13 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
   return createPortal(
     <div
       ref={panelRef}
-      className={cn(
-        "fixed w-[300px] rounded-lg border border-slate-600/70 bg-slate-950/95 shadow-xl backdrop-blur-sm",
-        SERVER_STATUS_OVERLAY_Z
-      )}
-      style={{ left: pos.x, top: pos.y }}
+      className="fixed w-[300px] rounded-lg border border-slate-600/70 bg-slate-950/95 shadow-xl backdrop-blur-sm"
+      style={{
+        left: pos.x,
+        top: pos.y,
+        zIndex: SERVER_STATUS_OVERLAY_Z_INDEX,
+        isolation: "isolate",
+      }}
       data-ui-region="marketFlow:serverStatusOverlay"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
