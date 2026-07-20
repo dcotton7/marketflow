@@ -28,7 +28,9 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     enabled: true,
     category: "signal",
     trigger: {
-      signalTypes: ["breadth_shift", "broad_weakness"],
+      // broad_weakness only — per-theme breadth/accel go through theme_motion_scan
+      // so a single theme move isn't killed by the multi-theme contagion gate.
+      signalTypes: ["broad_weakness"],
       direction: "down",
     },
     lensIds: ["fastest_movers", "cross_theme", "regime_context", "news"],
@@ -44,10 +46,26 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     enabled: true,
     category: "signal",
     trigger: {
-      signalTypes: ["theme_acceleration", "broad_strength"],
+      signalTypes: ["broad_strength"],
       direction: "up",
     },
     lensIds: ["fastest_movers", "peer_velocity", "regime_context", "news"],
+    reactions: ["discovery_brief"],
+    cooldownMs: 10 * 60_000,
+    priority: "normal",
+    ownerId: "system",
+    visibility: "global",
+  },
+  {
+    id: "theme_motion_scan",
+    name: "Theme Motion",
+    enabled: true,
+    category: "signal",
+    trigger: {
+      signalTypes: ["breadth_shift", "theme_acceleration"],
+      subjectKind: "theme",
+    },
+    lensIds: ["regime_context", "fastest_movers"],
     reactions: ["discovery_brief"],
     cooldownMs: 10 * 60_000,
     priority: "normal",

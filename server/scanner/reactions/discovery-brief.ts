@@ -542,6 +542,11 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
     case "weakness_cascade":
       brief = buildWeaknessCascadeBrief(es);
       break;
+    case "theme_motion_scan":
+      brief = es.signal.type === "breadth_shift"
+        ? buildBreadthShiftBrief(es)
+        : buildThemeAccelerationBrief(es);
+      break;
     case "leadership_divergence":
       brief = buildDivergenceBrief(es);
       break;

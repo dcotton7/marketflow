@@ -90,6 +90,14 @@ const NEWS_SIGNAL_TYPES: Set<SignalType> = new Set(["news_alert"]);
 
 const PREMARKET_SIGNAL_TYPES: Set<SignalType> = new Set(["gap", "volume_spike", "news_alert"]);
 
+/** Signal types to load from DB when a category chip is active (not client-only last-N). */
+const CATEGORY_DB_TYPES: Partial<Record<CategoryFilter, SignalType[]>> = {
+  theme: [...THEME_SIGNAL_TYPES],
+  news: [...NEWS_SIGNAL_TYPES],
+  setups: [...SETUP_SIGNAL_TYPES],
+  premarket: [...PREMARKET_SIGNAL_TYPES],
+};
+
 function isPreMarketSession(isoString: string): boolean {
   const d = new Date(isoString);
   const et = new Date(d.toLocaleString("en-US", { timeZone: "America/New_York" }));
@@ -128,6 +136,9 @@ function cardPriorDayDollarVol(card: DiscoveryCardType): number | null {
 
 function matchesThemeStrength(card: DiscoveryCardType, filter: ThemeStrengthFilter): boolean {
   if (filter === "all") return true;
+  // Market-wide cards and theme-subject cards aren't ticker-membership rows —
+  // don't hide them when Theme % chips are on.
+  if (card.subjectKind === "market" || card.subjectKind === "theme") return true;
   const pct = cardThemePercentile(card);
   if (pct == null) return false;
   if (filter === "top25") return pct >= 75;
@@ -227,8 +238,9 @@ export function DiscoveryFeedPanel() {
   const [historyMode, setHistoryMode] = useState(false);
   const [historyCards, setHistoryCards] = useState<DiscoveryCardType[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  /** Server-side type query (live buffer / last-N window often drop cleared LOD cards). */
+  /** Server-side type/category query (live last-N is flooded by ma_proximity). */
   const [historySignalType, setHistorySignalType] = useState<SignalType | "all">("all");
+  const [historyCategory, setHistoryCategory] = useState<CategoryFilter | null>(null);
 
   const isOnPopoutRoute = location.startsWith("/scanner-popout") || location.startsWith("/workspace-popout");
 
@@ -262,16 +274,51 @@ export function DiscoveryFeedPanel() {
         const data = await res.json();
         setHistoryCards(data.discoveries ?? []);
         setHistorySignalType(signalType);
+        setHistoryCategory(null);
         setHistoryMode(true);
       }
     } catch { /* ignore */ }
     setHistoryLoading(false);
   }, [etToday]);
 
+  const fetchCategoryHistory = useCallback(async (cat: CategoryFilter) => {
+    const types = CATEGORY_DB_TYPES[cat];
+    if (!types || types.length === 0) {
+      await fetchTodayHistory("all");
+      return;
+    }
+    setHistoryLoading(true);
+    try {
+      const date = etToday();
+      const batches = await Promise.all(
+        types.map(async (st) => {
+          const params = new URLSearchParams({ date, limit: "100", signal_type: st });
+          const res = await fetch(`/api/scanner/history?${params}`);
+          if (!res.ok) return [] as DiscoveryCardType[];
+          const data = await res.json();
+          return (data.discoveries ?? []) as DiscoveryCardType[];
+        })
+      );
+      const byId = new Map<number, DiscoveryCardType>();
+      for (const batch of batches) {
+        for (const card of batch) byId.set(card.id, card);
+      }
+      const merged = [...byId.values()].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setHistoryCards(merged);
+      setHistorySignalType("all");
+      setHistoryCategory(cat);
+      setHistoryMode(true);
+    } catch { /* ignore */ }
+    setHistoryLoading(false);
+  }, [etToday, fetchTodayHistory]);
+
   const exitHistoryMode = useCallback(() => {
     setHistoryMode(false);
     setHistoryCards([]);
     setHistorySignalType("all");
+    setHistoryCategory(null);
   }, []);
 
   // Type filter must hit DB — live feed clears dead LOD cards, and "last 200 today"
@@ -284,6 +331,17 @@ export function DiscoveryFeedPanel() {
     void fetchTodayHistory(signalTypeFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch on type change
   }, [signalTypeFilter]);
+
+  // Category chips (Theme / Setups / …) must also hit DB — same last-N starvation.
+  useEffect(() => {
+    if (signalTypeFilter !== "all") return; // type filter owns the query
+    if (categoryFilter === "all" || categoryFilter === "catalyst") {
+      if (historyMode && historyCategory) exitHistoryMode();
+      return;
+    }
+    void fetchCategoryHistory(categoryFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryFilter, signalTypeFilter]);
 
   const fetchCatalystRules = useCallback(async () => {
     try {
@@ -753,9 +811,11 @@ export function DiscoveryFeedPanel() {
             <span style={{ color: cssVariables.textMarketFlow, fontSize: scannerPx("small", fo) }}>
               {historyLoading
                 ? "Loading..."
-                : historySignalType === "all"
-                  ? `Showing ${historyCards.length} signals from today`
-                  : `Showing ${historyCards.length} ${SIGNAL_TYPE_LABELS[historySignalType]} from today (DB)`}
+                : historySignalType !== "all"
+                  ? `Showing ${historyCards.length} ${SIGNAL_TYPE_LABELS[historySignalType]} from today (DB)`
+                  : historyCategory
+                    ? `Showing ${historyCards.length} ${historyCategory} signals from today (DB)`
+                    : `Showing ${historyCards.length} signals from today`}
             </span>
             <Button variant="ghost" size="sm" className="h-5 px-2 text-cyan-400 hover:text-cyan-300" style={{ fontSize: scannerPx("small", fo) }} onClick={exitHistoryMode}>
               Back to Live

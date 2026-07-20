@@ -159,6 +159,16 @@ function qualifySignal(
       return { qualified: true, score: capScore(raw) };
     }
 
+    case "theme_motion_scan": {
+      // Per-theme breadth / score acceleration — both directions.
+      raw += 25;
+      raw += Math.min(30, signal.magnitude * (signal.type === "theme_acceleration" ? 3 : 40));
+      if (signal.direction === "up") raw += 5;
+      const fm = context.fastest_movers as FastestMoversResult | undefined;
+      if (fm?.movers.length) raw += Math.min(15, fm.movers.length * 3);
+      return { qualified: true, score: capScore(raw) };
+    }
+
     case "leadership_divergence": {
       const rs = context.relative_strength as RelativeStrengthResult | undefined;
       if (!rs?.isDiverging) return { qualified: false, score: 0 };

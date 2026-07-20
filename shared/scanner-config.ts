@@ -106,11 +106,11 @@ export const DEFAULT_SCANNER_CONFIG: ScannerConfig = {
   gapThresholdPct: 3.0,
   gapCooldownMin: 240,
 
-  breadthShiftThreshold: 0.25,
+  breadthShiftThreshold: 0.15,
   breadthShiftWindowFrames: 8,
   breadthShiftCooldownMin: 15,
 
-  themeAccelThreshold: 6.0,
+  themeAccelThreshold: 3.5,
   themeAccelCooldownMin: 10,
 
   raiShiftThreshold: 5,
