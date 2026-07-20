@@ -8,7 +8,17 @@
 import type { ScannerMode, MarketSession, DiscoveryCard, Signal } from "@shared/scanner-types";
 import type { ThemeMetrics } from "../market-condition/engine/theme-score";
 import { registerPostRefreshCallback } from "../market-condition/engine/snapshot";
-import { processSnapshot, setFiveDayHighLow, type SnapshotFrame, type TickerFrame, type ThemeFrame } from "./signal-producer";
+import {
+  processSnapshot,
+  setFiveDayHighLow,
+  onLodBounceGaveUp,
+  getFrame,
+  getBufferLength,
+  currentFrame,
+  type SnapshotFrame,
+  type TickerFrame,
+  type ThemeFrame,
+} from "./signal-producer";
 import { routeSignals } from "./pipeline-router";
 import { getActivePipelines } from "./pipeline-router";
 import { executeReactions } from "./reactions";
@@ -18,7 +28,6 @@ import {
   evaluateActiveLodBounces,
 } from "./active-lod-bounces";
 import type { LensContext } from "./lenses";
-import { getFrame, getBufferLength, currentFrame } from "./signal-producer";
 import { getCachedRAI } from "../market-condition/engine/rai";
 import { getMaDataForScanner, getRawSnapshotsForScanner } from "../market-condition/engine/snapshot";
 import {
@@ -212,6 +221,10 @@ async function onSnapshotRefreshed(
       if (clears.length > 0) {
         const clearIds = clears.flatMap((c) => c.cardIds);
         removeDiscoveries(clearIds);
+        const gaveUpSymbols = clears
+          .filter((c) => c.reason === "gave_up")
+          .map((c) => c.subject);
+        if (gaveUpSymbols.length > 0) onLodBounceGaveUp(gaveUpSymbols);
         if (scannerMode === "on") broadcastClear(clears);
         console.log(
           `[Scanner] Cleared ${clearIds.length} LOD bounce card(s): ` +

@@ -107,6 +107,10 @@ function markFired(key: string): void {
   cooldowns.set(key, Date.now());
 }
 
+function clearCooldown(key: string): void {
+  cooldowns.delete(key);
+}
+
 /** Prune cooldown entries older than 30 minutes to prevent unbounded growth. */
 export function pruneCooldowns(): void {
   const cutoff = Date.now() - 30 * 60_000;
@@ -575,7 +579,33 @@ const lodTracker = new Map<string, {
   lodFrameSeq: number;
   maxSinceLod: number;
   firedPeakPct: number;
+  /** Prior bounce gave up near LOD — next tier-1 reclaim is a fresh alert. */
+  armedAfterFail: boolean;
 }>();
+
+/** Re-arm LOD bounce after a failed attempt so a reclaim of the same LOD can fire again. */
+function rearmLodBounceAfterFail(
+  symbol: string,
+  tracker: { lodPrice: number; maxSinceLod: number; firedPeakPct: number; armedAfterFail: boolean },
+  price: number
+): void {
+  tracker.firedPeakPct = 0;
+  tracker.maxSinceLod = Math.max(price, tracker.lodPrice);
+  tracker.armedAfterFail = true;
+  clearCooldown(`lod_bounce:${symbol}:t1`);
+  clearCooldown(`lod_bounce:${symbol}:t2`);
+}
+
+/** Called when live LOD cards clear for give-up (keeps detector in sync with UI). */
+export function onLodBounceGaveUp(symbols: string[]): void {
+  for (const symbol of symbols) {
+    const tracker = lodTracker.get(symbol);
+    if (!tracker) continue;
+    const tick = currentFrame()?.tickers.get(symbol);
+    const price = tick?.price ?? tracker.lodPrice;
+    rearmLodBounceAfterFail(symbol, tracker, price);
+  }
+}
 
 /**
  * Count recent rising-price frames after the LOD (bounded by ring buffer).
@@ -661,12 +691,21 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
         lodFrameSeq: frameSeq,
         maxSinceLod: tick.price,
         firedPeakPct: 0,
+        armedAfterFail: false,
       });
       // Fall through — if price already bounced off this new/seeded LOD, fire same frame
     } else {
       // Same LOD: raise peak from snapshot prices only.
       // Never use todayHigh — on dump days that high printed *before* the LOD (DELL ~461).
       tracker.maxSinceLod = Math.max(tracker.maxSinceLod, tick.price);
+
+      // Failed bounce: back within give-up band of LOD after a fire → re-arm for reclaim.
+      if (tracker.firedPeakPct > 0) {
+        const pctAbove = ((tick.price - tracker.lodPrice) / tracker.lodPrice) * 100;
+        if (pctAbove < cfg.lodBounceGiveUpPct) {
+          rearmLodBounceAfterFail(symbol, tracker, tick.price);
+        }
+      }
     }
   }
 
@@ -710,7 +749,9 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
     if (isCoolingDown(key, min2ms(cfg.lodBounceCooldownMin))) continue;
 
     markFired(key);
+    const reclaimAfterFail = tracker.armedAfterFail;
     tracker.firedPeakPct = pctPeakAboveLod;
+    tracker.armedAfterFail = false;
 
     signals.push(
       makeSignal("lod_bounce", "ticker", symbol,
@@ -731,6 +772,7 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
           aboveSma200,
           changePct: Math.round(changePct * 100) / 100,
           minVolRatio: Math.round(minVolRatio * 100) / 100,
+          reclaimAfterFail,
         })
     );
   }

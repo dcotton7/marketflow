@@ -119,10 +119,15 @@ function buildLodBounceBrief(es: EnrichedSignal): { headline: string; narrative:
   const bounceVol = (es.signal.meta?.bounceBarVolumeRatio as number) ?? 0;
   const volRatio = (es.signal.meta?.volumeRatio as number) ?? 0;
 
+  const reclaimAfterFail = !!es.signal.meta?.reclaimAfterFail;
   const qualityTag = upFrames >= 3 ? " (3+ up bars, strong)" : upFrames >= 2 ? " (2 up bars)" : "";
-  const headline = `${es.signal.subject} LOD bounce — peak ${sign(pctPeak)}% off low${qualityTag}`;
+  const reclaimTag = reclaimAfterFail ? " — reclaim after fail" : "";
+  const headline = `${es.signal.subject} LOD bounce — peak ${sign(pctPeak)}% off low${qualityTag}${reclaimTag}`;
 
   const parts: string[] = [];
+  if (reclaimAfterFail) {
+    parts.push(`${es.signal.subject} failed a prior LOD bounce, then reclaimed the low.`);
+  }
   if (peakPrice != null && Math.abs(pctPeak - pctNow) > 0.3) {
     parts.push(
       `${es.signal.subject} peaked ${pctPeak.toFixed(1)}% above today's low` +
