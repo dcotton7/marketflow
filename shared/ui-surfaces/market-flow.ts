@@ -87,8 +87,8 @@ export const MARKET_FLOW_SURFACE: UiSurfaceDef = {
     serverStatusTrigger: {
       id: "serverStatusTrigger",
       displayName: "Server status clock",
-      parent: "regimeBar",
-      notes: "Tiny clock to the right of session badge; opens serverStatusOverlay.",
+      parent: "appNav",
+      notes: "Tiny clock immediately right of NY Open/Close countdown in SentinelHeader; opens serverStatusOverlay.",
     },
     serverStatusOverlay: {
       id: "serverStatusOverlay",

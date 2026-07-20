@@ -15,6 +15,7 @@ import { SENTINEL_OPEN_WATCHLIST_MANAGER_EVENT } from "@/lib/sentinel-ui-events"
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 import { useScanner } from "@/context/ScannerContext";
+import { ServerStatusTrigger } from "@/components/market-condition/ServerStatusOverlay";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -94,7 +95,7 @@ function MarketTimeDisplay() {
   const formatDuration = (h: number, m: number) => `${h}:${m.toString().padStart(2, "0")}`;
   
   return (
-    <div className="flex items-center gap-4 px-4 py-1.5 bg-slate-800/50 rounded-md border border-slate-700/50">
+    <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-800/50 rounded-md border border-slate-700/50">
       <div className="flex items-center gap-2">
         <Clock className="w-5 h-5 text-slate-400" />
         <span className="text-sm text-slate-400">NY:</span>
@@ -119,6 +120,8 @@ function MarketTimeDisplay() {
           <span className="text-sm text-slate-500">Market Closed</span>
         </>
       )}
+      {/* Server status — clock icon immediately right of Close countdown */}
+      <ServerStatusTrigger />
     </div>
   );
 }

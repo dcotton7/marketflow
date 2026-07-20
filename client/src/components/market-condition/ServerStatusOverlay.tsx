@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, GripVertical, X } from "lucide-react";
+import { Activity, GripVertical, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "marketflow:serverStatusOverlay";
@@ -121,7 +121,7 @@ export function ServerStatusTrigger() {
         aria-label="Open server status"
         data-ui-region="marketFlow:serverStatusTrigger"
       >
-        <Clock className="h-3.5 w-3.5" />
+        <Activity className="h-3.5 w-3.5" />
       </button>
       {open && <ServerStatusOverlay onClose={() => setOpen(false)} />}
     </>
