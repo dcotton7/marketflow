@@ -6,6 +6,7 @@ import { MarketConditionSummary, MarketRegime, ThemeRow, MegaCapOverlay } from "
 import { TrendingUp, TrendingDown, Activity, Clock, Gauge, Crown, Moon, Sun, BarChart3 } from "lucide-react";
 import type { MarketSession, UniverseParticipation } from "@/hooks/useMarketCondition";
 import { MarketFlowButton } from "./MarketFlowButton";
+import { ServerStatusTrigger } from "./ServerStatusOverlay";
 import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
 import { localSlotHeaderStyle } from "@/lib/local-slot-style";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
@@ -250,6 +251,7 @@ export function HeaderBar({
         </div>
 
         <SessionBadge marketSession={marketSession} />
+        <ServerStatusTrigger />
 
         <Tooltip>
           <TooltipTrigger>

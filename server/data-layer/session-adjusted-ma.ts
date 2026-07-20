@@ -40,7 +40,41 @@ export interface SessionMaSnapshotInput {
 
 let sessionMaCache: SessionMaCache | null = null;
 
+/** Full-universe MA cycle = 5 shards × 1 minute. */
+export const MA_SHARD_COUNT = 5;
+export const MA_SHARD_INTERVAL_MS = 60_000;
+
+/** @deprecated Prefer shard cadence; kept for single-symbol helpers. */
 const SESSION_MA_REFRESH_MS = 5 * 60 * 1000;
+
+let maRefreshInFlight = false;
+let nextShardIndex = 0;
+let lastShardKickAt: Date | null = null;
+let lastShardStartedAt: Date | null = null;
+let lastShardFinishedAt: Date | null = null;
+let lastShardElapsedMs: number | null = null;
+let lastShardIndex = -1;
+let lastShardRequested = 0;
+let lastShardComputed = 0;
+let lastUniverseSize = 0;
+let lastBatchSize = 0;
+
+export interface MaShardProgress {
+  inFlight: boolean;
+  shardCount: number;
+  shardIntervalMs: number;
+  nextShardIndex: number;
+  lastShardIndex: number;
+  lastShardStartedAt: string | null;
+  lastShardFinishedAt: string | null;
+  lastShardElapsedMs: number | null;
+  lastShardRequested: number;
+  lastShardComputed: number;
+  universeSize: number;
+  batchSize: number;
+  coveredCount: number;
+  msUntilNextShard: number | null;
+}
 
 export function getSessionMaCache(): SessionMaCache | null {
   return sessionMaCache;
@@ -49,6 +83,30 @@ export function getSessionMaCache(): SessionMaCache | null {
 export function shouldRefreshSessionMa(): boolean {
   if (!sessionMaCache) return true;
   return Date.now() - sessionMaCache.asOf.getTime() >= SESSION_MA_REFRESH_MS;
+}
+
+export function getMaShardProgress(): MaShardProgress {
+  const coveredCount = sessionMaCache?.data.size ?? 0;
+  let msUntilNextShard: number | null = null;
+  if (lastShardKickAt) {
+    msUntilNextShard = Math.max(0, MA_SHARD_INTERVAL_MS - (Date.now() - lastShardKickAt.getTime()));
+  }
+  return {
+    inFlight: maRefreshInFlight,
+    shardCount: MA_SHARD_COUNT,
+    shardIntervalMs: MA_SHARD_INTERVAL_MS,
+    nextShardIndex,
+    lastShardIndex,
+    lastShardStartedAt: lastShardStartedAt?.toISOString() ?? null,
+    lastShardFinishedAt: lastShardFinishedAt?.toISOString() ?? null,
+    lastShardElapsedMs,
+    lastShardRequested,
+    lastShardComputed,
+    universeSize: lastUniverseSize,
+    batchSize: lastBatchSize,
+    coveredCount,
+    msUntilNextShard: maRefreshInFlight ? 0 : msUntilNextShard,
+  };
 }
 
 async function loadDailyBarsForSymbols(
@@ -174,13 +232,11 @@ async function loadDailyBarsForSymbols(
   return result;
 }
 
-/**
- * Recompute session-adjusted MAs for the given symbols using live snapshot prices.
- */
-export async function computeSessionAdjustedMADataForSymbols(
+/** Compute MA entries for symbols without replacing the shared cache. */
+async function computeMaEntriesForSymbols(
   symbols: string[],
   snapshots: Map<string, SessionMaSnapshotInput>
-): Promise<SessionMaCache> {
+): Promise<Map<string, MaDataEntry>> {
   const unique = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
   const barsMap = await loadDailyBarsForSymbols(unique, snapshots);
   const result = new Map<string, MaDataEntry>();
@@ -196,13 +252,38 @@ export async function computeSessionAdjustedMADataForSymbols(
     result.set(symbol, levelsToEntry(levels));
   }
 
-  const cache: SessionMaCache = {
+  return result;
+}
+
+function mergeIntoSessionMaCache(entries: Map<string, MaDataEntry>): SessionMaCache {
+  const asOf = new Date();
+  if (!sessionMaCache) {
+    sessionMaCache = { data: new Map(entries), asOf, mode: "session_adjusted" };
+  } else {
+    for (const [sym, entry] of entries) {
+      sessionMaCache.data.set(sym, entry);
+    }
+    sessionMaCache.asOf = asOf;
+    sessionMaCache.mode = "session_adjusted";
+  }
+  return sessionMaCache;
+}
+
+/**
+ * Recompute session-adjusted MAs for the given symbols and replace the cache
+ * (legacy full-replace path). Prefer refreshNextSessionMaShard for MC polling.
+ */
+export async function computeSessionAdjustedMADataForSymbols(
+  symbols: string[],
+  snapshots: Map<string, SessionMaSnapshotInput>
+): Promise<SessionMaCache> {
+  const result = await computeMaEntriesForSymbols(symbols, snapshots);
+  sessionMaCache = {
     data: result,
     asOf: new Date(),
     mode: "session_adjusted",
   };
-  sessionMaCache = cache;
-  return cache;
+  return sessionMaCache;
 }
 
 export async function getSessionAdjustedMADataForSymbols(
@@ -214,6 +295,71 @@ export async function getSessionAdjustedMADataForSymbols(
     return sessionMaCache;
   }
   return computeSessionAdjustedMADataForSymbols(symbols, snapshots);
+}
+
+/**
+ * Refresh the next universe shard (ceil(N/5) symbols) at most once per minute.
+ * Merges into the shared cache so coverage accumulates across the full cycle.
+ */
+export async function refreshNextSessionMaShard(
+  allSymbols: string[],
+  snapshots: Map<string, SessionMaSnapshotInput>
+): Promise<SessionMaCache> {
+  const universe = Array.from(new Set(allSymbols.map((s) => s.toUpperCase())));
+  lastUniverseSize = universe.length;
+  lastBatchSize = universe.length > 0 ? Math.ceil(universe.length / MA_SHARD_COUNT) : 0;
+
+  if (universe.length === 0) {
+    return sessionMaCache ?? { data: new Map(), asOf: new Date(), mode: "session_adjusted" };
+  }
+
+  if (maRefreshInFlight) {
+    return sessionMaCache ?? { data: new Map(), asOf: new Date(), mode: "session_adjusted" };
+  }
+
+  const now = Date.now();
+  if (
+    sessionMaCache &&
+    lastShardKickAt &&
+    now - lastShardKickAt.getTime() < MA_SHARD_INTERVAL_MS
+  ) {
+    return sessionMaCache;
+  }
+
+  if (nextShardIndex >= MA_SHARD_COUNT) nextShardIndex = 0;
+  const batchSize = lastBatchSize;
+  const start = nextShardIndex * batchSize;
+  if (start >= universe.length) {
+    nextShardIndex = 0;
+  }
+  const shardStart = nextShardIndex * batchSize;
+  const shard = universe.slice(shardStart, shardStart + batchSize);
+  const shardIndex = nextShardIndex;
+
+  maRefreshInFlight = true;
+  lastShardKickAt = new Date();
+  lastShardStartedAt = lastShardKickAt;
+  lastShardRequested = shard.length;
+  lastShardComputed = 0;
+
+  try {
+    const entries = await computeMaEntriesForSymbols(shard, snapshots);
+    lastShardComputed = entries.size;
+    const merged = mergeIntoSessionMaCache(entries);
+    lastShardIndex = shardIndex;
+    nextShardIndex = (shardIndex + 1) % MA_SHARD_COUNT;
+    lastShardFinishedAt = new Date();
+    lastShardElapsedMs = lastShardFinishedAt.getTime() - lastShardStartedAt.getTime();
+    console.log(
+      `[SessionMA] Shard ${shardIndex + 1}/${MA_SHARD_COUNT}: ` +
+        `${lastShardComputed}/${lastShardRequested} computed, ` +
+        `coverage ${merged.data.size}/${universe.length}, ` +
+        `${lastShardElapsedMs}ms`
+    );
+    return merged;
+  } finally {
+    maRefreshInFlight = false;
+  }
 }
 
 export function maEntryToTickerMas(symbol: string, entry: MaDataEntry) {
@@ -240,6 +386,14 @@ function levelsToEntry(levels: TickerMaLevels): MaDataEntry {
 
 export function clearSessionMaCache(): void {
   sessionMaCache = null;
+  nextShardIndex = 0;
+  lastShardKickAt = null;
+  lastShardStartedAt = null;
+  lastShardFinishedAt = null;
+  lastShardElapsedMs = null;
+  lastShardIndex = -1;
+  lastShardRequested = 0;
+  lastShardComputed = 0;
 }
 
 /** Prefer MC poll cache when fresh; otherwise compute from live snapshot OHLC. */
@@ -277,12 +431,13 @@ export async function getSessionAdjustedMAsForSymbol(
   snapshot?: SessionMaSnapshotInput | null
 ): Promise<MaDataEntry | null> {
   const upper = symbol.toUpperCase();
-  if (sessionMaCache && !shouldRefreshSessionMa()) {
-    const cached = sessionMaCache.data.get(upper);
-    if (cached) return cached;
+  const cached = sessionMaCache?.data.get(upper);
+  if (cached && sessionMaCache && !shouldRefreshSessionMa()) {
+    return cached;
   }
-  if (!snapshot) return null;
+  if (!snapshot) return cached ?? null;
   const snapMap = new Map<string, SessionMaSnapshotInput>([[upper, snapshot]]);
-  const cache = await computeSessionAdjustedMADataForSymbols([upper], snapMap);
-  return cache.data.get(upper) ?? null;
+  const entries = await computeMaEntriesForSymbols([upper], snapMap);
+  const merged = mergeIntoSessionMaCache(entries);
+  return merged.data.get(upper) ?? null;
 }

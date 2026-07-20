@@ -37,6 +37,7 @@ import {
   touchActivity,
   getSleepStatus,
   getMaMetadata,
+  getServerStatusSnapshot,
 } from "./engine/snapshot";
 import { getRaceTimeline, listIntradaySnapshotSlots, getHistoricalSnapshotAt } from "./engine/theme-snapshots";
 import { calculateRAI } from "./engine/rai";
@@ -586,6 +587,52 @@ router.get("/status", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("[MC-API] Failed to get status:", error);
     res.status(500).json({ error: "Failed to get status" });
+  }
+});
+
+/**
+ * GET /api/market-condition/server-status
+ * Live diagnostics for the MarketFlow server-status overlay (MA shards, memory, poll).
+ */
+router.get("/server-status", async (_req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const base = getServerStatusSnapshot();
+
+    let dailyBars: {
+      lastAttempt: string | null;
+      lastSuccess: string | null;
+      apiKeyBroken: boolean;
+      refreshInProgress: boolean;
+    } | null = null;
+    try {
+      const { getDailyBarRefreshStatus } = await import("../data-layer/daily-bar-refresh");
+      dailyBars = getDailyBarRefreshStatus();
+    } catch {
+      dailyBars = null;
+    }
+
+    let scanner: {
+      mode: string;
+      lastSignalAt: string | null;
+      activePipelines: number;
+      universeSize: number;
+    } | null = null;
+    try {
+      const { getScannerState } = await import("../scanner");
+      scanner = getScannerState();
+    } catch {
+      scanner = null;
+    }
+
+    res.json({
+      ...base,
+      dailyBars,
+      scanner,
+    });
+  } catch (error) {
+    console.error("[MC-API] Failed to get server-status:", error);
+    res.status(500).json({ error: "Failed to get server status" });
   }
 });
 

@@ -84,6 +84,18 @@ export const MARKET_FLOW_SURFACE: UiSurfaceDef = {
       parent: "regimeBar",
       notes: "OPEN / AFTER / CLOSE — always visible after Market Flow branding.",
     },
+    serverStatusTrigger: {
+      id: "serverStatusTrigger",
+      displayName: "Server status clock",
+      parent: "regimeBar",
+      notes: "Tiny clock to the right of session badge; opens serverStatusOverlay.",
+    },
+    serverStatusOverlay: {
+      id: "serverStatusOverlay",
+      displayName: "Server status overlay",
+      parent: "pageShell",
+      notes: "Draggable live overlay — MA shard progress, memory, MC poll, daily bars, scanner.",
+    },
     universeBreadthBar: {
       id: "universeBreadthBar",
       displayName: "Universe breadth bar",

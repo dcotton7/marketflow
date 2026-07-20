@@ -7,6 +7,7 @@ export { ThemeDetailPanelEtfs } from "./ThemeDetailPanelEtfs";
 export { RotationTable } from "./RotationTable";
 export { TickerWorkbench } from "./TickerWorkbench";
 export { MarketFlowButton } from "./MarketFlowButton";
+export { ServerStatusTrigger } from "./ServerStatusOverlay";
 export { MarketFlowStripCompact } from "./MarketFlowStripCompact";
 export { ThemeRaceLanes } from "./ThemeRaceLanes";
 export { ThemeRaceLanesMockup } from "./ThemeRaceLanesMockup";

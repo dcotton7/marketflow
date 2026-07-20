@@ -107,11 +107,16 @@ function buildSnapshotFrame(
     const ma = maData.get(sym);
     const raw = rawSnaps.get(sym) ?? rawSnaps.get(symbol);
 
+    // Avg volume: prefer true 20d avg when present. Alpaca snapshots omit avgVolume,
+    // so fall back to prior-day volume — a hard 0 here zeroed every LOD bounce / volume_spike.
+    const avgVolume14d = [snap.avgVolume20D, snap.avgVolume, snap.prevDayVolume]
+      .find((v): v is number => typeof v === "number" && v > 0) ?? 0;
+
     tickers.set(sym, {
       price: snap.price ?? 0,
       changePct: snap.changePct ?? 0,
       volume: snap.volume ?? 0,
-      avgVolume14d: snap.avgVolume ?? 0,
+      avgVolume14d,
       extensionFrom20dAdr: (() => {
         const sma20 = ma?.sma20d;
         const adr = snap.adr20 ?? snap.avgDailyRange ?? null;

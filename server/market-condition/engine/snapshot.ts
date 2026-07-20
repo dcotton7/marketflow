@@ -24,7 +24,12 @@ import {
   calculateDeltaRanksFromOpen,
   getLatestDailySnapshot,
 } from "./theme-snapshots";
-import { getMADataForThemes, getSessionAdjustedMADataForSymbols, shouldRefreshSessionMa, type MaMode } from "../../data-layer";
+import {
+  getMADataForThemes,
+  refreshNextSessionMaShard,
+  getMaShardProgress,
+  type MaMode,
+} from "../../data-layer";
 
 // =============================================================================
 // Types
@@ -228,15 +233,9 @@ export async function refreshSnapshot(
         });
       }
 
-      const forceMaRefresh = shouldRefreshSessionMa();
-      // Cap MA computation to first 300 symbols to stay within Render 2GB memory.
-      // Core tickers appear first in allTickers (from CLUSTERS.core then candidates).
-      const maTickerCap = 300;
-      const maTickers = allTickers.length > maTickerCap ? allTickers.slice(0, maTickerCap) : allTickers;
-      if (allTickers.length > maTickerCap && forceMaRefresh) {
-        console.log(`[MC-Snapshot] MA computation capped at ${maTickerCap}/${allTickers.length} symbols to limit memory`);
-      }
-      const sessionMa = await getSessionAdjustedMADataForSymbols(maTickers, snapshotInputs, forceMaRefresh);
+      // Staggered full-universe MA refresh: ceil(N/5) symbols per minute, merged into cache.
+      // Keeps peak DB/memory load ~1/5 of a full-universe burst (Render 2GB spike guard).
+      const sessionMa = await refreshNextSessionMaShard(allTickers, snapshotInputs);
       state.maData = new Map(sessionMa.data);
       state.maAsOf = sessionMa.asOf;
       state.maMode = sessionMa.mode;
@@ -251,8 +250,11 @@ export async function refreshSnapshot(
           smaData.set(sym, { sma50: ma.sma50d, sma200: ma.sma200d });
         }
       }
+      const shard = getMaShardProgress();
       console.log(
-        `[MC-Snapshot] Session-adjusted MAs: ${sessionMa.data.size} symbols (asOf=${sessionMa.asOf.toISOString()}, refreshed=${forceMaRefresh})`
+        `[MC-Snapshot] Session-adjusted MAs: coverage ${sessionMa.data.size}/${shard.universeSize}` +
+          ` (shard ${shard.lastShardIndex >= 0 ? shard.lastShardIndex + 1 : "-"}/${shard.shardCount}` +
+          `, asOf=${sessionMa.asOf.toISOString()})`
       );
     } catch (err) {
       console.warn("[MC-Snapshot] Could not load session-adjusted MAs, falling back to EOD DB:", err);
@@ -990,6 +992,54 @@ export function getPollingStatus(): {
     errorCount: state.errorCount,
     tickerCount: state.snapshots.size,
     themeCount: state.themeMetrics.length,
+  };
+}
+
+const RENDER_RSS_BUDGET_MB = 2048;
+
+/** Compact live diagnostics for the MarketFlow server-status overlay. */
+export function getServerStatusSnapshot(): {
+  generatedAt: string;
+  memory: {
+    heapUsedMb: number;
+    heapTotalMb: number;
+    rssMb: number;
+    rssBudgetMb: number;
+    rssPctOfBudget: number;
+  };
+  polling: ReturnType<typeof getPollingStatus>;
+  sleep: ReturnType<typeof getSleepStatus>;
+  ma: {
+    asOf: string | null;
+    mode: MaMode;
+    coverage: number;
+    universeSize: number;
+    shard: ReturnType<typeof getMaShardProgress>;
+  };
+} {
+  const mem = process.memoryUsage();
+  const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024);
+  const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024);
+  const rssMb = Math.round(mem.rss / 1024 / 1024);
+  const shard = getMaShardProgress();
+  return {
+    generatedAt: new Date().toISOString(),
+    memory: {
+      heapUsedMb,
+      heapTotalMb,
+      rssMb,
+      rssBudgetMb: RENDER_RSS_BUDGET_MB,
+      rssPctOfBudget: Math.round((rssMb / RENDER_RSS_BUDGET_MB) * 1000) / 10,
+    },
+    polling: getPollingStatus(),
+    sleep: getSleepStatus(),
+    ma: {
+      asOf: state.maAsOf?.toISOString() ?? null,
+      mode: state.maMode,
+      coverage: state.maData.size,
+      universeSize: shard.universeSize || getAllUniverseTickers().length,
+      shard,
+    },
   };
 }
 

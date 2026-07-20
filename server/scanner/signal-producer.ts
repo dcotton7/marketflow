@@ -688,8 +688,11 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
 
     if (Math.abs(tick.extensionFrom20dAdr) > cfg.lodBounceMaxAtrExt) continue;
 
-    const volumeRatio = tick.avgVolume14d > 0 ? tick.volume / tick.avgVolume14d : 0;
-    if (volumeRatio < minVolRatio) continue;
+    const volumeKnown = tick.avgVolume14d > 0;
+    const volumeRatio = volumeKnown ? tick.volume / tick.avgVolume14d : 0;
+    // Only enforce the session-aware floor when we have a real volume baseline.
+    // Missing avg volume used to hard-zero every LOD bounce (and volume_spike).
+    if (volumeKnown && volumeRatio < minVolRatio) continue;
 
     const aboveSma20 = tick.sma20d != null && tick.price > tick.sma20d;
     const aboveSma50 = tick.sma50d != null && tick.price > tick.sma50d;
@@ -716,6 +719,7 @@ function detectLodBounce(current: SnapshotFrame): Signal[] {
           tier,
           todayLow: lod,
           volumeRatio: Math.round(volumeRatio * 100) / 100,
+          volumeKnown,
           bounceBarVolumeRatio,
           consecutiveUpFrames,
           aboveSma20,
