@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 import { SERVER_STATUS_OVERLAY_Z_INDEX } from "@/lib/overlay-z-index";
 
 const STORAGE_KEY = "marketflow:serverStatusOverlay";
-const POLL_MS = 2500;
+const POLL_MS = 1000;
+const TICK_MS = 250;
 
 type ServerStatusPayload = {
   generatedAt: string;
@@ -36,6 +37,7 @@ type ServerStatusPayload = {
     shard: {
       inFlight: boolean;
       shardCount: number;
+      shardIntervalMs: number;
       nextShardIndex: number;
       lastShardIndex: number;
       lastShardStartedAt: string | null;
@@ -133,6 +135,7 @@ export function ServerStatusTrigger() {
 function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<ServerStatusPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [pos, setPos] = useState(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -147,27 +150,38 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
   });
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const fetchGen = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      const gen = ++fetchGen.current;
       try {
-        const res = await fetch("/api/market-condition/server-status", { credentials: "include" });
+        const res = await fetch(`/api/market-condition/server-status?t=${Date.now()}`, {
+          credentials: "include",
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as ServerStatusPayload;
-        if (!cancelled) {
+        if (!cancelled && gen === fetchGen.current) {
           setStatus(json);
           setError(null);
+          setNowMs(Date.now());
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+        if (!cancelled && gen === fetchGen.current) {
+          setError(err instanceof Error ? err.message : "Failed to load");
+        }
       }
     };
     load();
-    const id = window.setInterval(load, POLL_MS);
+    const pollId = window.setInterval(load, POLL_MS);
+    const tickId = window.setInterval(() => setNowMs(Date.now()), TICK_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      window.clearInterval(pollId);
+      window.clearInterval(tickId);
     };
   }, []);
 
@@ -199,12 +213,30 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
   }, [pos]);
 
   const shard = status?.ma.shard;
-  const elapsedSec =
-    shard?.inFlight && shard.lastShardStartedAt
-      ? Math.max(0, Math.round((Date.now() - new Date(shard.lastShardStartedAt).getTime()) / 1000))
-      : shard?.lastShardElapsedMs != null
-        ? Math.round(shard.lastShardElapsedMs / 1000)
-        : null;
+  const elapsedSec = (() => {
+    if (!shard?.lastShardStartedAt) return null;
+    if (shard.inFlight) {
+      return Math.max(0, Math.round((nowMs - new Date(shard.lastShardStartedAt).getTime()) / 1000));
+    }
+    if (shard.lastShardElapsedMs != null) return Math.round(shard.lastShardElapsedMs / 1000);
+    return null;
+  })();
+  const nextShardSec = (() => {
+    if (!shard || shard.inFlight) return null;
+    const interval = shard.shardIntervalMs || 60_000;
+    const baseIso = shard.lastShardFinishedAt ?? shard.lastShardStartedAt;
+    if (baseIso) {
+      const base = new Date(baseIso).getTime();
+      return Math.max(0, Math.ceil((interval - (nowMs - base)) / 1000));
+    }
+    if (shard.msUntilNextShard != null) {
+      return Math.max(0, Math.ceil(shard.msUntilNextShard / 1000));
+    }
+    return null;
+  })();
+  const updatedAgeSec = status?.generatedAt
+    ? Math.max(0, Math.round((nowMs - new Date(status.generatedAt).getTime()) / 1000))
+    : null;
 
   const rssTone: "ok" | "warn" | "bad" | "idle" = !status
     ? "idle"
@@ -239,7 +271,16 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
     >
       <div className="flex items-center gap-1.5 border-b border-slate-700/60 px-2 py-1.5 cursor-grab active:cursor-grabbing">
         <GripVertical className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-        <span className="text-[11px] font-semibold text-slate-200 flex-1">Server status</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] font-semibold text-slate-200">Server status</div>
+          <div className="text-[10px] text-slate-500 tabular-nums">
+            {updatedAgeSec == null
+              ? "connecting…"
+              : updatedAgeSec <= 1
+                ? "live"
+                : `updated ${updatedAgeSec}s ago`}
+          </div>
+        </div>
         <button
           type="button"
           data-no-drag
@@ -276,7 +317,11 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
               </Row>
               <Row label="Coverage">
                 {status.ma.coverage}/{status.ma.universeSize}
-                {shard?.inFlight ? " · running" : shard?.msUntilNextShard != null ? ` · next ${Math.ceil(shard.msUntilNextShard / 1000)}s` : ""}
+                {shard?.inFlight
+                  ? " · running"
+                  : nextShardSec != null
+                    ? ` · next ${nextShardSec}s`
+                    : ""}
               </Row>
               <Row label="Batch size">{shard?.batchSize ?? "—"} / min</Row>
             </section>

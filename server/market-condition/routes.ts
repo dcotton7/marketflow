@@ -597,6 +597,8 @@ router.get("/status", async (req: Request, res: Response) => {
 router.get("/server-status", async (_req: Request, res: Response) => {
   try {
     touchActivity();
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
     const base = getServerStatusSnapshot();
 
     let dailyBars: {
