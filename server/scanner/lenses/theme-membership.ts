@@ -35,7 +35,8 @@ export const themeMembershipLens: Lens = {
       peerSymbols,
       etfProxy: cluster.etfProxies?.[0]?.symbol ?? null,
       themeScore: themeFrame?.score ?? 0,
-      themeRank: 0,
+      themeRank: themeFrame?.rank ?? 0,
+      themePercentile: themeFrame?.percentile ?? 0,
     };
   },
 };

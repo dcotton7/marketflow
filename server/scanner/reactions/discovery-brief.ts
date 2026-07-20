@@ -15,8 +15,10 @@ import type {
   ThemeMembershipResult,
   NewsResult,
   EarningsProximityResult,
+  DiscoveryFilterFields,
 } from "@shared/scanner-types";
 import { getClusterById, type ClusterId } from "../../market-condition/universe";
+import { currentFrame } from "../signal-producer";
 
 let nextId = 1;
 
@@ -576,6 +578,37 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
   }
 
   const theme = es.context.theme_membership as ThemeMembershipResult | undefined;
+  const frame = currentFrame();
+  const themeId =
+    theme?.themeId ?? (es.signal.subjectKind === "theme" ? es.signal.subject : null);
+
+  let themePercentile: number | null = theme?.themePercentile ?? null;
+  let themeRank: number | null = theme?.themeRank ?? null;
+  if (themeId && frame) {
+    const tf = frame.themes.get(themeId);
+    if (tf) {
+      if (themePercentile == null || themePercentile === 0) themePercentile = tf.percentile || null;
+      if (themeRank == null || themeRank === 0) themeRank = tf.rank || null;
+    }
+  }
+
+  let priorDayDollarVol: number | null = null;
+  if (frame) {
+    const sym =
+      es.signal.subjectKind === "ticker"
+        ? es.signal.subject
+        : filterToRealTickers(brief.tickers)[0];
+    if (sym) {
+      const tick = frame.tickers.get(sym.toUpperCase());
+      if (tick && tick.priorDayDollarVol > 0) priorDayDollarVol = tick.priorDayDollarVol;
+    }
+  }
+
+  const discoveryFilters: DiscoveryFilterFields = {
+    themePercentile,
+    themeRank,
+    priorDayDollarVol,
+  };
 
   return {
     id: nextId++,
@@ -591,10 +624,15 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
     headline: brief.headline,
     narrative: brief.narrative,
     tickers: filterToRealTickers(brief.tickers),
-    themeId: theme?.themeId
-      ?? (es.signal.subjectKind === "theme" ? es.signal.subject : null),
-    context: es.context,
+    themeId,
+    context: {
+      ...es.context,
+      discovery_filters: discoveryFilters,
+    },
     qualifyScore: es.qualifyScore,
     createdAt: new Date().toISOString(),
+    themePercentile,
+    themeRank,
+    priorDayDollarVol,
   };
 }

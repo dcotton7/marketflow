@@ -110,6 +110,43 @@ function matchesCategory(card: DiscoveryCardType, cat: CategoryFilter): boolean 
   return true;
 }
 
+// ── Theme strength + prior-day $ liquidity filters ───────────────────────────
+
+type ThemeStrengthFilter = "all" | "top25" | "top50" | "bottom50";
+type LiquidityFilter = "all" | "high" | "mid" | "low";
+
+function cardThemePercentile(card: DiscoveryCardType): number | null {
+  const pct = card.themePercentile ?? card.context?.discovery_filters?.themePercentile
+    ?? (card.context?.theme_membership as { themePercentile?: number } | undefined)?.themePercentile;
+  return pct != null && Number.isFinite(pct) ? pct : null;
+}
+
+function cardPriorDayDollarVol(card: DiscoveryCardType): number | null {
+  const v = card.priorDayDollarVol ?? card.context?.discovery_filters?.priorDayDollarVol;
+  return v != null && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+function matchesThemeStrength(card: DiscoveryCardType, filter: ThemeStrengthFilter): boolean {
+  if (filter === "all") return true;
+  const pct = cardThemePercentile(card);
+  if (pct == null) return false;
+  if (filter === "top25") return pct >= 75;
+  if (filter === "top50") return pct >= 50;
+  if (filter === "bottom50") return pct < 50;
+  return true;
+}
+
+function matchesLiquidity(card: DiscoveryCardType, filter: LiquidityFilter): boolean {
+  if (filter === "all") return true;
+  const adv = cardPriorDayDollarVol(card);
+  // Theme-level / unknown ADV$: don't hide when liquidity filter is on
+  if (adv == null) return true;
+  if (filter === "high") return adv >= 100_000_000;
+  if (filter === "mid") return adv >= 10_000_000 && adv < 100_000_000;
+  if (filter === "low") return adv < 10_000_000;
+  return true;
+}
+
 // ── Config field renderer ────────────────────────────────────────────────────
 
 function ConfigField({ field, value, onChange, css, fo }: {
@@ -175,6 +212,8 @@ export function DiscoveryFeedPanel() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "up" | "down">("all");
+  const [themeStrengthFilter, setThemeStrengthFilter] = useState<ThemeStrengthFilter>("all");
+  const [liquidityFilter, setLiquidityFilter] = useState<LiquidityFilter>("all");
   const [adminPanel, setAdminPanel] = useState<"none" | "rules" | "queue" | "config">("none");
   const [catalystRules, setCatalystRules] = useState<CatalystRuleDefinition[]>([]);
   const [catalystQueue, setCatalystQueue] = useState<CatalystEntry[]>([]);
@@ -347,9 +386,25 @@ export function DiscoveryFeedPanel() {
       cards = cards.filter((d) => matchesCategory(d, categoryFilter));
     }
     if (directionFilter !== "all") cards = cards.filter((d) => d.direction === directionFilter);
+    if (themeStrengthFilter !== "all") {
+      cards = cards.filter((d) => matchesThemeStrength(d, themeStrengthFilter));
+    }
+    if (liquidityFilter !== "all") {
+      cards = cards.filter((d) => matchesLiquidity(d, liquidityFilter));
+    }
     if (showUrgentOnly) cards = cards.filter((d) => d.priority === "urgent" || (d.qualifyScore ?? 0) >= 80);
     return cards;
-  }, [discoveries, historyCards, historyMode, showUrgentOnly, categoryFilter, signalTypeFilter, directionFilter]);
+  }, [
+    discoveries,
+    historyCards,
+    historyMode,
+    showUrgentOnly,
+    categoryFilter,
+    signalTypeFilter,
+    directionFilter,
+    themeStrengthFilter,
+    liquidityFilter,
+  ]);
 
   const cycleMode = () => {
     const order: ScannerMode[] = ["on", "silent", "off"];
@@ -598,6 +653,80 @@ export function DiscoveryFeedPanel() {
           })}
         </div>
 
+        {/* Theme strength (Flow percentile) */}
+        <div className="flex items-center gap-1 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
+          <span className="text-slate-500 shrink-0 w-10" style={{ fontSize: scannerPx("tiny", fo) }}>Theme</span>
+          <div className="flex flex-wrap items-center gap-0.5">
+            {([
+              ["all", "All"],
+              ["top25", "Top 25%"],
+              ["top50", "Top 50%"],
+              ["bottom50", "Bot 50%"],
+            ] as const).map(([id, label]) => {
+              const active = themeStrengthFilter === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  title={
+                    id === "top25" ? "Theme Flow percentile ≥ 75"
+                      : id === "top50" ? "Theme Flow percentile ≥ 50"
+                        : id === "bottom50" ? "Theme Flow percentile < 50"
+                          : "Any theme strength"
+                  }
+                  onClick={(e) => { e.stopPropagation(); setThemeStrengthFilter(id); }}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded text-xs font-medium transition-colors border",
+                    active
+                      ? "bg-violet-900/40 text-violet-200 border-violet-600/50"
+                      : "text-slate-400 hover:text-slate-200 border-transparent"
+                  )}
+                  style={{ fontSize: scannerPx("tiny", fo) }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Prior-day dollar volume liquidity */}
+        <div className="flex items-center gap-1 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
+          <span className="text-slate-500 shrink-0 w-10" style={{ fontSize: scannerPx("tiny", fo) }}>Liq $</span>
+          <div className="flex flex-wrap items-center gap-0.5">
+            {([
+              ["all", "All"],
+              ["high", "High"],
+              ["mid", "Mid"],
+              ["low", "Low"],
+            ] as const).map(([id, label]) => {
+              const active = liquidityFilter === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  title={
+                    id === "high" ? "Prior-day $ volume ≥ $100M"
+                      : id === "mid" ? "Prior-day $ volume $10M–$100M"
+                        : id === "low" ? "Prior-day $ volume < $10M"
+                          : "Any liquidity"
+                  }
+                  onClick={(e) => { e.stopPropagation(); setLiquidityFilter(id); }}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded text-xs font-medium transition-colors border",
+                    active
+                      ? "bg-amber-900/40 text-amber-200 border-amber-600/50"
+                      : "text-slate-400 hover:text-slate-200 border-transparent"
+                  )}
+                  style={{ fontSize: scannerPx("tiny", fo) }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* History mode banner */}
         {historyMode && (
           <div className="flex items-center justify-between rounded border px-2 py-1 shrink-0" style={{ borderColor: "rgba(34,211,238,0.3)", backgroundColor: "rgba(34,211,238,0.05)" }}>
@@ -616,7 +745,11 @@ export function DiscoveryFeedPanel() {
             <div className="flex flex-col items-center justify-center h-full gap-2 py-8">
               <Radar className="h-8 w-8 text-slate-600" />
               <p style={{ color: cssVariables.textSmall, fontSize: scannerPx("body", fo) }}>
-                {mode === "off" ? "Scanner is off" : "No discoveries yet — scanning..."}
+                {mode === "off"
+                  ? "Scanner is off"
+                  : themeStrengthFilter !== "all" || liquidityFilter !== "all" || categoryFilter !== "all" || signalTypeFilter !== "all" || directionFilter !== "all"
+                    ? "No discoveries match filters"
+                    : "No discoveries yet — scanning..."}
               </p>
               {mode !== "off" && status?.lastSignalAt && (
                 <p style={{ color: cssVariables.textTiny, fontSize: scannerPx("tiny", fo) }}>

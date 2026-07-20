@@ -112,11 +112,16 @@ function buildSnapshotFrame(
     const avgVolume14d = [snap.avgVolume20D, snap.avgVolume, snap.prevDayVolume]
       .find((v): v is number => typeof v === "number" && v > 0) ?? 0;
 
+    const prevClose = raw?.prevClose ?? 0;
+    const priorDayDollarVol =
+      prevClose > 0 && avgVolume14d > 0 ? prevClose * avgVolume14d : 0;
+
     tickers.set(sym, {
       price: snap.price ?? 0,
       changePct: snap.changePct ?? 0,
       volume: snap.volume ?? 0,
       avgVolume14d,
+      priorDayDollarVol,
       extensionFrom20dAdr: (() => {
         const sma20 = ma?.sma20d;
         const adr = snap.adr20 ?? snap.avgDailyRange ?? null;
@@ -124,7 +129,7 @@ function buildSnapshotFrame(
         const price = snap.price ?? 0;
         return (price - sma20) / adr;
       })(),
-      prevClose: raw?.prevClose ?? 0,
+      prevClose,
       todayOpen: raw?.open ?? 0,
       todayHigh: raw?.high ?? 0,
       todayLow: raw?.low ?? 0,
@@ -144,6 +149,8 @@ function buildSnapshotFrame(
       membersUp: tm.greenCount,
       membersDown: tm.totalCount - tm.greenCount,
       memberCount: tm.totalCount,
+      rank: tm.rank ?? 0,
+      percentile: tm.percentile ?? 0,
     });
   }
 

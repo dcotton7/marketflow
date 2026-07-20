@@ -67,6 +67,16 @@ export interface ThemeMembershipResult {
   etfProxy: string | null;
   themeScore: number;
   themeRank: number;
+  /** 0–100; higher = stronger theme (Flow percentile). */
+  themePercentile: number;
+}
+
+/** Snapshot filter fields attached to Discovery cards (also nested in context.discovery_filters). */
+export interface DiscoveryFilterFields {
+  themePercentile: number | null;
+  themeRank: number | null;
+  /** Prior-day dollar volume (prevClose × avg/prior shares). */
+  priorDayDollarVol: number | null;
 }
 
 export interface PeerVelocityEntry {
@@ -254,9 +264,16 @@ export interface DiscoveryCard {
   narrative: string;
   tickers: string[];
   themeId: string | null;
-  context: Partial<Record<LensId, LensResult>>;
+  context: Partial<Record<LensId, LensResult>> & {
+    discovery_filters?: DiscoveryFilterFields;
+  };
   qualifyScore: number;
   createdAt: string;
+  /** Theme Flow percentile 0–100 (null if unknown). */
+  themePercentile?: number | null;
+  themeRank?: number | null;
+  /** Prior-day dollar volume for liquidity chips (null if unknown). */
+  priorDayDollarVol?: number | null;
 }
 
 // ── Scanner state (client ↔ server) ─────────────────────────────────────────

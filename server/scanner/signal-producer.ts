@@ -29,6 +29,8 @@ export interface TickerFrame {
   changePct: number;
   volume: number;
   avgVolume14d: number;
+  /** Prior-day dollar volume ≈ prevClose × avg/prior volume (liquidity filter). */
+  priorDayDollarVol: number;
   extensionFrom20dAdr: number;
   prevClose: number;
   todayOpen: number;
@@ -47,6 +49,8 @@ export interface ThemeFrame {
   membersUp: number;
   membersDown: number;
   memberCount: number;
+  rank: number;
+  percentile: number;
 }
 
 export interface SnapshotFrame {

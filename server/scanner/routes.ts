@@ -10,7 +10,27 @@
 
 import { Router, type Request, type Response } from "express";
 import OpenAI from "openai";
-import type { DiscoveryCard, ScannerMode, ScannerStatus } from "@shared/scanner-types";
+import type {
+  DiscoveryCard,
+  DiscoveryFilterFields,
+  ScannerMode,
+  ScannerStatus,
+  ThemeMembershipResult,
+} from "@shared/scanner-types";
+
+function hydrateDiscoveryFilters(
+  context: DiscoveryCard["context"] | Record<string, unknown> | null | undefined
+): Pick<DiscoveryCard, "themePercentile" | "themeRank" | "priorDayDollarVol" | "context"> {
+  const ctx = (context ?? {}) as DiscoveryCard["context"];
+  const stored = ctx.discovery_filters as DiscoveryFilterFields | undefined;
+  const membership = ctx.theme_membership as ThemeMembershipResult | undefined;
+  return {
+    context: ctx,
+    themePercentile: stored?.themePercentile ?? membership?.themePercentile ?? null,
+    themeRank: stored?.themeRank ?? membership?.themeRank ?? null,
+    priorDayDollarVol: stored?.priorDayDollarVol ?? null,
+  };
+}
 import { DEFAULT_SCANNER_CONFIG } from "@shared/scanner-config";
 import { getScannerState, setScannerMode } from "./index";
 import { getScannerConfig, setScannerConfig, currentFrame } from "./signal-producer";
@@ -198,24 +218,30 @@ router.get("/history", async (_req: Request, res: Response) => {
       .from(scannerDiscoveries)
       .where(where);
 
-    const cards: DiscoveryCard[] = rows.map((r) => ({
-      id: r.id,
-      pipelineId: r.pipelineId,
-      pipelineName: r.pipelineName,
-      signalType: r.signalType as DiscoveryCard["signalType"],
-      subject: r.subject,
-      subjectKind: r.subjectKind as "ticker" | "theme" | "market",
-      direction: r.direction as "up" | "down" | "neutral",
-      magnitude: Number(r.magnitude),
-      priority: r.priority as "normal" | "high" | "urgent",
-      headline: r.headline,
-      narrative: r.narrative,
-      tickers: r.tickers ?? [],
-      themeId: r.themeId ?? undefined,
-      qualifyScore: Number(r.qualifyScore),
-      context: (r.contextJson as Record<string, unknown>) ?? {},
-      createdAt: r.createdAt.toISOString(),
-    }));
+    const cards: DiscoveryCard[] = rows.map((r) => {
+      const filters = hydrateDiscoveryFilters(r.contextJson as DiscoveryCard["context"]);
+      return {
+        id: r.id,
+        pipelineId: r.pipelineId,
+        pipelineName: r.pipelineName,
+        signalType: r.signalType as DiscoveryCard["signalType"],
+        subject: r.subject,
+        subjectKind: r.subjectKind as "ticker" | "theme" | "market",
+        direction: r.direction as "up" | "down" | "neutral",
+        magnitude: Number(r.magnitude),
+        priority: r.priority as "normal" | "high" | "urgent",
+        headline: r.headline,
+        narrative: r.narrative,
+        tickers: r.tickers ?? [],
+        themeId: r.themeId ?? null,
+        qualifyScore: Number(r.qualifyScore),
+        context: filters.context,
+        createdAt: r.createdAt.toISOString(),
+        themePercentile: filters.themePercentile,
+        themeRank: filters.themeRank,
+        priorDayDollarVol: filters.priorDayDollarVol,
+      };
+    });
 
     res.json({ discoveries: cards, total: Number(countResult[0]?.count ?? 0), source: "db" });
   } catch (err) {
