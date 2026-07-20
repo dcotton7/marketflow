@@ -227,6 +227,8 @@ export function DiscoveryFeedPanel() {
   const [historyMode, setHistoryMode] = useState(false);
   const [historyCards, setHistoryCards] = useState<DiscoveryCardType[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  /** Server-side type query (live buffer / last-N window often drop cleared LOD cards). */
+  const [historySignalType, setHistorySignalType] = useState<SignalType | "all">("all");
 
   const isOnPopoutRoute = location.startsWith("/scanner-popout") || location.startsWith("/workspace-popout");
 
@@ -246,24 +248,42 @@ export function DiscoveryFeedPanel() {
     return () => { ch.close(); channelRef.current = null; };
   }, [isOnPopoutRoute, navigate]);
 
-  const fetchTodayHistory = useCallback(async () => {
+  const etToday = useCallback(() => {
+    return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  }, []);
+
+  const fetchTodayHistory = useCallback(async (signalType: SignalType | "all" = "all") => {
     setHistoryLoading(true);
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const res = await fetch(`/api/scanner/history?date=${today}&limit=200`);
+      const params = new URLSearchParams({ date: etToday(), limit: "200" });
+      if (signalType !== "all") params.set("signal_type", signalType);
+      const res = await fetch(`/api/scanner/history?${params}`);
       if (res.ok) {
         const data = await res.json();
         setHistoryCards(data.discoveries ?? []);
+        setHistorySignalType(signalType);
         setHistoryMode(true);
       }
     } catch { /* ignore */ }
     setHistoryLoading(false);
-  }, []);
+  }, [etToday]);
 
   const exitHistoryMode = useCallback(() => {
     setHistoryMode(false);
     setHistoryCards([]);
+    setHistorySignalType("all");
   }, []);
+
+  // Type filter must hit DB — live feed clears dead LOD cards, and "last 200 today"
+  // is flooded by ma_proximity so client-only filter shows empty even when LODs exist.
+  useEffect(() => {
+    if (signalTypeFilter === "all") {
+      if (historyMode && historySignalType !== "all") exitHistoryMode();
+      return;
+    }
+    void fetchTodayHistory(signalTypeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch on type change
+  }, [signalTypeFilter]);
 
   const fetchCatalystRules = useCallback(async () => {
     try {
@@ -554,8 +574,8 @@ export function DiscoveryFeedPanel() {
                   ? "text-cyan-400 bg-cyan-950/30 ring-1 ring-cyan-700/40"
                   : "text-slate-500 hover:text-slate-300",
               )}
-              onClick={historyMode ? exitHistoryMode : fetchTodayHistory}
-              title={historyMode ? "Back to live feed" : "Show all of today's signals from DB"}
+              onClick={historyMode ? exitHistoryMode : () => void fetchTodayHistory(signalTypeFilter)}
+              title={historyMode ? "Back to live feed" : "Show today's signals from DB (respects type filter)"}
             >
               <CalendarDays className="h-3 w-3" />
             </Button>
@@ -731,7 +751,11 @@ export function DiscoveryFeedPanel() {
         {historyMode && (
           <div className="flex items-center justify-between rounded border px-2 py-1 shrink-0" style={{ borderColor: "rgba(34,211,238,0.3)", backgroundColor: "rgba(34,211,238,0.05)" }}>
             <span style={{ color: cssVariables.textMarketFlow, fontSize: scannerPx("small", fo) }}>
-              {historyLoading ? "Loading..." : `Showing all ${historyCards.length} signals from today`}
+              {historyLoading
+                ? "Loading..."
+                : historySignalType === "all"
+                  ? `Showing ${historyCards.length} signals from today`
+                  : `Showing ${historyCards.length} ${SIGNAL_TYPE_LABELS[historySignalType]} from today (DB)`}
             </span>
             <Button variant="ghost" size="sm" className="h-5 px-2 text-cyan-400 hover:text-cyan-300" style={{ fontSize: scannerPx("small", fo) }} onClick={exitHistoryMode}>
               Back to Live

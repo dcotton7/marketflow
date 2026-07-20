@@ -511,9 +511,9 @@ export function ThemeRaceLanes({
 
   useEffect(() => {
     if (themes.length === 0) return;
-    const selectionInList =
-      selectedTheme != null && themes.some((t) => t.id === selectedTheme);
-    if (!selectionInList) onThemeSelect(themes[0]!.id);
+    // Only seed a default — never override a deep-linked / user-selected theme.
+    if (selectedTheme != null) return;
+    onThemeSelect(themes[0]!.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themes.map((t) => t.id).join("|"), selectedTheme, onThemeSelect]);
 

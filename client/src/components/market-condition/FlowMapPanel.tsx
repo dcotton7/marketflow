@@ -553,11 +553,13 @@ export function FlowMapPanel({
   const selectedRow = headerSelection?.axis === "row" ? headerSelection.themeId : null;
   const selectedCol = headerSelection?.axis === "col" ? headerSelection.themeId : null;
 
+  // Parent/URL selectedTheme always wins (even before themeIds hydrate). Falling back to
+  // themeIds[0] while STORAGE was deep-linked made the focus panel flash CRYPTO.
   const focusedTheme = useMemo<ThemeId | null>(() => {
+    if (selectedTheme) return selectedTheme;
     if (selectedRoute && themeIds.includes(selectedRoute.to)) return selectedRoute.to;
     if (selectedRow && themeIds.includes(selectedRow)) return selectedRow;
     if (selectedCol && themeIds.includes(selectedCol)) return selectedCol;
-    if (selectedTheme && themeIds.includes(selectedTheme)) return selectedTheme;
     return themeIds[0] ?? null;
   }, [selectedRoute, selectedRow, selectedCol, selectedTheme, themeIds]);
 
@@ -580,15 +582,14 @@ export function FlowMapPanel({
     return () => window.removeEventListener("resize", onWindowResize);
   }, [helpOpen]);
 
-  // Only sync parent selection when the user picks a row/column/route — not on load fallback.
+  // Keep local row highlight aligned to parent selection. Do NOT push focus back to
+  // parent here — matrix clicks already call onThemeSelect. Pushing caused STORAGE↔CRYPTO flash.
   useEffect(() => {
-    if (!focusedTheme || focusedTheme === selectedTheme) return;
-    const focusFromMatrix = !!(selectedRow || selectedCol || selectedRoute);
-    if (!focusFromMatrix) return;
-    onThemeSelect(focusedTheme);
-    setHeaderSelection({ axis: "row", themeId: focusedTheme });
+    if (!selectedTheme || !themeIds.includes(selectedTheme)) return;
+    if (selectedRow === selectedTheme && !selectedRoute && selectedCol == null) return;
+    setHeaderSelection({ axis: "row", themeId: selectedTheme });
     setSelectedRoute(null);
-  }, [focusedTheme, selectedTheme, selectedRow, selectedCol, selectedRoute, onThemeSelect]);
+  }, [selectedTheme, themeIds, selectedRow, selectedRoute, selectedCol]);
 
   const getStrength = (id: ThemeId) => {
     const active = activeMap.get(id)?.score ?? 0;
@@ -708,44 +709,45 @@ export function FlowMapPanel({
     initialThemeSelectDoneRef.current = false;
   }, [sizeFilter]);
 
-  // Auto-select the top row in the left theme list (first visible row, not API/mock array order).
+  // Stable membership key — do NOT use score order (reorder was re-firing selection every poll).
+  const themeMembershipKey = useMemo(
+    () => [...themeIds].sort().join("|"),
+    [themeIds]
+  );
+
+  // Auto-select only when parent has no theme yet. Never override a deep-linked / user selection
+  // (including when size filter temporarily hides that row — leave parent alone).
   useEffect(() => {
     if (isLoading || orderedThemes.length === 0) return;
 
-    const topRow = orderedThemes[0];
+    const topRow = orderedThemes[0]!;
+    const themeInList = !!(selectedTheme && orderedThemes.includes(selectedTheme));
 
     if (!initialThemeSelectDoneRef.current) {
       initialThemeSelectDoneRef.current = true;
-      const initialTheme = selectedTheme && orderedThemes.includes(selectedTheme)
-        ? selectedTheme
-        : topRow;
-      setHeaderSelection({ axis: "row", themeId: initialTheme });
-      setSelectedRoute(null);
-      if (selectedTheme !== initialTheme) onThemeSelect(initialTheme);
+      if (themeInList) {
+        setHeaderSelection({ axis: "row", themeId: selectedTheme! });
+        setSelectedRoute(null);
+        return;
+      }
+      if (!selectedTheme) {
+        setHeaderSelection({ axis: "row", themeId: topRow });
+        setSelectedRoute(null);
+        onThemeSelect(topRow);
+      }
       return;
     }
 
-    const themeInList = !!(selectedTheme && orderedThemes.includes(selectedTheme));
-
-    if (!themeInList) {
-      setHeaderSelection({ axis: "row", themeId: topRow });
-      setSelectedRoute(null);
-      if (selectedTheme !== topRow) onThemeSelect(topRow);
-      return;
-    }
-
-    if (selectedRow !== selectedTheme) {
-      setHeaderSelection({ axis: "row", themeId: selectedTheme });
+    // Parent theme reappears in the map after filter/load — re-align row highlight only.
+    if (themeInList && selectedRow !== selectedTheme) {
+      setHeaderSelection({ axis: "row", themeId: selectedTheme! });
       setSelectedRoute(null);
     }
-    // Intentionally omit orderedThemes array identity — use length + join for stability across score refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isLoading,
-    orderedThemes.length,
-    orderedThemes.join("|"),
+    themeMembershipKey,
     selectedTheme,
-    selectedRow,
     onThemeSelect,
   ]);
 

@@ -316,8 +316,10 @@ export default function MarketConditionPage() {
 
   const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(urlTheme);
 
+  // Deep-link from scanner (?theme=STORAGE). Keep local selection aligned to URL.
   useEffect(() => {
-    if (urlTheme) setSelectedTheme(urlTheme);
+    if (urlTheme && urlTheme !== selectedTheme) setSelectedTheme(urlTheme);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to URL changes
   }, [urlTheme]);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [lensMode, setLensMode] = useState<LensMode>("flowMap");
@@ -576,13 +578,14 @@ export default function MarketConditionPage() {
     return [];
   }, [shouldUseLive, themeMembers, selectedTheme]);
 
-  // Handle theme selection
+  // Handle theme selection — keep ?theme= in sync so deep-links and UI don't fight
   const handleThemeSelect = useCallback((themeId: ThemeId) => {
     setSelectedTheme(themeId);
     setSelectedSubthemeId(null);
     setSelectedSubthemeName(null);
     setMemberScope("theme");
-  }, []);
+    navigate(`/sentinel/market-condition?theme=${themeId}`, { replace: true });
+  }, [navigate]);
 
   // Handle ticker click - navigate or sync to popout window
   const handleTickerSelect = useCallback(
@@ -686,14 +689,12 @@ export default function MarketConditionPage() {
     }
   }, [lensMode, themes, accDistFilter, heatmapSort, timeSlice]);
 
-  // Default selection on Flow load — Ticker Review / members need a theme before manual pick.
+  // Default selection on Flow load — only when nothing is selected (never override deep-link).
   // Flow Map owns first-row selection from its matrix order once slice data loads.
   useEffect(() => {
     if (sortedThemes.length === 0 || lensMode === "flowMap") return;
-    const selectionInList =
-      selectedTheme != null && sortedThemes.some((t) => t.id === selectedTheme);
-    if (selectionInList) return;
-    handleThemeSelect(sortedThemes[0].id);
+    if (selectedTheme != null) return;
+    handleThemeSelect(sortedThemes[0]!.id);
   }, [lensMode, selectedTheme, sortedThemes, handleThemeSelect]);
 
   // Build search results from query
@@ -735,10 +736,7 @@ export default function MarketConditionPage() {
   // Handle search selection — align with clicking a theme: show center + members, load theme data
   const handleSelectTicker = useCallback(
     (symbol: string, themeId: ClusterId) => {
-      setSelectedTheme(themeId as ThemeId);
-      setSelectedSubthemeId(null);
-      setSelectedSubthemeName(null);
-      setMemberScope("theme");
+      handleThemeSelect(themeId as ThemeId);
       setHighlightedTicker(symbol);
       setShowFocusedPanel(true);
       setShowMembersPanel(true);
@@ -747,24 +745,21 @@ export default function MarketConditionPage() {
       setSearchQuery("");
       if (analysisSyncEnabled) setAnalysisSheetSymbol(symbol);
     },
-    [analysisSyncEnabled]
+    [analysisSyncEnabled, handleThemeSelect]
   );
 
   const handleSelectTheme = useCallback((themeId: ThemeId) => {
-    setSelectedTheme(themeId);
-    setSelectedSubthemeId(null);
-    setSelectedSubthemeName(null);
-    setMemberScope("theme");
+    handleThemeSelect(themeId);
     setHighlightedTicker(null);
     setShowFocusedPanel(true);
     setShowMembersPanel(true);
     setFocusedCenterTab("actionableDetails");
     setSearchOpen(false);
     setSearchQuery("");
-  }, []);
+  }, [handleThemeSelect]);
 
   const handleSelectSubtheme = useCallback((subthemeId: string, subthemeName: string, themeId: ClusterId) => {
-    setSelectedTheme(themeId as ThemeId);
+    handleThemeSelect(themeId as ThemeId);
     setSelectedSubthemeId(subthemeId);
     setSelectedSubthemeName(subthemeName);
     setMemberScope("subtheme");
@@ -774,7 +769,7 @@ export default function MarketConditionPage() {
     setFocusedCenterTab("subthemes");
     setSearchOpen(false);
     setSearchQuery("");
-  }, []);
+  }, [handleThemeSelect]);
 
   const selectedSubthemeSymbols = useMemo(() => {
     const out = new Set<string>();

@@ -196,7 +196,9 @@ router.get("/history", async (_req: Request, res: Response) => {
   try {
     const conditions = [];
     if (dateFilter) {
-      conditions.push(gte(scannerDiscoveries.createdAt, new Date(dateFilter + "T00:00:00Z")));
+      // Inclusive single day — previously only gte, so older "date=" queries leaked later days.
+      conditions.push(gte(scannerDiscoveries.createdAt, new Date(dateFilter + "T00:00:00.000Z")));
+      conditions.push(lte(scannerDiscoveries.createdAt, new Date(dateFilter + "T23:59:59.999Z")));
     }
     if (signalFilter) {
       conditions.push(eq(scannerDiscoveries.signalType, signalFilter));

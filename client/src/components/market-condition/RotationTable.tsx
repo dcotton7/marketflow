@@ -218,9 +218,9 @@ export function RotationTable({
 
   useEffect(() => {
     if (lensMode === "flowMap" || sortedThemes.length === 0) return;
-    const selectionInList =
-      selectedTheme != null && sortedThemes.some((t) => t.id === selectedTheme);
-    if (!selectionInList) onThemeSelect(sortedThemes[0].id);
+    // Only seed a default — never override a deep-linked / user-selected theme.
+    if (selectedTheme != null) return;
+    onThemeSelect(sortedThemes[0]!.id);
   }, [lensMode, sortedThemes, selectedTheme, onThemeSelect]);
 
   return (
