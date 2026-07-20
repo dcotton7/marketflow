@@ -54,6 +54,11 @@ function markPipelineFired(pipelineId: string, subject: string): void {
   pipelineCooldowns.set(`${pipelineId}:${subject}`, Date.now());
 }
 
+/** Allow a subject to qualify again immediately (e.g. LOD bounce reclaim after give-up). */
+export function clearPipelineCooldown(pipelineId: string, subject: string): void {
+  pipelineCooldowns.delete(`${pipelineId}:${subject}`);
+}
+
 // ── After-hours peer liquidity gate ─────────────────────────────────────────
 
 const PEER_DEPENDENT_PIPELINES = new Set([

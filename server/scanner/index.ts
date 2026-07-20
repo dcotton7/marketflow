@@ -19,8 +19,7 @@ import {
   type TickerFrame,
   type ThemeFrame,
 } from "./signal-producer";
-import { routeSignals } from "./pipeline-router";
-import { getActivePipelines } from "./pipeline-router";
+import { routeSignals, getActivePipelines, clearPipelineCooldown } from "./pipeline-router";
 import { executeReactions } from "./reactions";
 import { broadcastBatch, broadcastClear, pushDiscoveries, removeDiscoveries } from "./routes";
 import {
@@ -224,7 +223,10 @@ async function onSnapshotRefreshed(
         const gaveUpSymbols = clears
           .filter((c) => c.reason === "gave_up")
           .map((c) => c.subject);
-        if (gaveUpSymbols.length > 0) onLodBounceGaveUp(gaveUpSymbols);
+        if (gaveUpSymbols.length > 0) {
+          onLodBounceGaveUp(gaveUpSymbols);
+          for (const sym of gaveUpSymbols) clearPipelineCooldown("lod_bounce_scan", sym);
+        }
         if (scannerMode === "on") broadcastClear(clears);
         console.log(
           `[Scanner] Cleared ${clearIds.length} LOD bounce card(s): ` +
