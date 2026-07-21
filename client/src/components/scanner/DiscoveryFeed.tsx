@@ -233,7 +233,7 @@ function isPoppedOut(): boolean {
 
 export function DiscoveryFeedPanel() {
   const [location, navigate] = useLocation();
-  const { panelOpen, setPanelOpen, mode, setMode, discoveries, connected, streamStatus, status } = useScanner();
+  const { panelOpen, setPanelOpen, mode, setMode, discoveries, streamStatus, status } = useScanner();
   const { cssVariables } = useAdminTheme();
 
   const [fontOffset, setFontOffset] = useState(() => loadScannerFontOffset());
