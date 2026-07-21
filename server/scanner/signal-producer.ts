@@ -670,9 +670,15 @@ function rthVolumeProgress(): number {
   return Math.min(1, Math.max(0.05, (mins - open) / (close - open)));
 }
 
-/** Minimum cumulative-volume / 14d-avg ratio for LOD bounce at current time of day. */
+/**
+ * Minimum cumulative-volume / avg-day-volume for LOD bounce at this time of day.
+ * Must track RTH progress — a hard 0.20 floor rejects every open bounce
+ * (CRWD/IGV at 9:37 were ~0.05–0.09× prior day with real session volume).
+ */
 function lodBounceMinVolumeRatio(): number {
-  return Math.max(0.2, rthVolumeProgress() * 0.6);
+  const progress = rthVolumeProgress();
+  // ~half of a normal day's pace by this clock time; tiny floor only filters noise.
+  return Math.max(0.02, progress * 0.5);
 }
 
 function detectLodBounce(current: SnapshotFrame): Signal[] {

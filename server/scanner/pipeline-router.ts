@@ -212,11 +212,9 @@ function qualifySignal(
     case "lod_bounce_scan": {
       const volRatio = (signal.meta?.volumeRatio as number) ?? 0;
       const volumeKnown = (signal.meta?.volumeKnown as boolean) ?? volRatio > 0;
-      // Session-aware floor: mid-morning cumulative vol vs full-day avg is often ~0.2–0.4,
-      // so a hard 1.0x gate silently killed every LOD bounce until late day.
-      // Skip the floor when baseline volume is unknown (avg never wired → ratio always 0).
-      const metaMin = (signal.meta?.minVolRatio as number) ?? 0.25;
-      const minVol = Math.max(0.2, metaMin);
+      // Trust detector's session-aware minVolRatio. Re-imposing max(0.2, …) here
+      // killed open-drive LOD cards after the detector had already passed them.
+      const minVol = (signal.meta?.minVolRatio as number) ?? 0.05;
       if (volumeKnown && volRatio < minVol) return { qualified: false, score: 0 };
 
       const tier = (signal.meta?.tier as number) ?? 1;

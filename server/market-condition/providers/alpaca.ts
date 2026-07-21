@@ -413,16 +413,20 @@ export class AlpacaProvider implements MarketDataProvider {
     const change = price - prevClose;
     const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
     
+    // Session OHLC + cumulative volume must come from dailyBar.
+    // Preferring minuteBar (old bug) made todayLow/High = current minute only and
+    // volume = one-minute prints — LOD bounce / HOD fade / volume_spike compared
+    // minute vol to full-day avg (~0.002x) and silently killed almost every setup.
     return {
       symbol,
       price,
       prevClose,
-      open: minuteBar?.o || dailyBar?.o || price,
-      high: minuteBar?.h || dailyBar?.h || price,
-      low: minuteBar?.l || dailyBar?.l || price,
-      volume: minuteBar?.v || dailyBar?.v || 0,
+      open: dailyBar?.o || minuteBar?.o || price,
+      high: dailyBar?.h || minuteBar?.h || price,
+      low: dailyBar?.l || minuteBar?.l || price,
+      volume: dailyBar?.v || minuteBar?.v || 0,
       prevDayVolume: prevBar?.v || 0,
-      vwap: minuteBar?.vw || dailyBar?.vw || price,
+      vwap: dailyBar?.vw || minuteBar?.vw || price,
       change,
       changePct,
       prevDayHigh: prevBar?.h || 0,
