@@ -136,15 +136,34 @@ function cardPriorDayDollarVol(card: DiscoveryCardType): number | null {
 
 function matchesThemeStrength(card: DiscoveryCardType, filter: ThemeStrengthFilter): boolean {
   if (filter === "all") return true;
-  // Market-wide cards and theme-subject cards aren't ticker-membership rows —
-  // don't hide them when Theme % chips are on.
+  // Market-wide / theme-subject cards aren't ticker-membership rows.
   if (card.subjectKind === "market" || card.subjectKind === "theme") return true;
   const pct = cardThemePercentile(card);
-  if (pct == null) return false;
+  // Unknown percentile ≠ weak — don't hide (same idea as unknown ADV$).
+  if (pct == null) return true;
   if (filter === "top25") return pct >= 75;
   if (filter === "top50") return pct >= 50;
   if (filter === "bottom50") return pct < 50;
   return true;
+}
+
+function describeActiveSecondaryFilters(opts: {
+  themeStrengthFilter: ThemeStrengthFilter;
+  liquidityFilter: LiquidityFilter;
+  directionFilter: "all" | "up" | "down";
+  showUrgentOnly: boolean;
+}): string[] {
+  const bits: string[] = [];
+  if (opts.themeStrengthFilter === "top25") bits.push("Theme Top 25%");
+  else if (opts.themeStrengthFilter === "top50") bits.push("Theme Top 50%");
+  else if (opts.themeStrengthFilter === "bottom50") bits.push("Theme Bot 50%");
+  if (opts.liquidityFilter === "high") bits.push("Liq $ High");
+  else if (opts.liquidityFilter === "mid") bits.push("Liq $ Mid");
+  else if (opts.liquidityFilter === "low") bits.push("Liq $ Low");
+  if (opts.directionFilter === "up") bits.push("Long only");
+  else if (opts.directionFilter === "down") bits.push("Short only");
+  if (opts.showUrgentOnly) bits.push("Urgent only");
+  return bits;
 }
 
 function matchesLiquidity(card: DiscoveryCardType, filter: LiquidityFilter): boolean {
@@ -456,8 +475,21 @@ export function DiscoveryFeedPanel() {
     return counts;
   }, [discoveries, historyCards, historyMode]);
 
+  const baseCards = useMemo(() => {
+    if (!historyMode) return discoveries;
+    // Keep live stream cards of the active type/category visible on top of DB results.
+    const ids = new Set(historyCards.map((c) => c.id));
+    const liveExtra = discoveries.filter((d) => {
+      if (ids.has(d.id)) return false;
+      if (signalTypeFilter !== "all") return d.signalType === signalTypeFilter;
+      if (historyCategory) return matchesCategory(d, historyCategory);
+      return true;
+    });
+    return [...liveExtra, ...historyCards];
+  }, [historyMode, historyCards, discoveries, signalTypeFilter, historyCategory]);
+
   const filteredCards = useMemo(() => {
-    let cards = historyMode ? historyCards : discoveries;
+    let cards = baseCards;
     if (signalTypeFilter !== "all") {
       cards = cards.filter((d) => d.signalType === signalTypeFilter);
     } else if (categoryFilter !== "all") {
@@ -473,9 +505,7 @@ export function DiscoveryFeedPanel() {
     if (showUrgentOnly) cards = cards.filter((d) => d.priority === "urgent" || (d.qualifyScore ?? 0) >= 80);
     return cards;
   }, [
-    discoveries,
-    historyCards,
-    historyMode,
+    baseCards,
     showUrgentOnly,
     categoryFilter,
     signalTypeFilter,
@@ -483,6 +513,17 @@ export function DiscoveryFeedPanel() {
     themeStrengthFilter,
     liquidityFilter,
   ]);
+
+  const secondaryFilterLabels = useMemo(
+    () =>
+      describeActiveSecondaryFilters({
+        themeStrengthFilter,
+        liquidityFilter,
+        directionFilter,
+        showUrgentOnly,
+      }),
+    [themeStrengthFilter, liquidityFilter, directionFilter, showUrgentOnly]
+  );
 
   const cycleMode = () => {
     const order: ScannerMode[] = ["on", "silent", "off"];
@@ -805,20 +846,40 @@ export function DiscoveryFeedPanel() {
           </div>
         </div>
 
-        {/* History mode banner */}
+        {/* DB/history banner — stream stays connected; this is a filtered today view */}
         {historyMode && (
           <div className="flex items-center justify-between rounded border px-2 py-1 shrink-0" style={{ borderColor: "rgba(34,211,238,0.3)", backgroundColor: "rgba(34,211,238,0.05)" }}>
             <span style={{ color: cssVariables.textMarketFlow, fontSize: scannerPx("small", fo) }}>
               {historyLoading
                 ? "Loading..."
-                : historySignalType !== "all"
-                  ? `Showing ${historyCards.length} ${SIGNAL_TYPE_LABELS[historySignalType]} from today (DB)`
-                  : historyCategory
-                    ? `Showing ${historyCards.length} ${historyCategory} signals from today (DB)`
-                    : `Showing ${historyCards.length} signals from today`}
+                : (() => {
+                    const label =
+                      historySignalType !== "all"
+                        ? SIGNAL_TYPE_LABELS[historySignalType]
+                        : historyCategory
+                          ? `${historyCategory} signals`
+                          : "signals";
+                    const loaded = baseCards.length;
+                    const shown = filteredCards.length;
+                    if (shown === loaded) return `${shown} ${label} today`;
+                    return `${shown} of ${loaded} ${label} today`;
+                  })()}
+              {secondaryFilterLabels.length > 0 && filteredCards.length < baseCards.length
+                ? ` · hidden by ${secondaryFilterLabels.join(", ")}`
+                : ""}
             </span>
-            <Button variant="ghost" size="sm" className="h-5 px-2 text-cyan-400 hover:text-cyan-300" style={{ fontSize: scannerPx("small", fo) }} onClick={exitHistoryMode}>
-              Back to Live
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-2 text-cyan-400 hover:text-cyan-300"
+              style={{ fontSize: scannerPx("small", fo) }}
+              onClick={() => {
+                exitHistoryMode();
+                setSignalTypeFilter("all");
+                setCategoryFilter("all");
+              }}
+            >
+              Clear view
             </Button>
           </div>
         )}
@@ -831,14 +892,39 @@ export function DiscoveryFeedPanel() {
               <p style={{ color: cssVariables.textSmall, fontSize: scannerPx("body", fo) }}>
                 {mode === "off"
                   ? "Scanner is off"
-                  : themeStrengthFilter !== "all" || liquidityFilter !== "all" || categoryFilter !== "all" || signalTypeFilter !== "all" || directionFilter !== "all"
-                    ? "No discoveries match filters"
-                    : "No discoveries yet — scanning..."}
+                  : baseCards.length > 0 && secondaryFilterLabels.length > 0
+                    ? `${baseCards.length} loaded — hidden by ${secondaryFilterLabels.join(", ")}`
+                    : signalTypeFilter !== "all" || categoryFilter !== "all"
+                      ? "No discoveries for this filter today"
+                      : "No discoveries yet — scanning..."}
               </p>
               {mode !== "off" && status?.lastSignalAt && (
                 <p style={{ color: cssVariables.textTiny, fontSize: scannerPx("tiny", fo) }}>
-                  Last signal: {new Date(status.lastSignalAt).toLocaleTimeString()}
+                  Last signal:{" "}
+                  {new Date(status.lastSignalAt).toLocaleTimeString("en-US", {
+                    timeZone: "America/New_York",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}{" "}
+                  ET
                 </p>
+              )}
+              {baseCards.length > 0 && secondaryFilterLabels.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-cyan-400"
+                  style={{ fontSize: scannerPx("small", fo) }}
+                  onClick={() => {
+                    setThemeStrengthFilter("all");
+                    setLiquidityFilter("all");
+                    setDirectionFilter("all");
+                    setShowUrgentOnly(false);
+                  }}
+                >
+                  Reset Theme / Liq / direction filters
+                </Button>
               )}
             </div>
           ) : (
