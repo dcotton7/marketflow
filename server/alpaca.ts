@@ -175,6 +175,8 @@ export async function fetchAlpacaIntradayBars(
     feed: "sip", // SIP feed includes all trading hours (when entitled)
     limit: "10000", // Default is 1000; we must raise this for longer ranges
     sort: "asc",
+    // Default Alpaca adjustment is "raw" — post-split cliffs (e.g. CRWD 4:1) wreck charts/MAs.
+    adjustment: "split",
   });
 
   console.log(`[Alpaca] Fetching ${ticker} bars`);
@@ -396,6 +398,7 @@ export async function fetchAlpacaMultiSymbolDailyBars(
     feed: "sip",
     limit: "10000",
     sort: "asc",
+    adjustment: "split",
   });
 
   try {

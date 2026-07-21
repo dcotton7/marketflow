@@ -276,6 +276,7 @@ export class AlpacaProvider implements MarketDataProvider {
         feed: "sip",
         limit: String(days + 10),
         sort: "asc",
+        adjustment: "split",
       });
       
       const url = `${ALPACA_DATA_URL}/v2/stocks/${encodeURIComponent(symbol)}/bars?${params}`;
@@ -451,6 +452,7 @@ export class AlpacaProvider implements MarketDataProvider {
       timeframe: "1Day",
       feed: "sip",
       sort: "asc",
+      adjustment: "split",
     });
 
     // Alpaca multi-bar endpoint supports up to 200 symbols per request;
@@ -513,6 +515,7 @@ export class AlpacaProvider implements MarketDataProvider {
       timeframe,
       feed: "sip",
       sort: "asc",
+      adjustment: "split",
     });
 
     const chunks = this.chunkArray(symbols, 100);
