@@ -233,7 +233,7 @@ function isPoppedOut(): boolean {
 
 export function DiscoveryFeedPanel() {
   const [location, navigate] = useLocation();
-  const { panelOpen, setPanelOpen, mode, setMode, discoveries, connected, status } = useScanner();
+  const { panelOpen, setPanelOpen, mode, setMode, discoveries, connected, streamStatus, status } = useScanner();
   const { cssVariables } = useAdminTheme();
 
   const [fontOffset, setFontOffset] = useState(() => loadScannerFontOffset());
@@ -580,10 +580,29 @@ export function DiscoveryFeedPanel() {
       <span className="font-semibold truncate" style={{ color: cssVariables.textTitle, fontSize: cssVariables.fontSizeSection }}>
         Discovery Scanner
       </span>
-      <span className={cn("text-[10px] font-bold uppercase", MODE_COLORS[mode])}>
+      <span className={cn("text-[10px] font-bold uppercase", MODE_COLORS[mode])} title="Scanner mode (Active / Silent / Off)">
         {MODE_LABELS[mode]}
       </span>
-      {connected ? <Wifi className="h-3 w-3 text-emerald-400 shrink-0" /> : <WifiOff className="h-3 w-3 text-red-400 shrink-0" />}
+      <span
+        className="shrink-0"
+        title={
+          streamStatus === "live"
+            ? "Push stream connected"
+            : streamStatus === "reconnecting"
+              ? "Push stream reconnecting… (scanner can still be Active)"
+              : mode === "off"
+                ? "Scanner off — push stream closed"
+                : "Push stream offline (not the same as scanner Off)"
+        }
+      >
+        {streamStatus === "live" ? (
+          <Wifi className="h-3 w-3 text-emerald-400" />
+        ) : streamStatus === "reconnecting" ? (
+          <Wifi className="h-3 w-3 text-amber-400 animate-pulse" />
+        ) : (
+          <WifiOff className="h-3 w-3 text-red-400" />
+        )}
+      </span>
       {!poppedOut && (
         <Button
           variant="ghost"

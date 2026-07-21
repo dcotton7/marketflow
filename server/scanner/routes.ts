@@ -174,7 +174,18 @@ router.get("/stream", (req: Request, res: Response) => {
   sseClients.add(res);
   console.log(`[Scanner SSE] Client connected (${sseClients.size} total)`);
 
+  // Keep proxies from idle-closing the stream (Render / browsers treat silence as dead).
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`data: ${JSON.stringify({ type: "ping", timestamp: new Date().toISOString() })}\n\n`);
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 20_000);
+
   req.on("close", () => {
+    clearInterval(heartbeat);
     sseClients.delete(res);
     console.log(`[Scanner SSE] Client disconnected (${sseClients.size} remaining)`);
   });
