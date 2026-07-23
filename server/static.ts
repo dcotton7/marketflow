@@ -10,15 +10,40 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  // Hashed assets: long-cache. Missing files must 404 (not SPA HTML) so stale
+  // clients fail cleanly after a deploy instead of "Failed to fetch dynamically imported module".
+  app.use(
+    "/assets",
+    express.static(path.join(distPath, "assets"), {
+      fallthrough: false,
+      maxAge: "1y",
+      immutable: true,
+    }),
+  );
 
-  // fall through to index.html if the file doesn't exist
-  // but only for non-API routes
+  // index.html must revalidate so clients pick up new chunk hashes after deploy
+  app.get(["/", "/index.html"], (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.sendFile(path.resolve(distPath, "index.html"));
+  });
+
+  app.use(
+    express.static(distPath, {
+      index: false,
+      setHeaders(res, filePath) {
+        if (path.basename(filePath) === "index.html") {
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        }
+      },
+    }),
+  );
+
+  // SPA fallback for client routes only — never for /api or /assets
   app.use("/{*path}", (req, res, next) => {
-    // Don't serve index.html for API routes - let them 404 properly
-    if (req.path.startsWith("/api")) {
+    if (req.path.startsWith("/api") || req.path.startsWith("/assets")) {
       return next();
     }
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

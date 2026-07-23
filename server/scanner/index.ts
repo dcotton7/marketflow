@@ -132,7 +132,9 @@ function buildSnapshotFrame(
       priorDayDollarVol,
       extensionFrom20dAdr: (() => {
         const sma20 = ma?.sma20d;
-        const adr = snap.adr20 ?? snap.avgDailyRange ?? null;
+        // ADR comes from session MA cache (historical_bars high−low). Alpaca
+        // snapshots never set adr20/avgDailyRange — reading those left extension at 0 forever.
+        const adr = ma?.adr20 ?? snap.adr20 ?? snap.avgDailyRange ?? null;
         if (sma20 == null || sma20 <= 0 || adr == null || adr <= 0) return 0;
         const price = snap.price ?? 0;
         return (price - sma20) / adr;

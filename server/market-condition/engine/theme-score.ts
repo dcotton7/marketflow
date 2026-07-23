@@ -661,7 +661,7 @@ export function generateReasonCodes(
 }
 
 /** Full MA data for pct vs MA calculations */
-export type MaDataEntry = { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null };
+export type MaDataEntry = { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null; adr20?: number | null };
 
 function pctVsMa(price: number, ma: number | null): number | null {
   if (ma == null || ma <= 0) return null;

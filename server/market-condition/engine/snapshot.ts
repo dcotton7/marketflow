@@ -5,7 +5,7 @@
  * Manages caching and provides data to API endpoints.
  */
 
-import { ClusterId, CLUSTERS, CLUSTER_IDS, getAllUniverseTickers, DEFAULT_CADENCE, isMarketHours, getPollingInterval, getMarketSession, MarketSession, TimeSlice, type SizeFilter } from "../universe";
+import { ClusterId, CLUSTERS, CLUSTER_IDS, getAllUniverseTickers, DEFAULT_CADENCE, isMarketHours, getPollingInterval, getMarketSession, MarketSession, TimeSlice, MARKET_HOURS, type SizeFilter } from "../universe";
 import { getAllThemeTickerSymbols } from "../utils/theme-db-loader";
 import { getAlpacaProvider } from "../providers/alpaca";
 import { TickerSnapshot, BenchmarkData } from "../providers/types";
@@ -58,7 +58,7 @@ export interface SnapshotState {
   spyBenchmark: BenchmarkData | null;
   benchmarks: Map<string, BenchmarkData>;
   themeMetrics: ThemeMetrics[];
-  maData: Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null }>;
+  maData: Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null; adr20: number | null }>;
   maAsOf: Date | null;
   maMode: MaMode;
   
@@ -243,6 +243,7 @@ export async function refreshSnapshot(
           sma20d: number | null;
           sma50d: number | null;
           sma200d: number | null;
+          adr20: number | null;
         }>;
         asOf: Date;
         mode: MaMode;
@@ -466,11 +467,14 @@ function startWatchdog(): void {
       console.error(`[MC-Watchdog] ⚠️ STALE DATA ALERT! Last update was ${Math.round(timeSinceLastUpdate / 60000)} min ago`);
       console.error(`[MC-Watchdog] Expected interval: ${expectedInterval / 1000}s, Sleeping: ${isSleeping}, Polling handle: ${!!pollTimeoutHandle}`);
       
-      // Attempt auto-recovery
-      if (!isSleeping && pollTimeoutHandle) {
-        console.error("[MC-Watchdog] Polling handle exists but not executing. Attempting restart...");
+      // Attempt auto-recovery (also when the poll timer was lost)
+      if (!isSleeping) {
+        console.error("[MC-Watchdog] Attempting polling restart...");
         stopPolling();
         setTimeout(() => startPolling(), 1000);
+      } else if (isActiveTradingWindow()) {
+        console.error("[MC-Watchdog] Asleep during trading window — forcing wake");
+        wakeUp();
       }
     } else if (timeSinceLastUpdate > expectedInterval * 2) {
       console.warn(`[MC-Watchdog] Polling slower than expected. Last update: ${Math.round(timeSinceLastUpdate / 1000)}s ago (expected ${expectedInterval / 1000}s)`);
@@ -553,6 +557,8 @@ export function stopPolling(): void {
     clearTimeout(sleepTimeoutHandle);
     sleepTimeoutHandle = null;
   }
+  // Keep sleepWatch running while asleep (it is what auto-wakes at the open).
+  if (!isSleeping) clearSleepWatch();
   lastMarketHoursState = null;
   console.log("[MC-Snapshot] Polling stopped");
 }
@@ -582,6 +588,48 @@ export function setPollInterval(marketIntervalMs: number, offHoursIntervalMs?: n
 // =============================================================================
 // Sleep/Wake Mode - Saves API quota when no users are active
 // =============================================================================
+
+/** While sleeping, check every 60s whether the trading window opened. */
+const SLEEP_WATCH_MS = 60_000;
+let sleepWatchHandle: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Weekdays 4:00–20:00 ET — scanner pre_market through after_hours.
+ * Sleep must not cover this window or the open starts with zero signals
+ * until a human hits the site (touchActivity).
+ */
+function isActiveTradingWindow(): boolean {
+  const etTime = new Date(
+    new Date().toLocaleString("en-US", { timeZone: MARKET_HOURS.timezone })
+  );
+  const day = etTime.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = etTime.getHours() * 60 + etTime.getMinutes();
+  return mins >= 4 * 60 && mins < 20 * 60;
+}
+
+function clearSleepWatch(): void {
+  if (sleepWatchHandle) {
+    clearInterval(sleepWatchHandle);
+    sleepWatchHandle = null;
+  }
+}
+
+function startSleepWatch(): void {
+  clearSleepWatch();
+  sleepWatchHandle = setInterval(() => {
+    if (!isSleeping) {
+      clearSleepWatch();
+      return;
+    }
+    if (isActiveTradingWindow()) {
+      console.log(
+        "[MC-Snapshot] Sleep watch: trading window open — auto-waking (no user required)"
+      );
+      wakeUp();
+    }
+  }, SLEEP_WATCH_MS);
+}
 
 /**
  * Called on every data request to track activity
@@ -613,15 +661,17 @@ function resetSleepTimer(): void {
 }
 
 /**
- * Enter sleep mode - stop polling to save API quota
- * Only sleeps during off-hours; during market hours polling always continues.
+ * Enter sleep mode - stop polling to save API quota.
+ * Never sleeps during the weekday trading window (4:00–20:00 ET).
  */
 function enterSleepMode(): void {
   if (isSleeping) return;
 
-  if (isMarketHours()) {
-    // Never sleep during market hours - reschedule check for after close
-    console.log("[MC-Snapshot] Inactivity detected but market is OPEN - not sleeping, resetting timer");
+  if (isActiveTradingWindow()) {
+    // Keep polling through pre-market / RTH / after-hours even with no users
+    console.log(
+      "[MC-Snapshot] Inactivity detected but trading window is OPEN - not sleeping, resetting timer"
+    );
     resetSleepTimer();
     return;
   }
@@ -629,6 +679,7 @@ function enterSleepMode(): void {
   console.log("[MC-Snapshot] No activity for 15 min (off-hours) - entering SLEEP mode to save API quota");
   isSleeping = true;
   stopPolling();
+  startSleepWatch();
 }
 
 /**
@@ -637,8 +688,9 @@ function enterSleepMode(): void {
 function wakeUp(): void {
   if (!isSleeping) return;
   
-  console.log("[MC-Snapshot] Activity detected - WAKING UP, resuming polling");
+  console.log("[MC-Snapshot] WAKING UP, resuming polling");
   isSleeping = false;
+  clearSleepWatch();
   startPolling();
 }
 
@@ -690,7 +742,7 @@ export function getMaMetadata(): { maAsOf: string | null; maMode: MaMode } {
   };
 }
 
-export function getMaDataForScanner(): Map<string, { sma20d: number | null; sma50d: number | null; sma200d: number | null }> {
+export function getMaDataForScanner(): Map<string, { sma20d: number | null; sma50d: number | null; sma200d: number | null; adr20: number | null }> {
   return state.maData;
 }
 

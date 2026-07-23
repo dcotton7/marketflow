@@ -10,6 +10,10 @@ import type { Signal, NewsHeadline } from "@shared/scanner-types";
 import { scoreHeadlineSeverity } from "@shared/catalyst-types";
 import { getAllUniverseTickers } from "../market-condition/universe";
 import type { SnapshotFrame } from "./signal-producer";
+import {
+  filterHeadlinesForSymbol,
+  normalizeTickerList,
+} from "./news-relevance";
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
 const FMP_API_KEY = process.env.FMP_API_KEY ?? "";
@@ -114,7 +118,9 @@ async function fetchFinnhubNews(symbol: string): Promise<NewsHeadline[]> {
       headline: item.headline ?? "",
       url: item.url ?? "",
       publishedAt: item.datetime ? new Date(item.datetime * 1000).toISOString() : "",
-      relatedTickers: item.related ? String(item.related).split(",").map((s: string) => s.trim()) : [symbol],
+      relatedTickers: item.related
+        ? String(item.related).split(",").map((s: string) => s.trim())
+        : [],
     }));
   } catch {
     return [];
@@ -128,13 +134,20 @@ async function fetchFmpNews(symbol: string): Promise<NewsHeadline[]> {
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
     const data = (await res.json()) as any[];
-    return (data ?? []).slice(0, 5).map((item) => ({
-      source: "fmp" as const,
-      headline: item.title ?? item.headline ?? "",
-      url: item.url ?? item.link ?? "",
-      publishedAt: item.publishedDate ?? item.date ?? "",
-      relatedTickers: Array.isArray(item.tickers) ? item.tickers : [symbol],
-    }));
+    return (data ?? []).slice(0, 5).map((item) => {
+      const fromList = normalizeTickerList(item.tickers);
+      const single =
+        typeof item.symbol === "string" && item.symbol.trim()
+          ? [item.symbol.trim().toUpperCase()]
+          : [];
+      return {
+        source: "fmp" as const,
+        headline: item.title ?? item.headline ?? "",
+        url: item.url ?? item.link ?? "",
+        publishedAt: item.publishedDate ?? item.date ?? "",
+        relatedTickers: fromList.length > 0 ? fromList : single,
+      };
+    });
   } catch {
     return [];
   }
@@ -175,7 +188,8 @@ export async function detectNewsAlerts(frame?: SnapshotFrame): Promise<Signal[]>
 
   for (const r of results) {
     if (r.status !== "fulfilled") continue;
-    const { symbol, headlines } = r.value;
+    const { symbol, headlines: rawHeadlines } = r.value;
+    const headlines = filterHeadlinesForSymbol(symbol, rawHeadlines);
     if (headlines.length === 0) continue;
 
     // Check cooldown
@@ -186,7 +200,9 @@ export async function detectNewsAlerts(frame?: SnapshotFrame): Promise<Signal[]>
     // Score and filter
     let bestHeadline: NewsHeadline | null = null;
     let bestSeverity = 0;
-    const corroborated = headlines.some(h => h.source === "finnhub") && headlines.some(h => h.source === "fmp");
+    const corroborated =
+      headlines.some((h) => h.source === "finnhub") &&
+      headlines.some((h) => h.source === "fmp");
 
     for (const hl of headlines) {
       if (!hl.headline) continue;

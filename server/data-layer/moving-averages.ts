@@ -125,13 +125,14 @@ export async function getSMADataForThemes(): Promise<
 
 /**
  * Get full MA data for theme member calculations (pct vs MA).
- * Returns Map of symbol -> { ema10d, ema20d, sma20d, sma50d, sma200d }
+ * Returns Map of symbol -> { ema10d, ema20d, sma20d, sma50d, sma200d, adr20 }
+ * EOD ticker_ma rows have no ADR — adr20 is null (session-adjusted path computes it).
  */
 export async function getMADataForThemes(): Promise<
-  Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null }>
+  Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null; adr20: number | null }>
 > {
   const allMAs = await getAllMAs();
-  const result = new Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null }>();
+  const result = new Map<string, { ema10d: number | null; ema20d: number | null; sma20d: number | null; sma50d: number | null; sma200d: number | null; adr20: number | null }>();
 
   for (const [symbol, ma] of allMAs) {
     result.set(symbol, {
@@ -140,6 +141,7 @@ export async function getMADataForThemes(): Promise<
       sma20d: ma.sma20d,
       sma50d: ma.sma50d,
       sma200d: ma.sma200d,
+      adr20: null,
     });
   }
 

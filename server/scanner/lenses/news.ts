@@ -6,6 +6,10 @@
 
 import type { Signal, NewsResult, NewsHeadline } from "@shared/scanner-types";
 import type { Lens } from "./types";
+import {
+  filterHeadlinesForSymbol,
+  normalizeTickerList,
+} from "../news-relevance";
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
 const FMP_API_KEY = process.env.FMP_API_KEY ?? "";
@@ -28,17 +32,21 @@ async function fetchFinnhubNews(symbol: string): Promise<NewsHeadline[]> {
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
     const data = await res.json() as any[];
-    return (data ?? []).slice(0, 5).map((item) => ({
-      source: "finnhub" as const,
-      headline: item.headline ?? "",
-      url: item.url ?? "",
-      publishedAt: item.datetime
-        ? new Date(item.datetime * 1000).toISOString()
-        : "",
-      relatedTickers: item.related
+    return (data ?? []).slice(0, 5).map((item) => {
+      const related = item.related
         ? String(item.related).split(",").map((s: string) => s.trim())
-        : [symbol],
-    }));
+        : [];
+      return {
+        source: "finnhub" as const,
+        headline: item.headline ?? "",
+        url: item.url ?? "",
+        publishedAt: item.datetime
+          ? new Date(item.datetime * 1000).toISOString()
+          : "",
+        // Never invent the query symbol — empty means "untagged"
+        relatedTickers: related,
+      };
+    });
   } catch {
     return [];
   }
@@ -51,15 +59,22 @@ async function fetchFmpNews(symbol: string): Promise<NewsHeadline[]> {
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
     const data = await res.json() as any[];
-    return (data ?? []).slice(0, 5).map((item) => ({
-      source: "fmp" as const,
-      headline: item.title ?? item.headline ?? "",
-      url: item.url ?? item.link ?? "",
-      publishedAt: item.publishedDate ?? item.date ?? "",
-      relatedTickers: Array.isArray(item.tickers)
-        ? item.tickers
-        : [symbol],
-    }));
+    return (data ?? []).slice(0, 5).map((item) => {
+      const fromList = normalizeTickerList(item.tickers);
+      const single =
+        typeof item.symbol === "string" && item.symbol.trim()
+          ? [item.symbol.trim().toUpperCase()]
+          : [];
+      return {
+        source: "fmp" as const,
+        headline: item.title ?? item.headline ?? "",
+        url: item.url ?? item.link ?? "",
+        publishedAt: item.publishedDate ?? item.date ?? "",
+        // Do NOT fall back to the queried symbol — FMP often returns general
+        // wires with no tickers; stamping the query caused Samsung→CEG etc.
+        relatedTickers: fromList.length > 0 ? fromList : single,
+      };
+    });
   } catch {
     return [];
   }
@@ -84,11 +99,17 @@ export const newsLens: Lens = {
       fetchFmpNews(symbol),
     ]);
 
-    const headlines = [...finnhubNews, ...fmpNews];
-    const sourceCount = (finnhubNews.length > 0 ? 1 : 0) + (fmpNews.length > 0 ? 1 : 0);
+    const headlines = filterHeadlinesForSymbol(symbol, [
+      ...finnhubNews,
+      ...fmpNews,
+    ]);
+    const finnhubRelevant = headlines.filter((h) => h.source === "finnhub");
+    const fmpRelevant = headlines.filter((h) => h.source === "fmp");
+    const sourceCount =
+      (finnhubRelevant.length > 0 ? 1 : 0) + (fmpRelevant.length > 0 ? 1 : 0);
 
-    // Simple corroboration: both sources returned headlines for this ticker today
-    const corroborated = finnhubNews.length > 0 && fmpNews.length > 0;
+    // Corroboration only when both sources have *relevant* headlines
+    const corroborated = finnhubRelevant.length > 0 && fmpRelevant.length > 0;
 
     const result: NewsResult = { headlines, corroborated, sourceCount };
 

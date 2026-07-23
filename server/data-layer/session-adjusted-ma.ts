@@ -18,6 +18,8 @@ export type MaDataEntry = {
   sma20d: number | null;
   sma50d: number | null;
   sma200d: number | null;
+  /** 20-session average daily range (high−low), dollars. Used by scanner adr_blowout. */
+  adr20: number | null;
 };
 
 export type MaMode = "session_adjusted" | "eod_db";
@@ -253,6 +255,18 @@ async function loadDailyBarsForSymbols(
   return result;
 }
 
+/** Average (high−low) over the newest `period` sessions. Bars are newest-first. */
+function computeAdr20(barsNewestFirst: DailyBar[], period = 20): number | null {
+  if (barsNewestFirst.length < period) return null;
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    const b = barsNewestFirst[i]!;
+    sum += Math.max(0, b.high - b.low);
+  }
+  const adr = sum / period;
+  return adr > 0 ? adr : null;
+}
+
 /** Compute MA entries for symbols without replacing the shared cache. */
 async function computeMaEntriesForSymbols(
   symbols: string[],
@@ -270,7 +284,7 @@ async function computeMaEntriesForSymbols(
     const levels = computeTickerMasFromClosesNewestFirst(closes);
     if (!levels) continue;
 
-    result.set(symbol, levelsToEntry(levels));
+    result.set(symbol, levelsToEntry(levels, computeAdr20(bars, 20)));
   }
 
   return result;
@@ -448,13 +462,14 @@ export function maEntryToTickerMas(symbol: string, entry: MaDataEntry) {
   };
 }
 
-function levelsToEntry(levels: TickerMaLevels): MaDataEntry {
+function levelsToEntry(levels: TickerMaLevels, adr20: number | null = null): MaDataEntry {
   return {
     ema10d: levels.ema10d,
     ema20d: levels.ema20d,
     sma20d: levels.sma20d,
     sma50d: levels.sma50d,
     sma200d: levels.sma200d,
+    adr20,
   };
 }
 
