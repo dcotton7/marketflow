@@ -248,8 +248,21 @@ function qualifySignal(
 
     case "ma_reclaim_scan": {
       const priority = signal.magnitude; // 3=200d, 2=50d, 1=20d
+      const changePct = (signal.meta?.changePct as number) ?? 0;
+      // Dump-day "reclaim" (price wicks back over MA while session is deeply red)
+      // is not a U&R setup — kill it here even if the detector briefly fired.
+      if (changePct <= -2) return { qualified: false, score: 0 };
+
       raw += priority * 15;
-      return { qualified: true, score: capScore(raw) };
+      if (changePct >= 0.5) raw += 10;
+      const score = capScore(raw);
+      // Urgent only for 200d reclaim on a non-red day — not every 50d tick.
+      const urgent = priority >= 3 && changePct >= 0;
+      return {
+        qualified: true,
+        score,
+        priorityOverride: urgent ? "urgent" : undefined,
+      };
     }
 
     case "prev_day_break_scan": {

@@ -34,6 +34,7 @@ Structure rules (dossier.structureMeta when present):
 - Price below the 200-day SMA is a NEGATIVE for long setups unless U&R reclaim is clearly in play (scan fired O5).
 - When postureHint is short_watch or shortSetupIdeas are present, weave in possible short / avoid-long ideas (failed bounce, breakdown continuation, weak-theme laggard fade). Frame as watch-level thesis, not a blind short command.
 - When themeBreakdown shows breakdown_watch or avoid_long, tie stock weakness to theme breakdown when relevant.
+- When structureMeta.earningsRisk is present, you MUST factor upcoming earnings into recommendation AND invalidation. RED (≤2d) = binary event — do not call the setup high-confidence; size down / wait. YELLOW (≤7d) = explicit event risk — mention date/days and temper confidence. Never say there is "no earnings factor" when earningsRisk is set.
 
 Base rules (dossier.baseMeta when present):
 - When baseMeta.detected is true, the FIRST sentence of recommendation MUST explicitly mention the long base / consolidation (use the word "base").
@@ -201,6 +202,37 @@ function ensureBaseInRecommendation(
   return { ...withRec, lifecycleStage: lifecycle, patternLabel };
 }
 
+function ensureEarningsInRecommendation(
+  result: ChartSetupEnrichResult,
+  dossier: ChartSetupEnrichDossier
+): ChartSetupEnrichResult {
+  const er = dossier.structureMeta?.earningsRisk;
+  if (!er) return result;
+
+  const lower = result.recommendation.toLowerCase();
+  const mentionsEarnings = lower.includes("earn");
+  let recommendation = result.recommendation;
+  if (!mentionsEarnings) {
+    recommendation = `${recommendation.replace(/\s+$/, "")} ${er.label}.`;
+  }
+
+  let invalidation = result.invalidation;
+  if (!invalidation.toLowerCase().includes("earn")) {
+    invalidation =
+      er.severity === "red"
+        ? `${invalidation} Also respect earnings ${er.date} binary risk.`
+        : `${invalidation} Watch earnings ${er.date} (${er.daysUntil}d).`;
+  }
+
+  let patternConfidencePct = result.patternConfidencePct;
+  if (patternConfidencePct != null) {
+    const cap = er.severity === "red" ? 55 : 70;
+    patternConfidencePct = Math.min(patternConfidencePct, cap);
+  }
+
+  return { ...result, recommendation, invalidation, patternConfidencePct };
+}
+
 function attachDossierMeta(
   result: ChartSetupEnrichResult,
   dossier: ChartSetupEnrichDossier
@@ -213,6 +245,7 @@ function attachDossierMeta(
   };
   merged = ensureBaseInRecommendation(merged, dossier);
   merged = ensureUrInRecommendation(merged, dossier);
+  merged = ensureEarningsInRecommendation(merged, dossier);
   return merged;
 }
 
@@ -372,8 +405,13 @@ export function buildEnrichUserPrompt(
         : ""
     : "";
 
+  const er = dossier.structureMeta?.earningsRisk;
+  const earningsLead = er
+    ? `\nIMPORTANT: earningsRisk=${er.severity.toUpperCase()} — ${er.label}. You MUST mention this earnings risk in recommendation and reflect it in invalidation / confidence. Do not call this high-confidence while ignoring earnings.\n`
+    : "";
+
   return `Analyze ${dossier.symbol.toUpperCase()} for setup posture and pattern.
-${urLead}${baseLead}
+${urLead}${baseLead}${earningsLead}
 Return JSON:
 {
   "recommendation": "2-4 sentences — lifecycle first, then pattern quality, then actionable posture",

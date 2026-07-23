@@ -189,7 +189,9 @@ export const DEFAULT_PIPELINES: PipelineDefinition[] = [
     lensIds: ["theme_membership", "regime_context", "ma_structure", "news"],
     reactions: ["discovery_brief"],
     cooldownMs: 60 * 60_000,
-    priority: "urgent",
+    // Default normal — urgent only when qualify upgrades (e.g. 200d + green day).
+    // Hardcoding urgent made every 50d tick-reclaim on a dump day look like a fire drill.
+    priority: "normal",
     ownerId: "system",
     visibility: "global",
   },

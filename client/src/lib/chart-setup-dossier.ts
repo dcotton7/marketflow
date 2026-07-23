@@ -120,6 +120,14 @@ export function buildChartSetupDossier(input: {
 
     powerSetup: baseMeta.powerSetup ?? false,
 
+    nextEarningsDate: input.chartMetrics?.nextEarningsDate ?? null,
+
+    nextEarningsDays: input.chartMetrics?.nextEarningsDays ?? null,
+
+    earningsTime: input.chartMetrics?.earningsTime ?? null,
+
+    earningsApplicable: input.chartMetrics?.earningsApplicable ?? null,
+
   });
 
 
@@ -159,6 +167,14 @@ export function buildChartSetupDossier(input: {
           themeName: input.chartMetrics.themeName,
 
           sectorEtf: input.chartMetrics.sectorEtf,
+
+          nextEarningsDate: input.chartMetrics.nextEarningsDate,
+
+          nextEarningsDays: input.chartMetrics.nextEarningsDays,
+
+          earningsTime: input.chartMetrics.earningsTime ?? null,
+
+          earningsApplicable: input.chartMetrics.earningsApplicable ?? null,
 
         }
 

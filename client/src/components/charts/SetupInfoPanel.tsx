@@ -151,14 +151,39 @@ function EnrichStructureMetaBlock({ meta }: { meta: ChartSetupStructureMeta }) {
   const hasContent =
     meta.longSetupNegatives.length > 0 ||
     meta.shortSetupIdeas.length > 0 ||
+    meta.earningsRisk != null ||
     meta.postureHint !== "unclear";
   if (!hasContent) return null;
+
+  const earnings = meta.earningsRisk;
+  const earningsLineClass =
+    earnings?.severity === "red"
+      ? "text-red-300"
+      : earnings?.severity === "yellow"
+        ? "text-amber-300"
+        : "text-slate-300";
 
   return (
     <div className="rounded border border-slate-700/50 bg-slate-900/35 p-2 space-y-1.5">
       <span className="text-[0.72em] uppercase tracking-wide text-muted-foreground block">
         Structure meta
       </span>
+      {earnings && (
+        <div
+          className={cn(
+            "rounded border px-2 py-1.5 text-[0.875em] leading-snug font-medium",
+            earnings.severity === "red"
+              ? "border-red-500/50 bg-red-950/35 text-red-200"
+              : "border-amber-500/45 bg-amber-950/30 text-amber-100"
+          )}
+          data-testid="enrich-earnings-risk"
+        >
+          <span className="text-[0.72em] uppercase tracking-wide opacity-90 block mb-0.5">
+            {earnings.severity === "red" ? "Earnings — RED" : "Earnings — YELLOW"}
+          </span>
+          {earnings.label}
+        </div>
+      )}
       {meta.postureHint !== "unclear" && (
         <p className="text-[0.875em] text-slate-300 leading-snug">
           <EnrichHighlightedText text={CHART_SETUP_POSTURE_LABELS[meta.postureHint]} />
@@ -167,7 +192,12 @@ function EnrichStructureMetaBlock({ meta }: { meta: ChartSetupStructureMeta }) {
       {meta.longSetupNegatives.length > 0 && (
         <ul className="text-[0.875em] text-slate-300 space-y-0.5 list-disc pl-4">
           {meta.longSetupNegatives.map((line) => (
-            <li key={line}>
+            <li
+              key={line}
+              className={
+                earnings && line === earnings.label ? earningsLineClass : undefined
+              }
+            >
               <EnrichHighlightedText text={line} />
             </li>
           ))}

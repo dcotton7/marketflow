@@ -13,6 +13,18 @@ export type ChartSetupPostureHint =
   | "short_watch"
   | "unclear";
 
+/** Binary-event risk for swing longs — red ≤2 trading-calendar days, yellow ≤7. */
+export type EarningsRiskSeverity = "red" | "yellow";
+
+export interface ChartSetupEarningsRisk {
+  date: string;
+  daysUntil: number;
+  time: string | null;
+  severity: EarningsRiskSeverity;
+  /** One-line trader label for UI + LLM. */
+  label: string;
+}
+
 export interface MaSlopeReading {
   slopePct10d: number | null;
   direction: MaSlopeDirection;
@@ -42,7 +54,49 @@ export interface ChartSetupStructureMeta {
     score: number;
     reasons: string[];
   } | null;
+  /** Upcoming earnings binary risk — null when none in window / N/A. */
+  earningsRisk: ChartSetupEarningsRisk | null;
   postureHint: ChartSetupPostureHint;
+}
+
+/** Red ≤2d, yellow ≤7d. Past / missing / ETF → null. */
+export function resolveEarningsRisk(input: {
+  nextEarningsDate?: string | null;
+  nextEarningsDays?: number | null;
+  earningsTime?: string | null;
+  earningsApplicable?: boolean | null;
+}): ChartSetupEarningsRisk | null {
+  if (input.earningsApplicable === false) return null;
+  const date = (input.nextEarningsDate ?? "").trim();
+  if (!date || date === "N/A") return null;
+
+  let daysUntil =
+    typeof input.nextEarningsDays === "number" && Number.isFinite(input.nextEarningsDays)
+      ? Math.floor(input.nextEarningsDays)
+      : null;
+
+  if (daysUntil == null) {
+    const next = new Date(`${date}T00:00:00`);
+    if (Number.isNaN(next.getTime())) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    daysUntil = Math.round((next.getTime() - today.getTime()) / 86_400_000);
+  }
+
+  if (daysUntil < 0 || daysUntil > 7) return null;
+
+  const time =
+    input.earningsTime === "bmo" || input.earningsTime === "amc" ? input.earningsTime : null;
+  const timeTag = time === "bmo" ? " BMO" : time === "amc" ? " AMC" : "";
+  const when =
+    daysUntil === 0 ? "TODAY" : daysUntil === 1 ? "tomorrow" : `in ${daysUntil}d`;
+  const severity: EarningsRiskSeverity = daysUntil <= 2 ? "red" : "yellow";
+  const label =
+    severity === "red"
+      ? `Earnings ${when} (${date}${timeTag}) — RED binary risk; size down or wait`
+      : `Earnings ${when} (${date}${timeTag}) — YELLOW event risk within 7d`;
+
+  return { date, daysUntil, time, severity, label };
 }
 
 function round2(n: number): number {
@@ -120,6 +174,10 @@ export function computeChartSetupStructureMeta(input: {
   baseBelow200dBuilt?: boolean;
   reclaim200dOnLastBar?: boolean;
   powerSetup?: boolean;
+  nextEarningsDate?: string | null;
+  nextEarningsDays?: number | null;
+  earningsTime?: string | null;
+  earningsApplicable?: boolean | null;
 }): ChartSetupStructureMeta {
   const closes = input.dailyCloses ?? [];
 
@@ -260,6 +318,17 @@ export function computeChartSetupStructureMeta(input: {
     shortSetupIdeas.push("Structure leans defensive — consider short-watch / avoid-long rather than fresh swing-long entries");
   }
 
+  const earningsRisk = resolveEarningsRisk({
+    nextEarningsDate: input.nextEarningsDate,
+    nextEarningsDays: input.nextEarningsDays,
+    earningsTime: input.earningsTime,
+    earningsApplicable: input.earningsApplicable,
+  });
+  if (earningsRisk) {
+    addNegative(earningsRisk.label);
+    shortSetupScore += earningsRisk.severity === "red" ? 18 : 10;
+  }
+
   shortSetupScore = Math.min(100, shortSetupScore);
 
   let postureHint: ChartSetupPostureHint = "unclear";
@@ -278,6 +347,18 @@ export function computeChartSetupStructureMeta(input: {
     postureHint = "long_friendly";
   }
 
+  // Earnings inside 7d blocks a clean "long_friendly" stamp — setup can still be
+  // constructive, but binary risk must downgrade posture to caution (or worse).
+  if (earningsRisk) {
+    if (earningsRisk.severity === "red") {
+      if (postureHint === "long_friendly" || postureHint === "unclear") {
+        postureHint = "caution";
+      }
+    } else if (postureHint === "long_friendly") {
+      postureHint = "caution";
+    }
+  }
+
   return {
     maSlopes: {
       sma20: { slopePct10d: slope20Pct, direction: sma20Dir },
@@ -291,10 +372,11 @@ export function computeChartSetupStructureMeta(input: {
       below50d,
       below200d,
     },
-    longSetupNegatives: longSetupNegatives.slice(0, 6),
+    longSetupNegatives: longSetupNegatives.slice(0, 8),
     shortSetupIdeas: shortSetupIdeas.slice(0, 4),
     shortSetupScore,
     themeBreakdown,
+    earningsRisk,
     postureHint,
   };
 }

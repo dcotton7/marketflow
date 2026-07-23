@@ -814,6 +814,9 @@ function detectMaReclaim(current: SnapshotFrame): Signal[] {
     }
     maPositionHistory.set(symbol, history);
 
+    // A −6% gap-down day that ticks 0.1% back over the 50d is not a U&R.
+    if (tick.changePct <= -2) continue;
+
     const checks: Array<{ ma: number | null; label: string; lastBelow: number; priority: number; maxExtPct: number }> = [
       { ma: tick.sma200d, label: "200d", lastBelow: history.below200, priority: 3, maxExtPct: cfg.maReclaim200dMaxExtPct },
       { ma: tick.sma50d, label: "50d", lastBelow: history.below50, priority: 2, maxExtPct: cfg.maReclaim50dMaxExtPct },
@@ -835,7 +838,13 @@ function detectMaReclaim(current: SnapshotFrame): Signal[] {
         makeSignal("ur_ma_reclaim", "ticker", symbol,
           check.priority,
           "up",
-          { maLevel: check.label, maValue: check.ma, price: tick.price, extAboveMaPct: Math.round(extAboveMa * 100) / 100 })
+          {
+            maLevel: check.label,
+            maValue: check.ma,
+            price: tick.price,
+            extAboveMaPct: Math.round(extAboveMa * 100) / 100,
+            changePct: Math.round(tick.changePct * 100) / 100,
+          })
       );
       break;
     }

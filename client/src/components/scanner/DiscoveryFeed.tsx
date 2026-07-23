@@ -139,8 +139,9 @@ function matchesThemeStrength(card: DiscoveryCardType, filter: ThemeStrengthFilt
   // Market-wide / theme-subject cards aren't ticker-membership rows.
   if (card.subjectKind === "market" || card.subjectKind === "theme") return true;
   const pct = cardThemePercentile(card);
-  // Unknown percentile ≠ weak — don't hide (same idea as unknown ADV$).
-  if (pct == null) return true;
+  // Top/Bot strength filters require a real Flow percentile. Unknown used to
+  // pass Top 25% — so META (no cluster membership → null pct) leaked through.
+  if (pct == null) return false;
   if (filter === "top25") return pct >= 75;
   if (filter === "top50") return pct >= 50;
   if (filter === "bottom50") return pct < 50;

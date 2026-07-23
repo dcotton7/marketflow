@@ -301,7 +301,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Semiconductors",
     tier: "Structural",
     leadersTarget: 5,
-    core: ["NVDA", "AMD", "AVGO", "ARM", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MU", "MRVL", "NXPI", "ON", "ADI", "TXN", "QCOM", "INTC", "MCHP", "MPWR", "SWKS", "QRVO", "TER", "STM"],
+    core: ["NVDA", "AMD", "AVGO", "ARM", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MU", "SNDK", "MRVL", "NXPI", "ON", "ADI", "TXN", "QCOM", "INTC", "MCHP", "MPWR", "SWKS", "QRVO", "TER", "STM"],
     candidates: ["CRUS", "WOLF", "ALGM", "AMKR", "COHU"],
     etfProxies: [
       { symbol: "SMH", name: "VanEck Semiconductor ETF", proxyType: "direct" },
@@ -508,7 +508,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Consumer Discretionary",
     tier: "Macro",
     leadersTarget: 5,
-    core: ["AMZN", "HD", "LOW", "NKE", "TJX", "LULU", "ROST", "DG", "DLTR"],
+    core: ["AAPL", "AMZN", "HD", "LOW", "NKE", "TJX", "LULU", "ROST", "DG", "DLTR"],
     candidates: ["BBY", "POOL", "WSM", "TPR", "DECK", "BIRK", "ONON"],
     etfProxies: [
       { symbol: "XLY", name: "Consumer Discretionary SPDR", proxyType: "direct" },
@@ -876,7 +876,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Narrative",
     leadersTarget: 4,
     core: [
-      "NFLX", "DIS", "WBD", "PARA", "CMCSA", "ROKU", "SPOT",
+      "META", "GOOGL", "NFLX", "DIS", "WBD", "PARA", "CMCSA", "ROKU", "SPOT",
       "RBLX", "EA", "TTWO",
     ],
     candidates: ["IMAX", "AMC", "CNK", "LSXMA", "FOX", "SIRI"],
