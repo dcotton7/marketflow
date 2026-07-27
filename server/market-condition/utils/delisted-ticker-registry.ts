@@ -42,7 +42,8 @@ async function persistDelistedSymbols(): Promise<void> {
 
 async function loadDelistedFile(): Promise<string[]> {
   try {
-    const raw = await fs.readFile(DELISTED_FILE, "utf8");
+    // Strip UTF-8 BOM if present (PowerShell Set-Content often writes one).
+    const raw = (await fs.readFile(DELISTED_FILE, "utf8")).replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       return parsed.map((s) => normalize(String(s))).filter(Boolean);
