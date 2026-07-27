@@ -1993,6 +1993,56 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: hint });
       }
 
+      // Normalize Results wiring before scan. Canvas auto-connect historically could create
+      // Results → Thought edges (backwards). Scan requires edges that *target* Results.
+      const resultsNodeForNorm = nodes.find((n: any) => n.type === "results");
+      if (resultsNodeForNorm) {
+        const resultsId = String(resultsNodeForNorm.id);
+        const resultsAliases = new Set(["RESULTS", "results", "results-node", resultsId]);
+        let reversed = 0;
+        let retargeted = 0;
+        for (const e of edges) {
+          const src = String(e.source ?? "");
+          const tgt = String(e.target ?? "");
+          if (resultsAliases.has(src) && !resultsAliases.has(tgt)) {
+            e.source = tgt;
+            e.target = resultsId;
+            reversed++;
+          } else if (resultsAliases.has(tgt) && tgt !== resultsId) {
+            e.target = resultsId;
+            retargeted++;
+          } else if (resultsAliases.has(src) && src !== resultsId) {
+            e.source = resultsId;
+          }
+        }
+        const hasEdgeToResults = edges.some((e: any) => String(e.target) === resultsId);
+        if (!hasEdgeToResults) {
+          const thoughtIds = new Set(
+            nodes.filter((n: any) => n.type === "thought").map((n: any) => String(n.id))
+          );
+          const sourcesWithOutgoing = new Set(edges.map((e: any) => String(e.source)));
+          const leaves = Array.from(thoughtIds).filter((id) => !sourcesWithOutgoing.has(id));
+          const toConnect = leaves.length > 0 ? leaves : Array.from(thoughtIds);
+          for (const thoughtId of toConnect) {
+            edges.push({
+              id: `auto-results-${thoughtId}`,
+              source: thoughtId,
+              target: resultsId,
+              logicType: "AND",
+            });
+          }
+          if (toConnect.length > 0) {
+            console.warn(
+              `[BigIdea Scan] Auto-wired ${toConnect.length} thought(s) → Results (no valid incoming Results edges; reversed=${reversed})`
+            );
+          }
+        } else if (reversed > 0 || retargeted > 0) {
+          console.warn(
+            `[BigIdea Scan] Normalized Results edges (reversed=${reversed}, retargeted=${retargeted})`
+          );
+        }
+      }
+
       const thoughtNodes = nodes.filter((n: any) => n.type === "thought" && (n.thoughtCriteria || n.isMuted));
 
       const linkOverrides: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }> = [];

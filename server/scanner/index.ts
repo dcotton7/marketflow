@@ -229,7 +229,8 @@ async function onSnapshotRefreshed(
           onLodBounceGaveUp(gaveUpSymbols);
           for (const sym of gaveUpSymbols) clearPipelineCooldown("lod_bounce_scan", sym);
         }
-        if (scannerMode === "on") broadcastClear(clears);
+        // Broadcast clears whenever the feed is live (on + silent). Off = no clients expected.
+        if (scannerMode !== "off") broadcastClear(clears);
         console.log(
           `[Scanner] Cleared ${clearIds.length} LOD bounce card(s): ` +
             clears.map((c) => `${c.subject}(${c.reason})`).join(", ")
@@ -298,8 +299,8 @@ async function onSnapshotRefreshed(
     pushDiscoveries(cards);
     trackLodBounceDiscoveries(cards, current);
 
-    // Broadcast to SSE clients (skip if mode is "silent" — they get history on open)
-    if (scannerMode === "on") {
+    // Broadcast whenever feed is live. Silent still gets cards (no chime); off skips push.
+    if (scannerMode !== "off") {
       broadcastBatch(cards);
     }
 
@@ -415,7 +416,7 @@ export async function initScanner(): Promise<void> {
         if (cards.length === 0) return;
 
         pushDiscoveries(cards);
-        if (scannerMode === "on") broadcastBatch(cards);
+        if (scannerMode !== "off") broadcastBatch(cards);
         console.log(`[Scanner/IPO] ${signals.length} IPO signals → ${cards.length} discoveries`);
       } catch (err) {
         console.error("[Scanner/IPO] Processing error:", err);

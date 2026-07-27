@@ -1844,10 +1844,15 @@ export default function BigIdeaPage() {
 
       if (currentNodes.length > 0) {
         const targetNodeIds = new Set(currentEdges.map((e) => e.target));
+        const resultsNode = currentNodes.find((n) => n.type === "results");
+        const resultsNeedsInput = !!resultsNode && !targetNodeIds.has(resultsNode.id);
         const unconnectedAsTarget = currentNodes.filter((n) => !targetNodeIds.has(n.id));
 
         let connectTarget: Node | null = null;
-        if (unconnectedAsTarget.length > 0) {
+        // Prefer wiring into Results when it has no incoming edges yet.
+        if (resultsNeedsInput && resultsNode) {
+          connectTarget = resultsNode;
+        } else if (unconnectedAsTarget.length > 0) {
           let bestDist = Infinity;
           for (const n of unconnectedAsTarget) {
             const dx = position.x - n.position.x;
@@ -1863,11 +1868,15 @@ export default function BigIdeaPage() {
         }
 
         if (connectTarget) {
-          const edgeId = `e-${connectTarget.id}-${newNodeId}`;
+          // Results is sink-only: new thought must feed INTO Results, never out of it.
+          const isResults = connectTarget.type === "results";
+          const sourceId = isResults ? newNodeId : connectTarget.id;
+          const targetId = isResults ? connectTarget.id : newNodeId;
+          const edgeId = `e-${sourceId}-${targetId}`;
           const autoEdge: Edge = {
             id: edgeId,
-            source: connectTarget.id,
-            target: newNodeId,
+            source: sourceId,
+            target: targetId,
             type: "logic",
             data: {
               logicType: "AND",
@@ -1956,10 +1965,15 @@ export default function BigIdeaPage() {
 
       if (currentNodes.length > 0) {
         const targetNodeIds = new Set(currentEdges.map((edge: Edge) => edge.target));
+        const resultsNode = currentNodes.find((n) => n.type === "results");
+        const resultsNeedsInput = !!resultsNode && !targetNodeIds.has(resultsNode.id);
         const unconnectedAsTarget = currentNodes.filter((node: Node) => !targetNodeIds.has(node.id));
 
         let connectTarget: Node | null = null;
-        if (unconnectedAsTarget.length > 0) {
+        // Prefer wiring into Results when it has no incoming edges yet.
+        if (resultsNeedsInput && resultsNode) {
+          connectTarget = resultsNode;
+        } else if (unconnectedAsTarget.length > 0) {
           let bestDist = Infinity;
           for (const n of unconnectedAsTarget) {
             const dx = position.x - n.position.x;
@@ -1973,11 +1987,15 @@ export default function BigIdeaPage() {
         }
 
         if (connectTarget) {
-          const edgeId = `e-${connectTarget.id}-${newNodeId}`;
+          // Results is sink-only: new thought must feed INTO Results, never out of it.
+          const isResults = connectTarget.type === "results";
+          const sourceId = isResults ? newNodeId : connectTarget.id;
+          const targetId = isResults ? connectTarget.id : newNodeId;
+          const edgeId = `e-${sourceId}-${targetId}`;
           const autoEdge: Edge = {
             id: edgeId,
-            source: connectTarget.id,
-            target: newNodeId,
+            source: sourceId,
+            target: targetId,
             type: "logic",
             data: {
               logicType: "AND",

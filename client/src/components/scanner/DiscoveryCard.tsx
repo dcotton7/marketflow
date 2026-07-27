@@ -83,7 +83,12 @@ function timeAgo(iso: string): string {
   const d = new Date(iso);
   const diff = Date.now() - d.getTime();
   const mins = Math.floor(diff / 60000);
-  const clock = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  const clock = d.toLocaleTimeString("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
   if (mins < 1) return `just now · ${clock}`;
   if (mins < 60) return `${mins}m ago · ${clock}`;
   const hrs = Math.floor(mins / 60);

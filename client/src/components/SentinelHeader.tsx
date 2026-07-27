@@ -38,7 +38,11 @@ function MarketTimeDisplay() {
         const data = await res.json();
         // dateTime is UTC e.g. "2026-03-17T16:37:00" — append Z to parse as UTC
         const utcDate = new Date(`${data.dateTime}Z`);
-        setOffsetMs(utcDate.getTime() - Date.now()); // correct local clock drift
+        if (Number.isNaN(utcDate.getTime())) return;
+        const nextOffset = utcDate.getTime() - Date.now();
+        // Reject absurd skew (bad/cached timeapi responses freeze the header clock).
+        if (Math.abs(nextOffset) > 2 * 60_000) return;
+        setOffsetMs(nextOffset);
       } catch {
         // If API fails keep existing offset (or 0 = local clock)
       }

@@ -76,6 +76,36 @@ export function useScannerContextSafe() {
 }
 
 const MAX_FEED_SIZE = 200;
+const SSE_RECONNECT_MS = 2_000;
+const HISTORY_POLL_MS = 15_000;
+
+function cardDedupeKey(card: DiscoveryCard): string {
+  // SSE cards use in-memory ids; history uses DB ids — dedupe across sources.
+  return `${card.signalType}|${card.subject}|${card.createdAt}|${card.headline}`;
+}
+
+function mergeDiscoveries(prev: DiscoveryCard[], incoming: DiscoveryCard[]): {
+  next: DiscoveryCard[];
+  added: number;
+} {
+  if (incoming.length === 0) return { next: prev, added: 0 };
+  const seen = new Set(prev.map(cardDedupeKey));
+  const fresh: DiscoveryCard[] = [];
+  for (const card of incoming) {
+    const key = cardDedupeKey(card);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fresh.push(card);
+  }
+  if (fresh.length === 0) return { next: prev, added: 0 };
+  const next = [...fresh, ...prev].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  return {
+    next: next.length > MAX_FEED_SIZE ? next.slice(0, MAX_FEED_SIZE) : next,
+    added: fresh.length,
+  };
+}
 
 export function ScannerProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ScannerMode>(() => {
@@ -97,6 +127,8 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
   panelOpenRef.current = panelOpen;
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const streamStatusRef = useRef(streamStatus);
+  streamStatusRef.current = streamStatus;
 
   // ── Mode setter (persists + sends to server) ────────────────────────────
 
@@ -122,7 +154,7 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
 
   const clearUnread = useCallback(() => setUnreadCount(0), []);
 
-  // ── SSE connection (push stream — independent of Active/Silent/Off mode label) ──
+  // ── SSE connection with hard reconnect (Render can CLOSE the stream) ──
 
   useEffect(() => {
     if (mode === "off") {
@@ -132,75 +164,118 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const es = new EventSource("/api/scanner/stream");
-    eventSourceRef.current = es;
+    let cancelled = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    es.onopen = () => setStreamStatus("live");
+    const connect = () => {
+      if (cancelled) return;
+      eventSourceRef.current?.close();
 
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        // Any traffic (hello / ping / card) means the stream is up
-        setStreamStatus("live");
-        if (data.type === "connected" || data.type === "ping") return;
+      const es = new EventSource("/api/scanner/stream");
+      eventSourceRef.current = es;
+      setStreamStatus("reconnecting");
 
-        // Setup invalidated (e.g. LOD bounce gave up or extended too far)
-        if (data.type === "discovery_clear") {
-          const cardIds = new Set<number>(
-            Array.isArray(data.cardIds) ? data.cardIds : []
-          );
-          const subject = typeof data.subject === "string" ? data.subject : null;
-          const signalType = typeof data.signalType === "string" ? data.signalType : null;
-          setDiscoveries((prev) =>
-            prev.filter((c) => {
-              if (cardIds.has(c.id)) return false;
-              if (subject && signalType && c.subject === subject && c.signalType === signalType) {
-                return false;
-              }
-              return true;
-            })
-          );
-          return;
+      es.onopen = () => {
+        if (!cancelled) setStreamStatus("live");
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // Any traffic (hello / ping / card) means the stream is up
+          setStreamStatus("live");
+          if (data.type === "connected" || data.type === "ping") return;
+
+          // Setup invalidated (e.g. LOD bounce gave up or extended too far)
+          if (data.type === "discovery_clear") {
+            const cardIds = new Set<number>(
+              Array.isArray(data.cardIds) ? data.cardIds : []
+            );
+            const subject = typeof data.subject === "string" ? data.subject : null;
+            const signalType = typeof data.signalType === "string" ? data.signalType : null;
+            setDiscoveries((prev) =>
+              prev.filter((c) => {
+                if (cardIds.has(c.id)) return false;
+                if (subject && signalType && c.subject === subject && c.signalType === signalType) {
+                  return false;
+                }
+                return true;
+              })
+            );
+            return;
+          }
+
+          const card = data as DiscoveryCard;
+          if (!card?.signalType || !card?.subject || !card?.createdAt) return;
+
+          setDiscoveries((prev) => {
+            const { next, added } = mergeDiscoveries(prev, [card]);
+            if (added > 0 && !panelOpenRef.current) {
+              setUnreadCount((c) => c + added);
+            }
+            return next;
+          });
+        } catch { /* ignore parse errors */ }
+      };
+
+      es.onerror = () => {
+        if (cancelled) return;
+        // Browser auto-reconnects while CONNECTING; once CLOSED we must open a new ES.
+        if (es.readyState === EventSource.CLOSED) {
+          setStreamStatus("offline");
+          eventSourceRef.current = null;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, SSE_RECONNECT_MS);
+        } else {
+          setStreamStatus("reconnecting");
         }
-
-        const card = data as DiscoveryCard;
-        setDiscoveries((prev) => {
-          const next = [card, ...prev];
-          return next.length > MAX_FEED_SIZE ? next.slice(0, MAX_FEED_SIZE) : next;
-        });
-
-        if (!panelOpenRef.current) {
-          setUnreadCount((c) => c + 1);
-        }
-      } catch { /* ignore parse errors */ }
+      };
     };
 
-    es.onerror = () => {
-      // Browser auto-reconnects while CONNECTING — don't show hard-offline red for that.
-      if (es.readyState === EventSource.CLOSED) setStreamStatus("offline");
-      else setStreamStatus("reconnecting");
-    };
+    connect();
 
     return () => {
-      es.close();
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      eventSourceRef.current?.close();
       eventSourceRef.current = null;
       setStreamStatus("offline");
     };
   }, [mode]);
 
-  // ── Load history on mount ───────────────────────────────────────────────
+  // ── History seed + poll fallback (keeps feed alive if SSE stalls) ───────
 
   useEffect(() => {
     if (mode === "off") return;
 
-    fetch("/api/scanner/history?limit=100")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.discoveries?.length) {
-          setDiscoveries(data.discoveries);
-        }
-      })
-      .catch(() => {});
+    let cancelled = false;
+
+    const pullHistory = (bumpUnread: boolean) => {
+      fetch("/api/scanner/history?limit=100")
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled || !data.discoveries?.length) return;
+          setDiscoveries((prev) => {
+            const { next, added } = mergeDiscoveries(prev, data.discoveries);
+            if (bumpUnread && added > 0 && !panelOpenRef.current) {
+              setUnreadCount((c) => c + added);
+            }
+            return next;
+          });
+        })
+        .catch(() => {});
+    };
+
+    pullHistory(false);
+    const handle = setInterval(() => {
+      // Always poll — cheap safety net when Render drops SSE without a clean CLOSE.
+      pullHistory(streamStatusRef.current !== "live");
+    }, HISTORY_POLL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
   }, [mode]);
 
   // ── Periodic status fetch ─────────────────────────────────────────────
@@ -211,12 +286,12 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
     const fetchStatus = () => {
       fetch("/api/scanner/status")
         .then((r) => r.json())
-        .then((s) => setStatus(s))
+        .then((s: ScannerStatus) => setStatus(s))
         .catch(() => {});
     };
 
     fetchStatus();
-    const handle = setInterval(fetchStatus, 30_000);
+    const handle = setInterval(fetchStatus, 15_000);
     return () => clearInterval(handle);
   }, [mode]);
 
