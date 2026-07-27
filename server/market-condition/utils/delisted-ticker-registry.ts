@@ -82,7 +82,8 @@ export function applyDelistedSymbolsToClusters(symbols: string[]): ClusterId[] {
 }
 
 /**
- * Load persisted delisted symbols and strip them from in-memory CLUSTERS.
+ * Load persisted delisted symbols and strip them from in-memory CLUSTERS + DB
+ * theme membership so Theme Members cannot keep ranking dead tickers (e.g. IIVI/INFN).
  * Call before theme cache init on server startup.
  */
 export async function initializeDelistedTickerRegistry(): Promise<void> {
@@ -90,6 +91,25 @@ export async function initializeDelistedTickerRegistry(): Promise<void> {
   const fromFile = await loadDelistedFile();
   for (const sym of fromFile) delistedSet.add(sym);
   const touched = applyDelistedSymbolsToClusters(fromFile);
+
+  // Purge stale DB rows before theme cache init — otherwise ghosts (IIVI/INFN/USM)
+  // stay as core/candidate with live quotes aliased to the new ticker but no bars → blank MAs.
+  if (db && fromFile.length > 0) {
+    let purged = 0;
+    for (const sym of fromFile) {
+      try {
+        await db.delete(tickerSliceMemberships).where(eq(tickerSliceMemberships.symbol, sym));
+        await db.delete(tickerTable).where(eq(tickerTable.symbol, sym));
+        purged++;
+      } catch (err) {
+        console.warn(`[DelistedRegistry] DB purge failed for ${sym}:`, err);
+      }
+    }
+    if (purged > 0) {
+      console.log(`[DelistedRegistry] DB membership purge attempted for ${purged} delisted symbol(s)`);
+    }
+  }
+
   registryLoaded = true;
   console.log(
     `[DelistedRegistry] Loaded ${delistedSet.size} delisted symbol(s)${

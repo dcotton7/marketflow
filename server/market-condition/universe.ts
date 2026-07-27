@@ -387,13 +387,15 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 4,
     core: ["LITE", "CIEN", "FN", "GLW", "CALX", "VIAV", "AAOI", "COHR"],
-    candidates: ["COMM", "CCOI", "LUMN", "USM", "SATS"],
+    // AD = Array Digital (ex-USM). ECHO = EchoStar (ex-SATS).
+    // Dead: IIVI→COHR, INFN, COMM, USM, SATS — do not re-add.
+    candidates: ["CCOI", "LUMN", "AD", "ECHO"],
     etfProxies: [
       { symbol: "XLC", name: "Communication Services SPDR", proxyType: "macro" },
       { symbol: "TECS", name: "Direxion Daily Technology Bear 3X", proxyType: "inverse" },
       { symbol: "TECL", name: "Direxion Daily Technology Bull 3X", proxyType: "leveraged" },
     ],
-    notes: "Early-cycle signal cluster. GLW primary here. COHR replaces merged IIVI / acquired INFN.",
+    notes: "Early-cycle signal cluster. GLW primary here. COHR replaces IIVI/INFN. AD replaces USM. ECHO replaces SATS.",
   },
   {
     id: "DATA_CENTER_REITS",
