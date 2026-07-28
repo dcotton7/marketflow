@@ -26,6 +26,10 @@ import { startPolling, stopPolling, getPollingStatus } from "./engine/snapshot";
 import { db } from "../db";
 import { tnnSettings } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import {
+  startDeadTickerScanScheduler,
+  stopDeadTickerScanScheduler,
+} from "./utils/dead-ticker-scan";
 
 // =============================================================================
 // Module Initialization
@@ -72,6 +76,8 @@ export async function initMarketCondition(): Promise<void> {
     } else {
       console.log("[MarketCondition] Auto-start disabled, polling not started");
     }
+
+    startDeadTickerScanScheduler();
     
     isInitialized = true;
     console.log("[MarketCondition] Initialization complete");
@@ -91,6 +97,7 @@ export function shutdownMarketCondition(): void {
   
   console.log("[MarketCondition] Shutting down...");
   stopPolling();
+  stopDeadTickerScanScheduler();
   isInitialized = false;
 }
 

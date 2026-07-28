@@ -66,6 +66,19 @@ type ServerStatusPayload = {
     activePipelines: number;
     universeSize: number;
   } | null;
+  deadTickers?: {
+    schedule: string;
+    lastRunAt: string | null;
+    lastDurationMs: number | null;
+    lastUniverseSize: number;
+    lastCutoffDate: string | null;
+    lastMissingFriday: string[];
+    lastRemoved: string[];
+    lastError: string | null;
+    inProgress: boolean;
+    nextRunHint: string;
+    delistedCount: number;
+  } | null;
 };
 
 function formatEtTime(iso: string | null | undefined): string {
@@ -139,6 +152,7 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<ServerStatusPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [scanStarting, setScanStarting] = useState(false);
   const [pos, setPos] = useState(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -187,6 +201,24 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
       window.clearInterval(tickId);
     };
   }, []);
+
+  const runDeadTickerScan = useCallback(async () => {
+    if (scanStarting || status?.deadTickers?.inProgress) return;
+    setScanStarting(true);
+    try {
+      const res = await fetch("/api/market-condition/dead-ticker-scan", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok && res.status !== 409) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Scan failed to start");
+    } finally {
+      setScanStarting(false);
+    }
+  }, [scanStarting, status?.deadTickers?.inProgress]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
@@ -407,6 +439,68 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
                 <Row label="Mode">{status.scanner.mode}</Row>
                 <Row label="Last signal">{formatAge(status.scanner.lastSignalAt)}</Row>
                 <Row label="Pipelines">{status.scanner.activePipelines}</Row>
+              </section>
+            )}
+
+            {status.deadTickers && (
+              <section className="space-y-1 border-t border-slate-800 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-slate-500">
+                    <Dot
+                      tone={
+                        status.deadTickers.lastError
+                          ? "bad"
+                          : status.deadTickers.inProgress
+                            ? "warn"
+                            : status.deadTickers.lastMissingFriday.length > 0
+                              ? "warn"
+                              : status.deadTickers.lastRunAt
+                                ? "ok"
+                                : "idle"
+                      }
+                    />
+                    Dead tickers
+                  </div>
+                  <button
+                    type="button"
+                    data-no-drag
+                    disabled={scanStarting || status.deadTickers.inProgress}
+                    onClick={() => void runDeadTickerScan()}
+                    className="h-5 rounded border border-slate-600/70 px-1.5 text-[10px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                  >
+                    {status.deadTickers.inProgress || scanStarting ? "Running…" : "Run now"}
+                  </button>
+                </div>
+                <Row label="Schedule">{status.deadTickers.schedule}</Row>
+                <Row label="Next">{status.deadTickers.nextRunHint}</Row>
+                <Row label="Last run">
+                  {status.deadTickers.inProgress
+                    ? "scanning…"
+                    : `${formatAge(status.deadTickers.lastRunAt)}${
+                        status.deadTickers.lastDurationMs != null
+                          ? ` · ${Math.round(status.deadTickers.lastDurationMs / 1000)}s`
+                          : ""
+                      }`}
+                </Row>
+                <Row label="Cutoff">{status.deadTickers.lastCutoffDate ?? "—"}</Row>
+                <Row label="Missing">
+                  {status.deadTickers.lastMissingFriday.length === 0
+                    ? "0"
+                    : `${status.deadTickers.lastMissingFriday.length}: ${status.deadTickers.lastMissingFriday.slice(0, 6).join(", ")}${
+                        status.deadTickers.lastMissingFriday.length > 6 ? "…" : ""
+                      }`}
+                </Row>
+                <Row label="Removed">
+                  {status.deadTickers.lastRemoved.length === 0
+                    ? "0"
+                    : `${status.deadTickers.lastRemoved.length}: ${status.deadTickers.lastRemoved.slice(0, 6).join(", ")}${
+                        status.deadTickers.lastRemoved.length > 6 ? "…" : ""
+                      }`}
+                </Row>
+                <Row label="Registry">{status.deadTickers.delistedCount}</Row>
+                {status.deadTickers.lastError ? (
+                  <p className="text-[10px] text-red-400 leading-snug">{status.deadTickers.lastError}</p>
+                ) : null}
               </section>
             )}
           </>

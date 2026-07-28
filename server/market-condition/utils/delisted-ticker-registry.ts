@@ -127,7 +127,8 @@ export function isSymbolTrackedInUniverse(symbol: string): boolean {
   return false;
 }
 
-/** No bars in the last ~30 calendar days but older history exists → delisted. */
+/** No bars in the last ~30 calendar days but older history exists → delisted.
+ *  Also: zero Alpaca bars ever while still in our universe → renamed/dead (ZI→GTM). */
 export async function isTickerDelistedOnMarket(symbol: string): Promise<boolean> {
   const sym = normalize(symbol);
   const { fetchAlpacaDailyBars } = await import("../../alpaca");
@@ -142,7 +143,10 @@ export async function isTickerDelistedOnMarket(symbol: string): Promise<boolean>
   const longStart = new Date();
   longStart.setFullYear(longStart.getFullYear() - 3);
   const historical = await fetchAlpacaDailyBars(sym, longStart, end);
-  if (historical.length === 0) return false;
+  if (historical.length === 0) {
+    // In universe but Alpaca has no history at all (ticker rename / dead symbol)
+    return isSymbolTrackedInUniverse(sym);
+  }
 
   const lastBarMs = new Date(historical[historical.length - 1]!.date).getTime();
   const daysSinceLast = (end.getTime() - lastBarMs) / 86_400_000;

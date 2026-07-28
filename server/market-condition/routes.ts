@@ -627,14 +627,48 @@ router.get("/server-status", async (_req: Request, res: Response) => {
       scanner = null;
     }
 
+    let deadTickers = null;
+    try {
+      const { getDeadTickerScanStatus } = await import("./utils/dead-ticker-scan");
+      deadTickers = getDeadTickerScanStatus();
+    } catch {
+      deadTickers = null;
+    }
+
     res.json({
       ...base,
       dailyBars,
       scanner,
+      deadTickers,
     });
   } catch (error) {
     console.error("[MC-API] Failed to get server-status:", error);
     res.status(500).json({ error: "Failed to get server status" });
+  }
+});
+
+/**
+ * POST /api/market-condition/dead-ticker-scan
+ * Run the weekly dead-ticker job now (Fri-bar check via multi-symbol daily bars).
+ */
+router.post("/dead-ticker-scan", async (_req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const { runDeadTickerScan, getDeadTickerScanStatus } = await import("./utils/dead-ticker-scan");
+    const status = getDeadTickerScanStatus();
+    if (status.inProgress) {
+      return res.status(409).json({ success: false, message: "Scan already in progress", deadTickers: status });
+    }
+    // Fire async so the overlay can poll; return immediately with inProgress
+    void runDeadTickerScan({ autoRemove: true });
+    res.json({
+      success: true,
+      message: "Dead ticker scan started",
+      deadTickers: getDeadTickerScanStatus(),
+    });
+  } catch (error) {
+    console.error("[MC-API] Failed to start dead ticker scan:", error);
+    res.status(500).json({ error: "Failed to start dead ticker scan" });
   }
 });
 
