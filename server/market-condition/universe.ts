@@ -321,7 +321,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "AI Infrastructure",
     tier: "Structural",
     leadersTarget: 5,
-    core: ["ANET", "SMCI", "DELL", "HPE", "CSCO", "VRT", "ETN", "HUBB", "CARR", "JCI", "TT", "GNRC", "PWR", "ABB", "EMR", "FLR", "CLS"],
+    core: ["ANET", "SMCI", "DELL", "HPE", "CSCO", "VRT", "ETN", "HUBB", "CARR", "JCI", "TT", "GNRC", "PWR", "EMR", "FLR", "CLS"],
     candidates: ["POWL", "AYI", "NVT", "APH", "TEL", "FLEX"],
     etfProxies: [
       { symbol: "AIIQ", name: "Global X AI & Technology ETF", proxyType: "direct" },
@@ -338,8 +338,8 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Storage / Data Infrastructure",
     tier: "Structural",
     leadersTarget: 3,
-    core: ["WDC", "STX", "PSTG", "NTAP", "NTNX", "BOX"],
-    candidates: ["DBX", "NEWR", "MNDT", "TDC", "VRNT"],
+    core: ["WDC", "STX", "NTAP", "NTNX", "BOX"],
+    candidates: ["DBX", "TDC"],
     etfProxies: [
       { symbol: "CLOU", name: "Global X Cloud Computing ETF", proxyType: "adjacent" },
       { symbol: "XLK", name: "Technology Select SPDR", proxyType: "macro" },
@@ -371,8 +371,8 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Cybersecurity",
     tier: "Structural",
     leadersTarget: 4,
-    core: ["PANW", "CRWD", "FTNT", "ZS", "S", "CHKP", "TENB", "CYBR", "VRNS", "QLYS"],
-    candidates: ["RPD", "AKAM", "FEYE", "SAIL"],
+    core: ["PANW", "CRWD", "FTNT", "ZS", "S", "CHKP", "TENB", "VRNS", "QLYS"],
+    candidates: ["RPD", "AKAM", "SAIL"],
     etfProxies: [
       { symbol: "CIBR", name: "First Trust Cybersecurity ETF", proxyType: "direct" },
       { symbol: "HACK", name: "ETFMG Prime Cyber Security ETF", proxyType: "direct" },
@@ -472,7 +472,8 @@ export const CLUSTERS: ClusterDefinition[] = [
     name: "Payments / FinTech",
     tier: "Structural",
     leadersTarget: 4,
-    core: ["V", "MA", "PYPL", "SQ", "AFRM", "HOOD", "SOFI", "FIS", "FI"],
+    core: ["V", "MA", "PYPL", "XYZ", "AFRM", "HOOD", "SOFI", "FIS"],
+    // XYZ = Block (ticker changed from SQ)
     candidates: ["GPN", "FOUR", "DFS", "COF", "SYF"],
     etfProxies: [
       { symbol: "IPAY", name: "ETFMG Prime Mobile Payments ETF", proxyType: "direct" },
@@ -489,7 +490,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 5,
     core: ["XOM", "CVX", "COP", "EOG", "OXY", "DVN", "FANG", "SLB", "HAL", "MPC", "VLO", "BKR"],
-    candidates: ["EQT", "AR", "KMI", "WMB", "OKE", "TRGP", "PSX", "LNG", "PXD", "HES"],
+    candidates: ["EQT", "AR", "KMI", "WMB", "OKE", "TRGP", "PSX", "LNG"],
     etfProxies: [
       { symbol: "XLE", name: "Energy Select SPDR", proxyType: "direct" },
       { symbol: "XOP", name: "SPDR S&P Oil & Gas E&P ETF", proxyType: "direct" },
@@ -529,7 +530,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Macro",
     leadersTarget: 4,
     core: ["PG", "KO", "PEP", "WMT", "COST", "CL", "MO", "PM", "MDLZ", "GIS", "KR"],
-    candidates: ["HSY", "SJM", "K", "CAG", "CPB", "CHD"],
+    candidates: ["HSY", "SJM", "CAG", "CPB", "CHD"],
     etfProxies: [
       { symbol: "XLP", name: "Consumer Staples SPDR", proxyType: "direct" },
       { symbol: "VDC", name: "Vanguard Consumer Staples ETF", proxyType: "direct" },
@@ -545,7 +546,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Macro",
     leadersTarget: 5,
     core: ["UNH", "LLY", "JNJ", "ABBV", "MRK", "TMO", "DHR", "ISRG", "AMGN", "BMY", "GILD", "PFE", "CVS", "CI", "HUM", "ELV", "MDT", "SYK", "ABT", "ZTS"],
-    candidates: ["BSX", "BDX", "EW", "DXCM", "IDXX", "A", "IQV", "HOLX", "HIMS"],
+    candidates: ["BSX", "BDX", "EW", "DXCM", "IDXX", "A", "IQV", "HIMS"],
     etfProxies: [
       { symbol: "XLV", name: "Health Care Select SPDR", proxyType: "direct" },
       { symbol: "VHT", name: "Vanguard Health Care ETF", proxyType: "direct" },
@@ -726,7 +727,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Narrative",
     leadersTarget: 4,
     core: ["REGN", "VRTX", "MRNA", "BNTX", "CRSP", "BIIB", "ALNY", "BGNE", "BMRN", "SRPT", "INCY", "XBI"],
-    candidates: ["EXAS", "RARE", "UTHR", "ARGX", "LEGN", "IONS", "NTRA", "PCVX"],
+    candidates: ["RARE", "UTHR", "ARGX", "LEGN", "IONS", "NTRA", "PCVX"],
     etfProxies: [
       { symbol: "XBI", name: "SPDR S&P Biotech ETF", proxyType: "direct" },
       { symbol: "IBB", name: "iShares Biotechnology ETF", proxyType: "direct" },
@@ -794,11 +795,11 @@ export const CLUSTERS: ClusterDefinition[] = [
       // Travel/booking
       "BKNG", "EXPE", "ABNB",
       // Theme parks / entertainment
-      "SIX", "FUN", "SEAS",
+      "FUN",
     ],
     candidates: [
       // More hotels
-      "VAC", "PLYA", "HTHT",
+      "VAC", "HTHT",
       // Travel adjacent
       "TRIP", "TCOM",
     ],
@@ -807,7 +808,6 @@ export const CLUSTERS: ClusterDefinition[] = [
       { symbol: "JETS", name: "U.S. Global Jets ETF", proxyType: "adjacent" },
       { symbol: "XLY", name: "Consumer Discretionary SPDR", proxyType: "macro" },
       { symbol: "SCC", name: "ProShares UltraShort Consumer Services", proxyType: "inverse" },
-      { symbol: "UCC", name: "ProShares Ultra Consumer Services 2X", proxyType: "leveraged" },
     ],
     notes: "Hotels, cruises, travel booking, theme parks. Consumer discretionary, post-COVID recovery play.",
   },
@@ -863,7 +863,7 @@ export const CLUSTERS: ClusterDefinition[] = [
       "TSLA", "GM", "F", "RIVN", "LCID", "LI", "XPEV", "NIO",
       "STLA", "APTV", "LEA", "BWA",
     ],
-    candidates: ["VFS", "PSNY", "GOEV", "RIDE", "HMC", "TM"],
+    candidates: ["VFS", "PSNY", "HMC", "TM"],
     etfProxies: [
       { symbol: "CARZ", name: "First Trust S-Network Future Vehicles ETF", proxyType: "direct" },
       { symbol: "DRIV", name: "Global X Autonomous & EV ETF", proxyType: "direct" },
@@ -879,7 +879,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Narrative",
     leadersTarget: 4,
     core: [
-      "META", "GOOGL", "NFLX", "DIS", "WBD", "PARA", "CMCSA", "ROKU", "SPOT",
+      "META", "GOOGL", "NFLX", "DIS", "WBD", "CMCSA", "ROKU", "SPOT",
       "RBLX", "EA", "TTWO",
     ],
     candidates: ["IMAX", "AMC", "CNK", "LSXMA", "FOX", "SIRI"],
