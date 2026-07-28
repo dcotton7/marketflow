@@ -461,16 +461,27 @@ export async function fetchChartData(
   includeETH: boolean = false
 ): Promise<ChartDataWithIndicators | null> {
   try {
-    /** Shorter 5m window = fewer Alpaca pages + faster indicator passes; adjust if you need deeper history. */
-    const intradayLookback: Record<string, number> = { "5min": 45, "15min": 120, "30min": 120 };
+    /**
+     * Keep intraday lookbacks short — long ETH 5m windows paginate hard and fail empty
+     * under mid-morning Alpaca load (scanner + hit-rates + concurrent charts).
+     */
+    const intradayLookback: Record<string, number> = { "5min": 12, "15min": 40, "30min": 40 };
     const isIntraday = timeframe !== "daily";
-    const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 90) : 750);
+    const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 40) : 750);
     const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
     const interval = intervalMap[timeframe] || "1d";
-    
-    const bars = await fetchHistoricalBars(ticker.toUpperCase(), days, interval, includeETH);
+    const symbol = ticker.toUpperCase();
+
+    let bars = await fetchHistoricalBars(symbol, days, interval, includeETH);
+    // One short-window retry when the primary pull comes back empty (rate-limit / partial outage).
+    if (isIntraday && bars.length < 10 && days > 5) {
+      console.warn(
+        `[ChartData] ${symbol} ${timeframe}: only ${bars.length} bars for ${days}d — retrying 5d window`
+      );
+      bars = await fetchHistoricalBars(symbol, 5, interval, includeETH);
+    }
     if (bars.length < 10) {
-      console.error(`[ChartData] Insufficient data for ${ticker}: ${bars.length} bars`);
+      console.error(`[ChartData] Insufficient data for ${symbol}: ${bars.length} bars`);
       return null;
     }
 
@@ -522,7 +533,7 @@ export async function fetchChartData(
         indicatorsExtended: extendedBundle,
         indicatorsMeta: { ...metaBase, primarySession: "rth" },
         gaps,
-        ticker: ticker.toUpperCase(),
+        ticker: symbol,
         timeframe,
       };
     }
@@ -534,7 +545,7 @@ export async function fetchChartData(
       indicators,
       indicatorsMeta: metaBase,
       gaps,
-      ticker: ticker.toUpperCase(),
+      ticker: symbol,
       timeframe,
     };
   } catch (error) {

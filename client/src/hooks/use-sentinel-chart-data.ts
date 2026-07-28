@@ -88,6 +88,8 @@ export function useSentinelIntradayChartData(
     placeholderData: intradayPlaceholderForTicker(ticker),
     refetchInterval: getChartRefetchIntervalMs(),
     gcTime: 2 * 60 * 60_000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1500 * 2 ** attempt, 8000),
     ...options,
   });
 }

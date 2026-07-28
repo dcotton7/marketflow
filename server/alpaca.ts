@@ -195,7 +195,22 @@ export async function fetchAlpacaIntradayBars(
 
       const url = `${ALPACA_DATA_URL}/v2/stocks/${encodeURIComponent(ticker)}/bars?${params}`;
       if (i === 0) console.log(`  - URL: ${url}`);
-      const data = await alpacaFetchWithRetry(url);
+
+      let data: any;
+      try {
+        data = await alpacaFetchWithRetry(url);
+      } catch (pageErr) {
+        // Mid-pagination failure under Alpaca load: keep bars already fetched so charts
+        // still open instead of returning empty and 404'ing the whole request.
+        if (rawBars.length > 0) {
+          console.warn(
+            `[Alpaca] Page ${i + 1} failed for ${ticker} after ${rawBars.length} bars — using partial series`,
+            String(pageErr).slice(0, 160)
+          );
+          break;
+        }
+        throw pageErr;
+      }
 
       const pageBars = extractBars(data);
       rawBars.push(...pageBars);

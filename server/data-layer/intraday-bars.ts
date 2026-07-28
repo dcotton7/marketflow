@@ -37,7 +37,9 @@ interface IntradayCacheValue {
 }
 
 const intradayCache = new Map<string, IntradayCacheValue>();
-const MAX_CACHE_ENTRIES = 30;
+const MAX_CACHE_ENTRIES = 80;
+/** Coalesce concurrent full fetches for the same symbol+interval (chart stampede). */
+const inflightFullFetches = new Map<string, Promise<IntradayBar[]>>();
 
 function getTTLMs(): number {
   const session = getMarketSession();
@@ -275,15 +277,30 @@ export async function getIntradayBars(
   }
 
   try {
-    const alpacaBars = await getAlpacaIntradayData(
-      upperSymbol,
-      startDate,
-      endDate,
-      interval,
-      ALPACA_INTRADAY_ALWAYS_EXTENDED
-    );
+    const existing = inflightFullFetches.get(cacheKey);
+    if (existing) {
+      const bars = await existing;
+      return applyEthMode([...bars]);
+    }
 
-    const bars = normalizeBars(alpacaBars);
+    const fetchPromise = (async () => {
+      const alpacaBars = await getAlpacaIntradayData(
+        upperSymbol,
+        startDate,
+        endDate,
+        interval,
+        ALPACA_INTRADAY_ALWAYS_EXTENDED
+      );
+      return normalizeBars(alpacaBars);
+    })();
+
+    inflightFullFetches.set(cacheKey, fetchPromise);
+    let bars: IntradayBar[];
+    try {
+      bars = await fetchPromise;
+    } finally {
+      inflightFullFetches.delete(cacheKey);
+    }
 
     if (bars.length === 0) {
       console.warn(

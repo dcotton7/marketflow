@@ -7373,7 +7373,8 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         : "1d";
       const intradayStart = new Date();
       if (isIntraday) {
-        intradayStart.setDate(intradayStart.getDate() - (timeframe === "5min" ? 25 : timeframe === "15min" ? 40 : 55));
+        // Keep short — same pressure as chart-data; long windows empty-out under Alpaca load
+        intradayStart.setDate(intradayStart.getDate() - (timeframe === "5min" ? 12 : timeframe === "15min" ? 25 : 30));
       }
 
       const [dailyBars, intradayBars, quoteData] = await Promise.all([
