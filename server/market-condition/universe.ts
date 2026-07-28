@@ -354,7 +354,8 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 5,
     core: ["MSFT", "CRM", "ORCL", "NOW", "ADBE", "INTU", "WDAY", "ADSK", "VEEV", "TEAM", "SNOW", "DDOG", "MDB", "NET", "HUBS", "SHOP", "ESTC", "IBM"],
-    candidates: ["ZM", "DOCU", "TWLO", "OKTA", "ZI", "BILL", "PCOR", "MNDY"],
+    candidates: ["ZM", "DOCU", "TWLO", "OKTA", "GTM", "BILL", "PCOR", "MNDY"],
+    // ZoomInfo: ZI → GTM (May 2025)
     etfProxies: [
       { symbol: "IGV", name: "iShares Software ETF", proxyType: "direct" },
       { symbol: "WCLD", name: "WisdomTree Cloud Computing ETF", proxyType: "direct" },
