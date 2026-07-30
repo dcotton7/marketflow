@@ -7300,7 +7300,10 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
     }
   });
 
-  app.get("/api/sentinel/chart-data", requireAuth, async (req: Request, res: Response) => {
+  // Market bars are not user-specific. Keeping this route behind session auth made
+  // chart loads fail mid-session when the cookie expired (daily could remain cached
+  // while a fresh intraday request returned 401).
+  app.get("/api/sentinel/chart-data", async (req: Request, res: Response) => {
     try {
       const ticker = String(req.query.ticker || "").toUpperCase();
       const timeframe = String(req.query.timeframe || "daily");
