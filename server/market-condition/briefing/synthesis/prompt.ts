@@ -51,7 +51,8 @@ Every value below MUST be a plain string (not an array or nested object). Use \\
 6. Include defense/geopolitical context when risk_off or haven themes lead
 7. If catalyst_watch entries exist, reference them — explain why the market may react to these later
 8. If session_structure patterns exist, warn the trader about intraday tendencies (e.g., "Morning pushes have faded in PM 6/10 days — consider tightening stops after lunch")
-9. When combining catalysts + session patterns + rotation, synthesize a forward-looking read — not just a recap`;
+9. When combining catalysts + session patterns + rotation, synthesize a forward-looking read — not just a recap
+10. In pre-market mode, lead with live overnight/early-morning tape and rank changes versus the prior RTH close. Treat yesterday's RTH session as background, not the headline.`;
 
 export function buildBriefingSynthesisPrompt(
   dossier: ThemeBriefingDossier,
@@ -97,6 +98,10 @@ export function buildBriefingSynthesisPrompt(
   return JSON.stringify(
     {
       mode: dossier.mode,
+      reportingBasis:
+        dossier.mode === "pre"
+          ? "Live overnight/pre-market theme ranks and member moves versus prior RTH close; prior-session tape is supporting context."
+          : "Completed RTH session review.",
       referenceSession: dossier.referenceSession,
       priorSession: dossier.priorSession,
       marketDirection: ctx.marketDirection,
@@ -123,6 +128,7 @@ export function buildBriefingSynthesisPrompt(
         intradaySlots: dossier.dataQuality.intradaySlots,
         openBaseline: dossier.dataQuality.openBaselineAvailable,
         lateBaseline: dossier.dataQuality.lateBaselineAvailable,
+        extendedQuotes: dossier.dataQuality.extendedQuotesAvailable,
       },
     },
     null,

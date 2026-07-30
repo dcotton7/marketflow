@@ -264,6 +264,30 @@ function buildSessionArcAtoms(dossier: ThemeBriefingDossier): StoryAtom[] {
   const openUp = dossier.openRotators.filter((t) => t.deltaRankFromOpen >= 4).slice(0, 3);
   const openDown = dossier.openRotators.filter((t) => t.deltaRankFromOpen <= -4).slice(0, 3);
 
+  if (dossier.mode === "pre") {
+    if (openUp.length) {
+      atoms.push({
+        id: "overnight_rank_gain",
+        category: "session_arc",
+        headline: `Re-ranked higher overnight: ${openUp.map((t) => t.name).join(", ")}.`,
+        detail: "Live pre-market ranks versus the prior RTH close.",
+        confidence: dossier.dataQuality.extendedQuotesAvailable ? "high" : "low",
+        evidence: openUp.map((t) => `${t.name} overnight Δ rank +${t.deltaRankFromOpen}`),
+      });
+    }
+    if (openDown.length) {
+      atoms.push({
+        id: "overnight_rank_loss",
+        category: "session_arc",
+        headline: `Lost ground overnight: ${openDown.map((t) => t.name).join(", ")}.`,
+        detail: "Live pre-market ranks versus the prior RTH close.",
+        confidence: dossier.dataQuality.extendedQuotesAvailable ? "high" : "low",
+        evidence: openDown.map((t) => `${t.name} overnight Δ rank ${t.deltaRankFromOpen}`),
+      });
+    }
+    return atoms;
+  }
+
   if (lateUp.length) {
     atoms.push({
       id: "late_rally",

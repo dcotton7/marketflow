@@ -140,6 +140,7 @@ function buildTopMembers(storyThemes: BriefingThemeRow[]): BriefingMemberMove[] 
         themeName: theme.name,
         pctChange: m.pctChange,
         rsVsBenchmark: m.rsVsBenchmark,
+        volExp: m.volExp,
         role: "leader",
       });
     }
@@ -150,6 +151,7 @@ function buildTopMembers(storyThemes: BriefingThemeRow[]): BriefingMemberMove[] 
         themeName: theme.name,
         pctChange: m.pctChange,
         rsVsBenchmark: m.rsVsBenchmark,
+        volExp: m.volExp,
         role: "dragger",
       });
     }
@@ -220,6 +222,7 @@ export async function buildThemeBriefingDossier(
   let openBaselineAvailable = false;
   let lateBaselineAvailable = false;
   let dailyCloseAvailable = false;
+  let extendedQuotesAvailable = false;
 
   const slots = await listIntradaySnapshotSlots(session.referenceSession);
   const slotCount = slots.length;
@@ -311,13 +314,40 @@ export async function buildThemeBriefingDossier(
       );
     }
   } else {
+    const liveCondition = getMarketCondition();
     const dailyRows = await loadDailyCloseRows(session.referenceSession);
     dailyCloseAvailable = dailyRows.length > 0;
 
-    if (dailyCloseAvailable) {
-      const nameMap = new Map<string, string>();
-      for (const t of getMarketCondition().themes) nameMap.set(t.id, t.name);
+    if (liveCondition.themes.length > 0) {
+      // Before the open, live Market Condition snapshots are the overnight tape:
+      // prices and theme scores are measured from the prior RTH close.
+      baseThemes = liveCondition.themes;
+      extendedQuotesAvailable = !liveCondition.isStale;
 
+      if (dailyCloseAvailable) {
+        const priorCloseRanks = new Map(
+          dailyRows.map((row) => [row.themeId, row.rank] as const)
+        );
+        for (const theme of baseThemes) {
+          const priorRank = priorCloseRanks.get(theme.id);
+          if (priorRank !== undefined) {
+            openDeltaById.set(theme.id, priorRank - theme.rank);
+          }
+        }
+        openBaselineAvailable = openDeltaById.size > 0;
+      }
+
+      if (liveCondition.isStale) {
+        warnings.push(
+          "Live overnight theme snapshot is stale — pre-market ranks may not reflect the latest tape."
+        );
+      }
+    } else {
+      warnings.push(
+        "No live overnight theme snapshot is available — using prior RTH close ranks as fallback."
+      );
+      const nameMap = new Map<string, string>();
+      for (const t of liveCondition.themes) nameMap.set(t.id, t.name);
       baseThemes = dailyRows.map((row) => ({
         id: row.themeId as ClusterId,
         name: nameMap.get(row.themeId) ?? row.themeId,
@@ -330,13 +360,13 @@ export async function buildThemeBriefingDossier(
         isNarrowLeadership: false,
         trendState: "Transition" as const,
       })) as ThemeMetrics[];
-
       baseThemes.sort((a, b) => a.rank - b.rank);
-    } else {
+    }
+
+    if (!dailyCloseAvailable) {
       warnings.push(
-        `No daily_close snapshot for ${session.referenceSession} — using latest live theme ranks as fallback.`
+        `No daily_close snapshot for ${session.referenceSession} — overnight rank changes versus the prior close are unavailable.`
       );
-      baseThemes = getMarketCondition().themes;
     }
 
     if (slots.length >= 2) {
@@ -344,13 +374,12 @@ export async function buildThemeBriefingDossier(
       lateComparisonTime = slots[slots.length - 2]?.at ?? null;
     }
 
-    const bm = getMarketCondition().benchmarks ?? {};
+    const bm = liveCondition.benchmarks ?? {};
     benchmarks = BENCHMARK_SYMBOLS.map((symbol: BenchmarkSymbol) => ({
       symbol,
       changePct: bm[symbol]?.changePct ?? 0,
       price: bm[symbol]?.price,
     }));
-    warnings.push("Pre-market mode: theme ranks reflect prior RTH close; overnight moves are not re-ranked.");
   }
 
   const themeRows: BriefingThemeRow[] = baseThemes.map((t) =>
@@ -373,7 +402,8 @@ export async function buildThemeBriefingDossier(
     .sort((a, b) => b.deltaRankFromOpen - a.deltaRankFromOpen);
 
   const rotationCharacter = classifyRotation(benchmarks);
-  const storyThemes = [...leaders, ...lateRotators.slice(0, 3), ...laggards.slice(0, 2)];
+  const activeRotators = session.mode === "pre" ? openRotators : lateRotators;
+  const storyThemes = [...leaders, ...activeRotators.slice(0, 3), ...laggards.slice(0, 2)];
   const uniqueStory = Array.from(new Map(storyThemes.map((t) => [t.id, t])).values());
   const topMembers = buildTopMembers(uniqueStory);
   const catalysts = await buildCatalysts(themeRows, topMembers, rotationCharacter);
@@ -391,7 +421,7 @@ export async function buildThemeBriefingDossier(
     dailyCloseAvailable,
     openBaselineAvailable,
     lateBaselineAvailable,
-    extendedQuotesAvailable: false,
+    extendedQuotesAvailable,
     synthesisAvailable,
     warnings,
   };

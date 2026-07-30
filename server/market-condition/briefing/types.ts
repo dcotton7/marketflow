@@ -78,6 +78,8 @@ export interface BriefingMemberMove {
   themeName: string;
   pctChange: number;
   rsVsBenchmark: number;
+  /** Live cumulative volume divided by 20-day average volume. */
+  volExp?: number;
   role: "leader" | "dragger";
 }
 

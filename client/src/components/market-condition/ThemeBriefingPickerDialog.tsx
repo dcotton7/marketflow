@@ -102,7 +102,7 @@ function buildLocalPreview(anchor = new Date()): BriefingPreviewItem[] {
       mode: "pre",
       label: "Pre-market briefing",
       referenceSession: prior,
-      description: `Prepare for the open using ${fmt(prior)} close data, intraday tape (if stored), and partial overnight context.`,
+      description: `Live overnight and early-morning theme flow into the open, ranked versus ${fmt(prior)} close; prior-session tape remains supporting context.`,
       recommended: recommendPre,
     },
   ];

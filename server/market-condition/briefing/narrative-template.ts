@@ -69,7 +69,20 @@ export function buildTemplateNarrative(dossier: ThemeBriefingDossier): BriefingN
       : "No laggard data available.",
   });
 
-  if (dossier.mode === "post" && dossier.openRotators.some((t) => Math.abs(t.deltaRankFromOpen) >= 3)) {
+  if (dossier.mode === "pre" && dossier.openRotators.some((t) => Math.abs(t.deltaRankFromOpen) >= 3)) {
+    const gainers = dossier.openRotators.filter((t) => t.deltaRankFromOpen >= 3).slice(0, 5);
+    const faders = [...dossier.openRotators].filter((t) => t.deltaRankFromOpen <= -3).slice(0, 5);
+    sections.push({
+      id: "overnight_rotation",
+      title: "Overnight rotation vs prior close",
+      body: [
+        gainers.length ? `Re-ranked higher overnight: ${gainers.map((t) => `${t.name} (Δ rank +${t.deltaRankFromOpen})`).join(", ")}.` : "",
+        faders.length ? `Lost rank overnight: ${faders.map((t) => `${t.name} (Δ rank ${t.deltaRankFromOpen})`).join(", ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+  } else if (dossier.mode === "post" && dossier.openRotators.some((t) => Math.abs(t.deltaRankFromOpen) >= 3)) {
     const gainers = dossier.openRotators.filter((t) => t.deltaRankFromOpen >= 3).slice(0, 5);
     const faders = [...dossier.openRotators].filter((t) => t.deltaRankFromOpen <= -3).slice(0, 5);
     sections.push({
@@ -106,12 +119,14 @@ export function buildTemplateNarrative(dossier: ThemeBriefingDossier): BriefingN
   if (dossier.topMembers.length) {
     sections.push({
       id: "members",
-      title: "Notable movers (story themes)",
+      title: dossier.mode === "pre" ? "Notable overnight movers" : "Notable movers (story themes)",
       body: dossier.topMembers
         .slice(0, 10)
         .map(
           (m) =>
-            `${m.symbol} (${m.themeName}) ${fmtPct(m.pctChange)} · RS ${fmtPct(m.rsVsBenchmark)} · ${m.role}`
+            `${m.symbol} (${m.themeName}) ${fmtPct(m.pctChange)} · RS ${fmtPct(m.rsVsBenchmark)}${
+              m.volExp !== undefined ? ` · volume ${m.volExp.toFixed(2)}x avg` : ""
+            } · ${m.role}`
         )
         .join("\n"),
     });

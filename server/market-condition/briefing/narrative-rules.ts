@@ -111,13 +111,13 @@ export function buildRulesNarrative(
 
   sections.push({
     id: "why_market",
-    title: "Why the market moved",
+    title: dossier.mode === "pre" ? "What moved overnight" : "Why the market moved",
     body: formatAtomBlock(atomsByCategory(ctx.atoms, "market_direction")),
   });
 
   sections.push({
     id: "why_rotation",
-    title: "Why this rotation",
+    title: dossier.mode === "pre" ? "Overnight theme rotation" : "Why this rotation",
     body: formatAtomBlock([
       ...atomsByCategory(ctx.atoms, "rotation_why"),
       ...atomsByCategory(ctx.atoms, "theme_pattern"),
@@ -126,7 +126,7 @@ export function buildRulesNarrative(
 
   sections.push({
     id: "session_arc",
-    title: "Session arc (open → late → close)",
+    title: dossier.mode === "pre" ? "Overnight arc vs prior close" : "Session arc (open → late → close)",
     body: formatAtomBlock(atomsByCategory(ctx.atoms, "session_arc")),
   });
 
@@ -174,12 +174,14 @@ export function buildRulesNarrative(
   if (dossier.topMembers.length) {
     sections.push({
       id: "members",
-      title: "Notable movers",
+      title: dossier.mode === "pre" ? "Notable overnight movers" : "Notable movers",
       body: dossier.topMembers
         .slice(0, 10)
         .map(
           (m) =>
-            `${m.symbol} (${m.themeName}) ${fmtPct(m.pctChange)} · RS ${fmtPct(m.rsVsBenchmark)} · ${m.role}`
+            `${m.symbol} (${m.themeName}) ${fmtPct(m.pctChange)} · RS ${fmtPct(m.rsVsBenchmark)}${
+              m.volExp !== undefined ? ` · volume ${m.volExp.toFixed(2)}x avg` : ""
+            } · ${m.role}`
         )
         .join("\n"),
     });
