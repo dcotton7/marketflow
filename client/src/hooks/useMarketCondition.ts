@@ -5,6 +5,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ThemeAccDistStats } from "@/lib/theme-actionable-model";
 
 // =============================================================================
 // Types (matching server types)
@@ -389,7 +390,7 @@ export function useThemeMembers(
     members: TickerMetrics[]; 
     totalCount: number; 
     leaderCount: number;
-    accDistStats?: AccDistStats;
+    accDistStats?: ThemeAccDistStats;
     maAsOf?: string | null;
     maMode?: "session_adjusted" | "eod_db" | null;
   }>({

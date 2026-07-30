@@ -4130,7 +4130,7 @@ export default function SentinelDashboardPage() {
                     )}
                     
                     {/* Admin: Generate TNN suggestions */}
-                    {currentUser?.isAdmin && (
+                    {user?.isAdmin && (
                       <div className="pt-4 border-t">
                         <Button 
                           onClick={() => generateTnnSuggestionsMutation.mutate()}

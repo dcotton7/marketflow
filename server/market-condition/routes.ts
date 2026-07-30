@@ -41,6 +41,7 @@ import {
 } from "./engine/snapshot";
 import { getRaceTimeline, listIntradaySnapshotSlots, getHistoricalSnapshotAt } from "./engine/theme-snapshots";
 import { calculateRAI } from "./engine/rai";
+import { getMarketRegimeForScanner } from "./exports";
 import { refreshThemeMembersCache } from "./utils/theme-db-loader";
 
 const router = Router();
