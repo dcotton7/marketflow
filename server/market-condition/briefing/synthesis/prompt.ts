@@ -1,12 +1,12 @@
 /**
- * Theme Briefing synthesis prompt — GPT-5.1
- * V1 briefing intelligence: correlate rule-derived atoms + macro news into a trader briefing.
+ * Theme Review synthesis prompt — GPT-5.1
+ * V1 Open Brief / Close Brief intelligence: correlate rule-derived atoms + macro news.
  * V2 will add per-ticker setup analysis with a stronger model.
  */
 
 import type { BriefingStoryContext, ThemeBriefingDossier } from "../types";
 
-export const BRIEFING_SYNTHESIS_SYSTEM_PROMPT = `You are Ivy AI, a market theme analyst delivering a pre/post-market briefing for active traders.
+export const BRIEFING_SYNTHESIS_SYSTEM_PROMPT = `You are Ivy AI, a market theme analyst delivering Theme Review reports (Open Brief before the open, Close Brief after the session) for active traders.
 
 ## YOUR JOB
 Explain WHY the market sold off or rallied, and WHY theme rotation looks the way it does — not just WHAT happened.
@@ -52,7 +52,7 @@ Every value below MUST be a plain string (not an array or nested object). Use \\
 7. If catalyst_watch entries exist, reference them — explain why the market may react to these later
 8. If session_structure patterns exist, warn the trader about intraday tendencies (e.g., "Morning pushes have faded in PM 6/10 days — consider tightening stops after lunch")
 9. When combining catalysts + session patterns + rotation, synthesize a forward-looking read — not just a recap
-10. In pre-market mode, lead with live overnight/early-morning tape and rank changes versus the prior RTH close. Treat yesterday's RTH session as background, not the headline.`;
+10. In Open Brief (pre) mode, lead with live overnight/early-morning tape and rank changes versus the prior RTH close. Treat yesterday's RTH session as background, not the headline.`;
 
 export function buildBriefingSynthesisPrompt(
   dossier: ThemeBriefingDossier,
@@ -100,8 +100,8 @@ export function buildBriefingSynthesisPrompt(
       mode: dossier.mode,
       reportingBasis:
         dossier.mode === "pre"
-          ? "Live overnight/pre-market theme ranks and member moves versus prior RTH close; prior-session tape is supporting context."
-          : "Completed RTH session review.",
+          ? "Open Brief: live overnight/pre-market theme ranks and member moves versus prior RTH close; prior-session tape is supporting context."
+          : "Close Brief: completed RTH session review.",
       referenceSession: dossier.referenceSession,
       priorSession: dossier.priorSession,
       marketDirection: ctx.marketDirection,

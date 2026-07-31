@@ -1,4 +1,5 @@
 import type { ThemeBriefingDossier, BriefingNarrative, BriefingThemeRow } from "./types";
+import { themeReviewSessionLabel } from "./naming";
 
 function fmtPct(n: number): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
@@ -18,12 +19,12 @@ function formatBenchmarkLine(dossier: ThemeBriefingDossier): string {
 }
 
 export function buildTemplateNarrative(dossier: ThemeBriefingDossier): BriefingNarrative {
-  const modeLabel = dossier.mode === "pre" ? "Pre-market" : "Post-market";
+  const modeLabel = themeReviewSessionLabel(dossier.mode);
   const sessionLabel = dossier.referenceSession;
 
   const execParts: string[] = [];
   execParts.push(
-    `${modeLabel} theme briefing for ${sessionLabel}. ${formatBenchmarkLine(dossier)}.`
+    `${modeLabel} for ${sessionLabel}. ${formatBenchmarkLine(dossier)}.`
   );
   if (dossier.leaders.length) {
     execParts.push(`Leaders: ${formatThemeList(dossier.leaders, 3)}.`);

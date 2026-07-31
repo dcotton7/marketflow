@@ -5,6 +5,7 @@ import type {
   ThemeBriefingDossier,
 } from "./types";
 import { macroNewsByCategory } from "./macro-news";
+import { themeReviewSessionLabel } from "./naming";
 
 function fmtPct(n: number): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
@@ -94,11 +95,11 @@ export function buildRulesNarrative(
   dossier: ThemeBriefingDossier,
   ctx: BriefingStoryContext
 ): BriefingNarrative {
-  const modeLabel = dossier.mode === "pre" ? "Pre-market" : "Post-market";
+  const modeLabel = themeReviewSessionLabel(dossier.mode);
   const benchLine = dossier.benchmarks.map((b) => `${b.symbol} ${fmtPct(b.changePct)}`).join(" · ");
 
   const execParts = [
-    `${modeLabel} briefing for ${dossier.referenceSession}. ${ctx.directionLabel}`,
+    `${modeLabel} for ${dossier.referenceSession}. ${ctx.directionLabel}`,
     ctx.rotationSummary,
   ];
   if (dossier.leaders[0]) {

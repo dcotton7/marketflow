@@ -37,7 +37,7 @@ export function ThemeReviewActions({
             <span className="text-[16.5px] font-medium leading-none">Theme Review</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Pre/post theme briefing (Ivy)</TooltipContent>
+        <TooltipContent>Open Brief / Close Brief (Ivy)</TooltipContent>
       </Tooltip>
 
       <Tooltip>

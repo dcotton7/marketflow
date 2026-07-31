@@ -1,4 +1,8 @@
 import type { BriefingMode } from "@/components/market-condition/ThemeBriefingPickerDialog";
+import {
+  THEME_REVIEW_PRODUCT,
+  themeReviewTitleDash,
+} from "@/lib/theme-review-naming";
 
 export interface ThemeBriefingResponse {
   mode: BriefingMode;
@@ -48,13 +52,9 @@ function formatSessionDate(iso: string): string {
   });
 }
 
-function modeLabel(mode: ThemeBriefingResponse["mode"]): string {
-  return mode === "pre" ? "Pre-market" : "Post-market";
-}
-
 export function briefingToPlainText(data: ThemeBriefingResponse): string {
   const lines: string[] = [];
-  lines.push(`Theme Briefing — ${modeLabel(data.mode)}`);
+  lines.push(themeReviewTitleDash(data.mode));
   lines.push(`Session: ${formatSessionDate(data.referenceSession)}`);
   lines.push(`Generated: ${new Date(data.generatedAt).toLocaleString()}`);
   lines.push("");
@@ -89,7 +89,7 @@ export function briefingToPlainText(data: ThemeBriefingResponse): string {
 export function buildBriefingPdfHtml(data: ThemeBriefingResponse): string {
   const dateStr = formatSessionDate(data.referenceSession);
   const generatedStr = new Date(data.generatedAt).toLocaleString();
-  const label = modeLabel(data.mode);
+  const label = themeReviewTitleDash(data.mode);
   const sourceLabel =
     data.narrative.source === "llm"
       ? `AI synthesis${data.synthesisModel ? ` · ${data.synthesisModel}` : ""}`
@@ -130,7 +130,7 @@ export function buildBriefingPdfHtml(data: ThemeBriefingResponse): string {
     </section>`
       : "";
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Theme Briefing — ${escapeHtml(label)}</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(label)}</title>
 <style>
   @media print { body { margin: 0; } .no-print { display: none; } }
   body { font-family: Georgia, "Times New Roman", serif; max-width: 720px; margin: 1.5em auto; padding: 0 1.25em; color: #1e293b; line-height: 1.55; }
@@ -146,7 +146,7 @@ export function buildBriefingPdfHtml(data: ThemeBriefingResponse): string {
   li { margin: 0.35em 0; }
   footer { margin-top: 2em; font-size: 0.75rem; color: #94a3b8; font-family: system-ui, sans-serif; }
 </style></head><body>
-  <h1>Theme Briefing — ${escapeHtml(label)}</h1>
+  <h1>${escapeHtml(label)}</h1>
   <p class="meta">${escapeHtml(dateStr)} · ${escapeHtml(sourceLabel)} · Generated ${escapeHtml(generatedStr)}</p>
   <section class="summary">
     <h2>Executive summary</h2>
@@ -155,7 +155,7 @@ export function buildBriefingPdfHtml(data: ThemeBriefingResponse): string {
   ${sectionsHtml}
   ${watchListHtml}
   ${warningsHtml}
-  <footer>Stock Pattern Stream · Theme Briefing report</footer>
+  <footer>Stock Pattern Stream · ${THEME_REVIEW_PRODUCT}</footer>
 </body></html>`;
 }
 
@@ -164,7 +164,7 @@ export function printBriefingAsPdf(data: ThemeBriefingResponse): void {
   const html = buildBriefingPdfHtml(data);
 
   const iframe = document.createElement("iframe");
-  iframe.setAttribute("title", "Theme Briefing print");
+  iframe.setAttribute("title", `${THEME_REVIEW_PRODUCT} print`);
   iframe.style.cssText =
     "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;";
   document.body.appendChild(iframe);
@@ -216,14 +216,13 @@ export function printBriefingAsPdf(data: ThemeBriefingResponse): void {
 
 /** Open default mail client with briefing text; pair with Save as PDF for attachment. */
 export function emailBriefingReport(data: ThemeBriefingResponse): void {
-  const label = modeLabel(data.mode);
   const dateStr = formatSessionDate(data.referenceSession);
-  const subject = `Theme Briefing — ${label} · ${dateStr}`;
+  const subject = `${themeReviewTitleDash(data.mode)} · ${dateStr}`;
   const body = [
     briefingToPlainText(data),
     "",
     "---",
-    "Tip: In Theme Briefing, use Save as PDF and attach that file for the full formatted report.",
+    `Tip: In ${THEME_REVIEW_PRODUCT}, use Save as PDF and attach that file for the full formatted report.`,
   ].join("\n");
 
   const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

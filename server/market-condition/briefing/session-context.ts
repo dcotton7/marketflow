@@ -8,6 +8,7 @@ import {
   listIntradaySnapshotSlots,
 } from "../engine/theme-snapshots";
 import type { BriefingMode, BriefingPreview } from "./types";
+import { themeReviewSessionLabel } from "./naming";
 
 const ET = "America/New_York";
 /** Enough stored slots to treat today's session as the post-market reference. */
@@ -76,8 +77,8 @@ async function resolvePostReferenceSession(
         priorSession: priorStored,
         sessionFallbackNote:
           todaySlots.length === 0
-            ? `Post-market report uses last stored session (${latestStored}) — no hourly tape saved yet for ${todayEt}.`
-            : `Post-market report uses last complete stored session (${latestStored}) — today's tape is partial (${todaySlots.length} slots).`,
+            ? `Close Brief uses last stored session (${latestStored}) — no hourly tape saved yet for ${todayEt}.`
+            : `Close Brief uses last complete stored session (${latestStored}) — today's tape is partial (${todaySlots.length} slots).`,
       };
     }
   }
@@ -137,14 +138,14 @@ export async function buildBriefingPreviews(anchor: Date = new Date()): Promise<
   return [
     {
       mode: "post",
-      label: "Post-market briefing",
+      label: themeReviewSessionLabel("post"),
       referenceSession: postRef,
       description: `Theme flow for ${formatSessionLabel(postRef)} — session ranks, rotation, late moves, and catalysts where evidence exists.`,
       recommended: recommendPost && !recommendPre,
     },
     {
       mode: "pre",
-      label: "Pre-market briefing",
+      label: themeReviewSessionLabel("pre"),
       referenceSession: prior,
       description: `Live overnight and early-morning theme flow into the open, ranked versus ${formatSessionLabel(prior)} close; prior-session tape remains supporting context.`,
       recommended: recommendPre,

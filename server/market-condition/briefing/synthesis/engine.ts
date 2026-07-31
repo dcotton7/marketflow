@@ -1,5 +1,5 @@
 /**
- * Theme Briefing AI synthesis — GPT-5.1 narrative from dossier + rule-derived story atoms.
+ * Theme Review AI synthesis — GPT-5.1 narrative from dossier + rule-derived story atoms.
  */
 
 import OpenAI from "openai";

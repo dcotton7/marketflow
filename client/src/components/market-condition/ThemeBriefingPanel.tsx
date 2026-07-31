@@ -12,6 +12,7 @@ import {
   printBriefingAsPdf,
   type ThemeBriefingResponse,
 } from "@/lib/theme-briefing-export";
+import { themeReviewTitle } from "@/lib/theme-review-naming";
 import type { BriefingMode } from "./ThemeBriefingPickerDialog";
 
 const STORAGE_KEY = "theme-briefing-floating";
@@ -112,7 +113,7 @@ export function ThemeBriefingPanel({ open, mode, onOpenChange, onRefresh }: Them
   const overlaySurfaceBg = themeEditor?.getSlotColor("marketFlow:overlayBg") ?? secondaryBg;
   const overlayTitleBarBg = themeEditor?.getSlotColor("marketFlow:overlayHeader") ?? headerBg;
 
-  const modeLabel = mode === "pre" ? "Pre-market" : "Post-market";
+  const title = mode ? themeReviewTitle(mode) : "Theme Review";
 
   return (
     <FloatingOverlayPanel
@@ -129,7 +130,7 @@ export function ThemeBriefingPanel({ open, mode, onOpenChange, onRefresh }: Them
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
           <span className="text-sm font-semibold text-foreground truncate">
-            Theme Briefing · {modeLabel}
+            {title}
           </span>
           {data && (
             <span className="text-[10px] text-muted-foreground truncate">
@@ -154,7 +155,7 @@ export function ThemeBriefingPanel({ open, mode, onOpenChange, onRefresh }: Them
                 size="icon"
                 className="h-7 w-7"
                 onClick={() => emailBriefingReport(data)}
-                title="Email briefing to a friend"
+                title="Email Theme Review to a friend"
                 data-testid="button-theme-briefing-email"
               >
                 <Mail className="h-3.5 w-3.5" />
@@ -177,7 +178,7 @@ export function ThemeBriefingPanel({ open, mode, onOpenChange, onRefresh }: Them
       {isLoading && !data ? (
         <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-sm">Building theme briefing…</span>
+          <span className="text-sm">Building Theme Review…</span>
         </div>
       ) : error ? (
         <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded p-3">

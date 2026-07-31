@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { THEME_REVIEW_PRODUCT, themeReviewSessionLabel } from "@/lib/theme-review-naming";
 
 export type BriefingMode = "pre" | "post";
 
@@ -93,14 +94,14 @@ function buildLocalPreview(anchor = new Date()): BriefingPreviewItem[] {
   return [
     {
       mode: "post",
-      label: "Post-market briefing",
+      label: themeReviewSessionLabel("post"),
       referenceSession: todayEt,
       description: `Theme flow for ${fmt(todayEt)} — session ranks, rotation, late moves, and catalysts where evidence exists.`,
       recommended: recommendPost && !recommendPre,
     },
     {
       mode: "pre",
-      label: "Pre-market briefing",
+      label: themeReviewSessionLabel("pre"),
       referenceSession: prior,
       description: `Live overnight and early-morning theme flow into the open, ranked versus ${fmt(prior)} close; prior-session tape remains supporting context.`,
       recommended: recommendPre,
@@ -147,10 +148,10 @@ export function ThemeBriefingPickerDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-amber-400" />
-            Theme market briefing
+            {THEME_REVIEW_PRODUCT}
           </DialogTitle>
           <DialogDescription className="text-slate-400">
-            Ivy synthesizes theme flow from MarketFlow snapshots, rotation, and news where evidence exists.
+            Ivy synthesizes Open Brief and Close Brief from MarketFlow snapshots, rotation, and news where evidence exists.
           </DialogDescription>
         </DialogHeader>
 
@@ -204,7 +205,7 @@ export function ThemeBriefingPickerDialog({
                 ) : (
                   <Sparkles className="h-3.5 w-3.5 text-amber-300" />
                 )}
-                Generate {item.mode === "post" ? "post-market" : "pre-market"} report
+                Generate {themeReviewSessionLabel(item.mode)}
               </Button>
             </div>
           ))}
