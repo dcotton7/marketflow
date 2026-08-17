@@ -188,6 +188,10 @@ const WELL_KNOWN_NON_EARNINGS_SYMBOLS = new Set([
   "SMH", "SOXX", "IGV", "BOTZ", "CIBR", "HACK", "CLOU", "WCLD", "ARKK", "ARKW",
   "TQQQ", "SQQQ", "UPRO", "SPXU", "TNA", "TZA", "UVXY", "SVXY", "VIXY",
   "IYT", "ITA", "XAR", "KBE", "KRE", "VNQ", "VIS", "DRAM", "AIIQ",
+  "FOTO",
+  "EWY", "EWJ", "EWT", "EWU", "EWG", "EWC", "EWA", "EWH", "EWS", "EWM",
+  "EWZ", "EWW", "EZA", "FXI", "KWEB", "ASHR", "MCHI", "INDA", "EEM", "EFA",
+  "IEMG", "VWO", "VEA", "VXUS",
 ]);
 
 function nameImpliesFundVehicle(name?: string | null): boolean {
@@ -223,6 +227,62 @@ export function isNonEarningsIssuer(opts: {
     return true;
   }
   return false;
+}
+
+export type ListedInstrumentKind = "etf" | "etn" | "fund" | "company";
+
+export function classifyListedInstrument(opts: {
+  symbol: string;
+  companyName?: string | null;
+  industry?: string | null;
+  sector?: string | null;
+}): ListedInstrumentKind {
+  const name = `${opts.companyName ?? ""}`.toUpperCase();
+  const ind = `${opts.industry ?? ""} ${opts.sector ?? ""}`.toLowerCase();
+  if (/\bETN\b/.test(name) || ind.includes("exchange traded note")) return "etn";
+  if (ind.includes("closed-end") || /CLOSED[- ]END FUND/.test(name)) return "fund";
+  if (isNonEarningsIssuer(opts) || nameImpliesFundVehicle(opts.companyName)) return "etf";
+  return "company";
+}
+
+const INSTRUMENT_KIND_PHRASE: Record<ListedInstrumentKind, string> = {
+  etf: "an exchange-traded fund (ETF)",
+  etn: "an exchange-traded note (ETN)",
+  fund: "a closed-end fund",
+  company: "a publicly traded company",
+};
+
+/** Prefer a vendor blurb unless it calls a fund/ETF a company. */
+export function buildListedInstrumentDescription(opts: {
+  symbol: string;
+  companyName?: string | null;
+  industry?: string | null;
+  sector?: string | null;
+  vendorDescription?: string | null;
+}): string {
+  const displayName = (opts.companyName || opts.symbol).trim();
+  const kind = classifyListedInstrument(opts);
+  const industryOrSector =
+    opts.industry && opts.industry !== "Unknown"
+      ? opts.industry
+      : opts.sector && opts.sector !== "Unknown"
+        ? opts.sector
+        : "";
+  const vendor = opts.vendorDescription?.trim() || "";
+  if (vendor && !(kind !== "company" && /publicly traded company/i.test(vendor))) {
+    return vendor;
+  }
+  const phrase = INSTRUMENT_KIND_PHRASE[kind];
+  if (kind === "company") {
+    return industryOrSector
+      ? `${displayName} is ${phrase} in the ${industryOrSector} sector.`
+      : `${displayName} is ${phrase}.`;
+  }
+  const focus =
+    industryOrSector && !/etf|exchange traded|fund/i.test(industryOrSector)
+      ? ` focused on ${industryOrSector}`
+      : "";
+  return `${displayName} is ${phrase}${focus}.`;
 }
 
 export function emptyCorporateEarnings(): ParsedEarnings {

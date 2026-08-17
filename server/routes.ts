@@ -47,7 +47,7 @@ function setCachedHistory(key: string, data: any): void {
   stockHistoryCache.set(key, { data, timestamp: Date.now() });
 }
 
-import { getSectorAndIndustry, getFundamentals } from "./fundamentals";
+import { getSectorAndIndustry, getFundamentals, buildListedInstrumentDescription, isNonEarningsIssuer } from "./fundamentals";
 import { normalizeWatchlistSymbol } from "@shared/watchlist-theme";
 import { getThemeLabelForSymbol } from "./market-condition/universe";
 import { getQuote, getQuotesBatch } from "./data-layer/quotes";
@@ -1101,7 +1101,12 @@ export async function registerRoutes(
       const sector = fundamentals.sector || 'Unknown';
       const industry = fundamentals.industry || 'Unknown';
       const companyName = fundamentals.companyName || symbol;
-      let description = `${companyName} is a publicly traded company.`;
+      const description = buildListedInstrumentDescription({
+        symbol,
+        companyName: fundamentals.companyName,
+        industry,
+        sector,
+      });
 
       const sectorETFs = SECTOR_ETFS[sector] || [];
       const sectorStocks = STOCKS_BY_SECTOR[sector] || [];
@@ -1122,7 +1127,14 @@ export async function registerRoutes(
           marketCap: s.marketCap,
         }));
 
-      const isETF = ETF_SYMBOLS.has(symbol.toUpperCase());
+      const isETF =
+        ETF_SYMBOLS.has(symbol.toUpperCase()) ||
+        isNonEarningsIssuer({
+          symbol,
+          companyName: fundamentals.companyName,
+          industry,
+          sector,
+        });
       const etfHoldings = isETF ? (ETF_HOLDINGS[symbol.toUpperCase()] || []).map(h => ({
         symbol: h.symbol,
         name: h.name,

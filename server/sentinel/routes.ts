@@ -38,7 +38,7 @@ import {
   SENTINEL_ACCESS_TIERS,
 } from "@shared/sentinelTierAccess";
 import { parseIntradayChartTimeframe, DEFAULT_INTRADAY_CHART_TIMEFRAME } from "@shared/chart-timeframes";
-import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals, fetchEarningsHistory, isNonEarningsIssuer, emptyCorporateEarnings, sanitizeQuarterlyHistory } from "../fundamentals";
+import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals, fetchEarningsHistory, isNonEarningsIssuer, emptyCorporateEarnings, sanitizeQuarterlyHistory, buildListedInstrumentDescription } from "../fundamentals";
 import { resolveSessionMaLevelsForSymbol } from "../data-layer/session-adjusted-ma";
 import { isDelistedSymbol, scheduleDelistedTickerCheck } from "../market-condition/utils/delisted-ticker-registry";
 
@@ -7529,17 +7529,12 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
           marketCap: fundData.marketCap || 0,
         };
         
-        // companyDescription will be overridden by real FMP description if available (see below)
-        const displayName = fundamentalData.companyName || ticker;
-        const industryOrSector =
-          fundamentalData.industry !== "Unknown"
-            ? fundamentalData.industry
-            : fundamentalData.sector !== "Unknown"
-              ? fundamentalData.sector
-              : "";
-        companyDescription = industryOrSector
-          ? `${displayName} is a publicly traded company in the ${industryOrSector} sector.`
-          : `${displayName} is a publicly traded company.`;
+        companyDescription = buildListedInstrumentDescription({
+          symbol: ticker,
+          companyName: fundamentalData.companyName,
+          industry: fundamentalData.industry,
+          sector: fundamentalData.sector,
+        });
         
         const sector = fundamentalData.sector;
         sectorEtf = SECTOR_ETF_MAP[sector] || "";
@@ -7668,8 +7663,13 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         } catch {}
       }
 
-      // Prefer real FMP company description over generated fallback
-      const realDescription = extFundamentals.companyDescription || companyDescription;
+      const realDescription = buildListedInstrumentDescription({
+        symbol: ticker,
+        companyName: fundamentalData.companyName,
+        industry: fundamentalData.industry,
+        sector: fundamentalData.sector,
+        vendorDescription: extFundamentals.companyDescription || companyDescription,
+      });
 
       // Compute 52-week high/low from daily candles as fallback when FMP/Finnhub data is missing
       let week52High = extFundamentals.week52High ?? null;

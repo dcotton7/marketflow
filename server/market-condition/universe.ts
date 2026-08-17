@@ -392,6 +392,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     // Dead: IIVI→COHR, INFN, COMM, USM, SATS — do not re-add.
     candidates: ["CCOI", "LUMN", "AD", "ECHO"],
     etfProxies: [
+      { symbol: "FOTO", name: "Tuttle Capital Pure Play Photonics ETF", proxyType: "direct" },
       { symbol: "XLC", name: "Communication Services SPDR", proxyType: "macro" },
       { symbol: "TECS", name: "Direxion Daily Technology Bear 3X", proxyType: "inverse" },
       { symbol: "TECL", name: "Direxion Daily Technology Bull 3X", proxyType: "leveraged" },
