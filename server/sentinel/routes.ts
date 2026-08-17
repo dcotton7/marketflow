@@ -7308,12 +7308,17 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const ticker = String(req.query.ticker || "").toUpperCase();
       const timeframe = String(req.query.timeframe || "daily");
       const includeETH = req.query.includeETH as string | undefined;
+      const lookbackRaw = parseInt(String(req.query.lookbackDays ?? ""), 10);
+      const lookbackDays =
+        Number.isFinite(lookbackRaw) && lookbackRaw > 0
+          ? Math.min(180, lookbackRaw)
+          : undefined;
       if (!ticker) return res.status(400).json({ error: "Ticker is required" });
       if (isDelistedSymbol(ticker)) {
         return res.status(404).json({ error: `${ticker} is delisted and removed from the universe` });
       }
 
-      const data = await fetchChartData(ticker, timeframe, undefined, includeETH === 'true');
+      const data = await fetchChartData(ticker, timeframe, lookbackDays, includeETH === 'true');
       if (!data) {
         scheduleDelistedTickerCheck(ticker, "chart-data-empty");
         return res.status(404).json({ error: `No chart data found for ${ticker}` });

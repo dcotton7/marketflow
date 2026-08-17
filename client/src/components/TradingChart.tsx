@@ -241,150 +241,179 @@ const MA_CONFIG = INDICATOR_FIELD_MAP.map(({ field, templateId }) => {
   };
 });
 
-function renderMaLinesToChart(
-  chart: IChartApi,
+type MaLineOptions = {
+  color: string;
+  lineWidth: 1 | 2 | 3 | 4;
+  lineStyle?: LineStyle;
+  priceLineVisible: false;
+  lastValueVisible: false;
+  crosshairMarkerVisible: false;
+};
+
+type MaLineSpec = {
+  id: string;
+  lineData: LineData[];
+  options: MaLineOptions;
+};
+
+function valuesToLineData(
+  values: (number | null)[] | undefined,
+  candles: ChartCandle[]
+): LineData[] {
+  if (!values?.length) return [];
+  const lineData: LineData[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const val = values[i];
+    if (val !== null && i < candles.length) {
+      lineData.push({ time: candles[i].timestamp as any, value: val });
+    }
+  }
+  return lineData;
+}
+
+function collectMaLineSpecs(
   settings: MaSettingForChart[] | undefined,
   chartData: { candles: ChartCandle[]; indicators: ChartIndicators },
   tf: string,
   maDataLimits?: ChartMaDataLimits
-): ISeriesApi<"Line">[] {
-  const addedSeries: ISeriesApi<"Line">[] = [];
+): MaLineSpec[] {
+  const specs: MaLineSpec[] = [];
   const limits = maDataLimits ?? DEFAULT_CHART_MA_LIMITS;
   const feasibilityTf = chartTimeframeToFeasibilityKey(tf);
+  const hidden = {
+    priceLineVisible: false as const,
+    lastValueVisible: false as const,
+    crosshairMarkerVisible: false as const,
+  };
 
   if (settings && settings.length > 0) {
-    const closes = chartData.candles.map(c => c.close);
+    const closes = chartData.candles.map((c) => c.close);
     for (const setting of settings) {
       if (!getTimeframeToggle(setting, tf)) continue;
       if (!isMaRowFeasibleForTimeframe(setting, feasibilityTf, limits)) continue;
 
       let indicatorValues: (number | null)[] | undefined;
-
       const field = SYSTEM_ROW_TO_FIELD[setting.rowId];
       if (field) {
         indicatorValues = chartData.indicators[field];
       } else if (setting.maType === "sma" || setting.maType === "ema") {
         const effectivePeriod = getEffectivePeriod(setting, tf);
         if (effectivePeriod != null && effectivePeriod > 0 && closes.length > 0) {
-          indicatorValues = setting.maType === "ema"
-            ? computeEMA(closes, effectivePeriod)
-            : computeSMA(closes, effectivePeriod);
+          indicatorValues =
+            setting.maType === "ema"
+              ? computeEMA(closes, effectivePeriod)
+              : computeSMA(closes, effectivePeriod);
         }
       }
 
-      if (!indicatorValues || indicatorValues.length === 0) continue;
-
-      const lineData: LineData[] = [];
-      for (let i = 0; i < indicatorValues.length; i++) {
-        const val = indicatorValues[i];
-        if (val !== null && i < chartData.candles.length) {
-          lineData.push({ time: chartData.candles[i].timestamp as any, value: val });
-        }
-      }
-
-      if (lineData.length > 0) {
-        const lwStyle = LINE_TYPE_TO_STYLE[setting.lineType] ?? LineStyle.Solid;
-        const series = chart.addSeries(LineSeries, {
+      const lineData = valuesToLineData(indicatorValues, chartData.candles);
+      if (lineData.length === 0) continue;
+      const lwStyle = LINE_TYPE_TO_STYLE[setting.lineType] ?? LineStyle.Solid;
+      specs.push({
+        id: setting.rowId || `${setting.maType}-${setting.period ?? "x"}`,
+        lineData,
+        options: {
           color: setting.color,
-          lineWidth: (setting.maType === "vwap" || setting.maType === "vwap_hi" || setting.maType === "vwap_lo" ? 2 : (setting.period && setting.period >= 20 ? 2 : 1)) as 1 | 2 | 3 | 4,
+          lineWidth: (setting.maType === "vwap" || setting.maType === "vwap_hi" || setting.maType === "vwap_lo"
+            ? 2
+            : setting.period && setting.period >= 20
+              ? 2
+              : 1) as 1 | 2 | 3 | 4,
           lineStyle: lwStyle,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        series.setData(lineData);
-        addedSeries.push(series);
-      }
+          ...hidden,
+        },
+      });
     }
-  } else {
-    for (const ma of MA_CONFIG) {
-      if (ma.key === "sma200" && !isSma200DefaultOnForTimeframe(tf)) continue;
-      if (
-        ma.key === "sma200" &&
-        !isMaRowFeasibleForTimeframe({ maType: "sma", period: 200, calcOn: "daily" }, feasibilityTf, limits)
-      ) {
-        continue;
-      }
-      const indicatorValues = chartData.indicators[ma.key];
-      if (!indicatorValues || indicatorValues.length === 0) continue;
-
-      const lineData: LineData[] = [];
-      for (let i = 0; i < indicatorValues.length; i++) {
-        const val = indicatorValues[i];
-        if (val !== null && i < chartData.candles.length) {
-          lineData.push({ time: chartData.candles[i].timestamp as any, value: val });
-        }
-      }
-
-      if (lineData.length > 0) {
-        const series = chart.addSeries(LineSeries, {
-          color: ma.color,
-          lineWidth: (ma.lineWidth || 1) as 1 | 2 | 3 | 4,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        series.setData(lineData);
-        addedSeries.push(series);
-      }
-    }
-
-    const vwapVals = chartData.indicators.vwap;
-    if (vwapVals && vwapVals.length > 0) {
-      const lineData: LineData[] = [];
-      for (let i = 0; i < vwapVals.length; i++) {
-        const val = vwapVals[i];
-        if (val !== null && i < chartData.candles.length) {
-          lineData.push({ time: chartData.candles[i].timestamp as any, value: val });
-        }
-      }
-      if (lineData.length > 0) {
-        const series = chart.addSeries(LineSeries, {
-          color: "#fbbf24",
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        series.setData(lineData);
-        addedSeries.push(series);
-      }
-    }
-
-    const avwapConfigs = [
-      { key: "avwapHigh" as const, label: "VWAP Hi", color: "#f97316", style: LineStyle.Dotted },
-      { key: "avwapLow" as const, label: "VWAP Lo", color: "#38bdf8", style: LineStyle.Dotted },
-    ];
-
-    for (const avwap of avwapConfigs) {
-      const vals = chartData.indicators[avwap.key];
-      if (!vals || vals.length === 0) continue;
-
-      const lineData: LineData[] = [];
-      for (let i = 0; i < vals.length; i++) {
-        const val = vals[i];
-        if (val !== null && i < chartData.candles.length) {
-          lineData.push({ time: chartData.candles[i].timestamp as any, value: val });
-        }
-      }
-
-      if (lineData.length > 0) {
-        const series = chart.addSeries(LineSeries, {
-          color: avwap.color,
-          lineWidth: 2,
-          lineStyle: avwap.style,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        series.setData(lineData);
-        addedSeries.push(series);
-      }
-    }
+    return specs;
   }
 
-  return addedSeries;
+  for (const ma of MA_CONFIG) {
+    if (ma.key === "sma200" && !isSma200DefaultOnForTimeframe(tf)) continue;
+    if (
+      ma.key === "sma200" &&
+      !isMaRowFeasibleForTimeframe({ maType: "sma", period: 200, calcOn: "daily" }, feasibilityTf, limits)
+    ) {
+      continue;
+    }
+    const lineData = valuesToLineData(chartData.indicators[ma.key], chartData.candles);
+    if (lineData.length === 0) continue;
+    specs.push({
+      id: ma.key,
+      lineData,
+      options: {
+        color: ma.color,
+        lineWidth: (ma.lineWidth || 1) as 1 | 2 | 3 | 4,
+        ...hidden,
+      },
+    });
+  }
+
+  const vwapData = valuesToLineData(chartData.indicators.vwap, chartData.candles);
+  if (vwapData.length > 0) {
+    specs.push({
+      id: "vwap",
+      lineData: vwapData,
+      options: {
+        color: "#fbbf24",
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        ...hidden,
+      },
+    });
+  }
+
+  const avwapConfigs = [
+    { key: "avwapHigh" as const, color: "#f97316", style: LineStyle.Dotted },
+    { key: "avwapLow" as const, color: "#38bdf8", style: LineStyle.Dotted },
+  ];
+  for (const avwap of avwapConfigs) {
+    const lineData = valuesToLineData(chartData.indicators[avwap.key], chartData.candles);
+    if (lineData.length === 0) continue;
+    specs.push({
+      id: avwap.key,
+      lineData,
+      options: {
+        color: avwap.color,
+        lineWidth: 2,
+        lineStyle: avwap.style,
+        ...hidden,
+      },
+    });
+  }
+
+  return specs;
+}
+
+/** Update existing MA series in place so a late 50d fill does not tear down the chart. */
+function syncMaLinesToChart(
+  chart: IChartApi,
+  specs: MaLineSpec[],
+  seriesById: Map<string, ISeriesApi<"Line">>
+): ISeriesApi<"Line">[] {
+  const nextIds = new Set(specs.map((s) => s.id));
+  for (const [id, series] of seriesById) {
+    if (nextIds.has(id)) continue;
+    try {
+      chart.removeSeries(series);
+    } catch {}
+    seriesById.delete(id);
+  }
+  for (const spec of specs) {
+    const existing = seriesById.get(spec.id);
+    if (existing) {
+      existing.setData(spec.lineData);
+      existing.applyOptions({
+        color: spec.options.color,
+        lineWidth: spec.options.lineWidth,
+        lineStyle: spec.options.lineStyle,
+      });
+      continue;
+    }
+    const series = chart.addSeries(LineSeries, spec.options);
+    series.setData(spec.lineData);
+    seriesById.set(spec.id, series);
+  }
+  return [...seriesById.values()];
 }
 
 interface MeasurePoint {
@@ -548,6 +577,7 @@ export function TradingChart({
   const priceLinesRef = useRef<any[]>([]);
   const latestPriceLinesRef = useRef(priceLines); // Store latest priceLines for re-application after chart recreation
   const maLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const maSeriesByIdRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const measurePrimitiveRef = useRef<MeasurePrimitive | null>(null);
   const measureStartRef = useRef<MeasurePoint | null>(null);
   const shiftKeyRef = useRef(false);
@@ -596,6 +626,13 @@ export function TradingChart({
         : `${chartTicker}|${candleLen}|${cFirst!.timestamp}|${cLast!.timestamp}|${cLast!.close}|${cLast!.volume}|${whiteExtendedHoursCandles}`,
     [chartTicker, candleLen, cFirst?.timestamp, cLast?.timestamp, cLast?.close, cLast?.volume, whiteExtendedHoursCandles]
   );
+  const sma50Series = displayData.indicators?.sma50;
+  const maSyncKey = useMemo(() => {
+    if (!sma50Series?.length) return `${chartTicker}|ma-none`;
+    const last = sma50Series[sma50Series.length - 1];
+    const firstHit = sma50Series.find((v) => v != null);
+    return `${chartTicker}|${sma50Series.length}|${firstHit ?? "n"}|${last ?? "n"}`;
+  }, [chartTicker, sma50Series]);
   const hasCandles = candleLen > 0;
 
   const displayDataRef = useRef(displayData);
@@ -843,7 +880,11 @@ export function TradingChart({
 
     candleSeries.setData(candleData);
 
-    maLineSeriesRef.current = renderMaLinesToChart(chart, maSettings, displayData, timeframe, maDataLimits);
+    maLineSeriesRef.current = syncMaLinesToChart(
+      chart,
+      collectMaLineSpecs(maSettings, displayData, timeframe, maDataLimits),
+      maSeriesByIdRef.current
+    );
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -941,6 +982,7 @@ export function TradingChart({
         priceLinesRef.current = [];
         setChartReady(false);
         maLineSeriesRef.current = [];
+        maSeriesByIdRef.current.clear();
         for (const s of resistanceLineSeriesRef.current) {
           try { chart.removeSeries(s); } catch {}
         }
@@ -972,19 +1014,17 @@ export function TradingChart({
   useEffect(() => {
     if (!chartRef.current) return;
     const chart = chartRef.current;
-    for (const s of maLineSeriesRef.current) {
-      try {
-        chart.removeSeries(s);
-      } catch {}
-    }
-    maLineSeriesRef.current = renderMaLinesToChart(
+    const n = displayDataRef.current.candles.length;
+    const visible = chart.timeScale().getVisibleLogicalRange();
+    maLineSeriesRef.current = syncMaLinesToChart(
       chart,
-      maSettings,
-      displayDataRef.current,
-      timeframe,
-      maDataLimits
+      collectMaLineSpecs(maSettings, displayDataRef.current, timeframe, maDataLimits),
+      maSeriesByIdRef.current
     );
-  }, [maSettings, timeframe, candleSyncKey, maDataLimits]);
+    if (visible && n > 0 && visible.from < n && visible.to < n + 40) {
+      chart.timeScale().setVisibleLogicalRange(visible);
+    }
+  }, [maSettings, timeframe, candleSyncKey, maSyncKey, maDataLimits]);
 
   useEffect(() => {
     if (!chartRef.current || !chartReady) return;
@@ -1187,7 +1227,7 @@ export function TradingChart({
     } catch (e) {
       console.warn("[TradingChart] resistanceLines render error:", e);
     }
-  }, [resistanceLines, displayData]);
+  }, [resistanceLines, candleSyncKey]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1235,7 +1275,7 @@ export function TradingChart({
     } catch (e) {
       console.warn("[TradingChart] baseZones render error:", e);
     }
-  }, [baseZones, displayData]);
+  }, [baseZones, candleSyncKey]);
 
   // Render Support/Resistance Gaps
   useEffect(() => {

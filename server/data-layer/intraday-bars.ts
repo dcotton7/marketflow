@@ -238,8 +238,13 @@ export async function getIntradayBars(
   const cached = intradayCache.get(cacheKey);
   const ttlMs = getTTLMs();
   const now = new Date();
+  const cachedCoversStart = (entry: IntradayCacheValue) => {
+    if (entry.bars.length === 0) return false;
+    const firstMs = new Date(entry.bars[0]!.timestamp).getTime();
+    return Number.isFinite(firstMs) && firstMs <= startDate.getTime() + 86_400_000;
+  };
   
-  if (cached) {
+  if (cached && cachedCoversStart(cached)) {
     const ageMs = Date.now() - cached.fetchedAt.getTime();
     
     if (ageMs < ttlMs) {

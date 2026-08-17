@@ -340,6 +340,52 @@ function computeIndicatorBundle(candles: ChartCandle[], timeframe: string): Sent
   return { ema5: ma5, ema10: ma10, sma21: ma20, sma50: ma50, sma200: ma200, vwap, avwapHigh, avwapLow };
 }
 
+/** Short window shown on the chart. Long MA fetches still compute on more history, then slice to this. */
+export const INTRADAY_DISPLAY_LOOKBACK: Record<string, number> = {
+  "5min": 12,
+  "15min": 40,
+  "30min": 40,
+};
+
+/** Calendar days needed to form a 50-day SMA on 5m/15m/30m bars. */
+export const INTRADAY_MA50_LOOKBACK_DAYS = 90;
+
+function sliceIndicatorBundle(
+  bundle: SentinelChartIndicators,
+  from: number
+): SentinelChartIndicators {
+  const cut = <T,>(arr: T[] | undefined): T[] | undefined =>
+    arr ? arr.slice(from) : undefined;
+  return {
+    ema5: bundle.ema5.slice(from),
+    ema10: bundle.ema10.slice(from),
+    sma21: bundle.sma21.slice(from),
+    sma50: bundle.sma50.slice(from),
+    sma200: bundle.sma200.slice(from),
+    vwap: cut(bundle.vwap),
+    avwapHigh: cut(bundle.avwapHigh),
+    avwapLow: cut(bundle.avwapLow),
+  };
+}
+
+/** Keep the visible candle window unchanged; drop warmup bars used only to form long MAs. */
+function sliceToDisplayWindow(
+  candles: ChartCandle[],
+  displayDays: number,
+  ...bundles: SentinelChartIndicators[]
+): { candles: ChartCandle[]; bundles: SentinelChartIndicators[] } {
+  if (candles.length === 0) return { candles, bundles };
+  const lastTs = candles[candles.length - 1]!.timestamp;
+  const cutoff = lastTs - displayDays * 86400;
+  let from = 0;
+  while (from < candles.length && candles[from]!.timestamp < cutoff) from++;
+  if (from <= 0) return { candles, bundles };
+  return {
+    candles: candles.slice(from),
+    bundles: bundles.map((b) => sliceIndicatorBundle(b, from)),
+  };
+}
+
 /** Map RTH-only indicator series (aligned to RTH candles only) onto full ETH-inclusive candle timeline. */
 function expandRthIndicatorsOntoFullSeries(
   fullCandles: ChartCandle[],
@@ -465,9 +511,9 @@ export async function fetchChartData(
      * Keep intraday lookbacks short — long ETH 5m windows paginate hard and fail empty
      * under mid-morning Alpaca load (scanner + hit-rates + concurrent charts).
      */
-    const intradayLookback: Record<string, number> = { "5min": 12, "15min": 40, "30min": 40 };
     const isIntraday = timeframe !== "daily";
-    const days = lookbackDays || (isIntraday ? (intradayLookback[timeframe] || 40) : 750);
+    const displayDays = INTRADAY_DISPLAY_LOOKBACK[timeframe] || 40;
+    const days = lookbackDays || (isIntraday ? displayDays : 750);
     const intervalMap: Record<string, string> = { "daily": "1d", "5min": "5m", "15min": "15m", "30min": "30m" };
     const interval = intervalMap[timeframe] || "1d";
     const symbol = ticker.toUpperCase();
@@ -526,11 +572,11 @@ export async function fetchChartData(
         rthCandles.length >= 10
           ? expandRthIndicatorsOntoFullSeries(finalCandles, rthCandles, rthBundle)
           : extendedBundle;
-
+      const sliced = sliceToDisplayWindow(finalCandles, displayDays, rthExpanded, extendedBundle);
       return {
-        candles: finalCandles,
-        indicators: rthExpanded,
-        indicatorsExtended: extendedBundle,
+        candles: sliced.candles,
+        indicators: sliced.bundles[0]!,
+        indicatorsExtended: sliced.bundles[1],
         indicatorsMeta: { ...metaBase, primarySession: "rth" },
         gaps,
         ticker: symbol,
@@ -539,6 +585,17 @@ export async function fetchChartData(
     }
 
     const indicators = computeIndicatorBundle(finalCandles, timeframe);
+    if (isIntraday) {
+      const sliced = sliceToDisplayWindow(finalCandles, displayDays, indicators);
+      return {
+        candles: sliced.candles,
+        indicators: sliced.bundles[0]!,
+        indicatorsMeta: metaBase,
+        gaps,
+        ticker: symbol,
+        timeframe,
+      };
+    }
 
     return {
       candles: finalCandles,

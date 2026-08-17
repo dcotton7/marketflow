@@ -29,10 +29,12 @@ export const sentinelChartDataQueryKey = (
 export async function fetchSentinelChartData(
   ticker: string,
   timeframe: string,
-  includeETH: boolean
+  includeETH: boolean,
+  lookbackDays?: number
 ): Promise<ChartDataResponse> {
   const params = new URLSearchParams({ ticker, timeframe });
   if (includeETH) params.set("includeETH", "true");
+  if (lookbackDays && lookbackDays > 0) params.set("lookbackDays", String(lookbackDays));
   const res = await fetch(`/api/sentinel/chart-data?${params}`, {
     cache: "no-store",
     credentials: "include",
@@ -62,13 +64,14 @@ export function useSentinelDailyChartData(ticker: string | undefined, options?: 
 }
 
 /**
- * Keep prior candles only when the symbol matches (smooth ETH toggle).
- * `keepPreviousData` alone would show the old ticker on intraday while the new symbol loads.
+ * Keep prior candles only when symbol AND timeframe match (smooth ETH toggle).
+ * A 5m placeholder on a 30m chart leaves the time scale sized for the wrong bar count.
  */
-function intradayPlaceholderForTicker(ticker: string | undefined) {
+function intradayPlaceholderForTicker(ticker: string | undefined, timeframe: string) {
   return (previousData: ChartDataResponse | undefined): ChartDataResponse | undefined => {
     if (!ticker || !previousData?.ticker) return undefined;
     if (previousData.ticker.toUpperCase() !== ticker.toUpperCase()) return undefined;
+    if (previousData.timeframe && previousData.timeframe !== timeframe) return undefined;
     return previousData;
   };
 }
@@ -85,7 +88,7 @@ export function useSentinelIntradayChartData(
       : ["/api/sentinel/chart-data", "", timeframe, includeETH],
     queryFn: () => fetchSentinelChartData(ticker!, timeframe, includeETH),
     enabled: !!ticker,
-    placeholderData: intradayPlaceholderForTicker(ticker),
+    placeholderData: intradayPlaceholderForTicker(ticker, timeframe),
     refetchInterval: getChartRefetchIntervalMs(),
     gcTime: 2 * 60 * 60_000,
     retry: 3,

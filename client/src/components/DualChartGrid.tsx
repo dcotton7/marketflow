@@ -32,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
 import { DEFAULT_CHART_MA_LIMITS, type ChartMaDataLimits } from "@/lib/chart-ma-feasibility";
+import { fetchSentinelChartData } from "@/hooks/use-sentinel-chart-data";
 import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 import {
   ChartInfoFooter,
@@ -50,6 +51,65 @@ export type ChartDataResponse = {
   ticker: string;
   timeframe: string;
 };
+
+const INTRADAY_MA50_LOOKBACK_DAYS = 90;
+
+function isSma50OnForTimeframe(
+  rows: Array<{ rowId?: string; period?: number | null; fiveMinOn?: boolean; fifteenMinOn?: boolean; thirtyMinOn?: boolean; isVisible?: boolean }> | undefined,
+  timeframe: string
+): boolean {
+  if (!rows) return false;
+  if (!rows.length) return true;
+  const row = rows.find((r) => r.rowId === "sys_sma50" || r.period === 50);
+  if (!row || row.isVisible === false) return false;
+  const tf = timeframe.toLowerCase();
+  if (tf === "5min" || tf === "5m") return !!row.fiveMinOn;
+  if (tf === "15min" || tf === "15m") return !!row.fifteenMinOn;
+  if (tf === "30min" || tf === "30m") return !!row.thirtyMinOn;
+  return false;
+}
+
+function alignIndicatorBundle(
+  candles: ChartCandle[],
+  patchCandles: ChartCandle[],
+  bundle: ChartIndicators
+): ChartIndicators {
+  const idx = new Map<number, number>();
+  for (let i = 0; i < patchCandles.length; i++) {
+    idx.set(patchCandles[i]!.timestamp, i);
+  }
+  const pick = (arr: (number | null)[] | undefined) => {
+    if (!arr?.length) return arr;
+    return candles.map((c) => {
+      const i = idx.get(c.timestamp);
+      return i == null ? null : (arr[i] ?? null);
+    });
+  };
+  return {
+    ema5: pick(bundle.ema5) ?? [],
+    ema10: pick(bundle.ema10) ?? [],
+    sma21: pick(bundle.sma21) ?? [],
+    sma50: pick(bundle.sma50) ?? [],
+    sma200: pick(bundle.sma200) ?? [],
+    vwap: pick(bundle.vwap),
+    avwapHigh: pick(bundle.avwapHigh),
+    avwapLow: pick(bundle.avwapLow),
+  };
+}
+
+function patchIntradayIndicators(
+  base: ChartDataResponse,
+  patch: ChartDataResponse
+): ChartDataResponse {
+  return {
+    ...base,
+    candles: base.candles,
+    indicators: alignIndicatorBundle(base.candles, patch.candles, patch.indicators),
+    indicatorsExtended: patch.indicatorsExtended
+      ? alignIndicatorBundle(base.candles, patch.candles, patch.indicatorsExtended)
+      : base.indicatorsExtended,
+  };
+}
 
 export interface QuarterlyEarning {
   quarter: string;
@@ -540,6 +600,60 @@ export function DualChartGrid({
     queryKey: ["/api/sentinel/ma-settings"],
   });
 
+  const sma50On = isSma50OnForTimeframe(maSettingsData, intradayTimeframe);
+  const [ma50Patch, setMa50Patch] = useState<ChartDataResponse | null>(null);
+  const [ma50Loading, setMa50Loading] = useState(false);
+  const [ma50Loaded, setMa50Loaded] = useState(false);
+  const [ma50LoadSec, setMa50LoadSec] = useState(0);
+  const ma50InFlightRef = useRef(false);
+  const ma50TickRef = useRef<number | null>(null);
+
+  const clearMa50Timer = useCallback(() => {
+    if (ma50TickRef.current != null) {
+      window.clearInterval(ma50TickRef.current);
+      ma50TickRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    setMa50Patch(null);
+    setMa50Loaded(false);
+    setMa50Loading(false);
+    setMa50LoadSec(0);
+    ma50InFlightRef.current = false;
+    clearMa50Timer();
+  }, [symbol, intradayTimeframe, showETH, clearMa50Timer]);
+
+  useEffect(() => () => clearMa50Timer(), [clearMa50Timer]);
+
+  const loadMa50 = useCallback(async () => {
+    if (!symbol || ma50InFlightRef.current || ma50Loaded) return;
+    ma50InFlightRef.current = true;
+    setMa50Loading(true);
+    setMa50LoadSec(0);
+    clearMa50Timer();
+    const t0 = Date.now();
+    ma50TickRef.current = window.setInterval(() => {
+      setMa50LoadSec(Math.floor((Date.now() - t0) / 1000));
+    }, 250);
+    try {
+      const next = await fetchSentinelChartData(
+        symbol,
+        intradayTimeframe,
+        showETH,
+        INTRADAY_MA50_LOOKBACK_DAYS
+      );
+      setMa50Patch(next);
+      setMa50Loaded(true);
+    } catch (err) {
+      console.warn("[DualChartGrid] 50d load failed:", err);
+    } finally {
+      clearMa50Timer();
+      ma50InFlightRef.current = false;
+      setMa50Loading(false);
+    }
+  }, [symbol, intradayTimeframe, showETH, ma50Loaded, clearMa50Timer]);
+
   const { data: chartPrefs } = useQuery<{
     defaultBarsOnScreen: number;
     dataLimitDaily?: number;
@@ -614,18 +728,38 @@ export function DualChartGrid({
       showIntradayMaBasisToggle &&
       showETH &&
       intradayMaBasis === "extended" &&
-      intradayData.indicatorsExtended;
-    const indicators = useExt ? intradayData.indicatorsExtended! : intradayData.indicators;
-    return { ...intradayData, indicators };
-  }, [intradayData, showIntradayMaBasisToggle, showETH, intradayMaBasis]);
+      (ma50Patch?.indicatorsExtended ?? intradayData.indicatorsExtended);
+    const source = ma50Patch ? patchIntradayIndicators(intradayData, ma50Patch) : intradayData;
+    const indicators = useExt ? source.indicatorsExtended! : source.indicators;
+    return { ...source, indicators };
+  }, [intradayData, showIntradayMaBasisToggle, showETH, intradayMaBasis, ma50Patch]);
 
   const intradayTickerMismatch = useMemo(() => {
     if (!symbol || !intradayData?.ticker) return false;
     return intradayData.ticker.toUpperCase() !== symbol.toUpperCase();
   }, [symbol, intradayData?.ticker]);
 
+  const intradayTimeframeMismatch = !!(
+    intradayData?.timeframe &&
+    intradayData.timeframe !== intradayTimeframe
+  );
+
   const intradayBlockingLoad =
-    !!symbol && ((intradayLoading && !intradayData) || intradayTickerMismatch);
+    !!symbol &&
+    ((intradayLoading && !intradayData) ||
+      intradayTickerMismatch ||
+      intradayTimeframeMismatch);
+
+  const firstIntradayReady =
+    !!intradayData &&
+    !intradayBlockingLoad &&
+    (!intradayData.timeframe || intradayData.timeframe === intradayTimeframe);
+
+  useEffect(() => {
+    if (!firstIntradayReady || !sma50On || ma50Loaded || ma50Loading) return;
+    if (intradayTimeframe !== "30min") return;
+    void loadMa50();
+  }, [firstIntradayReady, sma50On, ma50Loaded, ma50Loading, intradayTimeframe, loadMa50]);
 
   const [intradayLoadSec, setIntradayLoadSec] = useState(0);
   useEffect(() => {
@@ -906,6 +1040,28 @@ export function DualChartGrid({
               </Button>
             )}
           </>
+        )}
+        {sma50On && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!firstIntradayReady || ma50Loaded}
+            className={`min-w-[2.25rem] text-white text-[10px] font-semibold tabular-nums toggle-elevate ${ma50Loaded ? "toggle-elevated bg-white/15" : ""} ${ma50Loading ? "text-amber-300" : ""}`}
+            onClick={() => void loadMa50()}
+            style={ma50Loaded ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
+            data-testid={`${pid}button-intraday-load-50d`}
+            title={
+              ma50Loading
+                ? `Loading 50-day SMA… ${ma50LoadSec}s`
+                : ma50Loaded
+                  ? "50-day SMA loaded for this timeframe"
+                  : firstIntradayReady
+                    ? "Fetch enough history to draw the 50-day SMA on this timeframe"
+                    : "Available after the chart loads"
+            }
+          >
+            {ma50Loading ? `${ma50LoadSec}s` : "50d"}
+          </Button>
         )}
       </div>
       <div className="relative min-h-0 flex-1">
