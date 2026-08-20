@@ -145,10 +145,39 @@ function persistToDb(cards: DiscoveryCard[]): void {
       raiAtSignal: frame?.rai ?? null,
     };
   });
+  persistRows(rows);
+}
+
+type DiscoveryRow = typeof scannerDiscoveries.$inferInsert;
+
+/**
+ * Write the batch, and if the batch is refused, write it row by row.
+ *
+ * A batch is one INSERT, so a single row Postgres will not take aborts the
+ * whole statement and every healthy signal beside it is lost. That is how one
+ * over-length theme id came to cost more than half a day of discoveries. The
+ * retry costs nothing on the normal path, because it only runs once the batch
+ * has already failed, and it turns "the scanner went quiet" into one logged
+ * line naming the signal that could not be stored.
+ */
+function persistRows(rows: DiscoveryRow[]): void {
+  if (!db || rows.length === 0) return;
   db.insert(scannerDiscoveries)
     .values(rows)
     .then(() => {})
-    .catch((err) => console.warn("[Scanner DB] Persist failed:", String(err).slice(0, 150)));
+    .catch((err) => {
+      if (rows.length === 1) {
+        const row = rows[0]!;
+        console.warn(
+          `[Scanner DB] Dropped ${row.signalType} for ${row.subject}: ${String(err).slice(0, 150)}`
+        );
+        return;
+      }
+      console.warn(
+        `[Scanner DB] Batch of ${rows.length} refused, retrying singly: ${String(err).slice(0, 150)}`
+      );
+      for (const row of rows) persistRows([row]);
+    });
 }
 
 // Flush any cards already in memory to DB on first import (catches cards created before wiring)

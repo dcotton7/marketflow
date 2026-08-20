@@ -101,7 +101,9 @@ export const scannerDiscoveries = pgTable("scanner_discoveries", {
   pipelineId: varchar("pipeline_id", { length: 64 }).notNull(),
   pipelineName: varchar("pipeline_name", { length: 128 }).notNull(),
   signalType: varchar("signal_type", { length: 32 }).notNull(),
-  subject: varchar("subject", { length: 16 }).notNull(),
+  // A ticker or a theme id. Sized to match theme_id: four theme ids are longer
+  // than 16 characters, and at that width their signals were rejected outright.
+  subject: varchar("subject", { length: 64 }).notNull(),
   subjectKind: varchar("subject_kind", { length: 16 }).notNull(),
   direction: varchar("direction", { length: 8 }).notNull(),
   magnitude: decimal("magnitude", { precision: 8, scale: 2 }).notNull().default("0"),
