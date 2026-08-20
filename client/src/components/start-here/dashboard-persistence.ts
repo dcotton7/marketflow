@@ -1836,9 +1836,6 @@ export function reflowWatchlistChartWalls(
     chartWallColumns
   );
   const chartsPerRow = resolveChartsPerRowPreference(width, chartWallColumns);
-  const preserveIds = dashboard.defaultChartInstanceId
-    ? [dashboard.defaultChartInstanceId]
-    : [];
 
   // Every wall that exists, whether or not the watchlist that built it is still
   // on the page. Insertion order keeps the result deterministic for a given
@@ -1849,8 +1846,11 @@ export function reflowWatchlistChartWalls(
     else if (meta.type === "chart" && meta.watchlistLoadSourceId) wallIds.add(meta.watchlistLoadSourceId);
   }
 
-  // Claim each wall's charts in turn, so no chart is packed twice.
-  const claimed = new Set<string>(preserveIds);
+  // Claim each wall's charts in turn, so no chart is packed twice. The default
+  // chart is deliberately not held back: "3 per row" means every chart on the
+  // wall, and leaving the first one at its old size makes the row it sits in
+  // look like the control half-worked.
+  const claimed = new Set<string>();
   const walls: string[][] = [];
 
   for (const wallId of wallIds) {
@@ -1891,10 +1891,12 @@ export function reflowWatchlistChartWalls(
       .filter((l): l is Layout[number] => l != null);
     if (groupLayouts.length === 0) continue;
 
-    const anchorY = Math.min(...groupLayouts.map((l) => l.y));
-    const topRow = groupLayouts.filter((l) => l.y === anchorY);
-    const startX = Math.min(...topRow.map((l) => l.x));
-    const startY = anchorY;
+    // Keep the wall where it sits vertically, but always start its rows at the
+    // left edge. Starting from wherever the first chart happened to be left a
+    // short row that could not hold the chosen count, so the top of the wall
+    // came out with one or two charts on it while the rest packed correctly.
+    const startY = Math.min(...groupLayouts.map((l) => l.y));
+    const startX = 0;
     const chartIdSet = new Set(chartIds);
 
     const withoutGroup = layout.filter((l) => !chartIdSet.has(l.i));

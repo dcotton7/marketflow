@@ -241,7 +241,8 @@ function testReflowWatchlistChartWallsOnDensityChange(): void {
     2,
     { clientWidthPx: 1600, clientHeightPx: 900, suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT }
   );
-  assert(count === 5, "Expected five charts reflowed");
+  // Five from the watchlist plus the default chart, which is no longer held back.
+  assert(count === 6, `Expected six charts reflowed, got ${count}`);
   const after = reflowed.layout.filter((l) => reflowed.instances[l.i]?.watchlistLoadSourceId === wl);
   assert(after.length === 5, "Expected five watchlist charts after reflow");
   assert(after[0]!.w === 6, "Chart width should follow 2-per-row density (w=6)");
@@ -280,7 +281,8 @@ function testReflowSurvivesClosingTheWatchlist(): void {
     clientHeightPx: 900,
     suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
   });
-  assert(count === 5, `Expected five charts reflowed after closing the watchlist, got ${count}`);
+  // Five orphaned charts plus the default chart, which reflows with them.
+  assert(count === 6, `Expected six charts reflowed after closing the watchlist, got ${count}`);
   const after = reflowed.layout.filter((l) => reflowed.instances[l.i]?.watchlistLoadSourceId === wl);
   assert(after.every((l) => l.w === 6), "Every orphaned chart should take the 2-per-row width");
   const rows = new Set(after.map((l) => l.y));
@@ -320,7 +322,8 @@ function testReflowPacksHandPlacedCharts(): void {
     clientHeightPx: 900,
     suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
   });
-  assert(count === 4, `Expected four hand-placed charts reflowed, got ${count}`);
+  // Four hand-placed charts plus the default chart, which reflows with them.
+  assert(count === 5, `Expected five charts reflowed, got ${count}`);
   const handIds = new Set(hand.map(([id]) => id));
   const after = reflowed.layout.filter((l) => handIds.has(l.i));
   assert(after.every((l) => l.w === 6), "Every chart should take the 2-per-row width");
@@ -328,15 +331,85 @@ function testReflowPacksHandPlacedCharts(): void {
   assert(rows.size >= 2, "Four charts at two per row should span two rows");
 }
 
-/** A page with no walls at all still must not throw or claim work it did not do. */
-function testReflowWithNoChartWallsDoesNothing(): void {
-  const seeded = appendLinkedChartTriplet(createDefaultDashboard());
+/**
+ * "3 per row" has to mean all of them, the same size, three to a row.
+ *
+ * Two things stopped it meaning that. The default chart was held back, so it
+ * kept its old size while everything around it changed, and each wall started
+ * packing from wherever its first chart happened to sit rather than the left
+ * edge, which left a short top row that could not hold the chosen count.
+ */
+function testThreePerRowMeansEveryChartSameSize(): void {
+  let dash = createDefaultDashboard();
+  for (const [id, meta] of Object.entries(dash.instances)) {
+    if (meta.type !== "chart") dash = removeInstance(dash, id);
+  }
+  for (const sym of ["MU", "SNDK", "DELL"]) {
+    dash = addChartFromWatchlistSymbol(dash, sym);
+  }
+  const defaultId = dash.defaultChartInstanceId;
+  assert(!!defaultId, "Fixture should keep the default chart");
+  // Reproduce the live board: the default chart is a different size and the
+  // wall does not begin at the left edge.
+  dash = {
+    ...dash,
+    layout: dash.layout.map((l) => (l.i === defaultId ? { ...l, x: 4, y: 0, w: 4, h: 10 } : l)),
+  };
+
+  const chartIds = Object.entries(dash.instances)
+    .filter(([, m]) => m.type === "chart")
+    .map(([id]) => id);
+  assert(chartIds.length === 4, `Expected four charts including the default, got ${chartIds.length}`);
+
+  const { dashboard: reflowed, reflowed: count } = reflowWatchlistChartWalls(dash, 3, {
+    clientWidthPx: 1600,
+    clientHeightPx: 900,
+    suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
+  });
+  assert(count === 4, `Every chart should reflow, including the default, got ${count}`);
+
+  const after = reflowed.layout.filter((l) => chartIds.includes(l.i));
+  const widths = new Set(after.map((l) => l.w));
+  const heights = new Set(after.map((l) => l.h));
+  assert(widths.size === 1, `All charts should share one width, got ${[...widths].join(",")}`);
+  assert(heights.size === 1, `All charts should share one height, got ${[...heights].join(",")}`);
+  assert(after.every((l) => l.w === 4), `3 per row of 12 columns is w=4, got ${[...widths].join(",")}`);
+
+  const byRow = new Map<number, number>();
+  for (const l of after) byRow.set(l.y, (byRow.get(l.y) ?? 0) + 1);
+  const topRowY = Math.min(...after.map((l) => l.y));
+  assert(byRow.get(topRowY) === 3, `Top row should hold three charts, got ${byRow.get(topRowY)}`);
+  assert(
+    after.some((l) => l.y === topRowY && l.x === 0),
+    "The wall should start at the left edge"
+  );
+  const xs = after.filter((l) => l.y === topRowY).map((l) => l.x).sort((a, b) => a - b);
+  assert(xs.join(",") === "0,4,8", `Top row should sit at x=0,4,8, got ${xs.join(",")}`);
+}
+
+/**
+ * A locked linked set is not a wall.
+ *
+ * Those four charts are arranged on purpose and carry a lock in the UI, so
+ * density leaves them alone. With nothing else on the board there is no work
+ * to do, and the dashboard must come back untouched rather than merely equal.
+ */
+function testReflowLeavesLockedLinkedChartsAlone(): void {
+  let seeded = appendLinkedChartTriplet(createDefaultDashboard());
+  if (seeded.defaultChartInstanceId) {
+    seeded = removeInstance(seeded, seeded.defaultChartInstanceId);
+  }
+  const unlocked = Object.values(seeded.instances).filter(
+    (m) => m.type === "chart" && !m.linkedSetLocked
+  );
+  assert(unlocked.length === 0, `Fixture should leave only locked charts, got ${unlocked.length}`);
+
   const { dashboard: next, reflowed } = reflowWatchlistChartWalls(seeded, 2, {
     clientWidthPx: 1600,
     clientHeightPx: 900,
     suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
   });
-  assert(reflowed === 0, "Linked charts are not a watchlist wall and should not be reflowed");
+  assert(reflowed === 0, "Locked linked charts should never be repacked by density");
   assert(next === seeded, "An untouched dashboard should be returned by identity");
 }
 
@@ -361,7 +434,8 @@ function runAll(): void {
   testReflowWatchlistChartWallsOnDensityChange();
   testReflowSurvivesClosingTheWatchlist();
   testReflowPacksHandPlacedCharts();
-  testReflowWithNoChartWallsDoesNothing();
+  testThreePerRowMeansEveryChartSameSize();
+  testReflowLeavesLockedLinkedChartsAlone();
   testClearAllWidgetsStaysEmpty();
   console.log("✅ Start Here dashboard persistence smoke tests passed");
 }
