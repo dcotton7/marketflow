@@ -12,6 +12,7 @@ import {
   findBulkChartGridPlacement,
   loadChartsFromList,
   reflowWatchlistChartWalls,
+  removeInstance,
   resolveBulkChartCellsForViewport,
   resolveChartsPerRowPreference,
   sanitizeDashboard,
@@ -248,6 +249,97 @@ function testReflowWatchlistChartWallsOnDensityChange(): void {
   assert(rows.size >= 2, "Two per row should span multiple rows for five charts");
 }
 
+/**
+ * Closing the watchlist tile must not strand the wall it built.
+ *
+ * The charts keep the tag naming the watchlist that spawned them, and that tag
+ * outlives the tile. Reflowing only walls whose watchlist is still on the page
+ * left the density control changing its own value and moving nothing, which
+ * reads as a dead control rather than one that no longer applies.
+ */
+function testReflowSurvivesClosingTheWatchlist(): void {
+  const gid = "sh_lane_orphan";
+  const wl = "sh_watchlist_orphan";
+  const seed = withWatchlistGroup(createDefaultDashboard(), gid, "SPY", 2);
+  seed.instances[wl] = { type: "watchlist", groupId: gid };
+  const loaded = loadChartsFromList(seed, ["AMD", "NVDA", "MSFT", "GOOG", "META"], {
+    inheritGroupId: gid,
+    watchlistLoadSourceId: wl,
+    gridViewport: startHereGridViewportMetrics(1600, 900, 5),
+  }).dashboard;
+
+  const closed = removeInstance(loaded, wl);
+  assert(!closed.instances[wl], "Watchlist tile should be gone");
+  const stillTagged = Object.values(closed.instances).filter(
+    (m) => m.type === "chart" && m.watchlistLoadSourceId === wl
+  ).length;
+  assert(stillTagged === 5, `Expected five charts still tagged to the closed watchlist, got ${stillTagged}`);
+
+  const { dashboard: reflowed, reflowed: count } = reflowWatchlistChartWalls(closed, 2, {
+    clientWidthPx: 1600,
+    clientHeightPx: 900,
+    suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
+  });
+  assert(count === 5, `Expected five charts reflowed after closing the watchlist, got ${count}`);
+  const after = reflowed.layout.filter((l) => reflowed.instances[l.i]?.watchlistLoadSourceId === wl);
+  assert(after.every((l) => l.w === 6), "Every orphaned chart should take the 2-per-row width");
+  const rows = new Set(after.map((l) => l.y));
+  assert(rows.size >= 2, "Five charts at two per row should span multiple rows");
+}
+
+/**
+ * A board the user built by hand is a wall too.
+ *
+ * Live boards exist with charts on them and no watchlist anywhere on the page.
+ * Nothing on such a board carries a watchlist tag, so density had no wall to
+ * pack: the control changed its own value and every chart stayed where it was.
+ */
+function testReflowPacksHandPlacedCharts(): void {
+  let dash = createDefaultDashboard();
+  for (const [id, meta] of Object.entries(dash.instances)) {
+    if (meta.type === "watchlist") dash = removeInstance(dash, id);
+  }
+  for (const sym of ["AMD", "NVDA", "MSFT", "GOOG"]) {
+    dash = addChartFromWatchlistSymbol(dash, sym);
+  }
+  assert(
+    !Object.values(dash.instances).some((m) => m.type === "watchlist"),
+    "Fixture should have no watchlist widget on the page"
+  );
+  const hand = Object.entries(dash.instances).filter(
+    ([id, m]) => m.type === "chart" && !m.linkedSetLocked && id !== dash.defaultChartInstanceId
+  );
+  assert(hand.length === 4, `Expected four hand-placed charts, got ${hand.length}`);
+  assert(
+    hand.every(([, m]) => !m.watchlistLoadSourceId),
+    "Hand-placed charts should carry no watchlist tag"
+  );
+
+  const { dashboard: reflowed, reflowed: count } = reflowWatchlistChartWalls(dash, 2, {
+    clientWidthPx: 1600,
+    clientHeightPx: 900,
+    suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
+  });
+  assert(count === 4, `Expected four hand-placed charts reflowed, got ${count}`);
+  const handIds = new Set(hand.map(([id]) => id));
+  const after = reflowed.layout.filter((l) => handIds.has(l.i));
+  assert(after.every((l) => l.w === 6), "Every chart should take the 2-per-row width");
+  const rows = new Set(after.map((l) => l.y));
+  assert(rows.size >= 2, "Four charts at two per row should span two rows");
+}
+
+/** A page with no walls at all still must not throw or claim work it did not do. */
+function testReflowWithNoChartWallsDoesNothing(): void {
+  const seeded = appendLinkedChartTriplet(createDefaultDashboard());
+  const { dashboard: next, reflowed } = reflowWatchlistChartWalls(seeded, 2, {
+    clientWidthPx: 1600,
+    clientHeightPx: 900,
+    suggestedRowHeight: START_HERE_RGL_ROW_HEIGHT,
+  });
+  assert(reflowed === 0, "Linked charts are not a watchlist wall and should not be reflowed");
+  assert(next === seeded, "An untouched dashboard should be returned by identity");
+}
+
 function testClearAllWidgetsStaysEmpty(): void {
   const seeded = appendLinkedChartTriplet(createDefaultDashboard());
   const cleared = sanitizeDashboard(clearAllWidgets(seeded));
@@ -267,6 +359,9 @@ function runAll(): void {
   testBulkRowMajorPlacement();
   testBulkLoadUsesViewportCells();
   testReflowWatchlistChartWallsOnDensityChange();
+  testReflowSurvivesClosingTheWatchlist();
+  testReflowPacksHandPlacedCharts();
+  testReflowWithNoChartWallsDoesNothing();
   testClearAllWidgetsStaysEmpty();
   console.log("✅ Start Here dashboard persistence smoke tests passed");
 }

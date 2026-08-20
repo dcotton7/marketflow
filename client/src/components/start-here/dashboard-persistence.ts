@@ -1806,8 +1806,17 @@ export type ReflowWatchlistChartWallsResult = {
 };
 
 /**
- * Repack watchlist-owned chart walls when chart wall density changes.
- * One wall per watchlist widget (includes legacy untagged charts on the same lane).
+ * Repack chart walls when chart wall density changes.
+ * One wall per watchlist widget (includes legacy untagged charts on the same
+ * lane), plus one for the charts the user placed himself. Locked linked sets
+ * and the default chart keep their places.
+ *
+ * A wall outlives the watchlist that made it. Charts carry the id of the
+ * watchlist that spawned them, and closing that tile neither clears the tag nor
+ * moves the charts, so walking only the watchlists still on the page stranded
+ * every chart the moment the user tidied the watchlist away: the density
+ * control kept changing its own value and moving nothing, with no way to tell
+ * that it had stopped applying to anything.
  */
 export function reflowWatchlistChartWalls(
   dashboard: StartHereDashboardV2,
@@ -1831,28 +1840,52 @@ export function reflowWatchlistChartWalls(
     ? [dashboard.defaultChartInstanceId]
     : [];
 
-  const watchlistIds = Object.entries(dashboard.instances)
-    .filter(([, meta]) => meta.type === "watchlist")
-    .map(([id]) => id);
+  // Every wall that exists, whether or not the watchlist that built it is still
+  // on the page. Insertion order keeps the result deterministic for a given
+  // dashboard, so the same density choice always packs the same way.
+  const wallIds = new Set<string>();
+  for (const [instanceId, meta] of Object.entries(dashboard.instances)) {
+    if (meta.type === "watchlist") wallIds.add(instanceId);
+    else if (meta.type === "chart" && meta.watchlistLoadSourceId) wallIds.add(meta.watchlistLoadSourceId);
+  }
 
-  if (watchlistIds.length === 0) {
+  // Claim each wall's charts in turn, so no chart is packed twice.
+  const claimed = new Set<string>(preserveIds);
+  const walls: string[][] = [];
+
+  for (const wallId of wallIds) {
+    const wlMeta = dashboard.instances[wallId];
+
+    const chartIds = chartsManagedByWatchlistLoad(dashboard, {
+      watchlistLoadSourceId: wallId,
+      // Adopting untagged charts off a shared lane is something only a live tile
+      // can do; a closed one has no lane left to speak for, and claiming its old
+      // one would sweep up charts the user placed there since.
+      inheritGroupId: wlMeta?.type === "watchlist" ? wlMeta.groupId : undefined,
+      preserveChartInstanceIds: [...claimed],
+    });
+    if (chartIds.length === 0) continue;
+    for (const id of chartIds) claimed.add(id);
+    walls.push(chartIds);
+  }
+
+  // Charts put on the board by hand answer to the density control as well.
+  // Only charts a watchlist had loaded used to count as a wall, so a board the
+  // user had built up himself had no wall at all: the control moved its own
+  // value and nothing else, and looked broken because from the outside it was.
+  const looseCharts = Object.entries(dashboard.instances)
+    .filter(([id, meta]) => meta.type === "chart" && !meta.linkedSetLocked && !claimed.has(id))
+    .map(([id]) => id);
+  if (looseCharts.length > 0) walls.push(looseCharts);
+
+  if (walls.length === 0) {
     return { dashboard, reflowed: 0 };
   }
 
   let layout = [...dashboard.layout];
   let reflowed = 0;
 
-  for (const watchlistId of watchlistIds) {
-    const wlMeta = dashboard.instances[watchlistId];
-    if (wlMeta?.type !== "watchlist") continue;
-
-    const chartIds = chartsManagedByWatchlistLoad(dashboard, {
-      watchlistLoadSourceId: watchlistId,
-      inheritGroupId: wlMeta.groupId,
-      preserveChartInstanceIds: preserveIds,
-    });
-    if (chartIds.length === 0) continue;
-
+  for (const chartIds of walls) {
     const groupLayouts = chartIds
       .map((id) => layout.find((l) => l.i === id))
       .filter((l): l is Layout[number] => l != null);
