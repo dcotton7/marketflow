@@ -69,6 +69,7 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
   SlidersHorizontal,
   Target,
   X,
@@ -5739,15 +5740,6 @@ function ScanChartViewer({
           </Tooltip>
         );
       })()}
-      <Button
-        size="icon"
-        variant="ghost"
-        className="ml-auto"
-        onClick={() => onOpenChange(false)}
-        data-testid="button-chart-close"
-      >
-        <X className="h-8 w-8" />
-      </Button>
     </div>
   );
 
@@ -5912,7 +5904,26 @@ function ScanChartViewer({
           </div>
         </div>
       )}
-      <div ref={chartWindowRef} className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-4">
+      <div ref={chartWindowRef} className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col pt-12 px-4 pb-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute top-2 left-2 z-[70] gap-1.5 bg-background/90 hover:bg-background"
+          onClick={() => onOpenChange(false)}
+          data-testid="button-back-screen-results"
+        >
+          <ChevronsLeft className="h-4 w-4" />
+          Screen Results
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="absolute top-2 right-2 z-[70] bg-background/90 hover:bg-background"
+          onClick={() => onOpenChange(false)}
+          data-testid="button-chart-close"
+        >
+          <X className="h-6 w-6" />
+        </Button>
         <ChartErrorBoundary key={`scan-chart-viewer-${symbol}`} onClose={() => onOpenChange(false)}>
         <div className="relative flex-1 min-h-0 flex flex-col">
           <DualChartGrid
