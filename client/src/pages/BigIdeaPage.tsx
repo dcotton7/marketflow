@@ -5033,7 +5033,7 @@ function ScanChartViewer({
 
   type ChartDataResponse = { candles: ChartCandle[]; indicators: ChartIndicators; ticker: string; timeframe: string };
 
-  const { data: dailyData, isLoading: dailyLoading, error: dailyError } = useQuery<ChartDataResponse>({
+  const { data: dailyData, isLoading: dailyLoading } = useQuery<ChartDataResponse>({
     queryKey: ["/api/sentinel/chart-data", symbol, "daily"],
     enabled: open && !!symbol,
     refetchOnMount: 'always',
@@ -5065,7 +5065,6 @@ function ScanChartViewer({
   const {
     data: intradayData,
     isLoading: intradayLoading,
-    error: intradayError,
     isFetching: intradayFetching,
   } = useQuery<ChartDataResponse>({
     queryKey: ["/api/sentinel/chart-data", symbol, intradayTimeframe, showETH],
@@ -5099,7 +5098,7 @@ function ScanChartViewer({
     staleTime: 0,
   });
 
-  const { data: chartMetrics, error: metricsError } = useQuery<ChartMetrics>({
+  const { data: chartMetrics } = useQuery<ChartMetrics>({
     queryKey: ["/api/sentinel/trade-chart-metrics", symbol, intradayTimeframe, showETH],
     enabled: open && !!symbol,
     queryFn: async () => {
@@ -5914,26 +5913,6 @@ function ScanChartViewer({
         </div>
       )}
       <div ref={chartWindowRef} className="relative z-10 w-[95vw] max-w-[95vw] h-[90vh] bg-background border rounded-md shadow-lg flex flex-col p-4">
-        {/* Debug Status Panel */}
-        <div className="absolute top-2 right-2 bg-blue-950/90 border border-blue-500/50 rounded px-3 py-2 text-xs font-mono z-50 max-w-md">
-          <div className="font-bold text-blue-300 mb-1">Chart Debug Status</div>
-          <div className="space-y-0.5 text-blue-200/80">
-            <div>Symbol: <span className="text-white font-semibold">{symbol || "N/A"}</span></div>
-            <div>Daily: {dailyLoading ? "⏳ Loading..." : dailyError ? `❌ Error: ${dailyError}` : dailyData ? `✅ ${dailyData.candles?.length || 0} candles` : "❓ No data"}</div>
-            <div>Intraday: {intradayLoading ? "⏳ Loading..." : intradayError ? `❌ Error: ${intradayError}` : intradayData ? `✅ ${intradayData.candles?.length || 0} candles` : "❓ No data"}</div>
-            <div>Metrics: {metricsError ? `❌ Error: ${metricsError}` : chartMetrics ? `✅ Loaded` : "❓ No data"}</div>
-            {chartMetrics && (
-              <div className="mt-2 pt-2 border-t border-blue-500/30 text-[10px]">
-                <div>PE: {chartMetrics.pe ?? "null"}</div>
-                <div>Market Cap: {chartMetrics.marketCap ?? "null"}</div>
-                <div>Target: ${chartMetrics.targetPrice ?? "null"}</div>
-                <div>D/E: {chartMetrics.debtToEquity ?? "null"}</div>
-              </div>
-            )}
-            <div>Current Index: {currentIndex} / {results.length}</div>
-          </div>
-        </div>
-        
         <ChartErrorBoundary key={`scan-chart-viewer-${symbol}`} onClose={() => onOpenChange(false)}>
         <div className="relative flex-1 min-h-0 flex flex-col">
           <DualChartGrid
