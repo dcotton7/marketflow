@@ -67,6 +67,7 @@ export function useResponsiveLayout(): ResponsiveLayout {
   const collapseNav = tier === "md" || tier === "sm" || tier === "lg";
   const iconOnlyNav = false; // handled by collapseNav dropdown instead
   const navCollapsed = isManuallyCollapsed || collapseNav;
+  const stackPanels = tier === "md" || tier === "sm";
 
   return {
     enabled: true,
@@ -74,7 +75,7 @@ export function useResponsiveLayout(): ResponsiveLayout {
     tier,
     isCompact: tier === "md" || tier === "sm",
     isNarrow: tier === "sm",
-    stackPanels: collapseNav,
+    stackPanels,
     collapseNav,
     iconOnlyNav,
     navCollapsed,
