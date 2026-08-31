@@ -1663,6 +1663,26 @@ export default function MarketConditionPage() {
                 )}>{marketSummary.regime.replace("_", " ")}</span>
               </>
             )}
+            <div className="ml-auto flex items-center bg-slate-800/50 rounded p-0.5">
+              {(["split", "rows", "grid", "table"] as ViewMode[]).map((m) => (
+                <Tooltip key={m}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn("h-5 w-5 p-0", viewMode === m && "bg-slate-700")}
+                      onClick={() => setViewMode(m)}
+                    >
+                      {m === "split" ? <LayoutGrid className="w-3 h-3" /> :
+                       m === "rows" ? <Rows3 className="w-3 h-3" /> :
+                       m === "grid" ? <Grid3X3 className="w-3 h-3" /> :
+                       <List className="w-3 h-3" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{m === "split" ? "Columns" : m === "rows" ? "Rows" : m === "grid" ? "Heatmap" : "Table"}</TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
           </div>
         ) : (
         <div className="flex min-w-0 flex-wrap items-center gap-2 md:gap-4">
