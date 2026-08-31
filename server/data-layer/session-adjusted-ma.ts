@@ -10,6 +10,7 @@ import {
   MIN_BARS_FOR_SESSION_MA,
   type TickerMaLevels,
 } from "../shared/daily-ma-from-bars";
+import { shouldRunHeavyBackgroundWork } from "../infra/memory-gate";
 import type { DailyBar } from "./types";
 
 export type MaDataEntry = {
@@ -349,6 +350,12 @@ async function runSessionMaBatchChain(
     sessionMaCache ?? { data: new Map<string, MaDataEntry>(), asOf: new Date(), mode: "session_adjusted" as MaMode };
 
   for (let shardIndex = 0; shardIndex < MA_SHARD_COUNT; shardIndex++) {
+    if (!shouldRunHeavyBackgroundWork()) {
+      console.warn(
+        `[SessionMA] Stopping chain at batch ${shardIndex + 1}/${MA_SHARD_COUNT} — night mode or memory pressure.`
+      );
+      break;
+    }
     const shardStart = shardIndex * batchSize;
     if (shardStart >= universe.length) break;
     const shard = universe.slice(shardStart, shardStart + batchSize);
@@ -408,6 +415,13 @@ export function kickSessionMaBatchChain(
   }
 
   if (maRefreshInFlight) {
+    return sessionMaCache ?? empty;
+  }
+
+  if (!shouldRunHeavyBackgroundWork()) {
+    if (!sessionMaCache) {
+      console.log("[SessionMA] Skipping chain kick — night mode or memory pressure (no cache yet).");
+    }
     return sessionMaCache ?? empty;
   }
 

@@ -54,6 +54,12 @@ type ServerStatusPayload = {
       msUntilNextShard: number | null;
     };
   };
+  nightMode?: {
+    active: boolean;
+    startEt: string;
+    endEt: string;
+    allowHeavyWork: boolean;
+  };
   dailyBars?: {
     lastAttempt: string | null;
     lastSuccess: string | null;
@@ -379,6 +385,13 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
               </Row>
               <Row label="Heap">
                 {status.memory.heapUsedMb} / {status.memory.heapTotalMb} MB
+              </Row>
+              <Row label="Night mode">
+                {status.nightMode
+                  ? status.nightMode.active
+                    ? `on (${status.nightMode.startEt}–${status.nightMode.endEt} ET)`
+                    : `off · heavy ${status.nightMode.allowHeavyWork ? "ok" : "paused"}`
+                  : "—"}
               </Row>
             </section>
 

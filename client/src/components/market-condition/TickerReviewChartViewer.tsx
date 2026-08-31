@@ -52,6 +52,14 @@ export interface TickerReviewChartViewerProps {
 
   onClose: () => void;
 
+  /** Header label when more than one symbol is queued. */
+
+  queueLabel?: string;
+
+  /** Tooltip on the close (X) button. */
+
+  closeReturnLabel?: string;
+
 }
 
 
@@ -87,6 +95,10 @@ export function TickerReviewChartViewer({
   rowBySymbol,
 
   onClose,
+
+  queueLabel,
+
+  closeReturnLabel,
 
 }: TickerReviewChartViewerProps) {
 
@@ -284,6 +296,16 @@ export function TickerReviewChartViewer({
 
   }, [symbols.length]);
 
+  const handleNavigateToTicker = useCallback((ticker: string) => {
+
+    const up = ticker.toUpperCase();
+
+    const i = symbols.findIndex((s) => s.toUpperCase() === up);
+
+    if (i >= 0) setIndex(i);
+
+  }, [symbols]);
+
 
 
   useEffect(() => {
@@ -438,7 +460,7 @@ export function TickerReviewChartViewer({
 
           <span className="text-[11px] uppercase tracking-wide text-muted-foreground hidden md:inline">
 
-            {symbols.length > 1 ? "Ticker Review queue" : "Theme Charts"}
+            {symbols.length > 1 ? (queueLabel ?? "Ticker Review queue") : "Theme Charts"}
 
           </span>
 
@@ -468,7 +490,10 @@ export function TickerReviewChartViewer({
 
           <TooltipContent>
 
-            {symbols.length > 1 ? "Close chart — return to Ticker Review" : "Close chart — return to Theme Charts"}
+            {closeReturnLabel
+              ?? (symbols.length > 1
+                ? "Close chart — return to Ticker Review"
+                : "Close chart — return to Theme Charts")}
 
           </TooltipContent>
 
@@ -525,6 +550,8 @@ export function TickerReviewChartViewer({
           showIntradayMaBasisToggle
 
           navExtra={navExtra}
+
+          onNavigateToTicker={handleNavigateToTicker}
 
           testIdPrefix="ticker-review-chart"
 

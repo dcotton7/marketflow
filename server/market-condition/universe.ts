@@ -302,7 +302,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Structural",
     leadersTarget: 5,
     core: ["NVDA", "AMD", "AVGO", "ARM", "TSM", "ASML", "AMAT", "LRCX", "KLAC", "MU", "SNDK", "MRVL", "NXPI", "ON", "ADI", "TXN", "QCOM", "INTC", "MCHP", "MPWR", "SWKS", "QRVO", "TER", "STM"],
-    candidates: ["CRUS", "WOLF", "ALGM", "AMKR", "COHU"],
+    candidates: ["CRUS", "WOLF", "ALGM", "AMKR", "COHU", "FORM"],
     etfProxies: [
       { symbol: "SMH", name: "VanEck Semiconductor ETF", proxyType: "direct" },
       { symbol: "SOXX", name: "iShares Semiconductor ETF", proxyType: "direct" },
@@ -665,7 +665,7 @@ export const CLUSTERS: ClusterDefinition[] = [
     tier: "Narrative",
     leadersTarget: 3,
     core: ["IONQ", "RGTI", "QBTS", "ARQQ", "QUBT"],
-    candidates: ["QTUM", "FORM", "DMYI", "SOUN"],
+    candidates: ["QTUM", "DMYI", "SOUN"],
     etfProxies: [
       { symbol: "QTUM", name: "Defiance Quantum ETF", proxyType: "direct" },
       { symbol: "XLK", name: "Technology Select SPDR", proxyType: "macro" },
@@ -1071,6 +1071,25 @@ export function getClusterTickers(id: ClusterId): string[] {
     }
   }
   return base;
+}
+
+/**
+ * Which cluster claims this ticker by name, ignoring anything inferred at runtime.
+ *
+ * getTickerPrimaryCluster folds runtime guesses in with the real lists, which is
+ * what callers who just want "where does this trade" should use. Anything that
+ * has to tell the user whether a theme is a fact or a guess needs to ask this
+ * one instead, or every guess reads back as a membership on the next lookup.
+ */
+export function getTickerStaticCluster(symbol: string): ClusterId | null {
+  const upper = symbol.toUpperCase();
+  for (const cluster of CLUSTERS) {
+    if (cluster.core.includes(upper)) return cluster.id;
+  }
+  for (const cluster of CLUSTERS) {
+    if (cluster.candidates.includes(upper)) return cluster.id;
+  }
+  return null;
 }
 
 /**

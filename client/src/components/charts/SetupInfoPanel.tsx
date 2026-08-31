@@ -52,8 +52,9 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { ThemeTabContent } from "@/components/charts/ThemeTabContent";
 
-type SetupTab = "ai" | "fundamentals";
+type SetupTab = "ai" | "fundamentals" | "theme";
 
 const OPTIONAL_LABEL = Object.fromEntries(
   OPTIONAL_CRITERIA.map((c) => [c.id, c.shortLabel])
@@ -826,7 +827,8 @@ export function SetupInfoPanel({
   } = useChartSetupEnrich();
 
   const [panelCollapsed, setPanelCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<SetupTab>(() => "ai");
+  const [activeTab, setActiveTab] = useState<SetupTab>(() => "fundamentals");
+  const [pendingAiEnrich, setPendingAiEnrich] = useState(false);
   const [scanCollapsed, setScanCollapsed] = useState(true);
   const [includeVisual, setIncludeVisual] = useState(() => {
     try {
@@ -855,7 +857,6 @@ export function SetupInfoPanel({
 
   const sym = symbol.toUpperCase();
   const enrichResultRef = useRef<HTMLDivElement | null>(null);
-  const autoEnrichedSymbolsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setHelpful(null);
@@ -864,6 +865,7 @@ export function SetupInfoPanel({
     setShowPatternFix(false);
     setLastFeedbackId(null);
     setModelSavedLabel(null);
+    setPendingAiEnrich(false);
     const cached = getCached(sym, includeVisual);
     setEnrichEntry(cached);
     setScanCollapsed(!!cached);
@@ -940,18 +942,23 @@ export function SetupInfoPanel({
     ]
   );
 
-  // Auto-trigger enrichment when AI tab is selected with no cached result
-  useEffect(() => {
-    if (activeTab !== "ai") return;
-    if (enrichEntry) return;
-    if (!chartsReady) return;
-    if (enriching) return;
-    if (!sym) return;
-    if (autoEnrichedSymbolsRef.current.has(sym)) return;
-
-    autoEnrichedSymbolsRef.current.add(sym);
+  const requestAiAnalysis = useCallback(() => {
+    setActiveTab("ai");
+    if (enrichEntry || enriching || !sym) return;
+    if (!chartsReady) {
+      setPendingAiEnrich(true);
+      return;
+    }
     void runEnrich(false);
-  }, [activeTab, enrichEntry, chartsReady, enriching, sym, runEnrich]);
+  }, [enrichEntry, enriching, sym, chartsReady, runEnrich]);
+
+  useEffect(() => {
+    if (!pendingAiEnrich) return;
+    if (!chartsReady || enriching || !sym) return;
+    setPendingAiEnrich(false);
+    if (enrichEntry) return;
+    void runEnrich(false);
+  }, [pendingAiEnrich, chartsReady, enriching, sym, enrichEntry, runEnrich]);
 
   const sendFeedback = useCallback(
     async (opts: {
@@ -1049,7 +1056,7 @@ export function SetupInfoPanel({
             <div className="flex items-center gap-0.5 ml-1">
               <button
                 type="button"
-                onClick={() => setActiveTab("ai")}
+                onClick={requestAiAnalysis}
                 className={cn(
                   "px-2 py-0.5 text-[11px] font-medium rounded transition-colors",
                   activeTab === "ai"
@@ -1064,7 +1071,10 @@ export function SetupInfoPanel({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab("fundamentals")}
+                onClick={() => {
+                  setPendingAiEnrich(false);
+                  setActiveTab("fundamentals");
+                }}
                 className={cn(
                   "px-2 py-0.5 text-[11px] font-medium rounded transition-colors",
                   activeTab === "fundamentals"
@@ -1073,6 +1083,21 @@ export function SetupInfoPanel({
                 )}
               >
                 Fundamentals
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingAiEnrich(false);
+                  setActiveTab("theme");
+                }}
+                className={cn(
+                  "px-2 py-0.5 text-[11px] font-medium rounded transition-colors",
+                  activeTab === "theme"
+                    ? "bg-violet-500/20 text-violet-300 border border-violet-500/40"
+                    : "text-slate-400 hover:text-slate-200 border border-transparent"
+                )}
+              >
+                Theme
               </button>
             </div>
           )}
@@ -1143,6 +1168,15 @@ export function SetupInfoPanel({
             style={{ fontSize: contentFontPx }}
           >
             <FundamentalsTabContent metrics={chartMetrics} symbol={sym} />
+          </div>
+        )}
+
+        {!panelCollapsed && activeTab === "theme" && (
+          <div
+            className="flex-1 min-h-0 overflow-y-auto text-left pr-0.5"
+            style={{ fontSize: contentFontPx }}
+          >
+            <ThemeTabContent symbol={sym} />
           </div>
         )}
 

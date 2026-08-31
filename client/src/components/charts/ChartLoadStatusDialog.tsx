@@ -52,7 +52,17 @@ export function ChartLoadStatusDialog({
     title ??
     (isComplete ? `${symbol} charts ready` : `Loading ${symbol} charts`);
 
-  const hasError = steps.some((s) => s.status === "error");
+  const barsFailed = steps.some(
+    (s) =>
+      (s.id === "daily-bars" ||
+        s.id === "intraday-bars" ||
+        s.id === "daily-indicators" ||
+        s.id === "intraday-indicators" ||
+        s.id === "ready") &&
+      s.status === "error"
+  );
+  const metricsFailed = steps.some((s) => s.id === "metrics" && s.status === "error");
+  const hasHardError = barsFailed;
   const canDismiss = !!onDismiss;
 
   return createPortal(
@@ -79,9 +89,13 @@ export function ChartLoadStatusDialog({
               <span className="ml-1.5 tabular-nums">({formatElapsed(elapsedMs)})</span>
             ) : null}
           </p>
-          {hasError ? (
+          {hasHardError ? (
             <p className="mt-1 text-xs text-rs-red">
-              Chart data failed. Dismiss and keep using the app — retry if bars keep failing.
+              Chart bars failed. Dismiss and keep using the app — retry if candles stay empty.
+            </p>
+          ) : metricsFailed && !isComplete ? (
+            <p className="mt-1 text-xs text-amber-500/90">
+              ADR/RS metrics slow or failed — dual charts still load.
             </p>
           ) : !isComplete ? (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -133,7 +147,7 @@ export function ChartLoadStatusDialog({
       {canDismiss && !isComplete ? (
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" size="sm" variant="secondary" onClick={onDismiss}>
-            {hasError ? "Dismiss" : "Continue to charts"}
+            {hasHardError ? "Dismiss" : "Continue to charts"}
           </Button>
         </div>
       ) : null}

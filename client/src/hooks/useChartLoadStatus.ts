@@ -130,7 +130,13 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
   const intradayIndicatorsReady = intradayReady && indicatorsReady(intradayData);
   const metricsReady = !metricsLoading && !!metricsData;
   const layoutReady = dailyReady && intradayReady;
-  const isComplete = layoutReady && metricsReady && !dailyError && !intradayError && !metricsError;
+  // Hard fail only when a bars query errored with no usable candles (refetch isError + stale data is soft).
+  const dailyBarsFailed = !!dailyError && !dailyReady;
+  const intradayBarsFailed = !!intradayError && !intradayReady;
+  const barsFailed = dailyBarsFailed || intradayBarsFailed;
+  // Metrics are decorative for the dual-chart grid — never block "charts ready".
+  const metricsFailed = !!metricsError && !metricsReady;
+  const isComplete = layoutReady && !barsFailed;
 
   const steps = useMemo((): ChartLoadStep[] => {
     if (!symbol) return [];
@@ -171,8 +177,8 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
         "daily-bars",
         "Pulling daily price history",
         dailyReady,
-        dailyLoading,
-        !!dailyError,
+        dailyLoading && !dailyReady,
+        dailyBarsFailed,
         dailyReady
           ? `${candleCount(dailyData)} daily bars`
           : dailyLoading
@@ -183,8 +189,8 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
         "daily-indicators",
         "Computing daily MAs, VWAP & S/R gaps",
         dailyIndicatorsReady,
-        dailyLoading && !dailyReady,
-        !!dailyError && !dailyReady,
+        dailyReady && !dailyIndicatorsReady,
+        dailyBarsFailed,
         dailyIndicatorsReady ? "Indicators attached" : undefined
       ),
       resolve(
@@ -192,7 +198,7 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
         `Pulling ${tfLabel} intraday bars`,
         intradayReady,
         intradayBusy && !intradayReady,
-        !!intradayError,
+        intradayBarsFailed,
         intradayReady
           ? `${candleCount(intradayData)} intraday bars`
           : intradayBusy
@@ -203,8 +209,8 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
         "intraday-indicators",
         "Computing intraday MAs & session VWAP",
         intradayIndicatorsReady,
-        intradayBusy && intradayReady && !intradayIndicatorsReady,
-        !!intradayError && !intradayReady,
+        intradayReady && !intradayIndicatorsReady,
+        intradayBarsFailed,
         intradayIndicatorsReady ? "RTH session math" : undefined
       ),
       resolve(
@@ -212,23 +218,29 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
         "Loading ADR, RS, sector & earnings",
         metricsReady,
         metricsLoading && !metricsReady,
-        !!metricsError,
-        metricsReady ? "Fundamentals row ready" : metricsLoading ? "Trade chart metrics API" : undefined
+        metricsFailed,
+        metricsReady
+          ? "Fundamentals row ready"
+          : metricsFailed
+            ? "Skipped — charts still usable"
+            : metricsLoading
+              ? "Trade chart metrics API"
+              : undefined
       ),
       resolve(
         "layout",
         "Preparing dual-chart layout",
-        layoutReady && metricsReady,
-        layoutReady && !metricsReady,
+        layoutReady,
+        !layoutReady && dailyReady && intradayBusy,
         false,
-        layoutReady && metricsReady ? "Rendering charts" : undefined
+        layoutReady ? "Rendering charts" : undefined
       ),
       resolve(
         "ready",
         "Charts ready",
         isComplete,
-        layoutReady && metricsReady && !isComplete,
-        false
+        layoutReady && !isComplete,
+        barsFailed
       ),
     ];
   }, [
@@ -236,19 +248,19 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
     intradayTimeframe,
     dailyLoading,
     dailyData,
-    dailyError,
+    dailyBarsFailed,
     dailyReady,
     dailyIndicatorsReady,
     intradayBusy,
     intradayReady,
     intradayIndicatorsReady,
     intradayData,
-    intradayError,
+    intradayBarsFailed,
     metricsLoading,
     metricsReady,
-    metricsData,
-    metricsError,
+    metricsFailed,
     layoutReady,
+    barsFailed,
     isComplete,
   ]);
 
@@ -259,6 +271,8 @@ export function useChartLoadStatus(input: ChartLoadStatusInput) {
     activeStep,
     isComplete,
     layoutReady,
+    barsFailed,
+    metricsFailed,
     elapsedMs,
     isLoading: !!symbol && !isComplete,
   };

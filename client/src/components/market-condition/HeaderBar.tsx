@@ -75,7 +75,7 @@ function estimateParticipationFromThemes(themes: ThemeRow[]): { pctUp: number; p
 
 /** Shared chip shell — RAI, Mega, breadth, session, regime badges align to this footprint. */
 const REGIME_CHIP =
-  "flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-600/50 bg-slate-800/50";
+  "flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-600/50 bg-slate-800/50";
 
 function SessionBadge({ marketSession }: { marketSession?: MarketSession }) {
   const session = marketSession ?? "CLOSED";
@@ -238,7 +238,7 @@ export function HeaderBar({
 
   return (
     <div
-      className={`flex items-center justify-between ${responsive.isCompact ? "p-2 gap-2" : "p-3 gap-4"} border-b border-slate-700/50 flex-wrap`}
+      className={`flex items-center justify-between ${responsive.isCompact ? "p-2 gap-2" : "px-3 py-1 gap-3"} border-b border-slate-700/50 flex-wrap`}
       style={localSlotHeaderStyle("marketFlow:regimeBar")}
       data-ui-region="marketFlow:regimeBar"
     >
@@ -255,14 +255,12 @@ export function HeaderBar({
           <TooltipTrigger>
             <div className={REGIME_CHIP} data-ui-region="marketFlow:raiGauge">
               <Gauge className={`w-4 h-4 ${getRaiColor(rai.score)}`} />
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                   <span className="text-xs text-muted-foreground">RAI</span>
-                  <span className={`text-lg font-bold ${getRaiColor(rai.score)}`}>{rai.score}</span>
-                </div>
-                <div className="w-16 h-1 bg-slate-700 rounded overflow-hidden">
-                  <div className={`h-full ${getRaiBg(rai.score)}`} style={{ width: `${rai.score}%` }} />
-                </div>
+                  <span className={`text-sm font-bold ${getRaiColor(rai.score)}`}>{rai.score}</span>
+                  <div className="w-10 h-1 bg-slate-700 rounded overflow-hidden">
+                    <div className={`h-full ${getRaiBg(rai.score)}`} style={{ width: `${rai.score}%` }} />
+                  </div>
               </div>
               <Badge
                 variant="outline"
@@ -352,7 +350,7 @@ export function HeaderBar({
         <Tooltip>
           <TooltipTrigger>
             <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${getRegimeBg(summary.regime)}`}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${getRegimeBg(summary.regime)}`}
               data-ui-region="marketFlow:regimeBadge"
             >
               <span className={getRegimeColor(summary.regime)}>{regimeIcon}</span>
@@ -439,8 +437,8 @@ export function HeaderBar({
 
         <Tooltip>
           <TooltipTrigger>
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-600/30 bg-slate-800/30">
-              <TrendingUp className="w-4 h-4 text-green-400" />
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-600/30 bg-slate-800/30">
+              <TrendingUp className="w-3.5 h-3.5 text-green-400" />
               <span className="text-xs text-muted-foreground">Flow Score: &gt;70</span>
               <span
                 className={`text-sm font-bold ${strongPct >= 40 ? "text-green-400" : strongPct >= 25 ? "text-yellow-400" : "text-red-400"}`}
@@ -456,8 +454,8 @@ export function HeaderBar({
 
         <Tooltip>
           <TooltipTrigger>
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-600/30 bg-slate-800/30">
-              <TrendingDown className="w-4 h-4 text-red-400" />
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-600/30 bg-slate-800/30">
+              <TrendingDown className="w-3.5 h-3.5 text-red-400" />
               <span className="text-xs text-muted-foreground">Flow Score: &lt;40</span>
               <span
                 className={`text-sm font-bold ${weakPct < 20 ? "text-green-400" : weakPct < 30 ? "text-yellow-400" : "text-red-400"}`}
@@ -494,13 +492,13 @@ export function HeaderBar({
       <div className="flex items-center gap-3">
         <Tooltip>
           <TooltipTrigger>
-            <div className="flex items-center gap-3 text-base">
+            <div className="flex items-center gap-3 text-sm">
               <div className="flex items-center gap-1">
-                <TrendingUp className="w-5 h-5 text-green-400" />
+                <TrendingUp className="w-4 h-4 text-green-400" />
                 <span className="text-green-400 font-semibold">{summary.topTheme.replace(/_/g, " ")}</span>
               </div>
               <div className="flex items-center gap-1">
-                <TrendingDown className="w-5 h-5 text-red-400" />
+                <TrendingDown className="w-4 h-4 text-red-400" />
                 <span className="text-red-400 font-semibold">{summary.bottomTheme.replace(/_/g, " ")}</span>
               </div>
             </div>

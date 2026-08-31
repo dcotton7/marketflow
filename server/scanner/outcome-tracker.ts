@@ -221,6 +221,18 @@ async function processOutcomes(): Promise<void> {
     return;
   }
 
+  try {
+    const { shouldRunHeavyBackgroundWork } = await import("../infra/memory-gate");
+    if (!shouldRunHeavyBackgroundWork()) {
+      if (cycleCount % 5 === 0) {
+        console.warn(`[Outcome Tracker] Night mode or memory pressure — skipping (cycle ${cycleCount})`);
+      }
+      return;
+    }
+  } catch {
+    // memory-gate unavailable — continue
+  }
+
   console.log(`[Outcome Tracker] Cycle ${cycleCount} starting...`);
 
   try {

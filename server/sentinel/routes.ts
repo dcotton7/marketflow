@@ -228,6 +228,13 @@ export function registerSentinelRoutes(app: Express): void {
     jsonBody: Record<string, unknown>,
     statusCode = 200
   ): void {
+    if (db) {
+      db.update(sentinelUsers)
+        .set({ lastLoginAt: new Date(), loginCount: sql`login_count + 1` })
+        .where(eq(sentinelUsers.id, userId))
+        .execute()
+        .catch((err) => console.error("[auth] login tracking update failed:", err));
+    }
     const sess = req.session as unknown as { regenerate: (cb: (err?: unknown) => void) => void };
     sess.regenerate((regenErr?: unknown) => {
       if (regenErr) {

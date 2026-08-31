@@ -14,7 +14,7 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
-import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getTickerPrimaryCluster, getClusterById, autoMapTickerToCluster, addRuntimeCandidate } from "./universe";
+import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getClusterById } from "./universe";
 import { db } from "../db";
 import { subthemes, themes, tickers as tickerTable, tickerSliceMemberships, tnnSettings } from "@shared/schema";
 import {
@@ -217,29 +217,23 @@ const TRADING_DAYS_BACK: Partial<Record<TimeSlice, number>> = {
 router.get("/ticker-theme/:symbol", async (req: Request, res: Response) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    let clusterId = getTickerPrimaryCluster(symbol);
+    const { resolveTickerTheme } = await import("./utils/theme-classifier");
+    const { clusterId, source, basis } = await resolveTickerTheme(symbol);
+
     if (!clusterId) {
-      // Try auto-mapping from fundamentals
-      try {
-        const { getFundamentals } = await import("../fundamentals");
-        const fund = await getFundamentals(symbol);
-        if (fund.sector !== "Unknown") {
-          const autoCluster = autoMapTickerToCluster(symbol, fund.sector, fund.industry);
-          if (autoCluster) {
-            addRuntimeCandidate(symbol, autoCluster);
-            clusterId = autoCluster;
-            console.log(`[AutoMap] ${symbol} → ${autoCluster} (${fund.industry})`);
-          }
-        }
-      } catch {}
-    }
-    if (!clusterId) {
-      return res.json({ themeId: null, themeName: null, rank: null, totalThemes: null });
+      return res.json({ themeId: null, themeName: null, rank: null, totalThemes: null, source: null });
     }
     const cluster = getClusterById(clusterId);
     const mc = getMarketCondition();
     if (!mc?.themes?.length) {
-      return res.json({ themeId: clusterId, themeName: cluster?.name ?? clusterId, rank: null, totalThemes: null });
+      return res.json({
+        themeId: clusterId,
+        themeName: cluster?.name ?? clusterId,
+        rank: null,
+        totalThemes: null,
+        source,
+        basis,
+      });
     }
     const sorted = [...mc.themes].sort((a, b) => b.score - a.score);
     const idx = sorted.findIndex((t) => t.id === clusterId);
@@ -249,6 +243,10 @@ router.get("/ticker-theme/:symbol", async (req: Request, res: Response) => {
       themeName: cluster?.name ?? clusterId,
       rank,
       totalThemes: sorted.length,
+      // "member" means the ticker is in the theme. Anything else is this
+      // server's best guess, and the client must not present it as settled.
+      source,
+      basis,
       score: sorted[idx]?.score ?? null,
       medianPct: sorted[idx]?.medianPct ?? null,
       breadthPct: sorted[idx]?.breadthPct ?? null,
@@ -1570,6 +1568,11 @@ router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
 
     if (db && added.length > 0) {
       try {
+        // A ticker that just became a member must stop being reported as a
+        // guess, or the Theme tab keeps offering to add what is already there.
+        const { forgetInferredTheme } = await import("./utils/theme-classifier");
+        for (const ticker of added) forgetInferredTheme(ticker);
+
         await refreshThemeMembersCache();
         // Pull fresh quotes/metrics now so newly added symbols populate immediately.
         await refreshSnapshot(false, "ALL");

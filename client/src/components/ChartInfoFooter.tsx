@@ -1,6 +1,4 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-
 import type { ChartMetrics, ChartDataResponse } from "@/components/DualChartGrid";
 
 import { cn } from "@/lib/utils";
@@ -8,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { TickerReviewResultRow } from "@/lib/ticker-review-engine";
 
 import { SetupInfoPanel } from "@/components/charts/SetupInfoPanel";
+import { useTickerTheme } from "@/hooks/useTickerTheme";
 import { SetupQualityBar } from "@/components/charts/SetupQualityBar";
 import type { BreakdownWatchAssessment } from "@shared/theme-breakdown-watch";
 import { ChartFooterFontSizeControl } from "@/components/ChartFooterFontSizeControl";
@@ -203,30 +202,17 @@ export function ChartInfoFooter({
   const { user } = useSentinelAuth();
 
   // Theme lookup for rank display + setup-quality strength inputs
-  const { data: tickerThemeData } = useQuery<{
-    themeId: string | null;
-    themeName: string | null;
-    rank: number | null;
-    totalThemes: number | null;
-    score?: number | null;
-    medianPct?: number | null;
-    breadthPct?: number | null;
-    rsVsBenchmark?: number | null;
-    acceleration?: number | null;
-  }>({
-    queryKey: ["/api/market-condition/ticker-theme", symbol],
-    queryFn: async () => {
-      const res = await fetch(`/api/market-condition/ticker-theme/${symbol}`);
-      if (!res.ok) {
-        return { themeId: null, themeName: null, rank: null, totalThemes: null };
-      }
-      return res.json();
-    },
-    enabled: !!symbol,
-    staleTime: 60_000,
-  });
+  const { data: tickerThemeData } = useTickerTheme(symbol);
 
   const resolvedThemeRank = themeRank ?? tickerThemeData?.rank ?? null;
+
+  // What the AI dossier is told. A theme worked out from sector or from the
+  // classifier reads to the model exactly like a real membership, and the
+  // dossier has no field to tell the two apart, so only a genuine membership
+  // is passed on. A theme handed down by the caller is trusted as given.
+  const isThemeMember = tickerThemeData?.source === "member";
+  const dossierThemeId = themeId ?? (isThemeMember ? tickerThemeData?.themeId ?? null : null);
+  const dossierThemeRank = themeRank ?? (isThemeMember ? tickerThemeData?.rank ?? null : null);
   const resolvedThemeName = themeName ?? tickerThemeData?.themeName ?? null;
   const resolvedTotalThemes = totalThemes ?? tickerThemeData?.totalThemes ?? null;
   const resolvedThemeScore = tickerThemeData?.score ?? null;
@@ -651,9 +637,9 @@ export function ChartInfoFooter({
 
           intradayTimeframe={intradayTimeframe}
 
-          themeId={themeId}
+          themeId={dossierThemeId}
 
-          themeRank={themeRank}
+          themeRank={dossierThemeRank}
 
           chartsReady={chartsReady}
 

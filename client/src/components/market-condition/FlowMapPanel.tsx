@@ -413,7 +413,7 @@ export function FlowMapPanel({
   const [selectedRoute, setSelectedRoute] = useState<{ from: ThemeId; to: ThemeId } | null>(null);
   const [panelSize, setPanelSize] = useState({ w: 1200, h: 800 });
   const [isCompact, setIsCompact] = useState(false);
-  const [detailsExpanded, setDetailsExpanded] = useState(true);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [fontPrefs, setFontPrefs] = useState<FlowMapFontPrefs>(() =>
     loadFlowMapFontPrefs(undefined)
   );
@@ -424,7 +424,7 @@ export function FlowMapPanel({
   const COMPACT_ENTER_H = 500;
   const COMPACT_EXIT_H = 560;
 
-  const showDetailCards = detailsExpanded || !isCompact;
+  const showDetailCards = detailsExpanded;
 
   useEffect(() => {
     setFontPrefs(loadFlowMapFontPrefs(user?.id));
@@ -1207,9 +1207,9 @@ export function FlowMapPanel({
         )}
       >
         <div className="flex flex-col gap-2">
-          {isCompact ? (
+          {/* Summary row + toggle — always visible */}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0 text-[10px] text-slate-400">
+              <div className="min-w-0 text-xs text-slate-400">
                 {fmtTs(activeSnapshotUpdated)} · {TIMEFRAMES.find((t) => t.key === activeTf)?.label ?? activeTf}
                 {compareEnabled ? " · Compare on" : ""}
               </div>
@@ -1231,8 +1231,8 @@ export function FlowMapPanel({
                 )}
               </button>
             </div>
-          ) : null}
 
+          {showDetailCards && (
           <div
             className="min-w-0 rounded border border-slate-700/40 bg-slate-900/50 p-2"
             style={{ fontSize: fontPrefs.toolbar }}
@@ -1346,6 +1346,7 @@ export function FlowMapPanel({
               </div>
             )}
           </div>
+          )}
 
           {showDetailCards ? (
           <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -24,6 +24,7 @@ import { ThemeBriefingPickerDialog, type BriefingMode } from "@/components/marke
 import { ThemeBriefingPanel } from "@/components/market-condition/ThemeBriefingPanel";
 import { ThemeReviewActions } from "@/components/market-condition/ThemeReviewActions";
 import { ThemeTickerReviewPanel } from "@/components/market-condition/ThemeTickerReviewPanel";
+import { TickerReviewChartViewer } from "@/components/market-condition/TickerReviewChartViewer";
 import {
   MOCK_THEMES,
   MOCK_THEME_MEMBERS,
@@ -362,6 +363,7 @@ export default function MarketConditionPage() {
   const [briefingReportOpen, setBriefingReportOpen] = useState(false);
   const [briefingMode, setBriefingMode] = useState<BriefingMode | null>(null);
   const [tickerReviewOpen, setTickerReviewOpen] = useState(false);
+  const [membersChartSymbol, setMembersChartSymbol] = useState<string | null>(null);
   const [flowMapFocusData, setFlowMapFocusData] = useState<FlowMapFocusData | null>(null);
   const [focusedCenterTab, setFocusedCenterTab] = useState<
     "actionableDetails" | "flowFocus" | "etfs" | "subthemes" | "legacyDetails"
@@ -601,12 +603,12 @@ export default function MarketConditionPage() {
       if (chartSyncEnabled) {
         syncToChart(symbol);
       }
-      // If neither sync is enabled, navigate in same window
+      // Stay on Market Flow: overlay the dual charts so X returns here exactly.
       if (!msSyncEnabled && !chartSyncEnabled && !analysisSyncEnabled) {
-        navigate(`/sentinel/charts?symbol=${symbol}`);
+        setMembersChartSymbol(symbol.toUpperCase());
       }
     },
-    [navigate, msSyncEnabled, chartSyncEnabled, analysisSyncEnabled, syncToMarketSurge, syncToChart]
+    [msSyncEnabled, chartSyncEnabled, analysisSyncEnabled, syncToMarketSurge, syncToChart]
   );
 
   // Handle ticker added - refresh members list
@@ -793,6 +795,19 @@ export default function MarketConditionPage() {
     if (!selectedSubthemeId) return leaderFiltered;
     return selectedThemeTickers.filter((ticker) => selectedSubthemeSymbols.has(ticker.symbol.toUpperCase()));
   }, [memberScope, selectedSubthemeId, selectedThemeTickers, selectedSubthemeSymbols]);
+
+  const membersChartQueue = useMemo(() => {
+    const fromList = visibleThemeTickers.map((t) => t.symbol.toUpperCase());
+    const extra = membersChartSymbol?.toUpperCase();
+    if (extra && !fromList.includes(extra)) return [extra, ...fromList];
+    return fromList;
+  }, [visibleThemeTickers, membersChartSymbol]);
+
+  const membersChartIndex = useMemo(() => {
+    if (!membersChartSymbol) return 0;
+    const i = membersChartQueue.findIndex((s) => s === membersChartSymbol.toUpperCase());
+    return i >= 0 ? i : 0;
+  }, [membersChartQueue, membersChartSymbol]);
 
   useEffect(() => {
     if (!selectedSubthemeId || !selectedThemeSubthemes) return;
@@ -1580,7 +1595,7 @@ export default function MarketConditionPage() {
       <div
         className={cn(
           "flex flex-wrap items-center justify-between border-b border-slate-700/50 shrink-0",
-          responsive.isCompact ? "px-1.5 py-1 gap-1" : "px-4 py-2 gap-2"
+          responsive.isCompact ? "px-1.5 py-1 gap-1" : "px-3 py-1 gap-2"
         )}
         style={localSlotHeaderStyle("marketFlow:commandToolbar")}
         data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "commandToolbar")}
@@ -2455,6 +2470,19 @@ export default function MarketConditionPage() {
         onSyncToMarketSurge={(symbol) => syncToMarketSurge(symbol, "day")}
         onOpenAnalysis={(symbol) => setAnalysisSheetSymbol(symbol)}
         marketSession={pollingStatus?.marketSession}
+      />
+      <TickerReviewChartViewer
+        open={membersChartSymbol != null}
+        symbols={membersChartQueue}
+        startIndex={membersChartIndex}
+        themeId={selectedTheme}
+        themeRank={selectedThemeData?.rank}
+        themeName={selectedThemeData?.name ?? null}
+        totalThemes={themes.length}
+        themeBreakdownWatch={selectedThemeData?.breakdownWatch}
+        queueLabel="Theme members"
+        closeReturnLabel="Close chart — return to Theme Members"
+        onClose={() => setMembersChartSymbol(null)}
       />
     </div>
   );

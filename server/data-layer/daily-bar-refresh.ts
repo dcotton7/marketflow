@@ -15,7 +15,11 @@ import { historicalBars, tickerMa } from "@shared/schema";
 import { sql, eq, desc } from "drizzle-orm";
 import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
-import { isMemoryPressureHigh } from "../infra/memory-gate";
+import {
+  isMemoryPressureHigh,
+  isNightMode,
+  shouldRunHeavyBackgroundWork,
+} from "../infra/memory-gate";
 
 const STALE_THRESHOLD_DAYS = 3;
 const REFRESH_LOOKBACK_DAYS = 10;
@@ -93,10 +97,23 @@ async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: 
 export async function checkAndRefreshDailyBars(): Promise<void> {
   if (refreshInProgress) return;
 
+  if (isNightMode()) {
+    console.log("[DailyBarRefresh] Night mode (8pm–4am ET) — deferring refresh.");
+    return;
+  }
+
+  if (!shouldRunHeavyBackgroundWork()) {
+    console.warn("[DailyBarRefresh] Memory pressure high — deferring refresh.");
+    return;
+  }
+
   const { staleSymbols, freshCount } = await getStaleSymbols();
   const total = staleSymbols.length + freshCount;
 
   if (staleSymbols.length === 0) {
+    // Mark healthy so server-status is not stuck on lastSuccess=null forever.
+    lastRefreshAttempt = new Date();
+    lastRefreshSuccess = lastRefreshAttempt;
     console.log(`[DailyBarRefresh] All ${total} symbols are fresh. No refresh needed.`);
     return;
   }
@@ -130,17 +147,22 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
   let memorySkipped = 0;
 
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-    // Memory gate: pause if heap is under pressure, let GC + MC polling settle
+    // Abort remaining work if night mode starts mid-run or RSS/heap pressure persists.
+    if (isNightMode()) {
+      console.warn("[DailyBarRefresh] Night mode started mid-run — stopping remaining batches.");
+      break;
+    }
     if (isMemoryPressureHigh()) {
       memorySkipped++;
       if (memorySkipped <= 3) {
-        console.warn(`[DailyBarRefresh] Memory pressure high — pausing 10s (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
+        console.warn(
+          `[DailyBarRefresh] Memory pressure high (heap or RSS) — pausing 10s (batch ${Math.floor(i / BATCH_SIZE) + 1})`
+        );
       }
       await new Promise((r) => setTimeout(r, 10_000));
-      // Re-check after pause; if still high, skip this batch entirely
-      if (isMemoryPressureHigh()) {
-        console.warn(`[DailyBarRefresh] Memory still high after pause — skipping batch`);
-        continue;
+      if (isMemoryPressureHigh() || isNightMode()) {
+        console.warn("[DailyBarRefresh] Still under pressure / night mode — stopping remaining batches.");
+        break;
       }
     }
 
@@ -217,16 +239,26 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
     }
   }
 
-  if (totalUpserted > 0) {
-    apiKeyBroken = false;
-    lastRefreshSuccess = new Date();
-    console.log(`[DailyBarRefresh] ✅ Refreshed ${totalUpserted} bars for ${symbols.length} symbols (${totalFailed} failed${memorySkipped > 0 ? `, ${memorySkipped} batches deferred for memory` : ""}). Now recalculating MAs...`);
-    await recalculateTickerMAs(db, symbols);
-  } else if (totalFailed > 0) {
-    console.warn(`[DailyBarRefresh] ⚠️ All ${totalFailed} symbols failed. Check API key.`);
+  try {
+    if (totalUpserted > 0) {
+      apiKeyBroken = false;
+      lastRefreshSuccess = new Date();
+      console.log(
+        `[DailyBarRefresh] ✅ Refreshed ${totalUpserted} bars for ${symbols.length} symbols ` +
+          `(${totalFailed} failed${memorySkipped > 0 ? `, ${memorySkipped} batches deferred for memory` : ""}). ` +
+          `Now recalculating MAs...`
+      );
+      if (!isNightMode() && !isMemoryPressureHigh()) {
+        await recalculateTickerMAs(db, symbols);
+      } else {
+        console.warn("[DailyBarRefresh] Skipping MA recalculation — night mode or memory pressure.");
+      }
+    } else if (totalFailed > 0) {
+      console.warn(`[DailyBarRefresh] ⚠️ All ${totalFailed} symbols failed (or deferred). Not marking API key broken.`);
+    }
+  } finally {
+    refreshInProgress = false;
   }
-
-  refreshInProgress = false;
 }
 
 function calculateSMA(closes: number[], period: number): number | null {
@@ -311,8 +343,9 @@ async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
 export function startDailyBarRefreshScheduler(): void {
   setTimeout(() => {
     checkAndRefreshDailyBars().catch((err) => {
+      // Do not flip apiKeyBroken on generic startup errors — night/pressure skips and
+      // transient DB blips were falsely marking the key broken and hiding real status.
       console.error("[DailyBarRefresh] Startup check failed (non-fatal):", String(err).slice(0, 200));
-      apiKeyBroken = true;
     });
   }, 60_000);
 
@@ -323,5 +356,8 @@ export function startDailyBarRefreshScheduler(): void {
     });
   }, SIX_HOURS_MS);
 
-  console.log("[DailyBarRefresh] Scheduler started — first check in 60s, then every 6 hours.");
+  console.log(
+    "[DailyBarRefresh] Scheduler started — first check in 60s, then every 6 hours " +
+      "(skips night mode 8pm–4am ET and RSS/heap pressure)."
+  );
 }

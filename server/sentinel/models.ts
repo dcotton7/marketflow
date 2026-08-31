@@ -295,6 +295,17 @@ export const sentinelModels = {
 
   // Watchlist items methods
   async createWatchlistItem(data: InsertSentinelWatchlistItem): Promise<SentinelWatchlistItem> {
+    if (data.watchlistId) {
+      const [existing] = await db.select().from(sentinelWatchlist)
+        .where(and(
+          eq(sentinelWatchlist.userId, data.userId),
+          eq(sentinelWatchlist.watchlistId, data.watchlistId),
+          eq(sentinelWatchlist.symbol, data.symbol.toUpperCase()),
+          eq(sentinelWatchlist.status, "watching"),
+        ))
+        .limit(1);
+      if (existing) return existing;
+    }
     const [item] = await db.insert(sentinelWatchlist).values(data).returning();
     return item;
   },

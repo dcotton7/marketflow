@@ -297,6 +297,8 @@ export const sentinelUsers = pgTable("sentinel_users", {
   avgPositionSize: doublePrecision("avg_position_size"), // Optional, user-defined typical position
   riskProfileCompleted: boolean("risk_profile_completed").default(false), // Track if user has set up profile
   riskProfileSkippedAt: timestamp("risk_profile_skipped_at"), // When user last skipped the setup modal
+  lastLoginAt: timestamp("last_login_at"),
+  loginCount: integer("login_count").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

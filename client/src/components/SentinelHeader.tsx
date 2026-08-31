@@ -299,24 +299,24 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
     <WatchlistModal open={watchlistModalOpen} onOpenChange={setWatchlistModalOpen} />
     <AlertCenterDialog open={alertCenterOpen} onOpenChange={setAlertCenterOpen} />
     <div
-      className={`flex items-center justify-between border-b overflow-hidden ${responsive.isCompact ? "gap-1 px-2 py-0.5" : "gap-4 px-4 py-3"}`}
+      className={`flex items-center justify-between border-b overflow-hidden ${responsive.isCompact ? "gap-1 px-2 py-0.5" : "gap-3 px-4 py-1.5"}`}
       style={{ backgroundColor: cssVariables.headerBg }}
     >
-      <div className={`flex items-center min-w-0 ${responsive.isCompact ? "gap-1" : "gap-4"}`}>
+      <div className={`flex items-center min-w-0 ${responsive.isCompact ? "gap-1" : "gap-3"}`}>
         <Link href="/sentinel">
           <div
             className="flex items-center gap-1 cursor-pointer hover-elevate rounded-md px-0.5 py-0.5"
             data-testid="link-sentinel-home"
           >
             <div
-              className={`${responsive.isCompact ? "h-7 max-h-[1.75rem]" : "h-16 max-h-[4.25rem]"} shrink-0 flex items-center justify-center rounded-sm`}
+              className={`${responsive.isCompact ? "h-7 max-h-[1.75rem]" : "h-10 max-h-[2.5rem]"} shrink-0 flex items-center justify-center rounded-sm`}
               style={{ opacity: cssVariables.logoOpacity }}
               data-testid="img-sentinel-header-logo-wrap"
             >
               <img
                 src="/structuremap-mark.png"
                 alt="StructureMap"
-                className={`${responsive.isCompact ? "h-7" : "h-16"} w-auto max-h-full object-contain object-left block select-none pointer-events-none`}
+                className={`${responsive.isCompact ? "h-7" : "h-10"} w-auto max-h-full object-contain object-left block select-none pointer-events-none`}
                 draggable={false}
                 data-testid="img-sentinel-header-logo"
               />

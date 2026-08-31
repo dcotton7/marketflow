@@ -349,7 +349,6 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [tickerInput, setTickerInput] = useState("");
   const [isAddingTickers, setIsAddingTickers] = useState(false);
   const [addProgress, setAddProgress] = useState<{ done: number; total: number } | null>(null);
-  const [awaitingQuoteRefresh, setAwaitingQuoteRefresh] = useState(false);
   
   // Sort state
   const [sortField, setSortField] = useState<SortField>("symbol");
@@ -579,7 +578,6 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     }
 
     if (added > 0) {
-      setAwaitingQuoteRefresh(true);
       toast({ title: `Added ${added} ticker${added > 1 ? "s" : ""}` });
     } else if (tickers.length > 0) {
       toast({ title: "Could not add", description: "Tickers may already be in the list or a server error occurred.", variant: "destructive" });
@@ -613,17 +611,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     return sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />;
   };
 
-  useEffect(() => {
-    if (awaitingQuoteRefresh && !itemsLoading && !quotesLoading) {
-      setAwaitingQuoteRefresh(false);
-    }
-  }, [awaitingQuoteRefresh, itemsLoading, quotesLoading]);
-
-  const isPullingTickers =
-    isAddingTickers ||
-    awaitingQuoteRefresh ||
-    itemsLoading ||
-    (quotesLoading && symbols.length > 0);
+  const isPullingTickers = isAddingTickers;
   const addProgressPct =
     addProgress && addProgress.total > 0
       ? (addProgress.done / addProgress.total) * 100

@@ -31,6 +31,7 @@ import {
   getMaShardProgress,
   type MaMode,
 } from "../../data-layer";
+import { getNightModeWindow, shouldRunHeavyBackgroundWork } from "../../infra/memory-gate";
 
 // =============================================================================
 // Types
@@ -400,6 +401,11 @@ async function saveHistoricalSnapshotsIfNeeded(themes: ThemeMetrics[]): Promise<
 export async function refreshLeaders(): Promise<void> {
   if (!state.spyBenchmark || state.snapshots.size === 0) {
     console.log("[MC-Snapshot] Skipping leader refresh - no snapshot data");
+    return;
+  }
+
+  if (!shouldRunHeavyBackgroundWork()) {
+    console.log("[MC-Snapshot] Skipping leader refresh — night mode or memory pressure");
     return;
   }
   
@@ -1062,7 +1068,7 @@ export function getPollingStatus(): {
   };
 }
 
-const RENDER_RSS_BUDGET_MB = 2048;
+const RENDER_RSS_BUDGET_MB = parseInt(process.env.RSS_BUDGET_MB || "2048", 10);
 
 /** Compact live diagnostics for the MarketFlow server-status overlay. */
 export function getServerStatusSnapshot(): {
@@ -1083,12 +1089,19 @@ export function getServerStatusSnapshot(): {
     universeSize: number;
     shard: ReturnType<typeof getMaShardProgress>;
   };
+  nightMode?: {
+    active: boolean;
+    startEt: string;
+    endEt: string;
+    allowHeavyWork: boolean;
+  };
 } {
   const mem = process.memoryUsage();
   const heapUsedMb = Math.round(mem.heapUsed / 1024 / 1024);
   const heapTotalMb = Math.round(mem.heapTotal / 1024 / 1024);
   const rssMb = Math.round(mem.rss / 1024 / 1024);
   const shard = getMaShardProgress();
+  const nightWindow = getNightModeWindow();
   return {
     generatedAt: new Date().toISOString(),
     memory: {
@@ -1106,6 +1119,12 @@ export function getServerStatusSnapshot(): {
       coverage: Math.max(state.maData.size, shard.coveredCount),
       universeSize: shard.universeSize || getAllUniverseTickers().length,
       shard,
+    },
+    nightMode: {
+      active: nightWindow.active,
+      startEt: nightWindow.startEt,
+      endEt: nightWindow.endEt,
+      allowHeavyWork: shouldRunHeavyBackgroundWork(),
     },
   };
 }

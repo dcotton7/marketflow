@@ -31,7 +31,8 @@ export default function SentinelChartsPage() {
   const searchString = useSearch();
   const urlParams = new URLSearchParams(searchString);
   const pathSymbol = pathParams?.symbol?.toUpperCase() ?? "";
-  const initialSymbol = urlParams.get("symbol")?.toUpperCase() || pathSymbol || "";
+  const initialSymbol =
+    urlParams.get("symbol")?.toUpperCase() || urlParams.get("ticker")?.toUpperCase() || pathSymbol || "";
 
   const [tickerInput, setTickerInput] = useState(initialSymbol);
   const [activeSymbol, setActiveSymbol] = useState(initialSymbol.toUpperCase());
@@ -86,6 +87,13 @@ export default function SentinelChartsPage() {
   const [chartWatchlistSymOrder, setChartWatchlistSymOrder] = useState<string[] | null>(null);
   /** Symbol order from Ticker Review "Review on chart" when Internal Charts popout is active */
   const [tickerReviewSymOrder, setTickerReviewSymOrder] = useState<string[] | null>(null);
+
+  /** Captured on first load so replaceState (watchlist / ticker-review) cannot erase how we got here. */
+  const closeContextRef = useRef({
+    popout: urlParams.get("popout") === "true" || window.name === "InternalCharts",
+    source: urlParams.get("source"),
+    arrivedWithSymbol: Boolean(initialSymbol),
+  });
 
   const {
     selectedId: effectiveManagerWatchlistId,
@@ -388,6 +396,21 @@ export default function SentinelChartsPage() {
   }, [handleSubmitTicker]);
 
   const handleClose = useCallback(() => {
+    const ctx = closeContextRef.current;
+    const isChartPopout = window.name === "InternalCharts" || ctx.popout;
+
+    if (isChartPopout) {
+      window.close();
+      return;
+    }
+
+    if (ctx.arrivedWithSymbol || ctx.source) {
+      if (window.history.length > 1) {
+        window.history.back();
+        return;
+      }
+    }
+
     setActiveSymbol("");
     setTickerInput("");
   }, []);
@@ -842,7 +865,11 @@ export default function SentinelChartsPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p className="text-sm">Close chart and clear ticker</p>
+                <p className="text-sm">
+                  {closeContextRef.current.arrivedWithSymbol || closeContextRef.current.source || closeContextRef.current.popout
+                    ? "Close chart — return where you came from"
+                    : "Close chart and clear ticker"}
+                </p>
               </TooltipContent>
             </Tooltip>
           )}

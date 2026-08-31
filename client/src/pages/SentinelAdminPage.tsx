@@ -37,6 +37,8 @@ import {
 } from "@shared/sentinelTierAccess";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SCANNER_CONFIG_FIELDS, type ConfigFieldMeta } from "@shared/scanner-config";
+import type { ScannerMode, ScannerStatus } from "@shared/scanner-types";
 
 interface TnnFactor {
   id: number;
@@ -2213,6 +2215,399 @@ function AskIvyRulesPanel() {
   );
 }
 
+// ── Scanner Admin Panel ─────────────────────────────────────────────────────
+
+function ScannerAdminPanel() {
+  const { toast } = useToast();
+
+  // Scanner status
+  const { data: status, refetch: refetchStatus } = useQuery<ScannerStatus>({
+    queryKey: ["/api/scanner/status"],
+    refetchInterval: 5000,
+  });
+
+  // Scanner config
+  const { data: configData, isLoading: configLoading } = useQuery<{
+    config: Record<string, number | boolean>;
+    defaults: Record<string, number | boolean>;
+  }>({
+    queryKey: ["/api/scanner/config"],
+  });
+
+  // Catalyst rules
+  const { data: catalystData } = useQuery<{
+    rules: Array<{
+      id: string;
+      name: string;
+      enabled: boolean;
+      catalystType: string;
+      description: string;
+      windowDays: number;
+      decayShape: string;
+      boostMultiplier: number;
+    }>;
+    total: number;
+  }>({
+    queryKey: ["/api/scanner/catalysts/rules"],
+  });
+
+  // Active catalysts
+  const { data: activeCatalysts } = useQuery<{
+    catalysts: Array<{
+      id: number;
+      subject: string;
+      catalystType: string;
+      headline: string;
+      firedAt: string;
+      decayWeight: number;
+    }>;
+    total: number;
+  }>({
+    queryKey: ["/api/scanner/catalysts/queue"],
+    refetchInterval: 30_000,
+  });
+
+  const [localConfig, setLocalConfig] = useState<Record<string, number | boolean>>({});
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (configData?.config) setLocalConfig(configData.config);
+  }, [configData?.config]);
+
+  // Mode toggle
+  const modeMutation = useMutation({
+    mutationFn: async (mode: ScannerMode) => {
+      const res = await apiRequest("POST", "/api/scanner/mode", { mode });
+      return res.json();
+    },
+    onSuccess: (_, mode) => {
+      refetchStatus();
+      toast({ title: "Scanner mode changed", description: `Scanner is now ${mode}` });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to change mode", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Config save
+  const configMutation = useMutation({
+    mutationFn: async (updates: Record<string, number | boolean>) => {
+      const res = await apiRequest("PUT", "/api/scanner/config", updates);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/scanner/config"] });
+      setDirtyKeys(new Set());
+      if (data?.config) setLocalConfig(data.config);
+      toast({ title: "Scanner config saved" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Config save failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Catalyst rule toggle
+  const ruleMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await apiRequest("PUT", `/api/scanner/catalysts/rules/${id}`, { enabled });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/scanner/catalysts/rules"] });
+    },
+  });
+
+  const handleConfigChange = (key: string, value: number | boolean) => {
+    setLocalConfig((prev) => ({ ...prev, [key]: value }));
+    setDirtyKeys((prev) => new Set(prev).add(key));
+  };
+
+  const handleSaveConfig = () => {
+    const updates: Record<string, number | boolean> = {};
+    for (const k of dirtyKeys) updates[k] = localConfig[k]!;
+    if (Object.keys(updates).length > 0) configMutation.mutate(updates);
+  };
+
+  const handleResetConfig = () => {
+    if (configData?.defaults) {
+      setLocalConfig(configData.defaults);
+      const allKeys = new Set(Object.keys(configData.defaults));
+      setDirtyKeys(allKeys);
+    }
+  };
+
+  const toggleGroup = (group: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
+
+  // Group config fields by their group label
+  const fieldsByGroup = useMemo(() => {
+    const map = new Map<string, ConfigFieldMeta[]>();
+    for (const f of SCANNER_CONFIG_FIELDS) {
+      const list = map.get(f.group) || [];
+      list.push(f);
+      map.set(f.group, list);
+    }
+    return map;
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      {/* ── Status + Mode ──────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="w-5 h-5" />
+            Scanner Status
+          </CardTitle>
+          <CardDescription>Live scanner state and mode control</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="text-center p-3 rounded-lg bg-muted/50">
+              <p className="text-xs text-muted-foreground">Mode</p>
+              <p className="text-lg font-semibold">{status?.mode ?? "—"}</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-muted/50">
+              <p className="text-xs text-muted-foreground">Universe</p>
+              <p className="text-lg font-semibold">{status?.universeSize ?? "—"}</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-muted/50">
+              <p className="text-xs text-muted-foreground">Pipelines</p>
+              <p className="text-lg font-semibold">{status?.activePipelines ?? "—"}</p>
+            </div>
+            <div className="text-center p-3 rounded-lg bg-muted/50">
+              <p className="text-xs text-muted-foreground">Discoveries Today</p>
+              <p className="text-lg font-semibold">{status?.discoveriesToday ?? "—"}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium">Scanner Mode</Label>
+            <div className="flex gap-1 ml-auto">
+              {(["on", "silent", "off"] as ScannerMode[]).map((m) => (
+                <Button
+                  key={m}
+                  size="sm"
+                  variant={status?.mode === m ? "default" : "outline"}
+                  disabled={modeMutation.isPending}
+                  onClick={() => modeMutation.mutate(m)}
+                >
+                  {m === "on" ? "On" : m === "silent" ? "Silent" : "Off"}
+                </Button>
+              ))}
+            </div>
+          </div>
+          {status?.lastSignalAt && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Last signal: {new Date(status.lastSignalAt).toLocaleString()}
+            </p>
+          )}
+          {status?.sessionMode && (
+            <p className="text-xs text-muted-foreground">Session: {status.sessionMode}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Signal Config ──────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="w-5 h-5" />
+            Signal Thresholds
+          </CardTitle>
+          <CardDescription>
+            Tune pipeline thresholds, cooldowns, and windows.
+            {dirtyKeys.size > 0 && (
+              <Badge variant="secondary" className="ml-2">{dirtyKeys.size} unsaved</Badge>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {configLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
+          ) : (
+            <div className="space-y-2">
+              {[...fieldsByGroup.entries()].map(([group, fields]) => {
+                const isOpen = expandedGroups.has(group);
+                return (
+                  <div key={group} className="border rounded-lg">
+                    <button
+                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-muted/50 transition-colors"
+                      onClick={() => toggleGroup(group)}
+                    >
+                      <span>{group}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{fields.length} params</span>
+                        {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div className="px-4 pb-3 space-y-3 border-t">
+                        {fields.map((f) => {
+                          const val = localConfig[f.key];
+                          const isDirty = dirtyKeys.has(f.key);
+                          if (f.type === "boolean") {
+                            return (
+                              <div key={f.key} className="flex items-center justify-between py-1">
+                                <Label className={`text-sm ${isDirty ? "text-primary font-medium" : ""}`}>
+                                  {f.label}
+                                </Label>
+                                <Switch
+                                  checked={val as boolean ?? false}
+                                  onCheckedChange={(v) => handleConfigChange(f.key, v)}
+                                />
+                              </div>
+                            );
+                          }
+                          return (
+                            <div key={f.key} className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <Label className={`text-sm ${isDirty ? "text-primary font-medium" : ""}`}>
+                                  {f.label}
+                                </Label>
+                                <span className="text-xs text-muted-foreground tabular-nums">
+                                  {typeof val === "number" ? val : "—"}{f.unit ? ` ${f.unit}` : ""}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Slider
+                                  value={[typeof val === "number" ? val : (f.min ?? 0)]}
+                                  min={f.min ?? 0}
+                                  max={f.max ?? 100}
+                                  step={f.step ?? 1}
+                                  onValueChange={([v]) => handleConfigChange(f.key, v!)}
+                                  className="flex-1"
+                                />
+                                <Input
+                                  type="number"
+                                  className="w-20 h-8 text-xs"
+                                  value={typeof val === "number" ? val : ""}
+                                  min={f.min}
+                                  max={f.max}
+                                  step={f.step}
+                                  onChange={(e) => {
+                                    const n = parseFloat(e.target.value);
+                                    if (!isNaN(n)) handleConfigChange(f.key, n);
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {dirtyKeys.size > 0 && (
+            <div className="flex items-center gap-2 mt-4 pt-4 border-t">
+              <Button onClick={handleSaveConfig} disabled={configMutation.isPending}>
+                {configMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Save Config
+              </Button>
+              <Button variant="outline" onClick={handleResetConfig}>
+                Reset to Defaults
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Catalyst Rules ─────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
+            Catalyst Rules
+          </CardTitle>
+          <CardDescription>
+            Enable/disable catalyst detection rules. {catalystData?.total ?? 0} rules defined.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {catalystData?.rules && catalystData.rules.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">On</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Window</TableHead>
+                  <TableHead className="text-right">Boost</TableHead>
+                  <TableHead>Decay</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {catalystData.rules.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>
+                      <Switch
+                        checked={r.enabled}
+                        onCheckedChange={(enabled) => ruleMutation.mutate({ id: r.id, enabled })}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">{r.catalystType}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{r.windowDays}d</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.boostMultiplier}x</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.decayShape}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-muted-foreground">No catalyst rules configured.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Active Catalysts ───────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="w-5 h-5" />
+            Active Catalysts
+            {activeCatalysts?.total ? (
+              <Badge variant="secondary">{activeCatalysts.total}</Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>Currently active catalyst entries affecting signal scoring</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {activeCatalysts?.catalysts && activeCatalysts.catalysts.length > 0 ? (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {activeCatalysts.catalysts.map((c) => (
+                <div key={c.id} className="flex items-center gap-3 text-sm border rounded-lg px-3 py-2">
+                  <Badge variant="outline" className="text-xs shrink-0">{c.catalystType}</Badge>
+                  <span className="font-medium">{c.subject}</span>
+                  <span className="text-muted-foreground truncate flex-1">{c.headline}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                    wt {c.decayWeight.toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No active catalysts.</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function MarketConditionPanel() {
   const { toast } = useToast();
   const [settings, setSettings] = useState({
@@ -3119,6 +3514,10 @@ export default function SentinelAdminPage() {
               <Activity className="w-4 h-4" />
               Market Condition
             </TabsTrigger>
+            <TabsTrigger value="scanner" className="gap-2" data-testid="tab-scanner">
+              <Zap className="w-4 h-4" />
+              Scanner
+            </TabsTrigger>
             <TabsTrigger value="workspace-colors" className="gap-2" data-testid="tab-workspace-colors">
               <LayoutGrid className="w-4 h-4" />
               Workspace colors
@@ -3974,6 +4373,10 @@ export default function SentinelAdminPage() {
           ) : null}
           <TabsContent value="market-condition" data-testid="content-market-condition">
             <MarketConditionPanel />
+          </TabsContent>
+
+          <TabsContent value="scanner" data-testid="content-scanner">
+            <ScannerAdminPanel />
           </TabsContent>
 
           <TabsContent value="workspace-colors" data-testid="content-workspace-colors">

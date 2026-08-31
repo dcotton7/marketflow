@@ -802,7 +802,7 @@ export function DualChartGrid({
     if (onNavigateToTicker) {
       onNavigateToTicker(ticker);
     } else {
-      window.location.href = `/sentinel/charts?ticker=${ticker}`;
+      window.location.href = `/sentinel/charts?symbol=${encodeURIComponent(ticker)}`;
     }
   }, [onNavigateToTicker]);
 

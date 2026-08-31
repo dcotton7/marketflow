@@ -339,12 +339,12 @@ export function useAddToWatchlist() {
       return res.json();
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
       if (variables.watchlistId != null) {
         queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist", variables.watchlistId] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
-      toast({ title: "Added to Watchlist", description: "Symbol is now being tracked." });
     },
     onError: (err) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
