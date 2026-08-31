@@ -1349,7 +1349,14 @@ export function FlowMapPanel({
           )}
 
           {showDetailCards ? (
-          <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div
+            className="grid w-full min-w-0 gap-3"
+            style={{
+              gridTemplateColumns: panelSize.w >= 1000 ? "repeat(3, minmax(0, 1fr))"
+                : panelSize.w >= 600 ? "repeat(2, minmax(0, 1fr))"
+                : "1fr",
+            }}
+          >
             <div className="min-w-0 rounded border border-slate-700/60 bg-slate-900/85 p-3" style={{ fontSize: fontPrefs.snapshot }}>
               <div className="mb-1 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-wide text-slate-200">
@@ -1370,8 +1377,11 @@ export function FlowMapPanel({
               </div>
             </div>
             <div
-              className="min-w-0 rounded border border-cyan-500/40 bg-gradient-to-b from-cyan-500/10 to-slate-900/90 p-3 shadow-[0_0_0_1px_rgba(34,211,238,0.15)] sm:col-span-2 xl:col-span-1"
-              style={{ fontSize: fontPrefs.narrative }}
+              className="min-w-0 rounded border border-cyan-500/40 bg-gradient-to-b from-cyan-500/10 to-slate-900/90 p-3 shadow-[0_0_0_1px_rgba(34,211,238,0.15)]"
+              style={{
+                fontSize: fontPrefs.narrative,
+                gridColumn: panelSize.w >= 600 && panelSize.w < 1000 ? "span 2" : undefined,
+              }}
             >
               <div className="mb-1 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-wide text-cyan-200">
@@ -1499,8 +1509,13 @@ export function FlowMapPanel({
               )}
             </div>
 
-            <div className="min-w-0 rounded border border-slate-700/60 bg-slate-900/85 p-3 sm:col-span-2 xl:col-span-1" style={{ fontSize: fontPrefs.settings }}>
-              <div className="mb-1 flex items-center justify-between gap-2">
+            <div
+              className="min-w-0 rounded border border-slate-700/60 bg-slate-900/85 p-3"
+              style={{
+                fontSize: fontPrefs.settings,
+                gridColumn: panelSize.w >= 600 && panelSize.w < 1000 ? "span 2" : undefined,
+              }}
+            >              <div className="mb-1 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-wide text-slate-200">
                   <span>Current Tool Settings</span>
                   <InlineInfoTooltip label="Current Tool Settings help" className="h-4 w-4 text-[10px]">

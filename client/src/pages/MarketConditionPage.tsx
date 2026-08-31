@@ -41,7 +41,7 @@ import {
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useLocation, useSearch } from "wouter";
-import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, BarChart3, Search, Car, Eye, EyeOff } from "lucide-react";
+import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, ChevronUp, BarChart3, Search, Car, Eye, EyeOff, Rows3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -90,7 +90,7 @@ import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
 import { localSlotBgStyle, localSlotHeaderStyle } from "@/lib/local-slot-style";
 import { useResponsiveLayout } from "@/hooks/useResponsiveLayout";
 
-type ViewMode = "grid" | "table" | "split";
+type ViewMode = "grid" | "table" | "split" | "rows";
 type LensMode = "flow" | "rotation" | "flowMap" | "concentration" | "accumulation" | "race";
 
 interface SearchSubthemeResult {
@@ -322,7 +322,14 @@ export default function MarketConditionPage() {
     if (urlTheme && urlTheme !== selectedTheme) setSelectedTheme(urlTheme);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to URL changes
   }, [urlTheme]);
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [viewMode, setViewModeRaw] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem("mc-view-mode");
+    return (saved === "grid" || saved === "table" || saved === "split" || saved === "rows") ? saved : "split";
+  });
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeRaw(mode);
+    localStorage.setItem("mc-view-mode", mode);
+  }, []);
   const [lensMode, setLensMode] = useState<LensMode>("flowMap");
   const timeSliceDisabledModes = new Set<LensMode>(["flowMap", "concentration", "accumulation", "race"]);
   const handleLensMode = (mode: LensMode) => {
@@ -338,6 +345,8 @@ export default function MarketConditionPage() {
     if (slice === "TODAY") setHeatmapSort("current");
   };
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [headerBarCollapsed, setHeaderBarCollapsed] = useState(false);
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
   const [isRacePopoutOpen, setIsRacePopoutOpen] = useState(false);
   const [isRacePopoutMaximized, setIsRacePopoutMaximized] = useState(false);
   const [useLiveData, setUseLiveData] = useState(true);
@@ -1542,15 +1551,19 @@ export default function MarketConditionPage() {
 
   return (
     <div
-      className={cn("sentinel-page h-screen flex flex-col", isFullscreen && "fixed inset-0 z-50")}
+      className={cn(
+        "sentinel-page flex flex-col",
+        viewMode === "rows" ? "min-h-screen" : "h-screen",
+        isFullscreen && "fixed inset-0 z-50"
+      )}
       style={pageShellStyle as React.CSSProperties}
       data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "pageShell")}
     >
       {/* Main App Navigation */}
       <SentinelHeader showSentiment={false} />
       
-      {/* Market Condition Header - RAI, Regime, Metrics — hidden on compact to save vertical space */}
-      {!responsive.isCompact && (
+      {/* Market Condition Header - RAI, Regime, Metrics */}
+      {!responsive.isCompact && !headerBarCollapsed && (
         <HeaderBar 
           summary={marketSummary} 
           themes={themes} 
@@ -1600,6 +1613,58 @@ export default function MarketConditionPage() {
         style={localSlotHeaderStyle("marketFlow:commandToolbar")}
         data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "commandToolbar")}
       >
+        {/* Collapse toggles — always visible */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          {!responsive.isCompact && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-muted-foreground"
+                  onClick={() => setHeaderBarCollapsed((v) => !v)}
+                >
+                  {headerBarCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{headerBarCollapsed ? "Show regime bar" : "Hide regime bar"}</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-muted-foreground"
+                onClick={() => setToolbarCollapsed((v) => !v)}
+              >
+                {toolbarCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{toolbarCollapsed ? "Show toolbar" : "Hide toolbar"}</TooltipContent>
+          </Tooltip>
+        </div>
+
+        {toolbarCollapsed ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+            <span className="font-medium text-foreground">{responsive.isCompact ? "Flow" : "Market Condition"}</span>
+            <span className="text-[10px] px-1 py-0.5 rounded bg-slate-700 text-slate-300">{lensMode.toUpperCase()}</span>
+            {headerBarCollapsed && !responsive.isCompact && (
+              <>
+                <span className={cn(
+                  "text-[10px] px-1 py-0.5 rounded font-bold",
+                  marketSummary.rai.score >= 60 ? "bg-green-500/20 text-green-400" :
+                  marketSummary.rai.score >= 40 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"
+                )}>RAI {marketSummary.rai.score}</span>
+                <span className={cn(
+                  "text-[10px] px-1 py-0.5 rounded font-bold",
+                  marketSummary.regime === "RISK_ON" ? "bg-green-500/20 text-green-400" :
+                  marketSummary.regime === "RISK_OFF" ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400"
+                )}>{marketSummary.regime.replace("_", " ")}</span>
+              </>
+            )}
+          </div>
+        ) : (
         <div className="flex min-w-0 flex-wrap items-center gap-2 md:gap-4">
           <ThemeColorChip slotId="marketFlow:commandToolbar" />
           <Tooltip>
@@ -2135,9 +2200,10 @@ export default function MarketConditionPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
-          {viewMode === "split" && splitPanelsHiddenCount > 0 && (
+          {(viewMode === "split" || viewMode === "rows") && splitPanelsHiddenCount > 0 && (
             <div className="flex items-center gap-1 rounded-lg border border-slate-700/60 bg-slate-800/40 px-2 py-1">
               <span className="px-1 text-[11px] text-slate-400">Show:</span>
               {!showFocusedPanel && (
@@ -2240,6 +2306,22 @@ export default function MarketConditionPage() {
               </TooltipTrigger>
               <TooltipContent>Split View - All panels visible with resizable dividers</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 px-2",
+                    viewMode === "rows" && "bg-slate-700"
+                  )}
+                  onClick={() => setViewMode("rows")}
+                >
+                  <Rows3 className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Row View - Panels stacked vertically, single scroll</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Fullscreen Toggle */}
@@ -2273,8 +2355,129 @@ export default function MarketConditionPage() {
       )}
 
       {/* Main Content */}
-      <div className={cn("flex-1 overflow-hidden", responsive.isCompact ? "p-1" : "p-2")}>
-        {viewMode === "split" ? (
+      <div className={cn(
+        viewMode === "rows" ? "flex-1 overflow-y-auto" : "flex-1 overflow-hidden",
+        responsive.isCompact ? "p-1" : "p-2"
+      )}>
+        {viewMode === "rows" ? (
+          <div className="space-y-2">
+            {/* Theme Tracker / FlowMap */}
+            <div
+              className="rounded-lg border border-slate-700/50 overflow-hidden"
+              style={{ ...localSlotBgStyle("marketFlow:themeTrackerPanel"), minHeight: 300 }}
+              data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "themeTrackerPanel")}
+            >
+              <PanelHeader
+                bodySlotId="marketFlow:themeTrackerPanel"
+                title={lensMode === "flowMap" ? "Flow Map" : lensMode === "race" ? "Theme Race" : "Theme Tracker"}
+                tooltip="Top-level theme view driven by the selected lens"
+              />
+              <div style={{ height: 500 }} className="overflow-auto">
+                {lensMode === "flowMap" ? (
+                  <FlowMapPanel
+                    selectedTheme={selectedTheme}
+                    onThemeSelect={handleThemeSelect}
+                    sizeFilter={sizeFilter}
+                    onFocusDataChange={setFlowMapFocusData}
+                  />
+                ) : lensMode === "race" ? (
+                  <ThemeRaceLanes themes={sortedThemes} selectedTheme={selectedTheme} onThemeSelect={handleThemeSelect} totalThemes={themes.length} isFetching={themesFetching} />
+                ) : lensMode === "flow" || lensMode === "rotation" ? (
+                  <RotationTable
+                    themes={sortedThemes}
+                    selectedTheme={selectedTheme}
+                    onThemeSelect={handleThemeSelect}
+                    lensMode={lensMode}
+                    timeSlice={timeSlice}
+                  />
+                ) : (
+                  <ThemeHeatmapGrid
+                    themes={sortedThemes}
+                    selectedTheme={selectedTheme}
+                    onThemeSelect={handleThemeSelect}
+                    totalThemes={themes.length}
+                    timeSlice={timeSlice}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Focused Theme */}
+            {showFocusedPanel && renderCompactFocusedContent()}
+
+            {/* Theme Members */}
+            {showMembersPanel && selectedTheme && (
+              <div
+                className="rounded-lg border border-slate-700/50 overflow-hidden"
+                style={localSlotBgStyle("marketFlow:membersPanel")}
+                data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "membersPanel")}
+              >
+                <PanelHeader
+                  bodySlotId="marketFlow:membersPanel"
+                  title="Theme Members"
+                  tooltip="Individual tickers within the selected theme"
+                  action={
+                    <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowMembersPanel(false)}>
+                      <EyeOff className="mr-1 h-3.5 w-3.5" /> Hide
+                    </Button>
+                  }
+                />
+                <div className="overflow-auto" style={{ maxHeight: 400 }}>
+                  <TickerWorkbench
+                    themeId={selectedTheme}
+                    themeName={selectedThemeData?.name || null}
+                    selectedSubthemeId={selectedSubthemeId}
+                    selectedSubthemeName={selectedSubthemeName}
+                    tickers={visibleThemeTickers}
+                    onTickerSelect={handleTickerSelect}
+                    onTickersAdded={handleTickersAdded}
+                    isAdmin={userInfo?.isAdmin ?? false}
+                    highlightedTicker={highlightedTicker}
+                    timeSlice={timeSlice}
+                    maAsOf={themeMembers?.maAsOf ?? marketCondition?.maAsOf}
+                    maMode={themeMembers?.maMode ?? marketCondition?.maMode}
+                    msSyncEnabled={msSyncEnabled}
+                    onMsSyncToggle={() => setMsSyncEnabled(!msSyncEnabled)}
+                    chartSyncEnabled={chartSyncEnabled}
+                    onChartSyncToggle={() => setChartSyncEnabled(!chartSyncEnabled)}
+                    analysisSyncEnabled={analysisSyncEnabled}
+                    onAnalysisSyncToggle={() => setAnalysisSyncEnabled(!analysisSyncEnabled)}
+                    onOpenAnalysis={(symbol) => setAnalysisSheetSymbol(symbol)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Rotation Table */}
+            {showRotationTablePanel && (
+              <div
+                className="rounded-lg border border-slate-700/50 overflow-hidden"
+                style={localSlotBgStyle("marketFlow:rotationTable")}
+                data-ui-region={uiRegion(MARKET_FLOW_SURFACE.id, "rotationTable")}
+              >
+                <PanelHeader
+                  bodySlotId="marketFlow:rotationTable"
+                  title="Rotation Table"
+                  tooltip="Full metrics table with sortable columns"
+                  action={
+                    <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setShowRotationTablePanel(false)}>
+                      <EyeOff className="mr-1 h-3.5 w-3.5" /> Hide
+                    </Button>
+                  }
+                />
+                <div className="overflow-auto" style={{ maxHeight: 400 }}>
+                  <RotationTable
+                    themes={sortedThemes}
+                    selectedTheme={selectedTheme}
+                    onThemeSelect={handleThemeSelect}
+                    lensMode={lensMode}
+                    timeSlice={timeSlice}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        ) : viewMode === "split" ? (
           showRotationTablePanel ? (
             <PanelGroup
               direction="vertical"
