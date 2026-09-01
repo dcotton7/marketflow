@@ -418,7 +418,8 @@ export default function SentinelChartsPage() {
   const {
     data: dailyData,
     isLoading: dailyLoading,
-    isError: dailyError,
+    isError: dailyIsError,
+    error: dailyError,
   } = useSentinelDailyChartData(activeSymbol || undefined, {
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
@@ -466,7 +467,7 @@ export default function SentinelChartsPage() {
     intradayTimeframe,
     dailyLoading,
     dailyData,
-    dailyError,
+    dailyError: dailyIsError,
     intradayLoading,
     intradayFetching,
     intradayData,
@@ -890,6 +891,7 @@ export default function SentinelChartsPage() {
               symbol={activeSymbol}
               dailyData={dailyData}
               dailyLoading={dailyLoading}
+              dailyError={dailyError}
               intradayData={intradayData}
               intradayLoading={intradayLoading}
               intradayFetching={intradayFetching}

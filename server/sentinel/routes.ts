@@ -7392,15 +7392,26 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
         intradayStart.setDate(intradayStart.getDate() - (timeframe === "5min" ? 12 : timeframe === "15min" ? 25 : 30));
       }
 
+      let dailyFetchFailed = false;
       const [dailyBars, intradayBars, quoteData] = await Promise.all([
-        alpaca.fetchAlpacaDailyBars(ticker, startDate, endDate).catch(() => []),
+        alpaca.fetchAlpacaDailyBars(ticker, startDate, endDate).catch((err) => {
+          console.error(`[ChartData] Daily bars fetch FAILED for ${ticker}:`, String(err).slice(0, 300));
+          dailyFetchFailed = true;
+          return [] as alpaca.AlpacaCandle[];
+        }),
         isIntraday
-          ? alpaca.getAlpacaIntradayData(ticker, intradayStart, endDate, alpacaInterval, includeETH).catch(() => [])
+          ? alpaca.getAlpacaIntradayData(ticker, intradayStart, endDate, alpacaInterval, includeETH).catch((err) => {
+              console.warn(`[ChartData] Intraday bars fetch failed for ${ticker}:`, String(err).slice(0, 200));
+              return [] as alpaca.AlpacaCandle[];
+            })
           : Promise.resolve([] as alpaca.AlpacaCandle[]),
         alpaca.fetchAlpacaQuote(ticker).catch(() => null),
       ]);
 
       if (!dailyBars.length) {
+        if (dailyFetchFailed) {
+          return res.status(503).json({ error: `Data temporarily unavailable for ${ticker} — try again` });
+        }
         scheduleDelistedTickerCheck(ticker, "trade-chart-metrics-empty");
         return res.status(404).json({ error: `No data found for ${ticker}` });
       }

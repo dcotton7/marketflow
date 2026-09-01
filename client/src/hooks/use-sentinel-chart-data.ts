@@ -39,7 +39,11 @@ export async function fetchSentinelChartData(
     cache: "no-store",
     credentials: "include",
   });
-  if (!res.ok) throw new Error("Failed to fetch chart data");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const msg = body?.error ?? `Chart data fetch failed (${res.status})`;
+    throw new Error(msg);
+  }
   return res.json();
 }
 
@@ -59,6 +63,11 @@ export function useSentinelDailyChartData(ticker: string | undefined, options?: 
     queryFn: () => fetchSentinelChartData(ticker!, "daily", false),
     enabled: !!ticker,
     refetchInterval: getChartRefetchIntervalMs() || undefined,
+    retry: (failureCount, error) => {
+      if (error.message.includes("try again") && failureCount < 2) return true;
+      return false;
+    },
+    retryDelay: 2000,
     ...options,
   });
 }

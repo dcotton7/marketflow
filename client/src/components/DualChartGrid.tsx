@@ -209,6 +209,7 @@ interface DualChartGridProps {
   symbol?: string;
   dailyData: ChartDataResponse | undefined;
   dailyLoading: boolean;
+  dailyError?: Error | null;
   intradayData: ChartDataResponse | undefined;
   intradayLoading: boolean;
   /** True while a background refetch is in flight; chart stays visible with a light "Updating" hint. */
@@ -421,6 +422,7 @@ export function DualChartGrid({
   symbol,
   dailyData,
   dailyLoading,
+  dailyError,
   intradayData,
   intradayLoading,
   intradayFetching = false,
@@ -930,8 +932,15 @@ export function DualChartGrid({
           />
         ) : (
           <Card className="h-full">
-            <CardContent className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              No daily data
+            <CardContent className="flex h-full flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
+              {dailyError?.message?.includes("try again") ? (
+                <>
+                  <span>Data temporarily unavailable</span>
+                  <span className="text-xs">Alpaca API issue — refresh to retry</span>
+                </>
+              ) : (
+                "No daily data"
+              )}
             </CardContent>
           </Card>
         )}
