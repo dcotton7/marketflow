@@ -4,12 +4,16 @@ services:
   - type: web
     runtime: node
     name: stock-pattern-stream
-    plan: starter
+    plan: standard
     buildCommand: npm install && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: HEAP_LIMIT_MB
+        value: "1536"
+      - key: RSS_BUDGET_MB
+        value: "2048"
 
   - type: cron
     name: refresh-daily-bars

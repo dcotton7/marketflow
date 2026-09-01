@@ -8,7 +8,7 @@
  * refresh, and outcome-tracker backlog work so overnight RSS can settle.
  */
 
-const HEAP_LIMIT_MB = parseInt(process.env.HEAP_LIMIT_MB || "1024", 10);
+const HEAP_LIMIT_MB = parseInt(process.env.HEAP_LIMIT_MB || "1536", 10);
 const RSS_BUDGET_MB = parseInt(process.env.RSS_BUDGET_MB || "2048", 10);
 /** Heap fraction of HEAP_LIMIT_MB that counts as pressure. */
 const HEAP_PRESSURE_THRESHOLD = 0.70;
