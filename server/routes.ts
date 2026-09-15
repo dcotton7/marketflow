@@ -949,15 +949,26 @@ export async function registerRoutes(
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 
-  // ── ToS Bridge (LOCAL only — sends keystrokes to Thinkorswim) ─────────────
-  const tosBridge = await import("./bridge/tos-bridge");
-  
+  // ── ToS Bridge (LOCAL Windows only — Live returns 501 and never loads the module)
+  const tosUnavailable = {
+    available: false,
+    calibrated: false,
+    position: null,
+    calibratedAt: null,
+    process: null,
+    title: null,
+  };
+  const tosBridge =
+    process.platform === "win32" && process.env.NODE_ENV !== "production"
+      ? await import("./bridge/tos-bridge")
+      : null;
+
   app.get("/api/tos/status", (_req, res) => {
-    res.json(tosBridge.getStatus());
+    res.json(tosBridge ? tosBridge.getStatus() : tosUnavailable);
   });
 
   app.post("/api/tos/calibrate", async (_req, res) => {
-    if (!tosBridge.isAvailable()) {
+    if (!tosBridge?.isAvailable()) {
       return res.status(501).json({ error: "ToS bridge only available on LOCAL Windows" });
     }
     try {
@@ -970,7 +981,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/tos/navigate", async (req, res) => {
-    if (!tosBridge.isAvailable()) {
+    if (!tosBridge?.isAvailable()) {
       return res.status(501).json({ error: "ToS bridge only available on LOCAL Windows" });
     }
     const symbol = String(req.body?.symbol ?? "").trim();

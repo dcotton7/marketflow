@@ -16,12 +16,10 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 
 const exec = promisify(execFile);
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PS_SCRIPT = path.join(__dirname, "tos-win.ps1");
+const PS_SCRIPT = path.join(process.cwd(), "server", "bridge", "tos-win.ps1");
 
 interface Calibration {
   x: number;
