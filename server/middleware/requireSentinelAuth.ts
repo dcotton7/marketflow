@@ -8,7 +8,7 @@ import { sentinelModels } from "../sentinel/models";
 export async function requireSentinelAuth(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.session?.userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({ error: "Session expired" });
     }
     if (db) {
       const user = await sentinelModels.getUserById(req.session.userId);

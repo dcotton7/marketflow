@@ -11,6 +11,7 @@ import { SentinelHeader } from "@/components/SentinelHeader";
 import { CopyScreenButton } from "@/components/CopyScreenButton";
 import { DualChartGrid, ChartMetrics } from "@/components/DualChartGrid";
 import { AskIvyOverlay } from "@/components/AskIvyOverlay";
+import { TosSyncToggle } from "@/components/TosButton";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Search, Sparkles, Eye, X, ExternalLink, Star, ChevronLeft, ChevronRight, ChevronDown, Newspaper, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimeframe";
-import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
+import { isTradePlanEnabled, buildWatchlistTradePlanLines } from "@/lib/trade-plan-feature";
 import { ChartLoadStatusDialog } from "@/components/charts/ChartLoadStatusDialog";
 import { useChartLoadStatus } from "@/hooks/useChartLoadStatus";
 
@@ -136,6 +137,20 @@ export default function SentinelChartsPage() {
     return watchlistNavOrdered.map((w) => w.symbol);
   }, [tickerReviewSymOrder, watchlistNavOrdered]);
 
+  const chartTickerQueue = useMemo(() => {
+    const fromQueue = queueNavSymbols.map((s) => s.trim().toUpperCase()).filter(Boolean);
+    if (fromQueue.length > 1) return fromQueue;
+    const fromManager = (managerScopeItems ?? [])
+      .map((item) => item.symbol.trim().toUpperCase())
+      .filter(Boolean);
+    return fromManager.length > 1 ? fromManager : [];
+  }, [queueNavSymbols, managerScopeItems]);
+
+  const chartTickerIndex = useMemo(() => {
+    const idx = chartTickerQueue.findIndex((s) => s === activeSymbol.toUpperCase());
+    return idx;
+  }, [chartTickerQueue, activeSymbol]);
+
   const { mutate: addToWatchlist, isPending: isAddingToWatchlist } = useAddToWatchlist();
   const { mutate: removeFromWatchlist, isPending: isRemovingFromWatchlist } = useRemoveFromWatchlist();
   const { mutate: updateWatchlist } = useUpdateWatchlist();
@@ -181,7 +196,7 @@ export default function SentinelChartsPage() {
       setIvyTargetLevel(null);
     }
   }, [activeSymbol, prevSymbol]);
-  
+
   // NOTE: Price lines loading is handled by AskIvyOverlay via savedTradePlan prop
   // AskIvyOverlay calls onSelectionChange to update ivyEntryLevel/Stop/Target
 
@@ -460,6 +475,8 @@ export default function SentinelChartsPage() {
       return res.json();
     },
     staleTime: 60 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchIntervalInBackground: true,
   });
 
   const chartLoadStatus = useChartLoadStatus({
@@ -513,19 +530,13 @@ export default function SentinelChartsPage() {
   }, [pathSymbol, activeSymbol]);
 
   const ivyTradePlanPriceLines = useMemo(() => {
-    if (!isTradePlanEnabled()) return [];
-    return [
-      ...(ivyEntryLevel
-        ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }]
-        : []),
-      ...(ivyStopLevel
-        ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }]
-        : []),
-      ...(ivyTargetLevel
-        ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }]
-        : []),
-    ];
-  }, [ivyEntryLevel, ivyStopLevel, ivyTargetLevel]);
+    return buildWatchlistTradePlanLines({
+      liveEntry: ivyEntryLevel?.price,
+      liveStop: ivyStopLevel?.price,
+      liveTarget: ivyTargetLevel?.price,
+      saved: savedTradePlan,
+    });
+  }, [ivyEntryLevel, ivyStopLevel, ivyTargetLevel, savedTradePlan]);
 
   const ivyChartClickHandler = isTradePlanEnabled() && ivyActiveClickField
     ? (_candle: unknown, clickedPrice: number) => {
@@ -656,71 +667,75 @@ export default function SentinelChartsPage() {
 
   // Navigation handlers
   const handleNavigatePrev = useCallback(() => {
-    if (navigationMode === 'watchlist' && queueNavSymbols.length) {
-      const newIndex = Math.max(0, currentWatchlistIndex - 1);
-      setCurrentWatchlistIndex(newIndex);
-      const sym = queueNavSymbols[newIndex];
-      setActiveSymbol(sym);
-      setTickerInput(sym);
-      if (msSyncEnabled) {
-        syncToMarketSurge(sym, 'day');
-      }
+    if (chartTickerQueue.length < 2) return;
+    const idx = chartTickerIndex >= 0 ? chartTickerIndex : 0;
+    const newIndex = Math.max(0, idx - 1);
+    const sym = chartTickerQueue[newIndex];
+    if (!sym) return;
+    setCurrentWatchlistIndex(newIndex);
+    setActiveSymbol(sym);
+    setTickerInput(sym);
+    if (msSyncEnabled) {
+      syncToMarketSurge(sym, "day");
     }
-  }, [navigationMode, queueNavSymbols, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
+  }, [chartTickerQueue, chartTickerIndex, msSyncEnabled, syncToMarketSurge]);
 
   const handleNavigateNext = useCallback(() => {
-    if (navigationMode === 'watchlist' && queueNavSymbols.length) {
-      const newIndex = Math.min(queueNavSymbols.length - 1, currentWatchlistIndex + 1);
-      setCurrentWatchlistIndex(newIndex);
-      const sym = queueNavSymbols[newIndex];
-      setActiveSymbol(sym);
-      setTickerInput(sym);
-      if (msSyncEnabled) {
-        syncToMarketSurge(sym, 'day');
-      }
+    if (chartTickerQueue.length < 2) return;
+    const idx = chartTickerIndex >= 0 ? chartTickerIndex : -1;
+    const newIndex = Math.min(chartTickerQueue.length - 1, idx + 1);
+    const sym = chartTickerQueue[newIndex];
+    if (!sym) return;
+    setCurrentWatchlistIndex(newIndex);
+    setActiveSymbol(sym);
+    setTickerInput(sym);
+    if (msSyncEnabled) {
+      syncToMarketSurge(sym, "day");
     }
-  }, [navigationMode, queueNavSymbols, currentWatchlistIndex, msSyncEnabled, syncToMarketSurge]);
+  }, [chartTickerQueue, chartTickerIndex, msSyncEnabled, syncToMarketSurge]);
 
-  // Keyboard navigation
   useEffect(() => {
-    if (navigationMode !== 'watchlist') return;
-    
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        handleNavigatePrev();
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        handleNavigateNext();
-      }
-    };
-    
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [navigationMode, handleNavigatePrev, handleNavigateNext]);
+    if (chartTickerQueue.length < 2) return;
 
-  const currentPrice = dailyData?.candles?.length ? dailyData.candles[dailyData.candles.length - 1].close : 0;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const el = e.target as HTMLElement | null;
+      if (el?.closest("input, textarea, select, [contenteditable='true']")) return;
+      e.preventDefault();
+      if (e.key === "ArrowLeft") handleNavigatePrev();
+      else handleNavigateNext();
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [chartTickerQueue.length, handleNavigatePrev, handleNavigateNext]);
+
+  const currentPrice =
+    chartMetrics?.currentPrice ??
+    (dailyData?.candles?.length
+      ? dailyData.candles[dailyData.candles.length - 1].close
+      : 0);
   const chartsNavExtra = activeSymbol ? (
     <div className="flex items-center gap-1.5">
       {/* Watchlist navigation controls */}
-      {navigationMode === 'watchlist' && queueNavSymbols.length > 0 && (
+      {chartTickerQueue.length > 1 && (
         <>
           <Button
             size="icon"
             variant="outline"
-            disabled={currentWatchlistIndex === 0}
+            disabled={chartTickerIndex <= 0}
             onClick={handleNavigatePrev}
             data-testid="button-watchlist-prev"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <span className="text-sm text-muted-foreground px-2" data-testid="text-watchlist-position">
-            {currentWatchlistIndex + 1} of {queueNavSymbols.length}
+            {Math.max(chartTickerIndex, 0) + 1} of {chartTickerQueue.length}
           </span>
           <Button
             size="icon"
             variant="outline"
-            disabled={currentWatchlistIndex === queueNavSymbols.length - 1}
+            disabled={chartTickerIndex === chartTickerQueue.length - 1}
             onClick={handleNavigateNext}
             data-testid="button-watchlist-next"
           >
@@ -776,6 +791,7 @@ export default function SentinelChartsPage() {
         </TooltipContent>
       </Tooltip>
       <WatchlistSelector symbol={activeSymbol} />
+      <TosSyncToggle appearance="toolbar" currentSymbol={activeSymbol} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -849,6 +865,7 @@ export default function SentinelChartsPage() {
           >
             Go
           </Button>
+          <TosSyncToggle appearance="toolbar" currentSymbol={activeSymbol} />
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -904,6 +921,7 @@ export default function SentinelChartsPage() {
               showIntradayMaBasisToggle
               onNavigateToTicker={handleNavigateToTicker}
               navExtra={chartsNavExtra}
+              showTosToggle={false}
               dailyChartProps={{
                 priceLines: ivyTradePlanPriceLines,
                 onCandleClick: ivyChartClickHandler,

@@ -646,3 +646,31 @@ export function buildDiscoveryCard(es: EnrichedSignal): DiscoveryCard {
     priorDayDollarVol,
   };
 }
+
+/** Attach rank-only evidence badges onto discovery cards (never filters/suppresses). */
+export function attachEvidenceToCards(
+  cards: DiscoveryCard[],
+  evidenceIndex: Map<
+    string,
+    {
+      tier: NonNullable<DiscoveryCard["evidence"]>["tier"];
+      hitRate: number | null;
+      episodes: number;
+      trust: NonNullable<DiscoveryCard["evidence"]>["trust"];
+      window: NonNullable<DiscoveryCard["evidence"]>["window"];
+    }
+  >
+): DiscoveryCard[] {
+  for (const card of cards) {
+    const ev = evidenceIndex.get(card.signalType);
+    if (!ev) continue;
+    card.evidence = {
+      tier: ev.tier,
+      hitRate: ev.hitRate,
+      episodes: ev.episodes,
+      trust: ev.trust,
+      window: ev.window,
+    };
+  }
+  return cards;
+}

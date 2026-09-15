@@ -7,6 +7,7 @@ import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { cn } from "@/lib/utils";
 import { FlaskConical, RefreshCw, ChevronRight, X, TrendingUp, TrendingDown, Minus, Activity, Sparkles, ChevronDown, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiscoveryCard } from "@/components/scanner/DiscoveryCard";
 import { scannerPx, loadScannerFontOffset, saveScannerFontOffset } from "@/components/scanner/scanner-font-prefs";
 import { ScannerFontSizeControl } from "@/components/scanner/ScannerFontSizeControl";
@@ -19,14 +20,33 @@ interface SignalTypeStats {
   signalType: string;
   totalFired: number;
   tracked: number;
+  episodes?: number;
+  coverage?: number | null;
   hitRate: number | null;
+  hitRateShrunk?: number | null;
   avgMove: number | null;
+  medianMove?: number | null;
   avgPeakMove: number | null;
   avgGiveback: number | null;
   failRate: number | null;
   reversalRate: number | null;
   mfe3Rate: number | null;
   mae3Rate: number | null;
+  confidence?: number | null;
+  tier?: string | null;
+  trust?: string | null;
+}
+
+interface CohortRow {
+  signalType: string;
+  dimension: string;
+  bucket: string;
+  episodes: number;
+  tracked: number;
+  hitRate: number | null;
+  avgMove: number | null;
+  confidence: number;
+  tier: string;
 }
 
 interface WorkbenchCard extends DiscoveryCardType {
@@ -136,12 +156,6 @@ function hitRateColor(rate: number | null | undefined): string {
   return "text-red-400";
 }
 
-function failRateColor(rate: number | null | undefined): string {
-  if (rate == null) return "text-slate-500";
-  if (rate > 0.20) return "text-red-400";
-  return "text-slate-400";
-}
-
 function formatPct(n: number | null | undefined): string {
   if (n == null) return "—";
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
@@ -150,6 +164,133 @@ function formatPct(n: number | null | undefined): string {
 function formatRate(n: number | null | undefined): string {
   if (n == null) return "—";
   return `${Math.round(n * 100)}%`;
+}
+
+const STATS_COLUMN_HELP: { key: string; label: string; align: "left" | "right"; tip: string }[] = [
+  {
+    key: "signalType",
+    label: "Signal Type",
+    align: "left",
+    tip: "Scanner detector that fired. Hover a row name for that signal’s rules.",
+  },
+  {
+    key: "fired",
+    label: "Fired",
+    align: "right",
+    tip: "Raw discovery cards in range, including repeats of the same symbol on the same day.",
+  },
+  {
+    key: "eps",
+    label: "Eps",
+    align: "right",
+    tip: "Unique episodes = first fire per signal type + symbol + ET calendar day. Use this for ranking, not Fired.",
+  },
+  {
+    key: "tracked",
+    label: "Tracked",
+    align: "right",
+    tip: "Episodes that have an outcome filled at the selected window (e.g. 30m).",
+  },
+  {
+    key: "cov",
+    label: "Cov",
+    align: "right",
+    tip: "Coverage = Tracked ÷ Eps. Low coverage means many episodes still lack a price at this window.",
+  },
+  {
+    key: "hit",
+    label: "Hit%",
+    align: "right",
+    tip: "Share of tracked episodes whose direction-adjusted move met the Hit % threshold. Shorts are flipped so up is favorable.",
+  },
+  {
+    key: "edge",
+    label: "Edge",
+    align: "right",
+    tip: "Average direction-adjusted move at the selected window. Positive = favorable for the signal’s long/short direction.",
+  },
+  {
+    key: "peak",
+    label: "Peak",
+    align: "right",
+    tip: "Average max favorable excursion (MFE) after the signal, within the measured horizon.",
+  },
+  {
+    key: "give",
+    label: "Give",
+    align: "right",
+    tip: "Average giveback from peak MFE back toward entry — how much of the best move was typically lost.",
+  },
+  {
+    key: "tier",
+    label: "Tier",
+    align: "right",
+    tip: "Evidence tier from hit rate, edge, and sample size: strong / watch / weak / unknown. Provisional until V3 outcomes dominate.",
+  },
+  {
+    key: "conf",
+    label: "Conf",
+    align: "right",
+    tip: "Sample-size confidence (0–1). Higher means enough tracked episodes to trust the tier more.",
+  },
+];
+
+function StatsHeaderCell({ label, tip, align }: { label: string; tip: string; align: "left" | "right" }) {
+  return (
+    <th
+      className={cn(
+        "px-2 py-2 font-medium",
+        align === "left" ? "text-left px-3" : "text-right"
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "cursor-help border-b border-dotted border-slate-500/70 outline-none",
+              align === "right" && "ml-auto"
+            )}
+          >
+            {label}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="bottom"
+          className="max-w-xs border-slate-700 bg-slate-900 text-xs leading-snug text-slate-100"
+        >
+          {tip}
+        </TooltipContent>
+      </Tooltip>
+    </th>
+  );
+}
+
+/** America/New_York calendar YYYY-MM-DD for "today" in Lab filters. */
+function etCalendarYmd(d = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/**
+ * Last N Mon–Fri sessions back from ET today (holidays not excluded).
+ * Instant fallback until /workbench/lookback resolves true market days.
+ */
+function defaultLabFromDate(tradingDaysBack: number): string {
+  const todayEt = etCalendarYmd();
+  const [y, m, day] = todayEt.split("-").map(Number);
+  const cursor = new Date(Date.UTC(y!, m! - 1, day!));
+  let left = tradingDaysBack;
+  while (left > 0) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    const dow = cursor.getUTCDay();
+    if (dow !== 0 && dow !== 6) left--;
+  }
+  return cursor.toISOString().slice(0, 10);
 }
 
 // ── Error boundary ───────────────────────────────────────────────────────────
@@ -173,26 +314,29 @@ function SignalWorkbenchInner() {
     setFo(newOffset);
   };
 
-  // Filters
-  const [fromDate, setFromDate] = useState(() => {
-    const d = new Date(Date.now() - 14 * 86_400_000);
-    return d.toISOString().slice(0, 10);
-  });
-  const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Filters — default 30m over last ~5 sessions (market calendar soft-updates from)
+  const [fromDate, setFromDate] = useState(() => defaultLabFromDate(5));
+  const [toDate, setToDate] = useState(() => etCalendarYmd());
   const [hitThreshold, setHitThreshold] = useState(0.5);
   const [sessionFilter, setSessionFilter] = useState("all");
   const [minSamples, setMinSamples] = useState(5);
-  const [window, setWindow] = useState<WindowKey>("1hr");
+  const [window, setWindow] = useState<WindowKey>("30m");
 
   // Data
   const [stats, setStats] = useState<SignalTypeStats[]>([]);
+  const [cohorts, setCohorts] = useState<CohortRow[]>([]);
+  const [qualityWarnings, setQualityWarnings] = useState<string[]>([]);
+  const [trustUsed, setTrustUsed] = useState<string>("provisional");
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
   const [cards, setCards] = useState<WorkbenchCard[]>([]);
   const [cardsLoading, setCardsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [scannerConfig, setScannerConfig] = useState<ScannerConfig | null>(null);
+  const [trustMode, setTrustMode] = useState<"auto" | "provisional" | "trusted" | "all">("auto");
+  const [cohortDimension, setCohortDimension] = useState<string>("score");
 
   // AI Lab state
   const [aiLabExpanded, setAiLabExpanded] = useState(false);
@@ -211,9 +355,11 @@ function SignalWorkbenchInner() {
 
   const signalCriteria = useMemo(() => buildSignalCriteria(scannerConfig), [scannerConfig]);
 
-  // Fetch hit rates
-  const fetchHitRates = useCallback(async () => {
+  // Fetch hit rates (table first; cohorts lazy when a signal is selected)
+  const fetchHitRates = useCallback(async (opts?: { cohorts?: boolean }) => {
+    const wantCohorts = opts?.cohorts === true;
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({
         from: fromDate,
@@ -222,15 +368,39 @@ function SignalWorkbenchInner() {
         min_samples: String(minSamples),
         session: sessionFilter,
         window,
+        trust: trustMode,
+        cohorts: wantCohorts ? "1" : "0",
       });
-      const res = await fetch(`/api/scanner/workbench/hit-rates?${params}&_t=${Date.now()}`);
+      const res = await fetch(`/api/scanner/workbench/hit-rates?${params}&_t=${Date.now()}`, {
+        signal: AbortSignal.timeout(20_000),
+      });
       if (res.ok) {
         const data = await res.json();
         setStats(data.signalTypes ?? []);
+        if (wantCohorts) setCohorts(data.cohorts ?? []);
+        else setCohorts([]);
+        setQualityWarnings(data.qualityWarnings ?? []);
+        setTrustUsed(data.trustUsed ?? "provisional");
+        if (!(data.signalTypes ?? []).length) {
+          setLoadError("Query returned no signal rows for this range/window.");
+        }
+      } else {
+        setStats([]);
+        setCohorts([]);
+        setLoadError(`Hit-rates failed (${res.status}). Server may need a restart.`);
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      setStats([]);
+      setCohorts([]);
+      const name = err instanceof Error ? err.name : "";
+      setLoadError(
+        name === "TimeoutError" || name === "AbortError"
+          ? "Hit-rates timed out — DB connection likely saturated; restart LOCAL server."
+          : "Hit-rates request failed — check LOCAL server logs."
+      );
+    }
     setLoading(false);
-  }, [fromDate, toDate, hitThreshold, minSamples, sessionFilter, window]);
+  }, [fromDate, toDate, hitThreshold, minSamples, sessionFilter, window, trustMode]);
 
   // Fetch cards for selected signal type
   const fetchCards = useCallback(async (signalType: string) => {
@@ -243,7 +413,9 @@ function SignalWorkbenchInner() {
         status: statusFilter,
         limit: "50",
       });
-      const res = await fetch(`/api/scanner/workbench/cards?${params}&_t=${Date.now()}`);
+      const res = await fetch(`/api/scanner/workbench/cards?${params}&_t=${Date.now()}`, {
+        signal: AbortSignal.timeout(20_000),
+      });
       if (res.ok) {
         const data = await res.json();
         setCards(data.cards ?? []);
@@ -252,23 +424,62 @@ function SignalWorkbenchInner() {
     setCardsLoading(false);
   }, [fromDate, toDate, statusFilter]);
 
+  // Soft-resolve true US equity market days (do not block the first aggregate)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/scanner/workbench/lookback?days=5", {
+          signal: AbortSignal.timeout(2500),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (typeof data.from === "string") setFromDate((prev) => (prev === data.from ? prev : data.from));
+        if (typeof data.to === "string") setToDate((prev) => (prev === data.to ? prev : data.to));
+      } catch {
+        /* keep weekday fallback */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     document.title = "Signals Lab";
-    fetchHitRates();
-  }, [fetchHitRates]);
+    void fetchHitRates({ cohorts: !!selectedSignal });
+  }, [fetchHitRates, selectedSignal]);
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 90 seconds (aggregates are cached server-side for 60s)
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchHitRates();
+      void fetchHitRates({ cohorts: !!selectedSignal });
       if (selectedSignal) fetchCards(selectedSignal);
-    }, 15_000);
+    }, 90_000);
     return () => clearInterval(interval);
   }, [fetchHitRates, fetchCards, selectedSignal]);
 
   useEffect(() => {
-    if (selectedSignal) fetchCards(selectedSignal);
+    if (selectedSignal) void fetchCards(selectedSignal);
   }, [selectedSignal, fetchCards]);
+
+  const selectedCohorts = useMemo(() => {
+    if (!selectedSignal) return [];
+    return cohorts.filter((c) => c.signalType === selectedSignal && c.dimension === cohortDimension);
+  }, [cohorts, selectedSignal, cohortDimension]);
+
+  const sortedStats = useMemo(() => {
+    const copy = [...stats];
+    copy.sort((a, b) => {
+      const tierRank = (t?: string | null) =>
+        t === "strong" ? 0 : t === "watch" ? 1 : t === "weak" ? 3 : 2;
+      const tr = tierRank(a.tier) - tierRank(b.tier);
+      if (tr !== 0) return tr;
+      return (b.hitRateShrunk ?? b.hitRate ?? -1) - (a.hitRateShrunk ?? a.hitRate ?? -1);
+    });
+    return copy;
+  }, [stats]);
 
   const sortedCards = useMemo(() => {
     const sorted = [...cards];
@@ -354,7 +565,15 @@ function SignalWorkbenchInner() {
         <div className="flex items-center gap-2">
           <FlaskConical className="h-5 w-5 text-purple-400" />
           <h1 className="font-bold text-base" style={{ color: cssVariables.textTitle }}>Signals Lab</h1>
-          <span className="text-xs px-2 py-0.5 rounded bg-purple-900/30 text-purple-300 font-medium">V2 — MFE/MAE</span>
+          <span className="text-xs px-2 py-0.5 rounded bg-purple-900/30 text-purple-300 font-medium">V3 — Evidence</span>
+          <span
+            className={cn(
+              "text-[10px] px-2 py-0.5 rounded font-medium uppercase",
+              trustUsed === "trusted" ? "bg-emerald-900/30 text-emerald-300" : "bg-amber-900/30 text-amber-300"
+            )}
+          >
+            {trustUsed}
+          </span>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -403,10 +622,19 @@ function SignalWorkbenchInner() {
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-xs" style={{ color: cssVariables.textSmall }}>
+            Trust
+            <select value={trustMode} onChange={(e) => setTrustMode(e.target.value as typeof trustMode)} className="h-7 rounded border border-slate-700 bg-slate-900 px-2 text-xs" style={{ color: cssVariables.textTitle }}>
+              <option value="auto">Auto</option>
+              <option value="provisional">Provisional</option>
+              <option value="trusted">Trusted V3</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs" style={{ color: cssVariables.textSmall }}>
             Min
             <input type="number" min={1} max={100} value={minSamples} onChange={(e) => setMinSamples(parseInt(e.target.value, 10))} className="w-12 h-7 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-right" style={{ color: cssVariables.textTitle }} />
           </label>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20" onClick={fetchHitRates}>
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-purple-400 hover:text-purple-300 hover:bg-purple-900/20" onClick={() => void fetchHitRates({ cohorts: !!selectedSignal })}>
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
             Refresh
           </Button>
@@ -414,36 +642,52 @@ function SignalWorkbenchInner() {
         </div>
       </div>
 
+      {loadError && (
+        <div className="px-4 py-1.5 border-b text-[11px] shrink-0" style={{ borderColor: cssVariables.borderOnSecondary, backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+          {loadError}
+        </div>
+      )}
+
+      {qualityWarnings.length > 0 && (
+        <div className="px-4 py-1.5 border-b text-[11px] space-y-0.5 shrink-0" style={{ borderColor: cssVariables.borderOnSecondary, backgroundColor: "rgba(245,158,11,0.06)", color: "#fbbf24" }}>
+          {qualityWarnings.slice(0, 4).map((w, i) => (
+            <div key={i}>⚠ {w}</div>
+          ))}
+        </div>
+      )}
+
       {/* Main content: two panels */}
       <div className="flex flex-1 min-h-0" style={{ fontSize: scannerPx("card", fo) }}>
         {/* Left panel: stats table */}
         <div className="w-[55%] border-r overflow-y-auto" style={{ borderColor: cssVariables.borderOnSecondary }}>
+          <TooltipProvider delayDuration={200}>
           <table className="w-full">
             <thead className="sticky top-0" style={{ backgroundColor: cssVariables.headerBg }}>
               <tr style={{ color: cssVariables.textSmall }}>
-                <th className="text-left px-3 py-2 font-medium" title="The type of scanner signal detected">Signal Type</th>
-                <th className="text-right px-2 py-2 font-medium" title="Total number of times this signal fired in the date range">Fired</th>
-                <th className="text-right px-2 py-2 font-medium" title="Number of signals with outcome data at the selected timeframe window">Tracked</th>
-                <th className="text-right px-2 py-2 font-medium" title="Percentage of tracked signals that moved in the predicted direction by at least the Hit % threshold">Hit%</th>
-                <th className="text-right px-2 py-2 font-medium" title="Average price move (%) at the selected timeframe window. Positive = moved in signal direction">Avg Move</th>
-                <th className="text-right px-2 py-2 font-medium" title="Average Maximum Favorable Excursion (MFE) — the best price move in the signal's favor before any pullback">Avg Peak</th>
-                <th className="text-right px-2 py-2 font-medium" title="Average giveback (%) — how much of the peak move was lost. High giveback = signals fade quickly">Avg Give</th>
-                <th className="text-right px-2 py-2 font-medium" title="Percentage of signals that failed — never moved favorably (>1%) and went >5% adverse">Fail%</th>
-                <th className="text-right px-2 py-2 font-medium" title="Percentage of signals that reversed — initially moved favorably (>3%) but then gave it all back and went adverse">Rev%</th>
-                <th className="text-right px-2 py-2 font-medium text-emerald-500" title="% of tracked signals where MFE (max favorable excursion) reached +3% or better — strong winners">MFE 3%+</th>
-                <th className="text-right px-2 py-2 font-medium text-red-500" title="% of tracked signals where MAE (max adverse excursion) hit -3% or worse — painful losers">MAE 3%-</th>
-                <th className="w-5"></th>
+                  {STATS_COLUMN_HELP.map((col) => (
+                    <StatsHeaderCell key={col.key} label={col.label} tip={col.tip} align={col.align} />
+                  ))}
+                <th className="w-5" />
               </tr>
             </thead>
             <tbody>
-              {stats.length === 0 && !loading && (
+              {sortedStats.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={10} className="text-center py-12" style={{ color: cssVariables.textSmall }}>
-                    No data yet. Signals need time to accumulate outcomes.
+                  <td colSpan={12} className="text-center py-12" style={{ color: cssVariables.textSmall }}>
+                    {loadError
+                      ? "Could not load evidence for this range."
+                      : "No data yet. Signals need time to accumulate outcomes."}
                   </td>
                 </tr>
               )}
-              {stats.map((s) => {
+              {sortedStats.length === 0 && loading && (
+                <tr>
+                  <td colSpan={12} className="text-center py-12" style={{ color: cssVariables.textSmall }}>
+                    Loading evidence…
+                  </td>
+                </tr>
+              )}
+              {sortedStats.map((s) => {
                 const isSelected = selectedSignal === s.signalType;
                 return (
                   <tr
@@ -463,9 +707,13 @@ function SignalWorkbenchInner() {
                       {SIGNAL_TYPE_LABELS[s.signalType] ?? s.signalType}
                     </td>
                     <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textSmall }}>{s.totalFired}</td>
+                    <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textSmall }}>{s.episodes ?? "—"}</td>
                     <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textSmall }}>{s.tracked}</td>
-                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", hitRateColor(s.hitRate))}>
-                      {formatRate(s.hitRate)}
+                    <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textSmall }}>
+                      {s.coverage != null ? `${Math.round(s.coverage * 100)}%` : "—"}
+                    </td>
+                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", hitRateColor(s.hitRateShrunk ?? s.hitRate))}>
+                      {formatRate(s.hitRateShrunk ?? s.hitRate)}
                     </td>
                     <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textSmall }}>
                       {formatPct(s.avgMove)}
@@ -476,17 +724,16 @@ function SignalWorkbenchInner() {
                     <td className="text-right px-2 py-2 tabular-nums text-amber-400">
                       {s.avgGiveback != null ? `${s.avgGiveback.toFixed(1)}%` : "—"}
                     </td>
-                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", failRateColor(s.failRate))}>
-                      {formatRate(s.failRate)}
+                    <td className={cn(
+                      "text-right px-2 py-2 text-[10px] font-bold uppercase",
+                      s.tier === "strong" ? "text-emerald-400" :
+                      s.tier === "watch" ? "text-cyan-400" :
+                      s.tier === "weak" ? "text-red-400" : "text-slate-500"
+                    )}>
+                      {s.tier ?? "—"}
                     </td>
-                    <td className="text-right px-2 py-2 tabular-nums text-amber-400">
-                      {formatRate(s.reversalRate)}
-                    </td>
-                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", s.mfe3Rate != null && s.mfe3Rate > 0.15 ? "text-emerald-400" : "text-slate-400")}>
-                      {formatRate(s.mfe3Rate)}
-                    </td>
-                    <td className={cn("text-right px-2 py-2 tabular-nums font-medium", s.mae3Rate != null && s.mae3Rate > 0.15 ? "text-red-400" : "text-slate-400")}>
-                      {formatRate(s.mae3Rate)}
+                    <td className="text-right px-2 py-2 tabular-nums" style={{ color: cssVariables.textTiny }}>
+                      {s.confidence != null ? s.confidence.toFixed(2) : "—"}
                     </td>
                     <td className="px-1">
                       <ChevronRight className={cn("h-3 w-3 transition-transform", isSelected && "rotate-90")} style={{ color: cssVariables.textTiny }} />
@@ -496,6 +743,7 @@ function SignalWorkbenchInner() {
               })}
             </tbody>
           </table>
+          </TooltipProvider>
         </div>
 
         {/* Right panel: card drill-down */}
@@ -516,6 +764,20 @@ function SignalWorkbenchInner() {
                   <span className="text-xs tabular-nums" style={{ color: cssVariables.textTiny }}>
                     {cards.length} cards
                   </span>
+                  <select
+                    value={cohortDimension}
+                    onChange={(e) => setCohortDimension(e.target.value)}
+                    className="h-6 rounded border border-slate-700 bg-slate-900 px-1.5 text-[10px]"
+                    style={{ color: cssVariables.textTitle }}
+                    title="Cohort dimension"
+                  >
+                    <option value="score">Score</option>
+                    <option value="session">Session</option>
+                    <option value="theme">Theme</option>
+                    <option value="ma">MA</option>
+                    <option value="regime">Regime</option>
+                    <option value="liquidity">Liquidity</option>
+                  </select>
                 </div>
                 <div className="flex items-center gap-2">
                   {(["all", "profitable", "reversed", "failed", "tracking", "flat"] as StatusFilter[]).map((f) => (
@@ -551,6 +813,31 @@ function SignalWorkbenchInner() {
 
               {/* Cards list */}
               <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {selectedCohorts.length > 0 && (
+                  <div className="rounded border border-slate-700/40 p-2 mb-1">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                      Cohorts · {cohortDimension}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedCohorts.map((c) => (
+                        <span
+                          key={`${c.dimension}-${c.bucket}`}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tabular-nums border",
+                            c.tier === "strong" ? "border-emerald-700/50 text-emerald-300" :
+                            c.tier === "weak" ? "border-red-700/50 text-red-300" :
+                            "border-slate-700/50 text-slate-300"
+                          )}
+                          title={`n=${c.tracked} conf=${c.confidence.toFixed(2)}`}
+                        >
+                          <span className="font-medium">{c.bucket}</span>
+                          <span>{c.hitRate != null ? `${Math.round(c.hitRate * 100)}%` : "—"}</span>
+                          <span className="text-slate-500">{formatPct(c.avgMove)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {cardsLoading && (
                   <div className="flex items-center justify-center py-8" style={{ color: cssVariables.textSmall }}>Loading...</div>
                 )}

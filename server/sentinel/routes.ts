@@ -17,6 +17,7 @@ import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation
 import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
 import { fetchChartData } from "./chartDataEngine";
 import { registerChartSetupEnrichRoutes } from "./chart-setup-enrich/routes";
+import { extractTosScreen, isTosScreenExtractAvailable } from "./tos-screen-extract";
 import * as tnn from "./tnn";
 import { parseCSV, detectBroker, type ParseResult, type BrokerId } from "./tradeImport";
 import { buildTradeJournalPayload } from "./tradeJournal";
@@ -41,6 +42,8 @@ import { parseIntradayChartTimeframe, DEFAULT_INTRADAY_CHART_TIMEFRAME } from "@
 import { getSectorAndIndustry, getExtendedFundamentals, fetchIndustryPeersFromFMP, getFundamentals, fetchEarningsHistory, isNonEarningsIssuer, emptyCorporateEarnings, sanitizeQuarterlyHistory, buildListedInstrumentDescription } from "../fundamentals";
 import { resolveSessionMaLevelsForSymbol } from "../data-layer/session-adjusted-ma";
 import { isDelistedSymbol, scheduleDelistedTickerCheck } from "../market-condition/utils/delisted-ticker-registry";
+import { getUsEquityMarketSession } from "@shared/usEquityMarketSession";
+import { isUsEquityRegularSessionEt } from "@shared/nyRegularSession";
 
 declare module "express-session" {
   interface SessionData {
@@ -210,6 +213,8 @@ export function registerSentinelRoutes(app: Express): void {
       secret: effectiveSessionSecret,
       resave: false,
       saveUninitialized: false,
+      rolling: true,
+      proxy: true,
       cookie: {
         secure: isProd,
         httpOnly: true,
@@ -1606,6 +1611,49 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  const screenGrabLastAt = new Map<number, number>();
+  const SCREEN_GRAB_COOLDOWN_MS = 2500;
+  const MAX_EXTRACT_IMAGE_CHARS = 3_500_000;
+
+  function screenGrabTooSoon(userId: number): boolean {
+    const last = screenGrabLastAt.get(userId) ?? 0;
+    if (Date.now() - last < SCREEN_GRAB_COOLDOWN_MS) return true;
+    screenGrabLastAt.set(userId, Date.now());
+    return false;
+  }
+
+  app.get("/api/sentinel/screen-grab/status", requireAuth, (_req: Request, res: Response) => {
+    res.json({
+      extract: isTosScreenExtractAvailable(),
+    });
+  });
+
+  app.post("/api/sentinel/screen-grab/extract", requireAuth, async (req: Request, res: Response) => {
+    if (String(req.body?.model ?? "") !== "tos") {
+      return res.status(400).json({ error: "Only the ToS table model is available. Turn on ToS and calibrate first." });
+    }
+    if (!isTosScreenExtractAvailable()) {
+      return res.status(501).json({ error: "Table extract is not configured on this host" });
+    }
+    if (screenGrabTooSoon(req.session.userId!)) {
+      return res.status(429).json({ error: "Please wait a moment before extracting again" });
+    }
+    const imageDataUrl = String(req.body?.imageDataUrl ?? "").trim();
+    if (!imageDataUrl.startsWith("data:image/") || imageDataUrl.length > MAX_EXTRACT_IMAGE_CHARS) {
+      return res.status(400).json({ error: "A cropped screenshot image is required" });
+    }
+    try {
+      const extracted = await extractTosScreen(imageDataUrl);
+      console.log(
+        `[ScreenGrab] extract user=${req.session.userId} model=tos layout=${extracted.layout} tickers=${extracted.tickers.length} positions=${extracted.positions.filter((p) => p.hasPosition).length} reviewOnly=true`,
+      );
+      res.json(extracted);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Extract failed";
+      res.status(500).json({ error: msg });
+    }
+  });
+
   app.patch("/api/sentinel/watchlist/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id as string);
@@ -1693,7 +1741,8 @@ export function registerSentinelRoutes(app: Express): void {
 
       // Firewall: Prevent non-admins from editing system rules directly
       // Users should use the overrides endpoint instead
-      if (rule.source === 'starter' && !req.session.isAdmin) {
+      const actor = await sentinelModels.getUserById(req.session.userId!);
+      if (rule.source === 'starter' && !actor?.isAdmin) {
         return res.status(403).json({ 
           error: "Cannot edit system rules directly. Use the customize option to create a personal override." 
         });
@@ -1726,7 +1775,8 @@ export function registerSentinelRoutes(app: Express): void {
 
       // Firewall: Prevent non-admins from deleting system rules
       // Users can only disable system rules via overrides
-      if (rule.source === 'starter' && !req.session.isAdmin) {
+      const actor = await sentinelModels.getUserById(req.session.userId!);
+      if (rule.source === 'starter' && !actor?.isAdmin) {
         return res.status(403).json({ 
           error: "Cannot delete system rules. Use the customize option to disable it for your account." 
         });
@@ -2154,6 +2204,8 @@ export function registerSentinelRoutes(app: Express): void {
         isActive: sentinelUsers.isActive,
         tier: sentinelUsers.tier,
         createdAt: sentinelUsers.createdAt,
+        lastLoginAt: sentinelUsers.lastLoginAt,
+        loginCount: sentinelUsers.loginCount,
       }).from(sentinelUsers);
 
       const usersWithCounts = await Promise.all(
@@ -2171,6 +2223,8 @@ export function registerSentinelRoutes(app: Express): void {
             isActive: u.isActive,
             tier: normTier,
             createdAt: u.createdAt,
+            lastLoginAt: u.lastLoginAt,
+            loginCount: u.loginCount ?? 0,
             totalRules: rules.length,
             starterRulesCount: starterRules.length,
             userRulesCount: userRules.length,
@@ -7436,6 +7490,21 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       const validDaily = dailyQuotes.filter((q) => q.open != null && q.close != null && q.high != null && q.low != null);
       const currentPrice = quoteData?.lastPrice || validDaily[validDaily.length - 1]?.close || 0;
+      const previousClose =
+        quoteData?.prevClose ||
+        validDaily[Math.max(0, validDaily.length - 2)]?.close ||
+        currentPrice;
+      const regularSessionClose =
+        quoteData?.regularSessionClose ||
+        [...intradayQuotes].reverse().find((q: any) => {
+          const timestamp = new Date(q.date).getTime() / 1000;
+          return Number.isFinite(timestamp) && isUsEquityRegularSessionEt(timestamp);
+        })?.close ||
+        validDaily[validDaily.length - 1]?.close ||
+        currentPrice;
+      const regularSessionOpen =
+        quoteData?.sessionOpen || validDaily[validDaily.length - 1]?.open || currentPrice;
+      const priceSession = getUsEquityMarketSession();
 
       let adr14 = 0;
       if (validDaily.length >= 14) {
@@ -7708,6 +7777,11 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
 
       res.json({
         currentPrice: Math.round(currentPrice * 100) / 100,
+        previousClose: Math.round(previousClose * 100) / 100,
+        regularSessionOpen: Math.round(regularSessionOpen * 100) / 100,
+        regularSessionClose: Math.round(regularSessionClose * 100) / 100,
+        priceSession,
+        priceAsOf: quoteData?.timestamp ?? null,
         adr20: adr20Dollar,
         adr20Dollar,
         adr20Pct,

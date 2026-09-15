@@ -152,6 +152,10 @@ export const scannerDiscoveries = pgTable("scanner_discoveries", {
   sessionAtSignal: varchar("session_at_signal", { length: 32 }),
   raiAtSignal: doublePrecision("rai_at_signal"),
   outcomeTrackedAt: timestamp("outcome_tracked_at", { withTimezone: true }),
+  // Outcome contract V3 (migration 026) — versioning only; never rewrites legacy rows
+  outcomeContractVersion: varchar("outcome_contract_version", { length: 8 }),
+  outcomeProxySymbol: varchar("outcome_proxy_symbol", { length: 16 }),
+  intradayCompleteAt: timestamp("intraday_complete_at", { withTimezone: true }),
 });
 
 // Many-to-many ticker slice memberships (theme and/or sub-theme)

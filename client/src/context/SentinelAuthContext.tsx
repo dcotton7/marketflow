@@ -13,7 +13,7 @@ export interface SentinelAuthUser {
 interface AuthContextType {
   user: SentinelAuthUser | null;
   isLoading: boolean;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<SentinelAuthUser | null>;
   login: (username: string, password?: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -52,18 +52,22 @@ export function SentinelAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SentinelAuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async (): Promise<SentinelAuthUser | null> => {
     try {
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
         const data = (await res.json()) as SentinelAuthUser;
         setUser(data);
-      } else {
-        setUser(null);
+        return data;
       }
+      if (res.status === 401 || res.status === 403) {
+        setUser(null);
+        return null;
+      }
+      return null;
     } catch (error) {
       console.error("Auth check failed:", error);
-      setUser(null);
+      return null;
     }
   }, []);
 
@@ -72,6 +76,22 @@ export function SentinelAuthProvider({ children }: { children: ReactNode }) {
       await refreshUser();
       setIsLoading(false);
     })();
+  }, [refreshUser]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshUser();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshUser();
+    }, 4 * 60 * 1000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.clearInterval(heartbeat);
+    };
   }, [refreshUser]);
 
   const login = useCallback(async (username: string, password?: string) => {

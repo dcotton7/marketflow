@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { loginPathWithReturn } from "@/lib/auth-return";
 import { Loader2 } from "lucide-react";
 
 interface ProtectedRouteProps {
@@ -13,7 +14,7 @@ export function SentinelProtectedRoute({ children }: ProtectedRouteProps) {
 
   useEffect(() => {
     if (!isLoading && !user) {
-      setLocation("/sentinel/login");
+      setLocation(loginPathWithReturn());
     }
   }, [user, isLoading, setLocation]);
 

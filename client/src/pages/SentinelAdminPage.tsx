@@ -154,6 +154,8 @@ interface AdminUser {
   isActive: boolean;
   tier: SentinelAccessTier;
   createdAt: string;
+  lastLoginAt: string | null;
+  loginCount: number;
   totalRules: number;
   starterRulesCount: number;
   userRulesCount: number;
@@ -161,6 +163,13 @@ interface AdminUser {
   features: TierFeatureRow;
   tokensAllowed: number | null;
   tokensUsed: number;
+}
+
+function formatLastLogin(iso: string | null | undefined): string {
+  if (!iso) return "Never signed in";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Never signed in";
+  return d.toLocaleString();
 }
 
 const TIER_DISPLAY: Record<SentinelAccessTier, string> = {
@@ -431,6 +440,10 @@ function UsersTab() {
                 </span>
                 <span className="text-xs text-muted-foreground">
                   Joined {new Date(user.createdAt).toLocaleDateString()}
+                  {" · "}
+                  Last login {formatLastLogin(user.lastLoginAt)}
+                  {" · "}
+                  {user.loginCount} {user.loginCount === 1 ? "login" : "logins"}
                 </span>
               </div>
 

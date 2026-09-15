@@ -1,0 +1,37 @@
+---
+description: Safe Render env var management — never wipe production keys
+alwaysApply: true
+---
+
+# Render Environment Variables — Safe Mutation Protocol
+
+The Render API `PUT /v1/services/{id}/env-vars` **replaces the entire set**. Sending only new keys will DELETE every existing key.
+
+## Required Steps (no exceptions)
+
+1. **GET first**: Always fetch the current env vars before mutating.
+2. **Merge**: Add/update keys into the existing set.
+3. **PUT the full set**: Send ALL keys (old + new) in one call.
+
+```powershell
+# 1. GET existing
+$existing = Invoke-RestMethod -Uri "https://api.render.com/v1/services/$svcId/env-vars" -Headers $headers
+$merged = @()
+foreach ($v in $existing) { $merged += @{ key = $v.envVar.key; value = $v.envVar.value } }
+
+# 2. Merge new keys (add or overwrite)
+$merged += @{ key = "NEW_KEY"; value = "new_value" }
+
+# 3. PUT full set
+Invoke-RestMethod -Uri "https://api.render.com/v1/services/$svcId/env-vars" -Method PUT -Headers $headers -Body ($merged | ConvertTo-Json)
+```
+
+## Never Do
+
+- `PUT` with only new keys (wipes everything else)
+- `PUT` without a preceding `GET`
+- Assume the API is additive — it is NOT
+
+## After Every Mutation
+
+Always `GET` and list all key names to confirm nothing was lost.

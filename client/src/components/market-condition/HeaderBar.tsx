@@ -322,10 +322,11 @@ export function HeaderBar({
                 {megaOverlay.status}
               </span>
               <span
-                className={`text-xs font-medium ${megaOverlay.medianPct >= 0 ? "text-green-400" : "text-red-400"}`}
+                className={`text-xs font-medium ${typeof megaOverlay.medianPct === "number" && megaOverlay.medianPct >= 0 ? "text-green-400" : "text-red-400"}`}
               >
-                {megaOverlay.medianPct >= 0 ? "+" : ""}
-                {megaOverlay.medianPct.toFixed(2)}%
+                {typeof megaOverlay.medianPct === "number"
+                  ? `${megaOverlay.medianPct >= 0 ? "+" : ""}${megaOverlay.medianPct.toFixed(2)}%`
+                  : "—"}
               </span>
             </div>
           </TooltipTrigger>
@@ -336,7 +337,9 @@ export function HeaderBar({
               Mega caps are an overlay, not a theme. They provide market context but don&apos;t compete in
               theme rankings.
             </p>
-            <p className="text-xs mt-1">Breadth: {megaOverlay.breadthPct.toFixed(2)}% green</p>
+            <p className="text-xs mt-1">
+              Breadth: {typeof megaOverlay.breadthPct === "number" ? `${megaOverlay.breadthPct.toFixed(2)}%` : "—"} green
+            </p>
           </TooltipContent>
         </Tooltip>
 

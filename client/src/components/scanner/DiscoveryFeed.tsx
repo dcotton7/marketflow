@@ -6,10 +6,11 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useAdminTheme } from "@/context/SystemSettingsContext";
 import { useScanner } from "@/context/ScannerContext";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import {
   Radar, Wifi, WifiOff, ListFilter, Expand, Shrink,
   Beaker, BookOpen, Settings2, Check, X, PictureInPicture2, MonitorDown,
-  Layers, Newspaper, Crosshair, Zap, Globe, Sunrise, Flame, FlaskConical, CalendarDays,
+  Layers, Newspaper, Crosshair, Zap, Globe, Sunrise, Flame, FlaskConical, CalendarDays, ArrowDownWideNarrow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingOverlayPanel } from "@/components/FloatingOverlayPanel";
@@ -19,7 +20,7 @@ import { ScannerFontSizeControl } from "./ScannerFontSizeControl";
 import {
   loadScannerFontOffset, saveScannerFontOffset, scannerPx,
 } from "./scanner-font-prefs";
-import type { ScannerMode, DiscoveryCard as DiscoveryCardType, SignalType } from "@shared/scanner-types";
+import type { ScannerMode, DiscoveryCard as DiscoveryCardType, SignalType, DiscoveryEvidence } from "@shared/scanner-types";
 import { SCANNER_CONFIG_FIELDS, type ScannerConfig, type ConfigFieldMeta } from "@shared/scanner-config";
 import type { CatalystRuleDefinition, CatalystEntry, DecayShape } from "@shared/catalyst-types";
 import { useLocation } from "wouter";
@@ -236,10 +237,14 @@ export function DiscoveryFeedPanel() {
   const [location, navigate] = useLocation();
   const { panelOpen, setPanelOpen, mode, setMode, discoveries, streamStatus, status } = useScanner();
   const { cssVariables } = useAdminTheme();
+  const { user } = useSentinelAuth();
+  const isAdmin = !!user?.isAdmin;
 
   const [fontOffset, setFontOffset] = useState(() => loadScannerFontOffset());
   const [globalExpanded, setGlobalExpanded] = useState(false);
   const [showUrgentOnly, setShowUrgentOnly] = useState(false);
+  const [sortMode, setSortMode] = useState<"recent" | "evidence">("recent");
+  const [evidenceIndex, setEvidenceIndex] = useState<Map<string, DiscoveryEvidence>>(new Map());
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "up" | "down">("all");
@@ -283,6 +288,38 @@ export function DiscoveryFeedPanel() {
   const etToday = useCallback(() => {
     return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   }, []);
+
+  // Rank-only evidence index for badges / optional sort (never filters cards out)
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const session = status?.sessionMode;
+        const qs = session ? `?session=${encodeURIComponent(session)}` : "";
+        const res = await fetch(`/api/scanner/evidence/live${qs}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const map = new Map<string, DiscoveryEvidence>();
+        for (const e of data.entries ?? []) {
+          map.set(e.signalType, {
+            tier: e.tier,
+            hitRate: e.hitRate,
+            episodes: e.episodes,
+            trust: e.trust,
+            window: e.window,
+          });
+        }
+        setEvidenceIndex(map);
+      } catch { /* ignore */ }
+    };
+    load();
+    const id = setInterval(load, 90_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [status?.sessionMode]);
 
   const fetchTodayHistory = useCallback(async (signalType: SignalType | "all" = "all") => {
     setHistoryLoading(true);
@@ -387,6 +424,7 @@ export function DiscoveryFeedPanel() {
       const res = await fetch(`/api/scanner/catalysts/rules/${encodeURIComponent(id)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(updates),
       });
       if (res.ok) {
@@ -403,6 +441,7 @@ export function DiscoveryFeedPanel() {
       const res = await fetch(`/api/scanner/catalysts/resolve/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ magnitude: 0 }),
       });
       if (res.ok) {
@@ -428,6 +467,7 @@ export function DiscoveryFeedPanel() {
       const res = await fetch("/api/scanner/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(configData),
       });
       if (res.ok) {
@@ -490,7 +530,11 @@ export function DiscoveryFeedPanel() {
   }, [historyMode, historyCards, discoveries, signalTypeFilter, historyCategory]);
 
   const filteredCards = useMemo(() => {
-    let cards = baseCards;
+    let cards = baseCards.map((card) => {
+      if (card.evidence) return card;
+      const ev = evidenceIndex.get(card.signalType);
+      return ev ? { ...card, evidence: ev } : card;
+    });
     if (signalTypeFilter !== "all") {
       cards = cards.filter((d) => d.signalType === signalTypeFilter);
     } else if (categoryFilter !== "all") {
@@ -504,15 +548,29 @@ export function DiscoveryFeedPanel() {
       cards = cards.filter((d) => matchesLiquidity(d, liquidityFilter));
     }
     if (showUrgentOnly) cards = cards.filter((d) => d.priority === "urgent" || (d.qualifyScore ?? 0) >= 80);
+
+    if (sortMode === "evidence") {
+      const tierRank = (t?: string | null) =>
+        t === "strong" ? 0 : t === "watch" ? 1 : t === "unknown" ? 2 : t === "weak" ? 3 : 4;
+      cards = [...cards].sort((a, b) => {
+        const tr = tierRank(a.evidence?.tier) - tierRank(b.evidence?.tier);
+        if (tr !== 0) return tr;
+        const hr = (b.evidence?.hitRate ?? -1) - (a.evidence?.hitRate ?? -1);
+        if (hr !== 0) return hr;
+        return (b.qualifyScore ?? 0) - (a.qualifyScore ?? 0);
+      });
+    }
     return cards;
   }, [
     baseCards,
+    evidenceIndex,
     showUrgentOnly,
     categoryFilter,
     signalTypeFilter,
     directionFilter,
     themeStrengthFilter,
     liquidityFilter,
+    sortMode,
   ]);
 
   const secondaryFilterLabels = useMemo(
@@ -674,9 +732,15 @@ export function DiscoveryFeedPanel() {
           style={{ borderColor: cssVariables.borderOnSecondary, backgroundColor: "rgba(15,23,42,0.3)" }}
         >
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className={cn("h-6 px-2 text-[10px] font-bold uppercase", MODE_COLORS[mode])} onClick={cycleMode} title="Cycle mode: On → Silent → Off">
-              {MODE_LABELS[mode]}
-            </Button>
+            {isAdmin ? (
+              <Button variant="ghost" size="sm" className={cn("h-6 px-2 text-[10px] font-bold uppercase", MODE_COLORS[mode])} onClick={cycleMode} title="Cycle mode: On → Silent → Off">
+                {MODE_LABELS[mode]}
+              </Button>
+            ) : (
+              <span className={cn("h-6 px-2 text-[10px] font-bold uppercase inline-flex items-center", MODE_COLORS[mode])} title="Scanner mode">
+                {MODE_LABELS[mode]}
+              </span>
+            )}
             {status && (
               <span className="tabular-nums" style={{ color: cssVariables.textTiny, fontSize: scannerPx("tiny", fo) }}>
                 {status.universeSize} tickers · {status.activePipelines} pipes · {status.sessionMode.replace(/_/g, " ")}
@@ -697,6 +761,20 @@ export function DiscoveryFeedPanel() {
               title={historyMode ? "Back to live feed" : "Show today's signals from DB (respects type filter)"}
             >
               <CalendarDays className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-6 w-6 transition-colors",
+                sortMode === "evidence"
+                  ? "text-purple-300 bg-purple-950/30 ring-1 ring-purple-700/40"
+                  : "text-slate-500 hover:text-slate-300",
+              )}
+              onClick={() => setSortMode((m) => (m === "evidence" ? "recent" : "evidence"))}
+              title={sortMode === "evidence" ? "Sorting by evidence (click for recent)" : "Sort by evidence rank (does not hide cards)"}
+            >
+              <ArrowDownWideNarrow className="h-3 w-3" />
             </Button>
             <Button
               variant="ghost"
@@ -955,7 +1033,7 @@ export function DiscoveryFeedPanel() {
         </div>
 
         {/* Admin sub-panels */}
-        {adminPanel !== "none" && (
+        {isAdmin && adminPanel !== "none" && (
           <div className="shrink-0 border-t max-h-[250px] overflow-y-auto" style={{ borderColor: cssVariables.borderOnSecondary }}>
             <div className="flex items-center justify-between px-2 py-1">
               <span className="font-bold uppercase" style={{ color: cssVariables.textMarketFlow, fontSize: scannerPx("card", fo) }}>
@@ -1177,6 +1255,8 @@ export function DiscoveryFeedPanel() {
             <Button variant="ghost" size="sm" className="h-5 px-1.5 gap-0.5 text-slate-500 hover:text-purple-400" style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => window.open("/signal-workbench", "signal-workbench", "width=1200,height=900,menubar=no,toolbar=no,location=no,status=no")} title="Signals Lab">
               <FlaskConical className="h-2.5 w-2.5" />Signals Lab
             </Button>
+            {isAdmin && (
+              <>
             <Button variant="ghost" size="sm" className={cn("h-5 px-1.5 gap-0.5", adminPanel === "rules" ? "text-cyan-400" : "text-slate-500")} style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => setAdminPanel(adminPanel === "rules" ? "none" : "rules")} title="Catalyst Rules (Admin)">
               <BookOpen className="h-2.5 w-2.5" />Rules
             </Button>
@@ -1186,6 +1266,8 @@ export function DiscoveryFeedPanel() {
             <Button variant="ghost" size="sm" className={cn("h-5 px-1.5 gap-0.5", adminPanel === "config" ? "text-cyan-400" : "text-slate-500")} style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => setAdminPanel(adminPanel === "config" ? "none" : "config")} title="Scanner Config (Admin)">
               <Settings2 className="h-2.5 w-2.5" />Config
             </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

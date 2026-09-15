@@ -141,6 +141,7 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
     fetch("/api/scanner/mode", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ mode: next }),
     }).catch(() => {});
   }, []);

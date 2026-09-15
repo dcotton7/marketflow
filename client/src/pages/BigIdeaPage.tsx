@@ -47,7 +47,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useMarketSurgeSync } from "@/hooks/useMarketSurgeSync";
 import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist, useUpdateWatchlist, useAddToWatchlistWithTradePlan, useSelectedWatchlistId, useWatchlists } from "@/hooks/use-watchlist";
-import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
+import { isTradePlanEnabled, buildWatchlistTradePlanLines } from "@/lib/trade-plan-feature";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { BulkAddToWatchlist } from "@/components/BulkAddToWatchlist";
 import {
@@ -5521,19 +5521,13 @@ function ScanChartViewer({
   }, []);
 
   const ivyTradePlanPriceLines = useMemo(() => {
-    if (!isTradePlanEnabled()) return [];
-    return [
-      ...(ivyEntryLevel
-        ? [{ price: ivyEntryLevel.price, color: "rgba(34, 197, 94, 0.8)", label: `Entry: ${ivyEntryLevel.label}` }]
-        : []),
-      ...(ivyStopLevel
-        ? [{ price: ivyStopLevel.price, color: "rgba(239, 68, 68, 0.8)", label: `Stop: ${ivyStopLevel.label}` }]
-        : []),
-      ...(ivyTargetLevel
-        ? [{ price: ivyTargetLevel.price, color: "rgba(34, 197, 94, 0.6)", label: `Target: ${ivyTargetLevel.label}` }]
-        : []),
-    ];
-  }, [ivyEntryLevel, ivyStopLevel, ivyTargetLevel]);
+    return buildWatchlistTradePlanLines({
+      liveEntry: ivyEntryLevel?.price,
+      liveStop: ivyStopLevel?.price,
+      liveTarget: ivyTargetLevel?.price,
+      saved: savedTradePlan,
+    });
+  }, [ivyEntryLevel, ivyStopLevel, ivyTargetLevel, savedTradePlan]);
 
   const ivyChartClickHandler = isTradePlanEnabled() && ivyActiveClickField
     ? (_candle: unknown, clickedPrice: number) => {

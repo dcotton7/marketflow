@@ -10,6 +10,8 @@
 
 import { Router, type Request, type Response } from "express";
 import OpenAI from "openai";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { requireSentinelAuth } from "../middleware/requireSentinelAuth";
 import type {
   DiscoveryCard,
   DiscoveryFilterFields,
@@ -49,6 +51,8 @@ import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
 import { desc, eq, and, gte, lte, sql, isNull, isNotNull } from "drizzle-orm";
 import { getCachedEarningsData } from "../fundamentals";
+import { getEvidenceSnapshot, getLiveEvidenceIndex, evaluateSignalHoldout } from "./evidence-service";
+import type { OutcomeWindowKey } from "@shared/scanner-outcome-v3";
 
 const router = Router();
 
@@ -313,7 +317,7 @@ router.get("/status", (_req: Request, res: Response) => {
 
 // ── POST /mode — toggle scanner mode ────────────────────────────────────────
 
-router.post("/mode", (req: Request, res: Response) => {
+router.post("/mode", requireAdmin, (req: Request, res: Response) => {
   const { mode } = req.body as { mode?: ScannerMode };
   if (!mode || !["on", "silent", "off"].includes(mode)) {
     return res.status(400).json({ error: "Invalid mode. Use: on, silent, off" });
@@ -349,7 +353,7 @@ router.get("/catalysts/rules", (_req: Request, res: Response) => {
 
 // ── PUT /catalysts/rules/:id — update a catalyst rule ────────────────────
 
-router.put("/catalysts/rules/:id", async (req: Request, res: Response) => {
+router.put("/catalysts/rules/:id", requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const updates = req.body;
   if (!updates || typeof updates !== "object") {
@@ -364,7 +368,7 @@ router.put("/catalysts/rules/:id", async (req: Request, res: Response) => {
 
 // ── POST /catalysts/resolve/:id — resolve/dismiss a catalyst ─────────────
 
-router.post("/catalysts/resolve/:id", async (req: Request, res: Response) => {
+router.post("/catalysts/resolve/:id", requireAdmin, async (req: Request, res: Response) => {
   const id = parseInt(req.params.id!, 10);
   if (isNaN(id)) {
     return res.status(400).json({ error: "Invalid catalyst id" });
@@ -385,7 +389,7 @@ router.get("/config", (_req: Request, res: Response) => {
 
 // ── PUT /config — update scanner config ──────────────────────────────────────
 
-router.put("/config", (req: Request, res: Response) => {
+router.put("/config", requireAdmin, (req: Request, res: Response) => {
   const updates = req.body as Record<string, unknown>;
   if (!updates || typeof updates !== "object") {
     return res.status(400).json({ error: "Body must be an object of config fields" });
@@ -437,14 +441,76 @@ router.get("/picks", (_req: Request, res: Response) => {
   res.json({ picks, total: picks.length, date: new Date().toISOString().slice(0, 10) });
 });
 
-// ── Workbench: GET /workbench/hit-rates — aggregated signal hit rate data ─────
+// ── Workbench: GET /workbench/hit-rates — episode-deduped evidence aggregates ─
 
-type WindowKey = "15m" | "30m" | "1hr" | "4hr" | "d1_close" | "d2_open" | "d2_close" | "1w" | "1mo";
-const WINDOW_MOVE_COL: Record<WindowKey, string> = {
-  "15m": "move15m", "30m": "move30m", "1hr": "move1hr", "4hr": "move4hr",
-  d1_close: "moveD1Close", d2_open: "moveD2Open", d2_close: "moveD2Close",
-  "1w": "move1w", "1mo": "move1mo",
-};
+type WindowKey = OutcomeWindowKey;
+
+/**
+ * GET /workbench/lookback?days=5
+ * Resolves from/to using the Alpaca US equity market calendar (true market days).
+ */
+router.get("/workbench/lookback", async (req: Request, res: Response) => {
+  try {
+    const days = Math.min(21, Math.max(1, parseInt(String(req.query.days ?? "5"), 10) || 5));
+    const { getRaceTimelineWindow, formatMarketDateET } = await import(
+      "../market-condition/utils/theme-tracker-time"
+    );
+
+    const rangeKey =
+      days === 1
+        ? "1d"
+        : days === 2
+          ? "2d"
+          : days === 3
+            ? "3d"
+            : days === 4
+              ? "4d"
+              : days === 5
+                ? "5d"
+                : days <= 10
+                  ? "2w"
+                  : "3w";
+
+    const window = await Promise.race([
+      getRaceTimelineWindow(rangeKey),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+    ]);
+
+    if (!window) {
+      // Fast fallback: Mon–Fri walkback so Lab never stalls on Alpaca calendar
+      const to = formatMarketDateET(new Date());
+      const [y, m, d] = to.split("-").map(Number);
+      const cursor = new Date(Date.UTC(y!, m! - 1, d!));
+      let left = days;
+      while (left > 0) {
+        cursor.setUTCDate(cursor.getUTCDate() - 1);
+        const dow = cursor.getUTCDay();
+        if (dow !== 0 && dow !== 6) left--;
+      }
+      return res.json({
+        from: cursor.toISOString().slice(0, 10),
+        to,
+        days,
+        rangeKey,
+        interpretation: "trading",
+        terminalState: "CLOSED",
+        fallback: true,
+      });
+    }
+
+    res.json({
+      from: window.fromDateStr,
+      to: formatMarketDateET(new Date()),
+      days,
+      rangeKey,
+      interpretation: window.interpretation,
+      terminalState: window.terminalState,
+    });
+  } catch (err) {
+    console.warn("[Workbench] lookback error:", String(err).slice(0, 150));
+    res.status(500).json({ error: "Lookback failed" });
+  }
+});
 
 router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
   if (!db) return res.status(503).json({ error: "Database not available" });
@@ -455,99 +521,100 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
   const minSamples = parseInt(String(req.query.min_samples ?? "5"), 10);
   const sessionFilter = req.query.session as string | undefined;
   const window = (req.query.window as WindowKey) || "1hr";
+  const trust = (req.query.trust as "auto" | "trusted" | "provisional" | "all" | undefined) || "auto";
+  const subjectKind = (req.query.subject_kind as "ticker" | "theme" | "market" | "all" | undefined) || "all";
+  const includeCohorts = String(req.query.cohorts ?? "1") !== "0";
 
   try {
-    const conditions = [
-      gte(scannerDiscoveries.createdAt, new Date(from + "T00:00:00Z")),
-      lte(scannerDiscoveries.createdAt, new Date(to + "T23:59:59Z")),
-    ];
-    if (sessionFilter && sessionFilter !== "all") {
-      conditions.push(eq(scannerDiscoveries.sessionAtSignal, sessionFilter));
-    }
-
-    const rows = await db
-      .select()
-      .from(scannerDiscoveries)
-      .where(and(...conditions))
-      .orderBy(desc(scannerDiscoveries.createdAt));
-
-    const grouped = new Map<string, typeof rows>();
-    for (const row of rows) {
-      const list = grouped.get(row.signalType) || [];
-      list.push(row);
-      grouped.set(row.signalType, list);
-    }
-
-    const moveCol = WINDOW_MOVE_COL[window] || "move1hr";
-
-    const signalTypes = [];
-    for (const [signalType, entries] of grouped) {
-      const totalFired = entries.length;
-      const tracked = entries.filter((r) => (r as any)[moveCol] != null).length;
-
-      if (tracked < minSamples) {
-        signalTypes.push({ signalType, totalFired, tracked, hitRate: null, avgMove: null, avgPeakMove: null, avgGiveback: null, failRate: null, reversalRate: null, mfe3Rate: null, mae3Rate: null });
-        continue;
-      }
-
-      const withData = entries.filter((r) => (r as any)[moveCol] != null);
-      let hits = 0;
-      let totalMove = 0;
-      for (const r of withData) {
-        const move = Number((r as any)[moveCol]);
-        totalMove += move;
-        const isHit =
-          (r.direction === "up" && move >= hitThreshold) ||
-          (r.direction === "down" && move <= -hitThreshold);
-        if (isHit) hits++;
-      }
-
-      const withPeak = entries.filter((r) => r.peakMove != null);
-      const avgPeakMove = withPeak.length > 0
-        ? Math.round((withPeak.reduce((s, r) => s + Number(r.peakMove), 0) / withPeak.length) * 100) / 100
-        : null;
-
-      const withGiveback = entries.filter((r) => r.givebackPct != null);
-      const avgGiveback = withGiveback.length > 0
-        ? Math.round((withGiveback.reduce((s, r) => s + Number(r.givebackPct), 0) / withGiveback.length) * 100) / 100
-        : null;
-
-      const failCount = entries.filter((r) => r.outcomeFailed === true).length;
-      const reversalCount = entries.filter((r) => r.outcomeStatus === "reversed").length;
-
-      // MFE/MAE distribution: % of tracked signals that hit +3% or worse than -3%
-      const mfe3PctCount = withPeak.filter((r) => Number(r.peakMove) >= 3).length;
-      const mae3PctCount = entries.filter((r) => r.worstDrawdown != null && Number(r.worstDrawdown) <= -3).length;
-      const mfe3Rate = withPeak.length > 0 ? Math.round((mfe3PctCount / withPeak.length) * 1000) / 1000 : null;
-      const mae3Rate = entries.filter((r) => r.worstDrawdown != null).length > 0
-        ? Math.round((mae3PctCount / entries.filter((r) => r.worstDrawdown != null).length) * 1000) / 1000
-        : null;
-
-      signalTypes.push({
-        signalType,
-        totalFired,
-        tracked,
-        hitRate: withData.length > 0 ? Math.round((hits / withData.length) * 1000) / 1000 : 0,
-        avgMove: withData.length > 0 ? Math.round((totalMove / withData.length) * 100) / 100 : 0,
-        avgPeakMove,
-        avgGiveback,
-        failRate: totalFired > 0 ? Math.round((failCount / totalFired) * 1000) / 1000 : 0,
-        reversalRate: totalFired > 0 ? Math.round((reversalCount / totalFired) * 1000) / 1000 : 0,
-        mfe3Rate,
-        mae3Rate,
-      });
-    }
-
-    signalTypes.sort((a, b) => b.totalFired - a.totalFired);
-
-    res.json({
-      signalTypes,
-      dateRange: { from, to },
-      hitThreshold,
+    const snapshot = await getEvidenceSnapshot({
+      from,
+      to,
       window,
+      hitThreshold,
+      minEpisodes: minSamples,
+      session: sessionFilter,
+      subjectKind,
+      trust,
+      includeCohorts,
+    });
+
+    // Backward-compatible top-level fields + richer evidence payload
+    res.json({
+      signalTypes: snapshot.signalTypes.map((s) => ({
+        signalType: s.signalType,
+        totalFired: s.totalFired,
+        tracked: s.tracked,
+        episodes: s.episodes,
+        coverage: s.coverage,
+        hitRate: s.hitRate,
+        hitRateShrunk: s.hitRateShrunk,
+        avgMove: s.avgMove,
+        medianMove: s.medianMove,
+        avgPeakMove: s.avgPeakMove,
+        avgGiveback: s.avgGiveback,
+        failRate: s.failRate,
+        reversalRate: s.reversalRate,
+        mfe3Rate: s.mfe3Rate,
+        mae3Rate: s.mae3Rate,
+        confidence: s.confidence,
+        tier: s.tier,
+        trust: s.trust,
+      })),
+      cohorts: snapshot.cohorts,
+      qualityWarnings: snapshot.qualityWarnings,
+      trustUsed: snapshot.trustUsed,
+      generatedAt: snapshot.generatedAt,
+      dateRange: snapshot.dateRange,
+      hitThreshold: snapshot.hitThreshold,
+      window: snapshot.window,
     });
   } catch (err) {
-    console.warn("[Workbench] hit-rates error:", String(err).slice(0, 150));
+    console.warn("[Workbench] hit-rates error:", String(err).slice(0, 200));
+    res.status(500).json({ error: "Query failed" });
+  }
+});
+
+// ── Live evidence index for rank-only feed badges ────────────────────────────
+
+router.get("/evidence/live", async (req: Request, res: Response) => {
+  try {
+    const session = (req.query.session as string | undefined) || undefined;
+    const index = await getLiveEvidenceIndex({ session });
+    const entries = Array.from(index.entries()).map(([signalType, v]) => ({
+      signalType,
+      ...v,
+    }));
+    res.json({ entries, generatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.warn("[Evidence] live index error:", String(err).slice(0, 150));
+    res.status(500).json({ error: "Query failed" });
+  }
+});
+
+// ── Chronological holdout + cost sensitivity (research / promotion gate) ─────
+
+router.get("/evidence/holdout", async (req: Request, res: Response) => {
+  try {
+    const signalType = String(req.query.signal_type ?? "");
+    if (!signalType) return res.status(400).json({ error: "signal_type required" });
+    const to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
+    const from =
+      (req.query.from as string) ||
+      new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10);
+    const window = (req.query.window as string) || "1hr";
+    const trust = (req.query.trust as string) || "auto";
+    const report = await evaluateSignalHoldout({
+      signalType,
+      from,
+      to,
+      window: window as any,
+      trust: trust as any,
+      roundTripCostPct: req.query.cost != null ? Number(req.query.cost) : 0.12,
+    });
+    if (!report) return res.status(503).json({ error: "Database not available" });
+    res.json(report);
+  } catch (err) {
+    console.warn("[Evidence] holdout error:", String(err).slice(0, 200));
     res.status(500).json({ error: "Query failed" });
   }
 });
@@ -628,6 +695,9 @@ router.get("/workbench/cards", async (req: Request, res: Response) => {
       sessionAtSignal: r.sessionAtSignal,
       raiAtSignal: r.raiAtSignal,
       outcomeTrackedAt: r.outcomeTrackedAt?.toISOString() ?? null,
+      outcomeContractVersion: r.outcomeContractVersion ?? null,
+      outcomeProxySymbol: r.outcomeProxySymbol ?? null,
+      intradayCompleteAt: r.intradayCompleteAt?.toISOString() ?? null,
     }));
 
     res.json({ cards, total: cards.length });
@@ -654,61 +724,82 @@ Be direct, specific, and use the actual numbers. Reference individual signals wh
 
 const WORKBENCH_QUESTION_SYSTEM_PROMPT = `You are a quantitative trading signal analyst. You have access to scanner signal performance data from a stock market scanning system, including both aggregate stats and individual signal details (checkpoint moves, MFE/MAE, outcomes, time of day, regime). The user will ask you a specific question about this data. Answer using the actual numbers from the data provided. Reference individual signals when relevant. Be direct and specific. Think like a prop desk analyst.`;
 
-function formatStatsForPrompt(stats: any[], window: string, hitThreshold: number, dateRange: { from: string; to: string }, cards?: any[]): string {
+function formatStatsForPrompt(
+  stats: any[],
+  window: string,
+  hitThreshold: number,
+  dateRange: { from: string; to: string },
+  extras?: { cards?: any[]; warnings?: string[]; trustUsed?: string; cohorts?: any[] }
+): string {
   let text = `Signal Performance Data\n`;
   text += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
   text += `Date Range: ${dateRange.from} to ${dateRange.to}\n`;
   text += `Measurement Window: ${window}\n`;
-  text += `Hit Threshold: ${hitThreshold}%\n\n`;
+  text += `Hit Threshold: ${hitThreshold}%\n`;
+  text += `Trust: ${extras?.trustUsed ?? "unknown"}\n`;
+  text += `Note: Avg Move is direction-adjusted (positive = favorable). Episodes = one fire per symbol-day.\n\n`;
+
+  if (extras?.warnings?.length) {
+    text += `QUALITY WARNINGS:\n`;
+    for (const w of extras.warnings) text += `- ${w}\n`;
+    text += `\n`;
+  }
 
   if (!stats || stats.length === 0) {
     text += `No signal data available for this period.\n`;
     return text;
   }
 
-  text += `AGGREGATE STATS:\n`;
-  text += `Signal Type | Fired | Tracked | Hit% | Avg Move | Avg Peak (MFE) | Avg Giveback | Fail% | Reversal% | MFE≥3% | MAE≤-3%\n`;
+  text += `AGGREGATE STATS (episode-deduped):\n`;
+  text += `Signal Type | Fired | Episodes | Tracked | Cov% | Hit% | ShrunkHit% | Edge | Median | Peak | Give | Fail% | Tier | Conf\n`;
   text += `${"─".repeat(120)}\n`;
 
   for (const s of stats) {
     const hitRate = s.hitRate != null ? `${Math.round(s.hitRate * 100)}%` : "—";
+    const shrunk = s.hitRateShrunk != null ? `${Math.round(s.hitRateShrunk * 100)}%` : "—";
     const avgMove = s.avgMove != null ? `${s.avgMove >= 0 ? "+" : ""}${s.avgMove.toFixed(2)}%` : "—";
+    const med = s.medianMove != null ? `${s.medianMove >= 0 ? "+" : ""}${Number(s.medianMove).toFixed(2)}%` : "—";
     const avgPeak = s.avgPeakMove != null ? `+${s.avgPeakMove.toFixed(2)}%` : "—";
     const avgGive = s.avgGiveback != null ? `${s.avgGiveback.toFixed(1)}%` : "—";
     const failRate = s.failRate != null ? `${Math.round(s.failRate * 100)}%` : "—";
-    const revRate = s.reversalRate != null ? `${Math.round(s.reversalRate * 100)}%` : "—";
-    const mfe3 = s.mfe3Rate != null ? `${Math.round(s.mfe3Rate * 100)}%` : "—";
-    const mae3 = s.mae3Rate != null ? `${Math.round(s.mae3Rate * 100)}%` : "—";
-
-    text += `${s.signalType} | ${s.totalFired} | ${s.tracked} | ${hitRate} | ${avgMove} | ${avgPeak} | ${avgGive} | ${failRate} | ${revRate} | ${mfe3} | ${mae3}\n`;
+    const cov = s.coverage != null ? `${Math.round(s.coverage * 100)}%` : "—";
+    const conf = s.confidence != null ? s.confidence.toFixed(2) : "—";
+    text += `${s.signalType} | ${s.totalFired} | ${s.episodes ?? "—"} | ${s.tracked} | ${cov} | ${hitRate} | ${shrunk} | ${avgMove} | ${med} | ${avgPeak} | ${avgGive} | ${failRate} | ${s.tier ?? "—"} | ${conf}\n`;
   }
 
-  // Detailed individual signals section
-  if (cards && cards.length > 0) {
-    const sample = cards.slice(0, 50);
-    text += `\n\nDETAILED SIGNALS (sample of ${sample.length}/${cards.length} signals):\n`;
+  if (extras?.cohorts?.length) {
+    const top = extras.cohorts
+      .filter((c) => c.tier === "strong" || c.tier === "watch")
+      .slice(0, 40);
+    if (top.length) {
+      text += `\nTOP COHORTS:\n`;
+      for (const c of top) {
+        text += `- ${c.signalType} / ${c.dimension}=${c.bucket}: n=${c.tracked} hit=${c.hitRate != null ? Math.round(c.hitRate * 100) + "%" : "—"} edge=${c.avgMove ?? "—"} tier=${c.tier}\n`;
+      }
+    }
+  }
+
+  if (extras?.cards && extras.cards.length > 0) {
+    const sample = extras.cards.slice(0, 40);
+    text += `\n\nDETAILED SIGNALS (sample of ${sample.length}):\n`;
     text += `${"─".repeat(120)}\n`;
 
     for (const c of sample) {
       const time = c.createdAt ? new Date(c.createdAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "?";
       const dir = c.direction === "up" ? "LONG" : c.direction === "down" ? "SHORT" : "NEUT";
       const price = c.priceAtSignal != null ? `$${Number(c.priceAtSignal).toFixed(2)}` : "—";
-
-      // Checkpoint moves (only filled ones)
       const moves: string[] = [];
       if (c.move15m != null) moves.push(`15m:${Number(c.move15m) >= 0 ? "+" : ""}${Number(c.move15m).toFixed(1)}%`);
       if (c.move30m != null) moves.push(`30m:${Number(c.move30m) >= 0 ? "+" : ""}${Number(c.move30m).toFixed(1)}%`);
       if (c.move1hr != null) moves.push(`1hr:${Number(c.move1hr) >= 0 ? "+" : ""}${Number(c.move1hr).toFixed(1)}%`);
       if (c.move4hr != null) moves.push(`4hr:${Number(c.move4hr) >= 0 ? "+" : ""}${Number(c.move4hr).toFixed(1)}%`);
-      if (c.moveD1Close != null) moves.push(`D1C:${Number(c.moveD1Close) >= 0 ? "+" : ""}${Number(c.moveD1Close).toFixed(1)}%`);
       const movesStr = moves.length > 0 ? moves.join(" ") : "no checkpoints yet";
-
       const mfe = c.peakMove != null ? `MFE:+${Number(c.peakMove).toFixed(1)}%` : "";
       const mae = c.worstDrawdown != null ? `MAE:${Number(c.worstDrawdown).toFixed(1)}%` : "";
       const status = c.outcomeStatus ?? "pending";
       const regime = c.regimeAtSignal ?? "?";
-
-      text += `[${c.signalType}] ${c.subject} ${dir} ${price} | ${time} | ${movesStr} | ${mfe} ${mae} | ${status} | regime:${regime}\n`;
+      const ver = c.outcomeContractVersion ?? "legacy";
+      text += `[${c.signalType}] ${c.subject} ${dir} ${price} | ${time} | ${movesStr} | ${mfe} ${mae} | ${status} | regime:${regime} | ${ver}\n`;
       if (c.headline) text += `  "${c.headline}"\n`;
     }
   }
@@ -716,11 +807,11 @@ function formatStatsForPrompt(stats: any[], window: string, hitThreshold: number
   return text;
 }
 
-router.post("/workbench/ai-analyze", async (req: Request, res: Response) => {
-  const { mode, question, stats: clientStats, window: winParam, hitThreshold: htParam, dateRange, cards: clientCards } = req.body as {
+router.post("/workbench/ai-analyze", requireSentinelAuth, async (req: Request, res: Response) => {
+  const { mode, question, window: winParam, hitThreshold: htParam, dateRange, cards: clientCards } = req.body as {
     mode: "analyze" | "question";
     question?: string;
-    stats: any[];
+    stats?: any[];
     cards?: any[];
     window: string;
     hitThreshold: number;
@@ -741,19 +832,39 @@ router.post("/workbench/ai-analyze", async (req: Request, res: Response) => {
 
   const openai = new OpenAI({ apiKey, baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL });
 
+  const from = dateRange?.from || new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const to = dateRange?.to || new Date().toISOString().slice(0, 10);
+  const window = (winParam as WindowKey) || "1hr";
+  const hitThreshold = htParam ?? 0.5;
+
+  // Always recompute evidence server-side — never trust client-supplied stats.
+  const snapshot = await getEvidenceSnapshot({
+    from,
+    to,
+    window,
+    hitThreshold,
+    minEpisodes: 5,
+    trust: "auto",
+  });
+
   const dataContext = formatStatsForPrompt(
-    clientStats ?? [],
-    winParam ?? "1hr",
-    htParam ?? 0.5,
-    dateRange ?? { from: "unknown", to: "unknown" },
-    clientCards
+    snapshot.signalTypes,
+    window,
+    hitThreshold,
+    { from, to },
+    {
+      cards: clientCards,
+      warnings: snapshot.qualityWarnings,
+      trustUsed: snapshot.trustUsed,
+      cohorts: snapshot.cohorts,
+    }
   );
 
   const systemPrompt = mode === "analyze" ? WORKBENCH_ANALYZE_SYSTEM_PROMPT : WORKBENCH_QUESTION_SYSTEM_PROMPT;
   let userPrompt: string;
 
   if (mode === "analyze") {
-    userPrompt = `Here is the current signal performance data from our scanner workbench:\n\n${dataContext}\n\nPlease analyze this data comprehensively.`;
+    userPrompt = `Here is the current signal performance data from our scanner workbench:\n\n${dataContext}\n\nPlease analyze this data comprehensively. Treat provisional/legacy data cautiously.`;
   } else {
     userPrompt = `Here is the current signal performance data from our scanner workbench:\n\n${dataContext}\n\nUser question: ${question}`;
   }

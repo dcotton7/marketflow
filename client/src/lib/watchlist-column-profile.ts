@@ -15,7 +15,7 @@ export type WatchlistColumnId =
   | "stopPct"
   | "actions";
 
-export const WATCHLIST_COLUMN_PROFILE_VERSION = 2 as const;
+export const WATCHLIST_COLUMN_PROFILE_VERSION = 3 as const;
 
 export interface WatchlistColumnEntry {
   id: WatchlistColumnId;
@@ -23,8 +23,8 @@ export interface WatchlistColumnEntry {
 }
 
 export interface WatchlistColumnProfileFile {
-  /** v1: one-time migration inserts Theme after Company when missing. v2: layout is authoritative. */
-  v: 1 | typeof WATCHLIST_COLUMN_PROFILE_VERSION;
+  /** v1: insert Theme after Company. v2: layout is authoritative. v3: Entry before actions on Watchlist Manager. */
+  v: 1 | 2 | typeof WATCHLIST_COLUMN_PROFILE_VERSION;
   columns: WatchlistColumnEntry[];
 }
 
@@ -85,10 +85,10 @@ const MODAL_DEFAULT_ORDER: WatchlistColumnId[] = [
   "theme",
   "change",
   "changePct",
-  "entry",
-  "entryPct",
   "stop",
   "stopPct",
+  "entryPct",
+  "entry",
   "actions",
 ];
 
@@ -172,6 +172,21 @@ function insertThemeAfterCompanyIfMissing(columns: WatchlistColumnEntry[]): Watc
   return next;
 }
 
+function insertEntryBeforeActions(columns: WatchlistColumnEntry[]): WatchlistColumnEntry[] {
+  const existing = columns.find((c) => c.id === "entry");
+  const rest = columns.filter((c) => c.id !== "entry");
+  const entryCol: WatchlistColumnEntry = {
+    id: "entry",
+    width: existing?.width ?? WATCHLIST_COLUMN_META.entry.defaultWidth,
+  };
+  const actionsIdx = rest.findIndex((c) => c.id === "actions");
+  if (actionsIdx >= 0) {
+    rest.splice(actionsIdx, 0, entryCol);
+    return rest;
+  }
+  return [...rest, entryCol];
+}
+
 export function normalizeWatchlistColumnEntries(
   columns: WatchlistColumnEntry[],
   variant: WatchlistTableVariant
@@ -234,7 +249,10 @@ function migrateLegacyWidthArray(
       ),
     });
   }
-  return insertThemeAfterCompanyIfMissing(normalizeWatchlistColumnEntries(cols, variant));
+  const normalized = insertThemeAfterCompanyIfMissing(
+    normalizeWatchlistColumnEntries(cols, variant)
+  );
+  return variant === "modal" ? insertEntryBeforeActions(normalized) : normalized;
 }
 
 export function parseWatchlistColumnProfile(
@@ -254,7 +272,7 @@ export function parseWatchlistColumnProfile(
     }
     if (p && typeof p === "object") {
       const ver = (p as { v?: unknown }).v;
-      if (ver !== 1 && ver !== 2) return defaultProfile(variant);
+      if (ver !== 1 && ver !== 2 && ver !== 3) return defaultProfile(variant);
       const cols = (p as WatchlistColumnProfileFile).columns;
       if (!Array.isArray(cols)) return defaultProfile(variant);
       const entries: WatchlistColumnEntry[] = cols
@@ -268,8 +286,10 @@ export function parseWatchlistColumnProfile(
           id: c.id as WatchlistColumnId,
           width: typeof c.width === "number" ? c.width : WATCHLIST_COLUMN_META[c.id as WatchlistColumnId]?.defaultWidth ?? 80,
         }));
-      const normalized = normalizeWatchlistColumnEntries(entries, variant);
-      return ver === 1 ? insertThemeAfterCompanyIfMissing(normalized) : normalized;
+      let normalized = normalizeWatchlistColumnEntries(entries, variant);
+      if (ver === 1) normalized = insertThemeAfterCompanyIfMissing(normalized);
+      if (variant === "modal" && ver < 3) normalized = insertEntryBeforeActions(normalized);
+      return normalized;
     }
   } catch {
     /* fall through */

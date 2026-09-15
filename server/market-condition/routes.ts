@@ -13,6 +13,8 @@
 
 import { Router, Request, Response } from "express";
 import { z } from "zod";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { requireSentinelAuth } from "../middleware/requireSentinelAuth";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getClusterById } from "./universe";
 import { db } from "../db";
@@ -650,7 +652,7 @@ router.get("/server-status", async (_req: Request, res: Response) => {
  * POST /api/market-condition/dead-ticker-scan
  * Run the weekly dead-ticker job now (Fri-bar check via multi-symbol daily bars).
  */
-router.post("/dead-ticker-scan", async (_req: Request, res: Response) => {
+router.post("/dead-ticker-scan", requireAdmin, async (_req: Request, res: Response) => {
   try {
     touchActivity();
     const { runDeadTickerScan, getDeadTickerScanStatus } = await import("./utils/dead-ticker-scan");
@@ -735,7 +737,7 @@ const settingsSchema = z.object({
   clientTickersRefetchIntervalMs: z.number().min(15000).max(600000).optional(),
 });
 
-router.put("/settings", async (req: Request, res: Response) => {
+router.put("/settings", requireAdmin, async (req: Request, res: Response) => {
   try {
     const parsed = settingsSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -818,7 +820,7 @@ router.put("/settings", async (req: Request, res: Response) => {
  * POST /api/market-condition/start
  * Start polling
  */
-router.post("/start", async (req: Request, res: Response) => {
+router.post("/start", requireAdmin, async (req: Request, res: Response) => {
   try {
     const status = getPollingStatus();
     if (status.isPolling) {
@@ -837,7 +839,7 @@ router.post("/start", async (req: Request, res: Response) => {
  * POST /api/market-condition/stop
  * Stop polling
  */
-router.post("/stop", async (req: Request, res: Response) => {
+router.post("/stop", requireAdmin, async (req: Request, res: Response) => {
   try {
     stopPolling();
     res.json({ success: true, message: "Polling stopped" });
@@ -851,7 +853,7 @@ router.post("/stop", async (req: Request, res: Response) => {
  * POST /api/market-condition/refresh
  * Force immediate refresh
  */
-router.post("/refresh", async (req: Request, res: Response) => {
+router.post("/refresh", requireAdmin, async (req: Request, res: Response) => {
   try {
     await forceRefresh();
     res.json({ success: true, message: "Refresh complete" });
@@ -865,7 +867,7 @@ router.post("/refresh", async (req: Request, res: Response) => {
  * POST /api/market-condition/force-snapshot
  * Force save an intraday snapshot (admin only - for when data is stale)
  */
-router.post("/force-snapshot", async (req: Request, res: Response) => {
+router.post("/force-snapshot", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { forceSaveSnapshot } = await import("./engine/snapshot");
     const saved = await forceSaveSnapshot();
@@ -1345,7 +1347,7 @@ router.get("/ticker-assignments", async (req: Request, res: Response) => {
  * Add tickers to a theme's candidate pool (admin only)
  * Body: { tickers: string[], force?: boolean }
  */
-router.post("/themes/:id/add-tickers", async (req: Request, res: Response) => {
+router.post("/themes/:id/add-tickers", requireAdmin, async (req: Request, res: Response) => {
   try {
     const themeId = String(req.params.id);
     const { tickers, force, subthemeId } = req.body as {
@@ -1649,7 +1651,7 @@ router.get("/briefing", async (req: Request, res: Response) => {
  * POST /api/market-condition/themes/:id/ticker-review
  * Score theme members with AND/OR criteria (+ optional HVC from daily bars).
  */
-router.post("/themes/:id/ticker-review", async (req: Request, res: Response) => {
+router.post("/themes/:id/ticker-review", requireSentinelAuth, async (req: Request, res: Response) => {
   try {
     touchActivity();
     const { id } = req.params;
@@ -1728,7 +1730,7 @@ router.post("/themes/:id/ticker-review", async (req: Request, res: Response) => 
  * POST /api/market-condition/themes/:id/ticker-review/enrich
  * Batch LLM enrich for starred tickers before View Saved Charts.
  */
-router.post("/themes/:id/ticker-review/enrich", async (req: Request, res: Response) => {
+router.post("/themes/:id/ticker-review/enrich", requireSentinelAuth, async (req: Request, res: Response) => {
   try {
     touchActivity();
     const { id } = req.params;

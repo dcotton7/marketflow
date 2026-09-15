@@ -13,6 +13,8 @@ export interface TickerSnapshot {
   open: number;
   high: number;
   low: number;
+  /** Current/developing RTH close from the provider daily bar (never ETH). */
+  regularSessionClose?: number;
   volume: number;          // Today's session volume
   prevDayVolume: number;   // Previous full session volume (for D-Close / Today split)
   vwap: number;

@@ -1,3 +1,5 @@
+import { removeInjectedSessionAggregateBars } from "../shared/intradayBarValidation";
+
 const ALPACA_BASE_URL = process.env.ALPACA_BASE_URL || "https://paper-api.alpaca.markets";
 const ALPACA_DATA_URL = "https://data.alpaca.markets";
 
@@ -255,9 +257,24 @@ export async function fetchAlpacaIntradayBars(
       console.log(`  - Last bar: ${lastBar.toISOString()}`);
     }
     
+    // Pagination can repeat the boundary bar. Deduplicate before validating
+    // cumulative volume, otherwise repeated bars make a session aggregate look valid.
+    const uniqueBars = Array.from(
+      new Map(allBars.map((bar) => [new Date(bar.date).getTime(), bar])).values()
+    );
+    const intervalBars =
+      timeframe.toLowerCase() === "1day"
+        ? uniqueBars
+        : removeInjectedSessionAggregateBars(uniqueBars);
+    if (intervalBars.length !== uniqueBars.length) {
+      console.warn(
+        `[Alpaca] Removed ${uniqueBars.length - intervalBars.length} injected session aggregate bar(s) for ${ticker} ${timeframe}`
+      );
+    }
+
     // If extended hours not requested, filter to regular trading hours (9:30 AM - 4:00 PM ET)
     if (!includeExtendedHours) {
-      const filteredBars = allBars.filter((bar) => {
+      const filteredBars = intervalBars.filter((bar) => {
         const d = new Date(bar.date);
         const etHour = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
         const etMin = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }));
@@ -270,8 +287,8 @@ export async function fetchAlpacaIntradayBars(
       return filteredBars;
     }
     
-    console.log(`[Alpaca] Returning ${allBars.length} bars (ETH=true, no filtering)`);
-    return allBars;
+    console.log(`[Alpaca] Returning ${intervalBars.length} bars (ETH=true, no filtering)`);
+    return intervalBars;
   } catch (error) {
     console.error(`[Alpaca] Failed to fetch bars for ${ticker}:`, error);
     return []; // Return empty instead of throwing
@@ -294,6 +311,8 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
   sessionOpen: number;
   sessionHigh: number;
   sessionLow: number;
+  /** Current/developing regular-session close; excludes pre/post-market trades. */
+  regularSessionClose: number;
   sessionVwap?: number;
 } | null> {
   try {
@@ -334,14 +353,15 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
     const minuteBar = snapshot?.minuteBar;
     const dailyBar = snapshot?.dailyBar;
     const lastPrice = latestTradePrice || midPrice || lastBarClose;
-    const volume = minuteBar?.v || dailyBar?.v || dailyBars[dailyBars.length - 1]?.volume || 0;
+    const volume = dailyBar?.v || minuteBar?.v || dailyBars[dailyBars.length - 1]?.volume || 0;
     const timestamp =
       snapshot?.latestTrade?.t ||
       snapshot?.latestQuote?.t ||
       new Date().toISOString();
-    const sessionOpen = minuteBar?.o || dailyBar?.o || lastPrice;
-    const sessionHigh = minuteBar?.h || dailyBar?.h || lastPrice;
-    const sessionLow = minuteBar?.l || dailyBar?.l || lastPrice;
+    const sessionOpen = dailyBar?.o || minuteBar?.o || lastPrice;
+    const sessionHigh = dailyBar?.h || minuteBar?.h || lastPrice;
+    const sessionLow = dailyBar?.l || minuteBar?.l || lastPrice;
+    const regularSessionClose = dailyBar?.c || lastBarClose;
     const sessionVwap = minuteBar?.vw || dailyBar?.vw;
 
     return {
@@ -355,6 +375,7 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
       sessionOpen,
       sessionHigh,
       sessionLow,
+      regularSessionClose,
       sessionVwap,
     };
   } catch (error) {

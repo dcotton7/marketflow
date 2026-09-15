@@ -20,6 +20,7 @@ import {
   isNightMode,
   shouldRunHeavyBackgroundWork,
 } from "../infra/memory-gate";
+import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
 
 const STALE_THRESHOLD_DAYS = 3;
 const REFRESH_LOOKBACK_DAYS = 10;
@@ -175,8 +176,17 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
           if (bars.length === 0) return { symbol, count: 0 };
 
           let inserted = 0;
+          const now = new Date();
+          const currentEtDate = getEtClock(now).dateKey;
+          const currentSession = getUsEquityMarketSession(now);
           for (const bar of bars) {
-            const barDate = new Date(bar.date).toISOString().split("T")[0];
+            const barDate = getEtClock(new Date(bar.date)).dateKey;
+            const currentDayStillDeveloping =
+              barDate === currentEtDate &&
+              (currentSession === "pre_market" || currentSession === "regular");
+            if (currentDayStillDeveloping) {
+              continue;
+            }
             try {
               await db!.insert(historicalBars).values({
                 symbol: symbol.toUpperCase(),

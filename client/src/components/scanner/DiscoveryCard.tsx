@@ -73,6 +73,28 @@ function priorityBadge(priority: PipelinePriority, cssVars: ReturnType<typeof us
   }
 }
 
+function evidenceBadge(evidence: DiscoveryCardType["evidence"]) {
+  if (!evidence) return null;
+  const color =
+    evidence.tier === "strong"
+      ? "bg-emerald-900/30 text-emerald-300"
+      : evidence.tier === "watch"
+        ? "bg-cyan-900/30 text-cyan-300"
+        : evidence.tier === "weak"
+          ? "bg-red-900/30 text-red-300"
+          : "bg-slate-800/50 text-slate-400";
+  const hit =
+    evidence.hitRate != null ? `${Math.round(evidence.hitRate * 100)}%` : "—";
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${color}`}
+      title={`Evidence ${evidence.tier} · ${hit} hit @ ${evidence.window} · n=${evidence.episodes} · ${evidence.trust}`}
+    >
+      {evidence.tier} {hit}
+    </span>
+  );
+}
+
 function directionIcon(direction: string) {
   if (direction === "up") return <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />;
   if (direction === "down") return <TrendingDown className="h-3.5 w-3.5 text-red-400" />;
@@ -256,6 +278,7 @@ export function DiscoveryCard({
                   {card.headline}
                 </span>
                 {priorityBadge(card.priority, cssVariables)}
+                {evidenceBadge(card.evidence)}
               </div>
 
               {/* Pipeline + time */}

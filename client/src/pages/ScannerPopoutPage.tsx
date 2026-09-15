@@ -10,6 +10,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useScanner } from "@/context/ScannerContext";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import {
   Radar, Wifi, WifiOff, ListFilter, Expand, Shrink,
   Beaker, BookOpen, Settings2, X, MonitorDown, FlaskConical,
@@ -138,6 +139,8 @@ function ConfigField({ field, value, onChange, css, fo }: {
 export default function ScannerPopoutPage() {
   const { pageShellStyle, cssVariables } = useSystemSettings();
   const { mode, setMode, discoveries, connected, status } = useScanner();
+  const { user } = useSentinelAuth();
+  const isAdmin = !!user?.isAdmin;
   const channelRef = useRef<BroadcastChannel | null>(null);
 
   const [fontOffset, setFontOffset] = useState(() => loadScannerFontOffset());
@@ -218,16 +221,16 @@ export default function ScannerPopoutPage() {
   }, []);
   const saveConfig = useCallback(async () => {
     if (!configData) return;
-    try { const res = await fetch("/api/scanner/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(configData) }); if (res.ok) { const d = await res.json(); setConfigData(d.config); setConfigDirty(false); } } catch {}
+    try { const res = await fetch("/api/scanner/config", { method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(configData) }); if (res.ok) { const d = await res.json(); setConfigData(d.config); setConfigDirty(false); } } catch {}
   }, [configData]);
   const updateRule = useCallback(async (id: string, updates: Record<string, unknown>) => {
     setRulesSaving(id);
-    try { const res = await fetch(`/api/scanner/catalysts/rules/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) }); if (res.ok) { const d = await res.json(); setCatalystRules((prev) => prev.map((r) => r.id === id ? d.rule : r)); } } catch {}
+    try { const res = await fetch(`/api/scanner/catalysts/rules/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(updates) }); if (res.ok) { const d = await res.json(); setCatalystRules((prev) => prev.map((r) => r.id === id ? d.rule : r)); } } catch {}
     setRulesSaving(null);
   }, []);
   const resolveActiveCatalyst = useCallback(async (id: number) => {
     setResolvingId(id);
-    try { const res = await fetch(`/api/scanner/catalysts/resolve/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ magnitude: 0 }) }); if (res.ok) { setCatalystQueue((prev) => prev.filter((c) => c.id !== id)); } } catch {}
+    try { const res = await fetch(`/api/scanner/catalysts/resolve/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ magnitude: 0 }) }); if (res.ok) { setCatalystQueue((prev) => prev.filter((c) => c.id !== id)); } } catch {}
     setResolvingId(null);
   }, []);
 
@@ -319,9 +322,15 @@ export default function ScannerPopoutPage() {
           style={{ borderColor: cssVariables.borderOnSecondary, backgroundColor: "rgba(15,23,42,0.3)" }}
         >
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className={cn("h-6 px-2 text-[10px] font-bold uppercase", MODE_COLORS[mode])} onClick={cycleMode} title="Cycle mode">
-              {MODE_LABELS[mode]}
-            </Button>
+            {isAdmin ? (
+              <Button variant="ghost" size="sm" className={cn("h-6 px-2 text-[10px] font-bold uppercase", MODE_COLORS[mode])} onClick={cycleMode} title="Cycle mode">
+                {MODE_LABELS[mode]}
+              </Button>
+            ) : (
+              <span className={cn("h-6 px-2 text-[10px] font-bold uppercase inline-flex items-center", MODE_COLORS[mode])} title="Scanner mode">
+                {MODE_LABELS[mode]}
+              </span>
+            )}
             {status && (
               <span className="tabular-nums" style={{ color: cssVariables.textTiny, fontSize: scannerPx("tiny", fo) }}>
                 {status.universeSize} tickers · {status.activePipelines} pipes · {status.sessionMode.replace(/_/g, " ")}
@@ -455,7 +464,7 @@ export default function ScannerPopoutPage() {
         </div>
 
         {/* Admin sub-panels */}
-        {adminPanel !== "none" && (
+        {isAdmin && adminPanel !== "none" && (
           <div className="shrink-0 border-t max-h-[250px] overflow-y-auto" style={{ borderColor: cssVariables.borderOnSecondary }}>
             <div className="flex items-center justify-between px-2 py-1">
               <span className="font-bold uppercase" style={{ color: cssVariables.textMarketFlow, fontSize: scannerPx("card", fo) }}>
@@ -576,6 +585,8 @@ export default function ScannerPopoutPage() {
             <Button variant="ghost" size="sm" className="h-5 px-1.5 gap-0.5 text-slate-500 hover:text-purple-400" style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => window.open("/signal-workbench", "signal-workbench", "width=1200,height=900,menubar=no,toolbar=no,location=no,status=no")} title="Signal Workbench (Admin)">
               <FlaskConical className="h-2.5 w-2.5" />Lab
             </Button>
+            {isAdmin && (
+              <>
             <Button variant="ghost" size="sm" className={cn("h-5 px-1.5 gap-0.5", adminPanel === "rules" ? "text-cyan-400" : "text-slate-500")} style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => setAdminPanel(adminPanel === "rules" ? "none" : "rules")} title="Catalyst Rules">
               <BookOpen className="h-2.5 w-2.5" />Rules
             </Button>
@@ -585,6 +596,8 @@ export default function ScannerPopoutPage() {
             <Button variant="ghost" size="sm" className={cn("h-5 px-1.5 gap-0.5", adminPanel === "config" ? "text-cyan-400" : "text-slate-500")} style={{ fontSize: scannerPx("tiny", fo) }} onClick={() => setAdminPanel(adminPanel === "config" ? "none" : "config")} title="Scanner Config">
               <Settings2 className="h-2.5 w-2.5" />Config
             </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

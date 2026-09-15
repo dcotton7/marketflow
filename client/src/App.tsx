@@ -10,6 +10,7 @@ import { SystemSettingsProvider } from "@/context/SystemSettingsContext";
 import { ThemeEditorProvider } from "@/context/ThemeEditorContext";
 import { WorkspacePaletteProvider } from "@/context/WorkspacePaletteContext";
 import { ScannerProvider } from "@/context/ScannerContext";
+import { TosSyncProvider } from "@/context/TosSyncContext";
 import { DiscoveryFeedPanel } from "@/components/scanner/DiscoveryFeed";
 import NotFound from "@/pages/not-found";
 import SentinelLoginPage from "@/pages/SentinelLoginPage";
@@ -186,9 +187,11 @@ function App() {
               <ScannerProvider>
                 <ThemeEditorProvider>
                   <TimeframeProvider>
-                    <Toaster />
-                    <Router />
-                    <DiscoveryFeedPanel />
+                    <TosSyncProvider>
+                      <Toaster />
+                      <Router />
+                      <DiscoveryFeedPanel />
+                    </TosSyncProvider>
                   </TimeframeProvider>
                 </ThemeEditorProvider>
               </ScannerProvider>

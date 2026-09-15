@@ -313,27 +313,15 @@ export function ChartInfoFooter({
     const candles = dailyData?.candles;
     if (!candles?.length || !chartMetrics?.currentPrice) return null;
     const today = candles[candles.length - 1]!;
-    const todayOpen = today.open;
+    const todayOpen = chartMetrics.regularSessionOpen ?? today.open;
+    const rthClose = chartMetrics.regularSessionClose ?? chartMetrics.currentPrice;
     if (!todayOpen || todayOpen === 0) return null;
-    return ((chartMetrics.currentPrice - todayOpen) / todayOpen) * 100;
+    return ((rthClose - todayOpen) / todayOpen) * 100;
   })();
 
   const ethPct = (() => {
     if (!chartMetrics?.currentPrice) return null;
-    // Find regular session close from intraday candles (last candle at or before 4:00 PM ET)
-    const iCandles = intradayData?.candles;
-    if (!iCandles?.length) return null;
-    let rthClose: number | null = null;
-    for (let i = iCandles.length - 1; i >= 0; i--) {
-      const c = iCandles[i]!;
-      const d = new Date(c.timestamp * 1000);
-      const etH = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }), 10);
-      const etM = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }), 10);
-      if (etH < 16 || (etH === 16 && etM === 0)) {
-        rthClose = c.close;
-        break;
-      }
-    }
+    const rthClose = chartMetrics.regularSessionClose;
     if (!rthClose || rthClose === 0) return null;
     const pct = ((chartMetrics.currentPrice - rthClose) / rthClose) * 100;
     if (Math.abs(pct) < 0.005) return null;
@@ -463,7 +451,7 @@ export function ChartInfoFooter({
                 />
                 <FooterDivider />
                 <FooterInfoLine
-                  label={<>RTH<span title="% change from pre-market high to close (Regular Trading Hours)" className="cursor-help">*</span></>}
+                  label={<>RTH<span title="% change from the regular-session open to its current/final close" className="cursor-help">*</span></>}
                   value={
                     rthPct != null
                       ? `${rthPct >= 0 ? "+" : ""}${rthPct.toFixed(2)}%`

@@ -41,6 +41,8 @@ import {
   chartFooterTargetHeight,
   type ChartSetupInfo,
 } from "@/components/ChartInfoFooter";
+import { TosSyncToggle } from "@/components/TosButton";
+import { useTosSyncSafe } from "@/context/TosSyncContext";
 
 export type ChartDataResponse = {
   candles: ChartCandle[];
@@ -122,6 +124,11 @@ export interface QuarterlyEarning {
 
 export interface ChartMetrics {
   currentPrice: number;
+  previousClose?: number;
+  regularSessionOpen?: number;
+  regularSessionClose?: number;
+  priceSession?: "pre_market" | "regular" | "after_hours" | "closed";
+  priceAsOf?: string | null;
   adr20: number;
   adr20Dollar: number;
   adr20Pct: number;
@@ -242,6 +249,8 @@ interface DualChartGridProps {
   testIdPrefix?: string;
   upperPane?: ReactNode;
   navExtra?: ReactNode;
+  /** When false, skip the built-in ToS control so the parent can place it in navExtra. Default true. */
+  showTosToggle?: boolean;
   lowerPane?: ReactNode;
   alertTradePlanPreview?: {
     mode?: "single" | "per_symbol";
@@ -445,11 +454,23 @@ export function DualChartGrid({
   testIdPrefix = "",
   upperPane,
   navExtra,
+  showTosToggle = true,
   lowerPane,
   alertTradePlanPreview = null,
   alertWatchlistId = null,
 }: DualChartGridProps) {
   const { cssVariables } = useSystemSettings();
+  const tos = useTosSyncSafe();
+  const tosSyncEnabled = tos?.tosSyncEnabled ?? false;
+  const tosAvailable = tos?.tosAvailable ?? false;
+  const tosCalibrated = tos?.tosCalibrated ?? false;
+  const tosNavigate = tos?.tosNavigate;
+
+  useEffect(() => {
+    if (!symbol || !tosSyncEnabled || !tosAvailable || !tosCalibrated || !tosNavigate) return;
+    void tosNavigate(symbol);
+  }, [symbol, tosSyncEnabled, tosAvailable, tosCalibrated, tosNavigate]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const saveLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -544,6 +565,8 @@ export function DualChartGrid({
       syncingCrosshairRef.current = true;
       try {
         targetChart.setCrosshairPosition(price, time, targetSeries);
+      } catch (err) {
+        console.warn("[DualChartGrid] crosshair sync skipped:", err);
       } finally {
         // Keep the guard up briefly to block the re-entrant callback
         setTimeout(() => { syncingCrosshairRef.current = false; }, 0);
@@ -792,13 +815,47 @@ export function DualChartGrid({
   }, [intradayFetching, symbol, intradayTimeframe, showETH]);
 
   const dayChange = useMemo(() => {
+    if (
+      chartMetrics?.currentPrice != null &&
+      Number.isFinite(chartMetrics.currentPrice) &&
+      chartMetrics.previousClose != null &&
+      chartMetrics.previousClose > 0
+    ) {
+      const change = chartMetrics.currentPrice - chartMetrics.previousClose;
+      return {
+        price: chartMetrics.currentPrice,
+        change,
+        changePct: (change / chartMetrics.previousClose) * 100,
+      };
+    }
     if (!dailyData || dailyData.candles.length < 2) return null;
     const last = dailyData.candles[dailyData.candles.length - 1];
     const prev = dailyData.candles[dailyData.candles.length - 2];
     const change = last.close - prev.close;
     const changePct = (change / prev.close) * 100;
     return { price: last.close, change, changePct };
-  }, [dailyData]);
+  }, [chartMetrics?.currentPrice, chartMetrics?.previousClose, dailyData]);
+
+  const extendedSessionChangePct = useMemo(() => {
+    if (
+      (chartMetrics?.priceSession !== "pre_market" &&
+        chartMetrics?.priceSession !== "after_hours") ||
+      chartMetrics.currentPrice == null ||
+      chartMetrics.regularSessionClose == null ||
+      chartMetrics.regularSessionClose <= 0
+    ) {
+      return null;
+    }
+    return (
+      ((chartMetrics.currentPrice - chartMetrics.regularSessionClose) /
+        chartMetrics.regularSessionClose) *
+      100
+    );
+  }, [
+    chartMetrics?.currentPrice,
+    chartMetrics?.priceSession,
+    chartMetrics?.regularSessionClose,
+  ]);
 
   const handleTickerNav = useCallback((ticker: string) => {
     if (onNavigateToTicker) {
@@ -1171,6 +1228,21 @@ export function DualChartGrid({
                 <span className={`font-mono font-bold text-lg ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
                 <span style={{ color: cssVariables.textColorTiny }}>|</span>
                 <span className={`font-mono font-bold text-lg ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
+                {extendedSessionChangePct != null ? (
+                  <span
+                    className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
+                      extendedSessionChangePct >= 0
+                        ? "border-emerald-500/40 text-rs-green"
+                        : "border-red-500/40 text-rs-red"
+                    }`}
+                    title="Extended-hours change versus the regular-session close"
+                    data-testid="text-chart-extended-change"
+                  >
+                    {chartMetrics?.priceSession === "pre_market" ? "PRE" : "EXT"}{" "}
+                    {extendedSessionChangePct >= 0 ? "+" : ""}
+                    {extendedSessionChangePct.toFixed(2)}%
+                  </span>
+                ) : null}
               </>
             ) : (
               <span className="font-mono text-lg text-muted-foreground animate-pulse">—</span>
@@ -1187,6 +1259,11 @@ export function DualChartGrid({
             <Bell className="w-4 h-4" />
             Chart Alert
           </Button>
+          {showTosToggle && (
+            <div className="flex-shrink-0">
+              <TosSyncToggle appearance="toolbar" currentSymbol={symbol} />
+            </div>
+          )}
           {navExtra}
         </div>
 

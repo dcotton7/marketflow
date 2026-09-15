@@ -949,6 +949,43 @@ export async function registerRoutes(
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 
+  // ── ToS Bridge (LOCAL only — sends keystrokes to Thinkorswim) ─────────────
+  const tosBridge = await import("./bridge/tos-bridge");
+  
+  app.get("/api/tos/status", (_req, res) => {
+    res.json(tosBridge.getStatus());
+  });
+
+  app.post("/api/tos/calibrate", async (_req, res) => {
+    if (!tosBridge.isAvailable()) {
+      return res.status(501).json({ error: "ToS bridge only available on LOCAL Windows" });
+    }
+    try {
+      const cal = await tosBridge.calibrate();
+      res.json({ ok: true, ...cal });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Calibration failed";
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  app.post("/api/tos/navigate", async (req, res) => {
+    if (!tosBridge.isAvailable()) {
+      return res.status(501).json({ error: "ToS bridge only available on LOCAL Windows" });
+    }
+    const symbol = String(req.body?.symbol ?? "").trim();
+    if (!symbol) {
+      return res.status(400).json({ error: "symbol is required" });
+    }
+    try {
+      await tosBridge.navigate(symbol);
+      res.json({ ok: true, symbol: symbol.toUpperCase() });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Navigate failed";
+      res.status(500).json({ error: msg });
+    }
+  });
+
   // Initialize MC polling in background — do NOT await so the HTTP listener
   // can bind immediately. The first snapshot poll loads 676+ tickers and can
   // take 30-60s; blocking here causes Render to see the server as failed.

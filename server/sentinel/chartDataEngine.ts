@@ -3,6 +3,7 @@ import { isUsEquityRegularSessionEt } from "../../shared/nyRegularSession";
 import type { SentinelChartIndicators, SentinelChartIndicatorsMeta } from "../../shared/sentinelChartData";
 import * as alpaca from "../alpaca";
 import { getDailyBars, getIntradayBars } from "../data-layer";
+import { removeInjectedSessionAggregateBars } from "../../shared/intradayBarValidation";
 
 export interface ChartCandle {
   date: string;
@@ -551,7 +552,11 @@ export async function fetchChartData(
       return true;
     });
 
-    const finalCandles = dedupedCandles;
+    // Run this after timestamp deduplication: pagination boundary duplicates can
+    // otherwise hide the exact cumulative-volume signature.
+    const finalCandles = isIntraday
+      ? removeInjectedSessionAggregateBars(dedupedCandles)
+      : dedupedCandles;
 
     // Calculate Support/Resistance Gaps (only for daily timeframe)
     const gaps = timeframe === "daily" ? calculateGaps(finalCandles, false) : undefined;

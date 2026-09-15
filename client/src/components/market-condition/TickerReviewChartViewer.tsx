@@ -19,6 +19,7 @@ import { usePersistedIntradayTimeframe } from "@/hooks/usePersistedIntradayTimef
 import { useChartLoadStatus } from "@/hooks/useChartLoadStatus";
 
 import { ChartLoadStatusDialog } from "@/components/charts/ChartLoadStatusDialog";
+import { ChartErrorBoundary } from "@/components/charts/ChartErrorBoundary";
 
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
@@ -505,6 +506,7 @@ export function TickerReviewChartViewer({
 
       <div className="flex flex-1 min-h-0 flex-col p-3">
 
+        <ChartErrorBoundary onClose={onClose} label="Theme member chart failed">
         <DualChartGrid
 
           symbol={activeSymbol}
@@ -556,6 +558,7 @@ export function TickerReviewChartViewer({
           testIdPrefix="ticker-review-chart"
 
         />
+        </ChartErrorBoundary>
 
       </div>
 

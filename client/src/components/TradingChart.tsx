@@ -588,6 +588,8 @@ export function TradingChart({
   const [measureStartPrice, setMeasureStartPrice] = useState<number | null>(null);
   const [measureEndPrice, setMeasureEndPrice] = useState<number | null>(null);
   const [chartReady, setChartReady] = useState(false);
+  const [chartInitError, setChartInitError] = useState<string | null>(null);
+  const [plotWidth, setPlotWidth] = useState(0);
   
   useEffect(() => {
     measureModeRef.current = measureMode;
@@ -634,6 +636,16 @@ export function TradingChart({
     return `${chartTicker}|${sma50Series.length}|${firstHit ?? "n"}|${last ?? "n"}`;
   }, [chartTicker, sma50Series]);
   const hasCandles = candleLen > 0;
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const sync = () => setPlotWidth(el.clientWidth);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasCandles]);
 
   const displayDataRef = useRef(displayData);
   displayDataRef.current = displayData;
@@ -789,9 +801,13 @@ export function TradingChart({
     }
 
     if (!hasCandles) return;
+    if (plotWidth <= 0) return;
+    setChartInitError(null);
 
     const containerHeight = height || containerRef.current.clientHeight || 500;
-    const chart = createChart(containerRef.current, {
+    let chart: IChartApi;
+    try {
+      chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: containerHeight,
       layout: {
@@ -859,6 +875,11 @@ export function TradingChart({
         pinch: true,
       },
     });
+    } catch (err) {
+      console.error("[TradingChart] createChart failed:", err);
+      setChartInitError(err instanceof Error ? err.message : "Chart failed to start");
+      return;
+    }
 
     chartRef.current = chart;
 
@@ -878,7 +899,19 @@ export function TradingChart({
       isIntraday && whiteExtendedHoursCandles
     );
 
-    candleSeries.setData(candleData);
+    if (candleData.length === 0) {
+      setChartInitError("No plottable bars");
+      try { chart.remove(); } catch {}
+      return;
+    }
+
+    try {
+      candleSeries.setData(candleData);
+    } catch (err) {
+      console.error("[TradingChart] setData failed:", err);
+      setChartInitError(err instanceof Error ? err.message : "Chart data failed");
+      return;
+    }
 
     maLineSeriesRef.current = syncMaLinesToChart(
       chart,
@@ -895,7 +928,11 @@ export function TradingChart({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
-    volumeSeries.setData(styledVolumeData);
+    try {
+      volumeSeries.setData(styledVolumeData);
+    } catch (err) {
+      console.warn("[TradingChart] volume setData failed:", err);
+    }
     volumeSeriesRef.current = volumeSeries;
 
     const measurePrimitive = new MeasurePrimitive();
@@ -993,7 +1030,7 @@ export function TradingChart({
         baseZoneSeriesRef.current = [];
       }
     };
-  }, [hasCandles, isIntraday, timeframe]);
+  }, [hasCandles, isIntraday, timeframe, plotWidth]);
 
   /** Keep candle/volume in sync immediately (no rAF) so intraday isn’t delayed while daily chart inits. */
   useEffect(() => {
@@ -1005,9 +1042,13 @@ export function TradingChart({
       latest.candles,
       isIntraday && whiteExtendedHoursCandles
     );
-    candleSeriesRef.current.setData(candleData);
-    if (volumeSeriesRef.current) {
-      volumeSeriesRef.current.setData(volumeData);
+    try {
+      candleSeriesRef.current.setData(candleData);
+      if (volumeSeriesRef.current) {
+        volumeSeriesRef.current.setData(volumeData);
+      }
+    } catch (err) {
+      console.error("[TradingChart] update setData failed:", err);
     }
   }, [candleSyncKey, hasCandles, isIntraday, whiteExtendedHoursCandles]);
 
@@ -1179,6 +1220,7 @@ export function TradingChart({
     
     if (linesToDraw && linesToDraw.length > 0) {
       for (const pl of linesToDraw) {
+        if (!Number.isFinite(pl.price)) continue;
         const lwStyle = pl.lineStyle === "solid" ? LineStyle.Solid
           : pl.lineStyle === "dashed" ? LineStyle.Dashed
           : LineStyle.Dotted;
@@ -1620,6 +1662,11 @@ export function TradingChart({
         </Button>
       </div>
       <div ref={containerRef} className="w-full min-h-0 flex-1" style={drawingToolActive ? { cursor: 'crosshair' } : undefined} />
+      {chartInitError ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 px-4 text-center text-xs text-muted-foreground">
+          Chart unavailable: {chartInitError}
+        </div>
+      ) : null}
       <MaSettingsDialog open={showMaSettings} onOpenChange={setShowMaSettings} />
     </div>
   );

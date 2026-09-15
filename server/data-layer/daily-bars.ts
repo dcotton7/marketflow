@@ -14,6 +14,48 @@ import { historicalBars } from "@shared/schema";
 import { getTickerSnapshot } from "../market-condition/engine/snapshot";
 import { DailyBar, Quote } from "./types";
 import { getQuote } from "./quotes";
+import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
+import type { TickerSnapshot } from "../market-condition/providers/types";
+
+function snapshotRegularSessionBar(snapshot: TickerSnapshot): DailyBar | null {
+  if (snapshot.open <= 0 || !snapshot.regularSessionClose || snapshot.regularSessionClose <= 0) {
+    return null;
+  }
+
+  const now = new Date();
+  const currentSession = getUsEquityMarketSession(now);
+  const currentEtDate = getEtClock(now).dateKey;
+  const snapshotEtDate = getEtClock(snapshot.timestamp).dateKey;
+
+  // Premarket trades belong in ETH pricing, not in a developing daily RTH candle.
+  if (currentSession === "pre_market" && snapshotEtDate === currentEtDate) {
+    return null;
+  }
+
+  return {
+    date: snapshotEtDate,
+    open: snapshot.open,
+    high: snapshot.high,
+    low: snapshot.low,
+    close: snapshot.regularSessionClose,
+    volume: snapshot.volume,
+    vwap: snapshot.vwap,
+  };
+}
+
+function mergeRegularSessionBar(candles: DailyBar[], snapshot: TickerSnapshot | undefined): DailyBar[] {
+  if (!snapshot) return candles;
+  const sessionBar = snapshotRegularSessionBar(snapshot);
+  if (!sessionBar) return candles;
+
+  const existingIndex = candles.findIndex((bar) => bar.date === sessionBar.date);
+  if (existingIndex >= 0) {
+    candles[existingIndex] = sessionBar;
+  } else if (!candles.length || sessionBar.date > candles[0].date) {
+    candles.unshift(sessionBar);
+  }
+  return candles;
+}
 
 /**
  * Get daily bars for a symbol, merging DB history with today's live bar.
@@ -57,26 +99,7 @@ export async function getDailyBars(
       vwap: b.vwap ? Number(b.vwap) : undefined,
     }));
 
-    const snapshot = getTickerSnapshot(upperSymbol);
-    const today = new Date().toISOString().split("T")[0];
-
-    if (snapshot && snapshot.open > 0) {
-      const mostRecentDbDate = dbBars[0]?.barDate;
-
-      if (!mostRecentDbDate || today > mostRecentDbDate) {
-        candles.unshift({
-          date: today,
-          open: snapshot.open,
-          high: snapshot.high,
-          low: snapshot.low,
-          close: snapshot.price,
-          volume: snapshot.volume,
-          vwap: snapshot.vwap,
-        });
-      }
-    }
-
-    return candles.slice(0, days);
+    return mergeRegularSessionBar(candles, getTickerSnapshot(upperSymbol)).slice(0, days);
   } catch (error) {
     console.error(`[DataLayer] getDailyBars error for ${symbol}:`, error);
     return null;
@@ -127,8 +150,6 @@ export async function getDailyBarsBatch(
       barsBySymbol.set(bar.symbol, existing);
     }
 
-    const today = new Date().toISOString().split("T")[0];
-
     for (const symbol of upperSymbols) {
       const symbolBars = barsBySymbol.get(symbol) || [];
 
@@ -146,24 +167,10 @@ export async function getDailyBarsBatch(
         vwap: b.vwap ? Number(b.vwap) : undefined,
       }));
 
-      const snapshot = getTickerSnapshot(symbol);
-
-      if (snapshot && snapshot.open > 0) {
-        const mostRecentDbDate = symbolBars[0]?.barDate;
-        if (!mostRecentDbDate || today > mostRecentDbDate) {
-          candles.unshift({
-            date: today,
-            open: snapshot.open,
-            high: snapshot.high,
-            low: snapshot.low,
-            close: snapshot.price,
-            volume: snapshot.volume,
-            vwap: snapshot.vwap,
-          });
-        }
-      }
-
-      result.set(symbol, candles.slice(0, days));
+      result.set(
+        symbol,
+        mergeRegularSessionBar(candles, getTickerSnapshot(symbol)).slice(0, days)
+      );
     }
 
     return result;
@@ -180,21 +187,7 @@ export async function getDailyBarsBatch(
 export function getTodayBar(symbol: string): DailyBar | null {
   const snapshot = getTickerSnapshot(symbol.toUpperCase());
 
-  if (!snapshot || snapshot.open <= 0) {
-    return null;
-  }
-
-  const today = new Date().toISOString().split("T")[0];
-
-  return {
-    date: today,
-    open: snapshot.open,
-    high: snapshot.high,
-    low: snapshot.low,
-    close: snapshot.price,
-    volume: snapshot.volume,
-    vwap: snapshot.vwap,
-  };
+  return snapshot ? snapshotRegularSessionBar(snapshot) : null;
 }
 
 /**

@@ -79,6 +79,18 @@ export interface DiscoveryFilterFields {
   priorDayDollarVol: number | null;
 }
 
+/** Empirical evidence badge attached at enrich/broadcast time (rank-only; never suppresses). */
+export type EvidenceTierLabel = "strong" | "watch" | "weak" | "unknown";
+
+export interface DiscoveryEvidence {
+  tier: EvidenceTierLabel;
+  /** Direction-adjusted hit rate (preferably shrunk). */
+  hitRate: number | null;
+  episodes: number;
+  trust: "trusted" | "provisional";
+  window: "15m" | "30m" | "1hr" | "4hr" | "d1_close" | "d2_open" | "d2_close" | "1w" | "1mo";
+}
+
 export interface PeerVelocityEntry {
   symbol: string;
   changePct: number;
@@ -274,6 +286,8 @@ export interface DiscoveryCard {
   themeRank?: number | null;
   /** Prior-day dollar volume for liquidity chips (null if unknown). */
   priorDayDollarVol?: number | null;
+  /** Empirical Lab evidence for rank-only display (optional). */
+  evidence?: DiscoveryEvidence | null;
 }
 
 // ── Scanner state (client ↔ server) ─────────────────────────────────────────

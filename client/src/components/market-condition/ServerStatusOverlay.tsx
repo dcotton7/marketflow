@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Activity, GripVertical, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SERVER_STATUS_OVERLAY_Z_INDEX } from "@/lib/overlay-z-index";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 
 const STORAGE_KEY = "marketflow:serverStatusOverlay";
 const POLL_MS = 1000;
@@ -155,6 +156,8 @@ export function ServerStatusTrigger() {
 }
 
 function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
+  const { user } = useSentinelAuth();
+  const isAdmin = !!user?.isAdmin;
   const [status, setStatus] = useState<ServerStatusPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -474,6 +477,7 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
                     />
                     Dead tickers
                   </div>
+                  {isAdmin && (
                   <button
                     type="button"
                     data-no-drag
@@ -483,6 +487,7 @@ function ServerStatusOverlay({ onClose }: { onClose: () => void }) {
                   >
                     {status.deadTickers.inProgress || scanStarting ? "Running…" : "Run now"}
                   </button>
+                  )}
                 </div>
                 <Row label="Schedule">{status.deadTickers.schedule}</Row>
                 <Row label="Next">{status.deadTickers.nextRunHint}</Row>

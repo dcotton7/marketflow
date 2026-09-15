@@ -57,7 +57,9 @@ import {
   List,
   Bell,
   BriefcaseBusiness,
+  ScanSearch,
 } from "lucide-react";
+import { TosScreenReviewDialog } from "@/components/watchlist/TosScreenReviewDialog";
 
 interface WatchlistModalProps {
   open: boolean;
@@ -344,6 +346,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [listFilter, setListFilter] = useState<"all" | "daily">("all");
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [tosScreenReviewOpen, setTosScreenReviewOpen] = useState(false);
   
   // Ticker add state
   const [tickerInput, setTickerInput] = useState("");
@@ -875,6 +878,16 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   {isAddingTickers ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                   Add
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  onClick={() => setTosScreenReviewOpen(true)}
+                  title="Review a ToS screenshot (does not add to this list yet)"
+                >
+                  <ScanSearch className="w-4 h-4" />
+                  From screen
+                </Button>
               </div>
             </div>
 
@@ -944,6 +957,12 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           }}
         />
       )}
+      <TosScreenReviewDialog
+        open={tosScreenReviewOpen}
+        onOpenChange={setTosScreenReviewOpen}
+        watchlistId={effectiveWatchlistId ?? null}
+        watchlistName={selectedWatchlist?.name ?? "this watchlist"}
+      />
     </Dialog>
   );
 }

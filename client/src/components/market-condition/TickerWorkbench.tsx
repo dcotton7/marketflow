@@ -44,6 +44,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { MARKETFLOW_MA_HELP, formatMaAsOfLabel } from "@/components/market-condition/marketflowHelpContent";
+import { TosSyncToggle } from "@/components/TosButton";
 import { useMarketConditionSettings } from "@/hooks/useMarketCondition";
 import {
   useAddToWatchlist,
@@ -407,6 +408,7 @@ export function TickerWorkbench({
       const res = await fetch(`/api/market-condition/themes/${themeId}/add-tickers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ tickers, force, subthemeId: selectedSubthemeId }),
       });
       if (!res.ok) throw new Error("Failed to add tickers");
@@ -621,6 +623,7 @@ export function TickerWorkbench({
             Open MarketFlow AI analysis in a side panel. Clicking a ticker opens the analysis sheet.
           </TooltipContent>
         </Tooltip>
+        <TosSyncToggle appearance="chip" />
       </div>
 
       {/* Header */}

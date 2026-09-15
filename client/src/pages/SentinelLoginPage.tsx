@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useState, useEffect, useMemo } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
+import { safeReturnPath } from "@/lib/auth-return";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,16 +11,21 @@ import { useSystemSettings } from "@/context/SystemSettingsContext";
 
 export default function SentinelLoginPage() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const { login, register, user, isLoading: authLoading } = useSentinelAuth();
   const { toast } = useToast();
   const { cssVariables, pageShellStyle } = useSystemSettings();
+  const returnPath = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    return safeReturnPath(params.get("next"));
+  }, [searchString]);
   
   // Redirect if already logged in - handles the case where login succeeds but navigation didn't work
   useEffect(() => {
     if (!authLoading && user) {
-      setLocation("/sentinel/market-condition");
+      setLocation(returnPath);
     }
-  }, [user, authLoading, setLocation]);
+  }, [user, authLoading, setLocation, returnPath]);
 
   const [isRegistering, setIsRegistering] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -46,7 +52,7 @@ export default function SentinelLoginPage() {
         await login(username, password);
         toast({ title: "Welcome back", description: "Signed in successfully" });
       }
-      setLocation("/sentinel/market-condition");
+      setLocation(returnPath);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Authentication failed";
       toast({

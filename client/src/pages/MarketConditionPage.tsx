@@ -40,6 +40,7 @@ import {
 } from "@/data/mockThemeData";
 import { SentinelHeader } from "@/components/SentinelHeader";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
+import { useTosSync } from "@/context/TosSyncContext";
 import { useLocation, useSearch } from "wouter";
 import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, ChevronUp, BarChart3, Search, Car, Eye, EyeOff, Rows3 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -303,8 +304,20 @@ function PanelHeader({
   );
 }
 
+function marketConditionPath(themeId: string | null, chartSymbol?: string | null): string {
+  const params = new URLSearchParams();
+  if (themeId) params.set("theme", themeId);
+  if (chartSymbol) params.set("chart", chartSymbol.toUpperCase());
+  const q = params.toString();
+  return q ? `/sentinel/market-condition?${q}` : "/sentinel/market-condition";
+}
+
 export default function MarketConditionPage() {
   const { pageShellStyle } = useSystemSettings();
+  const {
+    tosSyncEnabled,
+    tosNavigate,
+  } = useTosSync();
   const responsive = useResponsiveLayout();
   const [, navigate] = useLocation();
 
@@ -313,6 +326,11 @@ export default function MarketConditionPage() {
   const urlTheme = useMemo(() => {
     const params = new URLSearchParams(searchString);
     return (params.get("theme") as ThemeId) || null;
+  }, [searchString]);
+  const urlChart = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    const chart = params.get("chart");
+    return chart ? chart.toUpperCase() : null;
   }, [searchString]);
 
   const [selectedTheme, setSelectedTheme] = useState<ThemeId | null>(urlTheme);
@@ -372,7 +390,7 @@ export default function MarketConditionPage() {
   const [briefingReportOpen, setBriefingReportOpen] = useState(false);
   const [briefingMode, setBriefingMode] = useState<BriefingMode | null>(null);
   const [tickerReviewOpen, setTickerReviewOpen] = useState(false);
-  const [membersChartSymbol, setMembersChartSymbol] = useState<string | null>(null);
+  const [membersChartSymbol, setMembersChartSymbol] = useState<string | null>(urlChart);
   const [flowMapFocusData, setFlowMapFocusData] = useState<FlowMapFocusData | null>(null);
   const [focusedCenterTab, setFocusedCenterTab] = useState<
     "actionableDetails" | "flowFocus" | "etfs" | "subthemes" | "legacyDetails"
@@ -420,7 +438,10 @@ export default function MarketConditionPage() {
   // Force snapshot mutation (admin only)
   const forceSnapshotMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/market-condition/force-snapshot", { method: "POST" });
+      const res = await fetch("/api/market-condition/force-snapshot", {
+        method: "POST",
+        credentials: "include",
+      });
       if (!res.ok) throw new Error("Failed to save snapshot");
       return res.json();
     },
@@ -589,18 +610,23 @@ export default function MarketConditionPage() {
     return [];
   }, [shouldUseLive, themeMembers, selectedTheme]);
 
+  useEffect(() => {
+    if (urlChart) setMembersChartSymbol(urlChart);
+  }, [urlChart]);
+
   // Handle theme selection — keep ?theme= in sync so deep-links and UI don't fight
   const handleThemeSelect = useCallback((themeId: ThemeId) => {
     setSelectedTheme(themeId);
     setSelectedSubthemeId(null);
     setSelectedSubthemeName(null);
     setMemberScope("theme");
-    navigate(`/sentinel/market-condition?theme=${themeId}`, { replace: true });
+    setMembersChartSymbol(null);
+    navigate(marketConditionPath(themeId), { replace: true });
   }, [navigate]);
 
   // Handle ticker click - navigate or sync to popout window
   const handleTickerSelect = useCallback(
-    (symbol: string) => {
+    (symbol: string, themeIdOverride?: ThemeId | ClusterId) => {
       if (analysisSyncEnabled) {
         setAnalysisSheetSymbol(symbol);
       }
@@ -612,12 +638,31 @@ export default function MarketConditionPage() {
       if (chartSyncEnabled) {
         syncToChart(symbol);
       }
+      // Drive Thinkorswim when ToS sync is on for this session
+      if (tosSyncEnabled) {
+        void tosNavigate(symbol);
+      }
       // Stay on Market Flow: overlay the dual charts so X returns here exactly.
       if (!msSyncEnabled && !chartSyncEnabled && !analysisSyncEnabled) {
-        setMembersChartSymbol(symbol.toUpperCase());
+        const upper = symbol.toUpperCase();
+        setMembersChartSymbol(upper);
+        const themeForUrl = (themeIdOverride as ThemeId | undefined) || selectedTheme;
+        if (themeForUrl) {
+          navigate(marketConditionPath(themeForUrl, upper), { replace: true });
+        }
       }
     },
-    [msSyncEnabled, chartSyncEnabled, analysisSyncEnabled, syncToMarketSurge, syncToChart]
+    [
+      msSyncEnabled,
+      chartSyncEnabled,
+      analysisSyncEnabled,
+      tosSyncEnabled,
+      selectedTheme,
+      navigate,
+      syncToMarketSurge,
+      syncToChart,
+      tosNavigate,
+    ]
   );
 
   // Handle ticker added - refresh members list
@@ -744,19 +789,22 @@ export default function MarketConditionPage() {
     };
   }, [searchQuery, themes, tickerAssignments, unifiedSearch]);
 
-  // Handle search selection — align with clicking a theme: show center + members, load theme data
+  // Handle search selection — open the dual-chart overlay for that ticker
   const handleSelectTicker = useCallback(
     (symbol: string, themeId: ClusterId) => {
-      handleThemeSelect(themeId as ThemeId);
+      setSelectedTheme(themeId as ThemeId);
+      setSelectedSubthemeId(null);
+      setSelectedSubthemeName(null);
+      setMemberScope("theme");
       setHighlightedTicker(symbol);
       setShowFocusedPanel(true);
       setShowMembersPanel(true);
       setFocusedCenterTab("actionableDetails");
       setSearchOpen(false);
       setSearchQuery("");
-      if (analysisSyncEnabled) setAnalysisSheetSymbol(symbol);
+      handleTickerSelect(symbol, themeId);
     },
-    [analysisSyncEnabled, handleThemeSelect]
+    [handleTickerSelect]
   );
 
   const handleSelectTheme = useCallback((themeId: ThemeId) => {
@@ -2705,7 +2753,10 @@ export default function MarketConditionPage() {
         themeBreakdownWatch={selectedThemeData?.breakdownWatch}
         queueLabel="Theme members"
         closeReturnLabel="Close chart — return to Theme Members"
-        onClose={() => setMembersChartSymbol(null)}
+        onClose={() => {
+          setMembersChartSymbol(null);
+          if (selectedTheme) navigate(marketConditionPath(selectedTheme), { replace: true });
+        }}
       />
     </div>
   );

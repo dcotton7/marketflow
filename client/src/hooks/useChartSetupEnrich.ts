@@ -1,7 +1,51 @@
 import { useCallback, useRef, useState } from "react";
-import type { ChartSetupEnrichDossier, ChartSetupEnrichResult } from "@shared/chart-setup-enrich";
+import type {
+  ChartSetupEnrichDossier,
+  ChartSetupEnrichResult,
+  ChartEnrichFeedbackInput,
+  ChartEnrichModelInput,
+} from "@shared/chart-setup-enrich";
+import { resolveTradingDayKey } from "@shared/theme-daily-watchlist";
+import { buildChartEnrichStatusSteps } from "@/lib/chart-enrich-status";
+import { loginPathWithReturn, sessionIsAlive } from "@/lib/auth-return";
 
 const ENRICH_CACHE_REV = 8;
+
+const SESSION_EXPIRED_MSG = "Session expired — sign in to run AI analysis.";
+const SESSION_MISMATCH_MSG =
+  "Enrich rejected this session. Sign out, sign in, then retry.";
+
+async function readErrorDetail(res: Response): Promise<string> {
+  try {
+    const errBody = await res.json();
+    if (typeof errBody?.error === "string") return errBody.error;
+    if (typeof errBody?.message === "string") return errBody.message;
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+async function postJson(url: string, body: unknown): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+}
+
+async function recoverUnauthorized(res: Response, retry: () => Promise<Response>): Promise<Response> {
+  if (res.status !== 401) return res;
+  const alive = await sessionIsAlive();
+  if (alive) {
+    const retried = await retry();
+    if (retried.status !== 401) return retried;
+    throw new Error(SESSION_MISMATCH_MSG);
+  }
+  window.location.assign(loginPathWithReturn());
+  throw new Error(SESSION_EXPIRED_MSG);
+}
 
 function mergeResultWithDossier(
   result: ChartSetupEnrichResult,
@@ -44,12 +88,6 @@ function mergeResultWithDossier(
     lifecycleStage: u?.buyableNow ? "triggering" : result.lifecycleStage,
   };
 }
-import type {
-  ChartEnrichFeedbackInput,
-  ChartEnrichModelInput,
-} from "@shared/chart-setup-enrich";
-import { resolveTradingDayKey } from "@shared/theme-daily-watchlist";
-import { buildChartEnrichStatusSteps } from "@/lib/chart-enrich-status";
 
 export interface ChartEnrichCacheEntry {
   result: ChartSetupEnrichResult;
@@ -139,32 +177,15 @@ export function useChartSetupEnrich() {
       setEnrichStatusLog([]);
       startStatusPlayback(statusSteps);
       try {
-        const res = await fetch("/api/sentinel/chart-setup-enrich", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ dossier }),
-        });
+        const payload = { dossier };
+        let res = await postJson("/api/sentinel/chart-setup-enrich", payload);
+        res = await recoverUnauthorized(res, () => postJson("/api/sentinel/chart-setup-enrich", payload));
         if (!res.ok) {
-          let detail = "";
-          try {
-            const errBody = await res.json();
-            detail =
-              typeof errBody?.error === "string"
-                ? errBody.error
-                : typeof errBody?.message === "string"
-                  ? errBody.message
-                  : "";
-          } catch {
-            /* ignore */
-          }
+          const detail = await readErrorDetail(res);
           if (res.status === 404) {
             throw new Error(
               "Enrich API not found (404). Restart npm run dev locally, or deploy latest code to Live."
             );
-          }
-          if (res.status === 401) {
-            throw new Error(detail || "Unauthorized — log into Sentinel and retry.");
           }
           throw new Error(detail || `Enrich failed (${res.status})`);
         }
@@ -212,34 +233,20 @@ export function useChartSetupEnrich() {
   );
 
   const parseApiError = async (res: Response, fallback: string) => {
-    try {
-      const body = await res.json();
-      if (typeof body?.error === "string") return body.error;
-      if (typeof body?.message === "string") return body.message;
-    } catch {
-      /* ignore */
-    }
-    return `${fallback} (${res.status})`;
+    const detail = await readErrorDetail(res);
+    return detail || `${fallback} (${res.status})`;
   };
 
   const submitFeedback = useCallback(async (input: ChartEnrichFeedbackInput) => {
-    const res = await fetch("/api/sentinel/chart-setup-enrich/feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(input),
-    });
+    let res = await postJson("/api/sentinel/chart-setup-enrich/feedback", input);
+    res = await recoverUnauthorized(res, () => postJson("/api/sentinel/chart-setup-enrich/feedback", input));
     if (!res.ok) throw new Error(await parseApiError(res, "Feedback failed"));
     return res.json() as Promise<{ ok: boolean; feedbackId: number | null }>;
   }, []);
 
   const saveModel = useCallback(async (input: ChartEnrichModelInput) => {
-    const res = await fetch("/api/sentinel/chart-setup-enrich/model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(input),
-    });
+    let res = await postJson("/api/sentinel/chart-setup-enrich/model", input);
+    res = await recoverUnauthorized(res, () => postJson("/api/sentinel/chart-setup-enrich/model", input));
     if (!res.ok) throw new Error(await parseApiError(res, "Model save failed"));
     return res.json() as Promise<{ ok: boolean; modelId: number | null }>;
   }, []);

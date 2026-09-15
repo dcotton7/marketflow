@@ -295,6 +295,16 @@ async function onSnapshotRefreshed(
     const cards = await executeReactions(enriched);
     if (cards.length === 0) return;
 
+    // Attach rank-only evidence badges (never suppresses cards)
+    try {
+      const { getLiveEvidenceIndex } = await import("./evidence-service");
+      const { attachEvidenceToCards } = await import("./reactions/discovery-brief");
+      const evidenceIndex = await getLiveEvidenceIndex({ session });
+      attachEvidenceToCards(cards, evidenceIndex);
+    } catch {
+      // evidence optional
+    }
+
     // Persist to in-memory buffer
     pushDiscoveries(cards);
     trackLodBounceDiscoveries(cards, current);

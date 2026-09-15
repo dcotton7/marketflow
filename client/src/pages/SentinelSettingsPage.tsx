@@ -27,6 +27,8 @@ interface UsageInfo {
   tier: string;
 }
 
+import { TosCalibrateButton } from "@/components/TosButton";
+
 export default function SentinelSettingsPage() {
   const { toast } = useToast();
   const { refreshUser } = useSentinelAuth();
@@ -190,6 +192,9 @@ export default function SentinelSettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* ToS Bridge — LOCAL only, auto-hides on production */}
+          <TosCalibrateButton />
 
           <Card>
             <CardHeader>

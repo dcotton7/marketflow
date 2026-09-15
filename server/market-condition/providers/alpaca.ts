@@ -424,6 +424,7 @@ export class AlpacaProvider implements MarketDataProvider {
       open: dailyBar?.o || minuteBar?.o || price,
       high: dailyBar?.h || minuteBar?.h || price,
       low: dailyBar?.l || minuteBar?.l || price,
+      regularSessionClose: dailyBar?.c || minuteBar?.c || price,
       volume: dailyBar?.v || minuteBar?.v || 0,
       prevDayVolume: prevBar?.v || 0,
       vwap: dailyBar?.vw || minuteBar?.vw || price,

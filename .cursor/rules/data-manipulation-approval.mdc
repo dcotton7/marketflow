@@ -1,0 +1,23 @@
+---
+description: Data add/delete/rewrite requires Don's approval first
+alwaysApply: true
+---
+
+# Data Manipulation Requires Approval
+
+Do not add, delete, backfill, overwrite, or change how market data is computed or stored without Don's explicit approval first.
+
+This includes:
+
+- Daily / intraday bar lookbacks and fetch windows
+- Recalculating or overlaying MAs, indicators, or snapshots
+- Backfills, deletes, or writes to Live or LOCAL databases
+- Changing what a labeled series means (e.g. "50d" on a 5m chart)
+
+When a data issue shows up:
+
+1. Report what is wrong and the options.
+2. Wait for Don to choose.
+3. Only then implement that option.
+
+Do not pick a "clever" data rewrite (overlay, substitute series, drop symbols, shorten/lengthen history) just to make a chart or status look complete.

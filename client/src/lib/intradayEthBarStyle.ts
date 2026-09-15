@@ -44,36 +44,47 @@ function ethVolumeColor(c: IntradayCandleInput, session: UsEthSession): string {
 }
 
 /** When ETH is on: white pre/post candles by bar time in ET (native LWC per-bar colors). */
+function isPlottableCandle(c: IntradayCandleInput): boolean {
+  return (
+    Number.isFinite(c.timestamp) &&
+    Number.isFinite(c.open) &&
+    Number.isFinite(c.high) &&
+    Number.isFinite(c.low) &&
+    Number.isFinite(c.close)
+  );
+}
+
 export function buildIntradayCandlestickAndVolume(
   candles: readonly IntradayCandleInput[],
   whiteExtendedHoursCandles: boolean
 ): { candleData: CandlestickData[]; volumeData: HistogramData[] } {
-  if (!whiteExtendedHoursCandles || candles.length === 0) {
-    const candleData: CandlestickData[] = candles.map((c) => ({
+  const plottable = candles.filter(isPlottableCandle);
+  if (!whiteExtendedHoursCandles || plottable.length === 0) {
+    const candleData: CandlestickData[] = plottable.map((c) => ({
       time: c.timestamp as CandlestickData["time"],
       open: c.open,
       high: c.high,
       low: c.low,
       close: c.close,
     }));
-    const volumeData: HistogramData[] = candles.map((c) => ({
+    const volumeData: HistogramData[] = plottable.map((c) => ({
       time: c.timestamp as HistogramData["time"],
-      value: c.volume,
+      value: Number.isFinite(c.volume) ? c.volume : 0,
       color: c.close >= c.open ? RTH_VOL_UP : RTH_VOL_DOWN,
     }));
     return { candleData, volumeData };
   }
 
-  const sessions = classifyUsEthSessionsForCandles(candles.map((c) => c.timestamp));
+  const sessions = classifyUsEthSessionsForCandles(plottable.map((c) => c.timestamp));
   const candleData: CandlestickData[] = [];
   const volumeData: HistogramData[] = [];
-  for (let i = 0; i < candles.length; i++) {
-    const c = candles[i];
+  for (let i = 0; i < plottable.length; i++) {
+    const c = plottable[i];
     const session = sessions[i];
     candleData.push(ethCandleStyle(c, session));
     volumeData.push({
       time: c.timestamp as HistogramData["time"],
-      value: c.volume,
+      value: Number.isFinite(c.volume) ? c.volume : 0,
       color: ethVolumeColor(c, session),
     });
   }
