@@ -25,9 +25,15 @@ function Save-Calibration($cal) {
 }
 
 function Parse-TosJson([string]$stdout) {
-  $lines = $stdout -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_.StartsWith("{") -and $_.EndsWith("}") }
-  if (-not $lines) { throw "ToS helper returned no result" }
-  return ($lines[-1] | ConvertFrom-Json)
+  $start = $stdout.IndexOf("{")
+  $end = $stdout.LastIndexOf("}")
+  if ($start -lt 0 -or $end -le $start) {
+    $preview = $stdout.Trim()
+    if ($preview.Length -gt 200) { $preview = $preview.Substring(0, 200) }
+    throw "ToS helper returned no result. $preview"
+  }
+  $json = $stdout.Substring($start, $end - $start + 1)
+  return ($json | ConvertFrom-Json)
 }
 
 function Invoke-TosWin([string[]]$WinArgs) {
