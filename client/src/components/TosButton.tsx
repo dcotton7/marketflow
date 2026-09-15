@@ -1,46 +1,22 @@
 /**
  * ToS Bridge — calibrate UI for Settings.
- * Global sync toggle lives in TosSyncContext + Flow "Choose OnClick Action".
+ * Drive Thinkorswim from this Windows PC via the local helper (Live) or LOCAL Node.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import {
+  fetchTosStatus,
+  isWindowsClient,
+  tosCalibrate,
+  tosErrorMessage,
+  type TosStatus,
+} from "@/lib/tos-bridge-client";
 import { useTosSyncSafe } from "@/context/TosSyncContext";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-
-interface TosStatus {
-  available: boolean;
-  calibrated: boolean;
-  position: { x: number; y: number } | null;
-  calibratedAt: string | null;
-}
-
-async function fetchTosStatus(): Promise<TosStatus> {
-  const res = await fetch("/api/tos/status", { credentials: "include" });
-  if (!res.ok) return { available: false, calibrated: false, position: null, calibratedAt: null };
-  return res.json();
-}
-
-async function tosCalibrateApi(): Promise<void> {
-  await apiRequest("POST", "/api/tos/calibrate");
-}
-
-function calibrateErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  const jsonStart = raw.indexOf("{");
-  if (jsonStart >= 0) {
-    try {
-      const parsed = JSON.parse(raw.slice(jsonStart)) as { error?: string };
-      if (parsed.error) return parsed.error;
-    } catch {
-      /* use raw */
-    }
-  }
-  return raw.replace(/^\d+:\s*/, "");
-}
 
 export function useTos() {
   const [status, setStatus] = useState<TosStatus>({
@@ -50,26 +26,35 @@ export function useTos() {
     calibratedAt: null,
   });
 
-  useEffect(() => {
-    fetchTosStatus().then(setStatus).catch(() => {});
-  }, []);
-
-  const calibrate = useCallback(async () => {
-    await tosCalibrateApi();
+  const refresh = useCallback(async () => {
     const s = await fetchTosStatus();
     setStatus(s);
   }, []);
 
-  return { ...status, calibrate };
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const calibrate = useCallback(async () => {
+    await tosCalibrate();
+    await refresh();
+  }, [refresh]);
+
+  return { ...status, calibrate, refresh };
 }
 
 export function TosCalibrateButton() {
-  const { available, calibrated, position, calibratedAt, calibrate } = useTos();
+  const { available, calibrated, position, calibratedAt, calibrate, refresh } = useTos();
   const tosSync = useTosSyncSafe();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const windows = isWindowsClient();
 
-  if (!available) return null;
+  useEffect(() => {
+    if (available) return;
+    const id = window.setInterval(() => { void refresh(); }, 4000);
+    return () => window.clearInterval(id);
+  }, [available, refresh]);
 
   async function handleCalibrate() {
     setBusy(true);
@@ -78,38 +63,75 @@ export function TosCalibrateButton() {
       await calibrate();
       await tosSync?.refreshStatus();
     } catch (err) {
-      setError(calibrateErrorMessage(err));
+      setError(tosErrorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-border p-4">
-      <h4 className="text-sm font-medium text-foreground">ToS Bridge</h4>
-      <p className="text-xs text-muted-foreground">
-        Click <strong>Calibrate</strong>, then click once on the Thinkorswim <strong>pop-out
-        symbol box</strong> (not Scanner). You have 15 seconds. Then turn on <strong>ToS</strong> on
-        Charts or Flow — one switch, shared everywhere.
-      </p>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleCalibrate}
-          disabled={busy}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {busy ? "Click the ToS symbol box…" : "Calibrate"}
-        </button>
-        {calibrated && position && (
-          <span className="text-xs text-muted-foreground">
-            ✓ Locked at ({position.x}, {position.y})
-            {calibratedAt && ` · ${new Date(calibratedAt).toLocaleString()}`}
-          </span>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">ToS Bridge</CardTitle>
+        <CardDescription>
+          Thinkorswim is on this PC. Recalibrate at each startup or whenever you move the ToS window.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!windows && (
+          <p className="text-xs text-muted-foreground">
+            ToS driving needs Windows with Thinkorswim open on this machine.
+          </p>
         )}
-      </div>
-      {error && <p className="text-xs text-red-400">{error}</p>}
-    </div>
+        {windows && !available && (
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p>
+              Start the ToS helper on this PC, then come back here. Download all three files into
+              the same folder and run <span className="font-medium text-foreground">start-tos-agent.cmd</span>.
+              Leave that window open.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <a href="/tos-helper/start-tos-agent.cmd" className="text-emerald-400 hover:underline" download>
+                start-tos-agent.cmd
+              </a>
+              <a href="/tos-helper/tos-agent.ps1" className="text-emerald-400 hover:underline" download>
+                tos-agent.ps1
+              </a>
+              <a href="/tos-helper/tos-win.ps1" className="text-emerald-400 hover:underline" download>
+                tos-win.ps1
+              </a>
+            </div>
+            <p>Repo on this PC: <code className="text-foreground">npm run tos-agent</code></p>
+          </div>
+        )}
+        {available && (
+          <p className="text-xs text-muted-foreground">
+            Click <strong>Calibrate</strong>, then click once on the Thinkorswim{" "}
+            <strong>pop-out symbol box</strong> (not Scanner). You have 15 seconds.
+          </p>
+        )}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleCalibrate}
+            disabled={busy || !available}
+            className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {busy ? "Click the ToS symbol box…" : calibrated ? "Recalibrate" : "Calibrate"}
+          </button>
+          {calibrated && position && (
+            <span className="text-xs text-muted-foreground">
+              ✓ Locked at ({position.x}, {position.y})
+              {calibratedAt && ` · ${new Date(calibratedAt).toLocaleString()}`}
+            </span>
+          )}
+          {windows && !available && (
+            <span className="text-xs text-amber-400">Helper not running</span>
+          )}
+        </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -123,12 +145,22 @@ export function TosSyncToggle({
 }) {
   const tos = useTosSyncSafe();
   const { toast } = useToast();
+  const windows = isWindowsClient();
 
-  if (!tos?.tosAvailable) return null;
+  if (!tos) return null;
+  if (!tos.tosAvailable && !windows) return null;
 
-  const { tosSyncEnabled, setTosSyncEnabled, tosCalibrated, tosNavigate } = tos;
+  const { tosSyncEnabled, setTosSyncEnabled, tosCalibrated, tosAvailable, tosNavigate } = tos;
 
   function handleClick() {
+    if (!tosAvailable) {
+      toast({
+        title: "ToS helper is not running",
+        description: "Settings → ToS Bridge: start the helper on this PC, then Calibrate.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!tosCalibrated) {
       toast({
         title: "ToS not calibrated",
@@ -148,11 +180,13 @@ export function TosSyncToggle({
     }
   }
 
-  const tooltip = tosCalibrated
-    ? tosSyncEnabled
-      ? "ToS driving is on — Flow and Charts share this switch"
-      : "Turn on ToS driving for Flow and Charts"
-    : "Calibrate first in Settings on the ToS pop-out symbol box";
+  const tooltip = !tosAvailable
+    ? "Start the ToS helper on this PC, then Calibrate in Settings"
+    : tosCalibrated
+      ? tosSyncEnabled
+        ? "ToS driving is on — Flow and Charts share this switch"
+        : "Turn on ToS driving for Flow and Charts"
+      : "Calibrate first in Settings on the ToS pop-out symbol box";
 
   if (appearance === "chip") {
     return (
@@ -164,7 +198,7 @@ export function TosSyncToggle({
             data-testid="button-flow-tos"
             className={cn(
               "text-xs px-3 py-1 rounded transition-colors flex items-center",
-              tosSyncEnabled
+              tosSyncEnabled && tosAvailable
                 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                 : "bg-slate-700/30 text-muted-foreground hover:text-foreground"
             )}
@@ -185,7 +219,7 @@ export function TosSyncToggle({
         <Button
           type="button"
           size="sm"
-          variant={tosSyncEnabled ? "default" : "outline"}
+          variant={tosSyncEnabled && tosAvailable ? "default" : "outline"}
           className="gap-1.5"
           onClick={handleClick}
           data-testid="button-chart-tos"

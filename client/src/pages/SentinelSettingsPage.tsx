@@ -193,7 +193,6 @@ export default function SentinelSettingsPage() {
             </CardContent>
           </Card>
 
-          {/* ToS Bridge — LOCAL only, auto-hides on production */}
           <TosCalibrateButton />
 
           <Card>

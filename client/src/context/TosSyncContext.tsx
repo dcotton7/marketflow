@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { fetchTosStatus, tosErrorMessage, tosNavigate as tosNavigateApi } from "@/lib/tos-bridge-client";
 import { useToast } from "@/hooks/use-toast";
 
 const STORAGE_KEY = "tosSyncEnabled";
@@ -61,31 +61,6 @@ function writeStoredToggle(enabled: boolean): void {
   }
 }
 
-async function fetchTosStatus(): Promise<TosStatus> {
-  try {
-    const res = await fetch("/api/tos/status", { credentials: "include" });
-    if (!res.ok) {
-      return { available: false, calibrated: false, position: null, calibratedAt: null };
-    }
-    return res.json();
-  } catch {
-    return { available: false, calibrated: false, position: null, calibratedAt: null };
-  }
-}
-
-function navigateErrorMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  const jsonStart = raw.indexOf("{");
-  if (jsonStart >= 0) {
-    try {
-      const parsed = JSON.parse(raw.slice(jsonStart)) as { error?: string };
-      if (parsed.error) return parsed.error;
-    } catch {
-      /* use raw */
-    }
-  }
-  return raw.replace(/^\d+:\s*/, "");
-}
 
 /** Latest-wins queue so arrowing through charts does not type every ticker into ToS. */
 const navigateQueue: { inflight: boolean; pending: string | null } = {
@@ -112,6 +87,8 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refreshStatus();
+    const id = window.setInterval(() => { void refreshStatus(); }, 5000);
+    return () => window.clearInterval(id);
   }, [refreshStatus]);
 
   useEffect(() => {
@@ -140,12 +117,12 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
         const next = navigateQueue.pending;
         navigateQueue.pending = null;
         try {
-          await apiRequest("POST", "/api/tos/navigate", { symbol: next });
+          await tosNavigateApi(next);
         } catch (err) {
           console.warn("[ToS sync]", err);
           toastRef.current({
             title: "ToS did not switch",
-            description: navigateErrorMessage(err),
+            description: tosErrorMessage(err),
             variant: "destructive",
           });
           break;

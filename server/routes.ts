@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import fs from "fs";
+import path from "path";
 import { storage } from "./storage";
 import { initializeDatabase, isDatabaseAvailable } from "./db";
 import { api } from "@shared/routes";
@@ -948,6 +950,21 @@ export async function registerRoutes(
   // Register Market Condition routes (mount immediately for API availability)
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
+
+  const tosHelperDir = path.join(process.cwd(), "server", "bridge");
+  const tosHelperFiles = new Set(["tos-agent.ps1", "tos-win.ps1", "start-tos-agent.cmd"]);
+  app.get("/tos-helper/:file", (req, res) => {
+    const file = path.basename(String(req.params.file ?? ""));
+    if (!tosHelperFiles.has(file)) {
+      return res.status(404).json({ error: "not found" });
+    }
+    const full = path.join(tosHelperDir, file);
+    if (!fs.existsSync(full)) {
+      return res.status(404).json({ error: "not found" });
+    }
+    res.setHeader("Content-Disposition", `attachment; filename="${file}"`);
+    res.sendFile(full);
+  });
 
   // ── ToS Bridge (LOCAL Windows only — Live returns 501 and never loads the module)
   const tosUnavailable = {

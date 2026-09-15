@@ -1,6 +1,6 @@
 {
   "name": "rest-express",
-  "version": "2.14.0",
+  "version": "2.14.1",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -16,7 +16,8 @@
     "db:ensure-theme-members-ma": "tsx server/scripts/ensureUserChartThemeMembersMaColumns.ts",
     "db:ensure-mini-ma": "tsx server/scripts/ensureMiniMaSettingsTable.ts",
     "db:deactivate-other-sentinel-users": "tsx server/scripts/deactivateNonForebodingSentinelUsers.ts",
-    "universe:refresh": "tsx server/scripts/refreshUniverseConstituents.ts"
+    "universe:refresh": "tsx server/scripts/refreshUniverseConstituents.ts",
+    "tos-agent": "powershell -NoProfile -ExecutionPolicy Bypass -File server/bridge/tos-agent.ps1"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
