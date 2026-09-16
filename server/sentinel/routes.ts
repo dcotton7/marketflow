@@ -1549,7 +1549,10 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.delete("/api/sentinel/watchlists/:id/items", requireAuth, async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "Invalid watchlist" });
+      }
       const wl = await sentinelModels.getWatchlistById(id);
 
       if (!wl) {

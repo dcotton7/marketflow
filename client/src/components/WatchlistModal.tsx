@@ -28,16 +28,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WatchlistColumnPicker } from "@/components/WatchlistColumnPicker";
@@ -383,6 +373,10 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   // Fetch items for selected watchlist
   const { data: watchlistItems, isLoading: itemsLoading } = useNamedWatchlistItems(effectiveWatchlistId);
 
+  useEffect(() => {
+    setClearAllOpen(false);
+  }, [effectiveWatchlistId]);
+
   // Fetch quotes for all tickers in selected watchlist
   const symbols = watchlistItems?.map((item) => item.symbol.trim().toUpperCase()) || [];
   const { data: quotes, isLoading: quotesLoading } = useQuery<TickerQuote[]>({
@@ -611,9 +605,9 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
 
   const handleDeleteAllTickers = async () => {
     if (!selectedWatchlist) return;
+    setClearAllOpen(false);
     try {
       await clearWatchlistItems.mutateAsync(selectedWatchlist.id);
-      setClearAllOpen(false);
     } catch {}
   };
 
@@ -642,7 +636,13 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
       : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setClearAllOpen(false);
+        onOpenChange(next);
+      }}
+    >
       <DialogContent
         ref={contentRef}
         overlayClassName="z-[3300]"
@@ -912,6 +912,36 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
               </div>
             </div>
 
+            {clearAllOpen && selectedWatchlist && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-white">
+                <span className="min-w-0 flex-1">
+                  Delete all {sortedTickers.length} ticker{sortedTickers.length === 1 ? "" : "s"} from “{selectedWatchlist.name}”? This cannot be undone.
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  onClick={() => setClearAllOpen(false)}
+                  disabled={clearWatchlistItems.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 gap-1 bg-red-600 text-white hover:bg-red-700 border-red-700"
+                  onClick={() => void handleDeleteAllTickers()}
+                  disabled={clearWatchlistItems.isPending}
+                >
+                  {clearWatchlistItems.isPending
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <Trash2 className="w-4 h-4" />}
+                  Yes, delete
+                </Button>
+              </div>
+            )}
+
             {/* Ticker Table */}
             <div className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
               {isPullingTickers ? (
@@ -959,32 +989,6 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           />
         </div>
       </DialogContent>
-
-      <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete all tickers from this watchlist?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {selectedWatchlist
-                ? `This removes every ticker from "${selectedWatchlist.name}". The watchlist itself stays. This cannot be undone.`
-                : "This removes every ticker from the open watchlist. The watchlist itself stays. This cannot be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 text-white hover:bg-red-700 border-red-700"
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDeleteAllTickers();
-              }}
-              disabled={clearWatchlistItems.isPending}
-            >
-              {clearWatchlistItems.isPending ? "Deleting…" : "Delete All Tickers"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {selectedWatchlist && (
         <AlertBuilderDialog

@@ -271,6 +271,7 @@ export function useClearWatchlistItems() {
       const res = await fetch(`/api/sentinel/watchlists/${id}/items`, {
         method: "DELETE",
         credentials: "include",
+        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({ error: "Failed to delete tickers" }));
@@ -278,9 +279,16 @@ export function useClearWatchlistItems() {
       }
       return res.json() as Promise<{ message: string; deleted: number }>;
     },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/sentinel/watchlist", id] });
+      await queryClient.cancelQueries({ queryKey: ["namedWatchlistQuotesExtended"] });
+      const previous = queryClient.getQueryData<SentinelWatchlistItem[]>(["/api/sentinel/watchlist", id]);
+      queryClient.setQueryData(["/api/sentinel/watchlist", id], []);
+      return { previous, id };
+    },
     onSuccess: (data, id) => {
+      queryClient.setQueryData(["/api/sentinel/watchlist", id], []);
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist", id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
       toast({
         title: "Tickers deleted",
@@ -289,7 +297,10 @@ export function useClearWatchlistItems() {
           : `Removed ${data.deleted} tickers from this watchlist.`,
       });
     },
-    onError: (err) => {
+    onError: (err, id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["/api/sentinel/watchlist", id], context.previous);
+      }
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });

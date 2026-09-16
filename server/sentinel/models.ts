@@ -344,13 +344,12 @@ export const sentinelModels = {
   },
 
   async deleteWatchlistItems(userId: number, watchlistId: number): Promise<number> {
-    const removed = await db.delete(sentinelWatchlist)
-      .where(and(
-        eq(sentinelWatchlist.userId, userId),
-        eq(sentinelWatchlist.watchlistId, watchlistId),
-      ))
-      .returning({ id: sentinelWatchlist.id });
-    return removed.length;
+    const result = await db.execute(sql`
+      delete from sentinel_watchlist
+      where user_id = ${userId}
+        and watchlist_id = ${watchlistId}
+    `);
+    return Number(result.rowCount ?? 0);
   },
 
   async moveWatchlistItems(fromWatchlistId: number, toWatchlistId: number): Promise<void> {
