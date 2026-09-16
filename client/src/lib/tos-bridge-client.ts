@@ -55,17 +55,18 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Pro
 }
 
 async function agentFetch(path: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
-  const settled = await Promise.allSettled(
-    TOS_AGENT_ORIGINS.map((origin) =>
-      fetchWithTimeout(`${origin}${path}`, {
+  // Try one origin at a time. Hitting 127.0.0.1 and localhost in parallel
+  // made ToSLink type the same ticker twice (both hit the same helper).
+  for (const origin of TOS_AGENT_ORIGINS) {
+    try {
+      return await fetchWithTimeout(`${origin}${path}`, {
         ...init,
         mode: "cors",
         credentials: "omit",
-      }, timeoutMs),
-    ),
-  );
-  for (const result of settled) {
-    if (result.status === "fulfilled") return result.value;
+      }, timeoutMs);
+    } catch {
+      /* try next origin */
+    }
   }
   return null;
 }

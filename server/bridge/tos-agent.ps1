@@ -63,6 +63,9 @@ function Read-Body($ctx) {
   try { return $reader.ReadToEnd() } finally { $reader.Close() }
 }
 
+$script:lastNavSymbol = ""
+$script:lastNavAt = Get-Date "2000-01-01"
+
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 $listener.Prefixes.Add("http://localhost:$Port/")
@@ -74,7 +77,7 @@ try {
   exit 1
 }
 
-Write-Host "MarketFlow ToS helper listening on http://127.0.0.1:$Port/"
+Write-Host "MarketFlow ToSLink helper listening on http://127.0.0.1:$Port/"
 Write-Host "Leave this window open. Settings, Calibrate, then click the ToS symbol box."
 Write-Host "Recalibrate whenever you move Thinkorswim."
 
@@ -158,9 +161,16 @@ while ($listener.IsListening) {
         Write-Json $ctx 400 @{ error = "symbol is required" }
         continue
       }
+      $up = $symbol.ToUpperInvariant()
+      $now = Get-Date
+      if ($up -eq $script:lastNavSymbol -and ($now - $script:lastNavAt).TotalMilliseconds -lt 900) {
+        Write-Host "Skipped duplicate $up"
+        Write-Json $ctx 200 @{ ok = $true; symbol = $up; skipped = $true }
+        continue
+      }
       $result = Invoke-TosWin @(
         "-Action", "navigate",
-        "-Symbol", $symbol.ToUpperInvariant(),
+        "-Symbol", $up,
         "-X", ([string][int]$cal.x),
         "-Y", ([string][int]$cal.y)
       )
@@ -168,7 +178,8 @@ while ($listener.IsListening) {
         Write-Json $ctx 400 @{ error = [string]$result.error }
         continue
       }
-      $up = $symbol.ToUpperInvariant()
+      $script:lastNavSymbol = $up
+      $script:lastNavAt = Get-Date
       Write-Host "Navigated to $up"
       Write-Json $ctx 200 @{ ok = $true; symbol = $up }
       continue

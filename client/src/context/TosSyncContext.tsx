@@ -63,8 +63,13 @@ function writeStoredToggle(enabled: boolean): void {
 
 
 /** Latest-wins queue so arrowing through charts does not type every ticker into ToS. */
-const navigateQueue: { inflight: boolean; pending: string | null } = {
+const navigateQueue: {
+  inflight: boolean;
+  inflightSymbol: string | null;
+  pending: string | null;
+} = {
   inflight: false,
+  inflightSymbol: null,
   pending: null,
 };
 
@@ -116,16 +121,19 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
       while (navigateQueue.pending) {
         const next = navigateQueue.pending;
         navigateQueue.pending = null;
+        navigateQueue.inflightSymbol = next;
         try {
           await tosNavigateApi(next);
         } catch (err) {
-          console.warn("[ToS sync]", err);
+          console.warn("[ToSLink]", err);
           toastRef.current({
-            title: "ToS did not switch",
+            title: "ToSLink did not switch",
             description: tosErrorMessage(err),
             variant: "destructive",
           });
           break;
+        } finally {
+          navigateQueue.inflightSymbol = null;
         }
       }
     } finally {
@@ -139,6 +147,8 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
   const tosNavigate = useCallback(async (symbol: string) => {
     const clean = symbol.trim().toUpperCase();
     if (!clean) return;
+    if (navigateQueue.pending === clean) return;
+    if (navigateQueue.inflightSymbol === clean) return;
     navigateQueue.pending = clean;
     await pumpNavigate();
   }, [pumpNavigate]);

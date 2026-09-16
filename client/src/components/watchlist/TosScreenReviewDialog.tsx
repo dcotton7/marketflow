@@ -142,7 +142,7 @@ export function TosScreenReviewDialog({
   const extract = async () => {
     if (!sourceUrl) return;
     if (!modelReady) {
-      setError("Turn on ToS and calibrate on Thinkorswim before extracting.");
+      setError("Turn on ToSLink and calibrate on Thinkorswim before extracting.");
       return;
     }
     const wrap = imgWrapRef.current;
@@ -236,10 +236,10 @@ export function TosScreenReviewDialog({
         <div className="space-y-3 text-sm">
           <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
             {modelReady ? (
-              <span className="text-emerald-400">ToS on and calibrated — ToS table model is active.</span>
+              <span className="text-emerald-400">ToSLink on and calibrated — ToS table model is active.</span>
             ) : (
               <span className="text-amber-400">
-                Turn on ToS (Charts or Flow) and calibrate on the Thinkorswim symbol box before
+                Turn on ToSLink (Charts or Flow) and calibrate on the Thinkorswim symbol box before
                 extracting.
               </span>
             )}

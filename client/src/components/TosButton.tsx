@@ -1,6 +1,6 @@
 /**
- * ToS Bridge — calibrate UI for Settings.
- * Drive Thinkorswim from this Windows PC via the local helper (Live) or LOCAL Node.
+ * ToSLink — calibrate UI for Settings.
+ * Drive Thinkorswim from this Windows PC via the local helper (Live or LOCAL).
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -73,7 +73,7 @@ export function TosCalibrateButton() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">ToS Bridge</CardTitle>
+        <CardTitle className="text-base">ToSLink</CardTitle>
         <CardDescription>
           Thinkorswim is on this PC. Recalibrate at each startup or whenever you move the ToS window.
         </CardDescription>
@@ -81,13 +81,13 @@ export function TosCalibrateButton() {
       <CardContent className="space-y-3">
         {!windows && (
           <p className="text-xs text-muted-foreground">
-            ToS driving needs Windows with Thinkorswim open on this machine.
+            ToSLink needs Windows with Thinkorswim open on this machine.
           </p>
         )}
         {windows && !available && (
           <div className="space-y-2 text-xs text-muted-foreground">
             <p>
-              Start the ToS helper on this PC, then come back here. Download all three files into
+              Start the ToSLink helper on this PC, then come back here. Download all three files into
               the same folder and run <span className="font-medium text-foreground">start-tos-agent.cmd</span>.
               Leave that window open.
             </p>
@@ -156,16 +156,16 @@ export function TosSyncToggle({
   function handleClick() {
     if (!tosAvailable) {
       toast({
-        title: "ToS helper is not running",
-        description: "Settings → ToS Bridge: start the helper on this PC, then Calibrate.",
+        title: "ToSLink helper is not running",
+        description: "Settings → ToSLink: start the helper on this PC, then Calibrate.",
         variant: "destructive",
       });
       return;
     }
     if (!tosCalibrated) {
       toast({
-        title: "ToS not calibrated",
-        description: "Settings → ToS Bridge: click Calibrate, then click the ToS pop-out symbol box.",
+        title: "ToSLink not calibrated",
+        description: "Settings → ToSLink: click Calibrate, then click the ToS pop-out symbol box.",
         variant: "destructive",
       });
       return;
@@ -175,18 +175,18 @@ export function TosSyncToggle({
     if (next) {
       if (currentSymbol) void tosNavigate(currentSymbol);
       toast({
-        title: "ToS Sync On",
+        title: "ToSLink On",
         description: "Ticker changes on Flow and Charts drive Thinkorswim",
       });
     }
   }
 
   const tooltip = !tosAvailable
-    ? "Start the ToS helper on this PC, then Calibrate in Settings"
+    ? "Start the ToSLink helper on this PC, then Calibrate in Settings"
     : tosCalibrated
       ? tosSyncEnabled
-        ? "ToS driving is on — Flow and Charts share this switch"
-        : "Turn on ToS driving for Flow and Charts"
+        ? "ToSLink is on — Flow and Charts share this switch"
+        : "Turn on ToSLink for Flow and Charts"
       : "Calibrate first in Settings on the ToS pop-out symbol box";
 
   if (appearance === "chip") {
@@ -204,7 +204,7 @@ export function TosSyncToggle({
                 : "bg-slate-700/30 text-muted-foreground hover:text-foreground"
             )}
           >
-            ToS
+            ToSLink
           </button>
         </TooltipTrigger>
         <TooltipContent>
@@ -225,7 +225,7 @@ export function TosSyncToggle({
           onClick={handleClick}
           data-testid="button-chart-tos"
         >
-          ToS
+          ToSLink
         </Button>
       </TooltipTrigger>
       <TooltipContent>

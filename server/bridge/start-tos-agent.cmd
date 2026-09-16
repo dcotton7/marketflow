@@ -1,7 +1,7 @@
 @echo off
-title MarketFlow ToS helper
+title MarketFlow ToSLink
 cd /d "%~dp0"
-echo MarketFlow ToS helper — leave this window open while using Charts.
+echo MarketFlow ToSLink — leave this window open while using Charts.
 echo After it says listening: Settings → Calibrate → click the ToS symbol box.
 echo Recalibrate at each startup or whenever you move Thinkorswim.
 echo.
