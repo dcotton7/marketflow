@@ -2,7 +2,6 @@ import type { PointerEvent, ThHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 export function WatchlistResizableTh({
-  widthPx,
   columnIndex,
   onResizeStart,
   showResizeHandle,
@@ -10,23 +9,20 @@ export function WatchlistResizableTh({
   children,
   ...props
 }: ThHTMLAttributes<HTMLTableCellElement> & {
-  widthPx: number;
   columnIndex: number;
   onResizeStart: (columnIndex: number, e: PointerEvent<HTMLButtonElement>) => void;
   showResizeHandle?: boolean;
 }) {
   return (
     <th
-      className={cn("relative align-middle", className)}
-      style={{
-        width: widthPx,
-        minWidth: widthPx,
-        maxWidth: widthPx,
-        boxSizing: "border-box",
-      }}
+      className={cn(
+        "relative align-middle overflow-hidden whitespace-nowrap",
+        className
+      )}
+      style={{ boxSizing: "border-box" }}
       {...props}
     >
-      <div className="flex min-w-0 items-center overflow-hidden">{children}</div>
+      <div className="flex w-full min-w-0 items-center overflow-hidden">{children}</div>
       {showResizeHandle ? (
         <button
           type="button"

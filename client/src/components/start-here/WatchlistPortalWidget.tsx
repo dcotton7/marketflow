@@ -564,7 +564,7 @@ export function WatchlistPortalWidget({
             No symbols in this list.
           </p>
         ) : (
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
             <WatchlistConfigurableTable
               variant="portal"
               columns={columns}

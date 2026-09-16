@@ -1547,6 +1547,26 @@ export function registerSentinelRoutes(app: Express): void {
     }
   });
 
+  app.delete("/api/sentinel/watchlists/:id/items", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const wl = await sentinelModels.getWatchlistById(id);
+
+      if (!wl) {
+        return res.status(404).json({ error: "Watchlist not found" });
+      }
+      if (wl.userId !== req.session.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const deleted = await sentinelModels.deleteWatchlistItems(req.session.userId!, id);
+      res.json({ message: "Cleared", deleted });
+    } catch (error) {
+      console.error("Clear watchlist items error:", error);
+      res.status(500).json({ error: "Failed to delete watchlist tickers" });
+    }
+  });
+
   app.post("/api/sentinel/watchlists/:id/set-default", requireAuth, async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);

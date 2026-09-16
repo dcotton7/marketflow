@@ -261,6 +261,40 @@ export function useDeleteWatchlist() {
   });
 }
 
+// Remove every ticker from a named watchlist (list itself stays)
+export function useClearWatchlistItems() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/sentinel/watchlists/${id}/items`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: "Failed to delete tickers" }));
+        throw new Error(error.error || "Failed to delete tickers");
+      }
+      return res.json() as Promise<{ message: string; deleted: number }>;
+    },
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
+      toast({
+        title: "Tickers deleted",
+        description: data.deleted === 1
+          ? "Removed 1 ticker from this watchlist."
+          : `Removed ${data.deleted} tickers from this watchlist.`,
+      });
+    },
+    onError: (err) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
 // Set a watchlist as default
 export function useSetDefaultWatchlist() {
   const queryClient = useQueryClient();

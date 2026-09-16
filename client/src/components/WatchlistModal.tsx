@@ -6,7 +6,8 @@ import {
   useWatchlists, 
   useCreateWatchlist, 
   useRenameWatchlist, 
-  useDeleteWatchlist, 
+  useDeleteWatchlist,
+  useClearWatchlistItems,
   useSetDefaultWatchlist,
   useAddToWatchlist,
   useRemoveFromWatchlist,
@@ -27,6 +28,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WatchlistColumnPicker } from "@/components/WatchlistColumnPicker";
@@ -347,6 +358,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [listFilter, setListFilter] = useState<"all" | "daily">("all");
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [tosScreenReviewOpen, setTosScreenReviewOpen] = useState(false);
+  const [clearAllOpen, setClearAllOpen] = useState(false);
   
   // Ticker add state
   const [tickerInput, setTickerInput] = useState("");
@@ -362,6 +374,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const createWatchlist = useCreateWatchlist();
   const renameWatchlist = useRenameWatchlist();
   const deleteWatchlist = useDeleteWatchlist();
+  const clearWatchlistItems = useClearWatchlistItems();
   const setDefaultWatchlist = useSetDefaultWatchlist();
   const addToWatchlist = useAddToWatchlist();
   const removeFromWatchlist = useRemoveFromWatchlist();
@@ -596,6 +609,14 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
     } catch {}
   };
 
+  const handleDeleteAllTickers = async () => {
+    if (!selectedWatchlist) return;
+    try {
+      await clearWatchlistItems.mutateAsync(selectedWatchlist.id);
+      setClearAllOpen(false);
+    } catch {}
+  };
+
   const openChartsWithWatchlistNav = (symbol: string) => {
     if (!effectiveWatchlistId || !sortedTickers.length) return;
     const symOrder = sortedTickers.map((t) => t.symbol).join(",");
@@ -797,11 +818,11 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                           <Button
                             size="icon"
                             variant="ghost"
-                            className="h-6 w-6 flex-shrink-0 opacity-50 hover:opacity-100 text-destructive"
+                            className="h-6 w-6 flex-shrink-0 text-red-400 hover:bg-red-500/20 hover:text-red-300"
                             onClick={(e) => { e.stopPropagation(); handleDelete(wl.id); }}
                             title={isDailyThemeWatchlistName(wl.name) ? "Archive daily theme list" : "Delete watchlist"}
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         )}
                       </>
@@ -815,63 +836,50 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           {/* Right Pane: Ticker List */}
           <div className="flex-1 flex flex-col min-w-0">
             {/* Header */}
-            <div className="p-3 border-b flex items-center gap-2 flex-wrap flex-shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={handleLoadInCharts}
-                disabled={!sortedTickers.length}
-              >
-                <BarChart3 className="w-4 h-4" />
-                Load in Charts
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => setAlertDialogOpen(true)}
-                disabled={!selectedWatchlist || sortedTickers.length === 0}
-              >
-                <Bell className="w-4 h-4" />
-                Alert This Watchlist
-              </Button>
-
-              <WatchlistColumnPicker
-                columns={columns}
-                availableToAdd={availableToAdd}
-                addColumn={addColumn}
-                removeColumn={removeColumn}
-                applyColumnPreset={applyColumnPreset}
-              />
-
-              {selectedWatchlist && !selectedWatchlist.isDefault && (
+            <div className="p-3 border-b flex flex-col gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-2 text-destructive border-destructive/50 hover:bg-destructive/10"
-                  onClick={() => handleDelete(selectedWatchlist.id)}
+                  className="gap-2"
+                  onClick={handleLoadInCharts}
+                  disabled={!sortedTickers.length}
                 >
-                  <Trash2 className="w-4 h-4" />
-                  {selectedWatchlist && isDailyThemeWatchlistName(selectedWatchlist.name)
-                    ? "Archive Daily List"
-                    : "Delete Watchlist"}
+                  <BarChart3 className="w-4 h-4" />
+                  Load in Charts
                 </Button>
-              )}
 
-              <div className="flex-1" />
+                <WatchlistColumnPicker
+                  columns={columns}
+                  availableToAdd={availableToAdd}
+                  addColumn={addColumn}
+                  removeColumn={removeColumn}
+                  applyColumnPreset={applyColumnPreset}
+                />
 
-              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setAlertDialogOpen(true)}
+                  disabled={!selectedWatchlist || sortedTickers.length === 0}
+                >
+                  <Bell className="w-4 h-4" />
+                  Alert This Watchlist
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <Input
                   value={tickerInput}
                   onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
                   placeholder="Add tickers (e.g. AAPL, MSFT)"
-                  className="h-8 w-48 text-sm"
+                  className="h-8 w-52 text-sm border-2 border-white bg-background text-white placeholder:text-white/55 shadow-[inset_0_1px_2px_rgba(0,0,0,0.45)] focus-visible:ring-white"
                   onKeyDown={(e) => { if (e.key === "Enter") handleAddTickers(); }}
                 />
                 <Button
                   size="sm"
+                  className="h-8 gap-1 border-2 border-white bg-primary font-semibold text-white shadow-[0_2px_0_rgba(255,255,255,0.55),0_3px_6px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.35)] hover:bg-primary/90 active:translate-y-px active:shadow-none"
                   onClick={handleAddTickers}
                   disabled={isAddingTickers || !tickerInput.trim()}
                 >
@@ -881,18 +889,31 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="gap-1"
+                  className="h-8 gap-1"
                   onClick={() => setTosScreenReviewOpen(true)}
                   title="Review a ToS screenshot (does not add to this list yet)"
                 >
                   <ScanSearch className="w-4 h-4" />
-                  From screen
+                  From Screen
                 </Button>
+                {selectedWatchlist && (
+                  <Button
+                    size="sm"
+                    className="ml-6 h-8 gap-1 bg-red-600 text-white hover:bg-red-700 border-red-700"
+                    onClick={() => setClearAllOpen(true)}
+                    disabled={sortedTickers.length === 0 || clearWatchlistItems.isPending}
+                  >
+                    {clearWatchlistItems.isPending
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <Trash2 className="w-4 h-4" />}
+                    Delete All Tickers
+                  </Button>
+                )}
               </div>
             </div>
 
             {/* Ticker Table */}
-            <div className="relative flex-1 overflow-y-auto">
+            <div className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
               {isPullingTickers ? (
                 <WatchlistPullingState
                   progressPct={isAddingTickers ? addProgressPct : null}
@@ -938,6 +959,32 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           />
         </div>
       </DialogContent>
+
+      <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all tickers from this watchlist?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedWatchlist
+                ? `This removes every ticker from "${selectedWatchlist.name}". The watchlist itself stays. This cannot be undone.`
+                : "This removes every ticker from the open watchlist. The watchlist itself stays. This cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700 border-red-700"
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteAllTickers();
+              }}
+              disabled={clearWatchlistItems.isPending}
+            >
+              {clearWatchlistItems.isPending ? "Deleting…" : "Delete All Tickers"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {selectedWatchlist && (
         <AlertBuilderDialog

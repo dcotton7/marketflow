@@ -119,7 +119,7 @@ export function WatchlistConfigurableTable({
     const sf = sortFieldForColumn(id);
     if (!sf) {
       return (
-        <span className="block min-w-0 truncate text-sm font-medium" title={label}>
+        <span className="block min-w-0 truncate text-sm font-medium leading-none" title={label}>
           {label}
         </span>
       );
@@ -127,11 +127,11 @@ export function WatchlistConfigurableTable({
     return (
       <div
         className={cn(
-          "flex min-w-0 items-center gap-1 text-sm font-medium",
+          "flex w-full min-w-0 items-center gap-1 text-sm font-medium",
           id === "symbol" || id === "company" || id === "theme" ? "justify-start" : "justify-end"
         )}
       >
-        <span className="min-w-0 truncate" title={label}>
+        <span className="min-w-0 truncate leading-none" title={label}>
           {label}
         </span>
         <span className="shrink-0">{renderSortIcon(sf)}</span>
@@ -421,11 +421,16 @@ export function WatchlistConfigurableTable({
     }
   };
 
+  const totalWidth = columns.reduce((sum, c) => sum + c.width, 0) || 1;
+
   return (
     <table className="w-full min-w-0 table-fixed">
       <colgroup>
         {columns.map((c, i) => (
-          <col key={`${c.id}-${i}`} style={{ width: c.width }} />
+          <col
+            key={`${c.id}-${i}`}
+            style={{ width: `${(c.width / totalWidth) * 100}%` }}
+          />
         ))}
       </colgroup>
       <thead className="sticky top-0 z-[1] border-b bg-background">
@@ -436,7 +441,6 @@ export function WatchlistConfigurableTable({
             return (
               <WatchlistResizableTh
                 key={`${c.id}-${i}`}
-                widthPx={c.width}
                 columnIndex={i}
                 onResizeStart={beginResize}
                 showResizeHandle={!last}
