@@ -163,7 +163,7 @@ while ($listener.IsListening) {
       }
       $up = $symbol.ToUpperInvariant()
       $now = Get-Date
-      if ($up -eq $script:lastNavSymbol -and ($now - $script:lastNavAt).TotalMilliseconds -lt 900) {
+      if ($up -eq $script:lastNavSymbol -and ($now - $script:lastNavAt).TotalMilliseconds -lt 4000) {
         Write-Host "Skipped duplicate $up"
         Write-Json $ctx 200 @{ ok = $true; symbol = $up; skipped = $true }
         continue

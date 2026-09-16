@@ -63,14 +63,19 @@ function writeStoredToggle(enabled: boolean): void {
 
 
 /** Latest-wins queue so arrowing through charts does not type every ticker into ToS. */
+const SAME_SYMBOL_COOLDOWN_MS = 4000;
 const navigateQueue: {
   inflight: boolean;
   inflightSymbol: string | null;
   pending: string | null;
+  lastSymbol: string;
+  lastAt: number;
 } = {
   inflight: false,
   inflightSymbol: null,
   pending: null,
+  lastSymbol: "",
+  lastAt: 0,
 };
 
 export function TosSyncProvider({ children }: { children: ReactNode }) {
@@ -147,8 +152,14 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
   const tosNavigate = useCallback(async (symbol: string) => {
     const clean = symbol.trim().toUpperCase();
     if (!clean) return;
+    const now = Date.now();
+    if (clean === navigateQueue.lastSymbol && now - navigateQueue.lastAt < SAME_SYMBOL_COOLDOWN_MS) {
+      return;
+    }
     if (navigateQueue.pending === clean) return;
     if (navigateQueue.inflightSymbol === clean) return;
+    navigateQueue.lastSymbol = clean;
+    navigateQueue.lastAt = now;
     navigateQueue.pending = clean;
     await pumpNavigate();
   }, [pumpNavigate]);

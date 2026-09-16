@@ -465,10 +465,18 @@ export function DualChartGrid({
   const tosAvailable = tos?.tosAvailable ?? false;
   const tosCalibrated = tos?.tosCalibrated ?? false;
   const tosNavigate = tos?.tosNavigate;
+  const lastTosSymbolRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!symbol || !tosSyncEnabled || !tosAvailable || !tosCalibrated || !tosNavigate) return;
-    void tosNavigate(symbol);
+    if (!tosSyncEnabled) {
+      lastTosSymbolRef.current = null;
+      return;
+    }
+    if (!symbol || !tosAvailable || !tosCalibrated || !tosNavigate) return;
+    const clean = symbol.trim().toUpperCase();
+    if (lastTosSymbolRef.current === clean) return;
+    lastTosSymbolRef.current = clean;
+    void tosNavigate(clean);
   }, [symbol, tosSyncEnabled, tosAvailable, tosCalibrated, tosNavigate]);
 
   const containerRef = useRef<HTMLDivElement>(null);
