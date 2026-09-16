@@ -834,7 +834,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
           </div>
 
           {/* Right Pane: Ticker List */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="relative flex-1 flex flex-col min-w-0">
             {/* Header */}
             <div className="p-3 border-b flex flex-col gap-2 flex-shrink-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -896,54 +896,81 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   <ScanSearch className="w-4 h-4" />
                   From Screen
                 </Button>
-                {selectedWatchlist && (
+                {selectedWatchlist && !clearAllOpen && (
                   <Button
                     size="sm"
                     className="ml-6 h-8 gap-1 bg-red-600 text-white hover:bg-red-700 border-red-700"
                     onClick={() => setClearAllOpen(true)}
                     disabled={sortedTickers.length === 0 || clearWatchlistItems.isPending}
                   >
-                    {clearWatchlistItems.isPending
-                      ? <Loader2 className="w-4 h-4 animate-spin" />
-                      : <Trash2 className="w-4 h-4" />}
+                    <Trash2 className="w-4 h-4" />
                     Delete All Tickers
                   </Button>
+                )}
+                {selectedWatchlist && clearAllOpen && (
+                  <>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="ml-6 h-8"
+                      onClick={() => setClearAllOpen(false)}
+                      disabled={clearWatchlistItems.isPending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 gap-1 bg-red-600 text-white hover:bg-red-700 border-red-700"
+                      onClick={() => void handleDeleteAllTickers()}
+                      disabled={clearWatchlistItems.isPending}
+                    >
+                      {clearWatchlistItems.isPending
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <Trash2 className="w-4 h-4" />}
+                      Yes, delete all
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
 
-            {clearAllOpen && selectedWatchlist && (
-              <div className="flex flex-wrap items-center gap-2 border-b border-red-500/40 bg-red-950/40 px-3 py-2 text-sm text-white">
-                <span className="min-w-0 flex-1">
-                  Delete all {sortedTickers.length} ticker{sortedTickers.length === 1 ? "" : "s"} from “{selectedWatchlist.name}”? This cannot be undone.
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  onClick={() => setClearAllOpen(false)}
-                  disabled={clearWatchlistItems.isPending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 gap-1 bg-red-600 text-white hover:bg-red-700 border-red-700"
-                  onClick={() => void handleDeleteAllTickers()}
-                  disabled={clearWatchlistItems.isPending}
-                >
-                  {clearWatchlistItems.isPending
-                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                    : <Trash2 className="w-4 h-4" />}
-                  Yes, delete
-                </Button>
-              </div>
-            )}
-
             {/* Ticker Table */}
             <div className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+              {clearAllOpen && selectedWatchlist && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/75 p-4">
+                  <div className="max-w-md rounded-md border-2 border-red-500 bg-background p-4 text-center shadow-xl">
+                    <p className="text-sm font-medium text-white">
+                      Delete all {sortedTickers.length} ticker{sortedTickers.length === 1 ? "" : "s"} from “{selectedWatchlist.name}”?
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">The watchlist stays. This cannot be undone.</p>
+                    <div className="mt-3 flex justify-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setClearAllOpen(false)}
+                        disabled={clearWatchlistItems.isPending}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="gap-1 bg-red-600 text-white hover:bg-red-700 border-red-700"
+                        onClick={() => void handleDeleteAllTickers()}
+                        disabled={clearWatchlistItems.isPending}
+                      >
+                        {clearWatchlistItems.isPending
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Trash2 className="w-4 h-4" />}
+                        Yes, delete all
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {isPullingTickers ? (
                 <WatchlistPullingState
                   progressPct={isAddingTickers ? addProgressPct : null}
