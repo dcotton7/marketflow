@@ -43,24 +43,29 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Pro
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    return await fetch(url, {
+      ...init,
+      signal: ctrl.signal,
+      // Chrome Local Network Access: HTTPS page talking to this PC's helper
+      ...({ targetAddressSpace: "loopback" } as RequestInit),
+    });
   } finally {
     window.clearTimeout(t);
   }
 }
 
 async function agentFetch(path: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
-  for (const origin of TOS_AGENT_ORIGINS) {
-    try {
-      const res = await fetchWithTimeout(`${origin}${path}`, {
+  const settled = await Promise.allSettled(
+    TOS_AGENT_ORIGINS.map((origin) =>
+      fetchWithTimeout(`${origin}${path}`, {
         ...init,
         mode: "cors",
         credentials: "omit",
-      }, timeoutMs);
-      return res;
-    } catch {
-      /* try next origin */
-    }
+      }, timeoutMs),
+    ),
+  );
+  for (const result of settled) {
+    if (result.status === "fulfilled") return result.value;
   }
   return null;
 }
@@ -78,7 +83,7 @@ async function originStatus(): Promise<TosStatus | null> {
 
 export async function fetchTosStatus(): Promise<TosStatus> {
   const [agentRes, origin] = await Promise.all([
-    agentFetch("/status", { method: "GET" }, 800),
+    agentFetch("/status", { method: "GET" }, 3000),
     originStatus(),
   ]);
 
@@ -137,21 +142,10 @@ export async function tosCalibrate(): Promise<void> {
 export async function tosNavigate(symbol: string): Promise<void> {
   const clean = symbol.trim().toUpperCase();
   if (!clean) return;
-  const body = JSON.stringify({ symbol: clean });
-  const headers = { "Content-Type": "application/json" };
+  const path = `/navigate?symbol=${encodeURIComponent(clean)}`;
 
-  if (lastSource === "origin") {
-    const origin = await fetch("/api/tos/navigate", {
-      method: "POST",
-      credentials: "include",
-      headers,
-      body,
-    });
-    await throwIfNotOk(origin);
-    return;
-  }
-
-  const agentRes = await agentFetch("/navigate", { method: "POST", headers, body }, 15000);
+  // GET avoids a CORS preflight so Live (HTTPS) can reach the loopback helper.
+  const agentRes = await agentFetch(path, { method: "GET" }, 15000);
   if (agentRes) {
     await throwIfNotOk(agentRes);
     lastSource = "agent";
@@ -161,8 +155,8 @@ export async function tosNavigate(symbol: string): Promise<void> {
   const origin = await fetch("/api/tos/navigate", {
     method: "POST",
     credentials: "include",
-    headers,
-    body,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbol: clean }),
   });
   await throwIfNotOk(origin);
   lastSource = "origin";

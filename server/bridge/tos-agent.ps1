@@ -82,9 +82,10 @@ while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   $reqPath = $ctx.Request.Url.AbsolutePath.TrimEnd("/").ToLowerInvariant()
   if ($reqPath -eq "") { $reqPath = "/" }
-  $method = $ctx.Request.HttpMethod.ToUpperInvariant()
+    $method = $ctx.Request.HttpMethod.ToUpperInvariant()
+    Write-Host "$method $reqPath"
 
-  try {
+    try {
     if ($method -eq "OPTIONS") {
       $ctx.Response.StatusCode = 204
       Write-Cors $ctx.Response
@@ -137,16 +138,22 @@ while ($listener.IsListening) {
       continue
     }
 
-    if ($method -eq "POST" -and $reqPath -eq "/navigate") {
+    if (($method -eq "GET" -or $method -eq "POST") -and $reqPath -eq "/navigate") {
       $cal = Get-Calibration
       if (-not $cal) {
         Write-Json $ctx 400 @{ error = "Not calibrated. Settings, Calibrate, then click the ToS symbol box." }
         continue
       }
-      $navBody = $null
-      $raw = Read-Body $ctx
-      if ($raw) { $navBody = $raw | ConvertFrom-Json }
-      $symbol = [string]$navBody.symbol
+      $symbol = [string]$ctx.Request.QueryString["symbol"]
+      if (-not $symbol -and $method -eq "POST") {
+        $navBody = $null
+        $raw = Read-Body $ctx
+        if ($raw) {
+          try { $navBody = $raw | ConvertFrom-Json } catch { $navBody = $null }
+          if ($navBody) { $symbol = [string]$navBody.symbol }
+          if (-not $symbol) { $symbol = $raw.Trim().Trim('"') }
+        }
+      }
       if (-not $symbol) {
         Write-Json $ctx 400 @{ error = "symbol is required" }
         continue

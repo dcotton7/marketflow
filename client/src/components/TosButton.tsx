@@ -61,6 +61,7 @@ export function TosCalibrateButton() {
     setError(null);
     try {
       await calibrate();
+      tosSync?.setTosSyncEnabled(true);
       await tosSync?.refreshStatus();
     } catch (err) {
       setError(tosErrorMessage(err));
