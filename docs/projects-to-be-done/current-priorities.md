@@ -11,6 +11,7 @@ Keep these three projects prominent in planning and backlog reviews:
 | Item | Notes |
 |------|--------|
 | **Shared intraday bar cache (table- or Redis-backed)** | Today `getIntradayBars` uses a per-process in-memory `Map`; only that Node instance benefits. Move to Postgres (durable, indexed by symbol+interval+time) or Redis (shared hot cache) so all users and all app instances reuse warmed history; keep tail refresh + snapshot merge for the live bar. Define retention vs chart lookback, upsert strategy, and pruning. Supports workspace/chart experience; optional tie-in to alerts if intraday data is reused there. |
+| **InfoPop / PopOut watchlist widget** | Tight chrome-less watchlist box from Watchlist Manager (**InfoPop**). Compact default columns; Columns popover add/remove/reorder. Click ticker → Charts. Not the Start Here workspace pop-out. |
 | **Token allowance + usage (per role / tier)** | Ship fields `tokensAllowed` and `tokensUsed` (or equivalent) on user/session context from `/api/auth/me` (or sibling). **For now: every tier unlimited** (`tokensUsed` can stay 0 until metering exists). Later: cap by tier and increment on metered calls (AI, analysis, etc.). |
 
 ## Tier & RBAC build checklist (draft)

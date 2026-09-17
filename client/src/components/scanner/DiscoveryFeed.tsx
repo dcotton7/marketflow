@@ -25,6 +25,7 @@ import { SCANNER_CONFIG_FIELDS, type ScannerConfig, type ConfigFieldMeta } from 
 import type { CatalystRuleDefinition, CatalystEntry, DecayShape } from "@shared/catalyst-types";
 import { useLocation } from "wouter";
 import { SCANNER_POPOUT_CHANNEL, type ScannerPopoutMessage } from "./scanner-popout-channel";
+import { openAppPopout } from "@/lib/app-popout";
 
 const SCANNER_OVERLAY_STORAGE = "scanner-overlay-position-v1";
 
@@ -267,7 +268,10 @@ export function DiscoveryFeedPanel() {
   const [historySignalType, setHistorySignalType] = useState<SignalType | "all">("all");
   const [historyCategory, setHistoryCategory] = useState<CategoryFilter | null>(null);
 
-  const isOnPopoutRoute = location.startsWith("/scanner-popout") || location.startsWith("/workspace-popout");
+  const isOnPopoutRoute =
+    location.startsWith("/scanner-popout") ||
+    location.startsWith("/workspace-popout") ||
+    location.startsWith("/infopop");
 
   // ── BroadcastChannel: listen for popout close/navigate ────────────────────
   useEffect(() => {
@@ -598,10 +602,11 @@ export function DiscoveryFeedPanel() {
   // ── Pop-out / Dock handlers ───────────────────────────────────────────────
 
   const handlePopOut = useCallback(() => {
-    const w = window.open(
+    const w = openAppPopout(
       "/scanner-popout",
       "scanner-popout",
-      "width=420,height=700,menubar=no,toolbar=no,location=no,status=no"
+      { width: 420, height: 700 },
+      popoutWindowRef.current
     );
     if (w) {
       popoutWindowRef.current = w;

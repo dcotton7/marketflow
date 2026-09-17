@@ -116,15 +116,26 @@ export function TickerReviewChartViewer({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  const clampedStart = symbols.length
+    ? Math.min(Math.max(0, startIndex), symbols.length - 1)
+    : 0;
+
+  const wasOpenRef = useRef(open);
+  const opening = open && !wasOpenRef.current;
+  wasOpenRef.current = open;
+  if (opening && index !== clampedStart) {
+    setIndex(clampedStart);
+  }
+
   useEffect(() => {
     if (!open) return;
     if (symbols.length === 0) { onCloseRef.current(); return; }
-    setIndex(Math.min(Math.max(0, startIndex), symbols.length - 1));
-  }, [open, startIndex, symbols.length]);
+    setIndex(clampedStart);
+  }, [open, startIndex, symbols.length, clampedStart]);
 
-
-
-  const activeSymbol = symbols[index]?.toUpperCase() ?? "";
+  // First open frame still has stale index 0 — that made ToSLink type the first theme ticker.
+  const activeIndex = opening ? clampedStart : index;
+  const activeSymbol = symbols[activeIndex]?.toUpperCase() ?? "";
 
 
 

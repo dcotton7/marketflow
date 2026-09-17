@@ -189,7 +189,8 @@ function insertEntryBeforeActions(columns: WatchlistColumnEntry[]): WatchlistCol
 
 export function normalizeWatchlistColumnEntries(
   columns: WatchlistColumnEntry[],
-  variant: WatchlistTableVariant
+  variant: WatchlistTableVariant,
+  options?: { preserveOrder?: boolean }
 ): WatchlistColumnEntry[] {
   const allowed = new Set(allowedColumnIds(variant));
   const seen = new Set<WatchlistColumnId>();
@@ -211,14 +212,26 @@ export function normalizeWatchlistColumnEntries(
     if (!variantAllows(req, variant)) continue;
     if (!seen.has(req)) {
       seen.add(req);
-      out.push({
-        id: req,
-        width: WATCHLIST_COLUMN_META[req].defaultWidth,
-      });
+      if (req === "symbol") {
+        out.unshift({ id: req, width: WATCHLIST_COLUMN_META[req].defaultWidth });
+      } else {
+        out.push({
+          id: req,
+          width: WATCHLIST_COLUMN_META[req].defaultWidth,
+        });
+      }
     }
   }
-  const order = defaultColumnOrder(variant);
-  out.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  if (!options?.preserveOrder) {
+    const order = defaultColumnOrder(variant);
+    out.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  } else {
+    const actionsIdx = out.findIndex((c) => c.id === "actions");
+    if (actionsIdx >= 0 && actionsIdx !== out.length - 1) {
+      const [actions] = out.splice(actionsIdx, 1);
+      if (actions) out.push(actions);
+    }
+  }
   if (!isTradePlanEnabled()) {
     return out.filter((c) => !isTradePlanWatchlistColumn(c.id));
   }
@@ -286,7 +299,9 @@ export function parseWatchlistColumnProfile(
           id: c.id as WatchlistColumnId,
           width: typeof c.width === "number" ? c.width : WATCHLIST_COLUMN_META[c.id as WatchlistColumnId]?.defaultWidth ?? 80,
         }));
-      let normalized = normalizeWatchlistColumnEntries(entries, variant);
+      let normalized = normalizeWatchlistColumnEntries(entries, variant, {
+        preserveOrder: ver >= 3,
+      });
       if (ver === 1) normalized = insertThemeAfterCompanyIfMissing(normalized);
       if (variant === "modal" && ver < 3) normalized = insertEntryBeforeActions(normalized);
       return normalized;

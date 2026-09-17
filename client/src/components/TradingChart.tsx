@@ -87,6 +87,34 @@ export interface Gap {
   expiresAt: number;
 }
 
+/** Horizontal line that stays drawn while panning. LWC drops 2-point series when both ends leave the viewport. */
+function horizontalGapLineData(
+  candles: ChartCandle[],
+  startIndex: number,
+  price: number,
+): LineData[] {
+  const last = candles.length - 1;
+  if (startIndex < 0 || startIndex > last || !Number.isFinite(price)) return [];
+  const span = last - startIndex;
+  const step = Math.max(1, Math.ceil(span / 120));
+  const data: LineData[] = [];
+  let prevTime: number | null = null;
+  for (let i = startIndex; i <= last; i += step) {
+    const t = candles[i]!.timestamp;
+    if (prevTime != null && t <= prevTime) continue;
+    data.push({ time: t as LineData["time"], value: price });
+    prevTime = t;
+  }
+  const endT = candles[last]!.timestamp;
+  if (prevTime == null) return [];
+  if (endT > prevTime) {
+    data.push({ time: endT as LineData["time"], value: price });
+  } else if (data.length === 1) {
+    data.push({ time: (endT + 1) as LineData["time"], value: price });
+  }
+  return data;
+}
+
 export interface ChartIndicators {
   ema5: (number | null)[];
   ema10: (number | null)[];
@@ -1020,6 +1048,7 @@ export function TradingChart({
         setChartReady(false);
         maLineSeriesRef.current = [];
         maSeriesByIdRef.current.clear();
+        gapSeriesRef.current = [];
         for (const s of resistanceLineSeriesRef.current) {
           try { chart.removeSeries(s); } catch {}
         }
@@ -1332,8 +1361,7 @@ export function TradingChart({
       gapSeriesRef.current = [];
     }
 
-    // Early return if conditions not met
-    if (!chartRef.current || !showGaps || !data.gaps || data.gaps.length === 0) {
+    if (!chartRef.current || !chartReady || !showGaps || !data.gaps || data.gaps.length === 0) {
       return;
     }
 
@@ -1366,15 +1394,10 @@ export function TradingChart({
           continue;
         }
         
-        let startTime = startCandle.timestamp;
-        let endTime = endCandle.timestamp;
-        
-        if (!startTime || !endTime) {
+        if (!startCandle.timestamp || !endCandle.timestamp) {
           console.warn(`[TradingChart] Missing timestamp for gap at index ${gap.index}`);
           continue;
         }
-        // lightweight-charts requires strictly ascending time; avoid duplicate timestamps
-        if (endTime <= startTime) endTime = startTime + 1;
         
         // CORRECT Drendel Gap Logic: GRAY until touched, then GREEN/RED
         const isGapUp = gap.isUp;
@@ -1410,6 +1433,8 @@ export function TradingChart({
           // Draw filler lines between top and bottom to create filled effect
           for (let i = 0; i < numFillerLines; i++) {
             const fillLevel = gap.currentBottom + (gapHeight * (i + 1) / (numFillerLines + 1)); // Evenly spaced
+            const fillData = horizontalGapLineData(candles, gap.index, fillLevel);
+            if (fillData.length < 2) continue;
             const fillSeries = chartRef.current.addSeries(LineSeries, {
               color: fillColor,
               lineWidth: 3,
@@ -1421,10 +1446,7 @@ export function TradingChart({
               autoscaleInfoProvider: () => null,
             });
             
-            fillSeries.setData([
-              { time: startTime as any, value: fillLevel },
-              { time: endTime as any, value: fillLevel },
-            ]);
+            fillSeries.setData(fillData);
             
             gapSeriesRef.current.push(fillSeries);
           }
@@ -1448,10 +1470,7 @@ export function TradingChart({
             autoscaleInfoProvider: () => null,
           });
           
-          topSeries.setData([
-            { time: startTime as any, value: gap.currentTop },
-            { time: endTime as any, value: gap.currentTop },
-          ]);
+          topSeries.setData(horizontalGapLineData(candles, gap.index, gap.currentTop));
           
           gapSeriesRef.current.push(topSeries);
           
@@ -1467,10 +1486,7 @@ export function TradingChart({
             autoscaleInfoProvider: () => null,
           });
           
-          bottomSeries.setData([
-            { time: startTime as any, value: gap.currentBottom },
-            { time: endTime as any, value: gap.currentBottom },
-          ]);
+          bottomSeries.setData(horizontalGapLineData(candles, gap.index, gap.currentBottom));
           
           gapSeriesRef.current.push(bottomSeries);
           
@@ -1490,7 +1506,7 @@ export function TradingChart({
       }
       gapSeriesRef.current = [];
     }
-  }, [showGaps, data.gaps, data.candles]);
+  }, [showGaps, data.gaps, chartReady, candleLen, cLast?.timestamp]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;

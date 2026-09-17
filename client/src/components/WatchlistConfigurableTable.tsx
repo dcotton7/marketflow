@@ -88,6 +88,8 @@ export function WatchlistConfigurableTable({
   onAddChartToGrid,
   noDragClassName = "",
   highlightSymbol,
+  density = "normal",
+  layout = "fill",
 }: {
   variant: "modal" | "portal";
   columns: WatchlistColumnEntry[];
@@ -111,15 +113,22 @@ export function WatchlistConfigurableTable({
   noDragClassName?: string;
   /** Highlight row when symbol matches (Start Here linked symbol). */
   highlightSymbol?: string;
+  density?: "normal" | "compact";
+  /** fill = stretch to container; scroll = fixed column widths, parent scrolls. */
+  layout?: "fill" | "scroll";
 }) {
   const nd = (c: string) => cn(c, noDragClassName);
+  const compact = density === "compact";
+  const pad = compact ? "px-1 py-0.5" : "px-1 py-2";
+  const bodyText = compact ? "text-xs" : "text-sm";
+  const iconBtn = compact ? "h-6 w-6" : "h-7 w-7";
 
   const headerInner = (id: WatchlistColumnId) => {
     const label = WATCHLIST_COLUMN_META[id].label;
     const sf = sortFieldForColumn(id);
     if (!sf) {
       return (
-        <span className="block min-w-0 truncate text-sm font-medium leading-none" title={label}>
+        <span className={cn("block min-w-0 truncate font-medium leading-none", compact ? "text-[11px]" : "text-sm")} title={label}>
           {label}
         </span>
       );
@@ -127,7 +136,8 @@ export function WatchlistConfigurableTable({
     return (
       <div
         className={cn(
-          "flex w-full min-w-0 items-center gap-1 text-sm font-medium",
+          "flex w-full min-w-0 items-center gap-1 font-medium",
+          compact ? "text-[11px]" : "text-sm",
           id === "symbol" || id === "company" || id === "theme" ? "justify-start" : "justify-end"
         )}
       >
@@ -151,12 +161,12 @@ export function WatchlistConfigurableTable({
     nd(
       cn(
         "select-none hover:bg-muted/50",
-        id === "chart" ? "px-1 py-2 text-center text-xs font-medium text-muted-foreground" : "",
+        id === "chart" ? `${pad} text-center text-xs font-medium text-muted-foreground` : "",
         sortFieldForColumn(id)
-          ? "cursor-pointer px-1 py-2"
+          ? `cursor-pointer ${pad}`
           : id === "chart"
             ? ""
-            : "px-1 py-2",
+            : pad,
         id === "chart"
           ? "text-center"
           : id === "symbol" || id === "company" || id === "theme"
@@ -180,7 +190,7 @@ export function WatchlistConfigurableTable({
         return (
           <td
             key={colId}
-            className={nd("overflow-hidden px-1 py-2 text-center")}
+            className={nd(`overflow-hidden ${pad} text-center`)}
             onClick={(e) => e.stopPropagation()}
           >
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
@@ -189,7 +199,7 @@ export function WatchlistConfigurableTable({
                   type="button"
                   size="icon"
                   variant="ghost"
-                  className={nd("h-7 w-7 text-muted-foreground hover:text-foreground")}
+                  className={nd(`${iconBtn} text-muted-foreground hover:text-foreground`)}
                   aria-label={`Add ${ticker.symbol} as chart on the grid`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -208,7 +218,7 @@ export function WatchlistConfigurableTable({
         );
       case "symbol":
         return (
-          <td key={colId} className="overflow-hidden px-1 py-2">
+          <td key={colId} className={`overflow-hidden ${pad}`}>
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <span className="block min-w-0 cursor-default truncate">
@@ -234,7 +244,7 @@ export function WatchlistConfigurableTable({
             ? ticker.themeLabel.trim()
             : null;
         return (
-          <td key={colId} className="overflow-hidden px-1 py-2 text-sm text-muted-foreground">
+          <td key={colId} className={`overflow-hidden ${pad} ${bodyText} text-muted-foreground`}>
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <span className="block min-w-0 cursor-default">
@@ -253,7 +263,7 @@ export function WatchlistConfigurableTable({
       }
       case "theme":
         return (
-          <td key={colId} className="overflow-hidden px-1 py-2 text-sm text-muted-foreground">
+          <td key={colId} className={`overflow-hidden ${pad} ${bodyText} text-muted-foreground`}>
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <span className="block min-w-0 cursor-default truncate">
@@ -269,7 +279,7 @@ export function WatchlistConfigurableTable({
           <td
             key={colId}
             className={cn(
-              "overflow-hidden px-1 py-2 text-right font-mono text-sm tabular-nums",
+              `overflow-hidden ${pad} text-right font-mono ${bodyText} tabular-nums`,
               ticker.change >= 0 ? "text-green-500" : "text-red-500"
             )}
           >
@@ -289,7 +299,7 @@ export function WatchlistConfigurableTable({
           <td
             key={colId}
             className={cn(
-              "overflow-hidden px-1 py-2 text-right font-mono text-sm tabular-nums",
+              `overflow-hidden ${pad} text-right font-mono ${bodyText} tabular-nums`,
               ticker.changePercent >= 0 ? "text-green-500" : "text-red-500"
             )}
           >
@@ -306,7 +316,7 @@ export function WatchlistConfigurableTable({
         );
       case "entry":
         return (
-          <td key={colId} className={nd("overflow-hidden px-1 py-2 text-right align-middle")}>
+          <td key={colId} className={nd(`overflow-hidden ${pad} text-right align-middle`)}>
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <div className="block min-w-0">
@@ -329,7 +339,7 @@ export function WatchlistConfigurableTable({
           <td
             key={colId}
             className={cn(
-              "overflow-hidden px-1 py-2 text-right font-mono text-sm tabular-nums",
+              `overflow-hidden ${pad} text-right font-mono ${bodyText} tabular-nums`,
               ticker.entryPct === null
                 ? "text-muted-foreground"
                 : ticker.entryPct >= 0
@@ -351,7 +361,7 @@ export function WatchlistConfigurableTable({
         );
       case "stop":
         return (
-          <td key={colId} className={nd("overflow-hidden px-1 py-2 text-right align-middle")}>
+          <td key={colId} className={nd(`overflow-hidden ${pad} text-right align-middle`)}>
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <div className="block min-w-0">
@@ -374,7 +384,7 @@ export function WatchlistConfigurableTable({
           <td
             key={colId}
             className={cn(
-              "overflow-hidden px-1 py-2 text-right font-mono text-sm tabular-nums",
+              `overflow-hidden ${pad} text-right font-mono ${bodyText} tabular-nums`,
               ticker.stopPct === null
                 ? "text-muted-foreground"
                 : ticker.stopPct >= 0
@@ -398,7 +408,7 @@ export function WatchlistConfigurableTable({
         return (
           <td
             key={colId}
-            className={nd("overflow-hidden px-1 py-2")}
+            className={nd(`overflow-hidden ${pad}`)}
             onClick={(e) => e.stopPropagation()}
           >
             <Tooltip delayDuration={ROW_NAME_TIP_DELAY_MS}>
@@ -406,7 +416,7 @@ export function WatchlistConfigurableTable({
                 <Button
                   size="icon"
                   variant="ghost"
-                  className={nd("h-7 w-7 text-muted-foreground hover:text-destructive")}
+                  className={nd(`${iconBtn} text-muted-foreground hover:text-destructive`)}
                   onClick={() => onRemoveTicker(ticker.id)}
                 >
                   <X className="h-4 w-4" />
@@ -422,14 +432,22 @@ export function WatchlistConfigurableTable({
   };
 
   const totalWidth = columns.reduce((sum, c) => sum + c.width, 0) || 1;
+  const scrollLayout = layout === "scroll";
 
   return (
-    <table className="w-full min-w-0 table-fixed">
+    <table
+      className={cn("table-fixed", scrollLayout ? "min-w-0" : "w-full min-w-0")}
+      style={scrollLayout ? { width: totalWidth, minWidth: totalWidth } : undefined}
+    >
       <colgroup>
         {columns.map((c, i) => (
           <col
             key={`${c.id}-${i}`}
-            style={{ width: `${(c.width / totalWidth) * 100}%` }}
+            style={
+              scrollLayout
+                ? { width: c.width }
+                : { width: `${(c.width / totalWidth) * 100}%` }
+            }
           />
         ))}
       </colgroup>

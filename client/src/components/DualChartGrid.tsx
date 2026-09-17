@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, startTransition, type ReactNode } from "react";
 import { IChartApi, ISeriesApi } from "lightweight-charts";
 import { TradingChart, ChartCandle, ChartIndicators, Gap, type PriceLevelLine } from "@/components/TradingChart";
+import { applyLiveEntryPctToPriceLines } from "@/lib/trade-plan-feature";
 import type { DrawingData } from "@/lib/chartDrawingPrimitives";
 import {
   clampHorizontalDrawingLineStyle,
@@ -97,6 +98,37 @@ function alignIndicatorBundle(
     avwapHigh: pick(bundle.avwapHigh),
     avwapLow: pick(bundle.avwapLow),
   };
+}
+
+function toUnixSec(t: number): number {
+  return t > 1e12 ? Math.floor(t / 1000) : t;
+}
+
+/** Place daily S/R gaps onto another candle series by time — never reuse daily bar indexes. */
+function mapDailyGapsOntoCandles(
+  gaps: Gap[] | undefined,
+  dailyCandles: ChartCandle[] | undefined,
+  targetCandles: ChartCandle[],
+): Gap[] {
+  if (!gaps?.length || targetCandles.length === 0) return [];
+  const firstTs = toUnixSec(targetCandles[0]!.timestamp);
+  const lastTs = toUnixSec(targetCandles[targetCandles.length - 1]!.timestamp);
+  const mapped: Gap[] = [];
+  for (const gap of gaps) {
+    if (gap.isFilled) continue;
+    const dailyBar = dailyCandles?.[gap.index];
+    const created = dailyBar
+      ? toUnixSec(dailyBar.timestamp)
+      : toUnixSec(gap.createdAt);
+    if (created > lastTs) continue;
+    // Gaps that opened before this series must not pin to bar 0 — that paints a
+    // full-width wall of old daily zones and does not match the daily chart.
+    if (created < firstTs) continue;
+    const index = targetCandles.findIndex((c) => toUnixSec(c.timestamp) >= created);
+    if (index < 0) continue;
+    mapped.push({ ...gap, index });
+  }
+  return mapped;
 }
 
 function patchIntradayIndicators(
@@ -618,16 +650,22 @@ export function DualChartGrid({
   const mergedDailyChartProps = useMemo(() => {
     const base = dailyChartProps ?? {};
     const fromDrawings = chartHorizontalDrawingsToPriceLines(dailyDrawings.drawings);
-    const pl = [...(base.priceLines ?? []), ...fromDrawings];
+    const pl = applyLiveEntryPctToPriceLines(
+      [...(base.priceLines ?? []), ...fromDrawings],
+      chartMetrics?.currentPrice,
+    );
     return { ...base, priceLines: pl };
-  }, [dailyChartProps, dailyDrawings.drawings]);
+  }, [dailyChartProps, dailyDrawings.drawings, chartMetrics?.currentPrice]);
 
   const mergedIntradayChartProps = useMemo(() => {
     const base = intradayChartProps ?? {};
     const fromDrawings = chartHorizontalDrawingsToPriceLines(intradayDrawings.drawings);
-    const pl = [...(base.priceLines ?? []), ...fromDrawings];
+    const pl = applyLiveEntryPctToPriceLines(
+      [...(base.priceLines ?? []), ...fromDrawings],
+      chartMetrics?.currentPrice,
+    );
     return { ...base, priceLines: pl };
-  }, [intradayChartProps, intradayDrawings.drawings]);
+  }, [intradayChartProps, intradayDrawings.drawings, chartMetrics?.currentPrice]);
 
   const { data: maSettingsData } = useQuery<any[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -764,8 +802,12 @@ export function DualChartGrid({
       (ma50Patch?.indicatorsExtended ?? intradayData.indicatorsExtended);
     const source = ma50Patch ? patchIntradayIndicators(intradayData, ma50Patch) : intradayData;
     const indicators = useExt ? source.indicatorsExtended! : source.indicators;
-    return { ...source, indicators };
-  }, [intradayData, showIntradayMaBasisToggle, showETH, intradayMaBasis, ma50Patch]);
+    return {
+      ...source,
+      indicators,
+      gaps: mapDailyGapsOntoCandles(dailyData?.gaps, dailyData?.candles, source.candles),
+    };
+  }, [intradayData, showIntradayMaBasisToggle, showETH, intradayMaBasis, ma50Patch, dailyData?.gaps, dailyData?.candles]);
 
   const intradayTickerMismatch = useMemo(() => {
     if (!symbol || !intradayData?.ticker) return false;
@@ -947,7 +989,7 @@ export function DualChartGrid({
           onClick={() => setShowGaps(!showGaps)}
           style={showGaps ? { boxShadow: "inset 0 2px 4px rgba(0,0,0,0.3)" } : undefined}
           data-testid={`${pid}button-toggle-gaps`}
-          title="Support/Resistance Gaps"
+          title="Support/Resistance Gaps (daily + intraday)"
         >
           S/R Gaps
         </Button>
@@ -1173,6 +1215,7 @@ export function DualChartGrid({
               onChartMouseUp={intradayDrawings.handleMouseUp}
               {...mergedIntradayChartProps}
               whiteExtendedHoursCandles={showETH}
+              showGaps={showGaps}
             />
             {intradayFetching ? (
               <div

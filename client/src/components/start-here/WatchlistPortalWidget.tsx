@@ -160,7 +160,7 @@ export function WatchlistPortalWidget({
     instanceId
   );
 
-  const { columns, beginResize, addColumn, removeColumn, availableToAdd, applyColumnPreset } =
+  const { columns, beginResize, addColumn, removeColumn, moveColumn, availableToAdd, applyColumnPreset } =
     useWatchlistColumnProfile(columnStorageKey, "portal", {
       seedFromStorageKey: columnSeedKey,
     });
@@ -550,6 +550,7 @@ export function WatchlistPortalWidget({
                 availableToAdd={availableToAdd}
                 addColumn={addColumn}
                 removeColumn={removeColumn}
+                moveColumn={moveColumn}
                 applyColumnPreset={applyColumnPreset}
                 triggerClassName="start-here-no-drag flex-shrink-0"
               />

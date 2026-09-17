@@ -639,7 +639,7 @@ export default function MarketConditionPage() {
         syncToChart(symbol);
       }
       // Drive Thinkorswim when ToS sync is on for this session
-      if (tosSyncEnabled) {
+      if (tosSyncEnabled && (msSyncEnabled || chartSyncEnabled || analysisSyncEnabled)) {
         void tosNavigate(symbol);
       }
       // Stay on Market Flow: overlay the dual charts so X returns here exactly.

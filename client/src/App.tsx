@@ -12,6 +12,7 @@ import { WorkspacePaletteProvider } from "@/context/WorkspacePaletteContext";
 import { ScannerProvider } from "@/context/ScannerContext";
 import { TosSyncProvider } from "@/context/TosSyncContext";
 import { DiscoveryFeedPanel } from "@/components/scanner/DiscoveryFeed";
+import { InfoPopNavListener } from "@/components/infopop/InfoPopNavListener";
 import NotFound from "@/pages/not-found";
 import SentinelLoginPage from "@/pages/SentinelLoginPage";
 import SentinelDashboardPage from "@/pages/SentinelDashboardPage";
@@ -36,6 +37,7 @@ const MarketConditionPage = lazy(() => import("@/pages/MarketConditionPage"));
 const ScannerPopoutPage = lazy(() => import("@/pages/ScannerPopoutPage"));
 const SignalWorkbenchPage = lazy(() => import("@/pages/SignalWorkbenchPage"));
 const WorkspacePopoutPage = lazy(() => import("@/pages/WorkspacePopoutPage"));
+const InfoPopPage = lazy(() => import("@/pages/InfoPopPage"));
 
 function Router() {
   return (
@@ -150,6 +152,15 @@ function Router() {
         </SentinelProtectedRoute>
       </Route>
 
+      {/* InfoPop — chrome-less watchlist floater */}
+      <Route path="/infopop">
+        <SentinelProtectedRoute>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading InfoPop...</div>}>
+            <InfoPopPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+
       {/* Scanner pop-out window */}
       <Route path="/scanner-popout">
         <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Scanner...</div>}>
@@ -190,6 +201,7 @@ function App() {
                     <TosSyncProvider>
                       <Toaster />
                       <Router />
+                      <InfoPopNavListener />
                       <DiscoveryFeedPanel />
                     </TosSyncProvider>
                   </TimeframeProvider>

@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/popover";
 import type { WatchlistColumnEntry, WatchlistColumnId } from "@/lib/watchlist-column-profile";
 import { WATCHLIST_COLUMN_META, WATCHLIST_REQUIRED_COLUMN_IDS } from "@/lib/watchlist-column-profile";
-import { Columns3, Minus, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, Columns3, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function columnPickerLabel(id: WatchlistColumnId): string {
@@ -19,58 +19,95 @@ export function WatchlistColumnPicker({
   availableToAdd,
   addColumn,
   removeColumn,
+  moveColumn,
   applyColumnPreset,
   triggerClassName,
+  iconOnly,
 }: {
   columns: WatchlistColumnEntry[];
   availableToAdd: () => WatchlistColumnId[];
   addColumn: (id: WatchlistColumnId) => void;
   removeColumn: (id: WatchlistColumnId) => void;
+  moveColumn?: (id: WatchlistColumnId, direction: "up" | "down") => void;
   applyColumnPreset?: (preset: "standard" | "simple") => void;
   triggerClassName?: string;
+  iconOnly?: boolean;
 }) {
   const addable = availableToAdd();
+  const lastMovable = columns.findIndex((c) => c.id === "actions");
+  const maxMoveIdx = lastMovable >= 0 ? lastMovable - 1 : columns.length - 1;
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
           type="button"
-          size="sm"
+          size={iconOnly ? "icon" : "sm"}
           variant="outline"
-          className={cn("gap-1", triggerClassName)}
+          className={cn(iconOnly ? "h-7 w-7 shrink-0" : "gap-1", triggerClassName)}
+          title="Columns"
+          aria-label="Columns"
         >
           <Columns3 className="h-4 w-4" />
-          Columns
+          {iconOnly ? null : "Columns"}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-3" align="end">
+      <PopoverContent className="w-[min(18rem,calc(100vw-1rem))] p-3" align="end">
         <div className="space-y-3">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">Visible columns</p>
             <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
-              {columns.map((c) => {
+              {columns.map((c, i) => {
                 const req = WATCHLIST_REQUIRED_COLUMN_IDS.includes(c.id);
+                const canMove = !!moveColumn && c.id !== "actions";
                 return (
                   <li
                     key={c.id}
-                    className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-muted/50"
+                    className="flex items-center justify-between gap-1 rounded px-1 py-0.5 hover:bg-muted/50"
                   >
-                    <span>{columnPickerLabel(c.id)}</span>
-                    {!req ? (
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                        aria-label={`Remove ${columnPickerLabel(c.id)}`}
-                        onClick={() => removeColumn(c.id)}
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">Required</span>
-                    )}
+                    <span className="min-w-0 truncate">{columnPickerLabel(c.id)}</span>
+                    <span className="flex shrink-0 items-center gap-0.5">
+                      {canMove ? (
+                        <>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground"
+                            aria-label={`Move ${columnPickerLabel(c.id)} up`}
+                            disabled={i <= 0}
+                            onClick={() => moveColumn(c.id, "up")}
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-muted-foreground"
+                            aria-label={`Move ${columnPickerLabel(c.id)} down`}
+                            disabled={i >= maxMoveIdx}
+                            onClick={() => moveColumn(c.id, "down")}
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      ) : null}
+                      {!req ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          aria-label={`Remove ${columnPickerLabel(c.id)}`}
+                          onClick={() => removeColumn(c.id)}
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : (
+                        <span className="px-1 text-xs text-muted-foreground">Req</span>
+                      )}
+                    </span>
                   </li>
                 );
               })}

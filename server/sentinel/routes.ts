@@ -1652,8 +1652,9 @@ export function registerSentinelRoutes(app: Express): void {
   });
 
   app.post("/api/sentinel/screen-grab/extract", requireAuth, async (req: Request, res: Response) => {
-    if (String(req.body?.model ?? "") !== "tos") {
-      return res.status(400).json({ error: "Only the ToS table model is available. Turn on ToS and calibrate first." });
+    const model = String(req.body?.model ?? "auto");
+    if (model !== "tos" && model !== "fidelity" && model !== "auto") {
+      return res.status(400).json({ error: "Use the table extract (ToS or Fidelity positions)." });
     }
     if (!isTosScreenExtractAvailable()) {
       return res.status(501).json({ error: "Table extract is not configured on this host" });
@@ -1668,7 +1669,7 @@ export function registerSentinelRoutes(app: Express): void {
     try {
       const extracted = await extractTosScreen(imageDataUrl);
       console.log(
-        `[ScreenGrab] extract user=${req.session.userId} model=tos layout=${extracted.layout} tickers=${extracted.tickers.length} positions=${extracted.positions.filter((p) => p.hasPosition).length} reviewOnly=true`,
+        `[ScreenGrab] extract user=${req.session.userId} model=${extracted.model} layout=${extracted.layout} tickers=${extracted.tickers.length} positions=${extracted.positions.filter((p) => p.hasPosition).length} withAvgCost=${extracted.positions.filter((p) => p.avgCost != null && p.avgCost > 0).length} reviewOnly=true`,
       );
       res.json(extracted);
     } catch (err) {

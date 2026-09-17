@@ -59,8 +59,10 @@ import {
   Bell,
   BriefcaseBusiness,
   ScanSearch,
+  PictureInPicture2,
 } from "lucide-react";
 import { TosScreenReviewDialog } from "@/components/watchlist/TosScreenReviewDialog";
+import { useInfoPop } from "@/hooks/useInfoPop";
 
 interface WatchlistModalProps {
   open: boolean;
@@ -189,13 +191,14 @@ function persistModalLayout(userId: number, layout: WatchlistModalLayout) {
 
 export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   const [, navigate] = useLocation();
+  const { openInfoPop } = useInfoPop();
   const { cssVariables } = useSystemSettings();
   const { user } = useSentinelAuth();
   const { toast } = useToast();
 
   const uid = user?.id ?? 0;
   const colStorageKey = watchlistModalColumnWidthsStorageKey(uid);
-  const { columns, beginResize, addColumn, removeColumn, availableToAdd, applyColumnPreset } =
+  const { columns, beginResize, addColumn, removeColumn, moveColumn, availableToAdd, applyColumnPreset } =
     useWatchlistColumnProfile(colStorageKey, "modal");
 
   const contentRef = useRef<HTMLDivElement>(null);
@@ -849,11 +852,23 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   Load in Charts
                 </Button>
 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => openInfoPop(effectiveWatchlistId)}
+                  title="Pop out this watchlist into a compact window. Pin on top with Win+Ctrl+T (PowerToys)."
+                >
+                  <PictureInPicture2 className="w-4 h-4" />
+                  InfoPop
+                </Button>
+
                 <WatchlistColumnPicker
                   columns={columns}
                   availableToAdd={availableToAdd}
                   addColumn={addColumn}
                   removeColumn={removeColumn}
+                  moveColumn={moveColumn}
                   applyColumnPreset={applyColumnPreset}
                 />
 

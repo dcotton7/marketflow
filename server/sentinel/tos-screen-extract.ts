@@ -1,5 +1,5 @@
 /**
- * Per-request Thinkorswim table extract. Image is not stored.
+ * Per-request broker table extract. Image is not stored.
  * Missing cells stay null. P/L is not persisted (it goes stale immediately).
  */
 
@@ -17,19 +17,34 @@ export function isTosScreenExtractAvailable(): boolean {
   return Boolean(process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
 }
 
-const SYSTEM = `You extract data from Thinkorswim (ToS) desktop tables.
+const SYSTEM = `You extract stock rows from a brokerage positions / watchlist table in a screenshot.
 
-This is the Thinkorswim Watchlist / All account positions table (first trained model).
-Typical columns: Symbol, Avg Cost, Pos Qty, P/L, P/L Open, Last.
-A dash, blank, or "N/A" means the cell is unknown — use null. Never invent or estimate a number.
-Pos Qty like "+150" is 150. "+406.81" is 406.81. A row with no quantity is watch-only (hasPosition=false).
-Yellow numbered badges (e.g. 24) and person icons are not tickers or quantities.
-Read symbols only from the Symbol column, not from headers, account names, or column titles.
-P/L Open / P/L YTD are visible but you must not put them in the JSON.
+Supported layouts (pick one):
+- tos_watchlist / tos_positions: Thinkorswim desktop. Columns: Symbol, Avg Cost, Pos Qty, P/L, Last.
+- fidelity_positions: Fidelity / NetBenefits / BrokerageLink Positions. Columns: Symbol, Last price, Average cost basis, Quantity, Cost basis total, gain/loss columns.
+- ticker_list: only symbols are readable.
+- unknown: cannot tell.
+
+Fidelity rules:
+- avgCost = "Average cost basis" (per-share). NEVER use "Cost basis total", Current value, or any gain/loss column.
+- posQty = Quantity. lastPrice = Last price.
+- Skip Cash, Core / money-market, Funding activity, Account total, account-name header rows, and company-name lines under the ticker.
+- Example: AMD last 151.91, average cost basis 92.22, quantity 100.01 → avgCost 92.22, posQty 100.01, lastPrice 151.91, hasPosition true.
+
+Thinkorswim rules:
+- avgCost = Avg Cost (cost basis), not P/L. Pos Qty like "+150" is 150.
+- Yellow numbered badges and person icons are not tickers.
+
+Shared rules:
+- Read symbols only from the Symbol column.
+- A dash, blank, or "N/A" is null. Never invent a number.
+- Do not leave avgCost null if that cost-basis cell shows a price.
+- hasPosition is true when quantity is a non-zero number.
+- P/L columns must not appear in the JSON.
 
 Return JSON only:
 {
-  "layout": "tos_watchlist" | "tos_positions" | "ticker_list" | "unknown",
+  "layout": "tos_watchlist" | "tos_positions" | "fidelity_positions" | "ticker_list" | "unknown",
   "positions": [
     {
       "symbol": "AAPL",
@@ -59,7 +74,7 @@ export async function extractTosScreen(imageDataUrl: string): Promise<TosScreenE
         content: [
           {
             type: "text",
-            text: "Extract every symbol row from this Thinkorswim table. Unknown values must be null.",
+            text: "Extract every equity symbol row. Use per-share average cost / Avg Cost, not the account total cost basis. Unknown values must be null.",
           },
           {
             type: "image_url",

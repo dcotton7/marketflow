@@ -304,7 +304,19 @@ export const sentinelModels = {
           eq(sentinelWatchlist.status, "watching"),
         ))
         .limit(1);
-      if (existing) return existing;
+      if (existing) {
+        const incoming = data.targetEntry;
+        const hasIncoming = incoming != null && Number(incoming) > 0;
+        const existingEmpty = existing.targetEntry == null || !(Number(existing.targetEntry) > 0);
+        if (hasIncoming && existingEmpty) {
+          const [updated] = await db.update(sentinelWatchlist)
+            .set({ targetEntry: Number(incoming), updatedAt: new Date() })
+            .where(eq(sentinelWatchlist.id, existing.id))
+            .returning();
+          return updated ?? existing;
+        }
+        return existing;
+      }
     }
     const [item] = await db.insert(sentinelWatchlist).values(data).returning();
     return item;

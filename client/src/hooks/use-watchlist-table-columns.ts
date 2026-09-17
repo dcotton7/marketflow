@@ -17,9 +17,13 @@ import {
 export function useWatchlistColumnProfile(
   storageKey: string,
   variant: WatchlistTableVariant,
-  options?: { seedFromStorageKey?: string | null }
+  options?: {
+    seedFromStorageKey?: string | null;
+    fallback?: "standard" | "simple";
+  }
 ) {
   const seedFromStorageKey = options?.seedFromStorageKey ?? null;
+  const fallback = options?.fallback ?? "standard";
 
   const read = useCallback(() => {
     try {
@@ -32,8 +36,8 @@ export function useWatchlistColumnProfile(
     } catch {
       /* ignore */
     }
-    return defaultProfile(variant);
-  }, [storageKey, variant, seedFromStorageKey]);
+    return fallback === "simple" ? simpleDefaultProfile(variant) : defaultProfile(variant);
+  }, [storageKey, variant, seedFromStorageKey, fallback]);
 
   const [columns, setColumns] = useState<WatchlistColumnEntry[]>(() => read());
 
@@ -96,7 +100,7 @@ export function useWatchlistColumnProfile(
         const rest = prev.filter((c) => c.id !== "actions");
         const actions = prev.find((c) => c.id === "actions");
         const merged = [...rest, { id, width: w }, ...(actions ? [actions] : [])];
-        return normalizeWatchlistColumnEntries(merged, variant);
+        return normalizeWatchlistColumnEntries(merged, variant, { preserveOrder: true });
       });
     },
     [variant]
@@ -108,9 +112,30 @@ export function useWatchlistColumnProfile(
       setColumns((prev) =>
         normalizeWatchlistColumnEntries(
           prev.filter((c) => c.id !== id),
-          variant
+          variant,
+          { preserveOrder: true }
         )
       );
+    },
+    [variant]
+  );
+
+  const moveColumn = useCallback(
+    (id: WatchlistColumnId, direction: "up" | "down") => {
+      if (id === "actions") return;
+      setColumns((prev) => {
+        const idx = prev.findIndex((c) => c.id === id);
+        if (idx < 0) return prev;
+        const actionsIdx = prev.findIndex((c) => c.id === "actions");
+        const maxIdx = actionsIdx >= 0 ? actionsIdx - 1 : prev.length - 1;
+        const target = direction === "up" ? idx - 1 : idx + 1;
+        if (target < 0 || target > maxIdx) return prev;
+        const next = [...prev];
+        const [item] = next.splice(idx, 1);
+        if (!item) return prev;
+        next.splice(target, 0, item);
+        return normalizeWatchlistColumnEntries(next, variant, { preserveOrder: true });
+      });
     },
     [variant]
   );
@@ -133,6 +158,7 @@ export function useWatchlistColumnProfile(
     beginResize,
     addColumn,
     removeColumn,
+    moveColumn,
     availableToAdd,
     applyColumnPreset,
   };

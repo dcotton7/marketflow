@@ -12,9 +12,9 @@ export type TosScreenPositionRow = {
 };
 
 export type TosScreenExtractResult = {
-  model: "tos";
+  model: "tos" | "fidelity";
   reviewOnly: true;
-  layout: "tos_watchlist" | "tos_positions" | "ticker_list" | "unknown";
+  layout: "tos_watchlist" | "tos_positions" | "fidelity_positions" | "ticker_list" | "unknown";
   tickers: string[];
   positions: TosScreenPositionRow[];
 };
@@ -103,7 +103,7 @@ function asFiniteNumber(value: unknown): number | null {
   const t = value.trim();
   if (!t || t === "-" || t.toUpperCase() === "N/A") return null;
   const neg = t.includes("(") && t.includes(")");
-  const cleaned = t.replace(/[$,()\s]/g, "").replace(/^[+]/, "");
+  const cleaned = t.replace(/[$,()\s]/g, "").replace(/,/g, "").replace(/^[+]/, "");
   if (!cleaned || cleaned === "-") return null;
   const n = Number(cleaned);
   if (!Number.isFinite(n)) return null;
@@ -123,6 +123,7 @@ export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult 
   const layout: TosScreenExtractResult["layout"] =
     layoutRaw === "tos_watchlist" ||
     layoutRaw === "tos_positions" ||
+    layoutRaw === "fidelity_positions" ||
     layoutRaw === "ticker_list" ||
     layoutRaw === "unknown"
       ? layoutRaw
@@ -142,7 +143,14 @@ export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult 
     const symbol = asSymbol(r.symbol);
     if (!symbol || seen.has(symbol)) continue;
     seen.add(symbol);
-    const avgCost = asFiniteNumber(r.avgCost ?? r.avg_cost);
+    const avgCost = asFiniteNumber(
+      r.avgCost ??
+        r.avg_cost ??
+        r.averageCost ??
+        r.avgPrice ??
+        r.averageCostBasis ??
+        r.avg_cost_basis,
+    );
     const posQty = asFiniteNumber(r.posQty ?? r.qty ?? r.quantity);
     const lastPrice = asFiniteNumber(r.lastPrice ?? r.last);
     const hasPosition = r.hasPosition === true || (posQty != null && posQty !== 0);
@@ -169,7 +177,7 @@ export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult 
   }
 
   return {
-    model: "tos",
+    model: layout === "fidelity_positions" ? "fidelity" : "tos",
     reviewOnly: true,
     layout,
     tickers: positions.map((p) => p.symbol),

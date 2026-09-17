@@ -1,6 +1,6 @@
 /**
- * Phase 1: ToS table capture + review. Does not write watchlists or trades.
- * Requires ToS switch on and calibrate locked on Thinkorswim.
+ * From Screen: ToS or Fidelity positions table capture + review.
+ * Avg cost is saved as planned entry. Qty is not stored.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -52,7 +52,6 @@ export function TosScreenReviewDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [importing, setImporting] = useState(false);
-  const modelReady = Boolean(tos?.tosSyncEnabled && tos?.tosCalibrated);
   const fileRef = useRef<HTMLInputElement>(null);
   const imgWrapRef = useRef<HTMLDivElement>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -69,6 +68,7 @@ export function TosScreenReviewDialog({
     enabled: open,
     staleTime: 15_000,
   });
+  const extractReady = grabStatus?.extract !== false;
 
   useEffect(() => {
     if (open) void tos?.refreshStatus();
@@ -97,7 +97,7 @@ export function TosScreenReviewDialog({
 
   const onFile = async (file: File | undefined) => {
     if (!file || !file.type.startsWith("image/")) {
-      toast({ title: "Need an image", description: "Upload a PNG or JPEG of the ToS table.", variant: "destructive" });
+      toast({ title: "Need an image", description: "Upload a PNG or JPEG of the positions table.", variant: "destructive" });
       return;
     }
     loadImage(await readFileAsDataUrl(file));
@@ -141,10 +141,6 @@ export function TosScreenReviewDialog({
 
   const extract = async () => {
     if (!sourceUrl) return;
-    if (!modelReady) {
-      setError("Turn on ToSLink and calibrate on Thinkorswim before extracting.");
-      return;
-    }
     const wrap = imgWrapRef.current;
     setExtracting(true);
     setError(null);
@@ -156,7 +152,7 @@ export function TosScreenReviewDialog({
         wrap?.clientHeight ?? 0,
       );
       const res = await apiRequest("POST", "/api/sentinel/screen-grab/extract", {
-        model: "tos",
+        model: "auto",
         imageDataUrl,
       });
       const extracted = (await res.json()) as TosScreenExtractResult;
@@ -180,13 +176,13 @@ export function TosScreenReviewDialog({
       return;
     }
     const costBySymbol = new Map(
-      (result?.positions ?? []).map((row) => [row.symbol, row.avgCost] as const),
+      (result?.positions ?? []).map((row) => [row.symbol.toUpperCase(), row.avgCost] as const),
     );
     setImporting(true);
     try {
       let withEntry = 0;
       for (const symbol of symbols) {
-        const avgCost = costBySymbol.get(symbol);
+        const avgCost = costBySymbol.get(symbol.toUpperCase());
         const targetEntry = avgCost != null && avgCost > 0 ? avgCost : undefined;
         const created = await apiRequest("POST", "/api/sentinel/watchlist", {
           symbol,
@@ -195,7 +191,7 @@ export function TosScreenReviewDialog({
           ...(targetEntry != null ? { targetEntry } : {}),
         });
         const item = (await created.json()) as { id?: number; targetEntry?: number | null };
-        if (targetEntry != null && item.id && item.targetEntry !== targetEntry) {
+        if (targetEntry != null && item.id && !(Number(item.targetEntry) > 0 && Math.abs(Number(item.targetEntry) - targetEntry) < 0.0001)) {
           await apiRequest("PATCH", `/api/sentinel/watchlist/${item.id}`, { targetEntry });
         }
         if (targetEntry != null) withEntry += 1;
@@ -206,8 +202,8 @@ export function TosScreenReviewDialog({
         title: `Imported ${symbols.length} to ${watchlistName}`,
         description:
           withEntry > 0
-            ? `${withEntry} with ToS avg cost as planned entry.`
-            : "No avg cost on those rows — symbols only.",
+            ? `${withEntry} with avg cost as planned entry.`
+            : "No Avg Cost in the extract — draw the box around Symbol and Average cost / Avg Cost, then Extract again.",
       });
       onOpenChange(false);
     } catch (err) {
@@ -225,26 +221,21 @@ export function TosScreenReviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>ToS screen review</DialogTitle>
+          <DialogTitle>From Screen</DialogTitle>
           <DialogDescription>
-            First trained model: Thinkorswim watchlist / positions table. Edit the ticker list, then
-            import into the open watchlist. ToS Avg Cost is saved as planned entry so you can monitor
-            those positions. Qty is not stored.
+            Snapshot a Thinkorswim or Fidelity positions table. Average cost / Avg Cost becomes
+            planned entry. Quantity is not stored. Edit the ticker list before import.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
           <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
-            {modelReady ? (
-              <span className="text-emerald-400">ToSLink on and calibrated — ToS table model is active.</span>
-            ) : (
-              <span className="text-amber-400">
-                Turn on ToSLink (Charts or Flow) and calibrate on the Thinkorswim symbol box before
-                extracting.
+            {extractReady ? (
+              <span className="text-emerald-400">
+                Table extract is ready — Thinkorswim or Fidelity positions.
               </span>
-            )}
-            {grabStatus && !grabStatus.extract && (
-              <p className="mt-1 text-destructive">Table extract is not configured on this host.</p>
+            ) : (
+              <span className="text-amber-400">Table extract is not configured on this host.</span>
             )}
           </div>
 
@@ -270,12 +261,12 @@ export function TosScreenReviewDialog({
               {capturing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <ScanSearch className="mr-1 h-4 w-4" />}
               Snapshot window
             </Button>
-            <span className="text-xs text-muted-foreground">pick Thinkorswim, or paste an image</span>
+            <span className="text-xs text-muted-foreground">opens Window share — pick Thinkorswim or Fidelity</span>
           </div>
 
           {sourceUrl && (
             <div className="rounded-md border border-amber-400/60 bg-amber-500/15 px-3 py-2 text-center text-sm font-medium text-amber-200">
-              Draw a box around your list of tickers.
+              Draw a box around the table — include Symbol and Average cost / Avg Cost.
             </div>
           )}
 
@@ -315,14 +306,14 @@ export function TosScreenReviewDialog({
                 {!(crop && crop.w > 4 && crop.h > 4) && (
                   <div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
                     <span className="rounded bg-black/75 px-3 py-1.5 text-sm font-semibold text-amber-200 shadow-lg">
-                      Draw a box around your list of tickers
+                      Draw a box around Symbol and Average cost
                     </span>
                   </div>
                 )}
               </div>
             ) : (
               <p className="py-8 text-center text-xs text-muted-foreground">
-                Upload, paste, or snapshot the Thinkorswim window, then draw a box around your list of tickers.
+                Upload, paste, or snapshot the window, then draw a box around Symbol and Average cost.
               </p>
             )}
           </div>
@@ -331,18 +322,18 @@ export function TosScreenReviewDialog({
             <Button
               type="button"
               size="sm"
-              disabled={!sourceUrl || extracting || !modelReady}
+              disabled={!sourceUrl || extracting || !extractReady}
               onClick={() => void extract()}
             >
               {extracting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-              Extract ToS table
+              Extract table
             </Button>
             {crop ? (
               <Button type="button" size="sm" variant="ghost" onClick={() => setCrop(null)}>
                 Clear crop
               </Button>
             ) : (
-              <span className="text-sm font-medium text-amber-200">Draw a box around your list of tickers.</span>
+              <span className="text-sm font-medium text-amber-200">Draw a box around Symbol and Average cost / Avg Cost.</span>
             )}
           </div>
 

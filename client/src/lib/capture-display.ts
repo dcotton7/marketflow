@@ -1,10 +1,43 @@
 /**
- * Capture the user's chosen screen or window in the browser.
+ * Capture the user's chosen application window in the browser.
  * Avoids PowerShell / CopyFromScreen, which antivirus treats as a grabber.
  */
 
 export function canCaptureDisplay(): boolean {
   return typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia);
+}
+
+/** Chrome extras: open the Window pane and hide Entire Screen. */
+type WindowShareOptions = DisplayMediaStreamOptions & {
+  preferCurrentTab?: boolean;
+  selfBrowserSurface?: "include" | "exclude";
+  systemAudio?: "include" | "exclude";
+  surfaceSwitching?: "include" | "exclude";
+  monitorTypeSurfaces?: "include" | "exclude";
+};
+
+async function requestWindowShare(): Promise<MediaStream> {
+  const windowFirst: WindowShareOptions = {
+    video: { displaySurface: "window" },
+    audio: false,
+    preferCurrentTab: false,
+    selfBrowserSurface: "exclude",
+    systemAudio: "exclude",
+    surfaceSwitching: "exclude",
+    monitorTypeSurfaces: "exclude",
+  };
+  try {
+    return await navigator.mediaDevices.getDisplayMedia(windowFirst);
+  } catch (err) {
+    // Older engines reject unknown picker hints; retry with window preference only.
+    if (err instanceof TypeError) {
+      return await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "window" },
+        audio: false,
+      });
+    }
+    throw err;
+  }
 }
 
 export async function captureDisplayJpeg(): Promise<string> {
@@ -14,16 +47,13 @@ export async function captureDisplayJpeg(): Promise<string> {
 
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: false,
-    });
+    stream = await requestWindowShare();
   } catch (err) {
     const name = err instanceof DOMException ? err.name : "";
     if (name === "NotAllowedError" || name === "AbortError") {
-      throw new Error("Screen share was cancelled. Pick the Thinkorswim window and try again.");
+      throw new Error("Window share was cancelled. Pick the Thinkorswim window and Share.");
     }
-    throw err instanceof Error ? err : new Error("Could not capture the screen");
+    throw err instanceof Error ? err : new Error("Could not capture the window");
   }
 
   try {
