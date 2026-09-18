@@ -21,6 +21,13 @@ import {
   type HoldoutSummary,
   type HoldoutWeek,
 } from "@shared/scanner-evidence-holdout";
+import {
+  lowestThemePercentileCap,
+  lowestThemeRankFloor,
+  parseThemeRankCut,
+  parseThemeRankN,
+  type ThemeRankCut,
+} from "@shared/scanner-theme-rank-filter";
 
 export type EvidenceTrust = "trusted" | "provisional";
 
@@ -35,6 +42,9 @@ export type EvidenceQuery = {
   trust?: "auto" | "trusted" | "provisional" | "all";
   /** Heavy breakdown query — skip for fast Lab table loads. Default true. */
   includeCohorts?: boolean;
+  /** Rank at fire: leading = rank 1..N, lowest = bottom N Flow themes. */
+  themeRankCut?: ThemeRankCut;
+  themeRankN?: number;
 };
 
 export type SignalTypeEvidence = {
@@ -94,6 +104,27 @@ const WINDOW_MOVE_SQL: Record<OutcomeWindowKey, string> = {
   "1mo": "move_1mo",
 };
 
+export function themeRankSqlPredicate(cut: ThemeRankCut, n: number) {
+  if (cut === "all") return sql`TRUE`;
+  const rankExpr = sql`COALESCE(
+    NULLIF(context_json->'discovery_filters'->>'themeRank','')::int,
+    NULLIF(context_json->'theme_membership'->>'themeRank','')::int
+  )`;
+  if (cut === "leading") {
+    return sql`(${rankExpr}) IS NOT NULL AND (${rankExpr}) >= 1 AND (${rankExpr}) <= ${n}`;
+  }
+  const floorRank = lowestThemeRankFloor(n);
+  const pctCap = lowestThemePercentileCap(n);
+  const pctExpr = sql`COALESCE(
+    NULLIF(context_json->'discovery_filters'->>'themePercentile','')::float8,
+    NULLIF(context_json->'theme_membership'->>'themePercentile','')::float8
+  )`;
+  return sql`(
+    ((${rankExpr}) IS NOT NULL AND (${rankExpr}) >= ${floorRank})
+    OR ((${pctExpr}) IS NOT NULL AND (${pctExpr}) > 0 AND (${pctExpr}) <= ${pctCap})
+  )`;
+}
+
 const CACHE_TTL_MS = 60_000;
 const cache = new Map<string, { at: number; value: EvidenceSnapshot }>();
 
@@ -119,7 +150,11 @@ async function countTrustedRows(from: string, to: string): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
-export async function getEvidenceSnapshot(query: EvidenceQuery): Promise<EvidenceSnapshot> {
+export async function getEvidenceSnapshot(queryIn: EvidenceQuery): Promise<EvidenceSnapshot> {
+  const themeRankCut = parseThemeRankCut(queryIn.themeRankCut);
+  const themeRankN = parseThemeRankN(queryIn.themeRankN);
+  const query: EvidenceQuery = { ...queryIn, themeRankCut, themeRankN };
+
   if (!db) {
     return {
       signalTypes: [],
@@ -171,6 +206,14 @@ export async function getEvidenceSnapshot(query: EvidenceQuery): Promise<Evidenc
     warnings.push("Mixed trust mode includes legacy and V3 rows.");
   }
 
+  if (themeRankCut === "leading") {
+    warnings.push(`Theme cut: leading ${themeRankN} (rank 1–${themeRankN} at fire). Unknown rank excluded.`);
+  } else if (themeRankCut === "lowest") {
+    warnings.push(
+      `Theme cut: lowest ${themeRankN} (rank ≥${lowestThemeRankFloor(themeRankN)} or percentile ≤${lowestThemePercentileCap(themeRankN)}). Unknown rank excluded unless percentile matches.`
+    );
+  }
+
   const moveCol = WINDOW_MOVE_SQL[query.window] ?? "move_1hr";
   const fromTs = `${query.from}T00:00:00Z`;
   const toTs = `${query.to}T23:59:59Z`;
@@ -215,6 +258,7 @@ export async function getEvidenceSnapshot(query: EvidenceQuery): Promise<Evidenc
           OR (${trustFilter}::text = 'trusted' AND outcome_contract_version = 'v3')
           OR (${trustFilter}::text = 'provisional' AND (outcome_contract_version IS NULL OR outcome_contract_version <> 'v3'))
         )
+        AND ${themeRankSqlPredicate(themeRankCut, themeRankN)}
     ),
     fired AS (
       SELECT signal_type, COUNT(*)::int AS total_fired
@@ -352,6 +396,7 @@ export async function getEvidenceSnapshot(query: EvidenceQuery): Promise<Evidenc
           OR (${trustFilter}::text = 'trusted' AND outcome_contract_version = 'v3')
           OR (${trustFilter}::text = 'provisional' AND (outcome_contract_version IS NULL OR outcome_contract_version <> 'v3'))
         )
+        AND ${themeRankSqlPredicate(themeRankCut, themeRankN)}
     ),
     episodes AS (
       SELECT DISTINCT ON (signal_type, subject, (created_at AT TIME ZONE 'America/New_York')::date)

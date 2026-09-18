@@ -51,8 +51,9 @@ import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
 import { desc, eq, and, gte, lte, sql, isNull, isNotNull } from "drizzle-orm";
 import { getCachedEarningsData } from "../fundamentals";
-import { getEvidenceSnapshot, getLiveEvidenceIndex, evaluateSignalHoldout } from "./evidence-service";
+import { getEvidenceSnapshot, getLiveEvidenceIndex, evaluateSignalHoldout, themeRankSqlPredicate } from "./evidence-service";
 import type { OutcomeWindowKey } from "@shared/scanner-outcome-v3";
+import { parseThemeRankCut, parseThemeRankN } from "@shared/scanner-theme-rank-filter";
 
 const router = Router();
 
@@ -524,6 +525,8 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
   const trust = (req.query.trust as "auto" | "trusted" | "provisional" | "all" | undefined) || "auto";
   const subjectKind = (req.query.subject_kind as "ticker" | "theme" | "market" | "all" | undefined) || "all";
   const includeCohorts = String(req.query.cohorts ?? "1") !== "0";
+  const themeRankCut = parseThemeRankCut(req.query.theme_rank_cut);
+  const themeRankN = parseThemeRankN(req.query.theme_rank_n);
 
   try {
     const snapshot = await getEvidenceSnapshot({
@@ -536,6 +539,8 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
       subjectKind,
       trust,
       includeCohorts,
+      themeRankCut,
+      themeRankN,
     });
 
     // Backward-compatible top-level fields + richer evidence payload
@@ -630,6 +635,8 @@ router.get("/workbench/cards", async (req: Request, res: Response) => {
   const statusFilter = (req.query.status as string) || "all";
   const limit = Math.min(100, parseInt(String(req.query.limit ?? "50"), 10));
   const offset = parseInt(String(req.query.offset ?? "0"), 10);
+  const themeRankCut = parseThemeRankCut(req.query.theme_rank_cut);
+  const themeRankN = parseThemeRankN(req.query.theme_rank_n);
 
   try {
     const conditions = [
@@ -639,6 +646,9 @@ router.get("/workbench/cards", async (req: Request, res: Response) => {
     if (signalType) conditions.push(eq(scannerDiscoveries.signalType, signalType));
     if (statusFilter && statusFilter !== "all") {
       conditions.push(eq(scannerDiscoveries.outcomeStatus, statusFilter));
+    }
+    if (themeRankCut !== "all") {
+      conditions.push(themeRankSqlPredicate(themeRankCut, themeRankN));
     }
 
     let rows = await db

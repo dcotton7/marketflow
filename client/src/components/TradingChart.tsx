@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
 import { buildIntradayCandlestickAndVolume } from "@/lib/intradayEthBarStyle";
+import { rthSessionBoundaryTimes } from "@/lib/usMarketEthSessions";
 
 function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];
@@ -450,6 +451,7 @@ interface MeasurePoint {
 }
 
 class MeasurePrimitive {
+  _chart: any = null;
   _series: any = null;
   _startPoint: MeasurePoint | null = null;
   _endPoint: MeasurePoint | null = null;
@@ -461,12 +463,14 @@ class MeasurePrimitive {
     if (this._requestUpdate) this._requestUpdate();
   }
 
-  attached({ series, requestUpdate }: any) {
+  attached({ chart, series, requestUpdate }: any) {
+    this._chart = chart;
     this._series = series;
     this._requestUpdate = requestUpdate;
   }
 
   detached() {
+    this._chart = null;
     this._series = null;
     this._requestUpdate = null;
   }
@@ -494,7 +498,8 @@ class MeasurePrimitive {
       const ctx = scope.context;
       const ratio = scope.horizontalPixelRatio;
       const vRatio = scope.verticalPixelRatio;
-      const ts = this._series.chart().timeScale();
+      const ts = this._chart?.timeScale();
+      if (!ts) return;
 
       const x1Raw = ts.timeToCoordinate(this._startPoint!.time as any);
       const x2Raw = ts.timeToCoordinate(this._endPoint!.time as any);
@@ -566,6 +571,101 @@ class MeasurePrimitive {
   }
 }
 
+class RthSessionLinesRenderer {
+  constructor(private _owner: RthSessionLinesPrimitive) {}
+
+  draw(target: any) {
+    const chart = this._owner._chart;
+    const times = this._owner._times;
+    if (!chart || times.length === 0) return;
+
+    try {
+      target.useBitmapCoordinateSpace((scope: any) => {
+        const ctx = scope.context;
+        const ratio = scope.horizontalPixelRatio;
+        const height = scope.bitmapSize?.height;
+        if (!height) return;
+        const ts = chart.timeScale();
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.55)";
+        ctx.lineWidth = Math.max(1, Math.round(ratio));
+        ctx.setLineDash([]);
+
+        for (const t of times) {
+          const xRaw = ts.timeToCoordinate(t as any);
+          if (xRaw == null) continue;
+          const x = Math.round(xRaw * ratio) + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      });
+    } catch (err) {
+      console.warn("[TradingChart] RTH session lines draw skipped:", err);
+    }
+  }
+}
+
+class RthSessionLinesPaneView {
+  _renderer: RthSessionLinesRenderer;
+
+  constructor(owner: RthSessionLinesPrimitive) {
+    this._renderer = new RthSessionLinesRenderer(owner);
+  }
+
+  zOrder(): "normal" {
+    return "normal";
+  }
+
+  renderer() {
+    return this._renderer;
+  }
+}
+
+class RthSessionLinesPrimitive {
+  _chart: any = null;
+  _times: number[] = [];
+  _requestUpdate: (() => void) | null = null;
+  _paneViews: RthSessionLinesPaneView[];
+
+  constructor() {
+    this._paneViews = [new RthSessionLinesPaneView(this)];
+  }
+
+  setTimes(times: number[]) {
+    this._times = times;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  attached({ chart, requestUpdate }: any) {
+    this._chart = chart;
+    this._requestUpdate = requestUpdate;
+  }
+
+  detached() {
+    this._chart = null;
+    this._requestUpdate = null;
+  }
+
+  updateAllViews() {}
+
+  paneViews() {
+    return this._paneViews;
+  }
+
+  autoscaleInfo() {
+    return null;
+  }
+
+  hitTest() {
+    return null;
+  }
+}
+
 export function TradingChart({
   data: rawData,
   onCandleClick,
@@ -607,6 +707,7 @@ export function TradingChart({
   const maLineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const maSeriesByIdRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const measurePrimitiveRef = useRef<MeasurePrimitive | null>(null);
+  const rthLinesPrimitiveRef = useRef<RthSessionLinesPrimitive | null>(null);
   const measureStartRef = useRef<MeasurePoint | null>(null);
   const shiftKeyRef = useRef(false);
   const measureModeRef = useRef(measureMode);
@@ -967,6 +1068,13 @@ export function TradingChart({
     candleSeries.attachPrimitive(measurePrimitive);
     measurePrimitiveRef.current = measurePrimitive;
 
+    if (isIntraday) {
+      const rthLines = new RthSessionLinesPrimitive();
+      rthLines.setTimes(rthSessionBoundaryTimes(displayData.candles.map((c) => c.timestamp)));
+      candleSeries.attachPrimitive(rthLines);
+      rthLinesPrimitiveRef.current = rthLines;
+    }
+
     const crosshairHandler = (param: any) => {
       if (onChartCrosshairMoveRef.current) {
         const resolvedTime = resolveClickTime(param);
@@ -1032,6 +1140,7 @@ export function TradingChart({
       resizeObserver.disconnect();
         measurePrimitiveRef.current = null;
         measureStartRef.current = null;
+        rthLinesPrimitiveRef.current = null;
       if (chartContainer) {
         chartContainer.removeEventListener("mousedown", mouseDownHandler);
       }
@@ -1078,6 +1187,11 @@ export function TradingChart({
       }
     } catch (err) {
       console.error("[TradingChart] update setData failed:", err);
+    }
+    if (isIntraday && rthLinesPrimitiveRef.current) {
+      rthLinesPrimitiveRef.current.setTimes(
+        rthSessionBoundaryTimes(latest.candles.map((c) => c.timestamp))
+      );
     }
   }, [candleSyncKey, hasCandles, isIntraday, whiteExtendedHoursCandles]);
 

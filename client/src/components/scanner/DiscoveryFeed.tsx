@@ -22,6 +22,7 @@ import {
 } from "./scanner-font-prefs";
 import type { ScannerMode, DiscoveryCard as DiscoveryCardType, SignalType, DiscoveryEvidence } from "@shared/scanner-types";
 import { SCANNER_CONFIG_FIELDS, type ScannerConfig, type ConfigFieldMeta } from "@shared/scanner-config";
+import { matchesThemeRankCut, parseThemeRankN, type ThemeRankCut } from "@shared/scanner-theme-rank-filter";
 import type { CatalystRuleDefinition, CatalystEntry, DecayShape } from "@shared/catalyst-types";
 import { useLocation } from "wouter";
 import { SCANNER_POPOUT_CHANNEL, type ScannerPopoutMessage } from "./scanner-popout-channel";
@@ -131,6 +132,12 @@ function cardThemePercentile(card: DiscoveryCardType): number | null {
   return pct != null && Number.isFinite(pct) ? pct : null;
 }
 
+function cardThemeRank(card: DiscoveryCardType): number | null {
+  const rank = card.themeRank ?? card.context?.discovery_filters?.themeRank
+    ?? (card.context?.theme_membership as { themeRank?: number } | undefined)?.themeRank;
+  return rank != null && Number.isFinite(rank) && rank >= 1 ? rank : null;
+}
+
 function cardPriorDayDollarVol(card: DiscoveryCardType): number | null {
   const v = card.priorDayDollarVol ?? card.context?.discovery_filters?.priorDayDollarVol;
   return v != null && Number.isFinite(v) && v > 0 ? v : null;
@@ -152,6 +159,8 @@ function matchesThemeStrength(card: DiscoveryCardType, filter: ThemeStrengthFilt
 
 function describeActiveSecondaryFilters(opts: {
   themeStrengthFilter: ThemeStrengthFilter;
+  themeRankCut: ThemeRankCut;
+  themeRankN: number;
   liquidityFilter: LiquidityFilter;
   directionFilter: "all" | "up" | "down";
   showUrgentOnly: boolean;
@@ -160,6 +169,8 @@ function describeActiveSecondaryFilters(opts: {
   if (opts.themeStrengthFilter === "top25") bits.push("Theme Top 25%");
   else if (opts.themeStrengthFilter === "top50") bits.push("Theme Top 50%");
   else if (opts.themeStrengthFilter === "bottom50") bits.push("Theme Bot 50%");
+  if (opts.themeRankCut === "leading") bits.push(`Lead ${opts.themeRankN}`);
+  else if (opts.themeRankCut === "lowest") bits.push(`Low ${opts.themeRankN}`);
   if (opts.liquidityFilter === "high") bits.push("Liq $ High");
   else if (opts.liquidityFilter === "mid") bits.push("Liq $ Mid");
   else if (opts.liquidityFilter === "low") bits.push("Liq $ Low");
@@ -250,6 +261,8 @@ export function DiscoveryFeedPanel() {
   const [signalTypeFilter, setSignalTypeFilter] = useState<SignalType | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "up" | "down">("all");
   const [themeStrengthFilter, setThemeStrengthFilter] = useState<ThemeStrengthFilter>("all");
+  const [themeRankCut, setThemeRankCut] = useState<ThemeRankCut>("all");
+  const [themeRankN, setThemeRankN] = useState(5);
   const [liquidityFilter, setLiquidityFilter] = useState<LiquidityFilter>("all");
   const [adminPanel, setAdminPanel] = useState<"none" | "rules" | "queue" | "config">("none");
   const [catalystRules, setCatalystRules] = useState<CatalystRuleDefinition[]>([]);
@@ -548,6 +561,11 @@ export function DiscoveryFeedPanel() {
     if (themeStrengthFilter !== "all") {
       cards = cards.filter((d) => matchesThemeStrength(d, themeStrengthFilter));
     }
+    if (themeRankCut !== "all") {
+      cards = cards.filter((d) =>
+        matchesThemeRankCut(cardThemeRank(d), cardThemePercentile(d), themeRankCut, themeRankN)
+      );
+    }
     if (liquidityFilter !== "all") {
       cards = cards.filter((d) => matchesLiquidity(d, liquidityFilter));
     }
@@ -573,6 +591,8 @@ export function DiscoveryFeedPanel() {
     signalTypeFilter,
     directionFilter,
     themeStrengthFilter,
+    themeRankCut,
+    themeRankN,
     liquidityFilter,
     sortMode,
   ]);
@@ -581,11 +601,13 @@ export function DiscoveryFeedPanel() {
     () =>
       describeActiveSecondaryFilters({
         themeStrengthFilter,
+        themeRankCut,
+        themeRankN,
         liquidityFilter,
         directionFilter,
         showUrgentOnly,
       }),
-    [themeStrengthFilter, liquidityFilter, directionFilter, showUrgentOnly]
+    [themeStrengthFilter, themeRankCut, themeRankN, liquidityFilter, directionFilter, showUrgentOnly]
   );
 
   const cycleMode = () => {
@@ -909,6 +931,54 @@ export function DiscoveryFeedPanel() {
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* Theme rank at fire: leading N / lowest N */}
+        <div className="flex items-center gap-1 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
+          <span className="text-slate-500 shrink-0" style={{ fontSize: scannerPx("tiny", fo) }}>Rank</span>
+          <div className="flex flex-wrap items-center gap-0.5">
+            {([
+              ["all", "All"],
+              ["leading", "Lead"],
+              ["lowest", "Low"],
+            ] as const).map(([id, label]) => {
+              const active = themeRankCut === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  title={
+                    id === "leading" ? "Names whose theme ranked in the top N at fire"
+                      : id === "lowest" ? "Names whose theme ranked in the bottom N at fire"
+                        : "Any theme rank"
+                  }
+                  onClick={(e) => { e.stopPropagation(); setThemeRankCut(id); }}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded text-xs font-medium transition-colors border",
+                    active
+                      ? "bg-violet-900/40 text-violet-200 border-violet-600/50"
+                      : "text-slate-400 hover:text-slate-200 border-transparent"
+                  )}
+                  style={{ fontSize: scannerPx("tiny", fo) }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            <input
+              type="number"
+              min={1}
+              max={26}
+              disabled={themeRankCut === "all"}
+              value={themeRankN}
+              title="N themes (1–26)"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setThemeRankN(parseThemeRankN(e.target.value, themeRankN))}
+              className="w-10 h-6 rounded border border-slate-700 bg-slate-900 px-1 text-xs text-right disabled:opacity-40"
+              style={{ fontSize: scannerPx("tiny", fo), color: "inherit" }}
+            />
           </div>
         </div>
 

@@ -13,6 +13,7 @@ import { scannerPx, loadScannerFontOffset, saveScannerFontOffset } from "@/compo
 import { ScannerFontSizeControl } from "@/components/scanner/ScannerFontSizeControl";
 import type { DiscoveryCard as DiscoveryCardType } from "@shared/scanner-types";
 import { DEFAULT_SCANNER_CONFIG, type ScannerConfig } from "@shared/scanner-config";
+import { parseThemeRankN, type ThemeRankCut } from "@shared/scanner-theme-rank-filter";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -336,6 +337,8 @@ function SignalWorkbenchInner() {
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [scannerConfig, setScannerConfig] = useState<ScannerConfig | null>(null);
   const [trustMode, setTrustMode] = useState<"auto" | "provisional" | "trusted" | "all">("auto");
+  const [themeRankCut, setThemeRankCut] = useState<ThemeRankCut>("all");
+  const [themeRankN, setThemeRankN] = useState(5);
   const [cohortDimension, setCohortDimension] = useState<string>("score");
 
   // AI Lab state
@@ -370,6 +373,8 @@ function SignalWorkbenchInner() {
         window,
         trust: trustMode,
         cohorts: wantCohorts ? "1" : "0",
+        theme_rank_cut: themeRankCut,
+        theme_rank_n: String(themeRankN),
       });
       const res = await fetch(`/api/scanner/workbench/hit-rates?${params}&_t=${Date.now()}`, {
         signal: AbortSignal.timeout(20_000),
@@ -400,7 +405,7 @@ function SignalWorkbenchInner() {
       );
     }
     setLoading(false);
-  }, [fromDate, toDate, hitThreshold, minSamples, sessionFilter, window, trustMode]);
+  }, [fromDate, toDate, hitThreshold, minSamples, sessionFilter, window, trustMode, themeRankCut, themeRankN]);
 
   // Fetch cards for selected signal type
   const fetchCards = useCallback(async (signalType: string) => {
@@ -412,6 +417,8 @@ function SignalWorkbenchInner() {
         to: toDate,
         status: statusFilter,
         limit: "50",
+        theme_rank_cut: themeRankCut,
+        theme_rank_n: String(themeRankN),
       });
       const res = await fetch(`/api/scanner/workbench/cards?${params}&_t=${Date.now()}`, {
         signal: AbortSignal.timeout(20_000),
@@ -422,7 +429,7 @@ function SignalWorkbenchInner() {
       }
     } catch { /* ignore */ }
     setCardsLoading(false);
-  }, [fromDate, toDate, statusFilter]);
+  }, [fromDate, toDate, statusFilter, themeRankCut, themeRankN]);
 
   // Soft-resolve true US equity market days (do not block the first aggregate)
   useEffect(() => {
@@ -620,6 +627,24 @@ function SignalWorkbenchInner() {
               <option value="close">Close</option>
               <option value="after_hours">After Hours</option>
             </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs" style={{ color: cssVariables.textSmall }} title="Theme rank at fire vs ~26 Flow themes. Leading 5 = ranks 1–5. Lowest 5 = weakest 5 (or bottom ~20% if rank is missing).">
+            Themes
+            <select value={themeRankCut} onChange={(e) => setThemeRankCut(e.target.value as ThemeRankCut)} className="h-7 rounded border border-slate-700 bg-slate-900 px-2 text-xs" style={{ color: cssVariables.textTitle }}>
+              <option value="all">All</option>
+              <option value="leading">Leading</option>
+              <option value="lowest">Lowest</option>
+            </select>
+            <input
+              type="number"
+              min={1}
+              max={26}
+              disabled={themeRankCut === "all"}
+              value={themeRankN}
+              onChange={(e) => setThemeRankN(parseThemeRankN(e.target.value, themeRankN))}
+              className="w-12 h-7 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-right disabled:opacity-40"
+              style={{ color: cssVariables.textTitle }}
+            />
           </label>
           <label className="flex items-center gap-1.5 text-xs" style={{ color: cssVariables.textSmall }}>
             Trust
