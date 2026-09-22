@@ -26,10 +26,11 @@ import {
   subscribeCompanyLogoOpacity,
 } from "@/lib/chartLogoPrefs";
 import {
-  DEFAULT_MEASURE_LABEL_OPACITY,
-  DEFAULT_MEASURE_LABEL_SIZE_SCALE,
+  DEFAULT_MEASURE_LABEL_PREFS,
   getMeasureLabelPrefs,
+  measureLabelHexToRgba,
   subscribeMeasureLabelPrefs,
+  type MeasureLabelPrefs,
 } from "@/lib/chartMeasureLabelPrefs";
 import {
   companyLogoSrc,
@@ -476,8 +477,7 @@ class MeasurePrimitive {
   _startPoint: MeasurePoint | null = null;
   _endPoint: MeasurePoint | null = null;
   _requestUpdate: (() => void) | null = null;
-  _labelSizeScale = DEFAULT_MEASURE_LABEL_SIZE_SCALE;
-  _labelOpacity = DEFAULT_MEASURE_LABEL_OPACITY;
+  _labelStyle: MeasureLabelPrefs = { ...DEFAULT_MEASURE_LABEL_PREFS };
 
   setPoints(start: MeasurePoint | null, end: MeasurePoint | null) {
     this._startPoint = start;
@@ -485,9 +485,8 @@ class MeasurePrimitive {
     if (this._requestUpdate) this._requestUpdate();
   }
 
-  setLabelStyle(sizeScale: number, opacity: number) {
-    this._labelSizeScale = sizeScale;
-    this._labelOpacity = opacity;
+  setLabelStyle(prefs: MeasureLabelPrefs) {
+    this._labelStyle = prefs;
     if (this._requestUpdate) this._requestUpdate();
   }
 
@@ -566,7 +565,7 @@ class MeasurePrimitive {
       const sign = priceDiff >= 0 ? "+" : "";
       const label = `${sign}${priceDiff.toFixed(2)}  (${sign}${pctChange.toFixed(2)}%)`;
 
-      const sizeScale = this._labelSizeScale;
+      const sizeScale = this._labelStyle.sizeScale;
       const fontSize = Math.max(8 * ratio, Math.round(22 * sizeScale * ratio));
       ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
 
@@ -581,8 +580,12 @@ class MeasurePrimitive {
       const boxX = midX - textWidth / 2 - padX;
       const boxY = midY - textHeight / 2 - padY - 10 * vRatio * sizeScale;
 
-      const alpha = this._labelOpacity;
-      const bgColor = priceDiff >= 0 ? `rgba(34, 197, 94, ${alpha})` : `rgba(239, 68, 68, ${alpha})`;
+      const up = priceDiff >= 0;
+      const bgColor = measureLabelHexToRgba(
+        up ? this._labelStyle.bgUp : this._labelStyle.bgDown,
+        this._labelStyle.opacity,
+        up ? DEFAULT_MEASURE_LABEL_PREFS.bgUp : DEFAULT_MEASURE_LABEL_PREFS.bgDown,
+      );
       ctx.fillStyle = bgColor;
       const boxW = textWidth + padX * 2;
       const boxH = textHeight + padY * 2;
@@ -591,7 +594,7 @@ class MeasurePrimitive {
       ctx.roundRect(boxX, boxY, boxW, boxH, cornerR);
       ctx.fill();
 
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = up ? this._labelStyle.textUp : this._labelStyle.textDown;
       ctx.textBaseline = "middle";
       ctx.textAlign = "center";
       ctx.fillText(label, midX, boxY + boxH / 2);
@@ -764,7 +767,7 @@ export function TradingChart({
   useEffect(() => subscribeCompanyLogoOpacity(() => setLogoOpacity(getCompanyLogoOpacity())), []);
   useEffect(() => subscribeMeasureLabelPrefs(() => setMeasureLabelPrefsState(getMeasureLabelPrefs())), []);
   useEffect(() => {
-    measurePrimitiveRef.current?.setLabelStyle(measureLabelPrefs.sizeScale, measureLabelPrefs.opacity);
+    measurePrimitiveRef.current?.setLabelStyle(measureLabelPrefs);
   }, [measureLabelPrefs]);
   
   useEffect(() => {
@@ -1112,7 +1115,7 @@ export function TradingChart({
     volumeSeriesRef.current = volumeSeries;
 
     const measurePrimitive = new MeasurePrimitive();
-    measurePrimitive.setLabelStyle(getMeasureLabelPrefs().sizeScale, getMeasureLabelPrefs().opacity);
+    measurePrimitive.setLabelStyle(getMeasureLabelPrefs());
     candleSeries.attachPrimitive(measurePrimitive);
     measurePrimitiveRef.current = measurePrimitive;
 

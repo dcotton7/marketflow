@@ -30,14 +30,20 @@ import {
   setCompanyLogoOpacity,
 } from "@/lib/chartLogoPrefs";
 import {
+  DEFAULT_MEASURE_LABEL_BG_DOWN,
+  DEFAULT_MEASURE_LABEL_BG_UP,
   DEFAULT_MEASURE_LABEL_OPACITY,
+  DEFAULT_MEASURE_LABEL_PREFS,
   DEFAULT_MEASURE_LABEL_SIZE_SCALE,
+  DEFAULT_MEASURE_LABEL_TEXT_DOWN,
+  DEFAULT_MEASURE_LABEL_TEXT_UP,
   getMeasureLabelPrefs,
   measureLabelOpacityFromPercent,
   measureLabelOpacityToPercent,
   measureLabelSizeFromPercent,
   measureLabelSizeToPercent,
   resetMeasureLabelPrefs,
+  resolveMeasureLabelHex,
   setMeasureLabelPrefs,
 } from "@/lib/chartMeasureLabelPrefs";
 import { Slider } from "@/components/ui/slider";
@@ -53,6 +59,37 @@ interface ChartPrefs extends ChartMaDataLimits {
   themeMembersMa1?: string;
   themeMembersMa2?: string;
   chartBackgroundColor?: string | null;
+}
+
+function MeasureLabelColorRow({
+  label,
+  value,
+  testId,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  testId: string;
+  onChange: (hex: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Label className="text-xs text-muted-foreground w-24 shrink-0">{label}</Label>
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-12 cursor-pointer rounded border border-input bg-transparent p-0.5"
+        data-testid={`${testId}-swatch`}
+      />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-24 text-xs font-mono"
+        data-testid={`${testId}-hex`}
+      />
+    </div>
+  );
 }
 
 const DEFAULT_LIMITS: MaGridLimits = {
@@ -72,6 +109,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [logoOpacity, setLogoOpacity] = useState<number>(DEFAULT_COMPANY_LOGO_OPACITY);
   const [measureLabelSize, setMeasureLabelSize] = useState<number>(DEFAULT_MEASURE_LABEL_SIZE_SCALE);
   const [measureLabelOpacity, setMeasureLabelOpacity] = useState<number>(DEFAULT_MEASURE_LABEL_OPACITY);
+  const [measureTextUp, setMeasureTextUp] = useState(DEFAULT_MEASURE_LABEL_TEXT_UP);
+  const [measureTextDown, setMeasureTextDown] = useState(DEFAULT_MEASURE_LABEL_TEXT_DOWN);
+  const [measureBgUp, setMeasureBgUp] = useState(DEFAULT_MEASURE_LABEL_BG_UP);
+  const [measureBgDown, setMeasureBgDown] = useState(DEFAULT_MEASURE_LABEL_BG_DOWN);
 
   const { data, isLoading } = useQuery<MaSettingRow[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -111,6 +152,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
       const measure = getMeasureLabelPrefs();
       setMeasureLabelSize(measure.sizeScale);
       setMeasureLabelOpacity(measure.opacity);
+      setMeasureTextUp(measure.textUp);
+      setMeasureTextDown(measure.textDown);
+      setMeasureBgUp(measure.bgUp);
+      setMeasureBgDown(measure.bgDown);
     }
   }, [open]);
 
@@ -130,6 +175,14 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   measureLabelSizeRef.current = measureLabelSize;
   const measureLabelOpacityRef = useRef(measureLabelOpacity);
   measureLabelOpacityRef.current = measureLabelOpacity;
+  const measureTextUpRef = useRef(measureTextUp);
+  measureTextUpRef.current = measureTextUp;
+  const measureTextDownRef = useRef(measureTextDown);
+  measureTextDownRef.current = measureTextDown;
+  const measureBgUpRef = useRef(measureBgUp);
+  measureBgUpRef.current = measureBgUp;
+  const measureBgDownRef = useRef(measureBgDown);
+  measureBgDownRef.current = measureBgDown;
 
   const saveIndicatorMutation = useMutation({
     mutationFn: async (currentRows: MaSettingRow[]) => {
@@ -177,6 +230,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
       setMeasureLabelPrefs({
         sizeScale: measureLabelSizeRef.current,
         opacity: measureLabelOpacityRef.current,
+        textUp: measureTextUpRef.current,
+        textDown: measureTextDownRef.current,
+        bgUp: measureBgUpRef.current,
+        bgDown: measureBgDownRef.current,
       });
     },
     onSuccess: () => {
@@ -381,7 +438,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
               <div>
                 <h3 className="text-sm font-medium">Measurement chart labels</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Size and fill of the green/red measure box on the chart. Kept on this computer until you reset it.
+                  Size, opacity, text, and background for up and down measure boxes. Kept on this computer until you reset it.
                 </p>
               </div>
               <div className="space-y-2.5" onClick={(e) => e.stopPropagation()}>
@@ -395,7 +452,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     onValueChange={([v]) => {
                       const next = measureLabelSizeFromPercent(v ?? 50);
                       setMeasureLabelSize(next);
-                      setMeasureLabelPrefs({ sizeScale: next, opacity: measureLabelOpacity });
+                      setMeasureLabelPrefs({ sizeScale: next });
                     }}
                     className="w-48 max-w-full"
                     data-testid="slider-measure-label-size"
@@ -414,7 +471,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     onValueChange={([v]) => {
                       const next = measureLabelOpacityFromPercent(v ?? 65);
                       setMeasureLabelOpacity(next);
-                      setMeasureLabelPrefs({ sizeScale: measureLabelSize, opacity: next });
+                      setMeasureLabelPrefs({ opacity: next });
                     }}
                     className="w-48 max-w-full"
                     data-testid="slider-measure-label-opacity"
@@ -423,12 +480,65 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     {measureLabelOpacityToPercent(measureLabelOpacity)}%
                   </span>
                 </div>
+                <div className="grid gap-3 sm:grid-cols-2 pt-1">
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium">Up</div>
+                    <MeasureLabelColorRow
+                      label="Text color"
+                      value={measureTextUp}
+                      testId="measure-text-up"
+                      onChange={(hex) => {
+                        const next = resolveMeasureLabelHex(hex, DEFAULT_MEASURE_LABEL_TEXT_UP);
+                        setMeasureTextUp(next);
+                        setMeasureLabelPrefs({ textUp: next });
+                      }}
+                    />
+                    <MeasureLabelColorRow
+                      label="Background"
+                      value={measureBgUp}
+                      testId="measure-bg-up"
+                      onChange={(hex) => {
+                        const next = resolveMeasureLabelHex(hex, DEFAULT_MEASURE_LABEL_BG_UP);
+                        setMeasureBgUp(next);
+                        setMeasureLabelPrefs({ bgUp: next });
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium">Down</div>
+                    <MeasureLabelColorRow
+                      label="Text color"
+                      value={measureTextDown}
+                      testId="measure-text-down"
+                      onChange={(hex) => {
+                        const next = resolveMeasureLabelHex(hex, DEFAULT_MEASURE_LABEL_TEXT_DOWN);
+                        setMeasureTextDown(next);
+                        setMeasureLabelPrefs({ textDown: next });
+                      }}
+                    />
+                    <MeasureLabelColorRow
+                      label="Background"
+                      value={measureBgDown}
+                      testId="measure-bg-down"
+                      onChange={(hex) => {
+                        const next = resolveMeasureLabelHex(hex, DEFAULT_MEASURE_LABEL_BG_DOWN);
+                        setMeasureBgDown(next);
+                        setMeasureLabelPrefs({ bgDown: next });
+                      }}
+                    />
+                  </div>
+                </div>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    setMeasureLabelSize(DEFAULT_MEASURE_LABEL_SIZE_SCALE);
-                    setMeasureLabelOpacity(DEFAULT_MEASURE_LABEL_OPACITY);
+                    const d = DEFAULT_MEASURE_LABEL_PREFS;
+                    setMeasureLabelSize(d.sizeScale);
+                    setMeasureLabelOpacity(d.opacity);
+                    setMeasureTextUp(d.textUp);
+                    setMeasureTextDown(d.textDown);
+                    setMeasureBgUp(d.bgUp);
+                    setMeasureBgDown(d.bgDown);
                     resetMeasureLabelPrefs();
                   }}
                   data-testid="button-reset-measure-labels"
