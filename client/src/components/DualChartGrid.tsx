@@ -22,7 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { GripHorizontal, GripVertical, Loader2, Ruler, Minus, Trash2, Bell, Settings2 } from "lucide-react";
+import { GripHorizontal, GripVertical, Loader2, Ruler, Minus, Trash2, Bell, Settings2, Camera } from "lucide-react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
   isChartLayoutV2Enabled,
@@ -44,6 +44,22 @@ import {
 } from "@/components/ChartInfoFooter";
 import { TosSyncToggle } from "@/components/TosButton";
 import { useTosSyncSafe } from "@/context/TosSyncContext";
+import { useToast } from "@/hooks/use-toast";
+import {
+  buildChartCopyFilename,
+  copyCanvasToClipboard,
+  formatIntradayCopyLabel,
+  screenshotChart,
+  stitchChartCanvases,
+} from "@/lib/copy-chart-image";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export type ChartDataResponse = {
   candles: ChartCandle[];
@@ -566,6 +582,9 @@ export function DualChartGrid({
   /** When ETH candles are on: RTH = server primary (regular-session math, forward-filled), EXT = all bars in MA/VWAP. */
   const [intradayMaBasis, setIntradayMaBasis] = useState<"rth" | "extended">("rth");
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [copyPrompt, setCopyPrompt] = useState<"daily" | "intraday" | null>(null);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const { toast } = useToast();
 
   const dailyChartRef = useRef<IChartApi | null>(null);
   const dailySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -945,6 +964,65 @@ export function DualChartGrid({
 
   const chartPixelHeight = layoutV2 ? undefined : chartHeight;
 
+  const capturePane = useCallback((which: "daily" | "intraday") => {
+    const chart = which === "daily" ? dailyChartRef.current : intradayChartRef.current;
+    const canvas = screenshotChart(chart);
+    if (!canvas) return null;
+    return {
+      canvas,
+      label: which === "daily" ? "Daily" : formatIntradayCopyLabel(intradayTimeframe),
+      which,
+    };
+  }, [intradayTimeframe]);
+
+  const handleCopyCharts = useCallback(async (mode: "this" | "both") => {
+    const selected = copyPrompt;
+    if (!selected) return;
+    setCopyBusy(true);
+    try {
+      const panes: { canvas: HTMLCanvasElement; label: string; which: "daily" | "intraday" }[] = [];
+      if (mode === "both") {
+        const daily = capturePane("daily");
+        const intra = capturePane("intraday");
+        if (daily) panes.push(daily);
+        if (intra) panes.push(intra);
+      } else {
+        const pane = capturePane(selected);
+        if (pane) panes.push(pane);
+      }
+      if (panes.length === 0) {
+        toast({ title: "Chart is not ready to copy", variant: "destructive" });
+        return;
+      }
+      const header = [symbol, displayPrice ? `$${displayPrice.toFixed(2)}` : null]
+        .filter(Boolean)
+        .join("  ");
+      const out = stitchChartCanvases(panes, header);
+      const scope = mode === "both"
+        ? "charts"
+        : selected === "daily"
+          ? "daily"
+          : intradayTimeframe.replace("min", "m");
+      const filename = buildChartCopyFilename(symbol, scope);
+      const result = await copyCanvasToClipboard(out, filename);
+      toast({
+        title: result === "copied" ? "Chart copied" : "Chart saved",
+        description: result === "copied"
+          ? "Paste it in Discord, X, or anywhere else."
+          : `${filename} downloaded (clipboard blocked).`,
+      });
+      setCopyPrompt(null);
+    } catch (err) {
+      toast({
+        title: "Could not copy chart",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setCopyBusy(false);
+    }
+  }, [capturePane, copyPrompt, displayPrice, intradayTimeframe, symbol, toast]);
+
   const dailyChartPane = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div
@@ -1005,6 +1083,17 @@ export function DualChartGrid({
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto text-white"
+          onClick={() => setCopyPrompt("daily")}
+          disabled={!dailyData}
+          data-testid={`${pid}button-daily-copy-chart`}
+          title="Copy chart image"
+        >
+          <Camera className="h-3.5 w-3.5" />
+        </Button>
       </div>
       <div className="min-h-0 flex-1">
         {dailyLoading ? (
@@ -1179,6 +1268,17 @@ export function DualChartGrid({
             {ma50Loading ? `${ma50LoadSec}s` : "50d"}
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto text-white"
+          onClick={() => setCopyPrompt("intraday")}
+          disabled={!effectiveIntradayData}
+          data-testid={`${pid}button-intraday-copy-chart`}
+          title="Copy chart image"
+        >
+          <Camera className="h-3.5 w-3.5" />
+        </Button>
       </div>
       <div className="relative min-h-0 flex-1">
         {intradayBlockingLoad ? (
@@ -1425,6 +1525,33 @@ export function DualChartGrid({
         </div>
       )}
 
+      <Dialog open={copyPrompt !== null} onOpenChange={(open) => { if (!open) setCopyPrompt(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Copy chart</DialogTitle>
+            <DialogDescription>
+              Would you like to copy both charts or just the chart selected?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => void handleCopyCharts("this")}
+              disabled={copyBusy}
+              data-testid={`${pid}button-copy-this-chart`}
+            >
+              This chart
+            </Button>
+            <Button
+              onClick={() => void handleCopyCharts("both")}
+              disabled={copyBusy}
+              data-testid={`${pid}button-copy-both-charts`}
+            >
+              Both charts
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <MaSettingsDialog open={maSettingsOpen} onOpenChange={setMaSettingsOpen} />
       {symbol && (
         <AlertBuilderDialog
