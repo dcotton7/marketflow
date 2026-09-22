@@ -16,6 +16,7 @@ import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
 import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
 import { fetchChartData } from "./chartDataEngine";
+import { fetchCompanyLogoBytes } from "../company-logo";
 import { registerChartSetupEnrichRoutes } from "./chart-setup-enrich/routes";
 import { extractTosScreen, isTosScreenExtractAvailable } from "./tos-screen-extract";
 import * as tnn from "./tnn";
@@ -7388,6 +7389,19 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
   // Market bars are not user-specific. Keeping this route behind session auth made
   // chart loads fail mid-session when the cookie expired (daily could remain cached
   // while a fresh intraday request returned 401).
+  app.get("/api/sentinel/company-logo/:symbol", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const got = await fetchCompanyLogoBytes(String(req.params.symbol ?? ""));
+      if (!got) return res.status(404).end();
+      res.setHeader("Content-Type", got.contentType);
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.send(got.body);
+    } catch (error) {
+      console.error("Company logo error:", error);
+      res.status(404).end();
+    }
+  });
+
   app.get("/api/sentinel/chart-data", async (req: Request, res: Response) => {
     try {
       const ticker = String(req.query.ticker || "").toUpperCase();

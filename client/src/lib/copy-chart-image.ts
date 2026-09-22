@@ -1,5 +1,21 @@
 import type { IChartApi } from "lightweight-charts";
 
+export const COMPANY_LOGO_OPACITY = 0.28;
+
+export type ChartShareLegendItem = {
+  label: string;
+  color: string;
+  isDotted: boolean;
+  isDashed: boolean;
+};
+
+export type ChartShareCaptureFn = () => HTMLCanvasElement | null;
+
+export function companyLogoSrc(symbol: string): string {
+  const s = symbol.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "");
+  return s ? `/api/sentinel/company-logo/${encodeURIComponent(s)}?v=3` : "";
+}
+
 export function formatIntradayCopyLabel(tf: string): string {
   const t = tf.toLowerCase();
   if (t === "5min" || t === "5m") return "Intraday 5m";
@@ -23,6 +39,77 @@ export function screenshotChart(chart: IChartApi | null | undefined): HTMLCanvas
   } catch {
     return null;
   }
+}
+
+function drawShareLegend(
+  ctx: CanvasRenderingContext2D,
+  legend: ChartShareLegendItem[],
+  scale: number,
+): void {
+  if (!legend.length) return;
+  const pad = 8 * scale;
+  const rowH = 16 * scale;
+  const swatchW = 12 * scale;
+  const fontPx = Math.max(10, 11 * scale);
+  ctx.font = `500 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+  let maxLabel = 0;
+  for (const item of legend) {
+    maxLabel = Math.max(maxLabel, ctx.measureText(item.label).width);
+  }
+  const boxW = pad * 2 + swatchW + 6 * scale + maxLabel;
+  const boxH = pad * 2 + rowH * legend.length;
+  ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+  ctx.fillRect(8 * scale, 8 * scale, boxW, boxH);
+  legend.forEach((item, i) => {
+    const y = 8 * scale + pad + i * rowH + rowH * 0.55;
+    const x = 8 * scale + pad;
+    ctx.strokeStyle = item.color;
+    ctx.fillStyle = item.color;
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + swatchW, y);
+    if (item.isDotted) ctx.setLineDash([1.5 * scale, 2 * scale]);
+    else if (item.isDashed) ctx.setLineDash([4 * scale, 3 * scale]);
+    else ctx.setLineDash([]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#94a3b8";
+    ctx.fillText(item.label, x + swatchW + 6 * scale, y + fontPx * 0.35);
+  });
+}
+
+export function compositeChartShareImage(
+  shot: HTMLCanvasElement,
+  opts: {
+    logo?: HTMLImageElement | null;
+    legend: ChartShareLegendItem[];
+    scale: number;
+  },
+): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = shot.width;
+  out.height = shot.height;
+  const ctx = out.getContext("2d");
+  if (!ctx) return shot;
+  ctx.drawImage(shot, 0, 0);
+
+  const logo = opts.logo;
+  if (logo && logo.complete && logo.naturalWidth > 0) {
+    const maxW = shot.width * 0.42;
+    const maxH = shot.height * 0.42;
+    const ratio = Math.min(maxW / logo.naturalWidth, maxH / logo.naturalHeight);
+    const dw = logo.naturalWidth * ratio;
+    const dh = logo.naturalHeight * ratio;
+    ctx.globalAlpha = COMPANY_LOGO_OPACITY;
+    ctx.globalCompositeOperation = "screen";
+    ctx.drawImage(logo, (shot.width - dw) / 2, (shot.height - dh) / 2, dw, dh);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+  }
+
+  drawShareLegend(ctx, opts.legend, Math.max(0.5, opts.scale));
+  return out;
 }
 
 export function stitchChartCanvases(

@@ -16,6 +16,12 @@ import {
   isValidChartBackgroundColor,
 } from "@/lib/chart-preferences-shared";
 import {
+  DEFAULT_HORIZONTAL_DRAWING_COLOR,
+  getHorizontalDrawingDefaults,
+  resolveHorizontalDrawingHex,
+  setHorizontalDrawingDefaults,
+} from "@/lib/chartHorizontalDrawingPrefs";
+import {
   MaSettingsGridPanel,
   MaDataLimitsPanel,
   type MaSettingRow,
@@ -42,6 +48,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [limits, setLimits] = useState<MaGridLimits>(DEFAULT_LIMITS);
   const [showDataLimits, setShowDataLimits] = useState(false);
   const [chartBackgroundColor, setChartBackgroundColor] = useState<string>(DEFAULT_CHART_BACKGROUND_COLOR);
+  const [lineColor, setLineColor] = useState<string>(DEFAULT_HORIZONTAL_DRAWING_COLOR);
 
   const { data, isLoading } = useQuery<MaSettingRow[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -74,6 +81,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
     }
   }, [chartPrefs]);
 
+  useEffect(() => {
+    if (open) setLineColor(getHorizontalDrawingDefaults().color);
+  }, [open]);
+
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const defaultBarsRef = useRef(defaultBars);
@@ -82,6 +93,8 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   limitsRef.current = limits;
   const chartBgRef = useRef(chartBackgroundColor);
   chartBgRef.current = chartBackgroundColor;
+  const lineColorRef = useRef(lineColor);
+  lineColorRef.current = lineColor;
 
   const saveIndicatorMutation = useMutation({
     mutationFn: async (currentRows: MaSettingRow[]) => {
@@ -119,6 +132,12 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
         themeMembersMa2: cachedPrefs?.themeMembersMa2,
         chartBackgroundColor: isValidChartBackgroundColor(bg) ? bg : null,
       });
+      const def = getHorizontalDrawingDefaults();
+      setHorizontalDrawingDefaults(
+        resolveHorizontalDrawingHex(lineColorRef.current),
+        def.width,
+        def.lineStyle,
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/chart-preferences"] });
@@ -243,6 +262,39 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                 />
                 <Button size="sm" variant="outline" onClick={resetChartBg} data-testid="button-reset-chart-bg">
                   Reset to default
+                </Button>
+              </div>
+            </section>
+
+            <section className="space-y-3" data-testid="chart-line-color-section">
+              <div>
+                <h3 className="text-sm font-medium">Line Color</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Default color for new horizontal lines. Change a selected line from the chart toolbar Settings.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="color"
+                  value={lineColor}
+                  onChange={(e) => setLineColor(e.target.value)}
+                  className="h-9 w-12 cursor-pointer rounded border border-input bg-transparent p-0.5"
+                  data-testid="input-line-color"
+                />
+                <Input
+                  value={lineColor}
+                  onChange={(e) => setLineColor(e.target.value)}
+                  className="h-9 w-28 text-xs font-mono"
+                  placeholder={DEFAULT_HORIZONTAL_DRAWING_COLOR}
+                  data-testid="input-line-color-hex"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setLineColor(DEFAULT_HORIZONTAL_DRAWING_COLOR)}
+                  data-testid="button-reset-line-color"
+                >
+                  Reset to white
                 </Button>
               </div>
             </section>

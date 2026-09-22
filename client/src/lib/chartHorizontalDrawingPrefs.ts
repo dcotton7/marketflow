@@ -1,4 +1,6 @@
-export const DEFAULT_HORIZONTAL_DRAWING_COLOR = "#ff6d00";
+export const DEFAULT_HORIZONTAL_DRAWING_COLOR = "#ffffff";
+/** Previous factory default — treat as unset so existing PCs pick up white. */
+const LEGACY_FACTORY_DRAWING_COLOR = "#ff6d00";
 export const DEFAULT_HORIZONTAL_DRAWING_WIDTH = 1;
 export const DEFAULT_HORIZONTAL_DRAWING_LINE_STYLE = "solid" as const;
 
@@ -48,8 +50,9 @@ export function getHorizontalDrawingDefaults(): {
     const c = localStorage.getItem(LS_DEFAULT_COLOR);
     const w = localStorage.getItem(LS_DEFAULT_WIDTH);
     const ls = localStorage.getItem(LS_DEFAULT_LINE_STYLE);
+    const storedColor = c ? resolveHorizontalDrawingHex(c) : DEFAULT_HORIZONTAL_DRAWING_COLOR;
     return {
-      color: c ? resolveHorizontalDrawingHex(c) : DEFAULT_HORIZONTAL_DRAWING_COLOR,
+      color: storedColor === LEGACY_FACTORY_DRAWING_COLOR ? DEFAULT_HORIZONTAL_DRAWING_COLOR : storedColor,
       width: w != null ? clampHorizontalDrawingWidth(parseInt(w, 10)) : DEFAULT_HORIZONTAL_DRAWING_WIDTH,
       lineStyle: ls ? clampHorizontalDrawingLineStyle(ls) : DEFAULT_HORIZONTAL_DRAWING_LINE_STYLE,
     };

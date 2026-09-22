@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo, useState } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState, type MutableRefObject } from "react";
 import {
   createChart,
   IChartApi,
@@ -21,6 +21,13 @@ import {
   isMaRowFeasibleForTimeframe,
 } from "@/lib/chart-ma-feasibility";
 import { resolveChartBackgroundColor } from "@/lib/chart-preferences-shared";
+import {
+  COMPANY_LOGO_OPACITY,
+  companyLogoSrc,
+  compositeChartShareImage,
+  screenshotChart,
+  type ChartShareCaptureFn,
+} from "@/lib/copy-chart-image";
 import { Button } from "@/components/ui/button";
 import { MaSettingsDialog } from "@/components/MaSettingsDialog";
 import { IndicatorsFourSquaresIcon } from "@/components/chart/ChartToolbarIcons";
@@ -211,6 +218,10 @@ export interface TradingChartProps {
   maDataLimits?: ChartMaDataLimits;
   /** Plot background; null/undefined uses user preference default (#0f172a). */
   chartBackgroundColor?: string | null;
+  /** Ticker used for the faint company-logo watermark. */
+  logoSymbol?: string;
+  /** Latest-wins capture used by the chart camera (includes logo + SMA keys). */
+  shareCaptureRef?: MutableRefObject<ChartShareCaptureFn | null>;
 }
 
 const SYSTEM_ROW_TO_FIELD: Record<string, keyof ChartIndicators> = {
@@ -692,6 +703,8 @@ export function TradingChart({
   whiteExtendedHoursCandles = false,
   maDataLimits,
   chartBackgroundColor,
+  logoSymbol,
+  shareCaptureRef,
 }: TradingChartProps) {
   const resolvedChartBg = resolveChartBackgroundColor(chartBackgroundColor);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -719,6 +732,13 @@ export function TradingChart({
   const [chartReady, setChartReady] = useState(false);
   const [chartInitError, setChartInitError] = useState<string | null>(null);
   const [plotWidth, setPlotWidth] = useState(0);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const logoImgRef = useRef<HTMLImageElement | null>(null);
+  const logoSrc = logoSymbol ? companyLogoSrc(logoSymbol) : "";
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [logoSrc]);
   
   useEffect(() => {
     measureModeRef.current = measureMode;
@@ -1721,6 +1741,25 @@ export function TradingChart({
     return items;
   }, [maSettings, timeframe, data.indicators, maDataLimits]);
 
+  const captureShareImage = useCallback((): HTMLCanvasElement | null => {
+    const shot = screenshotChart(chartRef.current);
+    if (!shot) return null;
+    const plotW = containerRef.current?.clientWidth || shot.width;
+    return compositeChartShareImage(shot, {
+      logo: logoFailed ? null : logoImgRef.current,
+      legend: showLegend ? legendItems : [],
+      scale: shot.width / Math.max(1, plotW),
+    });
+  }, [legendItems, logoFailed, showLegend]);
+
+  useEffect(() => {
+    if (!shareCaptureRef) return;
+    shareCaptureRef.current = captureShareImage;
+    return () => {
+      shareCaptureRef.current = null;
+    };
+  }, [captureShareImage, shareCaptureRef]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Shift") shiftKeyRef.current = true;
@@ -1741,6 +1780,17 @@ export function TradingChart({
 
   return (
     <div data-testid="chart-trading" className="relative w-full h-full flex flex-col">
+      {logoSrc && !logoFailed ? (
+        <img
+          ref={logoImgRef}
+          src={logoSrc}
+          alt=""
+          data-testid="img-chart-company-logo"
+          className="pointer-events-none absolute left-1/2 top-[46%] z-[5] max-h-[42%] max-w-[42%] -translate-x-1/2 -translate-y-1/2 select-none object-contain mix-blend-screen"
+          style={{ opacity: COMPANY_LOGO_OPACITY }}
+          onError={() => setLogoFailed(true)}
+        />
+      ) : null}
       {showLegend && legendItems.length > 0 && (
         <div className="absolute top-2 left-2 z-10 flex flex-col gap-1 rounded bg-slate-900/80 px-2 py-1.5">
           {legendItems.map((item: { key: string; label: string; color: string; isDotted: boolean; isDashed: boolean }) => (

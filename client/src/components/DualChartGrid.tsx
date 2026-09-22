@@ -51,6 +51,7 @@ import {
   formatIntradayCopyLabel,
   screenshotChart,
   stitchChartCanvases,
+  type ChartShareCaptureFn,
 } from "@/lib/copy-chart-image";
 import {
   Dialog,
@@ -376,7 +377,7 @@ function HorizontalLineSettingsPopover({
         <div className="space-y-3">
           <div className="text-sm font-medium text-foreground">Horizontal line</div>
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Color</Label>
+            <Label className="text-xs text-muted-foreground">Line Color</Label>
             <input
               type="color"
               value={color}
@@ -588,8 +589,10 @@ export function DualChartGrid({
 
   const dailyChartRef = useRef<IChartApi | null>(null);
   const dailySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const dailyShareCaptureRef = useRef<ChartShareCaptureFn | null>(null);
   const intradayChartRef = useRef<IChartApi | null>(null);
   const intradaySeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const intradayShareCaptureRef = useRef<ChartShareCaptureFn | null>(null);
   const syncingCrosshairRef = useRef(false);
 
   const syncCrosshairToTarget = useCallback(
@@ -965,8 +968,10 @@ export function DualChartGrid({
   const chartPixelHeight = layoutV2 ? undefined : chartHeight;
 
   const capturePane = useCallback((which: "daily" | "intraday") => {
-    const chart = which === "daily" ? dailyChartRef.current : intradayChartRef.current;
-    const canvas = screenshotChart(chart);
+    const shareFn = which === "daily" ? dailyShareCaptureRef.current : intradayShareCaptureRef.current;
+    const canvas = shareFn?.() ?? screenshotChart(
+      which === "daily" ? dailyChartRef.current : intradayChartRef.current,
+    );
     if (!canvas) return null;
     return {
       canvas,
@@ -1125,6 +1130,8 @@ export function DualChartGrid({
             onChartCrosshairMove={handleDailyCrosshairMove}
             onChartMouseUp={dailyDrawings.handleMouseUp}
             {...mergedDailyChartProps}
+            logoSymbol={symbol}
+            shareCaptureRef={dailyShareCaptureRef}
           />
         ) : (
           <Card className="h-full">
@@ -1316,6 +1323,8 @@ export function DualChartGrid({
               {...mergedIntradayChartProps}
               whiteExtendedHoursCandles={showETH}
               showGaps={showGaps}
+              logoSymbol={symbol}
+              shareCaptureRef={intradayShareCaptureRef}
             />
             {intradayFetching ? (
               <div
