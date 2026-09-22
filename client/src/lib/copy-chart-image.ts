@@ -1,6 +1,7 @@
 import type { IChartApi } from "lightweight-charts";
+import { DEFAULT_COMPANY_LOGO_OPACITY, getCompanyLogoOpacity } from "@/lib/chartLogoPrefs";
 
-export const COMPANY_LOGO_OPACITY = 0.28;
+export const COMPANY_LOGO_OPACITY = DEFAULT_COMPANY_LOGO_OPACITY;
 
 export type ChartShareLegendItem = {
   label: string;
@@ -85,6 +86,7 @@ export function compositeChartShareImage(
     logo?: HTMLImageElement | null;
     legend: ChartShareLegendItem[];
     scale: number;
+    opacity?: number;
   },
 ): HTMLCanvasElement {
   const out = document.createElement("canvas");
@@ -101,7 +103,7 @@ export function compositeChartShareImage(
     const ratio = Math.min(maxW / logo.naturalWidth, maxH / logo.naturalHeight);
     const dw = logo.naturalWidth * ratio;
     const dh = logo.naturalHeight * ratio;
-    ctx.globalAlpha = COMPANY_LOGO_OPACITY;
+    ctx.globalAlpha = opts.opacity ?? getCompanyLogoOpacity();
     ctx.globalCompositeOperation = "screen";
     ctx.drawImage(logo, (shot.width - dw) / 2, (shot.height - dh) / 2, dw, dh);
     ctx.globalCompositeOperation = "source-over";

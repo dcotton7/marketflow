@@ -22,7 +22,10 @@ import {
 } from "@/lib/chart-ma-feasibility";
 import { resolveChartBackgroundColor } from "@/lib/chart-preferences-shared";
 import {
-  COMPANY_LOGO_OPACITY,
+  getCompanyLogoOpacity,
+  subscribeCompanyLogoOpacity,
+} from "@/lib/chartLogoPrefs";
+import {
   companyLogoSrc,
   compositeChartShareImage,
   screenshotChart,
@@ -733,12 +736,15 @@ export function TradingChart({
   const [chartInitError, setChartInitError] = useState<string | null>(null);
   const [plotWidth, setPlotWidth] = useState(0);
   const [logoFailed, setLogoFailed] = useState(false);
+  const [logoOpacity, setLogoOpacity] = useState(getCompanyLogoOpacity);
   const logoImgRef = useRef<HTMLImageElement | null>(null);
   const logoSrc = logoSymbol ? companyLogoSrc(logoSymbol) : "";
 
   useEffect(() => {
     setLogoFailed(false);
   }, [logoSrc]);
+
+  useEffect(() => subscribeCompanyLogoOpacity(() => setLogoOpacity(getCompanyLogoOpacity())), []);
   
   useEffect(() => {
     measureModeRef.current = measureMode;
@@ -1749,8 +1755,9 @@ export function TradingChart({
       logo: logoFailed ? null : logoImgRef.current,
       legend: showLegend ? legendItems : [],
       scale: shot.width / Math.max(1, plotW),
+      opacity: logoOpacity,
     });
-  }, [legendItems, logoFailed, showLegend]);
+  }, [legendItems, logoFailed, logoOpacity, showLegend]);
 
   useEffect(() => {
     if (!shareCaptureRef) return;
@@ -1787,7 +1794,7 @@ export function TradingChart({
           alt=""
           data-testid="img-chart-company-logo"
           className="pointer-events-none absolute left-1/2 top-[46%] z-[5] max-h-[42%] max-w-[42%] -translate-x-1/2 -translate-y-1/2 select-none object-contain mix-blend-screen"
-          style={{ opacity: COMPANY_LOGO_OPACITY }}
+          style={{ opacity: logoOpacity }}
           onError={() => setLogoFailed(true)}
         />
       ) : null}

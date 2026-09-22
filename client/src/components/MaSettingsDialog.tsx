@@ -22,6 +22,15 @@ import {
   setHorizontalDrawingDefaults,
 } from "@/lib/chartHorizontalDrawingPrefs";
 import {
+  DEFAULT_COMPANY_LOGO_OPACITY,
+  companyLogoOpacityFromPercent,
+  companyLogoOpacityToPercent,
+  getCompanyLogoOpacity,
+  resetCompanyLogoOpacity,
+  setCompanyLogoOpacity,
+} from "@/lib/chartLogoPrefs";
+import { Slider } from "@/components/ui/slider";
+import {
   MaSettingsGridPanel,
   MaDataLimitsPanel,
   type MaSettingRow,
@@ -49,6 +58,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [showDataLimits, setShowDataLimits] = useState(false);
   const [chartBackgroundColor, setChartBackgroundColor] = useState<string>(DEFAULT_CHART_BACKGROUND_COLOR);
   const [lineColor, setLineColor] = useState<string>(DEFAULT_HORIZONTAL_DRAWING_COLOR);
+  const [logoOpacity, setLogoOpacity] = useState<number>(DEFAULT_COMPANY_LOGO_OPACITY);
 
   const { data, isLoading } = useQuery<MaSettingRow[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -82,7 +92,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   }, [chartPrefs]);
 
   useEffect(() => {
-    if (open) setLineColor(getHorizontalDrawingDefaults().color);
+    if (open) {
+      setLineColor(getHorizontalDrawingDefaults().color);
+      setLogoOpacity(getCompanyLogoOpacity());
+    }
   }, [open]);
 
   const rowsRef = useRef(rows);
@@ -95,6 +108,8 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   chartBgRef.current = chartBackgroundColor;
   const lineColorRef = useRef(lineColor);
   lineColorRef.current = lineColor;
+  const logoOpacityRef = useRef(logoOpacity);
+  logoOpacityRef.current = logoOpacity;
 
   const saveIndicatorMutation = useMutation({
     mutationFn: async (currentRows: MaSettingRow[]) => {
@@ -138,6 +153,7 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
         def.width,
         def.lineStyle,
       );
+      setCompanyLogoOpacity(logoOpacityRef.current);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/chart-preferences"] });
@@ -295,6 +311,44 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                   data-testid="button-reset-line-color"
                 >
                   Reset to white
+                </Button>
+              </div>
+            </section>
+
+            <section className="space-y-3" data-testid="chart-logo-opacity-section">
+              <div>
+                <h3 className="text-sm font-medium">Logo opacity</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Strength of the company watermark on the charts. Kept on this computer until you reset it.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                <Slider
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={[companyLogoOpacityToPercent(logoOpacity)]}
+                  onValueChange={([v]) => {
+                    const next = companyLogoOpacityFromPercent(v ?? 0);
+                    setLogoOpacity(next);
+                    setCompanyLogoOpacity(next);
+                  }}
+                  className="w-48 max-w-full"
+                  data-testid="slider-logo-opacity"
+                />
+                <span className="text-xs font-mono text-muted-foreground w-10 tabular-nums" data-testid="text-logo-opacity">
+                  {companyLogoOpacityToPercent(logoOpacity)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setLogoOpacity(DEFAULT_COMPANY_LOGO_OPACITY);
+                    resetCompanyLogoOpacity();
+                  }}
+                  data-testid="button-reset-logo-opacity"
+                >
+                  Reset to default
                 </Button>
               </div>
             </section>
