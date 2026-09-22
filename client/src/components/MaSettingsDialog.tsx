@@ -29,6 +29,17 @@ import {
   resetCompanyLogoOpacity,
   setCompanyLogoOpacity,
 } from "@/lib/chartLogoPrefs";
+import {
+  DEFAULT_MEASURE_LABEL_OPACITY,
+  DEFAULT_MEASURE_LABEL_SIZE_SCALE,
+  getMeasureLabelPrefs,
+  measureLabelOpacityFromPercent,
+  measureLabelOpacityToPercent,
+  measureLabelSizeFromPercent,
+  measureLabelSizeToPercent,
+  resetMeasureLabelPrefs,
+  setMeasureLabelPrefs,
+} from "@/lib/chartMeasureLabelPrefs";
 import { Slider } from "@/components/ui/slider";
 import {
   MaSettingsGridPanel,
@@ -59,6 +70,8 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [chartBackgroundColor, setChartBackgroundColor] = useState<string>(DEFAULT_CHART_BACKGROUND_COLOR);
   const [lineColor, setLineColor] = useState<string>(DEFAULT_HORIZONTAL_DRAWING_COLOR);
   const [logoOpacity, setLogoOpacity] = useState<number>(DEFAULT_COMPANY_LOGO_OPACITY);
+  const [measureLabelSize, setMeasureLabelSize] = useState<number>(DEFAULT_MEASURE_LABEL_SIZE_SCALE);
+  const [measureLabelOpacity, setMeasureLabelOpacity] = useState<number>(DEFAULT_MEASURE_LABEL_OPACITY);
 
   const { data, isLoading } = useQuery<MaSettingRow[]>({
     queryKey: ["/api/sentinel/ma-settings"],
@@ -95,6 +108,9 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
     if (open) {
       setLineColor(getHorizontalDrawingDefaults().color);
       setLogoOpacity(getCompanyLogoOpacity());
+      const measure = getMeasureLabelPrefs();
+      setMeasureLabelSize(measure.sizeScale);
+      setMeasureLabelOpacity(measure.opacity);
     }
   }, [open]);
 
@@ -110,6 +126,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
   lineColorRef.current = lineColor;
   const logoOpacityRef = useRef(logoOpacity);
   logoOpacityRef.current = logoOpacity;
+  const measureLabelSizeRef = useRef(measureLabelSize);
+  measureLabelSizeRef.current = measureLabelSize;
+  const measureLabelOpacityRef = useRef(measureLabelOpacity);
+  measureLabelOpacityRef.current = measureLabelOpacity;
 
   const saveIndicatorMutation = useMutation({
     mutationFn: async (currentRows: MaSettingRow[]) => {
@@ -154,6 +174,10 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
         def.lineStyle,
       );
       setCompanyLogoOpacity(logoOpacityRef.current);
+      setMeasureLabelPrefs({
+        sizeScale: measureLabelSizeRef.current,
+        opacity: measureLabelOpacityRef.current,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sentinel/chart-preferences"] });
@@ -347,6 +371,67 @@ export function MaSettingsDialog({ open, onOpenChange }: { open: boolean; onOpen
                     resetCompanyLogoOpacity();
                   }}
                   data-testid="button-reset-logo-opacity"
+                >
+                  Reset to default
+                </Button>
+              </div>
+            </section>
+
+            <section className="space-y-3" data-testid="chart-measure-labels-section">
+              <div>
+                <h3 className="text-sm font-medium">Measurement chart labels</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Size and fill of the green/red measure box on the chart. Kept on this computer until you reset it.
+                </p>
+              </div>
+              <div className="space-y-2.5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Label className="text-xs text-muted-foreground w-16 shrink-0">Size</Label>
+                  <Slider
+                    min={25}
+                    max={150}
+                    step={5}
+                    value={[measureLabelSizeToPercent(measureLabelSize)]}
+                    onValueChange={([v]) => {
+                      const next = measureLabelSizeFromPercent(v ?? 50);
+                      setMeasureLabelSize(next);
+                      setMeasureLabelPrefs({ sizeScale: next, opacity: measureLabelOpacity });
+                    }}
+                    className="w-48 max-w-full"
+                    data-testid="slider-measure-label-size"
+                  />
+                  <span className="text-xs font-mono text-muted-foreground w-10 tabular-nums" data-testid="text-measure-label-size">
+                    {measureLabelSizeToPercent(measureLabelSize)}%
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Label className="text-xs text-muted-foreground w-16 shrink-0">Opacity</Label>
+                  <Slider
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={[measureLabelOpacityToPercent(measureLabelOpacity)]}
+                    onValueChange={([v]) => {
+                      const next = measureLabelOpacityFromPercent(v ?? 65);
+                      setMeasureLabelOpacity(next);
+                      setMeasureLabelPrefs({ sizeScale: measureLabelSize, opacity: next });
+                    }}
+                    className="w-48 max-w-full"
+                    data-testid="slider-measure-label-opacity"
+                  />
+                  <span className="text-xs font-mono text-muted-foreground w-10 tabular-nums" data-testid="text-measure-label-opacity">
+                    {measureLabelOpacityToPercent(measureLabelOpacity)}%
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setMeasureLabelSize(DEFAULT_MEASURE_LABEL_SIZE_SCALE);
+                    setMeasureLabelOpacity(DEFAULT_MEASURE_LABEL_OPACITY);
+                    resetMeasureLabelPrefs();
+                  }}
+                  data-testid="button-reset-measure-labels"
                 >
                   Reset to default
                 </Button>
