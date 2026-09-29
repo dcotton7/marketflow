@@ -14,6 +14,12 @@ import {
   type WatchlistConfigurableSortField,
 } from "@/components/WatchlistConfigurableTable";
 import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
+import {
+  compareGaugePct,
+  gaugeFieldsFromQuote,
+  watchlistQuotesUrl,
+  watchlistShowsEntryGauges,
+} from "@/lib/watchlist-entry-gauges";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +43,11 @@ interface TickerQuote {
   price: number;
   change: number;
   changePercent: number;
+  vwapPct?: number | null;
+  vwapTone?: "entry" | "safe" | "fail" | null;
+  ema620Pct?: number | null;
+  ema620Cross?: "up" | "down" | null;
+  ema620Tone?: "entry" | "safe" | "fail" | null;
 }
 
 type SortField = WatchlistConfigurableSortField;
@@ -117,12 +128,13 @@ export default function InfoPopPage() {
   }, []);
 
   const symbols = watchlistItems?.map((item) => item.symbol.trim().toUpperCase()) || [];
+  const gaugesOn = watchlistShowsEntryGauges(columns);
   const { data: quotes, isLoading: quotesLoading } = useQuery<TickerQuote[]>({
-    queryKey: ["namedWatchlistQuotesExtended", { symbolsKey: symbols.join(","), schema: 3 }],
+    queryKey: ["namedWatchlistQuotesExtended", { symbolsKey: symbols.join(","), schema: 4, gaugesOn }],
     queryFn: async () => {
       if (symbols.length === 0) return [];
       const res = await fetch(
-        `/api/watchlist/quotes?symbols=${encodeURIComponent(symbols.join(","))}&extended=true`,
+        watchlistQuotesUrl(symbols, { extended: true, gauges: gaugesOn }),
         { credentials: "include" }
       );
       if (!res.ok) {
@@ -149,6 +161,7 @@ export default function InfoPopPage() {
           price: Number(r.price ?? r.last ?? 0) || 0,
           change: Number(r.change ?? 0) || 0,
           changePercent: Number(r.changePercent ?? r.change_pct ?? 0) || 0,
+          ...gaugeFieldsFromQuote(r),
         };
       });
     },
@@ -178,6 +191,7 @@ export default function InfoPopPage() {
         entryPct,
         stop,
         stopPct,
+        ...gaugeFieldsFromQuote(quote),
       };
     });
   }, [watchlistItems, quotes]);
@@ -216,6 +230,12 @@ export default function InfoPopPage() {
           break;
         case "stopPct":
           cmp = (a.stopPct || 0) - (b.stopPct || 0);
+          break;
+        case "vwapPct":
+          cmp = compareGaugePct(a.vwapPct, b.vwapPct);
+          break;
+        case "ema620":
+          cmp = compareGaugePct(a.ema620Pct, b.ema620Pct);
           break;
       }
       return sortDir === "asc" ? cmp : -cmp;

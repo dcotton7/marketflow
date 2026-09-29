@@ -17,6 +17,7 @@ import { requireAdmin } from "../middleware/requireAdmin";
 import { requireSentinelAuth } from "../middleware/requireSentinelAuth";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getClusterById } from "./universe";
+import { gaugeOrEmpty, loadEntryGauges } from "../entry-gauge";
 import { db } from "../db";
 import { subthemes, themes, tickers as tickerTable, tickerSliceMemberships, tnnSettings } from "@shared/schema";
 import {
@@ -434,10 +435,18 @@ router.get("/themes/:id/members", async (req: Request, res: Response) => {
     });
     
     console.log(`[API] /themes/${id}/members - Sample ticker A/D:`, enrichedMembers[0]?.symbol, enrichedMembers[0]?.accDistDays);
-    
+
+    let withGauges = enrichedMembers;
+    try {
+      const gauges = await loadEntryGauges(enrichedMembers.map((m) => m.symbol));
+      withGauges = enrichedMembers.map((m) => ({ ...m, ...gaugeOrEmpty(gauges, m.symbol) }));
+    } catch (err) {
+      console.warn(`[API] /themes/${id}/members - entry gauges unavailable:`, err);
+    }
+
     res.json({
       themeId: id,
-      members: enrichedMembers,
+      members: withGauges,
       accDistStats, // Theme-specific A/D aggregates
       totalCount: enrichedMembers.length,
       leaderCount: enrichedMembers.filter(m => m.isLeader).length,

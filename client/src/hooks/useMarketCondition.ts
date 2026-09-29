@@ -138,6 +138,11 @@ export interface TickerMetrics {
   leaderScore?: number;
   isLeader?: boolean;
   isPinned?: boolean;
+  vwapPct?: number | null;
+  vwapTone?: "entry" | "safe" | "fail" | null;
+  ema620Pct?: number | null;
+  ema620Cross?: "up" | "down" | null;
+  ema620Tone?: "entry" | "safe" | "fail" | null;
   // Historical ticker data for time-slice comparison
   historicalPrice?: number;
   historicalPct?: number;

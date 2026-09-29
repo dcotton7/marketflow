@@ -4,8 +4,10 @@ import { WatchlistInlinePriceCell } from "@/components/WatchlistInlinePriceCell"
 import { WatchlistResizableTh } from "@/components/WatchlistResizableTh";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CssVariables } from "@/context/SystemSettingsContext";
+import { EntryGaugeValue } from "@/components/EntryGaugeValue";
 import type { WatchlistColumnEntry, WatchlistColumnId } from "@/lib/watchlist-column-profile";
 import { WATCHLIST_COLUMN_META } from "@/lib/watchlist-column-profile";
+import type { Ema620Cross, EntryGaugeTone } from "@shared/entry-gauge";
 import { BarChart3, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +33,9 @@ export type WatchlistConfigurableSortField =
   | "entry"
   | "entryPct"
   | "stop"
-  | "stopPct";
+  | "stopPct"
+  | "vwapPct"
+  | "ema620";
 
 function sortFieldForColumn(id: WatchlistColumnId): WatchlistConfigurableSortField | null {
   switch (id) {
@@ -53,6 +57,10 @@ function sortFieldForColumn(id: WatchlistColumnId): WatchlistConfigurableSortFie
       return "stop";
     case "stopPct":
       return "stopPct";
+    case "vwapPct":
+      return "vwapPct";
+    case "ema620":
+      return "ema620";
     default:
       return null;
   }
@@ -70,6 +78,11 @@ export interface WatchlistConfigurableTickerRow {
   entryPct: number | null;
   stop: number | null;
   stopPct: number | null;
+  vwapPct?: number | null;
+  vwapTone?: EntryGaugeTone | null;
+  ema620Pct?: number | null;
+  ema620Cross?: Ema620Cross | null;
+  ema620Tone?: EntryGaugeTone | null;
 }
 
 export function WatchlistConfigurableTable({
@@ -125,10 +138,16 @@ export function WatchlistConfigurableTable({
 
   const headerInner = (id: WatchlistColumnId) => {
     const label = WATCHLIST_COLUMN_META[id].label;
+    const tip =
+      id === "vwapPct"
+        ? "Percent above or below session VWAP. Cyan is open for entry. Deep green has safety. Red is under."
+        : id === "ema620"
+          ? "5-minute 6/20 EMA. Cyan is open for entry. Deep green has safety. Red is under. × is a fresh cross."
+          : label;
     const sf = sortFieldForColumn(id);
     if (!sf) {
       return (
-        <span className={cn("block min-w-0 truncate font-medium leading-none", compact ? "text-[11px]" : "text-sm")} title={label}>
+        <span className={cn("block min-w-0 truncate font-medium leading-none", compact ? "text-[11px]" : "text-sm")} title={tip}>
           {label}
         </span>
       );
@@ -141,7 +160,7 @@ export function WatchlistConfigurableTable({
           id === "symbol" || id === "company" || id === "theme" ? "justify-start" : "justify-end"
         )}
       >
-        <span className="min-w-0 truncate leading-none" title={label}>
+        <span className="min-w-0 truncate leading-none" title={tip}>
           {label}
         </span>
         <span className="shrink-0">{renderSortIcon(sf)}</span>
@@ -402,6 +421,23 @@ export function WatchlistConfigurableTable({
               </TooltipTrigger>
               {tipContent(ticker)}
             </Tooltip>
+          </td>
+        );
+      case "vwapPct":
+        return (
+          <td key={colId} className={nd(`overflow-hidden ${pad} text-right font-mono ${bodyText}`)}>
+            <EntryGaugeValue kind="vwap" pct={ticker.vwapPct} tone={ticker.vwapTone} />
+          </td>
+        );
+      case "ema620":
+        return (
+          <td key={colId} className={nd(`overflow-hidden ${pad} text-right font-mono ${bodyText}`)}>
+            <EntryGaugeValue
+              kind="ema620"
+              pct={ticker.ema620Pct}
+              tone={ticker.ema620Tone}
+              cross={ticker.ema620Cross}
+            />
           </td>
         );
       case "actions":

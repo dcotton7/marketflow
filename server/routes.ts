@@ -18,6 +18,8 @@ import { registerUploadRoutes } from "./uploads/routes";
 import { initMarketCondition } from "./market-condition";
 
 import * as alpaca from "./alpaca";
+import { gaugeOrEmpty, loadEntryGauges } from "./entry-gauge";
+import type { EntryGauge } from "@shared/entry-gauge";
 
 // In-memory cache for stock history data
 interface CacheEntry {
@@ -1583,6 +1585,17 @@ export async function registerRoutes(
         extended ? Promise.all(upperSymbols.map(s => getFundamentals(s).catch(() => null))) : Promise.resolve([] as (Awaited<ReturnType<typeof getFundamentals>> | null)[]),
       ]);
 
+      const wantGauges = parseQueryBool(req.query.gauges);
+      let gaugeMap = new Map<string, EntryGauge>();
+      if (wantGauges) {
+        const override = new Map<string, { price: number; vwap: number }>();
+        for (const symbol of upperSymbols) {
+          const q = quotesMap.get(symbol);
+          if (q && q.price > 0 && q.vwap > 0) override.set(symbol, { price: q.price, vwap: q.vwap });
+        }
+        gaugeMap = await loadEntryGauges(upperSymbols, override);
+      }
+
       const quotes = await Promise.all(
         upperSymbols.map(async (symbol, i) => {
           const q = quotesMap.get(symbol);
@@ -1607,6 +1620,7 @@ export async function registerRoutes(
             change: Math.round(change * 100) / 100,
             changePercent: Math.round(changePercent * 100) / 100,
             companyName,
+            ...(wantGauges ? gaugeOrEmpty(gaugeMap, symbol) : {}),
           };
           return extended ? { ...base, themeLabel } : base;
         })

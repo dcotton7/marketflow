@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ExternalLink, Plus, Loader2 } from "lucide-react";
+import { EntryGaugeValue } from "@/components/EntryGaugeValue";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useTickerTheme } from "@/hooks/useTickerTheme";
@@ -225,6 +226,8 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
             <tr className="text-[9px] uppercase tracking-wide text-slate-500">
               <th className="text-left font-medium py-0.5">Symbol</th>
               <th className="text-right font-medium py-0.5">Pct</th>
+              <th className="text-right font-medium py-0.5" title="Percent above or below session VWAP">VW</th>
+              <th className="text-right font-medium py-0.5" title="5-minute 6/20 EMA. × marks a fresh cross.">6/20</th>
               <th className="text-right font-medium py-0.5">RS#</th>
               <th className="text-right font-medium py-0.5">Ldr</th>
               <th className="text-right font-medium py-0.5">A/D</th>
@@ -242,18 +245,31 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
                   )}
                 >
                   <td className="py-0.5 text-left">
-                    <span
+                    <Link
+                      href={`/sentinel/charts?symbol=${encodeURIComponent(m.symbol)}`}
                       className={cn(
-                        "font-medium",
-                        isCurrent ? "text-cyan-300" : "text-slate-200"
+                        "font-medium hover:underline",
+                        isCurrent ? "text-cyan-300" : "text-slate-200 hover:text-cyan-300"
                       )}
+                      title={isCurrent ? m.symbol : `Open ${m.symbol}`}
                     >
                       {m.symbol}
-                    </span>
+                    </Link>
                     {m.isCore && <span className="ml-0.5 text-[9px] text-amber-400">★</span>}
                   </td>
                   <td className={cn("py-0.5 text-right tabular-nums", pctClass(m.pctChange))}>
                     {fmtPct(m.pctChange)}
+                  </td>
+                  <td className="py-0.5 text-right">
+                    <EntryGaugeValue kind="vwap" pct={m.vwapPct} tone={m.vwapTone} />
+                  </td>
+                  <td className="py-0.5 text-right">
+                    <EntryGaugeValue
+                      kind="ema620"
+                      pct={m.ema620Pct}
+                      tone={m.ema620Tone}
+                      cross={m.ema620Cross}
+                    />
                   </td>
                   <td className="py-0.5 text-right tabular-nums text-slate-400">
                     {m.rsRank ?? "—"}

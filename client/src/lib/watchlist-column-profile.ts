@@ -13,6 +13,8 @@ export type WatchlistColumnId =
   | "entryPct"
   | "stop"
   | "stopPct"
+  | "vwapPct"
+  | "ema620"
   | "actions";
 
 export const WATCHLIST_COLUMN_PROFILE_VERSION = 3 as const;
@@ -47,6 +49,8 @@ export const WATCHLIST_COLUMN_META: Record<
   entryPct: { label: "% Entry", defaultWidth: 96, minWidth: 40 },
   stop: { label: "Stop", defaultWidth: 112, minWidth: 44 },
   stopPct: { label: "% Stop", defaultWidth: 96, minWidth: 40 },
+  vwapPct: { label: "VWAP", defaultWidth: 72, minWidth: 52 },
+  ema620: { label: "6/20", defaultWidth: 72, minWidth: 52 },
   actions: { label: "", defaultWidth: 48, minWidth: 36 },
 };
 
