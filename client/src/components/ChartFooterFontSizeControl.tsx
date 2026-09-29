@@ -36,6 +36,7 @@ export function ChartFooterFontSizeControl({
         type="button"
         className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-30"
         disabled={atMin}
+        title="Smaller"
         aria-label={`Decrease ${section} font size`}
         onClick={() => onChange(value - 1)}
       >
@@ -48,6 +49,7 @@ export function ChartFooterFontSizeControl({
         type="button"
         className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-30"
         disabled={atMax}
+        title="Larger"
         aria-label={`Increase ${section} font size`}
         onClick={() => onChange(value + 1)}
       >

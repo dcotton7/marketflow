@@ -42,8 +42,8 @@ function fmtAccDist(days: number | null | undefined): string {
 function ThemeStat({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
     <div className="flex flex-col">
-      <span className="text-[9px] uppercase tracking-wide text-slate-500">{label}</span>
-      <span className={cn("text-[11px] font-medium tabular-nums", className ?? "text-slate-200")}>{value}</span>
+      <span className="text-[0.64em] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className={cn("text-[0.8em] font-medium tabular-nums", className ?? "text-slate-200")}>{value}</span>
     </div>
   );
 }
@@ -125,14 +125,14 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
   });
 
   if (themeLoading) {
-    return <div className="p-2 text-[11px] text-slate-500">Looking up theme…</div>;
+    return <div className="p-2 text-[0.8em] text-slate-500">Looking up theme…</div>;
   }
 
   if (!themeId) {
     return (
       <div className="p-2 space-y-1">
-        <div className="text-[11px] text-slate-400">No theme fits {sym}.</div>
-        <div className="text-[10px] text-slate-500">
+        <div className="text-[0.8em] text-slate-400">No theme fits {sym}.</div>
+        <div className="text-[0.72em] text-slate-500">
           Neither its sector and industry nor the classifier could place it in one of the 26 themes.
         </div>
       </div>
@@ -145,23 +145,23 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[13px] font-semibold text-slate-100 truncate">
+            <span className="text-[0.95em] font-semibold text-slate-100 truncate">
               {theme?.themeName ?? themeId}
             </span>
             {theme?.rank != null && (
-              <span className="shrink-0 rounded bg-slate-700/50 px-1 py-0.5 text-[9px] font-medium text-slate-300">
+              <span className="shrink-0 rounded bg-slate-700/50 px-1 py-0.5 text-[0.64em] font-medium text-slate-300">
                 #{theme.rank}
                 {theme.totalThemes ? ` of ${theme.totalThemes}` : ""}
               </span>
             )}
           </div>
-          <div className="text-[10px] text-slate-500">
+          <div className="text-[0.72em] text-slate-500">
             {membersData?.totalCount ?? rows.length} tickers
           </div>
         </div>
         <Link
           href={`/sentinel/market-condition?theme=${themeId}`}
-          className="shrink-0 inline-flex items-center gap-0.5 text-[10px] text-cyan-400 hover:text-cyan-300"
+          className="shrink-0 inline-flex items-center gap-0.5 text-[0.72em] text-cyan-400 hover:text-cyan-300"
           title="Open this theme in Market Flow"
         >
           Flow <ExternalLink className="h-2.5 w-2.5" />
@@ -172,8 +172,8 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
       {!isMember && !justAdded && (
         <div className="flex items-center justify-between gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-1">
           <div className="min-w-0">
-            <div className="text-[10px] font-medium text-amber-300">{sym} is not in this theme</div>
-            <div className="text-[9px] text-amber-200/70 truncate">
+            <div className="text-[0.72em] font-medium text-amber-300">{sym} is not in this theme</div>
+            <div className="text-[0.64em] text-amber-200/70 truncate">
               Best fit from {theme?.source === "llm" ? "the classifier" : theme?.basis || "its sector"}
             </div>
           </div>
@@ -197,7 +197,7 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
       )}
 
       {/* Theme readings */}
-      <div className="grid grid-cols-4 gap-1.5 rounded bg-slate-800/40 px-1.5 py-1">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 rounded bg-slate-800/40 px-1.5 py-1">
         <ThemeStat label="Score" value={theme?.score != null ? theme.score.toFixed(0) : "—"} />
         <ThemeStat
           label="Median"
@@ -217,14 +217,15 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
 
       {/* Members */}
       {membersLoading ? (
-        <div className="p-2 text-[11px] text-slate-500">Loading tickers…</div>
+        <div className="p-2 text-[0.8em] text-slate-500">Loading tickers…</div>
       ) : rows.length === 0 ? (
-        <div className="p-2 text-[11px] text-slate-500">No tickers reporting for this theme.</div>
+        <div className="p-2 text-[0.8em] text-slate-500">No tickers reporting for this theme.</div>
       ) : (
-        <table className="w-full text-[11px]">
+        <div className="overflow-x-auto">
+        <table className="w-max border-separate border-spacing-x-2 text-[0.8em] whitespace-nowrap">
           <thead>
-            <tr className="text-[9px] uppercase tracking-wide text-slate-500">
-              <th className="text-left font-medium py-0.5">Symbol</th>
+            <tr className="text-[0.72em] uppercase tracking-wide text-slate-500">
+              <th className="text-left font-medium py-0.5 pr-1">Symbol</th>
               <th className="text-right font-medium py-0.5">Pct</th>
               <th className="text-right font-medium py-0.5" title="Percent above or below session VWAP">VW</th>
               <th className="text-right font-medium py-0.5" title="5-minute 6/20 EMA. × marks a fresh cross.">6/20</th>
@@ -255,7 +256,7 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
                     >
                       {m.symbol}
                     </Link>
-                    {m.isCore && <span className="ml-0.5 text-[9px] text-amber-400">★</span>}
+                    {m.isCore && <span className="ml-0.5 text-[0.75em] text-amber-400">★</span>}
                   </td>
                   <td className={cn("py-0.5 text-right tabular-nums", pctClass(m.pctChange))}>
                     {fmtPct(m.pctChange)}
@@ -294,6 +295,7 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

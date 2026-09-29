@@ -1036,7 +1036,7 @@ export function SetupInfoPanel({
         className="border border-border rounded p-2.5 overflow-hidden bg-background flex flex-col text-left w-full min-h-0 flex-1"
         data-testid={`${pid}box3-setup-info`}
       >
-        <div className="flex w-full items-center gap-2 shrink-0 mb-1.5">
+        <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 shrink-0 mb-1.5">
           <button
             type="button"
             onClick={() => setPanelCollapsed((c) => !c)}
