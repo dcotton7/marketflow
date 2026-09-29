@@ -3,8 +3,7 @@
 //
 // Shows the same member readings as the Market Flow workbench, cut down to what
 // survives a side panel: symbol, change, RS rank, leader score, accumulation.
-// The charted ticker is pinned to the top so it can be read against its peers
-// without hunting for it.
+// Headers sort the list. The charted ticker stays highlighted.
 //
 // A stock that is not in any theme still gets one, worked out from its sector
 // and industry or, failing that, from a model. That answer is labelled and
@@ -14,7 +13,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ExternalLink, Plus, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, Plus, Loader2 } from "lucide-react";
 import { EntryGaugeValue } from "@/components/EntryGaugeValue";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -38,6 +37,81 @@ function fmtAccDist(days: number | null | undefined): string {
   return days > 0 ? `A:${days}` : `D:${Math.abs(days)}`;
 }
 
+type ThemeSortKey = "symbol" | "pct" | "vwap" | "ema620" | "rs" | "ldr" | "ad";
+
+function compareMissingLast(
+  a: number | null | undefined,
+  b: number | null | undefined,
+  dir: number
+): number {
+  const aMissing = a == null || Number.isNaN(a);
+  const bMissing = b == null || Number.isNaN(b);
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  return (a - b) * dir;
+}
+
+function compareThemeRows(a: TickerMetrics, b: TickerMetrics, key: ThemeSortKey, dir: number): number {
+  switch (key) {
+    case "symbol":
+      return a.symbol.localeCompare(b.symbol) * dir;
+    case "pct":
+      return compareMissingLast(a.pctChange, b.pctChange, dir);
+    case "vwap":
+      return compareMissingLast(a.vwapPct, b.vwapPct, dir);
+    case "ema620":
+      return compareMissingLast(a.ema620Pct, b.ema620Pct, dir);
+    case "rs":
+      return compareMissingLast(a.rsRank, b.rsRank, dir);
+    case "ldr":
+      return compareMissingLast(a.leaderScore, b.leaderScore, dir);
+    case "ad":
+      return compareMissingLast(a.accDistDays, b.accDistDays, dir);
+  }
+}
+
+function SortTh({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onSort,
+  align = "right",
+  title,
+  className,
+}: {
+  label: string;
+  sortKey: ThemeSortKey;
+  activeKey: ThemeSortKey;
+  dir: "asc" | "desc";
+  onSort: (key: ThemeSortKey) => void;
+  align?: "left" | "right";
+  title?: string;
+  className?: string;
+}) {
+  const active = activeKey === sortKey;
+  return (
+    <th className={cn("py-0.5 font-medium", align === "left" ? "text-left pr-1" : "text-right", className)}>
+      <button
+        type="button"
+        title={title ?? `Sort by ${label}`}
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          "inline-flex items-center gap-0.5 uppercase tracking-wide hover:text-slate-200",
+          align === "right" && "ml-auto",
+          className
+        )}
+      >
+        {label}
+        {active ? (
+          dir === "asc" ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />
+        ) : null}
+      </button>
+    </th>
+  );
+}
+
 /** A one-line reading of the theme itself, above its members. */
 function ThemeStat({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
@@ -53,6 +127,8 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [justAdded, setJustAdded] = useState(false);
+  const [sortKey, setSortKey] = useState<ThemeSortKey>("ldr");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Membership feeds theme scores, breadth and the scanner's theme signals, so
   // changing it is an admin act everywhere else in the app. Same rule here.
@@ -66,18 +142,21 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
 
   const isMember = theme?.source === "member";
 
-  // Leader score descending matches Market Flow's default, so the same theme
-  // reads the same way in both places. The charted ticker jumps the queue.
   const rows = useMemo<TickerMetrics[]>(() => {
     const members = [...(membersData?.members ?? [])];
-    members.sort((a, b) => (b.leaderScore ?? 0) - (a.leaderScore ?? 0));
-    const idx = members.findIndex((m) => m.symbol.toUpperCase() === sym);
-    if (idx > 0) {
-      const [current] = members.splice(idx, 1);
-      members.unshift(current);
-    }
+    const dir = sortDir === "asc" ? 1 : -1;
+    members.sort((a, b) => compareThemeRows(a, b, sortKey, dir));
     return members;
-  }, [membersData, sym]);
+  }, [membersData, sortKey, sortDir]);
+
+  const toggleSort = (key: ThemeSortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "symbol" || key === "rs" ? "asc" : "desc");
+  };
 
   const addToTheme = useMutation({
     mutationFn: async () => {
@@ -225,13 +304,21 @@ export function ThemeTabContent({ symbol }: { symbol: string }) {
         <table className="w-max border-separate border-spacing-x-2 text-[0.8em] whitespace-nowrap">
           <thead>
             <tr className="text-[0.72em] uppercase tracking-wide text-slate-500">
-              <th className="text-left font-medium py-0.5 pr-1">Symbol</th>
-              <th className="text-right font-medium py-0.5">Pct</th>
-              <th className="text-right font-medium py-0.5" title="Percent above or below session VWAP">VW</th>
-              <th className="text-right font-medium py-0.5" title="5-minute 6/20 EMA. × marks a fresh cross.">6/20</th>
-              <th className="text-right font-medium py-0.5">RS#</th>
-              <th className="text-right font-medium py-0.5">Ldr</th>
-              <th className="text-right font-medium py-0.5">A/D</th>
+              <SortTh label="Symbol" sortKey="symbol" activeKey={sortKey} dir={sortDir} align="left" onSort={toggleSort} />
+              <SortTh label="Pct" sortKey="pct" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+              <SortTh
+                label="VWAP"
+                sortKey="vwap"
+                activeKey={sortKey}
+                dir={sortDir}
+                onSort={toggleSort}
+                title="Percent above or below session VWAP"
+                className="text-yellow-400"
+              />
+              <SortTh label="6/20" sortKey="ema620" activeKey={sortKey} dir={sortDir} onSort={toggleSort} title="5-minute 6/20 EMA. × marks a fresh cross." />
+              <SortTh label="RS#" sortKey="rs" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+              <SortTh label="Ldr" sortKey="ldr" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
+              <SortTh label="A/D" sortKey="ad" activeKey={sortKey} dir={sortDir} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
