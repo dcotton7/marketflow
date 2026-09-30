@@ -103,7 +103,7 @@ export function groupLinkAccent(
   return { accentColor: pal.unlinkedColor, accentLabel: UNLINKED_LABEL };
 }
 
-export type StartHereWidgetType = "watchlist" | "chart" | "news" | "flow" | "themeCharts";
+export type StartHereWidgetType = "watchlist" | "chart" | "news" | "flow" | "themeCharts" | "marketLeaders";
 
 export interface StartHereGroupState {
   colorIndex: number;
@@ -170,7 +170,8 @@ function isStartHereWidgetType(t: unknown): t is StartHereWidgetType {
     t === "chart" ||
     t === "news" ||
     t === "flow" ||
-    t === "themeCharts"
+    t === "themeCharts" ||
+    t === "marketLeaders"
   );
 }
 
@@ -631,6 +632,7 @@ const WIDGET_TEMPLATE: Record<
   news: { w: 4, h: 14, minW: 2, minH: 5 },
   flow: { w: 12, h: 8, minW: 1, minH: 2 },
   themeCharts: { w: 12, h: 40, minW: 6, minH: 12 },
+  marketLeaders: { w: 6, h: 16, minW: 4, minH: 8 },
 };
 
 function isValidFlowGridCells(x: unknown): x is StartHereFlowGridCells {
@@ -691,6 +693,7 @@ const DEFAULT_LAYOUT_POSITIONS: Record<StartHereWidgetType, { x: number; y: numb
   news: { x: 8, y: 0 },
   flow: { x: 0, y: 14 },
   themeCharts: { x: 0, y: 22 },
+  marketLeaders: { x: 6, y: 14 },
 };
 
 /** Stable ids for factory / reset (one shared group). */
@@ -700,6 +703,7 @@ export const DEFAULT_INSTANCE_IDS: Record<StartHereWidgetType, string> = {
   news: "sh_inst_news",
   flow: "sh_inst_flow",
   themeCharts: "sh_inst_theme_charts",
+  marketLeaders: "sh_inst_market_leaders",
 };
 
 export const DEFAULT_GROUP_ID = "sh_g_default";

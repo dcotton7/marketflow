@@ -110,6 +110,8 @@ app.use((req, res, next) => {
     logMem("pre-routes");
     // NOW register routes (which starts MC polling)
     await registerRoutes(httpServer, app);
+    const { registerMarketLeaderRoutes } = await import("./market-leaders/routes");
+    await registerMarketLeaderRoutes(app);
     console.log("Routes registered successfully");
     logMem("routes registered (MC polling started)");
 

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar, PanelLeftClose, PanelLeftOpen, Crown } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
@@ -247,6 +247,7 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const isMarketConditionPage = location === "/sentinel/market-condition";
   const isChartsPage = location === "/sentinel/charts" || location === "/sentinel/beta-charts";
   const isStartHerePage = location === "/sentinel/start-here";
+  const isLeadersPage = location === "/sentinel/market-leaders";
   const isEvaluatePage = location === "/sentinel/evaluate";
 
   const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
@@ -357,6 +358,17 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
             >
               <BarChart3 className="w-4 h-4" />
               {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Charts</span>}
+            </Button>
+          </Link>
+          <Link href="/sentinel/market-leaders">
+            <Button
+              variant={isLeadersPage ? "secondary" : "ghost"}
+              size="sm"
+              className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
+              data-testid="nav-market-leaders"
+            >
+              <Crown className="w-4 h-4" />
+              {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Leaders</span>}
             </Button>
           </Link>
           <Button 

@@ -23,6 +23,7 @@ import { ChartPreviewWidget } from "@/components/start-here/ChartPreviewWidget";
 import { NewsPortalWidget } from "@/components/start-here/NewsPortalWidget";
 import { StartHereFlowWidget } from "@/components/start-here/StartHereFlowWidget";
 import { LiveThemeChartsWidget } from "@/components/start-here/LiveThemeChartsWidget";
+import { MarketLeadersWidget } from "@/components/start-here/MarketLeadersWidget";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -105,6 +106,7 @@ const WIDGET_MENU: { type: StartHereWidgetType; label: string }[] = [
   { type: "news", label: "News" },
   { type: "flow", label: "Market Flow" },
   { type: "themeCharts", label: "Live Theme Charts" },
+  { type: "marketLeaders", label: "Market Leaders" },
 ];
 
 /** False: standard non-overlapping grid. Stacking helpers stay for a future notes/overlap mode. */
@@ -884,6 +886,16 @@ function StartHereGridHost() {
                 )}
                 {meta.type === "themeCharts" && (
                   <LiveThemeChartsWidget
+                    key={`${activeStartId}-${item.i}`}
+                    cssVariables={cssVariables}
+                    instanceId={item.i}
+                    groupId={meta.groupId}
+                    accentColor={accentColor}
+                    onClose={onClose}
+                  />
+                )}
+                {meta.type === "marketLeaders" && (
+                  <MarketLeadersWidget
                     key={`${activeStartId}-${item.i}`}
                     cssVariables={cssVariables}
                     instanceId={item.i}
