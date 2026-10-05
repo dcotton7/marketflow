@@ -8,6 +8,8 @@ export interface SentinelAuthUser {
   tier: string;
   isAdmin: boolean;
   isActive?: boolean;
+  /** Server-decided: may this account see vendor market data (prices, bars, news, signals)? */
+  isOwner?: boolean;
 }
 
 interface AuthContextType {

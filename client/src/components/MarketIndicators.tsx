@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { TrendingUp, TrendingDown } from "lucide-react";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 
 interface MarketQuote {
   symbol: string;
@@ -22,10 +23,22 @@ const MARKET_SYMBOLS = [
 
 export function MarketIndicators() {
   const [, setLocation] = useLocation();
+  const { user } = useSentinelAuth();
+  const dataAllowed = user?.isOwner === true;
   const { data: quotes, isLoading } = useQuery<MarketQuote[]>({
     queryKey: ["/api/market/indicators"],
     refetchInterval: 60000,
+    enabled: dataAllowed,
   });
+
+  if (!dataAllowed) {
+    return (
+      <div className="space-y-1" data-testid="market-indicators-unavailable">
+        <p className="text-sm font-bold text-foreground mb-2">Market</p>
+        <p className="text-xs text-muted-foreground">Not available on your plan</p>
+      </div>
+    );
+  }
 
   const handleClick = (symbol: string) => {
     // Remove ^ prefix for navigation (VIX has ^VIX symbol)

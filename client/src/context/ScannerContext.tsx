@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import type { DiscoveryCard, ScannerMode, ScannerStatus } from "@shared/scanner-types";
+import { useSentinelAuth } from "@/context/SentinelAuthContext";
 
 interface ScannerContextValue {
   /** Current scanner mode */
@@ -116,6 +117,9 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
     }
   });
 
+  const { user } = useSentinelAuth();
+  const streamEnabled = mode !== "off" && user?.isOwner === true;
+
   const [panelOpen, setPanelOpenState] = useState(false);
   const [discoveries, setDiscoveries] = useState<DiscoveryCard[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -158,7 +162,7 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
   // ── SSE connection with hard reconnect (Render can CLOSE the stream) ──
 
   useEffect(() => {
-    if (mode === "off") {
+    if (!streamEnabled) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
       setStreamStatus("offline");
@@ -242,12 +246,12 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
       eventSourceRef.current = null;
       setStreamStatus("offline");
     };
-  }, [mode]);
+  }, [streamEnabled]);
 
   // ── History seed + poll fallback (keeps feed alive if SSE stalls) ───────
 
   useEffect(() => {
-    if (mode === "off") return;
+    if (!streamEnabled) return;
 
     let cancelled = false;
 
@@ -277,12 +281,12 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(handle);
     };
-  }, [mode]);
+  }, [streamEnabled]);
 
   // ── Periodic status fetch ─────────────────────────────────────────────
 
   useEffect(() => {
-    if (mode === "off") return;
+    if (!streamEnabled) return;
 
     const fetchStatus = () => {
       fetch("/api/scanner/status")
@@ -294,7 +298,7 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
     fetchStatus();
     const handle = setInterval(fetchStatus, 15_000);
     return () => clearInterval(handle);
-  }, [mode]);
+  }, [streamEnabled]);
 
   return (
     <ScannerContext.Provider

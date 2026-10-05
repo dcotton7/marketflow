@@ -8,6 +8,7 @@ import { eq, and, or, not, inArray, sql, isNull, desc } from "drizzle-orm";
 import { db } from "../db";
 import { requireSentinelAuth as requireAuth } from "../middleware/requireSentinelAuth";
 import { clearLoginFailures, isLoginRateLimited, recordLoginFailure } from "../middleware/loginRateLimit";
+import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middleware/dataAccess";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
@@ -53,11 +54,8 @@ declare module "express-session" {
   }
 }
 
-const registerSchema = z.object({
-  username: z.string().min(3).max(50),
-  email: z.string().email(),
-  password: z.string().min(8).max(200),
-});
+const REGISTRATION_CLOSED_MESSAGE =
+  "Sign-up is closed. Accounts are created by the administrator by invitation only.";
 
 const loginSchema = z.object({
   username: z.string().min(1).max(50),
@@ -225,6 +223,23 @@ export function registerSentinelRoutes(app: Express): void {
     })
   );
 
+  const ownerConfig = loadOwnerConfig();
+  console.log(
+    ownerConfig.ownerIds
+      ? `[auth] Vendor data limited to OWNER_USER_IDS (${ownerConfig.ownerIds.size} id(s))`
+      : "[auth] OWNER_USER_IDS unset — vendor data limited to admin accounts",
+  );
+  const isOwner = (user: { id: number; isAdmin?: boolean | null; isActive?: boolean | null }) =>
+    isOwnerUser(user, ownerConfig);
+
+  app.use(
+    createApiAccessGuard({
+      config: ownerConfig,
+      getUser: async (userId) => (db ? sentinelModels.getUserById(userId) : allowAuthBypass ? { id: userId, isAdmin: false } : null),
+      destroySession: (req) => new Promise<void>((resolve) => req.session.destroy(() => resolve())),
+    }),
+  );
+
   /** New session id after login/register/password change (mitigates fixation). */
   function commitAuthedSession(
     req: Request,
@@ -284,57 +299,8 @@ export function registerSentinelRoutes(app: Express): void {
     });
   }
 
-  app.post("/api/auth/register", async (req: Request, res: Response) => {
-    try {
-      if (!db) {
-        return res.status(503).json({ error: "Registration requires database" });
-      }
-
-      const data = registerSchema.parse(req.body);
-
-      const existingUser = await sentinelModels.getUserByUsername(data.username);
-      if (existingUser) {
-        return res.status(400).json({ error: "Username already exists" });
-      }
-
-      const existingEmail = await sentinelModels.getUserByEmail(data.email);
-      if (existingEmail) {
-        return res.status(400).json({ error: "Email already exists" });
-      }
-
-      const passwordHash = await bcrypt.hash(data.password, 10);
-      const user = await sentinelModels.createUser({
-        username: data.username,
-        email: data.email,
-        passwordHash,
-      });
-
-      // Seed starter rules for new user
-      try {
-        await sentinelModels.seedStarterRulesForUser(user.id);
-        console.log(`[Sentinel] Seeded ${61} starter rules for user ${user.username}`);
-      } catch (seedError) {
-        console.error("Failed to seed starter rules:", seedError);
-        // Don't fail registration if seeding fails
-      }
-
-      clearLoginFailures(req);
-      const tier = normalizeSentinelTier(user.tier);
-      commitAuthedSession(req, res, user.id, user.username, {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        tier,
-        isAdmin: user.isAdmin ?? false,
-        isActive: user.isActive !== false,
-      }, 201);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors[0].message });
-      }
-      console.error("Register error:", error);
-      res.status(500).json({ error: "Registration failed" });
-    }
+  app.post("/api/auth/register", (_req: Request, res: Response) => {
+    res.status(403).json({ error: REGISTRATION_CLOSED_MESSAGE, code: "REGISTRATION_CLOSED" });
   });
 
   // Get current authenticated user
@@ -358,6 +324,7 @@ export function registerSentinelRoutes(app: Express): void {
             tier: normalizeSentinelTier(user.tier),
             isAdmin: user.isAdmin ?? false,
             isActive: user.isActive !== false,
+            isOwner: isOwner(user),
             accountSize: user.accountSize,
           });
         }
@@ -375,6 +342,7 @@ export function registerSentinelRoutes(app: Express): void {
         tier: "pro_plus",
         isAdmin: false,
         isActive: true,
+        isOwner: isOwner({ id: req.session.userId, isAdmin: false }),
       });
     } catch (error) {
       console.error("Get current user error:", error);
@@ -417,6 +385,7 @@ export function registerSentinelRoutes(app: Express): void {
         tier: normalizeSentinelTier(user.tier),
         isAdmin: user.isAdmin ?? false,
         isActive: user.isActive !== false,
+        isOwner: isOwner(user),
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -459,7 +428,7 @@ export function registerSentinelRoutes(app: Express): void {
           isActive: true,
         };
         clearLoginFailures(req);
-        return commitAuthedSession(req, res, mockUser.id, mockUser.username, { ...mockUser });
+        return commitAuthedSession(req, res, mockUser.id, mockUser.username, { ...mockUser, isOwner: isOwner(mockUser) });
       }
 
       let user = await sentinelModels.getUserByUsername(username);
@@ -508,6 +477,7 @@ export function registerSentinelRoutes(app: Express): void {
         tier,
         isAdmin: user.isAdmin ?? false,
         isActive: true,
+        isOwner: isOwner(user),
       });
     } catch (error) {
       console.error("Login error:", error);

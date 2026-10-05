@@ -55,7 +55,7 @@ function Router() {
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/evaluate">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <SentinelEvaluatePage />
         </SentinelProtectedRoute>
       </Route>
@@ -87,12 +87,12 @@ function Router() {
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/patterns">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <PatternLearningPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/bigidea">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <BigIdeaPage />
         </SentinelProtectedRoute>
       </Route>
@@ -102,32 +102,32 @@ function Router() {
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/charts/:symbol?">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <SentinelChartsPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/beta-charts">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <BetaChartsPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/start-here">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <StartHerePage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/market-leaders">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <MarketLeadersPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/analysis">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <AnalysisPopoutPage />
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/live-theme-charts">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <LiveThemeChartsPopoutPage />
         </SentinelProtectedRoute>
       </Route>
@@ -137,14 +137,14 @@ function Router() {
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/market-condition">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
             <MarketConditionPage />
           </Suspense>
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
             <MarketConditionPage />
           </Suspense>
@@ -153,14 +153,14 @@ function Router() {
 
       {/* Symbol/Chart page (accessible from Industry Comps, BigIdea, etc.) */}
       <Route path="/symbol/:symbol">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <SymbolPage />
         </SentinelProtectedRoute>
       </Route>
 
       {/* InfoPop — chrome-less watchlist floater */}
       <Route path="/infopop">
-        <SentinelProtectedRoute>
+        <SentinelProtectedRoute requiresData>
           <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading InfoPop...</div>}>
             <InfoPopPage />
           </Suspense>
@@ -169,23 +169,29 @@ function Router() {
 
       {/* Scanner pop-out window */}
       <Route path="/scanner-popout">
-        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Scanner...</div>}>
-          <ScannerPopoutPage />
-        </Suspense>
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Scanner...</div>}>
+            <ScannerPopoutPage />
+          </Suspense>
+        </SentinelProtectedRoute>
       </Route>
 
       {/* Workspace pop-out window */}
       <Route path="/workspace-popout">
-        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workspace...</div>}>
-          <WorkspacePopoutPage />
-        </Suspense>
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workspace...</div>}>
+            <WorkspacePopoutPage />
+          </Suspense>
+        </SentinelProtectedRoute>
       </Route>
 
       {/* Signal Workbench pop-out */}
       <Route path="/signal-workbench">
-        <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workbench...</div>}>
-          <SignalWorkbenchPage />
-        </Suspense>
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workbench...</div>}>
+            <SignalWorkbenchPage />
+          </Suspense>
+        </SentinelProtectedRoute>
       </Route>
       
       {/* Catch-all 404 */}
