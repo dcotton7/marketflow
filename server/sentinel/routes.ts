@@ -5,9 +5,10 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import OpenAI from "openai";
 import { eq, and, or, not, inArray, sql, isNull, desc } from "drizzle-orm";
-import { db } from "../db";
+import { db, getPool } from "../db";
 import { requireSentinelAuth as requireAuth } from "../middleware/requireSentinelAuth";
-import { clearLoginFailures, isLoginRateLimited, recordLoginFailure } from "../middleware/loginRateLimit";
+import { clearLoginFailures, clientKey, isLoginRateLimited, recordLoginFailure } from "../middleware/loginRateLimit";
+import { checkPasswordWithLockout, createLoginLockout, createPgLockStore, type LoginLockout } from "../middleware/loginLockout";
 import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middleware/dataAccess";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
@@ -240,6 +241,23 @@ export function registerSentinelRoutes(app: Express): void {
     }),
   );
 
+  let lockoutInstance: LoginLockout | null = null;
+  function loginLockout(): LoginLockout {
+    if (!lockoutInstance) {
+      const pool = getPool();
+      if (!pool) throw new Error("Login lockout store unavailable (no database pool)");
+      lockoutInstance = createLoginLockout({ store: createPgLockStore((text, params) => pool.query(text, params)) });
+    }
+    return lockoutInstance;
+  }
+
+  /** Equalises response time for unknown/locked accounts so they look like a wrong password. */
+  let dummyHash: string | null = null;
+  function dummyPasswordHash(): string {
+    if (!dummyHash) dummyHash = bcrypt.hashSync(`unused-${Date.now()}-${Math.random()}`, 10);
+    return dummyHash;
+  }
+
   /** New session id after login/register/password change (mitigates fixation). */
   function commitAuthedSession(
     req: Request,
@@ -441,21 +459,15 @@ export function registerSentinelRoutes(app: Express): void {
         user = await sentinelModels.getUserByUsernameCaseInsensitive("foreboding");
       }
 
-      if (!user) {
-        recordLoginFailure(req);
-        return invalidCreds();
-      }
-
-      if (!forebodingDevBypass && !user.passwordHash) {
-        recordLoginFailure(req);
-        return invalidCreds();
-      }
-
-      let match = forebodingDevBypass;
-      if (!match && user.passwordHash) {
-        match = await bcrypt.compare(password, user.passwordHash);
-      }
-      if (!match) {
+      const passwordHash = user?.passwordHash;
+      const ok = await checkPasswordWithLockout({
+        lockout: loginLockout(),
+        user,
+        ip: clientKey(req),
+        verifyPassword: async () => forebodingDevBypass || (!!passwordHash && bcrypt.compare(password, passwordHash)),
+        burnTime: () => bcrypt.compare(password, dummyPasswordHash()),
+      });
+      if (!ok || !user) {
         recordLoginFailure(req);
         return invalidCreds();
       }

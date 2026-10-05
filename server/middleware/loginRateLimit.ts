@@ -1,43 +1,58 @@
 import type { Request } from "express";
 
-const WINDOW_MS = 15 * 60 * 1000;
-const MAX_FAILURES = 25;
+/** In-memory per-IP throttle; auto-expires (unlike the per-account lock in loginLockout.ts). */
+export const LOGIN_IP_WINDOW_MS = 15 * 60 * 1000;
+export const LOGIN_IP_MAX_FAILURES = 10;
 
-function clientKey(req: Request): string {
-  return (typeof req.ip === "string" && req.ip) || req.socket.remoteAddress || "unknown";
+export function clientKey(req: Request): string {
+  return (typeof req.ip === "string" && req.ip) || req.socket?.remoteAddress || "unknown";
 }
 
-const failures = new Map<string, { count: number; windowStart: number }>();
+export function createLoginRateLimiter(opts: { max?: number; windowMs?: number; now?: () => number } = {}) {
+  const max = opts.max ?? LOGIN_IP_MAX_FAILURES;
+  const windowMs = opts.windowMs ?? LOGIN_IP_WINDOW_MS;
+  const now = opts.now ?? Date.now;
+  const failures = new Map<string, { count: number; windowStart: number }>();
 
-function prune(key: string, now: number) {
-  const e = failures.get(key);
-  if (e && now - e.windowStart > WINDOW_MS) {
-    failures.delete(key);
+  function live(key: string, t: number) {
+    const e = failures.get(key);
+    if (e && t - e.windowStart > windowMs) {
+      failures.delete(key);
+      return undefined;
+    }
+    return e;
   }
+
+  return {
+    isLimited(key: string): boolean {
+      const e = live(key, now());
+      return !!e && e.count >= max;
+    },
+    recordFailure(key: string): number {
+      const t = now();
+      const e = live(key, t) ?? { count: 0, windowStart: t };
+      e.count += 1;
+      failures.set(key, e);
+      if (e.count === max) console.warn(`[auth-audit] login throttled ip=${key} failures=${e.count} window=${windowMs / 60000}m`);
+      return e.count;
+    },
+    clear(key: string): void {
+      failures.delete(key);
+    },
+  };
 }
+
+const limiter = createLoginRateLimiter();
 
 /** Too many failed logins from this client in the rolling window. */
 export function isLoginRateLimited(req: Request): boolean {
-  const key = clientKey(req);
-  const now = Date.now();
-  prune(key, now);
-  const e = failures.get(key);
-  if (!e) return false;
-  if (now - e.windowStart > WINDOW_MS) return false;
-  return e.count >= MAX_FAILURES;
+  return limiter.isLimited(clientKey(req));
 }
 
 export function recordLoginFailure(req: Request): void {
-  const key = clientKey(req);
-  const now = Date.now();
-  let e = failures.get(key);
-  if (!e || now - e.windowStart > WINDOW_MS) {
-    e = { count: 0, windowStart: now };
-  }
-  e.count += 1;
-  failures.set(key, e);
+  limiter.recordFailure(clientKey(req));
 }
 
 export function clearLoginFailures(req: Request): void {
-  failures.delete(clientKey(req));
+  limiter.clear(clientKey(req));
 }
