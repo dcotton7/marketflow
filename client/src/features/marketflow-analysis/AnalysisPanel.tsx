@@ -40,6 +40,7 @@ import {
   Pin,
   X,
   GripVertical,
+  Sigma,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAnalysisPopout } from "@/hooks/useAnalysisPopout";
@@ -134,6 +135,7 @@ const MODULE_ICONS: Record<string, React.ReactNode> = {
   fundFlow: <TrendingUp className="w-4 h-4" />,
   sentiment: <Users className="w-4 h-4" />,
   positionSizing: <DollarSign className="w-4 h-4" />,
+  options: <Sigma className="w-4 h-4" />,
 };
 
 const MODULE_LABELS: Record<string, string> = {
@@ -148,6 +150,7 @@ const MODULE_LABELS: Record<string, string> = {
   fundFlow: "Fund Flow",
   sentiment: "Analyst Sentiment",
   positionSizing: "Position Sizing",
+  options: "Options Pulse",
 };
 
 function getSignalColor(signal: string): string {
@@ -328,6 +331,8 @@ function ModuleDataView({
       return <EarningsView data={data} />;
     case "positionSizing":
       return <PositionSizingView data={data} />;
+    case "options":
+      return <OptionsView data={data} />;
     default:
       return null;
   }
@@ -589,9 +594,14 @@ function SentimentView({ data }: { data: Record<string, unknown> }) {
     low: number;
     upside: number;
   } | null;
+  const putCallRatio = data.putCallRatio as number | null | undefined;
 
   return (
     <div className="text-xs space-y-2 mt-2">
+      <div>
+        <span className="text-muted-foreground">Put/Call (options volume):</span>{" "}
+        <span className="font-mono">{putCallRatio != null ? putCallRatio.toFixed(2) : "n/a"}</span>
+      </div>
       {consensus && (
         <div className="flex flex-wrap gap-x-3">
           <span className="text-green-500">
@@ -655,6 +665,131 @@ function EarningsView({ data }: { data: Record<string, unknown> }) {
       <div>
         <span className="text-muted-foreground">Beat rate:</span>{" "}
         {beatRate.toFixed(0)}%
+      </div>
+    </div>
+  );
+}
+
+interface OptionsPulseView {
+  spot: number | null;
+  fetchedAt: string;
+  session: string | null;
+  scope: { maxDte: number; strikeBandPct: number; expirations: number; contracts: number; truncated: boolean };
+  volumeDate: string | null;
+  callVolume: number;
+  putVolume: number;
+  pcVolumeRatio: number | null;
+  callPremium: number;
+  putPremium: number;
+  callPremiumSharePct: number | null;
+  openInterest: { total: number | null; label: string; coveragePct: number } | null;
+  volumeVsOi: number | null;
+  atm: {
+    expiration: string | null;
+    dte: number | null;
+    strike: number | null;
+    callIv: number | null;
+    putIv: number | null;
+    iv: number | null;
+    expectedMove: number | null;
+    expectedMovePct: number | null;
+  };
+  ivCoveragePct: number;
+}
+
+const NA = <span className="text-muted-foreground">n/a</span>;
+
+function fmtPremium(n: number): string {
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+function fmtIv(iv: number | null) {
+  return iv != null ? <span className="font-mono">{(iv * 100).toFixed(1)}%</span> : NA;
+}
+
+function OptionsView({ data }: { data: Record<string, unknown> }) {
+  const pulse = data.pulse as OptionsPulseView | null;
+  const error = data.error as string | null;
+  if (!pulse) {
+    return (
+      <div className="text-xs text-muted-foreground mt-2" data-ui-region="marketFlow:analysisOptionsCard">
+        Options data unavailable{error ? `: ${error}` : ""}.
+      </div>
+    );
+  }
+  const { atm, openInterest } = pulse;
+  return (
+    <div className="text-xs space-y-2 mt-2" data-ui-region="marketFlow:analysisOptionsCard">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className="text-muted-foreground">P/C volume:</span>{" "}
+          {pulse.pcVolumeRatio != null ? (
+            <span
+              className={cn(
+                "font-mono font-medium",
+                pulse.pcVolumeRatio >= 1 ? "text-red-400" : pulse.pcVolumeRatio <= 0.6 ? "text-green-400" : ""
+              )}
+            >
+              {pulse.pcVolumeRatio.toFixed(2)}
+            </span>
+          ) : (
+            NA
+          )}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Contracts:</span>{" "}
+          <span className="font-mono">
+            <span className="text-green-400">{pulse.callVolume.toLocaleString()}C</span>
+            {" / "}
+            <span className="text-red-400">{pulse.putVolume.toLocaleString()}P</span>
+          </span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Call premium:</span>{" "}
+          <span className="font-mono text-green-400">{fmtPremium(pulse.callPremium)}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Put premium:</span>{" "}
+          <span className="font-mono text-red-400">{fmtPremium(pulse.putPremium)}</span>
+          {pulse.callPremiumSharePct != null && (
+            <span className="text-muted-foreground ml-1">({pulse.callPremiumSharePct.toFixed(0)}% calls)</span>
+          )}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Vol / OI:</span>{" "}
+          {pulse.volumeVsOi != null ? <span className="font-mono">{pulse.volumeVsOi.toFixed(2)}×</span> : NA}
+          {openInterest && <span className="text-muted-foreground ml-1">({openInterest.label})</span>}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Open interest:</span>{" "}
+          {openInterest?.total != null ? <span className="font-mono">{openInterest.total.toLocaleString()}</span> : NA}
+        </div>
+        <div>
+          <span className="text-muted-foreground">ATM IV:</span> {fmtIv(atm.iv)}
+          {atm.iv != null && (atm.callIv == null || atm.putIv == null) && (
+            <span className="text-muted-foreground ml-1">(one leg)</span>
+          )}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Expected move:</span>{" "}
+          {atm.expectedMove != null && atm.expectedMovePct != null ? (
+            <span className="font-mono">
+              ±${atm.expectedMove.toFixed(2)} (±{atm.expectedMovePct.toFixed(1)}%)
+            </span>
+          ) : (
+            NA
+          )}
+        </div>
+      </div>
+      <div className="text-[10px] text-muted-foreground">
+        ATM straddle {atm.strike != null ? `$${atm.strike}` : "n/a"} exp {atm.expiration ?? "n/a"}
+        {atm.dte != null ? ` (${atm.dte}d)` : ""} · Scope ≤{pulse.scope.maxDte}d, ±{pulse.scope.strikeBandPct}% strikes,{" "}
+        {pulse.scope.contracts} contracts{pulse.scope.truncated ? " (truncated)" : ""} · IV on{" "}
+        {pulse.ivCoveragePct.toFixed(0)}% · Volume {pulse.volumeDate ?? "n/a"} · Live OPRA, fetched{" "}
+        {new Date(pulse.fetchedAt).toLocaleTimeString()}
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ import marketConditionRoutes from "./market-condition/routes";
 import marketflowAnalysisRoutes from "./market-condition/analysis/routes";
 import { registerUploadRoutes } from "./uploads/routes";
 import { initMarketCondition } from "./market-condition";
+import { buildTosLinkCmd, tosHelperOriginFromRequest } from "./bridge/toslink-installer";
 
 import * as alpaca from "./alpaca";
 import { gaugeOrEmpty, loadEntryGauges } from "./entry-gauge";
@@ -954,7 +955,39 @@ export async function registerRoutes(
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 
   const tosHelperDir = path.join(process.cwd(), "server", "bridge");
-  const tosHelperFiles = new Set(["tos-agent.ps1", "tos-win.ps1", "start-tos-agent.cmd"]);
+  const tosHelperFiles = new Set([
+    "tos-agent.ps1",
+    "tos-win.ps1",
+    "start-tos-agent.cmd",
+    "install-toslink.ps1",
+  ]);
+  const fidelityLeadDir = path.join(tosHelperDir, "fidelity-lead");
+  const fidelityLeadFiles = new Set(["manifest.json", "content.js", "background.js"]);
+  app.get("/tos-helper/ToSLink.cmd", (req, res) => {
+    const origin = tosHelperOriginFromRequest({
+      protocol: req.protocol,
+      headers: req.headers as Record<string, string | string[] | undefined>,
+    });
+    if (!origin) {
+      return res.status(400).type("text/plain").send("Could not determine app origin for ToSLink helper.");
+    }
+    const body = buildTosLinkCmd(origin);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Disposition", 'attachment; filename="ToSLink.cmd"');
+    res.send(body);
+  });
+  app.get("/tos-helper/fidelity-lead/:file", (req, res) => {
+    const file = path.basename(String(req.params.file ?? ""));
+    if (!fidelityLeadFiles.has(file)) {
+      return res.status(404).json({ error: "not found" });
+    }
+    const full = path.join(fidelityLeadDir, file);
+    if (!fs.existsSync(full)) {
+      return res.status(404).json({ error: "not found" });
+    }
+    res.setHeader("Content-Disposition", `attachment; filename="${file}"`);
+    res.sendFile(full);
+  });
   app.get("/tos-helper/:file", (req, res) => {
     const file = path.basename(String(req.params.file ?? ""));
     if (!tosHelperFiles.has(file)) {

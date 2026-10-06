@@ -7,9 +7,53 @@
 
 import { Router, Request, Response } from "express";
 import { getCacheMeta, getCached, setCached, invalidate } from "./cacheService";
-import { runAnalysis } from "./orchestrator";
+import { runAnalysis, stripLiveOnlyData, attachLiveOptions } from "./orchestrator";
+import type { ModuleResponse } from "./types";
+import {
+  getOptionsPulseBatch,
+  getOptionsRegime,
+  getOptionsBudgetStats,
+  MAX_BATCH_SYMBOLS,
+} from "../options/provider";
 
 const router = Router();
+
+/**
+ * GET /api/marketflow/options/pulse?symbols=AAPL,MSFT
+ * Options Pulse for up to MAX_BATCH_SYMBOLS underlyings (memberTable options columns). Memory-cached only.
+ */
+router.get("/options/pulse", async (req: Request, res: Response) => {
+  try {
+    const symbols = String(req.query.symbols || "")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    if (symbols.length === 0) return res.status(400).json({ error: "symbols required" });
+    if (symbols.length > MAX_BATCH_SYMBOLS) {
+      return res.status(400).json({ error: `At most ${MAX_BATCH_SYMBOLS} symbols per request` });
+    }
+    const result = await getOptionsPulseBatch(symbols);
+    return res.json(result);
+  } catch (error) {
+    console.error("[MarketFlow] options pulse error:", (error as Error).message);
+    return res.status(500).json({ error: "Options pulse failed" });
+  }
+});
+
+/** GET /api/marketflow/options/regime — SPY/QQQ/IWM P/C + ATM IV (≥5 min server cache). */
+router.get("/options/regime", async (_req: Request, res: Response) => {
+  try {
+    return res.json(await getOptionsRegime());
+  } catch (error) {
+    console.error("[MarketFlow] options regime error:", (error as Error).message);
+    return res.status(500).json({ error: "Options regime failed" });
+  }
+});
+
+/** GET /api/marketflow/options/budget — call budget usage and cache sizes. */
+router.get("/options/budget", (_req: Request, res: Response) => {
+  return res.json(getOptionsBudgetStats());
+});
 
 /**
  * GET /api/marketflow/:symbol/cache-meta
@@ -43,7 +87,8 @@ router.get("/:symbol/cached", async (req: Request, res: Response) => {
     if (!payload) {
       return res.status(404).json({ error: "No cached analysis or expired" });
     }
-    return res.json(payload);
+    const moduleResponses = await attachLiveOptions(symbol, payload.moduleResponses as ModuleResponse[]);
+    return res.json({ ...payload, moduleResponses });
   } catch (error) {
     console.error("[MarketFlow] cached error:", error);
     return res.status(500).json({ error: "Failed to get cached analysis" });
@@ -67,9 +112,9 @@ router.post("/:symbol", async (req: Request, res: Response) => {
 
     const result = await runAnalysis(symbol, { skipSynthesis });
 
-    // Store to cache
+    // Store to cache (options data is memory-only and never persisted)
     await setCached(symbol, {
-      moduleResponses: result.moduleResponses,
+      moduleResponses: stripLiveOnlyData(result.moduleResponses),
       synthesis: result.synthesis,
     });
 

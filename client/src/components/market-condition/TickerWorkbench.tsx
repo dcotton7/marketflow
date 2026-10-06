@@ -156,7 +156,34 @@ interface AddTickersResponse {
   message?: string;
 }
 
-type SortKey = "symbol" | "price" | "pct" | "leaderScore" | "rsVsSpy" | "volExp" | "momentum" | "rsRank" | "contributionPct" | "accDistDays" | "ma1" | "ma2";
+type OptionsSortKey = "optPc" | "optVolOi" | "optIv";
+type SortKey = "symbol" | "price" | "pct" | "leaderScore" | "rsVsSpy" | "volExp" | "momentum" | "rsRank" | "contributionPct" | "accDistDays" | "ma1" | "ma2" | OptionsSortKey;
+
+const OPTIONS_COLS_STORAGE_KEY = "marketflow-member-options-cols";
+const OPTIONS_PULSE_MAX_SYMBOLS = 80;
+const OPTIONS_REFRESH_MS = 5 * 60_000;
+
+interface MemberOptionsPulse {
+  pcVolumeRatio: number | null;
+  volumeVsOi: number | null;
+  callVolume: number;
+  putVolume: number;
+  openInterest: { total: number | null; label: string } | null;
+  atm: { iv: number | null; expiration: string | null };
+}
+
+interface MemberOptionsResponse {
+  pulses: Record<string, MemberOptionsPulse>;
+  errors: Record<string, string>;
+  apiCalls: { data: number; trading: number };
+}
+
+function getOptionsSortValue(p: MemberOptionsPulse | undefined, key: OptionsSortKey): number | null {
+  if (!p) return null;
+  if (key === "optPc") return p.pcVolumeRatio;
+  if (key === "optVolOi") return p.volumeVsOi;
+  return p.atm.iv;
+}
 type SortDirection = "asc" | "desc";
 
 function getMomentumColor(momentum: TickerRow["momentum"]): string {
@@ -193,6 +220,9 @@ const COLUMN_TOOLTIPS: Record<string, string> = {
   accDistDays: "Accumulation/Distribution streak (William O'Neal style).",
   ma1: "Price % above or below the selected moving average. White box when within threshold. Hover for exact % (2 decimals).",
   ma2: "Price % above or below the selected moving average. White box when within threshold. Hover for exact % (2 decimals).",
+  optPc: "Options put/call volume ratio today (expiries ≤30d, strikes ±15% of price). Live OPRA, refreshed every 5 min. n/a = no call volume or no data.",
+  optVolOi: "Today's options volume ÷ open interest for the same contracts. OI is daily and lags at least one session — hover a cell for its OI date.",
+  optIv: "At-the-money implied volatility from the nearest expiry (DTE ≥1). n/a when Alpaca has no IV for those contracts.",
 };
 
 function SortableHeader({
@@ -266,6 +296,67 @@ function MaPctCell({ pct, isNearMa }: { pct: number | null | undefined; isNearMa
   );
 }
 
+function OptionsCells({
+  pulse,
+  error,
+  loading,
+  failed,
+}: {
+  pulse: MemberOptionsPulse | undefined;
+  error: string | undefined;
+  loading: boolean;
+  failed: boolean;
+}) {
+  if (!pulse) {
+    const reason = loading ? null : error ?? (failed ? "Options request failed" : "No options data");
+    const cell = (
+      <TableCell className="font-mono text-[11px] text-muted-foreground">
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <span title={reason ?? undefined}>n/a</span>}
+      </TableCell>
+    );
+    return (
+      <>
+        {cell}
+        {cell}
+        {cell}
+      </>
+    );
+  }
+  const oiLabel = pulse.openInterest?.label ?? "OI not loaded";
+  return (
+    <>
+      <TableCell
+        className="font-mono text-[11px]"
+        title={`${pulse.callVolume.toLocaleString()} calls / ${pulse.putVolume.toLocaleString()} puts`}
+      >
+        {pulse.pcVolumeRatio != null ? (
+          <span className={pulse.pcVolumeRatio >= 1 ? "text-red-400" : pulse.pcVolumeRatio <= 0.6 ? "text-green-400" : "text-muted-foreground"}>
+            {pulse.pcVolumeRatio.toFixed(2)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">n/a</span>
+        )}
+      </TableCell>
+      <TableCell className="font-mono text-[11px]" title={oiLabel}>
+        {pulse.volumeVsOi != null ? (
+          <span className={pulse.volumeVsOi >= 1 ? "text-cyan-400 font-medium" : "text-muted-foreground"}>
+            {pulse.volumeVsOi.toFixed(2)}x
+          </span>
+        ) : (
+          <span className="text-muted-foreground">n/a</span>
+        )}
+      </TableCell>
+      <TableCell className="font-mono text-[11px]" title={pulse.atm.expiration ? `Expiry ${pulse.atm.expiration}` : undefined}>
+        {pulse.atm.iv != null ? (
+          <span className="text-foreground">{(pulse.atm.iv * 100).toFixed(1)}%</span>
+        ) : (
+          <span className="text-muted-foreground">n/a</span>
+        )}
+      </TableCell>
+    </>
+  );
+}
+
 export function TickerWorkbench({
   themeId,
   themeName,
@@ -314,6 +405,47 @@ export function TickerWorkbench({
   maCol2Ref.current = maCol2;
   const highlightedRowRef = useRef<HTMLTableRowElement>(null);
   const [pendingWatchlistSymbol, setPendingWatchlistSymbol] = useState<string | null>(null);
+  const [showOptionsCols, setShowOptionsCols] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(OPTIONS_COLS_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleOptionsCols = () => {
+    setShowOptionsCols((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(OPTIONS_COLS_STORAGE_KEY, next ? "1" : "0");
+      } catch {}
+      return next;
+    });
+  };
+
+  const optionsSymbolsKey = useMemo(
+    () =>
+      Array.from(new Set(tickers.map((t) => t.symbol.trim().toUpperCase())))
+        .sort()
+        .slice(0, OPTIONS_PULSE_MAX_SYMBOLS)
+        .join(","),
+    [tickers]
+  );
+
+  const optionsQuery = useQuery<MemberOptionsResponse>({
+    queryKey: ["marketflow", "options-pulse", optionsSymbolsKey],
+    queryFn: async () => {
+      const res = await fetch(`/api/marketflow/options/pulse?symbols=${encodeURIComponent(optionsSymbolsKey)}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Options pulse failed");
+      return res.json();
+    },
+    enabled: showOptionsCols && optionsSymbolsKey.length > 0,
+    staleTime: OPTIONS_REFRESH_MS,
+    refetchInterval: showOptionsCols ? OPTIONS_REFRESH_MS : false,
+  });
+  const optionsPulses = optionsQuery.data?.pulses;
+  const optionsErrors = optionsQuery.data?.errors;
 
   const defaultWatchlistId = useMemo(() => {
     if (!watchlists || watchlists.length === 0) return null;
@@ -496,7 +628,14 @@ export function TickerWorkbench({
     return result.sort((a, b) => {
       let aVal: string | number | boolean | null | undefined;
       let bVal: string | number | boolean | null | undefined;
-      if (sortKey === "ma1") {
+      if (sortKey === "optPc" || sortKey === "optVolOi" || sortKey === "optIv") {
+        const aOpt = getOptionsSortValue(optionsPulses?.[a.symbol.toUpperCase()], sortKey);
+        const bOpt = getOptionsSortValue(optionsPulses?.[b.symbol.toUpperCase()], sortKey);
+        const aN = aOpt ?? -Infinity;
+        const bN = bOpt ?? -Infinity;
+        if (aN === bN) return 0;
+        return sortDir === "asc" ? (aN < bN ? -1 : 1) : (aN < bN ? 1 : -1);
+      } else if (sortKey === "ma1") {
         aVal = getPctVsMa(a, maCol1);
         bVal = getPctVsMa(b, maCol1);
       } else if (sortKey === "ma2") {
@@ -530,7 +669,7 @@ export function TickerWorkbench({
       }
       return 0;
     });
-  }, [tickers, sortKey, sortDir, showCoreOnly, maCol1, maCol2, isHistorical]);
+  }, [tickers, sortKey, sortDir, showCoreOnly, maCol1, maCol2, isHistorical, optionsPulses]);
 
   // Find max absolute pct for scaling background bars
   const maxAbsPct = useMemo(() => {
@@ -746,11 +885,33 @@ export function TickerWorkbench({
               Restore Theme Members MA 1 / MA 2 to defaults (20d SMA and 50d SMA) and save
             </TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggleOptionsCols}
+                className={cn(
+                  "text-xs px-2 py-1 rounded transition-colors flex items-center gap-1",
+                  showOptionsCols
+                    ? "bg-violet-500/20 text-violet-300 border border-violet-500/30"
+                    : "bg-slate-700/30 text-muted-foreground hover:text-foreground"
+                )}
+                data-ui-region="marketFlow:memberOptionsColumns"
+              >
+                {showOptionsCols && optionsQuery.isFetching && <Loader2 className="w-3 h-3 animate-spin" />}
+                Options cols
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              Show P/C volume, options volume vs open interest, and ATM IV for this theme&apos;s members.
+              Loaded on demand from live OPRA data (refreshed every 5 min while shown). Off by default.
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" data-ui-region="marketFlow:memberTable">
         <Table>
           <TableHeader className="sticky top-0 bg-slate-900">
             <TableRow className="border-slate-700/50 hover:bg-transparent">
@@ -844,6 +1005,13 @@ export function TickerWorkbench({
                   </TooltipContent>
                 </Tooltip>
               </TableHead>
+              {showOptionsCols && (
+                <>
+                  <SortableHeader label="P/C Vol" sortKey="optPc" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Opt Vol/OI" sortKey="optVolOi" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="ATM IV" sortKey="optIv" currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
+                </>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1159,6 +1327,15 @@ export function TickerWorkbench({
                     return <MaPctCell pct={pct} isNearMa={isNearMa} />;
                   })()}
                 </TableCell>
+
+                {showOptionsCols && (
+                  <OptionsCells
+                    pulse={optionsPulses?.[normalizedSymbol]}
+                    error={optionsErrors?.[normalizedSymbol]}
+                    loading={optionsQuery.isLoading}
+                    failed={optionsQuery.isError}
+                  />
+                )}
               </TableRow>
             );
             })}

@@ -39,6 +39,7 @@ public static class TosWin {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -105,7 +106,9 @@ public static class TosWin {
 
   public static bool FocusWindow(IntPtr hWnd) {
     if (hWnd == IntPtr.Zero) return false;
-    ShowWindow(hWnd, SW_RESTORE);
+    // SW_RESTORE unsnaps Windows snap layouts and undoes maximize.
+    // Only restore when the window is actually minimized.
+    if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
     var fg = GetForegroundWindow();
     uint pidDummy;
     uint fgTid = GetWindowThreadProcessId(fg, out pidDummy);

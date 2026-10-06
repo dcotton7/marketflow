@@ -1,9 +1,10 @@
 // Market Condition Header Bar - Shows market regime, RAI, and summary metrics
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MarketConditionSummary, MarketRegime, ThemeRow, MegaCapOverlay } from "@/data/mockThemeData";
-import { TrendingUp, TrendingDown, Activity, Clock, Gauge, Crown, Moon, Sun, BarChart3 } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Clock, Gauge, Crown, Moon, Sun, BarChart3, Sigma } from "lucide-react";
 import type { MarketSession, UniverseParticipation } from "@/hooks/useMarketCondition";
 import { MarketFlowButton } from "./MarketFlowButton";
 import { ThemeColorChip } from "@/components/theme/ThemeColorChip";
@@ -189,6 +190,96 @@ function UniverseBreadthBar({
               } on the session.`
             : `${pctUp.toFixed(1)}% of theme members up vs down (estimate).`}
         </p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const OPTIONS_REGIME_REFRESH_MS = 5 * 60_000;
+
+interface OptionsRegimeItem {
+  symbol: string;
+  pcVolumeRatio: number | null;
+  atmIv: number | null;
+  atmExpiration: string | null;
+  expectedMovePct: number | null;
+  callVolume: number;
+  putVolume: number;
+  volumeDate: string | null;
+  error?: string;
+}
+
+interface OptionsRegimeResponse {
+  items: OptionsRegimeItem[];
+  fetchedAt: string;
+  session: string;
+  scope: { maxDte: number; strikeBandPct: number };
+}
+
+function pcColor(pc: number | null): string {
+  if (pc == null) return "text-muted-foreground";
+  if (pc >= 1.2) return "text-red-400";
+  if (pc <= 0.7) return "text-green-400";
+  return "text-foreground";
+}
+
+function OptionsRegimeTile() {
+  const { data, isError } = useQuery<OptionsRegimeResponse>({
+    queryKey: ["marketflow", "options-regime"],
+    queryFn: async () => {
+      const res = await fetch("/api/marketflow/options/regime", { credentials: "include" });
+      if (!res.ok) throw new Error("Options regime failed");
+      return res.json();
+    },
+    staleTime: OPTIONS_REGIME_REFRESH_MS,
+    refetchInterval: OPTIONS_REGIME_REFRESH_MS,
+  });
+
+  return (
+    <Tooltip>
+      <TooltipTrigger>
+        <div className={REGIME_CHIP} data-ui-region="marketFlow:optionsPulseTile">
+          <Sigma className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+          <span className="text-xs text-muted-foreground">OPT</span>
+          {data ? (
+            data.items.map((it) => (
+              <span key={it.symbol} className="flex items-center gap-1 font-mono text-[11px] tabular-nums">
+                <span className="text-[10px] text-muted-foreground">{it.symbol}</span>
+                <span className={pcColor(it.pcVolumeRatio)}>{it.pcVolumeRatio != null ? it.pcVolumeRatio.toFixed(2) : "n/a"}</span>
+                <span className="text-slate-400">{it.atmIv != null ? `${(it.atmIv * 100).toFixed(1)}%` : "n/a"}</span>
+              </span>
+            ))
+          ) : (
+            <span className="text-[11px] text-muted-foreground">{isError ? "n/a" : "…"}</span>
+          )}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm">
+        <p className="font-semibold mb-1">Index options pulse</p>
+        <p className="text-xs mb-2">
+          Put/call volume ratio, then ATM implied volatility (nearest expiry, DTE ≥1). Live OPRA via Alpaca,
+          refreshed every 5 minutes, held in memory only.
+        </p>
+        {data && (
+          <div className="text-xs space-y-1 border-t border-slate-600 pt-2">
+            {data.items.map((it) => (
+              <div key={it.symbol} className="flex justify-between gap-3">
+                <span className="font-mono">{it.symbol}</span>
+                <span>
+                  {it.error
+                    ? it.error
+                    : `${it.callVolume.toLocaleString()}C / ${it.putVolume.toLocaleString()}P · EM ${
+                        it.expectedMovePct != null ? `±${it.expectedMovePct.toFixed(1)}%` : "n/a"
+                      } · exp ${it.atmExpiration ?? "n/a"}`}
+                </span>
+              </div>
+            ))}
+            <p className="text-muted-foreground pt-1">
+              Scope ≤{data.scope.maxDte}d, ±{data.scope.strikeBandPct}% strikes · fetched{" "}
+              {new Date(data.fetchedAt).toLocaleTimeString()}
+            </p>
+          </div>
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -438,6 +529,7 @@ export function HeaderBar({
 
         <div className="w-px h-4 bg-slate-600" />
 
+        <div className="flex items-center gap-3" data-ui-region="marketFlow:marketHealth">
         <Tooltip>
           <TooltipTrigger>
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-600/30 bg-slate-800/30">
@@ -489,6 +581,10 @@ export function HeaderBar({
             </Badge>
           </>
         )}
+
+        <div className="w-px h-4 bg-slate-600" />
+        <OptionsRegimeTile />
+        </div>
       </div>
 
       {/* Right section: Top/Bottom + Timestamp */}

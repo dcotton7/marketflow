@@ -571,6 +571,17 @@ export default function SentinelChartsPage() {
     setActiveSymbol(ticker);
   }, []);
 
+  useEffect(() => {
+    const onLead = (event: Event) => {
+      const symbol = (event as CustomEvent<string>).detail;
+      if (typeof symbol === "string" && symbol.trim()) {
+        handleNavigateToTicker(symbol.trim().toUpperCase());
+      }
+    };
+    window.addEventListener("mf-lead-symbol", onLead);
+    return () => window.removeEventListener("mf-lead-symbol", onLead);
+  }, [handleNavigateToTicker]);
+
   // Auto-sync to MarketSurge when ticker changes
   useEffect(() => {
     if (msSyncEnabled && activeSymbol) {

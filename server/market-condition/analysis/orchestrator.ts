@@ -16,10 +16,39 @@ import {
   runFundFlow,
   runSentiment,
   runPositionSizing,
+  runOptions,
 } from "./modules";
 import { runSynthesis } from "./synthesis/engine";
 
-const VERSION = "v2.11";
+const VERSION = "v2.12";
+
+/** Modules whose data must stay memory-only (never written to marketflow_analysis_cache). */
+export const LIVE_ONLY_MODULES: ReadonlySet<string> = new Set(["options"]);
+
+/** Copy of module responses safe to persist: drops live-only modules and live options fields. */
+export function stripLiveOnlyData(modules: ModuleResponse[]): ModuleResponse[] {
+  return modules
+    .filter((m) => !LIVE_ONLY_MODULES.has(m.module_id))
+    .map((m) =>
+      m.module_id === "sentiment" && m.data && typeof m.data === "object"
+        ? { ...m, data: { ...(m.data as Record<string, unknown>), putCallRatio: null } }
+        : m
+    );
+}
+
+/** Re-attach live options (memory cache / fresh fetch) to a cached analysis payload. */
+export async function attachLiveOptions(symbol: string, modules: ModuleResponse[]): Promise<ModuleResponse[]> {
+  const optionsModule = await runOptions(symbol.toUpperCase());
+  const pc = (optionsModule.data.pulse?.pcVolumeRatio ?? null) as number | null;
+  const base = modules
+    .filter((m) => !LIVE_ONLY_MODULES.has(m.module_id))
+    .map((m) =>
+      m.module_id === "sentiment" && m.data && typeof m.data === "object"
+        ? { ...m, data: { ...(m.data as Record<string, unknown>), putCallRatio: pc } }
+        : m
+    );
+  return [...base, optionsModule];
+}
 
 interface OrchestratorOptions {
   skipSynthesis?: boolean;
@@ -28,10 +57,10 @@ interface OrchestratorOptions {
 
 /**
  * Run full analysis for a symbol
- * Phase 1 (parallel, no deps): marketContext, news, earnings, volume, riskCalendar, sentiment
+ * Phase 1 (parallel, no deps): marketContext, news, earnings, volume, riskCalendar, sentiment, options
  * Phase 2 (after price data): keyLevels, setupDetection
  * Phase 3 (after setup): fundFlow, positionSizing
- * Phase 4 (all complete): AI synthesis
+ * Phase 4 (all complete): AI synthesis — excludes live-only modules (options), because synthesis is persisted
  */
 export async function runAnalysis(
   symbol: string,
@@ -53,6 +82,7 @@ export async function runAnalysis(
       runVolume(upper),
       runRiskCalendar(upper),
       runSentiment(upper),
+      runOptions(upper),
     ]),
     timeout,
     "Phase 1"
@@ -110,21 +140,22 @@ export async function runAnalysis(
   }
 
   // Phase 4: AI Synthesis
+  const synthesisInputs = moduleResponses.filter((m) => !LIVE_ONLY_MODULES.has(m.module_id));
   let synthesis;
   if (options.skipSynthesis) {
     console.log(`[Orchestrator] Skipping synthesis (skipSynthesis=true)`);
-    synthesis = createFallbackSynthesis(upper, moduleResponses);
+    synthesis = createFallbackSynthesis(upper, synthesisInputs);
   } else {
     console.log(`[Orchestrator] Phase 4: Running AI synthesis for ${upper}`);
     try {
       synthesis = await runWithTimeout(
-        runSynthesis(upper, moduleResponses),
+        runSynthesis(upper, synthesisInputs),
         timeout,
         "Synthesis"
       );
     } catch (error) {
       console.error(`[Orchestrator] Synthesis failed, using fallback:`, error);
-      synthesis = createFallbackSynthesis(upper, moduleResponses);
+      synthesis = createFallbackSynthesis(upper, synthesisInputs);
     }
   }
 

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "MarketFlow Fidelity Lead",
+  "version": "1.0.4",
+  "description": "A ticker change on Fidelity Trade+ updates MarketFlow and Thinkorswim. ToSLink still works if Fidelity is closed.",
+  "permissions": ["scripting"],
+  "host_permissions": [
+    "https://*.fidelity.com/*",
+    "http://*.fidelity.com/*",
+    "http://127.0.0.1:7737/*",
+    "http://localhost:7737/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:*/*",
+      "http://127.0.0.1:*/*",
+      "https://*.onrender.com/*"
+    ]
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "MarketFlow Fidelity Lead"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.fidelity.com/*",
+        "http://*.fidelity.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

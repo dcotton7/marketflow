@@ -6,8 +6,8 @@
 import type { ModuleResponse, RiskCalendarData, Signal } from "../types";
 
 // Major economic events schedule (simplified static calendar)
-const MAJOR_EVENTS_2024_2025 = [
-  // FOMC meetings (Fed interest rate decisions)
+const MAJOR_EVENTS = [
+  // FOMC meetings (Fed interest rate decisions; date = second day of the meeting)
   { date: "2024-12-18", event: "FOMC Rate Decision", impact: "high" as const },
   { date: "2025-01-29", event: "FOMC Rate Decision", impact: "high" as const },
   { date: "2025-03-19", event: "FOMC Rate Decision", impact: "high" as const },
@@ -19,7 +19,21 @@ const MAJOR_EVENTS_2024_2025 = [
   { date: "2025-12-17", event: "FOMC Rate Decision", impact: "high" as const },
   { date: "2026-01-28", event: "FOMC Rate Decision", impact: "high" as const },
   { date: "2026-03-18", event: "FOMC Rate Decision", impact: "high" as const },
-  { date: "2026-05-06", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2026-04-29", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2026-06-17", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2026-07-29", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2026-09-16", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2026-10-28", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2026-12-09", event: "FOMC Rate Decision", impact: "high" as const },
+  // 2027 dates are tentative until confirmed at the preceding meeting
+  { date: "2027-01-27", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-03-17", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-04-28", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-06-09", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-07-28", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-09-15", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-10-27", event: "FOMC Rate Decision", impact: "high" as const },
+  { date: "2027-12-08", event: "FOMC Rate Decision", impact: "high" as const },
   
   // CPI releases (typically mid-month)
   { date: "2024-12-11", event: "CPI Release", impact: "high" as const },
@@ -35,9 +49,18 @@ const MAJOR_EVENTS_2024_2025 = [
   { date: "2025-10-10", event: "CPI Release", impact: "high" as const },
   { date: "2025-11-13", event: "CPI Release", impact: "high" as const },
   { date: "2025-12-10", event: "CPI Release", impact: "high" as const },
-  { date: "2026-01-14", event: "CPI Release", impact: "high" as const },
-  { date: "2026-02-11", event: "CPI Release", impact: "high" as const },
+  { date: "2026-01-13", event: "CPI Release", impact: "high" as const },
+  { date: "2026-02-13", event: "CPI Release", impact: "high" as const },
   { date: "2026-03-11", event: "CPI Release", impact: "high" as const },
+  { date: "2026-04-10", event: "CPI Release", impact: "high" as const },
+  { date: "2026-05-12", event: "CPI Release", impact: "high" as const },
+  { date: "2026-06-10", event: "CPI Release", impact: "high" as const },
+  { date: "2026-07-14", event: "CPI Release", impact: "high" as const },
+  { date: "2026-08-12", event: "CPI Release", impact: "high" as const },
+  { date: "2026-09-11", event: "CPI Release", impact: "high" as const },
+  { date: "2026-10-14", event: "CPI Release", impact: "high" as const },
+  { date: "2026-11-10", event: "CPI Release", impact: "high" as const },
+  { date: "2026-12-10", event: "CPI Release", impact: "high" as const },
   
   // Jobs Report (first Friday of month)
   { date: "2024-12-06", event: "Jobs Report (NFP)", impact: "high" as const },
@@ -54,8 +77,17 @@ const MAJOR_EVENTS_2024_2025 = [
   { date: "2025-11-07", event: "Jobs Report (NFP)", impact: "high" as const },
   { date: "2025-12-05", event: "Jobs Report (NFP)", impact: "high" as const },
   { date: "2026-01-09", event: "Jobs Report (NFP)", impact: "high" as const },
-  { date: "2026-02-06", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-02-11", event: "Jobs Report (NFP)", impact: "high" as const },
   { date: "2026-03-06", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-04-03", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-05-08", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-06-05", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-07-02", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-08-07", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-09-04", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-10-02", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-11-06", event: "Jobs Report (NFP)", impact: "high" as const },
+  { date: "2026-12-04", event: "Jobs Report (NFP)", impact: "high" as const },
 ];
 
 export async function runRiskCalendar(_symbol: string): Promise<ModuleResponse<RiskCalendarData>> {
@@ -67,9 +99,10 @@ export async function runRiskCalendar(_symbol: string): Promise<ModuleResponse<R
   // Find upcoming events within 30 days
   const upcomingEvents: RiskCalendarData["events"] = [];
 
-  for (const event of MAJOR_EVENTS_2024_2025) {
-    const eventDate = new Date(event.date);
-    eventDate.setHours(0, 0, 0, 0);
+  for (const event of MAJOR_EVENTS) {
+    // Local-date parse: `new Date("YYYY-MM-DD")` is UTC midnight, i.e. the previous day in US time zones.
+    const [y, m, d] = event.date.split("-").map(Number);
+    const eventDate = new Date(y, m - 1, d);
 
     const daysAway = Math.ceil((eventDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
 

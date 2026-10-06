@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { getPool } from "../db";
 import { loadEntryGauges } from "../entry-gauge";
+import { marketDateOrNull } from "@shared/market-leaders/dates";
 import {
   clampSpec,
   SPEC_FIELDS,
@@ -43,7 +44,8 @@ function userId(req: Authed): number | null {
 }
 
 function poolName(value: unknown): LeaderPool {
-  return value === "russell2000" ? "russell2000" : "sp500";
+  if (value === "universe" || value === "russell2000" || value === "sp500") return value;
+  return "universe";
 }
 
 async function ensureTables(): Promise<void> {
@@ -54,10 +56,10 @@ async function ensureTables(): Promise<void> {
 
 async function readPrefs(id: number): Promise<{ pool: LeaderPool; spec: MarketLeadersSpec }> {
   const pool = getPool();
-  if (!pool) return { pool: "sp500", spec: V1_SPEC };
+  if (!pool) return { pool: "universe", spec: V1_SPEC };
   const result = await pool.query(`SELECT pool, spec FROM market_leader_prefs WHERE user_id = $1`, [id]);
   const row = result.rows[0];
-  if (!row) return { pool: "sp500", spec: V1_SPEC };
+  if (!row) return { pool: "universe", spec: V1_SPEC };
   return { pool: poolName(row.pool), spec: clampSpec(row.spec).spec };
 }
 
@@ -129,8 +131,8 @@ export async function registerMarketLeaderRoutes(app: Express): Promise<void> {
       const saved = await readPrefs(id);
       const spec = clampSpec(req.body?.spec ?? saved.spec, saved.spec).spec;
       const pool = poolName(req.body?.pool ?? saved.pool);
-      const asOf = typeof req.body?.asOf === "string" && req.body.asOf ? req.body.asOf.slice(0, 10) : null;
-      const through = typeof req.body?.through === "string" && req.body.through ? req.body.through.slice(0, 10) : null;
+      const asOf = marketDateOrNull(req.body?.asOf);
+      const through = marketDateOrNull(req.body?.through);
       const payload = await loadBook({ pool, spec, asOf, through });
       const marks = await readMarks(id);
       const extras = await scoreSymbolsNow(payload, marks.map((mark) => mark.symbol));
@@ -204,7 +206,7 @@ export async function registerMarketLeaderRoutes(app: Express): Promise<void> {
   });
 
   setTimeout(() => {
-    void loadBook({ pool: "sp500", spec: V1_SPEC, asOf: null, through: null }).catch((error) => {
+    void loadBook({ pool: "universe", spec: V1_SPEC, asOf: null, through: null }).catch((error) => {
       console.warn("[MarketLeaders] nightly book skipped:", error instanceof Error ? error.message : error);
     });
   }, 15_000);

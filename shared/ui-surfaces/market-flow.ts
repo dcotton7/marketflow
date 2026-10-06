@@ -114,6 +114,13 @@ export const MARKET_FLOW_SURFACE: UiSurfaceDef = {
       id: "marketHealth",
       displayName: "Market health",
       parent: "regimeBar",
+      notes: "Flow Score >70 / <40 chips, HEALTHY/BIFURCATED/WEAK badge, options pulse tile.",
+    },
+    optionsPulseTile: {
+      id: "optionsPulseTile",
+      displayName: "Options pulse tile",
+      parent: "marketHealth",
+      notes: "SPY / QQQ / IWM put/call volume + ATM IV (live OPRA, memory only, ≥5 min refresh).",
     },
     statusBanners: {
       id: "statusBanners",
@@ -306,6 +313,12 @@ export const MARKET_FLOW_SURFACE: UiSurfaceDef = {
       displayName: "Member table",
       parent: "tickerWorkbench",
     },
+    memberOptionsColumns: {
+      id: "memberOptionsColumns",
+      displayName: "Member options columns",
+      parent: "memberTable",
+      notes: "Optional P/C Vol, Opt Vol/OI, ATM IV — off by default; loaded on demand for the shown theme's members only.",
+    },
     memberMaColumns: {
       id: "memberMaColumns",
       displayName: "MA column pickers",
@@ -339,6 +352,12 @@ export const MARKET_FLOW_SURFACE: UiSurfaceDef = {
       displayName: "Analysis panel",
       parent: "pageShell",
       notes: "Floating AI analysis sheet (MarketFlow analysis).",
+    },
+    analysisOptionsCard: {
+      id: "analysisOptionsCard",
+      displayName: "Options pulse card",
+      parent: "analysisPanel",
+      notes: "Options module: P/C volume, call vs put premium, volume vs OI (dated), ATM IV, straddle expected move. Memory only.",
     },
   },
 };

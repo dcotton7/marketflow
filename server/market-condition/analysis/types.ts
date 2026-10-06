@@ -3,6 +3,8 @@
  * Unified schema for all modules and synthesis
  */
 
+import type { OptionsPulse } from "../options/pulse-math";
+
 export type ModuleId =
   | "marketContext"
   | "keyLevels"
@@ -14,7 +16,8 @@ export type ModuleId =
   | "riskCalendar"
   | "fundFlow"
   | "sentiment"
-  | "positionSizing";
+  | "positionSizing"
+  | "options";
 
 export type Signal = "bullish" | "bearish" | "neutral" | "warning" | "informational";
 
@@ -155,6 +158,11 @@ export interface SentimentData {
   } | null;
   shortInterest: number | null;
   putCallRatio: number | null;
+}
+
+export interface OptionsPulseData {
+  pulse: OptionsPulse | null;
+  error: string | null;
 }
 
 export interface PositionSizingData {

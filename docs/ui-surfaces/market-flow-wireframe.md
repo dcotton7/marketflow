@@ -24,6 +24,8 @@
 │  [regimeBranding] MarketFlow │ [sessionBadge] OPEN/AFTER/CLOSE               │
 │  [raiGauge] RAI │ [megaOverlay] MEGA │ [universeBreadthBar] %↑ green / %↓ red  │
 │  [regimeBadge] RISK ON │ [benchmarkStrip] QQQ · IWM · MDY · SPY │ health…     │
+│  [marketHealth] Flow Score >70 / <40 · HEALTHY/BIFURCATED/WEAK               │
+│    └ [optionsPulseTile] OPT  SPY · QQQ · IWM  P/C vol + ATM IV  ~5m          │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ STATUS BANNERS  [statusBanners]  (conditional)                                  │
 │  [apiErrorBanner] API error + retry │ [comparisonBanner] baseline unavailable │
@@ -76,6 +78,7 @@
 │  │  │   [memberMaColumns] MA1 / MA2 pickers                               │  │  │
 │  │  │   [memberSyncToggles] MS sync · Chart sync · Analysis sync          │  │  │
 │  │  │   [memberTable] sortable ticker rows                                │  │  │
+│  │  │     └ [memberOptionsColumns] opt-in P/C Vol · Opt Vol/OI · ATM IV   │  │  │
 │  │  └───────────────────────────────────────────────────────────────────┘  │  │
 │  └─────────────────────────────────────────────────────────────────────────┘  │
 │  ┌─ BOTTOM ROW (split only, optional) ────────────────────────────────────┐  │
@@ -91,6 +94,7 @@
 OVERLAYS (same page, not in main stack)
   [racePopout]      Theme Race dialog — expanded [themeRace]
   [analysisPanel]   Floating AI analysis sheet (symbol from member/workbench)
+    └ [analysisOptionsCard] Options Pulse module card (live OPRA, memory only)
 ```
 
 ---
@@ -131,6 +135,8 @@ Time slice selector disabled for: `flowMap`, `concentration`, `accumulation`, `r
 
 **Theme box** (`actionableDetails` tab): same cadence as `themeStream` today (not 15m unless changed later).
 
+**Options Pulse v0** (own cadence, not a registry tier): `optionsPulseTile` and `memberOptionsColumns` refresh every 5 min; `analysisOptionsCard` loads with the analysis (server memory cache 5 min in market hours, 15 min otherwise). Live Alpaca OPRA, memory only — no DB, no stored series.
+
 ---
 
 ## Region index (quick lookup)
@@ -149,6 +155,11 @@ Time slice selector disabled for: `flowMap`, `concentration`, `accumulation`, `r
 | `rotationTablePanel` | Rotation table panel | workspace |
 | `racePopout` | Race pop-out | pageShell |
 | `analysisPanel` | Analysis panel | pageShell |
+| `marketHealth` | Market health | regimeBar |
+| `optionsPulseTile` | Options pulse tile | marketHealth |
+| `memberTable` | Member table | tickerWorkbench |
+| `memberOptionsColumns` | Member options columns | memberTable |
+| `analysisOptionsCard` | Options pulse card | analysisPanel |
 
 Full tree: `shared/ui-surfaces/market-flow.ts`.
 

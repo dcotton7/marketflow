@@ -4,6 +4,18 @@
  */
 
 export const TOS_AGENT_ORIGINS = ["http://127.0.0.1:7737", "http://localhost:7737"] as const;
+export const TOSLINK_PROTOCOL_START = "marketflow-toslink:start";
+export const TOSLINK_DOWNLOAD_HREF = "/tos-helper/ToSLink.cmd";
+
+/** Ask Windows to open the installed ToSLink helper. No-op if it was never installed. */
+export function startTosLinkHelper(): void {
+  if (typeof document === "undefined") return;
+  const a = document.createElement("a");
+  a.href = TOSLINK_PROTOCOL_START;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 export interface TosStatus {
   available: boolean;
@@ -13,6 +25,8 @@ export interface TosStatus {
   process?: string | null;
   title?: string | null;
   helper?: boolean;
+  fidelitySymbol?: string | null;
+  fidelityAt?: string | null;
   source?: "agent" | "origin" | "none";
 }
 
@@ -28,6 +42,29 @@ let lastSource: TosStatus["source"] = "none";
 
 export function getTosBridgeSource(): TosStatus["source"] {
   return lastSource;
+}
+
+export const MF_LEAD_SYMBOL_EVENT = "mf-lead-symbol";
+
+/** Unpacked add-on id on this PC. Wake it so it can attach to an already-open Fidelity tab. */
+const FIDELITY_LEAD_EXT_ID = "nickjnnbalkecfkbhmninnilodkcgfng";
+
+export function pokeFidelityLead(): void {
+  try {
+    const runtime = (window as unknown as { chrome?: { runtime?: { sendMessage?: Function; lastError?: unknown } } }).chrome?.runtime;
+    if (!runtime || typeof runtime.sendMessage !== "function") return;
+    runtime.sendMessage(FIDELITY_LEAD_EXT_ID, { poke: true }, () => {
+      void runtime.lastError;
+    });
+  } catch {
+    /* add-on missing or this page is not allowed to talk to it */
+  }
+}
+
+export function emitLeadSymbol(symbol: string): void {
+  const clean = symbol.trim().toUpperCase();
+  if (!clean || typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MF_LEAD_SYMBOL_EVENT, { detail: clean }));
 }
 
 export function isWindowsClient(): boolean {

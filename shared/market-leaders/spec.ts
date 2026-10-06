@@ -6,7 +6,7 @@
 
 export const MARKET_LEADERS_SPEC_VERSION = "v1" as const;
 
-export type LeaderPool = "sp500" | "russell2000";
+export type LeaderPool = "universe" | "sp500" | "russell2000";
 
 export interface MarketLeadersSpec {
   joinScore: number;
@@ -95,35 +95,36 @@ export const SPEC_FIELDS: {
   min: number;
   max: number;
   label: string;
+  hint: string;
   group: "main" | "advanced";
 }[] = [
-  { key: "joinScore", min: 50, max: 90, label: "Join score", group: "main" },
-  { key: "stayScore", min: 40, max: 80, label: "Stay score", group: "main" },
-  { key: "gateFailCloses", min: 1, max: 5, label: "Failed closes before drop", group: "main" },
-  { key: "highProximity", min: 0.6, max: 0.9, label: "Min fraction of 252-day high", group: "main" },
-  { key: "atRiskScore", min: 50, max: 85, label: "At-risk score", group: "advanced" },
-  { key: "smaFast", min: 10, max: 100, label: "Fast SMA", group: "advanced" },
-  { key: "smaSlow", min: 30, max: 250, label: "Slow SMA", group: "advanced" },
-  { key: "slopeBars", min: 5, max: 60, label: "SMA slope bars", group: "advanced" },
-  { key: "minDollarVolume", min: 5_000_000, max: 100_000_000, label: "Min 50-day dollar volume", group: "advanced" },
-  { key: "minClose", min: 5, max: 50, label: "Min close", group: "advanced" },
-  { key: "lowExtension", min: 1.1, max: 1.6, label: "Min multiple of 252-day low", group: "advanced" },
-  { key: "lookback", min: 20, max: 252, label: "High/low lookback", group: "advanced" },
-  { key: "rsTop", min: 70, max: 99, label: "RS percentile for 25 pts", group: "advanced" },
-  { key: "rsMid", min: 60, max: 95, label: "RS percentile for 18 pts", group: "advanced" },
-  { key: "rsLow", min: 50, max: 90, label: "RS percentile for 10 pts", group: "advanced" },
-  { key: "rsLineWindow", min: 5, max: 20, label: "RS-line high window", group: "advanced" },
-  { key: "groupTop", min: 0.1, max: 0.4, label: "Theme top fraction", group: "advanced" },
-  { key: "groupMid", min: 0.3, max: 0.7, label: "Theme mid fraction", group: "advanced" },
-  { key: "udvrHi", min: 1, max: 3, label: "Up/down volume for 15 pts", group: "advanced" },
-  { key: "udvrLo", min: 1, max: 2.5, label: "Up/down volume for 8 pts", group: "advanced" },
-  { key: "udvrBars", min: 20, max: 100, label: "Up/down volume bars", group: "advanced" },
-  { key: "gapPct", min: 0.03, max: 0.1, label: "Held gap size", group: "advanced" },
-  { key: "gapVolMultiple", min: 1.5, max: 4, label: "Held gap volume multiple", group: "advanced" },
-  { key: "gapWindow", min: 20, max: 80, label: "Held gap window", group: "advanced" },
-  { key: "characterHighRoom", min: 0.05, max: 0.25, label: "Character distance from high", group: "advanced" },
-  { key: "characterSmaBuffer", min: 0.9, max: 1, label: "20-bar low vs 20 SMA", group: "advanced" },
-  { key: "volumeBreakMultiple", min: 1.2, max: 3, label: "50 SMA volume-break multiple", group: "advanced" },
+  { key: "joinScore", min: 50, max: 90, label: "Join score", group: "main", hint: "Score a name must reach to join the book." },
+  { key: "stayScore", min: 40, max: 80, label: "Stay score", group: "main", hint: "Lowest score that still keeps a name on the book." },
+  { key: "gateFailCloses", min: 1, max: 5, label: "Failed closes before drop", group: "main", hint: "How many failed-gate closes in a row drop the name." },
+  { key: "highProximity", min: 0.6, max: 0.9, label: "Min fraction of 252-day high", group: "main", hint: "Close must be at least this fraction of the lookback high. 0.75 means within 25% of that high." },
+  { key: "atRiskScore", min: 50, max: 85, label: "At-risk score", group: "advanced", hint: "On-book names below this score are marked At risk." },
+  { key: "smaFast", min: 10, max: 100, label: "Fast SMA", group: "advanced", hint: "Fast moving average used in the trend gates." },
+  { key: "smaSlow", min: 30, max: 250, label: "Slow SMA", group: "advanced", hint: "Slow moving average. The fast SMA must sit above this." },
+  { key: "slopeBars", min: 5, max: 60, label: "SMA slope bars", group: "advanced", hint: "The fast SMA must be higher than it was this many bars ago." },
+  { key: "minDollarVolume", min: 5_000_000, max: 100_000_000, label: "Min 50-day dollar volume", group: "advanced", hint: "Minimum 50-day average dollar volume to pass the liquidity gate." },
+  { key: "minClose", min: 5, max: 50, label: "Min close", group: "advanced", hint: "Minimum closing price to stay in the pool." },
+  { key: "lowExtension", min: 1.1, max: 1.6, label: "Min multiple of 252-day low", group: "advanced", hint: "Close must be at least this multiple of the lookback low." },
+  { key: "lookback", min: 20, max: 252, label: "High/low lookback", group: "advanced", hint: "How many sessions define the high and low used by the range gates." },
+  { key: "rsTop", min: 70, max: 99, label: "RS percentile for 25 pts", group: "advanced", hint: "Relative-strength percentile that earns 25 points." },
+  { key: "rsMid", min: 60, max: 95, label: "RS percentile for 18 pts", group: "advanced", hint: "Relative-strength percentile that earns 18 points." },
+  { key: "rsLow", min: 50, max: 90, label: "RS percentile for 10 pts", group: "advanced", hint: "Relative-strength percentile that earns 10 points." },
+  { key: "rsLineWindow", min: 5, max: 20, label: "RS-line high window", group: "advanced", hint: "The RS-versus-SPY line must make a high inside this many bars for 10 points." },
+  { key: "groupTop", min: 0.1, max: 0.4, label: "Theme top fraction", group: "advanced", hint: "Theme rank in this top fraction of the list earns 20 points." },
+  { key: "groupMid", min: 0.3, max: 0.7, label: "Theme mid fraction", group: "advanced", hint: "Theme rank in this next fraction earns 10 points." },
+  { key: "udvrHi", min: 1, max: 3, label: "Up/down volume for 15 pts", group: "advanced", hint: "Up/down volume ratio that earns 15 accumulation points." },
+  { key: "udvrLo", min: 1, max: 2.5, label: "Up/down volume for 8 pts", group: "advanced", hint: "Up/down volume ratio that earns 8 accumulation points." },
+  { key: "udvrBars", min: 20, max: 100, label: "Up/down volume bars", group: "advanced", hint: "Sessions used to compute the up/down volume ratio." },
+  { key: "gapPct", min: 0.03, max: 0.1, label: "Held gap size", group: "advanced", hint: "Minimum opening gap that can earn held-gap points if it is still held." },
+  { key: "gapVolMultiple", min: 1.5, max: 4, label: "Held gap volume multiple", group: "advanced", hint: "Gap-day volume must be at least this multiple of the prior 50-day average." },
+  { key: "gapWindow", min: 20, max: 80, label: "Held gap window", group: "advanced", hint: "How far back a held gap can still count." },
+  { key: "characterHighRoom", min: 0.05, max: 0.25, label: "Character distance from high", group: "advanced", hint: "Close this close to the lookback high earns character points." },
+  { key: "characterSmaBuffer", min: 0.9, max: 1, label: "20-bar low vs 20 SMA", group: "advanced", hint: "The 20-bar low must hold at least this fraction of the 20 SMA for character points." },
+  { key: "volumeBreakMultiple", min: 1.2, max: 3, label: "50 SMA volume-break multiple", group: "advanced", hint: "Volume multiple that flags a volume-break when price is under the fast SMA." },
 ];
 
 const FIELD_BY_KEY = new Map(SPEC_FIELDS.map((field) => [field.key, field]));

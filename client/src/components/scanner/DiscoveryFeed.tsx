@@ -13,6 +13,7 @@ import {
   Layers, Newspaper, Crosshair, Zap, Globe, Sunrise, Flame, FlaskConical, CalendarDays, ArrowDownWideNarrow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FloatingOverlayPanel } from "@/components/FloatingOverlayPanel";
 import { SCANNER_OVERLAY_Z } from "@/lib/overlay-z-index";
 import { DiscoveryCard } from "./DiscoveryCard";
@@ -178,6 +179,35 @@ function describeActiveSecondaryFilters(opts: {
   else if (opts.directionFilter === "down") bits.push("Short only");
   if (opts.showUrgentOnly) bits.push("Urgent only");
   return bits;
+}
+
+const THEME_FILTER_TIP =
+  "Keeps a band of the Flow theme list. Top 25% is about the strongest 7 of 26 themes. Top 50% is the top half. Bot 50% is the weaker half. Rank uses this same list as an exact count.";
+
+const RANK_FILTER_TIP =
+  "Keeps an exact count on the same Flow theme list as Theme. 1 is the strongest theme. Lead 5 sits inside Top 25%. Low 5 sits inside Bot 50%. If both filters are on, a signal has to match both.";
+
+function FilterLabelTip({ label, tip, widthClass, fo }: {
+  label: string;
+  tip: string;
+  widthClass?: string;
+  fo: number;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn("text-slate-500 shrink-0 cursor-help", widthClass)}
+          style={{ fontSize: scannerPx("tiny", fo) }}
+        >
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-[260px] text-xs leading-snug">
+        {tip}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function matchesLiquidity(card: DiscoveryCardType, filter: LiquidityFilter): boolean {
@@ -899,7 +929,7 @@ export function DiscoveryFeedPanel() {
 
         {/* Theme strength (Flow percentile) */}
         <div className="flex items-center gap-1 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
-          <span className="text-slate-500 shrink-0 w-10" style={{ fontSize: scannerPx("tiny", fo) }}>Theme</span>
+          <FilterLabelTip label="Theme" tip={THEME_FILTER_TIP} widthClass="w-10" fo={fo} />
           <div className="flex flex-wrap items-center gap-0.5">
             {([
               ["all", "All"],
@@ -913,9 +943,9 @@ export function DiscoveryFeedPanel() {
                   key={id}
                   type="button"
                   title={
-                    id === "top25" ? "Theme Flow percentile ≥ 75"
-                      : id === "top50" ? "Theme Flow percentile ≥ 50"
-                        : id === "bottom50" ? "Theme Flow percentile < 50"
+                    id === "top25" ? "Strongest quarter of the Flow theme list — about ranks 1–7 of 26"
+                      : id === "top50" ? "Top half of the Flow theme list — about ranks 1–14 of 26"
+                        : id === "bottom50" ? "Weaker half of the Flow theme list"
                           : "Any theme strength"
                   }
                   onClick={(e) => { e.stopPropagation(); setThemeStrengthFilter(id); }}
@@ -936,7 +966,7 @@ export function DiscoveryFeedPanel() {
 
         {/* Theme rank at fire: leading N / lowest N */}
         <div className="flex items-center gap-1 shrink-0 px-0.5" onPointerDown={(e) => e.stopPropagation()}>
-          <span className="text-slate-500 shrink-0" style={{ fontSize: scannerPx("tiny", fo) }}>Rank</span>
+          <FilterLabelTip label="Rank" tip={RANK_FILTER_TIP} fo={fo} />
           <div className="flex flex-wrap items-center gap-0.5">
             {([
               ["all", "All"],
@@ -949,8 +979,8 @@ export function DiscoveryFeedPanel() {
                   key={id}
                   type="button"
                   title={
-                    id === "leading" ? "Names whose theme ranked in the top N at fire"
-                      : id === "lowest" ? "Names whose theme ranked in the bottom N at fire"
+                    id === "leading" ? "Strongest N themes. Lead 5 sits inside Top 25%."
+                      : id === "lowest" ? "Weakest N themes. Low 5 sits inside Bot 50%."
                         : "Any theme rank"
                   }
                   onClick={(e) => { e.stopPropagation(); setThemeRankCut(id); }}
@@ -972,7 +1002,7 @@ export function DiscoveryFeedPanel() {
               max={26}
               disabled={themeRankCut === "all"}
               value={themeRankN}
-              title="N themes (1–26)"
+              title="How many themes to keep (1–26). Same list as Theme."
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => setThemeRankN(parseThemeRankN(e.target.value, themeRankN))}

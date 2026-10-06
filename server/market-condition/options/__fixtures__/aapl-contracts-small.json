@@ -1,0 +1,10 @@
+{
+  "option_contracts": [
+    { "symbol": "AAPL261005C00250000", "underlying_symbol": "AAPL", "type": "call", "strike_price": "250", "expiration_date": "2026-10-05", "open_interest": null, "open_interest_date": null },
+    { "symbol": "AAPL261005C00330000", "underlying_symbol": "AAPL", "type": "call", "strike_price": "330", "expiration_date": "2026-10-05", "open_interest": "500", "open_interest_date": "2026-09-30" },
+    { "symbol": "AAPL261007C00330000", "underlying_symbol": "AAPL", "type": "call", "strike_price": "330", "expiration_date": "2026-10-07", "open_interest": "1048", "open_interest_date": "2026-10-01" },
+    { "symbol": "AAPL261007P00330000", "underlying_symbol": "AAPL", "type": "put", "strike_price": "330", "expiration_date": "2026-10-07", "open_interest": "2210", "open_interest_date": "2026-10-01" },
+    { "symbol": "AAPL261007C00335000", "underlying_symbol": "AAPL", "type": "call", "strike_price": "335", "expiration_date": "2026-10-07", "open_interest": null, "open_interest_date": null }
+  ],
+  "next_page_token": null
+}

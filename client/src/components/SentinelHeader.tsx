@@ -360,17 +360,24 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
               {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Charts</span>}
             </Button>
           </Link>
-          <Link href="/sentinel/market-leaders">
-            <Button
-              variant={isLeadersPage ? "secondary" : "ghost"}
-              size="sm"
-              className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
-              data-testid="nav-market-leaders"
-            >
-              <Crown className="w-4 h-4" />
-              {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Leaders</span>}
-            </Button>
-          </Link>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Link href="/sentinel/market-leaders">
+                <Button
+                  variant={isLeadersPage ? "secondary" : "ghost"}
+                  size="sm"
+                  className={responsive.isCompact ? "h-7 w-7 p-0" : "gap-2"}
+                  data-testid="nav-market-leaders"
+                >
+                  <Crown className="w-4 h-4" />
+                  {!responsive.isCompact && <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Leaders</span>}
+                </Button>
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs text-xs">
+              Names that pass the leadership book — score, stay or leave, and your pins.
+            </TooltipContent>
+          </Tooltip>
           <Button 
             variant="ghost" 
             size="sm"

@@ -30,7 +30,7 @@ function getApiSecret(): string {
   return process.env.ALPACA_API_SECRET || "";
 }
 
-function alpacaHeaders(): Record<string, string> {
+export function alpacaHeaders(): Record<string, string> {
   return {
     "APCA-API-KEY-ID": getApiKey(),
     "APCA-API-SECRET-KEY": getApiSecret(),

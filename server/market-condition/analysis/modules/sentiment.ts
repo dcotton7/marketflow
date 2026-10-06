@@ -6,14 +6,16 @@
 import type { ModuleResponse, SentimentData, Signal } from "../types";
 import { fetchRecommendations, fetchPriceTarget } from "../../../finnhub";
 import { getQuote } from "../../../data-layer/quotes";
+import { getOptionsPulse } from "../../options/provider";
 
 export async function runSentiment(symbol: string): Promise<ModuleResponse<SentimentData>> {
   const start = Date.now();
 
-  const [recommendations, priceTargetData, quote] = await Promise.all([
+  const [recommendations, priceTargetData, quote, optionsPulse] = await Promise.all([
     fetchRecommendations(symbol).catch(() => []),
     fetchPriceTarget(symbol).catch(() => null),
     getQuote(symbol).catch(() => null),
+    getOptionsPulse(symbol).catch(() => null),
   ]);
 
   const currentPrice = quote?.price ?? 0;
@@ -41,9 +43,10 @@ export async function runSentiment(symbol: string): Promise<ModuleResponse<Senti
     };
   }
 
-  // Short interest and put/call ratio (placeholders — need external data sources)
+  // Short interest still needs an external source. P/C volume comes from the live options pulse
+  // (shared in-flight request with the options module) and does not affect the sentiment signal.
   const shortInterest: number | null = null;
-  const putCallRatio: number | null = null;
+  const putCallRatio: number | null = optionsPulse?.pulse?.pcVolumeRatio ?? null;
 
   // Determine signal
   let signal: Signal = "neutral";

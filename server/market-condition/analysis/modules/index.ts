@@ -13,3 +13,4 @@ export { runRiskCalendar } from "./riskCalendar";
 export { runFundFlow } from "./fundFlow";
 export { runSentiment } from "./sentiment";
 export { runPositionSizing } from "./positionSizing";
+export { runOptions } from "./options";

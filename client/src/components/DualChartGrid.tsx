@@ -42,6 +42,7 @@ import {
   chartFooterTargetHeight,
   type ChartSetupInfo,
 } from "@/components/ChartInfoFooter";
+import { ChartTickerChip } from "@/components/chart/ChartTickerChip";
 import { TosSyncToggle } from "@/components/TosButton";
 import { useTosSyncSafe } from "@/context/TosSyncContext";
 import { useToast } from "@/hooks/use-toast";
@@ -953,7 +954,6 @@ export function DualChartGrid({
   const displayPrice = dayChange?.price ?? 0;
   const priceChange = dayChange?.change ?? 0;
   const pricePctChange = dayChange?.changePct ?? 0;
-  const isPriceUp = priceChange >= 0;
 
   /** Enrich only needs daily OHLCV; intraday/metrics improve the dossier but must not block the button. */
   const enrichChartsReady = useMemo(() => {
@@ -1378,36 +1378,16 @@ export function DualChartGrid({
 
       <div className="flex-shrink-0 overflow-hidden grid grid-cols-2 gap-3" style={{ height: NAV_INFO_H, marginTop: upperPane ? GAP : 0 }} data-testid={`${pid}nav-info-row`}>
         <div className="flex items-center gap-2 overflow-hidden" data-testid={`${pid}nav-pane`}>
-          <div className="flex items-center gap-2 px-3 py-1 rounded-md border border-border bg-card flex-shrink-0">
-            <span className="font-mono font-bold text-lg" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-symbol">{symbol || "—"}</span>
-            <span style={{ color: cssVariables.textColorTiny }}>|</span>
-            {dailyData ? (
-              <>
-                <span className="font-mono font-semibold text-lg" style={{ color: cssVariables.textColorHeader }} data-testid="text-chart-price">${displayPrice.toFixed(2)}</span>
-                <span style={{ color: cssVariables.textColorTiny }}>|</span>
-                <span className={`font-mono font-bold text-lg ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-change">{isPriceUp ? "+" : ""}{priceChange.toFixed(2)}</span>
-                <span style={{ color: cssVariables.textColorTiny }}>|</span>
-                <span className={`font-mono font-bold text-lg ${isPriceUp ? "text-rs-green" : "text-rs-red"}`} data-testid="text-chart-pct">{isPriceUp ? "+" : ""}{pricePctChange.toFixed(2)}%</span>
-                {extendedSessionChangePct != null ? (
-                  <span
-                    className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
-                      extendedSessionChangePct >= 0
-                        ? "border-emerald-500/40 text-rs-green"
-                        : "border-red-500/40 text-rs-red"
-                    }`}
-                    title="Extended-hours change versus the regular-session close"
-                    data-testid="text-chart-extended-change"
-                  >
-                    {chartMetrics?.priceSession === "pre_market" ? "PRE" : "EXT"}{" "}
-                    {extendedSessionChangePct >= 0 ? "+" : ""}
-                    {extendedSessionChangePct.toFixed(2)}%
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <span className="font-mono text-lg text-muted-foreground animate-pulse">—</span>
-            )}
-          </div>
+          <ChartTickerChip
+            symbol={symbol || ""}
+            price={dailyData ? displayPrice : null}
+            change={dailyData ? priceChange : null}
+            changePct={dailyData ? pricePctChange : null}
+            extendedLabel={chartMetrics?.priceSession === "pre_market" ? "PRE" : "EXT"}
+            extendedPct={extendedSessionChangePct}
+            loading={!dailyData}
+            className="flex-shrink-0"
+          />
           <Button
             variant="outline"
             size="sm"

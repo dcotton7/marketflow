@@ -1,11 +1,15 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "wouter";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, Loader2, Pin, RotateCcw } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Crown, LineChart, Loader2, Pin, RotateCcw } from "lucide-react";
+import { ScanChartViewer } from "@/components/bigidea/ScanChartViewer";
+import { ChartTickerChip } from "@/components/chart/ChartTickerChip";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EntryGaugeValue } from "@/components/EntryGaugeValue";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { marketDateOrNull } from "@shared/market-leaders/dates";
 import {
   SPEC_FIELDS,
   V1_SPEC,
@@ -56,6 +60,31 @@ function shownScore(score: number, points: number): number {
   return score + points;
 }
 
+function Tip({ text, children }: { text: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-help">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function bookErrorText(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Could not load the book";
+  const body = raw.replace(/^\d+:\s*/, "");
+  try {
+    const parsed = JSON.parse(body) as { error?: string };
+    if (parsed.error) return parsed.error;
+  } catch {
+    /* the status line is already readable */
+  }
+  return raw;
+}
+
 export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
   const queryClient = useQueryClient();
   const prefs = useQuery({
@@ -66,13 +95,15 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
     },
   });
 
-  const [pool, setPool] = useState<LeaderPool>("sp500");
+  const [pool, setPool] = useState<LeaderPool>("universe");
   const [spec, setSpec] = useState<MarketLeadersSpec>(V1_SPEC);
   const [savedSpec, setSavedSpec] = useState<MarketLeadersSpec>(V1_SPEC);
   const [asOf, setAsOf] = useState("");
   const [through, setThrough] = useState("");
   const [ready, setReady] = useState(false);
   const [openSymbol, setOpenSymbol] = useState<string | null>(null);
+  const [chartOpen, setChartOpen] = useState(false);
+  const [chartIndex, setChartIndex] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [note, setNote] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -89,19 +120,36 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
     if (prefs.isError) setReady(true);
   }, [prefs.data, prefs.isError, ready]);
 
+  const asOfDate = marketDateOrNull(asOf);
+  const throughDate = marketDateOrNull(through);
+  const datesSeeded = useRef(false);
+  const dateWarning =
+    (asOf.trim() !== "" && !asOfDate) || (through.trim() !== "" && !throughDate)
+      ? "That date isn’t usable. The book stays on the last good close."
+      : null;
+
   const book = useQuery({
-    queryKey: ["/api/market-leaders/book", mode, pool, asOf, through, spec],
+    queryKey: ["/api/market-leaders/book", mode, pool, asOfDate, throughDate, spec],
     enabled: ready,
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       const res = await apiRequest("POST", "/api/market-leaders/book", {
         pool,
         spec,
-        asOf: asOf || null,
-        through: through || null,
+        asOf: asOfDate,
+        through: throughDate,
       });
       return (await res.json()) as BookResponse;
     },
   });
+
+  useEffect(() => {
+    if (!book.data || book.isPlaceholderData || book.isFetching || datesSeeded.current) return;
+    if (asOf !== "" || through !== "") return;
+    datesSeeded.current = true;
+    setAsOf(book.data.from ?? book.data.asOf);
+    setThrough(book.data.asOf);
+  }, [book.data, book.isPlaceholderData, book.isFetching, asOf, through]);
 
   const savePrefs = useMutation({
     mutationFn: async (next: { pool: LeaderPool; spec: MarketLeadersSpec }) => {
@@ -173,6 +221,29 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
     });
   }, [book.data, marks]);
 
+  const chartResults = useMemo(() => {
+    if (book.data?.mode === "span" && book.data.span) {
+      return book.data.span.map((row) => ({
+        symbol: row.symbol,
+        name: row.symbol,
+        price: 0,
+        passedPaths: [] as string[],
+      }));
+    }
+    return closeRows.map((row) => ({
+      symbol: row.symbol,
+      name: row.symbol,
+      price: row.close,
+      passedPaths: [] as string[],
+    }));
+  }, [book.data, closeRows]);
+
+  function openChart(symbol: string) {
+    const index = chartResults.findIndex((row) => row.symbol === symbol);
+    setChartIndex(index < 0 ? 0 : index);
+    setChartOpen(true);
+  }
+
   const dirty = ready && !specsEqual(spec, savedSpec);
   const page = mode === "page";
 
@@ -188,13 +259,19 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
     <div className={`flex h-full min-h-0 flex-col ${page ? "gap-3 p-4" : "gap-2 p-2"}`}>
       <div className="flex flex-wrap items-center gap-2">
         {page ? (
-          <h1 className="text-lg font-semibold">Market Leaders</h1>
+          <Tip text="Names that pass the current gates and score. Click a symbol for the score lines.">
+            <h1 className="text-lg font-semibold">Market Leaders</h1>
+          </Tip>
         ) : (
-          <Link href="/sentinel/market-leaders" className="text-xs font-medium underline-offset-2 hover:underline">
-            Open Leaders
-          </Link>
+          <Tip text="Open the full Leaders page for dates, scoring knobs, and AI.">
+            <Link href="/sentinel/market-leaders" className="text-xs font-medium underline-offset-2 hover:underline">
+              Open Leaders
+            </Link>
+          </Tip>
         )}
-        <span className="text-xs text-muted-foreground">v1</span>
+        <Tip text="Current scoring spec. Reset v1 restores these original numbers.">
+          <span className="text-xs text-muted-foreground">v1</span>
+        </Tip>
         {book.data ? (
           <span className="text-xs text-muted-foreground">
             {book.data.mode === "span" ? `${book.data.from} → ${book.data.asOf}` : book.data.asOf}
@@ -203,22 +280,55 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
         ) : null}
         {page ? (
           <>
-            <select
-              className="start-here-no-drag h-8 rounded border bg-background px-2 text-xs"
-              value={pool}
-              onChange={(event) => setPool(event.target.value as LeaderPool)}
-            >
-              <option value="sp500">S&P 500</option>
-              <option value="russell2000">Russell 2000</option>
-            </select>
+            <Tip text="Which names are scored. Universe is the full leaders list. S&P 500 and Russell 2000 limit the pool.">
+              <select
+                className="start-here-no-drag h-8 rounded border bg-background px-2 text-xs"
+                value={pool}
+                onChange={(event) => setPool(event.target.value as LeaderPool)}
+              >
+                <option value="universe">Universe</option>
+                <option value="sp500">S&P 500</option>
+                <option value="russell2000">Russell 2000</option>
+              </select>
+            </Tip>
             <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              As of
-              <Input className="start-here-no-drag h-8 w-36 text-xs" type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} />
+              <Tip text="First session in the window. Leave both dates empty for the latest close.">As of</Tip>
+              <Input
+                className="start-here-no-drag h-8 w-36 text-xs"
+                type="date"
+                min="2000-01-01"
+                max="2100-12-31"
+                value={asOf}
+                onChange={(event) => setAsOf(event.target.value)}
+              />
             </label>
             <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              Through
-              <Input className="start-here-no-drag h-8 w-36 text-xs" type="date" value={through} onChange={(event) => setThrough(event.target.value)} />
+              <Tip text="Last session in the window. Set both dates to see who joined and left between them.">Through</Tip>
+              <Input
+                className="start-here-no-drag h-8 w-36 text-xs"
+                type="date"
+                min="2000-01-01"
+                max="2100-12-31"
+                value={through}
+                onChange={(event) => setThrough(event.target.value)}
+              />
             </label>
+            {asOf || through ? (
+              <Tip text="Clear both dates and return to the latest close.">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="start-here-no-drag h-8"
+                  onClick={() => {
+                    datesSeeded.current = false;
+                    setAsOf("");
+                    setThrough("");
+                  }}
+                >
+                  Clear dates
+                </Button>
+              </Tip>
+            ) : null}
           </>
         ) : null}
       </div>
@@ -228,7 +338,7 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
           <div className="flex flex-wrap items-end gap-3">
             {SPEC_FIELDS.filter((field) => field.group === "main").map((field) => (
               <label key={field.key} className="flex flex-col gap-1 text-xs">
-                {field.label}
+                <Tip text={field.hint}>{field.label}</Tip>
                 <Input
                   className="h-8 w-28 text-xs"
                   type="number"
@@ -238,30 +348,36 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
                 />
               </label>
             ))}
-            <Button size="sm" disabled={!dirty || savePrefs.isPending} onClick={() => savePrefs.mutate({ pool, spec })}>
-              Keep
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setSpec(V1_SPEC);
-                setPool("sp500");
-                savePrefs.mutate({ pool: "sp500", spec: V1_SPEC });
-              }}
-            >
-              <RotateCcw className="mr-1 h-3 w-3" />
-              Reset v1
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setShowAdvanced((open) => !open)}>
-              {showAdvanced ? "Hide advanced" : "Advanced"}
-            </Button>
+            <Tip text="Save these numbers and the pool. Until you Keep, the table is only a preview.">
+              <Button size="sm" disabled={!dirty || savePrefs.isPending} onClick={() => savePrefs.mutate({ pool, spec })}>
+                Keep
+              </Button>
+            </Tip>
+            <Tip text="Restore the original v1 numbers and the full universe, then save.">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSpec(V1_SPEC);
+                  setPool("universe");
+                  savePrefs.mutate({ pool: "universe", spec: V1_SPEC });
+                }}
+              >
+                <RotateCcw className="mr-1 h-3 w-3" />
+                Reset v1
+              </Button>
+            </Tip>
+            <Tip text="Extra scoring knobs: moving averages, RS cutoffs, volume, and character.">
+              <Button size="sm" variant="ghost" onClick={() => setShowAdvanced((open) => !open)}>
+                {showAdvanced ? "Hide advanced" : "Advanced"}
+              </Button>
+            </Tip>
           </div>
           {showAdvanced ? (
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               {SPEC_FIELDS.filter((field) => field.group === "advanced").map((field) => (
                 <label key={field.key} className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-                  {field.label}
+                  <Tip text={field.hint}>{field.label}</Tip>
                   <Input
                     className="h-7 text-xs"
                     type="number"
@@ -282,41 +398,56 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
                 if (event.key === "Enter" && prompt.trim()) interpret.mutate();
               }}
             />
-            <Button size="sm" variant="secondary" disabled={!prompt.trim() || interpret.isPending} onClick={() => interpret.mutate()}>
-              {interpret.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Apply with AI"}
-            </Button>
-            {dirty ? <span className="text-xs text-amber-500">Preview — Keep to save</span> : null}
+            <Tip text="Turns a plain-English request into the scoring numbers above. Keep still saves them.">
+              <Button size="sm" variant="secondary" disabled={!prompt.trim() || interpret.isPending} onClick={() => interpret.mutate()}>
+                {interpret.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Apply with AI"}
+              </Button>
+            </Tip>
+            {dirty ? (
+              <Tip text="These numbers are not saved yet. Keep writes them. Refreshing the page drops the preview.">
+                <span className="text-xs text-amber-500">Preview — Keep to save</span>
+              </Tip>
+            ) : null}
           </div>
           {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
           {interpret.error ? <p className="text-xs text-red-400">{(interpret.error as Error).message}</p> : null}
         </div>
       ) : null}
 
+      {dateWarning ? <p className="px-2 text-xs text-amber-500">{dateWarning}</p> : null}
+      {book.error && book.data ? <p className="px-2 text-xs text-red-400">{bookErrorText(book.error)}</p> : null}
       {book.isLoading || !ready ? (
         <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Building the book from the daily closes…
         </div>
-      ) : book.error ? (
-        <p className="p-2 text-sm text-red-400">{(book.error as Error).message}</p>
+      ) : book.error && !book.data ? (
+        <p className="p-2 text-sm text-red-400">{bookErrorText(book.error)}</p>
       ) : book.data?.mode === "span" && book.data.span ? (
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-background">
               <tr className="text-left text-muted-foreground">
-                <th className="px-2 py-1">Symbol</th>
-                <th className="px-2 py-1">Days</th>
-                <th className="px-2 py-1">Joined</th>
-                <th className="px-2 py-1">Left</th>
-                <th className="px-2 py-1">Why</th>
-                <th className="px-2 py-1">Score</th>
+                <th className="px-2 py-1"><Tip text="Click the chart icon to open the daily chart.">Symbol</Tip></th>
+                <th className="px-2 py-1"><Tip text="Sessions this name spent on the book in the date window.">Days</Tip></th>
+                <th className="px-2 py-1"><Tip text="First session it joined the book in this window.">Joined</Tip></th>
+                <th className="px-2 py-1"><Tip text="Session it left the book. Blank if it is still on.">Left</Tip></th>
+                <th className="px-2 py-1"><Tip text="Why it left, or that it is still on the book.">Why</Tip></th>
+                <th className="px-2 py-1"><Tip text="Engine score on the last session in the window.">Score</Tip></th>
               </tr>
             </thead>
             <tbody>
               {book.data.span.map((row) => (
                 <tr key={row.symbol} className="border-t">
                   <td className="px-2 py-1 font-medium">
-                    <Link href={`/sentinel/charts/${row.symbol}`}>{row.symbol}</Link>
+                    <span className="inline-flex items-center">
+                      <ChartTickerChip
+                        symbol={row.symbol}
+                        size="compact"
+                        testIdPrefix={`leaders-span-${row.symbol}`}
+                      />
+                      <ChartIconButton symbol={row.symbol} onOpen={openChart} />
+                    </span>
                   </td>
                   <td className="px-2 py-1 tabular-nums">{row.daysInBook}</td>
                   <td className="px-2 py-1">{row.joined ?? "—"}</td>
@@ -332,25 +463,31 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
         <div className="min-h-0 flex-1 overflow-auto">
           {book.data ? (
             <p className="px-2 pb-1 text-[11px] text-muted-foreground">
-              {book.data.counts.onBook} on book · {book.data.counts.atRisk} at risk · {book.data.counts.joinedThisWeek} joined this week · {book.data.counts.droppedThisWeek} left this week
+              <Tip text="Passing the gates and at or above the stay score.">{book.data.counts.onBook} on book</Tip>
+              {" · "}
+              <Tip text="Still on the book, but the score is below the at-risk line.">{book.data.counts.atRisk} at risk</Tip>
+              {" · "}
+              <Tip text="Names that joined in the last five sessions.">{book.data.counts.joinedThisWeek} joined this week</Tip>
+              {" · "}
+              <Tip text="Names that left in the last five sessions.">{book.data.counts.droppedThisWeek} left this week</Tip>
             </p>
           ) : null}
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-background">
               <tr className="text-left text-muted-foreground">
-                <th className="px-2 py-1">Symbol</th>
-                <th className="px-2 py-1">Score</th>
-                <th className="px-2 py-1">Yours</th>
-                <th className="px-2 py-1">Theme</th>
-                <th className="px-2 py-1">Status</th>
+                <th className="px-2 py-1"><Tip text="Click the name for gates and score lines. Chart icon opens the daily chart.">Symbol</Tip></th>
+                <th className="px-2 py-1"><Tip text="Engine score, 0–100, from RS, theme rank, accumulation, and character.">Score</Tip></th>
+                <th className="px-2 py-1"><Tip text="Engine score plus your +/− points. Pin does not change this number.">Yours</Tip></th>
+                <th className="px-2 py-1"><Tip text="Daily theme assigned to this name on this close.">Theme</Tip></th>
+                <th className="px-2 py-1"><Tip text="On book = passing. At risk = still on but score is weak. Left = dropped or not on the book.">Status</Tip></th>
                 {book.data?.live ? (
                   <>
-                    <th className="px-2 py-1 text-yellow-400">VWAP</th>
-                    <th className="px-2 py-1">6/20</th>
+                    <th className="px-2 py-1 text-yellow-400"><Tip text="Live distance to VWAP. Hover the number for the entry reading.">VWAP</Tip></th>
+                    <th className="px-2 py-1"><Tip text="Live 6/20 EMA relationship. Hover the number for the entry reading.">6/20</Tip></th>
                   </>
                 ) : null}
-                <th className="px-2 py-1">Days</th>
-                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"><Tip text="Consecutive sessions this name has been on the book.">Days</Tip></th>
+                <th className="px-2 py-1"><Tip text="Your points (−10 to +10) and pin. Pin keeps the name on this list if it left the book.">Pin</Tip></th>
               </tr>
             </thead>
             <tbody>
@@ -361,10 +498,22 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
                   <Fragment key={row.symbol}>
                     <tr className="border-t">
                       <td className="px-2 py-1 font-medium">
-                        <button className="start-here-no-drag" onClick={() => setOpenSymbol(open ? null : row.symbol)}>
-                          {mark.pinned ? <Pin className="mr-1 inline h-3 w-3" /> : null}
-                          {row.symbol}
-                        </button>
+                        <span className="inline-flex items-center">
+                          {mark.pinned ? <Pin className="mr-1 h-3 w-3 text-muted-foreground" /> : null}
+                          <button
+                            type="button"
+                            className="start-here-no-drag"
+                            onClick={() => setOpenSymbol(open ? null : row.symbol)}
+                          >
+                            <ChartTickerChip
+                              symbol={row.symbol}
+                              price={row.close > 0 ? row.close : null}
+                              size="compact"
+                              testIdPrefix={`leaders-${row.symbol}`}
+                            />
+                          </button>
+                          <ChartIconButton symbol={row.symbol} onOpen={openChart} />
+                        </span>
                       </td>
                       <td className="px-2 py-1 tabular-nums">{row.score}</td>
                       <td className="px-2 py-1 tabular-nums">{shownScore(row.score, mark.points)}</td>
@@ -383,22 +532,30 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
                       <td className="px-2 py-1 tabular-nums">{row.daysOnBook || "—"}</td>
                       <td className="px-2 py-1">
                         <span className="start-here-no-drag inline-flex gap-1">
-                          <button
-                            className="rounded border px-1"
-                            onClick={() => saveMark.mutate({ ...mark, points: Math.max(-10, mark.points - 1) })}
-                          >
-                            −
-                          </button>
-                          <span className="tabular-nums">{mark.points}</span>
-                          <button
-                            className="rounded border px-1"
-                            onClick={() => saveMark.mutate({ ...mark, points: Math.min(10, mark.points + 1) })}
-                          >
-                            +
-                          </button>
-                          <button className="rounded border px-1" onClick={() => saveMark.mutate({ ...mark, pinned: !mark.pinned })}>
-                            {mark.pinned ? "Unpin" : "Pin"}
-                          </button>
+                          <Tip text="Subtract one of your points. Floor is −10.">
+                            <button
+                              className="rounded border px-1"
+                              onClick={() => saveMark.mutate({ ...mark, points: Math.max(-10, mark.points - 1) })}
+                            >
+                              −
+                            </button>
+                          </Tip>
+                          <Tip text="Your points added to the engine score.">
+                            <span className="tabular-nums">{mark.points}</span>
+                          </Tip>
+                          <Tip text="Add one of your points. Cap is +10.">
+                            <button
+                              className="rounded border px-1"
+                              onClick={() => saveMark.mutate({ ...mark, points: Math.min(10, mark.points + 1) })}
+                            >
+                              +
+                            </button>
+                          </Tip>
+                          <Tip text={mark.pinned ? "Remove the pin. The name can fall off this list." : "Keep this name on the list even if it left the book."}>
+                            <button className="rounded border px-1" onClick={() => saveMark.mutate({ ...mark, pinned: !mark.pinned })}>
+                              {mark.pinned ? "Unpin" : "Pin"}
+                            </button>
+                          </Tip>
                         </span>
                       </td>
                     </tr>
@@ -440,6 +597,34 @@ export function MarketLeadersBoard({ mode }: { mode: "page" | "widget" }) {
           Configuration, dates, and AI live on the Leaders page.
         </p>
       )}
+      {chartOpen && chartResults.length > 0 ? (
+        <ScanChartViewer
+          results={chartResults}
+          currentIndex={chartIndex}
+          open={chartOpen}
+          onOpenChange={setChartOpen}
+          onIndexChange={setChartIndex}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function ChartIconButton({ symbol, onOpen }: { symbol: string; onOpen: (symbol: string) => void }) {
+  return (
+    <button
+      type="button"
+      className="start-here-no-drag ml-1 inline-flex text-muted-foreground hover:text-foreground"
+      title="Open the daily chart"
+      aria-label={`Open chart for ${symbol}`}
+      data-testid={`button-leaders-chart-${symbol}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        onOpen(symbol);
+      }}
+    >
+      <LineChart className="h-3.5 w-3.5" />
+    </button>
   );
 }

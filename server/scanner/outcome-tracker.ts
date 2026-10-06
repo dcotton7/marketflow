@@ -6,12 +6,16 @@
 // horizon, locks a proxy symbol at first touch, and separates intraday
 // completion from longer-horizon scheduling.
 //
-// Existing V2 rows are never rewritten. New fills stamp outcome_contract_version=v3.
+// Existing V2 rows are never rewritten or deleted. New fills stamp
+// outcome_contract_version=v3. V2-closed rows (outcome_tracked_at set) stay
+// in the table but are not re-queued. Flood types (LOD/HOD/gap/volume/MA
+// proximity) clock the first print per name per ET day only; repeats stay.
 // ---------------------------------------------------------------------------
 
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
-import { eq, and, isNull, sql, inArray, notInArray, lt, or } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray, notInArray, lt } from "drizzle-orm";
+import { FLOOD_TRACK_ONCE_PER_DAY } from "@shared/scanner-outcome-queue";
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
 import { fetchAlpacaDailyBars, fetchAlpacaIntradayBars, fetchAlpacaQuote } from "../alpaca";
@@ -26,6 +30,25 @@ import {
 const INTERVAL_MS = 3 * 60_000;
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
+
+/** First print of (type, subject, ET day) for flood detectors; other types unchanged. */
+function floodFirstEpisodeSql() {
+  const listed = sql.join(
+    FLOOD_TRACK_ONCE_PER_DAY.map((t) => sql`${t}`),
+    sql`, `
+  );
+  return sql`(
+    scanner_discoveries.signal_type NOT IN (${listed})
+    OR scanner_discoveries.id = (
+      SELECT MIN(d2.id)
+      FROM scanner_discoveries d2
+      WHERE d2.signal_type = scanner_discoveries.signal_type
+        AND d2.subject = scanner_discoveries.subject
+        AND (d2.created_at AT TIME ZONE 'America/New_York')::date
+          = (scanner_discoveries.created_at AT TIME ZONE 'America/New_York')::date
+    )
+  )`;
+}
 
 const MARKET_LEVEL_SIGNAL_TYPES = new Set([
   "regime_change", "rai_shift", "broad_weakness", "broad_strength",
@@ -248,13 +271,14 @@ async function processOutcomes(): Promise<void> {
     const nowForSelect = new Date();
     const overdueAgeCutoff = new Date(nowForSelect.getTime() - 20 * 60_000);
 
+    // Open work only: outcome_tracked_at still null. V2-closed rows keep every
+    // clock they have; they are not deleted and not pulled back into the queue
+    // just because intraday_complete_at (a V3 column) is empty.
     const eligibleWhere = and(
-      or(
-        isNull(scannerDiscoveries.outcomeTrackedAt),
-        isNull(scannerDiscoveries.intradayCompleteAt)
-      ),
+      isNull(scannerDiscoveries.outcomeTrackedAt),
       inArray(scannerDiscoveries.subjectKind, ["ticker", "theme", "market"]),
-      notInArray(scannerDiscoveries.signalType, [...SKIP_SIGNAL_TYPES])
+      notInArray(scannerDiscoveries.signalType, [...SKIP_SIGNAL_TYPES]),
+      floodFirstEpisodeSql()
     );
 
     const newestPending = await db
@@ -361,7 +385,8 @@ async function processOutcomes(): Promise<void> {
     console.log(
       `[Outcome Tracker] Fetched ${pending.length} across ${byType.size} types ` +
         `(${PER_TYPE_LIMIT}/type; partialOverdue=${partialOverdue.length}, ` +
-        `oldestOverdue=${oldestOverdue.length}, newest=${newestPending.length})`
+        `oldestOverdue=${oldestOverdue.length}, newest=${newestPending.length}; ` +
+        `open tracked_at only, flood first-episode)`
     );
     if (pending.length === 0) return;
 

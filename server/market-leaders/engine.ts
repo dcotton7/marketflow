@@ -6,6 +6,7 @@
 import { createHash } from "crypto";
 import { getPool } from "../db";
 import { getUniverseTickers } from "../bigidea/universes";
+import { getLeadersUniverseTickers } from "./universe";
 import { getClusterById, getTickerStaticCluster } from "../market-condition/universe";
 import {
   MARKET_LEADERS_SPEC_VERSION,
@@ -220,7 +221,9 @@ async function computeBook(
   from: string | null,
   latest: string,
 ): Promise<LeadersPayload> {
-  const universe = getUniverseTickers(poolName).map((symbol) => symbol.toUpperCase());
+  const universe = (poolName === "universe" ? getLeadersUniverseTickers() : getUniverseTickers(poolName)).map((symbol) =>
+    symbol.toUpperCase(),
+  );
   if (universe.length === 0) throw new Error(`No constituents for ${poolName}`);
   const symbols = [...new Set([...universe, "SPY"])];
   const bars = await loadBars(symbols, asOf);
@@ -276,7 +279,11 @@ export async function scoreSymbolsNow(
   const spy = bars.get("SPY") ?? [];
   const spyClose = new Map(spy.map((bar) => [bar.date, bar.close]));
   const snaps = await loadThemeSnaps(payload.asOf);
-  const poolSet = new Set(getUniverseTickers(payload.pool).map((symbol) => symbol.toUpperCase()));
+  const poolSet = new Set(
+    (payload.pool === "universe" ? getLeadersUniverseTickers() : getUniverseTickers(payload.pool)).map((symbol) =>
+      symbol.toUpperCase(),
+    ),
+  );
   const raw = [];
   for (const symbol of missing) {
     const list = bars.get(symbol);

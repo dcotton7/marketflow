@@ -666,6 +666,17 @@ export default function MarketConditionPage() {
   );
 
   // Handle ticker added - refresh members list
+  useEffect(() => {
+    const onLead = (event: Event) => {
+      const symbol = (event as CustomEvent<string>).detail;
+      if (typeof symbol === "string" && symbol.trim()) {
+        handleTickerSelect(symbol.trim().toUpperCase());
+      }
+    };
+    window.addEventListener("mf-lead-symbol", onLead);
+    return () => window.removeEventListener("mf-lead-symbol", onLead);
+  }, [handleTickerSelect]);
+
   const handleTickersAdded = useCallback(() => {
     refetchMembers();
   }, [refetchMembers]);
