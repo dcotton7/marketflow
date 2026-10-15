@@ -71,6 +71,12 @@ const OWNER_ROUTES: Array<[string, string]> = [
 const OWNER_ADMIN_ROUTES: Array<[string, string]> = [
   ["POST", "/api/marketflow/AAPL"],
   ["DELETE", "/api/marketflow/AAPL/cache"],
+  ["GET", "/api/discord-stream/status"],
+  ["GET", "/api/discord-stream/messages"],
+  ["GET", "/api/discord-stream/analysis"],
+  ["POST", "/api/discord-stream/start"],
+  ["POST", "/api/discord-stream/stop"],
+  ["POST", "/api/discord-stream/clear"],
 ];
 
 /** Logged-in, user-owned content: any active account. */

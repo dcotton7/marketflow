@@ -76,6 +76,12 @@ function Router() {
           <SentinelAdminPage />
         </SentinelProtectedRoute>
       </Route>
+      <Route path="/sentinel/discord-stream">
+        {() => {
+          localStorage.setItem("mc-discord-dock", "1");
+          return <Redirect to="/sentinel/market-condition" />;
+        }}
+      </Route>
       <Route path="/sentinel/import">
         <SentinelProtectedRoute>
           <SentinelImportPage />

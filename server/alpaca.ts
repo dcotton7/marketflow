@@ -153,6 +153,24 @@ export async function fetchAlpacaAssetName(symbol: string): Promise<string | nul
 }
 
 /**
+ * Every active, tradable US equity / ETF symbol (GET /v2/assets). Returns [] without credentials.
+ */
+export async function fetchAlpacaActiveSymbols(): Promise<string[]> {
+  if (!getApiKey() || !getApiSecret()) return [];
+  try {
+    const url = `${ALPACA_BASE_URL}/v2/assets?status=active&asset_class=us_equity`;
+    const data = await alpacaFetchWithRetry(url);
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((a: any) => a?.tradable && typeof a.symbol === "string")
+      .map((a: any) => String(a.symbol).toUpperCase());
+  } catch (error) {
+    console.error("[Alpaca] Failed to fetch active assets:", error);
+    return [];
+  }
+}
+
+/**
  * Fetch intraday bars from Alpaca Market Data API v2
  * Supports extended hours (pre-market + after-hours)
  */

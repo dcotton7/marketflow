@@ -25,6 +25,7 @@ import { ThemeBriefingPanel } from "@/components/market-condition/ThemeBriefingP
 import { ThemeReviewActions } from "@/components/market-condition/ThemeReviewActions";
 import { ThemeTickerReviewPanel } from "@/components/market-condition/ThemeTickerReviewPanel";
 import { TickerReviewChartViewer } from "@/components/market-condition/TickerReviewChartViewer";
+import { DiscordStreamPanel } from "@/components/discord/DiscordStreamPanel";
 import {
   MOCK_THEMES,
   MOCK_THEME_MEMBERS,
@@ -42,7 +43,7 @@ import { SentinelHeader } from "@/components/SentinelHeader";
 import { useSystemSettings } from "@/context/SystemSettingsContext";
 import { useTosSync } from "@/context/TosSyncContext";
 import { useLocation, useSearch } from "wouter";
-import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, ChevronUp, BarChart3, Search, Car, Eye, EyeOff, Rows3 } from "lucide-react";
+import { Grid3X3, List, LayoutGrid, Maximize2, Minimize2, TrendingUp, ArrowUpDown, PieChart, Info, GripVertical, GripHorizontal, RefreshCw, AlertCircle, Clock, Filter, ChevronDown, ChevronUp, BarChart3, Search, Car, Eye, EyeOff, Rows3, MessagesSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -241,6 +242,32 @@ function ResizeHandle({ direction = "vertical" }: { direction?: "vertical" | "ho
   );
 }
 
+// Right-side dock (Discord stream) beside the workspace; renders the workspace alone when no dock.
+function WorkspaceWithDock({
+  dock,
+  padClass,
+  children,
+}: {
+  dock: React.ReactNode;
+  padClass: string;
+  children: React.ReactNode;
+}) {
+  if (!dock) return <>{children}</>;
+  return (
+    <div className="flex min-h-0 flex-1">
+      <PanelGroup direction="horizontal" autoSaveId="market-flow-discord-dock-v2">
+        <Panel id="mf-workspace" order={1} defaultSize={55} minSize={25}>
+          {children}
+        </Panel>
+        <ResizeHandle direction="vertical" />
+        <Panel id="mf-discord-dock" order={2} defaultSize={45} minSize={25} maxSize={75}>
+          <div className={cn("h-full", padClass, "pl-0")}>{dock}</div>
+        </Panel>
+      </PanelGroup>
+    </div>
+  );
+}
+
 // Panel header component
 function PanelHeader({
   title,
@@ -348,6 +375,22 @@ export default function MarketConditionPage() {
     setViewModeRaw(mode);
     localStorage.setItem("mc-view-mode", mode);
   }, []);
+  const [discordDockOpen, setDiscordDockOpenRaw] = useState(() => localStorage.getItem("mc-discord-dock") === "1");
+  const setDiscordDockOpen = useCallback((open: boolean) => {
+    setDiscordDockOpenRaw(open);
+    localStorage.setItem("mc-discord-dock", open ? "1" : "0");
+  }, []);
+  // 403 for non-admins, 501 on Live: the Discord dock and its toggle stay hidden.
+  const { data: discordAvailable = false } = useQuery<boolean>({
+    queryKey: ["/api/discord-stream/status", "available"],
+    queryFn: async () => {
+      const res = await fetch("/api/discord-stream/status", { credentials: "include" });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { available?: boolean };
+      return body.available === true;
+    },
+  });
+  const showDiscordDock = discordAvailable && discordDockOpen;
   const [lensMode, setLensMode] = useState<LensMode>("flowMap");
   const timeSliceDisabledModes = new Set<LensMode>(["flowMap", "concentration", "accumulation", "race"]);
   const handleLensMode = (mode: LensMode) => {
@@ -1612,7 +1655,7 @@ export default function MarketConditionPage() {
     <div
       className={cn(
         "sentinel-page flex flex-col",
-        viewMode === "rows" ? "min-h-screen" : "h-screen",
+        viewMode === "rows" && !showDiscordDock ? "min-h-screen" : "h-screen",
         isFullscreen && "fixed inset-0 z-50"
       )}
       style={pageShellStyle as React.CSSProperties}
@@ -2403,6 +2446,24 @@ export default function MarketConditionPage() {
             </Tooltip>
           </div>
 
+          {discordAvailable && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn("h-7 gap-1.5 px-2", discordDockOpen && "bg-slate-700 text-indigo-300")}
+                  onClick={() => setDiscordDockOpen(!discordDockOpen)}
+                  data-testid="mf-discord-toggle"
+                >
+                  <MessagesSquare className="h-4 w-4" />
+                  {!responsive.isCompact && <span className="text-xs">Discord</span>}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{discordDockOpen ? "Hide Discord stream panel" : "Show Discord stream panel (#live-stream-chat)"}</TooltipContent>
+            </Tooltip>
+          )}
+
           {/* Fullscreen Toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -2434,9 +2495,23 @@ export default function MarketConditionPage() {
       )}
 
       {/* Main Content */}
+      <WorkspaceWithDock
+        dock={
+          showDiscordDock ? (
+            <DiscordStreamPanel
+              onHide={() => setDiscordDockOpen(false)}
+              onSymbol={(symbol) => handleTickerSelect(symbol)}
+              dataRegion={uiRegion(MARKET_FLOW_SURFACE.id, "discordStreamPanel")}
+            />
+          ) : null
+        }
+        padClass={responsive.isCompact ? "p-1" : "p-2"}
+      >
       <div className={cn(
         viewMode === "rows" ? "flex-1 overflow-y-auto" : "flex-1 overflow-hidden",
-        responsive.isCompact ? "p-1" : "p-2"
+        showDiscordDock && "h-full",
+        responsive.isCompact ? "p-1" : "p-2",
+        showDiscordDock && "pr-0"
       )}>
         {viewMode === "rows" ? (
           <div className="space-y-2">
@@ -2644,6 +2719,7 @@ export default function MarketConditionPage() {
           </div>
         )}
       </div>
+      </WorkspaceWithDock>
       <Dialog
         open={isRacePopoutOpen}
         onOpenChange={(open) => {

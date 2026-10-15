@@ -1049,6 +1049,62 @@ export async function registerRoutes(
     }
   });
 
+  // ── Discord Watch (LOCAL Windows only — read-only capture, in-memory buffer)
+  const discordBridge =
+    process.platform === "win32" && process.env.NODE_ENV !== "production"
+      ? await import("./bridge/discord-bridge")
+      : null;
+  const discordUnavailable = { error: "Discord Watch only available on LOCAL Windows" };
+
+  app.get("/api/discord-stream/status", (_req, res) => {
+    if (!discordBridge) return res.status(501).json({ available: false, ...discordUnavailable });
+    res.json(discordBridge.getStatus());
+  });
+
+  app.get("/api/discord-stream/messages", (req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    const after = Number(req.query.after ?? 0);
+    const limit = Number(req.query.limit ?? 1000);
+    res.json({
+      messages: discordBridge.getMessages(Number.isFinite(after) ? after : 0, Number.isFinite(limit) ? limit : 1000),
+      status: discordBridge.getStatus(),
+    });
+  });
+
+  app.get("/api/discord-stream/analysis", (req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    const w = Number(req.query.window);
+    const traders = String(req.query.traders ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+    res.json(discordBridge.getAnalysis({ windowMin: Number.isFinite(w) && w > 0 ? Math.min(w, 24 * 60) : null, traders }));
+  });
+
+  app.post("/api/discord-stream/start", (req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    try {
+      const channel = typeof req.body?.channel === "string" ? req.body.channel : undefined;
+      discordBridge.start({ channel });
+      res.json(discordBridge.getStatus());
+    } catch (err) {
+      res.status(409).json({ error: err instanceof Error ? err.message : "Start failed" });
+    }
+  });
+
+  app.post("/api/discord-stream/stop", (_req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    discordBridge.stop();
+    res.json(discordBridge.getStatus());
+  });
+
+  app.post("/api/discord-stream/clear", (_req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    discordBridge.clear();
+    res.json(discordBridge.getStatus());
+  });
+
   // Initialize MC polling in background — do NOT await so the HTTP listener
   // can bind immediately. The first snapshot poll loads 676+ tickers and can
   // take 30-60s; blocking here causes Render to see the server as failed.

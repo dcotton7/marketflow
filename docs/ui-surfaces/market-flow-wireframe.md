@@ -36,6 +36,7 @@
 │  LENS  [lensSwitcher]: flow │ flowMap │ rotation │ conc │ A/D │ race          │
 │  [accDistFilter] │ [timeSliceSelector] │ [universeSearch] │ [sizeFilter]        │
 │  [viewModeToggle] grid │ table │ split │ [panelVisibility] │ [fullscreenToggle]│
+│  Discord toggle → opens [discordStreamPanel] dock (LOCAL + admin only)        │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ WORKSPACE  [workspace]                                                        │
 │                                                                               │
@@ -89,6 +90,17 @@
 │  ═══ OTHER VIEW MODES ═══                                                     │
 │  grid  → full-width [themeHeatmap] (or [flowMapMatrix] if flowMap lens)       │
 │  table → full-width [rotationTable]                                           │
+│                                                                               │
+│  ═══ RIGHT DOCK (optional, any view mode) ═══                                 │
+│  ║ resize handle │ DISCORD STREAM  [discordStreamPanel]                       │
+│    header: #live-stream-chat · Start/Stop · Hide                              │
+│    ┌ CHAT ~1.5s ─────────────┐║┌ ROOM IDEAS ~5s ─────────────────────┐       │
+│    │ status · filter · Details│║│ window 5m│15m│30m│1h│Session        │       │
+│    │ messages (tickers, Nick/ │║│ Nick & Ari trade calls (chime)     │       │
+│    │ Ari rows highlighted)    │║│ Most mentioned (long/short lean)   │       │
+│    └──────────────────────────┘║│ Leaning long │ Leaning short       │       │
+│                                ║└─────────────────────────────────────┘       │
+│    LOCAL Windows + admin only · read-only · memory only                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 OVERLAYS (same page, not in main stack)
@@ -153,6 +165,7 @@ Time slice selector disabled for: `flowMap`, `concentration`, `accumulation`, `r
 | `focusedThemePanel` | Focused theme panel | workspace |
 | `membersPanel` | Members panel | workspace |
 | `rotationTablePanel` | Rotation table panel | workspace |
+| `discordStreamPanel` | Discord stream panel | workspace |
 | `racePopout` | Race pop-out | pageShell |
 | `analysisPanel` | Analysis panel | pageShell |
 | `marketHealth` | Market health | regimeBar |

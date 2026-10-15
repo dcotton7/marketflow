@@ -341,6 +341,13 @@ export const MARKET_FLOW_SURFACE: UiSurfaceDef = {
       displayName: "Rotation table",
       parent: "rotationTablePanel",
     },
+    discordStreamPanel: {
+      id: "discordStreamPanel",
+      displayName: "Discord stream panel",
+      parent: "workspace",
+      notes:
+        "Right-side dock (toolbar Discord toggle). LOCAL Windows + admin only. Split side by side: chat (read-only capture of #live-stream-chat, ~1.5s) | Room ideas (Nick & Ari trade calls, most-mentioned tickers with long/short lean over 5m-session, ~5s). Memory only.",
+    },
     racePopout: {
       id: "racePopout",
       displayName: "Race pop-out",

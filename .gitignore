@@ -7,3 +7,4 @@ server/public
 vite.config.ts.*
 *.tar.gz
 server/scripts/.user-disable-backup-*.json
+server/bridge/DISCORD_WATCH_RESUME.json

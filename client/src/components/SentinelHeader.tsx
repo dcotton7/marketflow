@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, BookOpen, LayoutDashboard, Settings, Upload, Brain, Lightbulb, Sparkles, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar, PanelLeftClose, PanelLeftOpen, Crown } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, RefreshCw, Zap, ArrowLeftRight, Flame, Snowflake, Settings, Upload, Lightbulb, BarChart3, Layers, Clock, Bell, House, LogOut, UserRound, CalendarDays, Menu, Radar, PanelLeftClose, PanelLeftOpen, Crown } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { WatchlistSelector } from "@/components/WatchlistSelector";
 import { WatchlistModal } from "./WatchlistModal";
@@ -241,15 +241,12 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
   const isDashboardPage = location === "/sentinel" || location === "/sentinel/dashboard";
   const isImportPage = location === "/sentinel/import";
   const isTradeJournalPage = location === "/sentinel/trade-journal";
-  const isPatternsPage = location === "/sentinel/patterns";
   const isAdminPage = location.startsWith("/sentinel/admin");
   const isBigIdeaPage = location === "/sentinel/bigidea";
   const isMarketConditionPage = location === "/sentinel/market-condition";
   const isChartsPage = location === "/sentinel/charts" || location === "/sentinel/beta-charts";
   const isStartHerePage = location === "/sentinel/start-here";
   const isLeadersPage = location === "/sentinel/market-leaders";
-  const isEvaluatePage = location === "/sentinel/evaluate";
-
   const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
   const [alertCenterOpen, setAlertCenterOpen] = useState(false);
   const responsive = useResponsiveLayout();
@@ -409,17 +406,6 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
                 showAddButton={false}
                 onManageWatchlists={() => setWatchlistModalOpen(true)}
               />
-              <Link href="/sentinel/evaluate">
-                <Button 
-                  variant={isEvaluatePage ? "secondary" : "ghost"} 
-                  size="sm"
-                  className="gap-2"
-                  data-testid="nav-evaluate"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Ivy AI</span>
-                </Button>
-              </Link>
               <Link href="/sentinel/import">
                 <Button 
                   variant={isImportPage ? "secondary" : "ghost"} 
@@ -442,17 +428,6 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
                   <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Trade Journal</span>
                 </Button>
               </Link>
-              <Link href="/sentinel/patterns">
-                <Button 
-                  variant={isPatternsPage ? "secondary" : "ghost"} 
-                  size="sm"
-                  className="gap-2"
-                  data-testid="nav-patterns"
-                >
-                  <Brain className="w-4 h-4" />
-                  <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Patterns</span>
-                </Button>
-              </Link>
               {authUser?.isAdmin && (
                 <Link href="/sentinel/admin">
                   <Button 
@@ -466,26 +441,6 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
                   </Button>
                 </Link>
               )}
-              <Button 
-                variant="ghost"
-                size="sm"
-                className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
-                disabled
-                data-testid="nav-dashboard"
-              >
-                <LayoutDashboard className="w-4 h-4" />
-                <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Dashboard</span>
-              </Button>
-              <Button 
-                variant="ghost"
-                size="sm"
-                className="gap-2 opacity-30 cursor-not-allowed pointer-events-none"
-                disabled
-                data-testid="nav-rules"
-              >
-                <BookOpen className="w-4 h-4" />
-                <span className="hidden sm:inline" style={{ fontSize: cssVariables.fontSizeSmall }}>Rubric</span>
-              </Button>
             </>
           ) : (
             <DropdownMenu>
@@ -502,18 +457,12 @@ export function SentinelHeader({ showSentiment = true, rightContent }: SentinelH
                 <DropdownMenuItem onClick={() => setWatchlistModalOpen(true)} className="gap-2">
                   <Layers className="w-4 h-4" /> Watchlists
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setLocation("/sentinel/evaluate")} className="gap-2">
-                  <Sparkles className="w-4 h-4" /> Ivy AI
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setLocation("/sentinel/import")} className="gap-2">
                   <Upload className="w-4 h-4" /> Import
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setLocation("/sentinel/trade-journal")} className="gap-2">
                   <CalendarDays className="w-4 h-4" /> Trade Journal
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setLocation("/sentinel/patterns")} className="gap-2">
-                  <Brain className="w-4 h-4" /> Patterns
                 </DropdownMenuItem>
                 {authUser?.isAdmin && (
                   <>
