@@ -181,6 +181,16 @@ const importConfirmSchema = z.object({
   timestampOverride: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, "Invalid time format (HH:MM)").optional(),
 });
 
+async function userOwnsTrade(tradeId: number, userId: number): Promise<boolean> {
+  if (!Number.isFinite(tradeId)) return false;
+  const [row] = await db
+    .select({ id: sentinelTrades.id })
+    .from(sentinelTrades)
+    .where(and(eq(sentinelTrades.id, tradeId), eq(sentinelTrades.userId, userId)))
+    .limit(1);
+  return !!row;
+}
+
 export function registerSentinelRoutes(app: Express): void {
   const PgSession = connectPgSimple(session);
   const isProd = process.env.NODE_ENV === "production";
@@ -3894,6 +3904,9 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const userId = req.session.userId!;
       const user = await sentinelModels.getUserById(userId);
       const isAdmin = user?.isAdmin ?? false;
+      if (!isAdmin && !(await userOwnsTrade(tradeId, userId))) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
 
       let labels;
       if (isAdmin) {
@@ -3940,16 +3953,41 @@ Only suggest rules NOT already in the list. Focus on actionable, specific rules.
       const tradeId = parseInt(req.params.tradeId as string);
       const { labelIds } = req.body as { labelIds: number[] };
 
-      if (!labelIds || !Array.isArray(labelIds)) {
+      if (!labelIds || !Array.isArray(labelIds) || !labelIds.every((id) => Number.isInteger(id))) {
         return res.status(400).json({ error: "labelIds must be an array" });
+      }
+
+      const userId = req.session.userId!;
+      const user = await sentinelModels.getUserById(userId);
+      const isAdmin = user?.isAdmin ?? false;
+      if (!isAdmin && !(await userOwnsTrade(tradeId, userId))) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+
+      let wanted = Array.from(new Set(labelIds));
+      if (!isAdmin) {
+        const adminOnly = await db
+          .select({ id: sentinelTradeLabels.id })
+          .from(sentinelTradeLabels)
+          .where(eq(sentinelTradeLabels.isAdminOnly, true));
+        const adminIds = new Set(adminOnly.map((l) => l.id));
+        const kept = await db
+          .select({ labelId: sentinelTradeToLabels.labelId })
+          .from(sentinelTradeToLabels)
+          .where(eq(sentinelTradeToLabels.tradeId, tradeId));
+        // Non-admins can't add admin-only labels, and can't strip ones an admin put on.
+        wanted = [
+          ...wanted.filter((id) => !adminIds.has(id)),
+          ...kept.map((k) => k.labelId).filter((id) => adminIds.has(id)),
+        ];
       }
 
       // Remove existing labels first, then add new ones
       await db.delete(sentinelTradeToLabels).where(eq(sentinelTradeToLabels.tradeId, tradeId));
 
-      if (labelIds.length > 0) {
+      if (wanted.length > 0) {
         await db.insert(sentinelTradeToLabels).values(
-          labelIds.map((labelId) => ({ tradeId, labelId }))
+          wanted.map((labelId) => ({ tradeId, labelId }))
         );
       }
 
@@ -8327,7 +8365,7 @@ Be concise and actionable.`;
         return res.status(400).json({ error: "Rating must be 'up' or 'down'" });
       }
 
-      const updated = await sentinelModels.rateIvyEval(evalId, rating);
+      const updated = await sentinelModels.rateIvyEval(evalId, req.session.userId!, rating);
       if (!updated) {
         return res.status(404).json({ error: "Evaluation not found" });
       }

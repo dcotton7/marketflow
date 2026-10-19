@@ -38,6 +38,8 @@ const MarketConditionPage = lazy(() => import("@/pages/MarketConditionPage"));
 const ScannerPopoutPage = lazy(() => import("@/pages/ScannerPopoutPage"));
 const SignalWorkbenchPage = lazy(() => import("@/pages/SignalWorkbenchPage"));
 const WorkspacePopoutPage = lazy(() => import("@/pages/WorkspacePopoutPage"));
+const EmbedChartsPage = lazy(() => import("@/pages/EmbedChartsPage"));
+const EmbedBigChartPage = lazy(() => import("@/pages/EmbedBigChartPage"));
 const InfoPopPage = lazy(() => import("@/pages/InfoPopPage"));
 
 function Router() {
@@ -187,6 +189,22 @@ function Router() {
         <SentinelProtectedRoute requiresData>
           <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Workspace...</div>}>
             <WorkspacePopoutPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+
+      {/* Embeds for Anima Lab panels (frame-ancestors limits who may host them) */}
+      <Route path="/embed/charts">
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading charts...</div>}>
+            <EmbedChartsPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/embed/big-chart">
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading charts...</div>}>
+            <EmbedBigChartPage />
           </Suspense>
         </SentinelProtectedRoute>
       </Route>

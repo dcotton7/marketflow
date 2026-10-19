@@ -1071,6 +1071,25 @@ export async function registerRoutes(
     });
   });
 
+  // Per-author weights from the client: { "name": 1.25 | 0.75 }, lower-cased, clamped.
+  const parseDiscordWeights = (input: unknown): Record<string, number> => {
+    let obj = input;
+    if (typeof obj === "string") {
+      try {
+        obj = JSON.parse(obj);
+      } catch {
+        return {};
+      }
+    }
+    if (!obj || typeof obj !== "object") return {};
+    const out: Record<string, number> = {};
+    for (const [name, v] of Object.entries(obj as Record<string, unknown>).slice(0, 200)) {
+      const n = Number(v);
+      if (name && Number.isFinite(n) && n !== 1) out[name.toLowerCase().slice(0, 80)] = Math.min(2, Math.max(0.25, n));
+    }
+    return out;
+  };
+
   app.get("/api/discord-stream/analysis", (req, res) => {
     if (!discordBridge) return res.status(501).json(discordUnavailable);
     const w = Number(req.query.window);
@@ -1079,7 +1098,32 @@ export async function registerRoutes(
       .map((t) => t.trim())
       .filter(Boolean)
       .slice(0, 10);
-    res.json(discordBridge.getAnalysis({ windowMin: Number.isFinite(w) && w > 0 ? Math.min(w, 24 * 60) : null, traders }));
+    res.json(
+      discordBridge.getAnalysis({
+        windowMin: Number.isFinite(w) && w > 0 ? Math.min(w, 24 * 60) : null,
+        traders,
+        weights: parseDiscordWeights(req.query.weights),
+      }),
+    );
+  });
+
+  app.get("/api/discord-stream/summary", (_req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    res.json({ aiAvailable: discordBridge.aiAvailable(), summary: discordBridge.getLastSummary() });
+  });
+
+  // Sends the last hour of captured room messages to OpenAI — only when the owner presses the button.
+  app.post("/api/discord-stream/summary", async (req, res) => {
+    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    if (!discordBridge.aiAvailable()) return res.status(503).json({ error: "OpenAI key not configured" });
+    const minutes = Math.min(240, Math.max(5, Number(req.body?.minutes) || 60));
+    try {
+      const summary = await discordBridge.summarize({ minutes, weights: parseDiscordWeights(req.body?.weights) });
+      res.json({ aiAvailable: true, summary });
+    } catch (err) {
+      console.error("[Discord Watch] summary failed:", err);
+      res.status(502).json({ error: err instanceof Error ? err.message : "Summary failed" });
+    }
   });
 
   app.post("/api/discord-stream/start", (req, res) => {

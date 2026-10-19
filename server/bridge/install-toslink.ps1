@@ -61,11 +61,9 @@ function Get-HelperFiles {
   Write-Host "Updating ToSLink files from $Origin ..."
   Invoke-WebRequest -UseBasicParsing -Uri "$Origin/tos-helper/tos-agent.ps1" -OutFile $Agent
   Invoke-WebRequest -UseBasicParsing -Uri "$Origin/tos-helper/tos-win.ps1" -OutFile $Win
-  $Lead = Join-Path $MfDir "fidelity-lead"
-  if (-not (Test-Path $Lead)) { New-Item -ItemType Directory -Path $Lead | Out-Null }
-  Invoke-WebRequest -UseBasicParsing -Uri "$Origin/tos-helper/fidelity-lead/manifest.json" -OutFile (Join-Path $Lead "manifest.json")
-  Invoke-WebRequest -UseBasicParsing -Uri "$Origin/tos-helper/fidelity-lead/content.js" -OutFile (Join-Path $Lead "content.js")
-  Invoke-WebRequest -UseBasicParsing -Uri "$Origin/tos-helper/fidelity-lead/background.js" -OutFile (Join-Path $Lead "background.js")
+  # KILL SWITCH 2026-10-06: do not reinstall Fidelity Lead extension files.
+  # Leave any existing %LOCALAPPDATA%\MarketFlow\fidelity-lead alone (already no-op'd).
+  Write-Host "Skipping Fidelity Lead extension install (disabled)."
   Save-Origin $Origin
 }
 

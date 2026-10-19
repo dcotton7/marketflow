@@ -42,7 +42,15 @@ const RULES: Rule[] = [
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/[^/]+\/evaluate$/ },
 ];
 
-export function classifyApiPath(method: string, path: string): ApiAccessLevel | null {
+/** Express routing is case-insensitive and non-strict, so "/API/x/" reaches the "/api/x" handler. */
+export function normalizeApiPath(path: string): string {
+  const lower = path.toLowerCase();
+  const trimmed = lower.replace(/\/+$/, "");
+  return trimmed || "/";
+}
+
+export function classifyApiPath(method: string, rawPath: string): ApiAccessLevel | null {
+  const path = normalizeApiPath(rawPath);
   if (path !== "/api" && !path.startsWith("/api/")) return null;
   const m = method.toUpperCase() === "HEAD" ? "GET" : method.toUpperCase();
   for (const rule of RULES) {

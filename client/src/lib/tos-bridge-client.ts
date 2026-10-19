@@ -46,10 +46,13 @@ export function getTosBridgeSource(): TosStatus["source"] {
 
 export const MF_LEAD_SYMBOL_EVENT = "mf-lead-symbol";
 
-/** Unpacked add-on id on this PC. Wake it so it can attach to an already-open Fidelity tab. */
+/** Unpacked add-on id on this PC. KILL SWITCH 2026-10-06 — Fidelity Lead disabled (haywire). */
 const FIDELITY_LEAD_EXT_ID = "nickjnnbalkecfkbhmninnilodkcgfng";
+const FIDELITY_LEAD_DISABLED = true;
 
+/** No-op while Fidelity Lead is killed. ToSLink (MarketFlow → Thinkorswim) is unchanged. */
 export function pokeFidelityLead(): void {
+  if (FIDELITY_LEAD_DISABLED) return;
   try {
     const runtime = (window as unknown as { chrome?: { runtime?: { sendMessage?: Function; lastError?: unknown } } }).chrome?.runtime;
     if (!runtime || typeof runtime.sendMessage !== "function") return;

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
@@ -27,6 +28,23 @@ function getTwilioAuthHeaders(): Record<string, string> {
   return {
     Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
   };
+}
+
+/** X-Twilio-Signature: base64 HMAC-SHA1 of the full callback URL plus the sorted POST params (key then value). */
+export function isValidTwilioSignature(
+  url: string,
+  params: Record<string, unknown>,
+  signature: string | undefined,
+  authToken: string | undefined = process.env.TWILIO_AUTH_TOKEN || readEnvFileValue("TWILIO_AUTH_TOKEN"),
+): boolean {
+  if (!signature || !authToken) return false;
+  const data = Object.keys(params)
+    .sort()
+    .reduce((acc, key) => acc + key + String(params[key] ?? ""), url);
+  const expected = crypto.createHmac("sha1", authToken).update(data, "utf8").digest("base64");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 function getTwilioMessagesBaseUrl(): string {

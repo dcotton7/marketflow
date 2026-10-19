@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { emitLeadSymbol, fetchTosStatus, pokeFidelityLead, tosErrorMessage, tosNavigate as tosNavigateApi } from "@/lib/tos-bridge-client";
+import { fetchTosStatus, pokeFidelityLead, tosErrorMessage, tosNavigate as tosNavigateApi } from "@/lib/tos-bridge-client";
 import { useToast } from "@/hooks/use-toast";
 
 const STORAGE_KEY = "tosSyncEnabled";
@@ -90,21 +90,12 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
     calibratedAt: null,
   });
 
-  const lastFidelityRef = useRef("");
-
   const refreshStatus = useCallback(async () => {
+    // KILL SWITCH 2026-10-06: do not wake Fidelity Lead or follow fidelitySymbol.
+    // pokeFidelityLead is itself a no-op; ToS status / MarketFlow→ToS navigate stay live.
     pokeFidelityLead();
     const s = await fetchTosStatus();
     setStatus(s);
-    const incoming = (s.fidelitySymbol || "").trim().toUpperCase();
-    if (!incoming || incoming === lastFidelityRef.current) return;
-    lastFidelityRef.current = incoming;
-    emitLeadSymbol(incoming);
-    if (s.available && s.calibrated) {
-      void tosNavigateApi(incoming).catch(() => {
-        /* Thinkorswim may be closed. MarketFlow still follows Fidelity. */
-      });
-    }
   }, []);
 
   useEffect(() => {

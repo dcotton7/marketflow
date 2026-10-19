@@ -69,7 +69,7 @@ function buildSequenceStateKey(userId: number, alertId: number, symbol: string):
   return `${userId}:${alertId}:${symbol.toUpperCase()}`;
 }
 
-function getAlertsPublicBaseUrl(): string | null {
+export function getAlertsPublicBaseUrl(): string | null {
   const value = process.env.ALERTS_PUBLIC_BASE_URL?.trim() || process.env.PUBLIC_APP_URL?.trim() || null;
   if (!value) return null;
   return value.replace(/\/+$/, "");

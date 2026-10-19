@@ -972,10 +972,10 @@ export const sentinelModels = {
   },
 
   // Update rating on an eval
-  async rateIvyEval(evalId: number, rating: 'up' | 'down'): Promise<IvyEvalHistory | undefined> {
+  async rateIvyEval(evalId: number, userId: number, rating: 'up' | 'down'): Promise<IvyEvalHistory | undefined> {
     const [updated] = await db.update(ivyEvalHistory)
       .set({ userRating: rating, ratedAt: new Date() })
-      .where(eq(ivyEvalHistory.id, evalId))
+      .where(and(eq(ivyEvalHistory.id, evalId), eq(ivyEvalHistory.userId, userId)))
       .returning();
     return updated;
   },

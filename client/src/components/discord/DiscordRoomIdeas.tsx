@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, BellOff, ChevronDown, ChevronRight, Lightbulb, RotateCcw, TrendingDown, TrendingUp, X } from "lucide-react";
+import { ENTRY_ACTIONS, EXIT_ACTIONS, useUnseenTradeCalls } from "@/components/discord/discord-trade-seen";
+import { NewTradeStar } from "@/components/discord/NewTradeStar";
+import { useAuthorWeights } from "@/components/discord/discord-author-weights";
+import { DiscordRoomSummary } from "@/components/discord/DiscordRoomSummary";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { playAlertChime } from "@/lib/alert-sound";
 import { cn } from "@/lib/utils";
@@ -32,6 +36,9 @@ interface TradeCall {
   tickers: string[];
   action: TradeAction | null;
   side: Side;
+  price?: number | null;
+  sizePct?: number | null;
+  stop?: string | null;
 }
 
 interface RoomAnalysis {
@@ -112,20 +119,51 @@ function LeanBar({ long, short, neutral }: { long: number; short: number; neutra
   );
 }
 
-function TradeCallCard({ call, onSymbol, now }: { call: TradeCall; onSymbol?: (s: string) => void; now: number }) {
+function TradeCallCard({
+  call,
+  onSymbol,
+  now,
+  todayStart,
+  isNew,
+  onSeen,
+}: {
+  call: TradeCall;
+  onSymbol?: (s: string) => void;
+  now: number;
+  todayStart: number;
+  isNew: boolean;
+  onSeen: () => void;
+}) {
+  const day = call.ts < todayStart ? new Date(call.ts).toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" }) : "";
   const style = call.action ? ACTION_STYLE[call.action] : null;
   const fresh = now - call.ts < FRESH_MS;
   return (
-    <div className={cn("mx-3 mb-1.5 rounded-md border bg-slate-900/60 px-2.5 py-1.5", fresh ? "border-cyan-500/50 shadow-[0_0_0_1px_rgba(6,182,212,0.15)]" : "border-slate-700/60")}>
+    <div
+      onClick={isNew ? onSeen : undefined}
+      className={cn(
+        "mx-3 mb-1.5 rounded-md border bg-slate-900/60 px-2.5 py-1.5",
+        isNew
+          ? "cursor-pointer border-amber-400/70 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
+          : fresh
+            ? "border-cyan-500/50 shadow-[0_0_0_1px_rgba(6,182,212,0.15)]"
+            : "border-slate-700/60",
+      )}
+    >
       <div className="flex flex-wrap items-center gap-1.5">
+        {isNew && <span className="rounded bg-amber-400 px-1 py-px text-[9px] font-bold tracking-wide text-slate-950">NEW</span>}
         {style && <span className={cn("rounded border px-1.5 py-px text-[10px] font-bold tracking-wide", style.cls)}>{style.label}</span>}
         {call.tickers.map((t) => (
           <TickerChip key={t} symbol={t} onClick={onSymbol} />
         ))}
+        {call.price != null && <span className="font-mono text-[11px] font-semibold tabular-nums text-slate-100">@ {call.price}</span>}
+        {call.sizePct != null && <span className="font-mono text-[10px] tabular-nums text-slate-300">{call.sizePct}%</span>}
+        {call.stop && <span className="rounded bg-rose-500/10 px-1 py-px font-mono text-[10px] text-rose-300">stop {call.stop}</span>}
         {call.source === "toast" && <span className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-300">pop-up</span>}
         <span className="ml-auto whitespace-nowrap text-[10px] text-slate-500">
           {call.author.split(" ")[0]}
-          {call.channel && call.channel !== "live-stream-chat" && <span className="text-indigo-300/80"> · #{call.channel}</span>} · {call.time}
+          {call.channel && call.channel !== "live-stream-chat" && <span className="text-indigo-300/80"> · #{call.channel}</span>} ·{" "}
+          {day && <span className="text-slate-400">{day} </span>}
+          {call.time}
         </span>
       </div>
       <div className="mt-1 line-clamp-3 text-xs leading-snug text-slate-300">{call.text}</div>
@@ -147,6 +185,8 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
   const [chime, setChimeRaw] = useState(() => localStorage.getItem(CHIME_KEY) !== "0");
   const [now, setNow] = useState(() => Date.now());
   const lastCallSeq = useRef<number | null>(null);
+  const { unseenEntries, unseenExits, markSeen, isSeen } = useUnseenTradeCalls(true, traders);
+  const { weights, setWeight, raw: weightsRaw } = useAuthorWeights();
 
   const win = WINDOWS.find((w) => w.id === windowId) ?? WINDOWS[1];
   const setWindowId = (id: string) => {
@@ -175,6 +215,7 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
       try {
         const qs = new URLSearchParams({ traders: traderKey });
         if (win.min) qs.set("window", String(win.min));
+        if (weightsRaw !== "{}") qs.set("weights", weightsRaw);
         const res = await fetch(`/api/discord-stream/analysis?${qs}`, { credentials: "include" });
         if (!res.ok) throw new Error(`${res.status}`);
         const body = (await res.json()) as RoomAnalysis;
@@ -195,7 +236,7 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
       alive = false;
       clearTimeout(timer);
     };
-  }, [win.min, traderKey, chime]);
+  }, [win.min, traderKey, chime, weightsRaw]);
 
   const tickers = useMemo(() => (data?.tickers ?? []).filter((t) => !ignored.includes(t.symbol)), [data, ignored]);
   const top = tickers.slice(0, 15);
@@ -203,7 +244,21 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
   const leanLong = tickers.filter((t) => t.long > t.short).sort((a, b) => b.long - a.long || b.mentions - a.mentions).slice(0, 6);
   const leanShort = tickers.filter((t) => t.short > t.long).sort((a, b) => b.short - a.short || b.mentions - a.mentions).slice(0, 6);
   const todayStart = new Date(now).setHours(0, 0, 0, 0);
-  const calls = (showAllTrader ? data?.traderMessages ?? [] : data?.tradeCalls ?? []).filter((c) => c.ts >= todayStart);
+  const calls = showAllTrader
+    ? (data?.traderMessages ?? []).filter((c) => c.ts >= todayStart)
+    : (data?.tradeCalls ?? []).filter((c) => c.ts >= todayStart && ENTRY_ACTIONS.has(c.action ?? ""));
+  const exits = (data?.tradeCalls ?? []).filter((c) => EXIT_ACTIONS.has(c.action ?? ""));
+  const renderCard = (c: TradeCall) => (
+    <TradeCallCard
+      key={c.id}
+      call={c}
+      onSymbol={onSymbol}
+      now={now}
+      todayStart={todayStart}
+      isNew={c.tickers.length > 0 && c.action != null && !isSeen(c)}
+      onSeen={() => markSeen([c])}
+    />
+  );
   const traderNames = traders.map((t) => t.replace(/^RealSimple/i, "").split(" ")[0]).join(" & ");
 
   return (
@@ -231,9 +286,39 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         {error && <div className="mx-3 mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-300">Analysis unavailable ({error})</div>}
 
+        {Object.keys(weights).length > 0 && (
+          <div className="mx-3 mt-2 flex flex-wrap items-center gap-1 text-[10px]">
+            <span className="text-slate-500">Weighted:</span>
+            {Object.entries(weights).map(([name, w]) => (
+              <span
+                key={name}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-1.5 py-px",
+                  w > 1 ? "border-emerald-500/40 text-emerald-300" : "border-rose-500/40 text-rose-300",
+                )}
+              >
+                {w > 1 ? "▲" : "▼"} {name}
+                <button type="button" onClick={() => setWeight(name, null)} className="text-slate-500 hover:text-slate-200" aria-label={`Reset ${name}`}>
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <SectionTitle
           right={
             <>
+              {unseenEntries.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => markSeen(unseenEntries)}
+                  className="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-300 hover:bg-amber-500/15"
+                  data-testid="discord-mark-trades-seen"
+                >
+                  Mark {unseenEntries.length} seen
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowAllTrader(!showAllTrader)}
@@ -257,17 +342,50 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
             </>
           }
         >
-          {traderNames} trade calls · today
+          <span className="inline-flex items-center gap-1.5">
+            {showAllTrader ? `${traderNames} messages · today` : `${traderNames} new trades · today`}
+            <NewTradeStar count={unseenEntries.length} onClick={() => markSeen(unseenEntries)} />
+          </span>
         </SectionTitle>
         {calls.length === 0 ? (
           <div className="mx-3 rounded-md border border-dashed border-slate-700/60 px-2.5 py-2 text-[11px] text-slate-500">
             {showAllTrader
               ? `No messages from ${traderNames} captured today.`
-              : `No trade calls from ${traderNames} today. A post naming a ticker with a trade word (bought, added, trimmed, sold, closed, short, stopped), or any ticker post in #live-long-ideas / #live-short-ideas, shows here.`}
+              : `No new trades from ${traderNames} today. An entry needs a ticker and a price (e.g. "SNDK long 1315.18 10%"); posts in #live-long-ideas / #live-short-ideas count as entries.`}
           </div>
         ) : (
-          calls.slice(0, 12).map((c) => <TradeCallCard key={c.id} call={c} onSymbol={onSymbol} now={now} />)
+          calls.slice(0, 12).map(renderCard)
         )}
+
+        <SectionTitle
+          right={
+            unseenExits.length > 0 && (
+              <button
+                type="button"
+                onClick={() => markSeen(unseenExits)}
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-300 hover:bg-amber-500/15"
+                data-testid="discord-mark-exits-seen"
+              >
+                Mark {unseenExits.length} seen
+              </button>
+            )
+          }
+        >
+          <span className="inline-flex items-center gap-1.5">
+            Trims &amp; closes · last 3 days
+            <NewTradeStar count={unseenExits.length} onClick={() => markSeen(unseenExits)} />
+          </span>
+        </SectionTitle>
+        {exits.length === 0 ? (
+          <div className="mx-3 rounded-md border border-dashed border-slate-700/60 px-2.5 py-2 text-[11px] text-slate-500">
+            No trims, closes or stops from {traderNames} captured in the last 3 trading days. Earlier days show up after their channel has been
+            open in Discord.
+          </div>
+        ) : (
+          exits.slice(0, 20).map(renderCard)
+        )}
+
+        <DiscordRoomSummary weights={weights} onSymbol={onSymbol} />
 
         <SectionTitle
           right={

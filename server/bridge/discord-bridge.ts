@@ -14,6 +14,7 @@ import readline from "readline";
 import fs from "fs";
 import path from "path";
 import { analyze, loadFullSymbolList, tagMessage, TRADE_CHANNELS, type RoomAnalysis, type Side, type TradeAction } from "./discord-analysis";
+import { aiAvailable, summarizeRoom, type RoomSummary } from "./discord-summary";
 
 const BRIDGE_DIR = path.join(process.cwd(), "server", "bridge");
 const PS_SCRIPT = path.join(BRIDGE_DIR, "discord-watch.ps1");
@@ -346,9 +347,39 @@ export function getMessages(afterSeq = 0, limit = MAX_MESSAGES): DiscordMessage[
   return out.slice(-Math.max(1, Math.min(limit, MAX_MESSAGES)));
 }
 
-export function getAnalysis(opts: { windowMin: number | null; traders?: string[] }): RoomAnalysis {
-  return analyze(messages, { windowMin: opts.windowMin, traders: opts.traders?.length ? opts.traders : DEFAULT_TRADERS });
+export function getAnalysis(opts: { windowMin: number | null; traders?: string[]; weights?: Record<string, number> }): RoomAnalysis {
+  return analyze(messages, {
+    windowMin: opts.windowMin,
+    traders: opts.traders?.length ? opts.traders : DEFAULT_TRADERS,
+    weights: opts.weights,
+  });
 }
+
+let lastSummary: RoomSummary | null = null;
+let summaryInFlight: Promise<RoomSummary> | null = null;
+
+export function getLastSummary(): RoomSummary | null {
+  return lastSummary;
+}
+
+export function summarize(opts: { minutes: number; traders?: string[]; weights?: Record<string, number> }): Promise<RoomSummary> {
+  if (summaryInFlight) return summaryInFlight;
+  summaryInFlight = summarizeRoom(messages, {
+    minutes: opts.minutes,
+    traders: opts.traders?.length ? opts.traders : DEFAULT_TRADERS,
+    weights: opts.weights ?? {},
+  })
+    .then((s) => {
+      lastSummary = s;
+      return s;
+    })
+    .finally(() => {
+      summaryInFlight = null;
+    });
+  return summaryInFlight;
+}
+
+export { aiAvailable };
 
 export function getStatus() {
   return {

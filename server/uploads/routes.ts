@@ -1,7 +1,7 @@
 import { Express, Request, Response } from "express";
 import { db, isDatabaseAvailable } from "../db";
 import { uploads, setupUploads } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -121,7 +121,7 @@ export function registerUploadRoutes(app: Express) {
 
       const [uploadRecord] = await db.select()
         .from(uploads)
-        .where(eq(uploads.id, id));
+        .where(and(eq(uploads.id, id), eq(uploads.createdBy, userId)));
 
       if (!uploadRecord) {
         return res.status(404).json({ error: "Upload not found" });
@@ -150,7 +150,7 @@ export function registerUploadRoutes(app: Express) {
 
       const [uploadRecord] = await db.select()
         .from(uploads)
-        .where(eq(uploads.id, id));
+        .where(and(eq(uploads.id, id), eq(uploads.createdBy, userId)));
 
       if (!uploadRecord) {
         return res.status(404).json({ error: "Upload not found" });
@@ -186,7 +186,7 @@ export function registerUploadRoutes(app: Express) {
 
       const [uploadRecord] = await db.select()
         .from(uploads)
-        .where(eq(uploads.id, id));
+        .where(and(eq(uploads.id, id), eq(uploads.createdBy, userId)));
 
       if (!uploadRecord) {
         return res.status(404).json({ error: "Upload not found" });
@@ -224,6 +224,13 @@ export function registerUploadRoutes(app: Express) {
         return res.status(400).json({ error: "uploadId and setupId required" });
       }
 
+      const [owned] = await db.select({ id: uploads.id })
+        .from(uploads)
+        .where(and(eq(uploads.id, uploadId), eq(uploads.createdBy, userId)));
+      if (!owned) {
+        return res.status(404).json({ error: "Upload not found" });
+      }
+
       const [link] = await db.insert(setupUploads).values({
         setupId,
         uploadId,
@@ -253,7 +260,7 @@ export function registerUploadRoutes(app: Express) {
 
       const [uploadRecord] = await db.select()
         .from(uploads)
-        .where(eq(uploads.id, id));
+        .where(and(eq(uploads.id, id), eq(uploads.createdBy, userId)));
 
       if (!uploadRecord) {
         return res.status(404).json({ error: "Upload not found" });

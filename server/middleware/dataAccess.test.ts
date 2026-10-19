@@ -77,6 +77,8 @@ const OWNER_ADMIN_ROUTES: Array<[string, string]> = [
   ["POST", "/api/discord-stream/start"],
   ["POST", "/api/discord-stream/stop"],
   ["POST", "/api/discord-stream/clear"],
+  ["GET", "/api/discord-stream/summary"],
+  ["POST", "/api/discord-stream/summary"],
 ];
 
 /** Logged-in, user-owned content: any active account. */
@@ -189,6 +191,47 @@ await withServer(fallback, async (call) => {
   assert.equal((await call("GET", "/api/sentinel/chart-data", 6)).status, 200, "fallback: admin is owner");
   assert.equal((await call("GET", "/api/sentinel/chart-data", 3)).status, 403, "fallback: standard user");
 });
+
+// Express routes "/API/x/" to the "/api/x" handler, so case and trailing slashes must not change the level.
+for (const [m, p] of [
+  ["GET", "/API/stocks/AAPL/quote"],
+  ["GET", "/Api/Sentinel/Chart-Data"],
+  ["GET", "/api/watchlist/quotes/"],
+  ["GET", "/api/watchlist/quotes//"],
+  ["POST", "/API/alerts/7/evaluate/"],
+]) {
+  assert.equal(classifyApiPath(m, p), "owner", `${m} ${p}`);
+}
+assert.equal(classifyApiPath("POST", "/API/MARKETFLOW/AAPL/"), "owner_admin");
+assert.equal(classifyApiPath("GET", "/API/uploads"), "auth");
+assert.equal(classifyApiPath("GET", "/API"), "auth");
+
+{
+  const app = express();
+  app.use((req, _res, next) => {
+    const uid = Number(req.header("x-test-user"));
+    (req as any).session = { userId: uid > 0 ? uid : undefined, destroy: (cb: () => void) => cb() };
+    next();
+  });
+  app.use(createApiAccessGuard({ config: explicit, getUser: async (id) => USERS[id] ?? null }));
+  app.get("/api/stocks/:ticker/quote", (_req, res) => res.json({ ok: true }));
+  app.get("/api/uploads", (_req, res) => res.json({ ok: true }));
+  app.use((_req, res) => res.status(404).json({ ok: false }));
+  const server = app.listen(0);
+  await new Promise<void>((r) => server.once("listening", () => r()));
+  const { port } = server.address() as AddressInfo;
+  const get = async (path: string, uid?: number) =>
+    (await fetch(`http://127.0.0.1:${port}${path}`, { headers: uid ? { "x-test-user": String(uid) } : {} })).status;
+  try {
+    for (const p of ["/API/stocks/AAPL/quote", "/api/STOCKS/AAPL/quote/", "/Api/Uploads"]) {
+      assert.equal(await get(p), 401, `anonymous ${p}`);
+    }
+    assert.equal(await get("/API/stocks/AAPL/quote", 3), 403, "non-owner upper-case");
+    assert.equal(await get("/API/stocks/AAPL/quote", 2), 200, "owner upper-case reaches handler");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+}
 
 console.log(
   `data access guard ok: ${OWNER_ROUTES.length} owner, ${OWNER_ADMIN_ROUTES.length} owner+admin, ` +

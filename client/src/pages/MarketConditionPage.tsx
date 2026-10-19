@@ -1,11 +1,12 @@
 // Market Condition / Flow Mode Page
 // v4: Theme Rotation Dashboard with multi-timeframe support
 // Now with resizable panels and live API integration
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   Panel,
   PanelGroup,
   PanelResizeHandle,
+  type ImperativePanelHandle,
 } from "react-resizable-panels";
 import {
   HeaderBar,
@@ -26,6 +27,8 @@ import { ThemeReviewActions } from "@/components/market-condition/ThemeReviewAct
 import { ThemeTickerReviewPanel } from "@/components/market-condition/ThemeTickerReviewPanel";
 import { TickerReviewChartViewer } from "@/components/market-condition/TickerReviewChartViewer";
 import { DiscordStreamPanel } from "@/components/discord/DiscordStreamPanel";
+import { useUnseenTradeCalls } from "@/components/discord/discord-trade-seen";
+import { NewTradeStar } from "@/components/discord/NewTradeStar";
 import {
   MOCK_THEMES,
   MOCK_THEME_MEMBERS,
@@ -243,15 +246,21 @@ function ResizeHandle({ direction = "vertical" }: { direction?: "vertical" | "ho
 }
 
 // Right-side dock (Discord stream) beside the workspace; renders the workspace alone when no dock.
+// The dock collapses to a thin strip (~44px) instead of closing, so capture and alerts keep running.
 function WorkspaceWithDock({
   dock,
+  dockRef,
+  onDockCollapsedChange,
   padClass,
   children,
 }: {
   dock: React.ReactNode;
+  dockRef: React.Ref<ImperativePanelHandle>;
+  onDockCollapsedChange: (collapsed: boolean) => void;
   padClass: string;
   children: React.ReactNode;
 }) {
+  const [collapsedSize] = useState(() => Math.min(6, Math.max(1.5, (44 / Math.max(window.innerWidth, 1)) * 100)));
   if (!dock) return <>{children}</>;
   return (
     <div className="flex min-h-0 flex-1">
@@ -260,7 +269,17 @@ function WorkspaceWithDock({
           {children}
         </Panel>
         <ResizeHandle direction="vertical" />
-        <Panel id="mf-discord-dock" order={2} defaultSize={45} minSize={25} maxSize={75}>
+        <Panel
+          ref={dockRef}
+          id="mf-discord-dock"
+          order={2}
+          defaultSize={45}
+          minSize={25}
+          maxSize={75}
+          collapsible
+          collapsedSize={collapsedSize}
+          onResize={(size) => onDockCollapsedChange(size <= collapsedSize + 0.5)}
+        >
           <div className={cn("h-full", padClass, "pl-0")}>{dock}</div>
         </Panel>
       </PanelGroup>
@@ -391,6 +410,13 @@ export default function MarketConditionPage() {
     },
   });
   const showDiscordDock = discordAvailable && discordDockOpen;
+  const discordDockRef = useRef<ImperativePanelHandle>(null);
+  const [discordCollapsed, setDiscordCollapsed] = useState(false);
+  const setDiscordCollapsedVia = useCallback((collapsed: boolean) => {
+    if (collapsed) discordDockRef.current?.collapse();
+    else discordDockRef.current?.expand();
+  }, []);
+  const { unseen: unseenDiscordTrades, markSeen: markDiscordTradesSeen } = useUnseenTradeCalls(discordAvailable);
   const [lensMode, setLensMode] = useState<LensMode>("flowMap");
   const timeSliceDisabledModes = new Set<LensMode>(["flowMap", "concentration", "accumulation", "race"]);
   const handleLensMode = (mode: LensMode) => {
@@ -2463,6 +2489,15 @@ export default function MarketConditionPage() {
               <TooltipContent>{discordDockOpen ? "Hide Discord stream panel" : "Show Discord stream panel (#live-stream-chat)"}</TooltipContent>
             </Tooltip>
           )}
+          {discordAvailable && !discordDockOpen && (
+            <NewTradeStar
+              count={unseenDiscordTrades.length}
+              onClick={() => {
+                markDiscordTradesSeen();
+                setDiscordDockOpen(true);
+              }}
+            />
+          )}
 
           {/* Fullscreen Toggle */}
           <Tooltip>
@@ -2501,10 +2536,14 @@ export default function MarketConditionPage() {
             <DiscordStreamPanel
               onHide={() => setDiscordDockOpen(false)}
               onSymbol={(symbol) => handleTickerSelect(symbol)}
+              collapsed={discordCollapsed}
+              onCollapsedChange={setDiscordCollapsedVia}
               dataRegion={uiRegion(MARKET_FLOW_SURFACE.id, "discordStreamPanel")}
             />
           ) : null
         }
+        dockRef={discordDockRef}
+        onDockCollapsedChange={setDiscordCollapsed}
         padClass={responsive.isCompact ? "p-1" : "p-2"}
       >
       <div className={cn(

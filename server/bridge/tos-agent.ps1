@@ -121,71 +121,28 @@ while ($listener.IsListening) {
         process         = $(if ($cal) { $cal.process } else { $null })
         title           = $(if ($cal) { $cal.title } else { $null })
         helper          = $true
-        fidelitySymbol  = $script:fidelitySymbol
-        fidelityAt      = $script:fidelityAt
-        extHelloAt      = $script:extHelloAt
+        # KILL SWITCH 2026-10-06: never expose a Fidelity lead symbol to MarketFlow.
+        fidelitySymbol  = ""
+        fidelityAt      = ""
+        extHelloAt      = ""
       }
       continue
     }
 
     if ($method -eq "GET" -and $reqPath -eq "/ext-hello") {
-      $script:extHelloAt = [DateTime]::UtcNow.ToString("o")
-      Write-Host "Extension hello $($ctx.Request.QueryString['href'])"
-      Write-Json $ctx 200 @{ ok = $true; at = $script:extHelloAt }
+      # KILL SWITCH 2026-10-06: Fidelity Lead extension path disabled (haywire).
+      Write-HelperLog "ext-hello IGNORED (Fidelity kill switch)"
+      Write-Json $ctx 200 @{ ok = $false; disabled = $true; reason = "fidelity-lead-disabled" }
       continue
     }
 
     if (($method -eq "GET" -or $method -eq "POST") -and $reqPath -eq "/from-fidelity") {
-      # Store the Fidelity ticker. If Thinkorswim is calibrated, type it there too.
-      # If Thinkorswim is closed, this still succeeds. /navigate stays its own path.
-      $symbol = [string]$ctx.Request.QueryString["symbol"]
-      if (-not $symbol -and $method -eq "POST") {
-        $raw = Read-Body $ctx
-        if ($raw) {
-          try {
-            $body = $raw | ConvertFrom-Json
-            if ($body) { $symbol = [string]$body.symbol }
-          } catch { }
-          if (-not $symbol) { $symbol = $raw.Trim().Trim('"') }
-        }
-      }
-      $up = ($symbol.Trim() -replace '[^A-Za-z0-9.\-]', '').ToUpperInvariant()
-      if (-not $up -or $up.Length -gt 8) {
-        Write-Json $ctx 400 @{ error = "symbol is required" }
-        continue
-      }
-      $changed = $up -ne $script:fidelitySymbol
-      if ($changed) {
-        $script:fidelitySymbol = $up
-        $script:fidelityAt = [DateTime]::UtcNow.ToString("o")
-        Write-Host "Fidelity lead $up"
-      }
-      $tos = $false
-      $cal = Get-Calibration
-      if ($changed -and $cal) {
-        try {
-          $now = Get-Date
-          if (-not ($up -eq $script:lastNavSymbol -and ($now - $script:lastNavAt).TotalMilliseconds -lt 4000)) {
-            $result = Invoke-TosWin @(
-              "-Action", "navigate",
-              "-Symbol", $up,
-              "-X", ([string][int]$cal.x),
-              "-Y", ([string][int]$cal.y)
-            )
-            if ($result.ok) {
-              $script:lastNavSymbol = $up
-              $script:lastNavAt = Get-Date
-              $tos = $true
-              Write-Host "Thinkorswim followed Fidelity to $up"
-            } else {
-              Write-Host "Thinkorswim did not follow: $($result.error)"
-            }
-          }
-        } catch {
-          Write-Host "Thinkorswim did not follow: $($_.Exception.Message)"
-        }
-      }
-      Write-Json $ctx 200 @{ ok = $true; symbol = $up; at = $script:fidelityAt; tos = $tos }
+      # KILL SWITCH 2026-10-06: ignore Fidelity Lead. Do not store symbol or drive ToS.
+      # MarketFlow -> ToS via /navigate is unchanged.
+      $script:fidelitySymbol = ""
+      $script:fidelityAt = ""
+      Write-HelperLog "from-fidelity IGNORED (Fidelity kill switch) $($ctx.Request.Url.Query)"
+      Write-Json $ctx 200 @{ ok = $false; disabled = $true; reason = "fidelity-lead-disabled"; tos = $false }
       continue
     }
 

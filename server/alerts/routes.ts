@@ -3,7 +3,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { createAlertDefinitionSchema, updateAlertDefinitionSchema } from "@shared/alerts";
 import { alertDeliveries, alertEvents, alertSymbolStates, userAlerts } from "@shared/schema";
 import { db } from "../db";
-import { clearAlertSequenceState, evaluateAlertDefinition, evaluateStoredAlertById } from "./evaluator";
+import {
+  clearAlertSequenceState,
+  evaluateAlertDefinition,
+  evaluateStoredAlertById,
+  getAlertsPublicBaseUrl,
+} from "./evaluator";
+import { isValidTwilioSignature } from "../messages/providers/twilio";
 import { requireSentinelAuth as requireAuth } from "../middleware/requireSentinelAuth";
 
 declare module "express-session" {
@@ -17,6 +23,12 @@ export function registerAlertRoutes(app: Express): void {
   app.post("/api/alerts/deliveries/twilio-status", async (req: Request, res: Response) => {
     try {
       if (!db) return res.status(500).json({ error: "Database not available" });
+
+      const baseUrl = getAlertsPublicBaseUrl();
+      const signature = req.header("x-twilio-signature");
+      if (!baseUrl || !isValidTwilioSignature(`${baseUrl}${req.originalUrl}`, req.body ?? {}, signature)) {
+        return res.sendStatus(403);
+      }
 
       const deliveryId = Number(req.query.deliveryId);
       const messageSid = typeof req.body?.MessageSid === "string" ? req.body.MessageSid : null;
@@ -334,6 +346,13 @@ export function registerAlertRoutes(app: Express): void {
       if (!Number.isFinite(alertId)) {
         return res.status(400).json({ error: "Invalid alert id" });
       }
+
+      const [owned] = await db
+        .select({ id: userAlerts.id })
+        .from(userAlerts)
+        .where(and(eq(userAlerts.id, alertId), eq(userAlerts.userId, req.session.userId!)))
+        .limit(1);
+      if (!owned) return res.status(404).json({ error: "Alert not found" });
 
       const deliveries = await db
         .select()

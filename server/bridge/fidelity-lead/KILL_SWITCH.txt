@@ -1,0 +1,13 @@
+FIDELITY LEAD DISABLED — 2026-10-06 (Don: haywire)
+
+What was killed:
+- Chrome extension scripts (content/background) are hard no-ops
+- ToSLink helper /from-fidelity and /ext-hello ignore Fidelity (TOS /navigate still works)
+- MarketFlow client pokeFidelityLead + fidelitySymbol follow are no-ops (LOCAL)
+
+Don — one click in Chrome (required; Chrome holds the old script until you do):
+1. Open chrome://extensions
+2. Find "MarketFlow Fidelity Lead" (or "... (DISABLED)")
+3. Toggle OFF, or click Remove, or at least Reload
+
+Until that reload, the old content script may still POST /from-fidelity — the helper ignores it and will NOT drive Thinkorswim.

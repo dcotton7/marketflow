@@ -61,6 +61,10 @@ export interface TickerReviewChartViewerProps {
 
   closeReturnLabel?: string;
 
+  /** Header label for where the viewer was opened from (default "Theme Charts" / queue label). */
+
+  contextLabel?: string;
+
 }
 
 
@@ -100,6 +104,8 @@ export function TickerReviewChartViewer({
   queueLabel,
 
   closeReturnLabel,
+
+  contextLabel,
 
 }: TickerReviewChartViewerProps) {
 
@@ -472,7 +478,7 @@ export function TickerReviewChartViewer({
 
           <span className="text-[11px] uppercase tracking-wide text-muted-foreground hidden md:inline">
 
-            {symbols.length > 1 ? (queueLabel ?? "Ticker Review queue") : "Theme Charts"}
+            {contextLabel ?? (symbols.length > 1 ? (queueLabel ?? "Ticker Review queue") : "Theme Charts")}
 
           </span>
 

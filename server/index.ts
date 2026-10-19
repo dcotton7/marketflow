@@ -40,6 +40,13 @@ app.use(
 
 app.use(express.urlencoded({ extended: false, limit: jsonBodyLimit }));
 
+// Only MarketFlow itself and Anima Lab on the owner's PC may show MarketFlow pages in a frame (/embed/* panels).
+const FRAME_ANCESTORS = "frame-ancestors 'self' http://localhost:8770 http://127.0.0.1:8770";
+app.use((_req, res, next) => {
+  res.setHeader("Content-Security-Policy", FRAME_ANCESTORS);
+  next();
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",

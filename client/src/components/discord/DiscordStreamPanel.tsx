@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { ArrowDown, CornerDownRight, Eraser, EyeOff, Film, GripVertical, Image as ImageIcon, Info, Link2, Loader2, MessagesSquare, Paperclip, Play, Search, Square } from "lucide-react";
+import { ArrowDown, ChevronLeft, ChevronRight, CornerDownRight, Eraser, EyeOff, Film, GripVertical, Image as ImageIcon, Info, Link2, Loader2, MessagesSquare, Paperclip, Play, Search, Square } from "lucide-react";
 import { DiscordRoomIdeas } from "@/components/discord/DiscordRoomIdeas";
+import { DEFAULT_TRADERS, useUnseenTradeCalls } from "@/components/discord/discord-trade-seen";
+import { useAuthorWeights, WEIGHT_DOWN, WEIGHT_UP } from "@/components/discord/discord-author-weights";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { NewTradeStar } from "@/components/discord/NewTradeStar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,7 +97,6 @@ export interface DiscordStreamStatus {
 
 const POLL_MS = 1500;
 const STICK_PX = 48;
-const DEFAULT_TRADERS = ["Nick Drendel", "RealSimpleAriel"];
 
 const AUTHOR_COLORS = [
   "text-sky-400",
@@ -191,18 +201,56 @@ function MediaChip({ kind }: { kind: string }) {
   );
 }
 
+function AuthorName({ name, weight, onWeight }: { name: string; weight: number; onWeight: (w: number | null) => void }) {
+  const label = name || "Unknown";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className={cn("inline-flex items-center gap-0.5 font-semibold hover:underline", authorColor(name))}>
+          {label}
+          {weight > 1 && <span className="text-[9px] text-emerald-400">▲</span>}
+          {weight < 1 && <span className="text-[9px] text-rose-400">▼</span>}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel className="text-xs">
+          {label} · {weight > 1 ? "weighted up 25%" : weight < 1 ? "weighted down 25%" : "normal weight"}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onWeight(WEIGHT_UP)} className="text-xs">
+          <span className="mr-2 text-emerald-400">▲</span> Weight up 25%
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onWeight(null)} className="text-xs">
+          <span className="mr-2 text-slate-400">●</span> Normal weight
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onWeight(WEIGHT_DOWN)} className="text-xs">
+          <span className="mr-2 text-rose-400">▼</span> Weight down 25%
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1 text-[10px] leading-snug text-muted-foreground">
+          Changes how much this person counts in Most mentioned, the long/short lean and the AI summary.
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function MessageRow({
   msg,
   showDetails,
   grouped,
   isTrader,
   onSymbol,
+  weight,
+  onWeight,
 }: {
   msg: DiscordMessage;
   showDetails: boolean;
   grouped: boolean;
   isTrader: boolean;
   onSymbol?: (s: string) => void;
+  weight: number;
+  onWeight: (w: number | null) => void;
 }) {
   return (
     <div
@@ -221,7 +269,7 @@ function MessageRow({
       )}
       {(!grouped || msg.replyTo) && (
         <div className="flex items-baseline gap-1.5">
-          <span className={cn("font-semibold", authorColor(msg.author))}>{msg.author || "Unknown"}</span>
+          <AuthorName name={msg.author} weight={weight} onWeight={onWeight} />
           {msg.tag && (
             <span className="rounded bg-slate-800 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-400">{msg.tag}</span>
           )}
@@ -279,15 +327,22 @@ export function DiscordStreamPanel({
   onHide,
   onSymbol,
   traders = DEFAULT_TRADERS,
+  collapsed = false,
+  onCollapsedChange,
   className,
   dataRegion,
 }: {
   onHide?: () => void;
   onSymbol?: (symbol: string) => void;
   traders?: string[];
+  /** Collapsed to a thin strip: capture, analysis and the trade chime keep running. */
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
   className?: string;
   dataRegion?: string;
 }) {
+  const { unseen: unseenTrades, markSeen: markTradesSeen } = useUnseenTradeCalls(true, traders);
+  const { weightOf, setWeight } = useAuthorWeights();
   const [status, setStatus] = useState<DiscordStreamStatus | null>(null);
   const [messages, setMessages] = useState<DiscordMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -408,13 +463,64 @@ export function DiscordStreamPanel({
     off: "bg-rose-500",
   }[phase.tone];
 
+  const onStar = () => {
+    markTradesSeen();
+    if (collapsed) onCollapsedChange?.(false);
+  };
+
   return (
     <div
       className={cn("flex h-full flex-col overflow-hidden rounded-lg border border-slate-700/50", className)}
       style={localSlotBgStyle("marketFlow:discordStreamPanel")}
       data-ui-region={dataRegion}
     >
+      {collapsed && (
+        <div className="flex h-full flex-col items-center gap-3 py-2" style={localSlotHeaderStyle("marketFlow:panelHeader")}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
+                onClick={() => onCollapsedChange?.(false)}
+                data-testid="discord-expand"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Expand Discord panel</TooltipContent>
+          </Tooltip>
+          <NewTradeStar count={unseenTrades.length} onClick={onStar} side="left" />
+          <button
+            type="button"
+            onClick={() => onCollapsedChange?.(false)}
+            className="flex flex-col items-center gap-2 text-slate-400 hover:text-slate-200"
+          >
+            <MessagesSquare className="h-3.5 w-3.5 text-indigo-400" />
+            <span className={cn("h-1.5 w-1.5 rounded-full", dotTone, phase.tone === "live" && "animate-pulse")} />
+            <span className="text-xs font-medium [writing-mode:vertical-rl]">Discord</span>
+          </button>
+        </div>
+      )}
+
+      <div className={cn("flex min-h-0 flex-1 flex-col", collapsed && "hidden")}>
       <div className="flex shrink-0 items-center gap-2 border-b border-slate-700/50 px-3 py-2" style={localSlotHeaderStyle("marketFlow:panelHeader")}>
+        {onCollapsedChange && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-1.5 h-7 w-7 shrink-0 p-0 text-slate-300 hover:bg-slate-700/60 hover:text-slate-100"
+                onClick={() => onCollapsedChange(true)}
+                data-testid="discord-collapse"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Collapse Discord panel (capture keeps running)</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex min-w-0 cursor-help items-center gap-1.5">
@@ -434,6 +540,7 @@ export function DiscordStreamPanel({
             </p>
           </TooltipContent>
         </Tooltip>
+        <NewTradeStar count={unseenTrades.length} onClick={onStar} />
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {status?.running ? (
             <Button
@@ -584,6 +691,8 @@ export function DiscordStreamPanel({
                     grouped={grouped}
                     isTrader={traderSet.some((t) => m.author.toLowerCase().includes(t))}
                     onSymbol={onSymbol}
+                    weight={weightOf(m.author)}
+                    onWeight={(w) => setWeight(m.author, w)}
                   />
                 </div>
               );
@@ -612,6 +721,7 @@ export function DiscordStreamPanel({
         <DiscordRoomIdeas traders={traders} onSymbol={onSymbol} />
       </Panel>
       </PanelGroup>
+      </div>
     </div>
   );
 }
