@@ -12,9 +12,10 @@ export interface SeenTradeCall {
 
 export const DEFAULT_TRADERS = ["Nick Drendel", "RealSimpleAriel"];
 
-/** Entries live in the "New trades" box (today); exits in "Trims & closes" (last 3 trading days). */
+/** Entries live in the "New trades" box (last 48h, rolling); exits in "Trims & closes" (last 3 trading days). */
 export const ENTRY_ACTIONS = new Set(["buy", "add", "short"]);
 export const EXIT_ACTIONS = new Set(["trim", "sell", "stop", "cover"]);
+export const ENTRY_KEEP_MS = 48 * 60 * 60_000;
 
 const STORE_KEY = "mf-discord-trades-seen-v2";
 const CHANGE_EVENT = "mf-discord-trades-seen-change";
@@ -61,12 +62,12 @@ function writeSeen(seen: Record<string, number>) {
 }
 
 /**
- * Nick / Ari trade calls and which of them have not been looked at yet, split into today's entries and
- * the last 3 trading days of exits. Shared across the page (one poll, same query key).
+ * Nick / Ari trade calls and which of them have not been looked at yet, split into the last 48 hours of
+ * entries and the last 3 trading days of exits. Shared across the page (one poll, same query key).
  */
 export function useUnseenTradeCalls(enabled: boolean, traders: string[] = DEFAULT_TRADERS) {
   const traderKey = traders.join(",");
-  const { data } = useQuery<SeenTradeCall[]>({
+  const { data, dataUpdatedAt } = useQuery<SeenTradeCall[]>({
     queryKey: ["/api/discord-stream/analysis", "trade-calls", traderKey],
     queryFn: async () => {
       const res = await fetch(`/api/discord-stream/analysis?window=5&traders=${encodeURIComponent(traderKey)}`, { credentials: "include" });
@@ -82,13 +83,13 @@ export function useUnseenTradeCalls(enabled: boolean, traders: string[] = DEFAUL
   const seen = useMemo(() => parseSeen(raw), [raw]);
 
   const { entries, exits } = useMemo(() => {
-    const today = new Date().setHours(0, 0, 0, 0);
+    const entriesFrom = (dataUpdatedAt || Date.now()) - ENTRY_KEEP_MS;
     const all = data ?? [];
     return {
-      entries: all.filter((c) => c.ts >= today && ENTRY_ACTIONS.has(c.action ?? "")),
+      entries: all.filter((c) => c.ts >= entriesFrom && ENTRY_ACTIONS.has(c.action ?? "")),
       exits: all.filter((c) => EXIT_ACTIONS.has(c.action ?? "")),
     };
-  }, [data]);
+  }, [data, dataUpdatedAt]);
 
   const unseenEntries = useMemo(() => entries.filter((c) => !(tradeKey(c) in seen)), [entries, seen]);
   const unseenExits = useMemo(() => exits.filter((c) => !(tradeKey(c) in seen)), [exits, seen]);

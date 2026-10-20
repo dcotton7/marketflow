@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, BellOff, ChevronDown, ChevronRight, Lightbulb, RotateCcw, TrendingDown, TrendingUp, X } from "lucide-react";
-import { ENTRY_ACTIONS, EXIT_ACTIONS, useUnseenTradeCalls } from "@/components/discord/discord-trade-seen";
+import { ENTRY_ACTIONS, ENTRY_KEEP_MS, EXIT_ACTIONS, useUnseenTradeCalls } from "@/components/discord/discord-trade-seen";
 import { NewTradeStar } from "@/components/discord/NewTradeStar";
 import { useAuthorWeights } from "@/components/discord/discord-author-weights";
 import { DiscordRoomSummary } from "@/components/discord/DiscordRoomSummary";
@@ -63,6 +63,26 @@ const FRESH_MS = 3 * 60_000;
 const IGNORE_KEY = "mf-discord-ignored-tickers";
 const WINDOW_KEY = "mf-discord-window";
 const CHIME_KEY = "mf-discord-trade-chime";
+const ENTRIES_OPEN_KEY = "mf-discord-entries-open";
+const EXITS_OPEN_KEY = "mf-discord-exits-open";
+const FADE_START_MS = 12 * 60 * 60_000;
+const FADE_MIN_OPACITY = 0.38;
+
+/** Entry cards hold full strength for 12h, then ease (smoothstep) down to FADE_MIN_OPACITY at 48h. */
+function entryOpacity(ageMs: number): number {
+  if (ageMs <= FADE_START_MS) return 1;
+  const t = Math.min(1, (ageMs - FADE_START_MS) / (ENTRY_KEEP_MS - FADE_START_MS));
+  return 1 - (1 - FADE_MIN_OPACITY) * t * t * (3 - 2 * t);
+}
+
+function useStoredOpen(key: string): [boolean, () => void] {
+  const [open, setOpen] = useState(() => localStorage.getItem(key) !== "0");
+  const toggle = () => {
+    setOpen(!open);
+    localStorage.setItem(key, open ? "0" : "1");
+  };
+  return [open, toggle];
+}
 
 const ACTION_STYLE: Record<TradeAction, { label: string; cls: string }> = {
   buy: { label: "BUY", cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" },
@@ -84,10 +104,38 @@ function readIgnored(): string[] {
   }
 }
 
-function SectionTitle({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+function SectionTitle({
+  children,
+  right,
+  badge,
+  open,
+  onToggle,
+}: {
+  children: React.ReactNode;
+  right?: React.ReactNode;
+  /** Rendered next to the title, outside the toggle button (e.g. the NEW star). */
+  badge?: React.ReactNode;
+  open?: boolean;
+  onToggle?: () => void;
+}) {
   return (
     <div className="flex items-center gap-2 px-3 pb-1 pt-3">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{children}</span>
+      <span className="inline-flex items-center gap-1.5">
+        {onToggle ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            className="-ml-0.5 inline-flex items-center gap-1 rounded text-[10px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200"
+          >
+            {open ? <ChevronDown className="h-3 w-3 text-slate-500" /> : <ChevronRight className="h-3 w-3 text-slate-500" />}
+            {children}
+          </button>
+        ) : (
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{children}</span>
+        )}
+        {badge}
+      </span>
       {right && <div className="ml-auto flex items-center gap-1">{right}</div>}
     </div>
   );
@@ -125,6 +173,7 @@ function TradeCallCard({
   now,
   todayStart,
   isNew,
+  fade,
   onSeen,
 }: {
   call: TradeCall;
@@ -132,16 +181,21 @@ function TradeCallCard({
   now: number;
   todayStart: number;
   isNew: boolean;
+  /** Ease opacity down with age (entry cards); hover and NEW keep full strength. */
+  fade?: boolean;
   onSeen: () => void;
 }) {
   const day = call.ts < todayStart ? new Date(call.ts).toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" }) : "";
   const style = call.action ? ACTION_STYLE[call.action] : null;
   const fresh = now - call.ts < FRESH_MS;
+  const opacity = fade && !isNew ? entryOpacity(now - call.ts) : 1;
   return (
     <div
       onClick={isNew ? onSeen : undefined}
+      style={opacity < 1 ? ({ "--age-fade": opacity } as React.CSSProperties) : undefined}
       className={cn(
         "mx-3 mb-1.5 rounded-md border bg-slate-900/60 px-2.5 py-1.5",
+        opacity < 1 && "opacity-[var(--age-fade)] transition-opacity hover:opacity-100",
         isNew
           ? "cursor-pointer border-amber-400/70 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
           : fresh
@@ -184,6 +238,8 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
   const [showAllTrader, setShowAllTrader] = useState(false);
   const [chime, setChimeRaw] = useState(() => localStorage.getItem(CHIME_KEY) !== "0");
   const [now, setNow] = useState(() => Date.now());
+  const [entriesOpen, toggleEntries] = useStoredOpen(ENTRIES_OPEN_KEY);
+  const [exitsOpen, toggleExits] = useStoredOpen(EXITS_OPEN_KEY);
   const lastCallSeq = useRef<number | null>(null);
   const { unseenEntries, unseenExits, markSeen, isSeen } = useUnseenTradeCalls(true, traders);
   const { weights, setWeight, raw: weightsRaw } = useAuthorWeights();
@@ -246,15 +302,16 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
   const todayStart = new Date(now).setHours(0, 0, 0, 0);
   const calls = showAllTrader
     ? (data?.traderMessages ?? []).filter((c) => c.ts >= todayStart)
-    : (data?.tradeCalls ?? []).filter((c) => c.ts >= todayStart && ENTRY_ACTIONS.has(c.action ?? ""));
+    : (data?.tradeCalls ?? []).filter((c) => c.ts >= now - ENTRY_KEEP_MS && ENTRY_ACTIONS.has(c.action ?? ""));
   const exits = (data?.tradeCalls ?? []).filter((c) => EXIT_ACTIONS.has(c.action ?? ""));
-  const renderCard = (c: TradeCall) => (
+  const renderCard = (c: TradeCall, fade = false) => (
     <TradeCallCard
       key={c.id}
       call={c}
       onSymbol={onSymbol}
       now={now}
       todayStart={todayStart}
+      fade={fade}
       isNew={c.tickers.length > 0 && c.action != null && !isSeen(c)}
       onSeen={() => markSeen([c])}
     />
@@ -341,23 +398,29 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
               </Tooltip>
             </>
           }
+          open={entriesOpen}
+          onToggle={toggleEntries}
+          badge={<NewTradeStar count={unseenEntries.length} onClick={() => markSeen(unseenEntries)} />}
         >
-          <span className="inline-flex items-center gap-1.5">
-            {showAllTrader ? `${traderNames} messages · today` : `${traderNames} new trades · today`}
-            <NewTradeStar count={unseenEntries.length} onClick={() => markSeen(unseenEntries)} />
-          </span>
+          {showAllTrader ? `${traderNames} messages · today` : `${traderNames} new trades · last 2 days`}
         </SectionTitle>
-        {calls.length === 0 ? (
-          <div className="mx-3 rounded-md border border-dashed border-slate-700/60 px-2.5 py-2 text-[11px] text-slate-500">
-            {showAllTrader
-              ? `No messages from ${traderNames} captured today.`
-              : `No new trades from ${traderNames} today. An entry needs a ticker and a price (e.g. "SNDK long 1315.18 10%"); posts in #live-long-ideas / #live-short-ideas count as entries.`}
-          </div>
-        ) : (
-          calls.slice(0, 12).map(renderCard)
-        )}
+        {entriesOpen &&
+          (calls.length === 0 ? (
+            <div className="mx-3 rounded-md border border-dashed border-slate-700/60 px-2.5 py-2 text-[11px] text-slate-500">
+              {showAllTrader
+                ? `No messages from ${traderNames} captured today.`
+                : `No new trades from ${traderNames} in the last 2 days. An entry needs a ticker and a price (e.g. "SNDK long 1315.18 10%"); posts in #live-long-ideas / #live-short-ideas count as entries.`}
+            </div>
+          ) : showAllTrader ? (
+            calls.slice(0, 12).map((c) => renderCard(c))
+          ) : (
+            calls.slice(0, 20).map((c) => renderCard(c, true))
+          ))}
 
         <SectionTitle
+          open={exitsOpen}
+          onToggle={toggleExits}
+          badge={<NewTradeStar count={unseenExits.length} onClick={() => markSeen(unseenExits)} />}
           right={
             unseenExits.length > 0 && (
               <button
@@ -371,19 +434,17 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
             )
           }
         >
-          <span className="inline-flex items-center gap-1.5">
-            Trims &amp; closes · last 3 days
-            <NewTradeStar count={unseenExits.length} onClick={() => markSeen(unseenExits)} />
-          </span>
+          Trims &amp; closes · last 3 days
         </SectionTitle>
-        {exits.length === 0 ? (
-          <div className="mx-3 rounded-md border border-dashed border-slate-700/60 px-2.5 py-2 text-[11px] text-slate-500">
-            No trims, closes or stops from {traderNames} captured in the last 3 trading days. Earlier days show up after their channel has been
-            open in Discord.
-          </div>
-        ) : (
-          exits.slice(0, 20).map(renderCard)
-        )}
+        {exitsOpen &&
+          (exits.length === 0 ? (
+            <div className="mx-3 rounded-md border border-dashed border-slate-700/60 px-2.5 py-2 text-[11px] text-slate-500">
+              No trims, closes or stops from {traderNames} captured in the last 3 trading days. Earlier days show up after their channel has been
+              open in Discord.
+            </div>
+          ) : (
+            exits.slice(0, 20).map((c) => renderCard(c))
+          ))}
 
         <DiscordRoomSummary weights={weights} onSymbol={onSymbol} />
 
