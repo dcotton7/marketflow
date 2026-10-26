@@ -115,6 +115,8 @@ app.use((req, res, next) => {
     console.log("Universe constituents preloaded");
     
     logMem("pre-routes");
+    const { createAnimaGateway, loadAnimaGatewayOptions } = await import("./middleware/animaGateway");
+    app.use(createAnimaGateway(loadAnimaGatewayOptions()));
     // NOW register routes (which starts MC polling)
     await registerRoutes(httpServer, app);
     const { registerMarketLeaderRoutes } = await import("./market-leaders/routes");
