@@ -2,7 +2,7 @@
  * Messaging between MarketFlow embed pages (/embed/*) and the app hosting them in an iframe (Anima Lab).
  * Only the hosts listed here may embed MarketFlow (see frame-ancestors in server/index.ts) or talk to it.
  */
-export const EMBED_HOST_ORIGINS = ["http://localhost:8770", "http://127.0.0.1:8770"];
+export const EMBED_HOST_ORIGINS = ["http://localhost:8770", "http://127.0.0.1:8770", "https://anima-u2fy.onrender.com"];
 
 /** One mini chart as the host sees it; x/y/w/h are its place in the 12-column grid. */
 export interface EmbedChart {

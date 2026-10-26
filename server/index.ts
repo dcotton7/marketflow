@@ -40,8 +40,8 @@ app.use(
 
 app.use(express.urlencoded({ extended: false, limit: jsonBodyLimit }));
 
-// Only MarketFlow itself and Anima Lab on the owner's PC may show MarketFlow pages in a frame (/embed/* panels).
-const FRAME_ANCESTORS = "frame-ancestors 'self' http://localhost:8770 http://127.0.0.1:8770";
+// Only MarketFlow itself and Anima Lab (on the owner's PC, or Anima online) may show MarketFlow pages in a frame.
+const FRAME_ANCESTORS = "frame-ancestors 'self' http://localhost:8770 http://127.0.0.1:8770 https://anima-u2fy.onrender.com";
 app.use((_req, res, next) => {
   res.setHeader("Content-Security-Policy", FRAME_ANCESTORS);
   next();
@@ -116,7 +116,9 @@ app.use((req, res, next) => {
     
     logMem("pre-routes");
     const { createAnimaGateway, loadAnimaGatewayOptions } = await import("./middleware/animaGateway");
+    const { createAnimaEmbed } = await import("./middleware/animaEmbed");
     app.use(createAnimaGateway(loadAnimaGatewayOptions()));
+    app.use(createAnimaEmbed(loadAnimaGatewayOptions()));
     // NOW register routes (which starts MC polling)
     await registerRoutes(httpServer, app);
     const { registerMarketLeaderRoutes } = await import("./market-leaders/routes");
