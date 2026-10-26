@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import session from "express-session";
 import { createApiAccessGuard, type AccessUser } from "./dataAccess";
-import { allowedPath, createAnimaGateway, internalRequest } from "./animaGateway";
+import { allowedPath, createAnimaGateway, internalRequest, ipAllowed, loadAnimaGatewayOptions } from "./animaGateway";
 
 const TOKEN = "t".repeat(40);
 const USERS: Record<number, AccessUser> = { 1: { id: 1, isAdmin: true, isActive: true } };
@@ -23,9 +23,18 @@ assert.ok(!internalRequest({ headers: { host: "marketflow-hrxh.onrender.com" } }
 assert.ok(!internalRequest({ headers: { host: "marketflow-hrxh:10000", "x-forwarded-for": "1.2.3.4" } } as any));
 assert.ok(!internalRequest({ headers: {} } as any));
 
-async function withApp(opts: { token?: string; userId?: number }, fn: (call: Call) => Promise<void>) {
+const RANGES = ["74.220.49.0/24", "74.220.57.0/24"];
+assert.ok(ipAllowed("74.220.49.7", RANGES));
+assert.ok(ipAllowed("74.220.57.255", RANGES));
+for (const ip of ["74.220.50.1", "74.220.4.1", "1.2.3.4", "74.220.49", "74.220.49.300", "::1", ""]) {
+  assert.ok(!ipAllowed(ip, RANGES), `refused ${ip}`);
+}
+assert.ok(!ipAllowed("10.0.0.1", ["0.0.0.0/0"]), "no catch-all range");
+assert.deepEqual(loadAnimaGatewayOptions({ ANIMA_GATEWAY_IPS: " 74.220.49.0/24, ,74.220.57.0/24 " } as any).ips, RANGES);
+
+async function withApp(opts: { token?: string; userId?: number; ips?: string[] }, fn: (call: Call) => Promise<void>) {
   const app = express();
-  app.use(createAnimaGateway({ token: opts.token, userId: opts.userId }));
+  app.use(createAnimaGateway({ token: opts.token, userId: opts.userId, ips: opts.ips }));
   app.use(session({ secret: "x", resave: false, saveUninitialized: false, store: new session.MemoryStore() }));
   app.use(createApiAccessGuard({ config: { ownerIds: new Set([1]) }, getUser: async (id) => USERS[id] ?? null }));
   app.get("/api/stocks/:t/quote", (req: any, res) => res.json({ t: req.params.t, uid: req.session.userId, q: req.query }));
@@ -70,6 +79,21 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
   assert.equal((await call("GET", "/api/anima/auth/me", inside)).status, 403, "not on the list");
   assert.equal((await call("GET", "/api/anima/../sentinel/evaluate", inside)).status, 403, "no climbing out");
   assert.equal((await call("GET", "/api/stocks/AAPL/quote", inside)).status, 401, "the token is not a login anywhere else");
+});
+
+const edge = { host: "marketflow-hrxh.onrender.com", "x-forwarded-for": "74.220.49.7", "x-anima-token": TOKEN };
+await withApp({ token: TOKEN, userId: 1, ips: RANGES }, async (call) => {
+  const ok = await call("GET", "/api/anima/stocks/AAPL/quote", { ...edge, "cf-connecting-ip": "74.220.49.7" });
+  assert.equal(ok.status, 200, "public address from Anima's range");
+  assert.equal(ok.body.uid, 1);
+  assert.equal((await call("GET", "/api/anima/stocks/AAPL/quote", { ...edge, "cf-connecting-ip": "8.8.8.8" })).status, 404, "outside the range");
+  assert.equal((await call("GET", "/api/anima/stocks/AAPL/quote", edge)).status, 404, "a forged X-Forwarded-For is not enough");
+  assert.equal((await call("GET", "/api/anima/stocks/AAPL/quote", { ...edge, "cf-connecting-ip": "74.220.49.7", "x-anima-token": "wrong" })).status, 404, "range without the token");
+  assert.equal((await call("POST", "/api/anima/sentinel/evaluate", { ...edge, "cf-connecting-ip": "74.220.49.7" })).status, 405, "still read only");
+  assert.equal((await call("GET", "/api/anima/stocks/AAPL/quote", inside)).status, 200, "private network still works");
+});
+await withApp({ token: TOKEN, userId: 1 }, async (call) => {
+  assert.equal((await call("GET", "/api/anima/stocks/AAPL/quote", { ...edge, "cf-connecting-ip": "74.220.49.7" })).status, 404, "no ranges, no public door");
 });
 
 await withApp({ token: "short", userId: 1 }, async (call) => {
