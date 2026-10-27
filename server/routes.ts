@@ -1293,7 +1293,7 @@ export async function registerRoutes(
         return res.status(404).json({ message: `Symbol ${symbol} not found` });
       }
 
-      const price = quote.lastPrice || 0;
+      const price = quote.price || 0;
       const prevClose = quote.prevClose || 0;
       const change = prevClose ? price - prevClose : 0;
       const changePercent = prevClose ? (change / prevClose) * 100 : 0;
