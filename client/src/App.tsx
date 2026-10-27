@@ -40,6 +40,8 @@ const SignalWorkbenchPage = lazy(() => import("@/pages/SignalWorkbenchPage"));
 const WorkspacePopoutPage = lazy(() => import("@/pages/WorkspacePopoutPage"));
 const EmbedChartsPage = lazy(() => import("@/pages/EmbedChartsPage"));
 const EmbedBigChartPage = lazy(() => import("@/pages/EmbedBigChartPage"));
+const EmbedWatchlistPage = lazy(() => import("@/pages/EmbedWatchlistPage"));
+const EmbedDiscordIdeasPage = lazy(() => import("@/pages/EmbedDiscordIdeasPage"));
 const InfoPopPage = lazy(() => import("@/pages/InfoPopPage"));
 
 function Router() {
@@ -205,6 +207,27 @@ function Router() {
         <SentinelProtectedRoute requiresData>
           <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading charts...</div>}>
             <EmbedBigChartPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/embed/watchlist">
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading watchlist...</div>}>
+            <EmbedWatchlistPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/embed/discord-ideas">
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Discord ideas...</div>}>
+            <EmbedDiscordIdeasPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/embed/scanner">
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading Scanner...</div>}>
+            <ScannerPopoutPage />
           </Suspense>
         </SentinelProtectedRoute>
       </Route>

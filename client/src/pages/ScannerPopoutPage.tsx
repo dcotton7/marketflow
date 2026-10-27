@@ -28,6 +28,7 @@ import {
 } from "@/components/scanner/scanner-popout-channel";
 import type { ScannerMode, DiscoveryCard as DiscoveryCardType, SignalType } from "@shared/scanner-types";
 import { SCANNER_CONFIG_FIELDS, type ScannerConfig, type ConfigFieldMeta } from "@shared/scanner-config";
+import { postToHost } from "@/lib/embed-host";
 import type { CatalystRuleDefinition, CatalystEntry, DecayShape } from "@shared/catalyst-types";
 
 // ── Signal type labels (shared with DiscoveryFeed) ───────────────────────────
@@ -195,6 +196,7 @@ export default function ScannerPopoutPage() {
   }, []);
 
   const handleOpenChart = useCallback((symbol: string) => {
+    if (postToHost({ type: "open-big", symbol })) return;
     navigateMain(`/sentinel/charts?symbol=${symbol}`);
   }, [navigateMain]);
 

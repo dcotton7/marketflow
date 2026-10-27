@@ -314,7 +314,8 @@ export function DiscoveryFeedPanel() {
   const isOnPopoutRoute =
     location.startsWith("/scanner-popout") ||
     location.startsWith("/workspace-popout") ||
-    location.startsWith("/infopop");
+    location.startsWith("/infopop") ||
+    location.startsWith("/embed/");
 
   // ── BroadcastChannel: listen for popout close/navigate ────────────────────
   useEffect(() => {
