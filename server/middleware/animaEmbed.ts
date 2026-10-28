@@ -10,8 +10,10 @@ import type { AnimaGatewayOptions } from "./animaGateway";
  *   The cookie is Partitioned (CHIPS): the browser only sends it while MarketFlow is framed by that same site.
  * - A GET/HEAD request with a valid EMBED_COOKIE and no normal login runs as the owner (ANIMA_GATEWAY_USER_ID), like
  *   the gateway: nothing stored server-side. Anything else (POST, PUT, ...) is never signed in by it, except the
- *   JSON POSTs in EMBED_POSTS (the room summary, and the full watchlist panel's paste, which only adds tickers to
- *   one of the owner's lists; JSON forces a CORS preflight from any other site).
+ *   JSON POSTs in EMBED_POSTS (JSON forces a CORS preflight from any other site): the room summary, and the full
+ *   watchlist panel's paste and From Screen, which read a screenshot (screen-grab/extract) and bulk-add tickers to
+ *   one of the owner's lists, with `update` (shares and entry of tickers already there; bulk-add allows it only on a
+ *   portfolio list). A body with `remove` is never signed in, so nothing is taken out of a list from a frame.
  *
  * Tickets and cookies are HMACs under a key derived from ANIMA_GATEWAY_TOKEN, so only Anima's server can make them.
  */
@@ -19,11 +21,11 @@ export const EMBED_COOKIE = "mf_anima_embed";
 export const COOKIE_SECONDS = 12 * 60 * 60;
 const TICKET_MAX_SECONDS = 600;
 const SESSION_COOKIE = "connect.sid";
-const EMBED_POSTS = /^\/api\/(discord-stream\/summary|sentinel\/watchlist\/bulk-add)$/;
+const EMBED_POSTS = /^\/api\/(discord-stream\/summary|sentinel\/watchlist\/bulk-add|sentinel\/screen-grab\/extract)$/;
 
 const embedPost = (req: Request) =>
   req.method === "POST" && EMBED_POSTS.test(req.path) && /^application\/json\b/i.test(req.get("content-type") || "") &&
-  !(req.body && typeof req.body === "object" && ("update" in req.body || "remove" in req.body));
+  !(req.body && typeof req.body === "object" && "remove" in req.body);
 
 const embedKey = (token: string) => createHash("sha256").update(`anima-embed\n${token}`).digest();
 const sign = (token: string, what: string) => createHmac("sha256", embedKey(token)).update(what).digest("hex");

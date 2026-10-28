@@ -3,8 +3,21 @@
  * Avoids PowerShell / CopyFromScreen, which antivirus treats as a grabber.
  */
 
+type PolicyDoc = { allowsFeature?: (feature: string) => boolean };
+
+/** False when the browser lacks getDisplayMedia or this page (e.g. a frame without allow="display-capture") may not
+ *  use it, so callers offer upload only. */
 export function canCaptureDisplay(): boolean {
-  return typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia);
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) return false;
+  if (typeof document === "undefined") return true;
+  const doc = document as unknown as { permissionsPolicy?: PolicyDoc; featurePolicy?: PolicyDoc };
+  const policy = doc.permissionsPolicy ?? doc.featurePolicy;
+  if (typeof policy?.allowsFeature !== "function") return true;
+  try {
+    return policy.allowsFeature("display-capture");
+  } catch {
+    return true;
+  }
 }
 
 /** Chrome extras: open the Window pane and hide Entire Screen. */

@@ -13,6 +13,7 @@ import {
   type WatchlistConfigurableSortField,
 } from "@/components/WatchlistConfigurableTable";
 import { TickerPasteBox } from "@/components/TickerPasteBox";
+import { TosScreenReviewDialog } from "@/components/watchlist/TosScreenReviewDialog";
 import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
 import {
   WATCHLIST_COLUMN_META,
@@ -27,7 +28,7 @@ import {
 } from "@/lib/watchlist-entry-gauges";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
 import { postToHost } from "@/lib/embed-host";
-import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardPaste, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardPaste, Loader2, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PICK_KEY = "embed-watchlist-pick";
@@ -63,8 +64,9 @@ function seedColumns() {
 
 /**
  * /embed/watchlist-full — the detailed watchlist for an Anima Lab panel: entry, stop, shares and entry date per row,
- * the column picker, and a paste box (the one write the embed sign-in allows). A row click opens that ticker's big
- * chart in Anima. Shares the small panel's list pick.
+ * the column picker, a paste box and From Screen (a thinkorswim/Fidelity positions screenshot, reviewed, then one
+ * bulk-add; in a portfolio list with shares and entry, updating tickers already there; never a remove), the writes
+ * the embed sign-in allows. A row click opens that ticker's big chart in Anima. Shares the small panel's list pick.
  */
 export default function EmbedWatchlistFullPage() {
   const { cssVariables } = useAdminTheme();
@@ -74,6 +76,7 @@ export default function EmbedWatchlistFullPage() {
   const [sortField, setSortField] = useState<SortField>("symbol");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [screenOpen, setScreenOpen] = useState(false);
 
   const { columns, beginResize, addColumn, removeColumn, moveColumn, availableToAdd, applyColumnPreset } =
     useWatchlistColumnProfile(COLUMNS_KEY, "modal");
@@ -251,6 +254,24 @@ export default function EmbedWatchlistFullPage() {
           <ClipboardPaste className="h-3.5 w-3.5" />
           Paste
         </button>
+        <button
+          type="button"
+          onClick={() => setScreenOpen(true)}
+          disabled={listId == null}
+          className={cn(
+            "flex h-7 items-center gap-1 rounded border px-1.5 disabled:opacity-50",
+            screenOpen ? "border-cyan-600 text-cyan-300" : "border-slate-700 text-slate-300",
+          )}
+          title={
+            list?.isPortfolio
+              ? "Import a thinkorswim or Fidelity positions screenshot: review, then add or update tickers with shares and avg cost"
+              : "Import tickers from a thinkorswim or Fidelity screenshot: review, then add them with avg cost as entry"
+          }
+          data-testid="embed-watchlist-full-from-screen"
+        >
+          <ScanSearch className="h-3.5 w-3.5" />
+          From Screen
+        </button>
         <span className="flex-1" />
         <span className="text-slate-500">
           {dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""}
@@ -286,6 +307,15 @@ export default function EmbedWatchlistFullPage() {
           />
         )}
       </div>
+      <TosScreenReviewDialog
+        open={screenOpen}
+        onOpenChange={setScreenOpen}
+        watchlistId={listId}
+        watchlistName={list?.name ?? "this watchlist"}
+        isPortfolio={!!list?.isPortfolio}
+        listSymbols={symbols}
+        embed
+      />
     </div>
   );
 }

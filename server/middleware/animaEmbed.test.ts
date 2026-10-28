@@ -20,7 +20,7 @@ assert.equal(readCookie("xmf_anima_embed=1", EMBED_COOKIE), "");
 type Res = { status: number; body: string; headers: http.IncomingHttpHeaders };
 async function withApp(token: string | undefined, fn: (call: (m: string, p: string, h?: Record<string, string>, b?: string) => Promise<Res>) => Promise<void>) {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
   app.use(createAnimaEmbed({ token, userId: 2 }, () => NOW));
   app.use((req: any, res) => res.json({ path: req.url, uid: req.session?.userId ?? null }));
   const server = app.listen(0);
@@ -65,12 +65,22 @@ await withApp(TOKEN, async (call) => {
   assert.equal(JSON.parse((await call("POST", "/api/discord-stream/clear", json)).body).uid, null, "only that one");
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json)).body).uid, 2, "the paste in the full panel");
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", { cookie, "content-type": "text/plain" })).body).uid, null, "the paste is JSON only");
-  for (const extra of [{ update: true }, { remove: ["NVDA"] }]) {
-    const sent = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA" }], ...extra });
+  const update = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA", shares: 10, entry: 100 }], update: true });
+  assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json, update)).body).uid, 2,
+    "From Screen updates shares and entry (bulk-add allows it on a portfolio list only)");
+  for (const remove of [{ remove: ["DELL"] }, { update: true, remove: ["DELL"] }, { remove: [] }]) {
+    const sent = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA" }], ...remove });
     assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json, sent)).body).uid, null,
-      `the panel's paste only adds: ${Object.keys(extra)[0]}`);
+      `nothing is removed from a frame: ${sent}`);
   }
-  for (const p of ["/api/sentinel/watchlist", "/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add/x"]) {
+  const shot = JSON.stringify({ model: "auto", imageDataUrl: "data:image/jpeg;base64,AAAA" });
+  assert.equal(JSON.parse((await call("POST", "/api/sentinel/screen-grab/extract", json, shot)).body).uid, 2,
+    "From Screen reads the screenshot");
+  assert.equal(JSON.parse((await call("POST", "/api/sentinel/screen-grab/extract", { cookie, "content-type": "text/plain" }, shot)).body).uid,
+    null, "the screenshot read is JSON only");
+  assert.equal(JSON.parse((await call("GET", "/api/sentinel/screen-grab/status", { cookie })).body).uid, 2, "its status is a read");
+  for (const p of ["/api/sentinel/watchlist", "/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add/x",
+    "/api/sentinel/screen-grab/extract/x", "/api/sentinel/screen-grab/import", "/api/sentinel/watchlists"]) {
     assert.equal(JSON.parse((await call("POST", p, json)).body).uid, null, `no other watchlist write: ${p}`);
   }
   assert.equal(JSON.parse((await call("PATCH", "/api/sentinel/watchlist/12", json)).body).uid, null, "no edits");

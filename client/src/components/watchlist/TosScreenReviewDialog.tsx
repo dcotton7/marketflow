@@ -53,6 +53,7 @@ export function TosScreenReviewDialog({
   watchlistName,
   isPortfolio = false,
   listSymbols = [],
+  embed = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -60,6 +61,8 @@ export function TosScreenReviewDialog({
   watchlistName: string;
   isPortfolio?: boolean;
   listSymbols?: string[];
+  /** In Anima's full watchlist panel: one bulk-add (the embed sign-in's only list write), never a remove. */
+  embed?: boolean;
 }) {
   const tos = useTosSyncSafe();
   const { toast } = useToast();
@@ -198,13 +201,13 @@ export function TosScreenReviewDialog({
     const items = screenImportItems(symbols, result?.positions ?? [], isPortfolio);
     const shorts = items.filter((i) => i.short).map((i) => i.symbol);
     setImporting(true);
-    if (isPortfolio) {
-      const remove = removeMissing ? screenImportMissing(items, listSymbols) : [];
+    if (isPortfolio || embed) {
+      const remove = removeMissing && !embed ? screenImportMissing(items, listSymbols) : [];
       try {
         const got = await bulkAdd.mutateAsync({
           watchlistId,
           items: items.map(({ symbol, shares, entry }) => ({ symbol, shares, entry })),
-          update: true,
+          ...(isPortfolio ? { update: true } : {}),
           ...(remove.length ? { remove } : {}),
         });
         await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
@@ -319,7 +322,11 @@ export function TosScreenReviewDialog({
               {capturing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <ScanSearch className="mr-1 h-4 w-4" />}
               Snapshot window
             </Button>
-            <span className="text-xs text-muted-foreground">opens Window share — pick Thinkorswim or Fidelity</span>
+            <span className="text-xs text-muted-foreground">
+              {canCaptureDisplay()
+                ? "opens Window share — pick Thinkorswim or Fidelity"
+                : "window snapshot isn't available here — upload or paste a screenshot"}
+            </span>
           </div>
 
           {sourceUrl && (
@@ -435,7 +442,7 @@ export function TosScreenReviewDialog({
                 spellCheck={false}
                 aria-label="Tickers to import"
               />
-              {isPortfolio && missingCount > 0 && (
+              {isPortfolio && !embed && missingCount > 0 && (
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
