@@ -1,6 +1,6 @@
 # Strategy research loop — design spec
 
-Status: **DESIGN ONLY. No code yet.** Don approved the shape of this design and answered two rounds of questions (2026-10-28). The draft filters in section 2, the draft setup definitions in section 3, and the open questions in section 15 need his answers before phase 1 starts.
+Status: **DESIGN ONLY. No code yet.** Don approved the shape of this design and answered two rounds of questions (2026-10-28). The draft filters in section 2, the draft price-cycle sub-stages and Kell setups in section 3, the draft setup definitions in section 4, and the open questions in section 16 need his answers before phase 1 starts.
 Written: 2026-10-28. Owner: Don.
 
 ## Goal
@@ -74,7 +74,7 @@ Computed for every symbol and every date, as of that date's close (or that minut
 
 - Moving averages: 5 SMA, 10/20 EMA and SMA, 50/150/200 SMA daily; **10-week and 30-week SMA on weekly closes** (the 30-week MA drives Weinstein stages).
 - MA slopes, including the 30-week MA change over the last 4 weeks.
-- **Extension from an MA in ATR multiples:** `((price − MA) ÷ MA) ÷ ATR%`, with ATR% = ATR(14) ÷ price. Computed for the 50DMA (drives trims) and for the 5, 10 and 20DMA (picks the trailing MA). See section 4.
+- **Extension from an MA in ATR multiples:** `((price − MA) ÷ MA) ÷ ATR%`, with ATR% = ATR(14) ÷ price. Computed for the 50DMA (drives trims) and for the 5, 10 and 20DMA (picks the trailing MA). See section 5.
 - RSI(14), MACD(12,26,9) and histogram.
 - ATR(14) and ATR as percent of price.
 - Relative volume: today's volume over the 50-day average; weekly volume over the 10-week average; intraday volume vs the same time of day on prior sessions.
@@ -84,32 +84,35 @@ Computed for every symbol and every date, as of that date's close (or that minut
 - Intraday facts from minute bars: VWAP, opening range high and low (5, 15, 30 minutes), low and high of day so far.
 - Gap size vs prior close, and whether the gap day was an earnings day (when known point-in-time).
 - Average daily dollar volume (20-day) and price.
-- The regime state for that date (section 5).
+- The stock's price-cycle sub-stage (1A to 4C) and the cycle measures behind it, from the 10 and 20 EMA (section 3).
+- The regime state for that date (section 6).
+
+EMAs and SMAs are both computed, and every rule names which it uses: the cycle and Kell's setups use the 10/20 EMA; Don's trade management (5/10/20 trail, 50 trim trigger, 50/200 trend) uses SMAs.
 
 Reuse the math in `server/bigidea/indicators.ts`, `shared/ma-math.ts` and `shared/setup-detectors/` where it fits. Wrap each fact in one pure function that takes bars up to a point in time, so live and backtest use the same code.
 
-**Position sizing** is a fact too. The hard 5% loss cap (section 4) sets the most a position can lose. Account-level risk sets how big the position is: `shares = floor(equity × account risk% ÷ (entry − stop))`, capped at a maximum position size. Don's example: a $100,000 position with a 5% stop can lose at most $5,000. This replaces the fixed $100k assumption in `positionSizing.ts` for research.
+**Position sizing** is a fact too. The hard 5% loss cap (section 5) sets the most a position can lose. Account-level risk sets how big the position is: `shares = floor(equity × account risk% ÷ (entry − stop))`, capped at a maximum position size. Don's example: a $100,000 position with a 5% stop can lose at most $5,000. This replaces the fixed $100k assumption in `positionSizing.ts` for research.
 
 ### Layer B — Don's rules (code, pass/fail)
 
-Every rule is an explicit check with a name, a threshold, a pass/fail result and the measured value, so a decision can say "failed `volume_breakout`: 1.2× vs 1.5× required". Setup-specific checks are in section 3. Hard trade rules are in section 4. The filters below apply to every setup and are a **draft for Don to confirm**:
+Every rule is an explicit check with a name, a threshold, a pass/fail result and the measured value, so a decision can say "failed `volume_breakout`: 1.2× vs 1.5× required". Setup-specific checks are in section 4. Hard trade rules are in section 5. The filters below apply to every setup and are a **draft for Don to confirm**:
 
 **Market filter**
-- [ ] `market_stage`: SPY (or QQQ, Don to pick) closes above its 30-week MA and the MA is not falling. Otherwise no new longs. The regime work (section 5) may later replace this with a tested regime filter.
+- [ ] `market_stage`: SPY (or QQQ, Don to pick) closes above its 30-week MA and the MA is not falling. Otherwise no new longs. The regime work (section 6) may later replace this with a tested regime filter.
 
 **Relative strength**
 - [ ] `rs_rank`: RS percentile at least 80 in the universe.
 - [ ] `rs_line_high`: RS line vs SPY within 5% of its 52-week high.
 - [ ] `rs_vs_qqq`: 63-day return above QQQ's.
 
-**Liquidity** (applied first; critical with the whole Nasdaq in the universe, see section 7)
+**Liquidity** (applied first; critical with the whole Nasdaq in the universe, see section 8)
 - [ ] `price_min`: close at least $10.
 - [ ] `dollar_volume_min`: 20-day average dollar volume at least $20M.
 
 **Earnings**
 - [ ] `earnings_gap`: no new entry within 5 sessions before earnings (code when the date is known point-in-time; otherwise the LLM layer judges it). Does not apply to the earnings gap setup itself.
 
-A setup becomes a **candidate** when its own checks pass (section 3), the filters above pass, and it fits the hard rules (section 4). Each strategy version says which filters are required.
+A setup becomes a **candidate** when its own checks pass (section 4), the filters above pass, and it fits the hard rules (section 5). Each strategy version says which filters are required.
 
 ### Layer C — context judge (general LLM)
 
@@ -122,18 +125,116 @@ Runs only on candidates (a small share of the universe), so cost stays bounded. 
 Rules for this layer:
 
 - Low temperature (0 to 0.2), fixed model id, fixed prompt version.
-- Input: the code facts plus headlines and earnings info **known as of the decision date**, anonymized (section 8).
+- Input: the code facts plus headlines and earnings info **known as of the decision date**, anonymized (section 9).
 - Output is structured: `verdict` (`take` / `skip` / `caution`), `confidence` (0 to 1), `reasons` (short list), `flags` (e.g. `earnings_within_5d`, `offering`).
 - Every verdict is saved with its reasons and never overwritten. Same input, same prompt version and same model means the cached verdict is reused, not re-asked.
 - It can only veto or downgrade a candidate. It never creates trades code didn't find.
 
 ### Layer D — specialist signal (optional, tested separately)
 
-A narrow model that adds one number, for example news sentiment (FinBERT-style) on the same headlines, or a pretrained time-series forecaster. It is a feature, not a judge. It gets its own ablation (section 7) and the same contamination checks as the LLM (pretrained models also saw history). It ships only if it adds measurable edge on top of rules and the LLM. The existing `analysis/modules/sentiment.ts` is a starting point to compare against.
+A narrow model that adds one number, for example news sentiment (FinBERT-style) on the same headlines, or a pretrained time-series forecaster. It is a feature, not a judge. It gets its own ablation (section 8) and the same contamination checks as the LLM (pretrained models also saw history). It ships only if it adds measurable edge on top of rules and the LLM. The existing `analysis/modules/sentiment.ts` is a starting point to compare against.
 
-## 3. Setup library
+## 3. Price cycle (Weinstein + Kell)
 
-Each setup is its own detector with a precise definition in code, tested on its own and in combination. The definitions below are **drafts for Don to confirm or correct**. Every setup must also produce a logical stop; if that stop is more than 5% below entry, section 4 applies.
+Don's backbone: Weinstein's four stages, split into sub-stages the way Oliver Kell's "Cycle of Price Action" does. Each sub-stage has its own typical setups, so every stock on every date gets a cycle label, and every setup and trade is read in the light of where the stock is in its cycle.
+
+| Stage | Sub-stages | Kell setups that occur there |
+| --- | --- | --- |
+| 1 Basing | 1A, 1B | Wedge Pop (late 1B) |
+| 2 Advancing | 2A, 2B, 2C | Wedge Pop (2A), EMA Crossback (2A/2B), Base 'n Break (2A/2B), Exhaustion Extension (2C) |
+| 3 Distribution | 3A, 3B | Wedge Drop (3A/3B), failed EMA Crossback from below (3B) |
+| 4 Declining | 4A, 4B, 4C | bearish Base 'n Break (4A), Reversal Extension (end of 4C) |
+
+### EMA vs SMA
+
+- **The cycle and Kell's setups use the 10 EMA and 20 EMA**, as on Kell's chart.
+- **Don's trade management uses SMAs:** the 5/10/20 SMA trail, the 50 SMA trim trigger, and the 50/200 SMA trend checks, as Don chose.
+- Both come from the shared indicator code (`shared/ma-math.ts` and `server/bigidea/indicators.ts`), computed once per symbol and date by layer A. Every rule names which one it uses (`ema10`, `sma10`), so they never get mixed up.
+- The 30-week SMA Weinstein stage on weekly bars (layer A) is stored alongside as the bigger frame. The cycle below runs on daily bars.
+
+### Measures the cycle uses
+
+All are computed from daily bars as of each close, in ATR terms so they compare across stocks:
+
+- `ext10`, `ext20`: distance of the close above (+) or below (−) the 10 and 20 EMA, in ATR multiples: `(close − EMA) ÷ ATR(14)`.
+- `slope10`, `slope20`: EMA change over 5 sessions ÷ ATR(14). Rising above +0.1, falling below −0.1, otherwise flat (draft thresholds).
+- `ema_order`: 10 EMA above or below the 20 EMA; `ema_gap` = |EMA10 − EMA20| ÷ ATR.
+- `ema_crosses`: number of closes that crossed the 20 EMA in the last 20 sessions.
+- Swing structure: swing highs and lows from 5-bar pivots; whether the last two swings make higher highs and higher lows, or lower highs and lower lows.
+- `contraction`: 10-session high-low range ÷ ATR(14), and ATR(5) ÷ ATR(50).
+- Relative volume (as in layer A).
+
+### Sub-stage definitions (drafts for Don to confirm)
+
+**1A Basing, early.** After a decline (prior sub-stage 4B or 4C). EMAs flat or falling slowly and close together (`ema_gap` under 0.5). Price chops around them (`ema_crosses` at least 2). No new 20-day low in the last 10 sessions.
+
+**1B Basing, late.** `slope20` flat or rising. At least 6 of the last 10 closes above the 20 EMA. A higher swing low above the 1A low. Volatility contracting (10-session range under 4 ATR, or ATR(5) ÷ ATR(50) under 0.8).
+
+**2A Advancing, early.** 10 EMA above the 20 EMA, both rising. Close above both. First swing high above the base's high. Entered from 1B, usually on a Wedge Pop.
+
+**2B Advancing, main.** 2A conditions held for at least 10 sessions. Higher highs and higher lows. Pullbacks hold the 20 EMA (no more than 1 close below it). `ext10` between 0 and 3.
+
+**2C Advancing, climax.** 2B conditions plus `ext10` at least 3 or `ext20` at least 5 (draft), with acceleration: a gap up, or a day range of at least 2 ATR, or 3 or more consecutive up days at rising volume. Goes back to 2B if price returns to the EMAs and the trend holds (as on the chart), or on to 3A if it breaks.
+
+**3A Distribution, early.** After 2B or 2C. First close below the 20 EMA after the advance, or `slope10` turning flat while `slope20` is still flat or rising. A lower swing high after the top. Wider swings (ATR(5) ÷ ATR(50) over 1.2).
+
+**3B Distribution, late.** 10 EMA below the 20 EMA, `slope20` flat or falling. At least 6 of the last 10 closes below the 20 EMA. Lower highs. Rallies to the EMAs fail.
+
+**4A Declining, early.** Both EMAs falling, 10 below 20, close below both. A close below the distribution range low.
+
+**4B Declining, main.** Lower highs and lower lows. Rallies fail at the 10 or 20 EMA. `ext10` between 0 and −3.
+
+**4C Declining, capitulation.** 4B conditions plus `ext10` at or below −3 or `ext20` at or below −5 (draft), with a day range of at least 2 ATR or volume at least 2.5× the 50-day average.
+
+**How labels are assigned.** The classifier is a state machine, not a fresh guess each day, so labels don't flicker:
+
+- Normal path: 1A → 1B → 2A → 2B ⇄ 2C → 3A → 3B → 4A → 4B ⇄ 4C → 1A.
+- Allowed setbacks: 1B → 1A (base fails), 2A → 1B (breakout fails), 3A → 2B (re-accumulation: price reclaims the EMAs and makes a new high), 4A → 3B.
+- A move to a new sub-stage needs its conditions to hold for 2 closes (draft hysteresis), except 2C and 4C, which are set on the day.
+- On a stock's first dates, the starting label is the best match of the definitions above.
+- The thresholds marked draft are parameters. Don's hand-labelled charts (phase 1 acceptance) fix their starting values; the backtest may tune them later only through the normal challenger process.
+
+### Kell's setups (drafts for Don to confirm)
+
+Each setup is a detector like those in section 4, with a logical stop. The 5% maximum loss (section 5) applies to all of them.
+
+**Reversal Extension** (end of 4C; long, counter-trend)
+- Stock in 4C: `ext10` at or below −3 and `ext20` at or below −5.
+- Trigger: a reversal bar, closing above the prior day's high, or closing in the top third of a range of at least 1.5 ATR, on volume at least 1.5× average.
+- Entry above the reversal bar's high. Stop below the reversal low. The 5% cap will often bind; section 5 decides.
+- Reported separately as counter-trend, since it buys against the EMAs.
+
+**Wedge Pop** (late 1B, 2A)
+- A falling wedge or contraction over 8 to 30 sessions: at least 2 lower swing highs, lows flatter than highs (converging lines), and the last 5-session range no more than half of the first 5-session range.
+- Price at or below the EMAs before the trigger.
+- Trigger: a close above both the 10 and 20 EMA and above the wedge's upper line, on volume at least 1.3× average.
+- Stop below the pop day's low, or the wedge low if within 5%.
+
+**EMA Crossback** (2A, 2B)
+- Stock in 2A or 2B, and price was at least 1.5 ATR above the 10 EMA within the last 10 sessions.
+- Pullback touches the rising 10 or 20 EMA (low within 0.25 ATR of it, or undercuts by at most 0.5 ATR) and closes above the 20 EMA.
+- Pullback volume below the 50-day average.
+- Trigger: the next session trades above the touch bar's high. Stop below the pullback low.
+- The bearish version (a rally to the falling EMAs that fails, in 3B) is an avoid flag: no new longs.
+
+**Base 'n Break** (2A, 2B; bearish version in 4A)
+- A tight base of 5 to 20 sessions with a range of at most 2.5 ATR (or 10%), sitting on or just above the rising 10/20 EMA, with volume drying up.
+- Trigger: a close above the base high on volume at least 1.5× average. Stop below the base low.
+- Bearish version in 4A: a tight base under falling EMAs that breaks its low. For a long-only strategy it is an exit and avoid signal.
+
+**Exhaustion Extension** (2C; trim or sell signal, not an entry)
+- `ext10` at least 3 or `ext20` at least 5, plus a climax sign: a gap up, a day range of at least 2 ATR, or volume at least 2× average after 3 or more up days.
+- Action: trim into strength (section 5). It often fires near Don's 7× rule (`((price − 50 SMA) ÷ 50 SMA) ÷ ATR% ≥ 7`); reports show how often the two coincide and which fires first.
+- No new long entries while the stock is in 2C.
+
+**Wedge Drop** (3A, 3B; exit or avoid signal)
+- A rising wedge over 8 to 30 sessions: at least 2 higher swing highs, with lows rising faster than highs (converging lines), and a contracting range.
+- Trigger: a close below the wedge's lower line and below the 20 EMA (and the 10 EMA), on volume at least 1.2× average.
+- Action: exit (whole position or trailing piece only, open question) and no new longs.
+
+## 4. Setup library
+
+Each setup is its own detector with a precise definition in code, tested on its own and in combination. The definitions below are **drafts for Don to confirm or correct**. Kell's setups (Reversal Extension, Wedge Pop, EMA Crossback, Base 'n Break, Exhaustion Extension, Wedge Drop) are defined in section 3 and belong to the same library. Every setup records the cycle sub-stage it fired in. Every setup must also produce a logical stop; if that stop is more than 5% below entry, section 5 applies.
 
 ### Intraday setups (Alpaca minute bars)
 
@@ -192,7 +293,7 @@ The intraday detectors find the entry. The position is then managed by the same 
 - Gap up of at least 8% on earnings or major news, volume at least 3× the 50-day average by the close.
 - Close in the upper half of the day's range.
 - Prior 3 months without a large run-up (not already extended).
-- Entry: above the gap-day high, or an opening range breakout on the next session. Stop: below the gap-day low. The 5% cap will often bind here; section 4 decides.
+- Entry: above the gap-day high, or an opening range breakout on the next session. Stop: below the gap-day low. The 5% cap will often bind here; section 5 decides.
 - Needs the earnings date point-in-time to separate earnings gaps from other news gaps; the LLM judges catalyst quality.
 
 **Weinstein Stage 2 breakout** (new detector)
@@ -203,7 +304,7 @@ The intraday detectors find the entry. The position is then managed by the same 
 - Not extended: close no more than 25% above the 30-week MA.
 - Stop: below the Stage 1 range high or the last weekly swing low.
 
-## 4. Hard trade rules and the exit policy
+## 5. Hard trade rules and the exit policy
 
 ### Fixed constraints (never varied, never optimized)
 
@@ -232,7 +333,7 @@ One exit policy, with parameters. Each set of parameter values is a separate str
    | 20 to 30 | 5%, 10%, 15%, 20%, 25% |
    | over 30 | 5%, 10%, 15%, 20%, 25% |
 
-   The search space is every mapping where trim size never falls as VIX rises (70 mappings), plus the 5 flat mappings that ignore VIX as the baseline. Start with a coarse grid (flat 10%, flat 20%, 5/10/15/25, 5/10/20/25, 10/15/20/25) and widen only around the best region. Every mapping tried counts toward the multiple-testing total (section 9).
+   The search space is every mapping where trim size never falls as VIX rises (70 mappings), plus the 5 flat mappings that ignore VIX as the baseline. Start with a coarse grid (flat 10%, flat 20%, 5/10/15/25, 5/10/20/25, 10/15/20/25) and widen only around the best region. Every mapping tried counts toward the multiple-testing total (section 10).
 4. **Trailing piece (extension-dependent MA, thresholds found by the backtest):** which MA the trail uses depends on how far price is above the MAs, measured in the same ATR multiples. At each close:
    - **Very extended → 5DMA:** when extension above the 10DMA is at least `X_far`, the trail is a close below the 5DMA.
    - **Large profit, moderate extension → 20DMA:** when open profit is at least `P_large` and extension above the 20DMA is at most `Y_moderate`, the trail is a close below the 20DMA.
@@ -248,14 +349,19 @@ One exit policy, with parameters. Each set of parameter values is a separate str
    | hysteresis (closes in the new state before switching) | 1, 2 |
 
 5. **Stop to break-even:** option, off by default: after the first trim, move the stop to entry.
+6. **Kell cycle signals (section 3):**
+   - **Exhaustion Extension** triggers a trim into strength. Variants: the same trim size as the 7× rule, or a larger one (open question). If both fire on the same day, only one trim is taken.
+   - **Wedge Drop** exits. Variants: the whole position, or the trailing piece only (open question).
+   - **Bearish Base 'n Break** (4A) exits whatever is left.
+   - Variant with all three off, to measure what they add.
 
-**Tested variants:** the trim-size-vs-VIX mapping, the trim cap, and the trail thresholds above. Other exit styles run as separate strategies on the same entries, for comparison:
+**Tested variants:** the trim-size-vs-VIX mapping, the trim cap, the trail thresholds above, and the Kell signal options. Other exit styles run as separate strategies on the same entries, for comparison:
 
 - **Baseline:** fixed 10DMA trail, flat 10% trims. Shows what the extension-dependent trail and the VIX mapping add.
 - **Position (reference):** trail on a weekly close below the 10-week MA, or the Weinstein exit (weekly close below the 30-week MA). The 5% initial stop and trims still apply.
 - **Intraday only (reference):** flat by the close, for the intraday setups.
 
-## 5. Regimes and success patterns
+## 6. Regimes and success patterns
 
 The aim is to learn which setups work in which market conditions, using conditions that can be measured on any date.
 
@@ -300,15 +406,21 @@ A new table (e.g. `regime_daily`) holds one row per trading day since 2016. Ever
 
 New events are added by hand as they happen, with a start date and a shock window.
 
-### Regime stored on every trade
+### Stock cycle sub-stage
 
-Every backtest decision, paper trade and live decision stores the regime row id for its entry date (and the regime at exit). Don's own journaled trades (`sentinel_trades`, imported trades) can be tagged the same way, so he can see his own results by regime next to the strategy's.
+The market regime describes the market; the cycle sub-stage (section 3) describes the stock. Both are labels on every trade.
+
+### Regime and sub-stage stored on every trade
+
+Every backtest decision, paper trade and live decision stores the regime row id for its entry date (and the regime at exit), and the stock's cycle sub-stage at entry and at exit. Don's own journaled trades (`sentinel_trades`, imported trades) can be tagged the same way, so he can see his own results by regime next to the strategy's.
 
 ### Reports
 
 - **Setup × regime table:** for each setup and each regime bucket (one regime dimension at a time, plus a few chosen pairs such as VIX × SPY vs 200DMA): trade count, win rate, expectancy in R, average R, with 95% confidence intervals (bootstrap).
+- **Setup × sub-stage × market regime:** the same numbers for each setup by the stock's sub-stage at entry, split by a market regime dimension (for example a base breakout in 2A vs 2B, with SPY above vs below its 200DMA). Three-way cells thin out fast; when they do, the report falls back to setup × sub-stage and setup × regime.
+- **Exit sub-stage:** for each setup, what sub-stage trades were in when they exited, and the R by exit reason (trail, trim, Exhaustion Extension, Wedge Drop, stop).
 - **Minimum sample:** cells under 30 trades are shown greyed as "too few to judge", with no expectancy colour.
-- **Heatmap:** setups as rows, regime buckets as columns, colour by expectancy in R, only for cells with enough trades. Hovering shows n, win rate and the interval.
+- **Heatmap:** setups as rows, regime buckets or sub-stages as columns (a filter picks the market regime), colour by expectancy in R, only for cells with enough trades. Hovering shows n, win rate and the interval.
 - The research page shows the current regime row so Don can see which cells apply today.
 
 ### What regimes can and can't tell us
@@ -320,9 +432,9 @@ Every backtest decision, paper trade and live decision stores the regime row id 
 
 ### Regime filters in the improvement loop
 
-The critic (section 9) may propose regime filters such as "no base breakouts when VIX is over 30 and SPY is below its 200DMA". A filter is a normal challenger: it must pass validation, the multiple-testing gate and the locked holdout, and Don approves it. A filter that only removes a handful of trades is rejected as too thin.
+The critic (section 10) may propose regime filters such as "no base breakouts when VIX is over 30 and SPY is below its 200DMA". A filter is a normal challenger: it must pass validation, the multiple-testing gate and the locked holdout, and Don approves it. A filter that only removes a handful of trades is rejected as too thin. The same applies to **sub-stage filters**, for example "take EMA Crossbacks only in 2A and 2B, not late 2B after a 2C" or "no base breakouts while the stock is in 3A".
 
-## 6. Strategy as a versioned package
+## 7. Strategy as a versioned package
 
 A strategy is one immutable package. Changing anything makes a new version.
 
@@ -330,9 +442,10 @@ A strategy is one immutable package. Changing anything makes a new version.
 | --- | --- |
 | `id` | e.g. `wein-cwh-v7` plus a content hash |
 | `parent_id` | the version it was derived from |
-| `setups` | which setups from section 3, with their thresholds |
+| `setups` | which setups from section 4, with their thresholds |
 | `rules` | which layer B filters are required, and their thresholds |
-| `regime_filters` | approved regime filters, if any |
+| `cycle` | price-cycle classifier thresholds and version (section 3) |
+| `regime_filters` | approved regime and sub-stage filters, if any |
 | `exit_policy` | VIX-to-trim mapping, trim cap, trail thresholds (`X_far`, `P_large`, `Y_moderate`, hysteresis), exit style, exit fill (next open or 15:55) |
 | `params` | account risk %, max positions, max position size, wait-for-entry sessions, cost model, universe id |
 | `llm` | model id, its knowledge cutoff, prompt text, prompt version, temperature, on/off |
@@ -342,9 +455,9 @@ A strategy is one immutable package. Changing anything makes a new version.
 | `change_note` | plain words: what changed and why |
 | `status` | `draft`, `challenger`, `paper`, `champion`, `retired` |
 
-Stored in a new table (e.g. `strategy_versions`) with the package as JSON and the hash unique. The hard rules in section 4 are not part of the package; they are enforced by the harness for every version. Prompts and model files are stored by hash so old versions can always be re-run exactly. Exactly one version is `champion` at a time.
+Stored in a new table (e.g. `strategy_versions`) with the package as JSON and the hash unique. The hard rules in section 5 are not part of the package; they are enforced by the harness for every version. Prompts and model files are stored by hash so old versions can always be re-run exactly. Exactly one version is `champion` at a time.
 
-## 7. Evaluation harness
+## 8. Evaluation harness
 
 One backtester for every strategy version. It runs on Don's PC as a script (like `scripts/`), not on Render, and writes results to the shared database.
 
@@ -378,9 +491,19 @@ One backtester for every strategy version. It runs on Don's PC as a script (like
 
 Alpaca SIP daily and minute history runs from about 2016, so roughly ten years are available.
 
-- **Locked holdout:** the most recent 12 months. Never used for tuning. Checked rarely (section 9).
-- **Walk-forward on the rest:** tune on 3 years, validate on the next 6 months, roll forward 6 months, repeat. Report each validation window separately and combined.
-- Every window reports its regime mix (section 5) so results can be read by regime.
+- **Walk-forward:** tune on 3 years, validate on the next 6 months, roll forward 6 months, repeat. Report each validation window separately and combined.
+- Every window reports its regime mix (section 6) so results can be read by regime.
+
+### Holdout plan
+
+2026 (January 2 to now) is the pilot and development window (section 14). It is looked at freely while the pipeline is built, so it can't be a holdout. Instead:
+
+- **Forward paper trading from now on is the final judge.** It runs on data that doesn't exist yet, so nothing can have been tuned to it, and no model can remember it.
+- **A locked older-year slice is the backtest holdout for the full run.** One calendar year, chosen and recorded before the first full run: 2023 (recovery from the 2022 bear, the bank crisis, a narrow AI-led rally) or 2019 (a trending bull market with the tariff shock). Default 2023; Don confirms.
+- The locked year is excluded from all walk-forward training and validation windows. Its bars are still read as warm-up history for indicators on later dates, but no trade in it is ever scored during development.
+- **Embargo:** walk-forward windows stop opening trades 20 sessions before the locked year, and trades still open at its start are closed at the last close before it. Windows after it start 20 sessions after it ends. This stops holdout prices leaking into tuning through trades that span the boundary.
+- The holdout is checked rarely (section 10). When it is used up, the other candidate year becomes the holdout and the used one joins the walk-forward history. Once both are used, forward paper trading is the only out-of-sample judge.
+- The older-year holdout is before the LLM's training cutoff, so it judges rules, exits, filters and the learned model only. The LLM layer is judged on post-cutoff dates (section 9) and on forward paper trading.
 
 ### Metrics
 
@@ -415,19 +538,19 @@ A layer stays on only if it improves expectancy or drawdown without cutting trad
 - Until that is solved, every report carries a "survivorship-biased universe" warning, and promotion decisions compare versions against each other on the same universe (the bias is roughly shared), never against absolute targets.
 - The delisted registry stays as is for the live app. Research gets its own universe table so the live purge doesn't erase research history.
 
-## 8. LLM lookahead contamination
+## 9. LLM lookahead contamination
 
 A general LLM may remember what happened to a stock after the decision date ("NVDA in May 2023"). That makes its backtest verdicts look smarter than they are. Mitigations, all required:
 
-- **Anonymize inputs.** Replace ticker and company name with a token (`STOCK_A`), strip or generalize product and executive names in headlines where possible, shift all dates to relative days ("day 0", "earnings in 4 sessions"), and send prices as percentages from the pivot rather than dollar levels. Keep the sector in broad words only. Event tags (section 5) are never sent; they would give the date away.
+- **Anonymize inputs.** Replace ticker and company name with a token (`STOCK_A`), strip or generalize product and executive names in headlines where possible, shift all dates to relative days ("day 0", "earnings in 4 sessions"), and send prices as percentages from the pivot rather than dollar levels. Keep the sector in broad words only. Event tags (section 6) are never sent; they would give the date away.
 - **Leak probe.** Before trusting a prompt, ask the model to name the anonymized stock or its later return on a sample. If it identifies more than chance, the anonymization is not good enough.
 - **Post-cutoff testing only.** Each package records its model's published knowledge cutoff. The LLM layer's ablation result counts only on decision dates after that cutoff plus a 3-month margin. Earlier dates may be run for debugging, but their numbers are labelled contaminated and never used for promotion.
-- **The sample will be small.** Post-cutoff windows for current models cover a year or two at most, and part of that is the locked holdout. Expect few trades and treat LLM-layer evidence as weak until forward paper trading confirms it.
-- **Forward paper trading is the true test** (section 9). No model can remember the future.
+- **The sample will be small.** Post-cutoff windows for current models cover a year or two at most, and 2026 is also the development window (section 8, holdout plan). Expect few trades and treat LLM-layer evidence as weak until forward paper trading confirms it.
+- **Forward paper trading is the true test** (section 10). No model can remember the future.
 
 Code rules and the learned model have no memory of history, so their backtests don't need this guard. The specialist model does, if it is pretrained.
 
-## 9. The improvement loop
+## 10. The improvement loop
 
 ### Champion and challengers
 
@@ -441,18 +564,18 @@ A separate LLM call (the critic) reads the champion's decision log for the lates
 - Losing trades, with their facts, rule results, regime and LLM reasons.
 - Skipped candidates that would have won (missed trades).
 - Rule checks that barely passed or barely failed.
-- Setup × regime cells with enough trades and clearly negative expectancy.
+- Setup × regime and setup × sub-stage cells with enough trades and clearly negative expectancy.
 
 It proposes **concrete diffs**, each with a one-line reason tied to logged trades:
 
 - A threshold change (`volume_breakout` 1.5× → 1.8×).
 - A new filter built from existing facts (skip if ATR % over 6).
-- A regime filter (section 5).
+- A regime filter or a cycle sub-stage filter (section 6).
 - An exit policy variant (VIX-to-trim mapping, trim cap, trail thresholds).
 - A prompt edit for the context judge.
 - A new fact to compute (handle volume trend).
 
-The critic may only use facts that exist point-in-time, can't touch the hard rules in section 4, and never sees the holdout.
+The critic may only use facts that exist point-in-time, can't touch the hard rules in section 5, and never sees the holdout.
 
 ### Promotion gates
 
@@ -460,11 +583,11 @@ A challenger is promoted only if all are true:
 
 1. **Better on walk-forward validation:** higher expectancy in R, max drawdown no worse than the champion's by more than a set margin, trade count at least the minimum.
 2. **Survives multiple testing:** deflated Sharpe ratio (or a similar correction that accounts for how many variants were tried) still above the threshold. The total count of variants ever tested is tracked per holdout period.
-3. **Better on the locked holdout.** The holdout is checked at most once per 5 rounds, and every check is logged with what was compared. A challenger that fails the holdout can't be resubmitted with a trivial change.
-4. **Forward paper trading:** runs alongside the champion on live data for a set period (default 8 weeks or 20 trades, whichever is longer) without falling behind beyond a margin.
+3. **Better on the locked older-year holdout** (section 8). The holdout is checked at most once per 5 rounds, and every check is logged with what was compared. A challenger that fails the holdout can't be resubmitted with a trivial change. LLM-layer changes skip this gate (the holdout predates the model's cutoff) and rely on post-cutoff results and gate 4.
+4. **Forward paper trading, the final judge:** runs alongside the champion on live data for a set period (default 8 weeks or 20 trades, whichever is longer) without falling behind beyond a margin.
 5. **Don approves** in the promotion UI. Nothing becomes champion automatically.
 
-When the holdout has been checked many times (default: 4 checks), it is considered used up. A fresh holdout is formed from data that has arrived since, and the old one joins the walk-forward history.
+When the holdout has been checked many times (default: 4 checks), it is considered used up and replaced as described in the holdout plan (section 8).
 
 ### Cost controls
 
@@ -475,7 +598,7 @@ When the holdout has been checked many times (default: 4 checks), it is consider
 - Minute bars are fetched only for flagged days and cached on disk, so intraday reruns don't refetch.
 - Spend per round is stored with the round's results.
 
-## 10. Learning data
+## 11. Learning data
 
 ### Decision log
 
@@ -483,7 +606,7 @@ Every candidate the strategy evaluates (taken or skipped), in backtest, paper an
 
 - Strategy version id, run id, mode (`backtest`, `paper`), setup, symbol, decision time.
 - All layer A facts as of that time.
-- Regime row id at entry and at exit.
+- Regime row id and the stock's cycle sub-stage, at entry and at exit.
 - Every rule result with its measured value.
 - LLM verdict, confidence, reasons and flags (by reference to the saved verdict).
 - Specialist score, learned-model score (when present).
@@ -495,7 +618,7 @@ Skipped candidates are labelled too ("what would have happened"), so filters can
 
 ### Learned model
 
-- Once there are several thousand labelled decisions, train a simple model (gradient boosting) on layer A facts and measurable regime features to score setups: probability of a positive R, or expected R.
+- Once there are several thousand labelled decisions, train a simple model (gradient boosting) on layer A facts, the cycle sub-stage and measures, and measurable regime features to score setups: probability of a positive R, or expected R.
 - Event tags and president/party are excluded as inputs.
 - Trained only on walk-forward training windows; evaluated like any other layer, with its own ablation.
 - Saved by file hash in the strategy package with its training window.
@@ -503,14 +626,14 @@ Skipped candidates are labelled too ("what would have happened"), so filters can
 
 The general LLM stays the context judge and explainer. It is not fine-tuned on returns: the sample is too small, the result can't be explained, and it would deepen the contamination problem.
 
-## 11. Strategy decay and retirement
+## 12. Strategy decay and retirement
 
 - **Rolling re-test:** each month, re-run the champion on the latest 6 and 12 months and compare to its own history.
 - **Decay alarm:** if rolling 6-month expectancy in R falls below a set floor (e.g. under 0.1R) or drawdown exceeds its worst backtest drawdown by a margin, flag it on the research page.
 - **Check the regime first:** the alarm shows the current regime and the champion's historical results in that regime. A strategy that has always been weak in this regime is not decaying; it is in its bad cell.
 - **Retirement:** a flagged champion is reviewed by Don. Options: keep, reduce account risk %, pause (no new paper entries), or retire and promote the best challenger that passes the gates. Retired versions stay stored and re-runnable.
 
-## 12. Quinn (Anima companion) integration
+## 13. Quinn (Anima companion) integration
 
 MarketFlow is the source of truth. Anima reads it read-only through the existing gateway (`/api/anima/<path>` runs `GET /api/<path>` as the owner). No research data is copied into Anima.
 
@@ -536,29 +659,60 @@ Wiring, when each route ships:
 
 Anima's `knowledge/common.md` gets a short entry **only when each piece ships**, so Quinn knows the concepts and limits without claiming abilities that don't exist. This spec does not edit the Anima repo. Draft wording per piece:
 
-- **Phase 1 shipped:** "MarketFlow can backtest Don's swing setups (Weinstein Stage 2, base and cup-and-handle breakouts, pullbacks, VCP, earnings gaps) on past daily bars under his hard rule of never losing more than 5% on a trade. Results are biased upward because past delisted stocks are missing. You can't see or run backtests yet."
+- **Phase 1 shipped:** "MarketFlow labels each stock's place in its price cycle (Weinstein's stages split Kell's way: 1A–1B basing, 2A–2C advancing, 3A–3B distribution, 4A–4C declining, from the 10 and 20 EMA) and can backtest Don's swing setups (Kell's Wedge Pop, EMA Crossback, Base 'n Break and Reversal Extension, Weinstein Stage 2, base and cup-and-handle breakouts, pullbacks, VCP, earnings gaps) on past daily bars under his hard rule of never losing more than 5% on a trade. Results are biased upward because past delisted stocks are missing. You can't see or run backtests yet."
 - **Phase 2 shipped:** "MarketFlow labels every past day with its market regime (trend, VIX, breadth, rates) and shows which setups worked in which regimes. Party and president are labels only, not causes."
 - **Phase 3 shipped:** "Some strategy versions use an AI check on news and earnings before a trade. Its reasons are saved. Backtest results for it only count after the AI's training cutoff."
 - **Phase 4 shipped:** "MarketFlow tests improved versions of Don's strategy in rounds. Don approves any change; nothing switches on its own."
 - **Phase 6 shipped:** "You can read the current champion strategy and its rules, the latest round, why a given trade was taken or skipped, and paper-trading results. These are paper results, not real trades. You can't change the strategy, run tests, or place trades, and you don't give buy or sell advice."
 
-## 13. Phased build plan
+## 14. Phased build plan
 
 Each phase ships on its own and is usable before the next starts.
 
 ### Phase 1 — facts, daily setups, hard rules, regimes, point-in-time backtest
 
-Build: weekly bars from daily; layer A facts as pure functions over bars up to a date; the daily setups in section 3 and the layer B filters as named checks; the hard rules and exit policy in section 4; `regime_daily` with VIX, rates and FOMC data loaded; point-in-time S&P 500 membership and Nasdaq common-stock listings, with the liquidity floor applied per date; the backtester with costs, sizing, walk-forward windows and metrics; `strategy_versions` with the first versions (one per exit style).
+Build: weekly bars from daily; layer A facts as pure functions over bars up to a date; the price-cycle classifier and Kell's setups (section 3); the daily setups in section 4 and the layer B filters as named checks; the hard rules and exit policy in section 5; `regime_daily` with VIX, rates and FOMC data loaded; point-in-time S&P 500 membership and Nasdaq common-stock listings, with the liquidity floor applied per date; the backtester with costs, sizing, walk-forward windows and metrics; `strategy_versions` with the first versions (one per exit style).
 
 Acceptance:
 - Facts match hand-checked values on 5 symbols across 3 dates (including the 30-week MA, the 50DMA extension in ATR multiples, and a Stage 2 call on a known chart Don picks).
-- Each daily setup finds at least 3 examples Don picks by hand, on the right dates.
+- Each daily setup, including Kell's, finds at least 3 examples Don picks by hand, on the right dates.
+- Don hand-labels the cycle sub-stages on at least 10 charts (a mix of leaders, failed breakouts and decliners). The classifier matches his labels on at least 80% of days, and never jumps across the cycle (for example 2B straight to 4B).
 - No trade loses more than 5% from entry plus slippage; trims only fill into strength; every trade keeps a trailing piece until the trail exits.
 - The lookahead test passes (changing future bars changes no past decision).
 - `regime_daily` covers every trading day since 2016 with no missing fields.
-- A full walk-forward run finishes on Don's PC, reports every metric net of costs, and shows SPY/QQQ buy-and-hold for the same windows.
+- The pilot run below passes first.
+- Then a full walk-forward run (2016 onward, with the locked holdout year excluded) finishes on Don's PC, reports every metric net of costs, and shows SPY/QQQ buy-and-hold for the same windows.
 - Re-running the same version gives identical results.
 - Reports carry the survivorship warning until delisted-name history is filled.
+
+### Pilot run — 2026 only, before the full 10-year run
+
+A small first backtest to prove the pipeline works end to end. **Its purpose is to verify the machinery, not to judge strategies.**
+
+- **Trade window:** 2026-01-02 to the latest close (extended as new sessions arrive). No trade opens before 2026-01-02. Trades still open at the end are marked to market and labelled open.
+- **Warm-up history:** bars loaded from early 2025 (start December 2024, so the 52-week measures have a full year by January 2). That covers the 200-day SMA (about 200 prior sessions), the 30-week SMA and its slope, Mansfield RS, and the EMAs. Bars before 2026 feed indicators only. Any fact still short of history is reported as missing, never guessed.
+- **Universe, two steps:**
+  1. A small liquid slice: the 100 to 200 most liquid S&P 500 and Nasdaq names, ranked by average dollar volume as of 2025-12-31 (so the choice itself is point-in-time).
+  2. Then the full universe (all Nasdaq-listed common stocks plus the S&P 500), with the liquidity floor applied per date.
+- **Survivorship for the pilot:** names delisted during 2026 are in `data/delisted-symbols.json`; add them back to the pilot universe where Alpaca still serves their bars.
+
+**What the pilot must show** (pass/fail, checked by hand on samples):
+
+- Point-in-time data: the lookahead test passes, and spot checks show no fact uses a later bar.
+- Fills: daily setups fill at the next open (or 15:55 in the variant), intraday ones on the minute bar after the trigger, each with slippage.
+- Costs applied on every fill.
+- The 5% maximum loss holds on every trade (plus slippage and gaps), and "stop too wide" skips and waiting entries are logged.
+- Trims fire at the 7× extension and fill only into strength; the extension-dependent 5/10/20 SMA trail switches and exits as defined; Kell exit signals fire where expected.
+- Cycle labels look right on 10 charts Don picks from 2026.
+- Every candidate has a decision-log row with facts, rule results, regime, sub-stage and outcome.
+- The report renders all metrics, the setup × sub-stage × regime tables (mostly greyed as too few trades) and SPY/QQQ comparisons.
+- The same run twice gives identical results; the full-universe run finishes on Don's PC in acceptable time.
+
+**What the pilot can't show:**
+
+- About 10 months is one market regime and too few trades per setup to conclude anything about which setups or exits work. No thresholds are promoted from it.
+- It is a clean place to try the LLM-verdict layer (phase 3): 2026 is very likely after the training cutoff of the models MarketFlow uses (checked per model), so the model can't remember outcomes. Anonymization still applies. The results are development evidence only; forward paper trading is the real test.
+- 2026 becomes the development window, which is why the holdout moved to an older year plus forward paper trading (section 8, holdout plan).
 
 ### Phase 1b — intraday setups
 
@@ -571,7 +725,7 @@ Acceptance:
 
 ### Phase 2 — decision log and regime reports
 
-Build: `strategy_decisions` for every candidate, taken, skipped or waiting, with outcome labels and regime ids; a research page that lists runs and decisions; the setup × regime table and heatmap with confidence intervals; optional regime tagging of Don's journaled trades.
+Build: `strategy_decisions` for every candidate, taken, skipped or waiting, with outcome labels, regime ids and cycle sub-stages; a research page that lists runs and decisions; the setup × regime and setup × sub-stage × regime tables and heatmap with confidence intervals; optional regime tagging of Don's journaled trades.
 
 Acceptance:
 - Every trade in a backtest has a decision row; counts match the backtest's trade count.
@@ -581,7 +735,7 @@ Acceptance:
 
 ### Phase 3 — LLM context verdict with contamination guards
 
-Build: the context judge on candidates; anonymizer; leak probe; verdict table and cache; budget; ablation rules only vs rules + LLM, scored only after the model's cutoff.
+Build: the context judge on candidates; anonymizer; leak probe; verdict table and cache; budget; ablation rules only vs rules + LLM, scored only after the model's cutoff. First tried on the 2026 pilot window.
 
 Acceptance:
 - Leak probe identifies anonymized stocks no better than chance on a 100-case sample.
@@ -591,7 +745,7 @@ Acceptance:
 
 ### Phase 4 — critic, champion/challenger, holdout
 
-Build: rounds, critic proposals as diffs (including regime filters and exit variants), N challengers per round, promotion gates including deflated Sharpe and the holdout check limit, variant counter.
+Build: rounds, critic proposals as diffs (including regime filters, sub-stage filters and exit variants), N challengers per round, promotion gates including deflated Sharpe and the holdout check limit, variant counter.
 
 Acceptance:
 - A round produces N challengers, each with a readable diff and reason tied to logged trades.
@@ -601,7 +755,7 @@ Acceptance:
 
 ### Phase 5 — learned model
 
-Build: training job on labelled decisions (walk-forward windows only, measurable regime features, no event tags), model stored by hash, ablation with and without it, feature importance report.
+Build: training job on labelled decisions (walk-forward windows only, measurable regime features and cycle sub-stage, no event tags), model stored by hash, ablation with and without it, feature importance report.
 
 Acceptance:
 - Starts only once the decision count passes the threshold Don sets (default 3,000).
@@ -619,21 +773,25 @@ Acceptance:
 - Anima can read all four routes through the gateway; any write or non-listed research route returns 403 or 405.
 - The matching `knowledge/common.md` entries are ready for Anima to add.
 
-## 14. Out of scope
+## 15. Out of scope
 
 - Placing orders (Alpaca paper or live). See `docs/proposals/alpaca-trading-plan.md`.
 - Changing the price vendor. Alpaca SIP is the price source.
 - Fine-tuning the general LLM.
 - Editing the Anima repo.
 
-## 15. Open questions for Don
+## 16. Open questions for Don
 
-Answered and written into the spec: the 7× trim trigger (section 4), the VIX-to-trim mapping and trail thresholds (found by the backtest, section 4), entry timing (section 7), and the universe (every Nasdaq-listed common stock plus the S&P 500, section 7). Still open:
+Answered and written into the spec: the 7× trim trigger (section 5), the VIX-to-trim mapping and trail thresholds (found by the backtest, section 5), entry timing (section 8), and the universe (every Nasdaq-listed common stock plus the S&P 500, section 8). Still open:
 
 1. **Waiting entries.** When the logical stop is more than 5% away, skip or wait? If wait, for how many sessions?
 2. **Account risk and positions.** Account risk per trade (0.5%, 0.75% or 1% of equity), maximum open positions, and maximum position size?
-3. **Setup definitions.** Which drafts in section 3 are right, which thresholds change, what is missing? Is the market filter SPY, QQQ, or both?
+3. **Setup definitions.** Which drafts in section 4 are right, which thresholds change, what is missing? Is the market filter SPY, QQQ, or both?
 4. **Missing data budget.** Pay for delisted-name history and point-in-time earnings and news if Alpaca and Finnhub can't cover them? What monthly budget for that and for LLM calls?
 5. **Benchmark and promotion bar.** Judge against SPY, QQQ, or both? Minimum improvement in expectancy, maximum allowed drawdown increase, and paper period length (default 8 weeks or 20 trades)?
 6. **LLM.** OK to use the OpenAI models MarketFlow already uses, at temperature 0? Any news sources to include or exclude?
 7. **Discord ideas.** Start logging Discord room ideas now so they can become a feature later?
+8. **Cycle sub-stages.** Are the draft definitions of 1A to 4C in section 3 right? Which thresholds change (for example the 2C and 4C extension levels, the hysteresis)?
+9. **Exhaustion Extension trim.** Should it trigger the same trim as the 7× rule, or a larger one?
+10. **Wedge Drop exit.** Should a Wedge Drop exit the whole position, or only the trailing piece left after trims?
+11. **Holdout year.** Lock 2023 (default) or 2019 as the older-year holdout for the full run?
