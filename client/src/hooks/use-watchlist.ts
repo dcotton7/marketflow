@@ -520,15 +520,20 @@ export interface PasteAddResult {
   added: string[];
   existing: string[];
   invalid: string[];
+  updated?: string[];
+  removed?: string[];
 }
 
-/** One server call for a pasted table (POST /api/sentinel/watchlist/bulk-add), with shares and entry. */
+/** One server call for a pasted table (POST /api/sentinel/watchlist/bulk-add), with shares and entry. update and
+ *  remove (portfolio lists only) are for From Screen. */
 export function usePasteToWatchlist() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
       watchlistId: number;
       items: { symbol: string; shares?: number | null; entry?: number | null }[];
+      update?: boolean;
+      remove?: string[];
     }): Promise<PasteAddResult> => {
       const res = await fetch("/api/sentinel/watchlist/bulk-add", {
         method: "POST",

@@ -1,6 +1,8 @@
 /**
  * From Screen: ToS or Fidelity positions table capture + review.
- * Avg cost is saved as planned entry. Qty is not stored.
+ * Avg cost is saved as planned entry. In a portfolio list Pos Qty is saved as shares and tickers already in the list
+ * are updated (one bulk-add with update); tickers missing from the screenshot are removed only when the box is ticked.
+ * A short (negative Pos Qty) is imported without shares or entry.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,7 +12,14 @@ import { useTosSyncSafe } from "@/context/TosSyncContext";
 import { useToast } from "@/hooks/use-toast";
 import { cropImageToJpeg, type CropRect } from "@/lib/crop-image";
 import { canCaptureDisplay, captureDisplayJpeg } from "@/lib/capture-display";
-import { formatTickersCsv, parseWatchlistTickers, type TosScreenExtractResult } from "@shared/tos-screen-extract";
+import {
+  formatTickersCsv,
+  parseWatchlistTickers,
+  screenImportItems,
+  screenImportMissing,
+  type TosScreenExtractResult,
+} from "@shared/tos-screen-extract";
+import { usePasteToWatchlist } from "@/hooks/use-watchlist";
 import {
   Dialog,
   DialogContent,
@@ -42,16 +51,22 @@ export function TosScreenReviewDialog({
   onOpenChange,
   watchlistId,
   watchlistName,
+  isPortfolio = false,
+  listSymbols = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   watchlistId: number | null;
   watchlistName: string;
+  isPortfolio?: boolean;
+  listSymbols?: string[];
 }) {
   const tos = useTosSyncSafe();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const bulkAdd = usePasteToWatchlist();
   const [importing, setImporting] = useState(false);
+  const [removeMissing, setRemoveMissing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const imgWrapRef = useRef<HTMLDivElement>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -69,6 +84,10 @@ export function TosScreenReviewDialog({
     staleTime: 15_000,
   });
   const extractReady = grabStatus?.extract !== false;
+  const missingCount = result
+    ? screenImportMissing(screenImportItems(parseWatchlistTickers(tickerCsv), result.positions, isPortfolio), listSymbols)
+        .length
+    : 0;
 
   useEffect(() => {
     if (open) void tos?.refreshStatus();
@@ -85,6 +104,7 @@ export function TosScreenReviewDialog({
     setExtracting(false);
     setCapturing(false);
     setImporting(false);
+    setRemoveMissing(false);
   }, [open]);
 
   const loadImage = useCallback((dataUrl: string) => {
@@ -175,15 +195,49 @@ export function TosScreenReviewDialog({
       toast({ title: "No tickers", description: "Delete extras in the box, but leave at least one valid symbol.", variant: "destructive" });
       return;
     }
-    const costBySymbol = new Map(
-      (result?.positions ?? []).map((row) => [row.symbol.toUpperCase(), row.avgCost] as const),
-    );
+    const items = screenImportItems(symbols, result?.positions ?? [], isPortfolio);
+    const shorts = items.filter((i) => i.short).map((i) => i.symbol);
     setImporting(true);
+    if (isPortfolio) {
+      const remove = removeMissing ? screenImportMissing(items, listSymbols) : [];
+      try {
+        const got = await bulkAdd.mutateAsync({
+          watchlistId,
+          items: items.map(({ symbol, shares, entry }) => ({ symbol, shares, entry })),
+          update: true,
+          ...(remove.length ? { remove } : {}),
+        });
+        await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
+        const said = [
+          got.added.length ? `${got.added.length} added` : "",
+          got.updated?.length ? `${got.updated.length} updated` : "",
+          got.removed?.length ? `${got.removed.length} removed` : "",
+          got.invalid.length ? `${got.invalid.length} not tickers (${got.invalid.join(", ")})` : "",
+        ].filter(Boolean);
+        toast({
+          title: `Positions imported to ${watchlistName}`,
+          description:
+            (said.join(" · ") || "Nothing changed") +
+            (shorts.length ? `. Shorts kept without shares or entry: ${shorts.join(", ")}` : "") + ".",
+        });
+        onOpenChange(false);
+      } catch (err) {
+        toast({
+          title: "Import failed",
+          description: err instanceof Error ? err.message : "Could not import positions",
+          variant: "destructive",
+        });
+      } finally {
+        setImporting(false);
+      }
+      return;
+    }
+    const entryBySymbol = new Map(items.map((i) => [i.symbol, i.entry] as const));
     try {
       let withEntry = 0;
-      for (const symbol of symbols) {
-        const avgCost = costBySymbol.get(symbol.toUpperCase());
-        const targetEntry = avgCost != null && avgCost > 0 ? avgCost : undefined;
+      for (const raw of symbols) {
+        const symbol = raw.toUpperCase().replace("/", ".");
+        const targetEntry = entryBySymbol.get(symbol) ?? undefined;
         const created = await apiRequest("POST", "/api/sentinel/watchlist", {
           symbol,
           watchlistId,
@@ -224,7 +278,11 @@ export function TosScreenReviewDialog({
           <DialogTitle>From Screen</DialogTitle>
           <DialogDescription>
             Snapshot a Thinkorswim or Fidelity positions table. Average cost / Avg Cost becomes
-            planned entry. Quantity is not stored. Edit the ticker list before import.
+            planned entry.{" "}
+            {isPortfolio
+              ? "This is a portfolio list: Pos Qty is saved as shares, and tickers already in it get the new shares and entry. Shorts come in without shares or entry."
+              : "Quantity is saved only in a portfolio list (the briefcase); here only tickers and entry are added."}{" "}
+            Edit the ticker list before import.
           </DialogDescription>
         </DialogHeader>
 
@@ -266,7 +324,8 @@ export function TosScreenReviewDialog({
 
           {sourceUrl && (
             <div className="rounded-md border border-amber-400/60 bg-amber-500/15 px-3 py-2 text-center text-sm font-medium text-amber-200">
-              Draw a box around the table — include Symbol and Average cost / Avg Cost.
+              Draw a box around the table — include Symbol and Average cost / Avg Cost
+              {isPortfolio ? ", and Qty for the share count" : ""}.
             </div>
           )}
 
@@ -343,7 +402,7 @@ export function TosScreenReviewDialog({
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
                 Layout: {result.layout} · {result.tickers.length} symbols ·{" "}
-                {result.positions.filter((p) => p.hasPosition).length} with qty · review only
+                {result.positions.filter((p) => p.hasPosition).length} with qty · nothing is saved until Import
               </p>
               <div className="max-h-[28vh] overflow-auto rounded-md border border-border">
                 <table className="w-full text-xs">
@@ -376,6 +435,18 @@ export function TosScreenReviewDialog({
                 spellCheck={false}
                 aria-label="Tickers to import"
               />
+              {isPortfolio && missingCount > 0 && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={removeMissing}
+                    onChange={(e) => setRemoveMissing(e.target.checked)}
+                    data-testid="from-screen-remove-missing"
+                  />
+                  Also remove {missingCount} ticker{missingCount === 1 ? "" : "s"} in {watchlistName} not in this
+                  screenshot
+                </label>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
@@ -388,7 +459,7 @@ export function TosScreenReviewDialog({
                   onClick={() => void importTickers()}
                 >
                   {importing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-                  Import Tickers
+                  {isPortfolio ? "Import Positions" : "Import Tickers"}
                 </Button>
                 <span className="text-xs text-muted-foreground">
                   {watchlistId == null

@@ -948,7 +948,11 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   variant="outline"
                   className="h-8 gap-1"
                   onClick={() => setTosScreenReviewOpen(true)}
-                  title="Review a ToS screenshot (does not add to this list yet)"
+                  title={
+                    selectedWatchlist?.isPortfolio
+                      ? "Import a ToS or Fidelity positions screenshot: review, then add or update tickers with shares and avg cost"
+                      : "Import tickers from a ToS or Fidelity screenshot: review, then add them with avg cost as entry"
+                  }
                 >
                   <ScanSearch className="w-4 h-4" />
                   From Screen
@@ -1105,6 +1109,8 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
         onOpenChange={setTosScreenReviewOpen}
         watchlistId={effectiveWatchlistId ?? null}
         watchlistName={selectedWatchlist?.name ?? "this watchlist"}
+        isPortfolio={!!selectedWatchlist?.isPortfolio}
+        listSymbols={symbols}
       />
     </Dialog>
   );

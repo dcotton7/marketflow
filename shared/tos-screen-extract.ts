@@ -96,6 +96,39 @@ export function formatTickersCsv(tickers: string[]): string {
   return tickers.join(", ");
 }
 
+export type ScreenImportItem = { symbol: string; shares: number | null; entry: number | null; short: boolean };
+
+/** What From Screen imports for the reviewed symbols: Avg Cost is the entry, and in a portfolio list Pos Qty is the
+ *  share count. A short (negative Pos Qty) is marked and carries neither. "BRK/B" is stored as "BRK.B". */
+export function screenImportItems(
+  symbols: string[],
+  positions: TosScreenPositionRow[],
+  portfolio: boolean,
+): ScreenImportItem[] {
+  const bySymbol = new Map(positions.map((p) => [p.symbol.toUpperCase().replace("/", "."), p] as const));
+  const seen = new Set<string>();
+  const out: ScreenImportItem[] = [];
+  for (const raw of symbols) {
+    const symbol = raw.toUpperCase().replace("/", ".");
+    if (seen.has(symbol)) continue;
+    seen.add(symbol);
+    const row = bySymbol.get(symbol);
+    const short = row?.posQty != null && row.posQty < 0;
+    const entry = !short && row?.avgCost != null && row.avgCost > 0 ? row.avgCost : null;
+    const shares = portfolio && !short && row?.posQty != null && row.posQty > 0 ? row.posQty : null;
+    out.push({ symbol, shares, entry, short });
+  }
+  return out;
+}
+
+/** Tickers in the list that the import doesn't name (offered for removal only when he ticks the box). */
+export function screenImportMissing(items: ScreenImportItem[], have: string[]): string[] {
+  const named = new Set(items.map((i) => i.symbol));
+  const out: string[] = [];
+  for (const s of have.map((h) => h.trim().toUpperCase())) if (s && !named.has(s) && !out.includes(s)) out.push(s);
+  return out;
+}
+
 function asFiniteNumber(value: unknown): number | null {
   if (value == null || value === "") return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;

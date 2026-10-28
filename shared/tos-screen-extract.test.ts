@@ -3,6 +3,8 @@ import {
   formatTickersCsv,
   normalizeTosScreenExtract,
   parseWatchlistTickers,
+  screenImportItems,
+  screenImportMissing,
 } from "./tos-screen-extract";
 
 assert.deepEqual(
@@ -63,6 +65,38 @@ assert.equal(
     positions: [{ symbol: "GD", lastPrice: "$1,516.91" }],
   }).positions[0].lastPrice,
   1516.91,
+);
+
+const shot = normalizeTosScreenExtract({
+  layout: "tos_positions",
+  positions: [
+    { symbol: "NVDA", avgCost: "140.50", posQty: "+150" },
+    { symbol: "TSLA", avgCost: "410.00", posQty: "-50" },
+    { symbol: "BRK/B", avgCost: "455.10", posQty: "10" },
+    { symbol: "AMD", avgCost: null, posQty: null },
+  ],
+}).positions;
+const picked = ["NVDA", "TSLA", "BRK/B", "AMD", "COIN", "nvda"];
+assert.deepEqual(
+  screenImportItems(picked, shot, true),
+  [
+    { symbol: "NVDA", shares: 150, entry: 140.5, short: false },
+    { symbol: "TSLA", shares: null, entry: null, short: true },
+    { symbol: "BRK.B", shares: 10, entry: 455.1, short: false },
+    { symbol: "AMD", shares: null, entry: null, short: false },
+    { symbol: "COIN", shares: null, entry: null, short: false },
+  ],
+  "portfolio list: Pos Qty is shares, a short carries nothing, BRK/B is BRK.B, typed-in tickers come too",
+);
+assert.deepEqual(
+  screenImportItems(picked, shot, false).map((i) => [i.symbol, i.shares, i.entry]),
+  [["NVDA", null, 140.5], ["TSLA", null, null], ["BRK.B", null, 455.1], ["AMD", null, null], ["COIN", null, null]],
+  "other lists: entry only",
+);
+assert.deepEqual(
+  screenImportMissing(screenImportItems(picked, shot, true), ["NVDA", " dell ", "MU", "DELL", "BRK.B"]),
+  ["DELL", "MU"],
+  "list tickers the screenshot doesn't name, once each",
 );
 
 const empty = normalizeTosScreenExtract(null);

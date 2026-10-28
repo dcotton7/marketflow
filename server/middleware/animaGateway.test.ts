@@ -16,10 +16,8 @@ for (const p of ["/api/stocks/AAPL/quote", "/api/stocks/BRK.B/history", "/api/ma
   assert.ok(allowedPath(p), `allowed ${p}`);
 }
 assert.ok(allowedPath("/api/sentinel/watchlist/12/shares", "POST"));
-assert.ok(allowedPath("/api/sentinel/watchlist/bulk-add", "POST"), "the confirmed positions update");
-assert.ok(!allowedPath("/api/sentinel/watchlist/bulk-add"), "not a read route");
 for (const p of ["/api/sentinel/watchlist/12", "/api/sentinel/watchlist", "/api/sentinel/watchlist/x/shares", "/api/stocks/AAPL/quote",
-  "/api/sentinel/watchlist/bulk-add/x", "/api/sentinel/watchlists/3/items"]) {
+  "/api/sentinel/watchlist/bulk-add"]) {
   assert.ok(!allowedPath(p, "POST"), `refused POST ${p}`);
 }
 for (const p of ["/api/auth/me", "/api/sentinel/evaluate", "/api/marketflow/NVDA", "/api/discord-stream/messages",
@@ -52,7 +50,6 @@ async function withApp(opts: { token?: string; userId?: number; ips?: string[] }
   app.get("/api/alerts/feed", (req: any, res) => res.json({ uid: req.session.userId, q: req.query }));
   app.get("/api/alerts/events", (_req, res) => res.json({ leaked: true }));
   app.post("/api/sentinel/watchlist/:id/shares", express.json(), (req: any, res) => res.json({ id: req.params.id, uid: req.session.userId, body: req.body }));
-  app.post("/api/sentinel/watchlist/bulk-add", express.json(), (req: any, res) => res.json({ uid: req.session.userId, body: req.body }));
   app.post("/api/sentinel/watchlist/:id", (_req, res) => res.json({ leaked: true }));
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   const server = app.listen(0);
@@ -111,11 +108,6 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
   assert.equal((await call("GET", "/api/anima/sentinel/watchlist/12/shares", inside)).status, 403, "not a read route");
   assert.equal((await call("POST", "/api/anima/sentinel/watchlist/12/shares", { ...json, "x-anima-token": "wrong" }, trim)).status, 404, "the write needs the token");
   assert.equal((await call("POST", "/api/sentinel/watchlist/12/shares", json, trim)).status, 401, "not open outside the gateway");
-  const shot = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA", shares: 10, entry: 100 }], update: true });
-  const bulk = await call("POST", "/api/anima/sentinel/watchlist/bulk-add", json, shot);
-  assert.equal(bulk.status, 200);
-  assert.deepEqual(bulk.body, { uid: 1, body: JSON.parse(shot) }, "the confirmed positions update, as the owner");
-  assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", inside, shot)).status, 415, "JSON only");
 });
 
 const edge = { host: "marketflow-hrxh.onrender.com", "x-forwarded-for": "74.220.49.7", "x-anima-token": TOKEN };
