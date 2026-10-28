@@ -13,6 +13,7 @@ import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middlewar
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { checkSharesWrite } from "./shares-write";
+import { bulkAddSchema, planBulkAdd } from "./bulk-add";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
 // monitor.ts removed — was a stub that only console.logged active trades
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
@@ -1629,6 +1630,36 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Create watchlist error:", error);
       res.status(500).json({ error: "Failed to create watchlist item" });
+    }
+  });
+
+  app.post("/api/sentinel/watchlist/bulk-add", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { watchlistId, items } = bulkAddSchema.parse(req.body);
+      const userId = req.session.userId!;
+      const list = await sentinelModels.getWatchlistById(watchlistId);
+      if (!list || list.userId !== userId) return res.status(404).json({ error: "Watchlist not found" });
+      const have = await sentinelModels.getWatchlistByUser(userId, watchlistId);
+      const plan = planBulkAdd(items, have.filter((i) => i.status === "watching").map((i) => i.symbol));
+      const added: string[] = [];
+      for (const it of plan.add) {
+        await sentinelModels.createWatchlistItem({
+          userId,
+          watchlistId,
+          symbol: it.symbol,
+          targetEntry: it.entry,
+          shares: it.shares,
+          priority: "medium",
+        });
+        added.push(it.symbol);
+      }
+      res.json({ added, existing: plan.existing, invalid: plan.invalid });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Bulk add watchlist error:", error);
+      res.status(500).json({ error: "Failed to add tickers" });
     }
   });
 

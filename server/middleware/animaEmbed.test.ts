@@ -62,6 +62,13 @@ await withApp(TOKEN, async (call) => {
   assert.equal(JSON.parse((await call("POST", "/api/discord-stream/summary", json)).body).uid, 2, "the room summary button");
   assert.equal(JSON.parse((await call("POST", "/api/discord-stream/summary", { cookie })).body).uid, null, "JSON only");
   assert.equal(JSON.parse((await call("POST", "/api/discord-stream/clear", json)).body).uid, null, "only that one");
+  assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json)).body).uid, 2, "the paste in the full panel");
+  assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", { cookie, "content-type": "text/plain" })).body).uid, null, "the paste is JSON only");
+  for (const p of ["/api/sentinel/watchlist", "/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add/x"]) {
+    assert.equal(JSON.parse((await call("POST", p, json)).body).uid, null, `no other watchlist write: ${p}`);
+  }
+  assert.equal(JSON.parse((await call("PATCH", "/api/sentinel/watchlist/12", json)).body).uid, null, "no edits");
+  assert.equal(JSON.parse((await call("DELETE", "/api/sentinel/watchlist/12", { cookie })).body).uid, null, "no removes");
   assert.equal(JSON.parse((await call("GET", "/api/x", { cookie: `${EMBED_COOKIE}=${NOW + 60}.${"a".repeat(64)}` })).body).uid, null, "forged cookie");
   assert.equal(JSON.parse((await call("GET", "/api/x", { cookie: `connect.sid=s; ${cookie}` })).body).uid, null, "a real login wins");
   assert.equal(JSON.parse((await call("GET", "/api/x")).body).uid, null);

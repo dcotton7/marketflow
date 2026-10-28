@@ -41,6 +41,7 @@ const WorkspacePopoutPage = lazy(() => import("@/pages/WorkspacePopoutPage"));
 const EmbedChartsPage = lazy(() => import("@/pages/EmbedChartsPage"));
 const EmbedBigChartPage = lazy(() => import("@/pages/EmbedBigChartPage"));
 const EmbedWatchlistPage = lazy(() => import("@/pages/EmbedWatchlistPage"));
+const EmbedWatchlistFullPage = lazy(() => import("@/pages/EmbedWatchlistFullPage"));
 const EmbedDiscordIdeasPage = lazy(() => import("@/pages/EmbedDiscordIdeasPage"));
 const InfoPopPage = lazy(() => import("@/pages/InfoPopPage"));
 
@@ -207,6 +208,13 @@ function Router() {
         <SentinelProtectedRoute requiresData>
           <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading charts...</div>}>
             <EmbedBigChartPage />
+          </Suspense>
+        </SentinelProtectedRoute>
+      </Route>
+      <Route path="/embed/watchlist-full">
+        <SentinelProtectedRoute requiresData>
+          <Suspense fallback={<div className="flex items-center justify-center h-screen bg-slate-950 text-slate-400">Loading watchlist...</div>}>
+            <EmbedWatchlistFullPage />
           </Suspense>
         </SentinelProtectedRoute>
       </Route>

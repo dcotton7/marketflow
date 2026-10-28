@@ -516,6 +516,39 @@ export function useUpdateWatchlist() {
   });
 }
 
+export interface PasteAddResult {
+  added: string[];
+  existing: string[];
+  invalid: string[];
+}
+
+/** One server call for a pasted table (POST /api/sentinel/watchlist/bulk-add), with shares and entry. */
+export function usePasteToWatchlist() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      watchlistId: number;
+      items: { symbol: string; shares?: number | null; entry?: number | null }[];
+    }): Promise<PasteAddResult> => {
+      const res = await fetch("/api/sentinel/watchlist/bulk-add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: "Failed to add tickers" }));
+        throw new Error(error.error || "Failed to add tickers");
+      }
+      return res.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist", variables.watchlistId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
+    },
+  });
+}
+
 export function useAddToWatchlistWithTradePlan() {
   const queryClient = useQueryClient();
   const { toast } = useToast();

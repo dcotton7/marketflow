@@ -31,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WatchlistColumnPicker } from "@/components/WatchlistColumnPicker";
+import { TickerPasteBox } from "@/components/TickerPasteBox";
 import {
   WatchlistConfigurableTable,
   type WatchlistConfigurableSortField,
@@ -66,6 +67,7 @@ import {
   BriefcaseBusiness,
   ScanSearch,
   PictureInPicture2,
+  ClipboardPaste,
 } from "lucide-react";
 import { TosScreenReviewDialog } from "@/components/watchlist/TosScreenReviewDialog";
 import { useInfoPop } from "@/hooks/useInfoPop";
@@ -366,6 +368,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
   
   // Ticker add state
   const [tickerInput, setTickerInput] = useState("");
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [isAddingTickers, setIsAddingTickers] = useState(false);
   const [addProgress, setAddProgress] = useState<{ done: number; total: number } | null>(null);
   
@@ -931,6 +934,17 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                 </Button>
                 <Button
                   size="sm"
+                  variant={pasteOpen ? "secondary" : "outline"}
+                  className="h-8 gap-1"
+                  onClick={() => setPasteOpen((v) => !v)}
+                  title="Paste a Schwab or thinkorswim table, a CSV export, or a list"
+                  data-testid="watchlist-paste-toggle"
+                >
+                  <ClipboardPaste className="w-4 h-4" />
+                  Paste
+                </Button>
+                <Button
+                  size="sm"
                   variant="outline"
                   className="h-8 gap-1"
                   onClick={() => setTosScreenReviewOpen(true)}
@@ -977,6 +991,14 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   </>
                 )}
               </div>
+              {pasteOpen && (
+                <TickerPasteBox
+                  watchlistId={effectiveWatchlistId ?? null}
+                  isPortfolio={!!selectedWatchlist?.isPortfolio}
+                  onDone={(message) => toast({ title: message })}
+                  className="w-full max-w-xl"
+                />
+              )}
             </div>
 
             {/* Ticker Table */}
