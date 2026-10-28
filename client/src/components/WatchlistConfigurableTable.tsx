@@ -34,6 +34,8 @@ export type WatchlistConfigurableSortField =
   | "entryPct"
   | "stop"
   | "stopPct"
+  | "shares"
+  | "entryDate"
   | "vwapPct"
   | "ema620";
 
@@ -57,6 +59,10 @@ function sortFieldForColumn(id: WatchlistColumnId): WatchlistConfigurableSortFie
       return "stop";
     case "stopPct":
       return "stopPct";
+    case "shares":
+      return "shares";
+    case "entryDate":
+      return "entryDate";
     case "vwapPct":
       return "vwapPct";
     case "ema620":
@@ -78,6 +84,8 @@ export interface WatchlistConfigurableTickerRow {
   entryPct: number | null;
   stop: number | null;
   stopPct: number | null;
+  shares?: number | null;
+  entryDate?: string | null;
   vwapPct?: number | null;
   vwapTone?: EntryGaugeTone | null;
   ema620Pct?: number | null;
@@ -115,7 +123,12 @@ export function WatchlistConfigurableTable({
   updateWatchlist: {
     mutate: (args: {
       id: number;
-      data: { targetEntry?: number | null; stopPlan?: number | null };
+      data: {
+        targetEntry?: number | null;
+        stopPlan?: number | null;
+        shares?: number | null;
+        entryDate?: string | null;
+      };
     }) => void;
   };
   onRemoveTicker: (id: number) => void;
@@ -421,6 +434,39 @@ export function WatchlistConfigurableTable({
               </TooltipTrigger>
               {tipContent(ticker)}
             </Tooltip>
+          </td>
+        );
+      case "shares":
+        return (
+          <td key={colId} className={nd(`overflow-hidden ${pad} text-right align-middle`)}>
+            <WatchlistInlinePriceCell
+              value={ticker.shares ?? undefined}
+              allowClear
+              format="count"
+              onSave={(v) => updateWatchlist.mutate({ id: ticker.id, data: { shares: v } })}
+              data-testid={`wl-shares-${variant}-${ticker.id}`}
+            />
+          </td>
+        );
+      case "entryDate":
+        return (
+          <td
+            key={colId}
+            className={nd(`overflow-hidden ${pad} text-right align-middle`)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="date"
+              value={ticker.entryDate ?? ""}
+              onChange={(e) =>
+                updateWatchlist.mutate({ id: ticker.id, data: { entryDate: e.target.value || null } })
+              }
+              className={cn(
+                "h-7 w-full min-w-0 rounded border-0 bg-transparent px-0.5 text-right font-mono text-muted-foreground",
+                compact ? "text-[11px]" : "text-xs"
+              )}
+              data-testid={`wl-entry-date-${variant}-${ticker.id}`}
+            />
           </td>
         );
       case "vwapPct":

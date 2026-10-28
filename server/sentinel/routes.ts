@@ -152,6 +152,8 @@ const watchlistSchema = z.object({
   stopPlan: z.number().positive().nullable().optional(),
   targetPlan: z.number().positive().nullable().optional(),
   alertPrice: z.number().positive().nullable().optional(),
+  shares: z.number().positive().nullable().optional(),
+  entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "entryDate must be YYYY-MM-DD").nullable().optional(),
   thesis: z.string().nullable().optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
 });
@@ -1614,6 +1616,8 @@ export function registerSentinelRoutes(app: Express): void {
         stopPlan: data.stopPlan,
         targetPlan: data.targetPlan,
         alertPrice: data.alertPrice,
+        shares: data.shares,
+        entryDate: data.entryDate,
         thesis: data.thesis,
         priority: data.priority || "medium",
       });

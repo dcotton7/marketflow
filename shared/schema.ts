@@ -432,6 +432,8 @@ export const sentinelWatchlist = pgTable("sentinel_watchlist", {
   stopPlan: doublePrecision("stop_plan"), // planned stop if entered
   targetPlan: doublePrecision("target_plan"), // planned target if entered
   alertPrice: doublePrecision("alert_price"), // price to alert user
+  shares: doublePrecision("shares"), // position size (portfolio lists)
+  entryDate: date("entry_date"), // YYYY-MM-DD the position was opened
   thesis: text("thesis"),
   priority: text("priority").default("medium"), // 'high' | 'medium' | 'low'
   status: text("status").default("watching"), // 'watching' | 'triggered' | 'expired' | 'entered'

@@ -88,6 +88,8 @@ app.use((req, res, next) => {
     const { initializeDatabase } = await import("./db");
     await initializeDatabase();
     logMem("DB connected");
+    const { ensurePositionSchema } = await import("./alerts/ensure-schema");
+    await ensurePositionSchema().catch((err) => console.error("[Startup] position schema ensure failed:", err));
     
     // Strip persisted delisted symbols from in-memory universe before theme cache
     console.log("Initializing delisted ticker registry...");

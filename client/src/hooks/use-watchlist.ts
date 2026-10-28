@@ -24,6 +24,8 @@ export interface SentinelWatchlistItem {
   stopPlan?: number;
   targetPlan?: number;
   alertPrice?: number;
+  shares?: number | null;
+  entryDate?: string | null;
   thesis?: string;
   priority: string;
   status: string;
@@ -454,6 +456,8 @@ export function useUpdateWatchlist() {
         targetEntry?: number | null; 
         stopPlan?: number | null; 
         targetPlan?: number | null;
+        shares?: number | null;
+        entryDate?: string | null;
         thesis?: string;
         priority?: string;
       } 

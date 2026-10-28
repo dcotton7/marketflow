@@ -320,6 +320,8 @@ export function WatchlistPortalWidget({
         entryPct,
         stop,
         stopPct,
+        shares: item.shares ?? null,
+        entryDate: item.entryDate ?? null,
         ...gaugeFieldsFromQuote(quote),
       };
     });
@@ -360,6 +362,12 @@ export function WatchlistPortalWidget({
           break;
         case "stopPct":
           cmp = (a.stopPct || 0) - (b.stopPct || 0);
+          break;
+        case "shares":
+          cmp = (a.shares || 0) - (b.shares || 0);
+          break;
+        case "entryDate":
+          cmp = (a.entryDate || "").localeCompare(b.entryDate || "");
           break;
         case "vwapPct":
           cmp = compareGaugePct(a.vwapPct, b.vwapPct);

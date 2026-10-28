@@ -7,6 +7,8 @@ export interface WatchlistInlinePriceCellProps {
   /** When true, empty input on blur / save clears the value (sends `null`). */
   allowClear?: boolean;
   className?: string;
+  /** "count" (shares): no $ and no fixed decimals. */
+  format?: "price" | "count";
   "data-testid"?: string;
 }
 
@@ -15,17 +17,20 @@ export function WatchlistInlinePriceCell({
   onSave,
   allowClear = false,
   className = "",
+  format = "price",
   "data-testid": testId = "watchlist-inline-price",
 }: WatchlistInlinePriceCellProps) {
+  const editText = (v: number | null | undefined) =>
+    v != null && Number.isFinite(v) ? (format === "count" ? String(v) : v.toFixed(2)) : "";
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(() =>
-    value != null && Number.isFinite(value) ? value.toFixed(2) : ""
+    editText(value)
   );
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isEditing) {
-      setEditValue(value != null && Number.isFinite(value) ? value.toFixed(2) : "");
+      setEditValue(editText(value));
     }
   }, [value, isEditing]);
 
@@ -56,7 +61,7 @@ export function WatchlistInlinePriceCell({
       trySave();
       setIsEditing(false);
     } else if (e.key === "Escape") {
-      setEditValue(value != null && Number.isFinite(value) ? value.toFixed(2) : "");
+      setEditValue(editText(value));
       setIsEditing(false);
     }
   };
@@ -75,7 +80,9 @@ export function WatchlistInlinePriceCell({
   };
 
   const displayPrice =
-    value != null && Number.isFinite(value) && value > 0 ? `$${value.toFixed(2)}` : "Set";
+    value != null && Number.isFinite(value) && value > 0
+      ? format === "count" ? value.toLocaleString("en-US", { maximumFractionDigits: 4 }) : `$${value.toFixed(2)}`
+      : "Set";
 
   return (
     <div
@@ -88,7 +95,7 @@ export function WatchlistInlinePriceCell({
           <input
             ref={inputRef}
             type="number"
-            step="0.01"
+            step={format === "count" ? "any" : "0.01"}
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -112,7 +119,7 @@ export function WatchlistInlinePriceCell({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setEditValue(value != null && Number.isFinite(value) ? value.toFixed(2) : "");
+              setEditValue(editText(value));
               setIsEditing(false);
             }}
             className="p-0.5 text-red-500 hover:text-red-600"
@@ -127,7 +134,7 @@ export function WatchlistInlinePriceCell({
           className="max-w-full min-w-0 truncate text-right font-mono text-sm text-muted-foreground hover:text-foreground hover:underline"
           onClick={(e) => {
             e.stopPropagation();
-            setEditValue(value != null && Number.isFinite(value) ? value.toFixed(2) : "");
+            setEditValue(editText(value));
             setIsEditing(true);
           }}
           data-testid={`${testId}-value`}
