@@ -12,6 +12,7 @@ import { checkPasswordWithLockout, createLoginLockout, createPgLockStore, type L
 import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middleware/dataAccess";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
+import { checkSharesWrite } from "./shares-write";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
 // monitor.ts removed — was a stub that only console.logged active trades
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
@@ -1696,6 +1697,23 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Update watchlist error:", error);
       res.status(500).json({ error: "Failed to update watchlist item" });
+    }
+  });
+
+  app.post("/api/sentinel/watchlist/:id/shares", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id as string);
+      const item = await sentinelModels.getWatchlistItem(id);
+      const check = checkSharesWrite(item, req.session.userId, req.body);
+      if (check.status !== 200) {
+        const { status, ...body } = check;
+        return res.status(status).json(body);
+      }
+      const updated = await sentinelModels.updateWatchlistItem(id, { shares: check.shares });
+      res.json(updated);
+    } catch (error) {
+      console.error("Trim shares error:", error);
+      res.status(500).json({ error: "Failed to update shares" });
     }
   });
 

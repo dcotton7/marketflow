@@ -10,7 +10,8 @@ import { normalizeApiPath } from "./dataAccess";
  *   Render's public edge always adds) or, when the services sit in different regions, over the public address from
  *   one of the ANIMA_GATEWAY_IPS ranges (Anima's outbound IPs). Anything else gets a plain 404.
  * - GET only, and only the read routes in ALLOWED. Nothing that trades, writes, or spends LLM credit on demand:
- *   force/refresh are dropped so cached analyses and briefings are served as they are.
+ *   force/refresh are dropped so cached analyses and briefings are served as they are. The single exception is the
+ *   JSON POST in ALLOWED_POSTS (a trim's new share count), which the route itself limits to lowering a count.
  * - The request carries the owner's id (ANIMA_GATEWAY_USER_ID) for this request only; express-session leaves an
  *   existing req.session alone, so nothing is stored and no cookie is issued. dataAccess still checks the route.
  */
@@ -34,11 +35,17 @@ export const ALLOWED: RegExp[] = [
   /^\/api\/alerts\/feed$/,
   /^\/api\/positions\/snapshot$/,
 ];
+/** The one write: "Trimmed" on a position alert sets the new share count. */
+export const ALLOWED_POSTS: RegExp[] = [/^\/api\/sentinel\/watchlist\/\d+\/shares$/];
 const DROPPED = new Set(["force", "refresh"]);
 
-export function allowedPath(path: string): boolean {
+export function allowedPath(path: string, method = "GET"): boolean {
   const p = normalizeApiPath(path);
-  return ALLOWED.some((rx) => rx.test(p));
+  return (method === "POST" ? ALLOWED_POSTS : ALLOWED).some((rx) => rx.test(p));
+}
+
+function jsonBody(req: Pick<Request, "headers">): boolean {
+  return String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase() === "application/json";
 }
 
 export function internalRequest(req: Pick<Request, "headers">): boolean {
@@ -100,9 +107,11 @@ export function createAnimaGateway(opts: AnimaGatewayOptions): RequestHandler {
     const hidden = () => res.status(404).json({ error: "Not found" });
     const from = internalRequest(req) || publicFromAnima(req, opts.ips || []);
     if (!on || !from || !sameToken(req.headers["x-anima-token"], opts.token!)) return hidden();
-    if (req.method !== "GET") return res.status(405).json({ error: "Read only" });
     const target = "/api/" + req.path.slice(ANIMA_PREFIX.length);
-    if (!allowedPath(target)) return res.status(403).json({ error: "Not available to Anima" });
+    const write = req.method === "POST" && allowedPath(target, "POST");
+    if (req.method !== "GET" && !write) return res.status(405).json({ error: "Read only" });
+    if (write && !jsonBody(req)) return res.status(415).json({ error: "JSON only" });
+    if (!write && !allowedPath(target)) return res.status(403).json({ error: "Not available to Anima" });
     const q = new URLSearchParams(req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "");
     for (const k of [...q.keys()]) if (DROPPED.has(k.toLowerCase())) q.delete(k);
     const done = (cb?: (err?: unknown) => void) => { cb?.(); };
