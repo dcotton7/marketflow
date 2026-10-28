@@ -1,22 +1,27 @@
 import { and, eq, gte } from "drizzle-orm";
 import { positionAlerts, sentinelWatchlist, watchlists } from "@shared/schema";
 import { getDb } from "../db";
+import { getIntradayBars } from "../data-layer/intraday-bars";
 import { getQuote } from "../data-layer/quotes";
 import { fetchEarningsCalendar } from "../finnhub";
 import { getMarketSession } from "../market-condition/universe";
 import { dailyBarsOldestFirst } from "./chart-numbers";
 import { buildSnapshot, materialChange, type IndexInput, type PositionSnapshot } from "./position-snapshot";
-import type { PositionSignal } from "./position-rules";
+import { withLivePrice, type PositionSignal } from "./position-rules";
+import { setupHits, setupParamsFor, todaysBars } from "./setup-rules";
 import { getVix } from "./vix";
 
 /**
  * Builds a snapshot of every open position (items in isPortfolio lists with an entry price) each poll, and writes one
  * position_alerts row for a position when it has a rule signal not sent yet today or its situation materially
- * changed (materialChange). Anima reads the rows through GET /api/alerts/feed; Quinn decides what to say.
+ * changed (materialChange). During market hours it also checks the starred (isDefault) list for entry setups
+ * (setup-rules.ts) and writes one rule "setup" row per item for the setups not sent yet today. Anima reads the rows
+ * through GET /api/alerts/feed; Quinn decides what to say.
  */
 const MARKET_MS = 30_000;
 const AFTER_MS = 2 * 60_000;
 const CLOSED_MS = 5 * 60_000;
+const SETUP_MS = 60_000;
 const SNAPSHOT_FRESH_MS = 2 * 60_000;
 const SIGNAL_ORDER = ["stop:breach", "stop:warn", "level_break", "trail", "wedge_drop", "trim"];
 
@@ -25,6 +30,7 @@ const sent = { day: "", keys: new Set<string>() };
 const earnings = new Map<string, { day: string; date: string | null }>();
 let started = false;
 let running = false;
+let lastSetupRun = 0;
 
 export function etClock(now = new Date()) {
   const parts = Object.fromEntries(
@@ -205,6 +211,75 @@ export async function runPositionAlertCycle(): Promise<number> {
   return written;
 }
 
+async function starredItems() {
+  const db = getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({ item: sentinelWatchlist })
+    .from(sentinelWatchlist)
+    .innerJoin(watchlists, eq(sentinelWatchlist.watchlistId, watchlists.id))
+    .where(and(eq(watchlists.isDefault, true), eq(sentinelWatchlist.status, "watching")));
+  return rows.map((r) => r.item);
+}
+
+/** Entry setups on the starred list; positions are left to the position rules. */
+export async function runSetupAlertCycle(now = new Date()): Promise<number> {
+  const db = getDb();
+  if (!db || getMarketSession() !== "MARKET_HOURS") return 0;
+  const clock = etClock(now);
+  await loadSentToday(clock.day);
+  const held = new Set((await openPositions()).map((i) => `${i.userId}:${i.symbol.toUpperCase()}`));
+  const items = (await starredItems()).filter((i) => !held.has(`${i.userId}:${i.symbol.toUpperCase()}`));
+  let written = 0;
+  for (const item of items) {
+    try {
+      const symbol = item.symbol.toUpperCase();
+      const [daily, quote, intraday] = await Promise.all([
+        dailyBarsOldestFirst(symbol),
+        getQuote(symbol),
+        getIntradayBars(symbol, "5Min", new Date(now.getTime() - 86_400_000), now),
+      ]);
+      const price = quote?.price ?? 0;
+      if (!daily?.length || !(price > 0)) continue;
+      const { sessionFraction } = sessionTiming(clock, daily[daily.length - 1].date.slice(0, 10), true);
+      const hits = setupHits({
+        symbol, daily: withLivePrice(daily, price), bars: todaysBars(intraday, clock.day), price, confirmed: false,
+        sessionFraction,
+      }).filter((h) => !sent.keys.has(`setup:${item.id}:${h.name}:${clock.day}`));
+      if (!hits.length) continue;
+      const keys = hits.map((h) => `setup:${item.id}:${h.name}:${clock.day}`);
+      const inserted = await db
+        .insert(positionAlerts)
+        .values({
+          userId: item.userId,
+          watchlistItemId: item.id,
+          symbol,
+          rule: "setup",
+          level: hits[0].name,
+          message: hits.map((h) => h.message).join(" "),
+          payload: {
+            hard: false,
+            list: "starred",
+            signalKeys: keys,
+            newSignals: hits.map((h) => ({ rule: "setup", level: h.name, message: h.message, detail: h.detail })),
+            setups: hits.map((h) => ({ ...h, params: setupParamsFor(h.name) })),
+            price,
+            day: clock.day,
+            at: now.toISOString(),
+          },
+          dedupeKey: keys.join("+"),
+        })
+        .onConflictDoNothing()
+        .returning({ id: positionAlerts.id });
+      for (const k of keys) sent.keys.add(k);
+      written += inserted.length;
+    } catch (error) {
+      console.warn(`[SetupAlerts] check failed for ${item.symbol}:`, error);
+    }
+  }
+  return written;
+}
+
 function nextDelay(): number {
   const s = getMarketSession();
   return s === "MARKET_HOURS" ? MARKET_MS : s === "AFTER_HOURS" ? AFTER_MS : CLOSED_MS;
@@ -220,6 +295,11 @@ export function startPositionAlertWorker(): void {
       try {
         const n = await runPositionAlertCycle();
         if (n) console.log(`[PositionAlerts] ${n} alert(s) written in ${Date.now() - t0}ms`);
+        if (Date.now() - lastSetupRun >= SETUP_MS) {
+          lastSetupRun = Date.now();
+          const s = await runSetupAlertCycle();
+          if (s) console.log(`[SetupAlerts] ${s} setup alert(s) written`);
+        }
       } catch (error) {
         console.error("[PositionAlerts] cycle failed:", error);
       } finally {
