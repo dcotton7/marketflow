@@ -108,6 +108,7 @@ const PUBLIC_ROUTES: Array<[string, string]> = [
   ["GET", "/api/auth/me"],
   ["GET", "/api/health/memory"],
   ["POST", "/api/alerts/deliveries/twilio-status"],
+  ["POST", "/api/discord-stream/relay"],
   ["GET", "/"],
   ["GET", "/assets/index.js"],
   ["GET", "/tos-helper/ToSLink.cmd"],

@@ -1055,19 +1055,30 @@ export async function registerRoutes(
       ? await import("./bridge/discord-bridge")
       : null;
   const discordUnavailable = { error: "Discord Watch only available on LOCAL Windows" };
+  const discordRelay = await import("./bridge/discord-relay");
+  // On Live the room is whatever the LOCAL capture last relayed; LOCAL reads its own bridge and relays it.
+  const discordRead = () => discordBridge ?? (discordRelay.hasData() ? discordRelay : null);
+  if (discordBridge) discordRelay.startSender(discordBridge);
+
+  app.post("/api/discord-stream/relay", (req, res) => {
+    if (discordBridge) return res.status(404).end();
+    discordRelay.accept(req, res);
+  });
 
   app.get("/api/discord-stream/status", (_req, res) => {
-    if (!discordBridge) return res.status(501).json({ available: false, ...discordUnavailable });
-    res.json(discordBridge.getStatus());
+    const src = discordRead();
+    if (!src) return res.status(501).json({ available: false, ...discordUnavailable });
+    res.json(src.getStatus());
   });
 
   app.get("/api/discord-stream/messages", (req, res) => {
-    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    const src = discordRead();
+    if (!src) return res.status(501).json(discordUnavailable);
     const after = Number(req.query.after ?? 0);
     const limit = Number(req.query.limit ?? 1000);
     res.json({
-      messages: discordBridge.getMessages(Number.isFinite(after) ? after : 0, Number.isFinite(limit) ? limit : 1000),
-      status: discordBridge.getStatus(),
+      messages: src.getMessages(Number.isFinite(after) ? after : 0, Number.isFinite(limit) ? limit : 1000),
+      status: src.getStatus(),
     });
   });
 
@@ -1091,7 +1102,8 @@ export async function registerRoutes(
   };
 
   app.get("/api/discord-stream/analysis", (req, res) => {
-    if (!discordBridge) return res.status(501).json(discordUnavailable);
+    const src = discordRead();
+    if (!src) return res.status(501).json(discordUnavailable);
     const w = Number(req.query.window);
     const traders = String(req.query.traders ?? "")
       .split(",")
@@ -1099,7 +1111,7 @@ export async function registerRoutes(
       .filter(Boolean)
       .slice(0, 10);
     res.json(
-      discordBridge.getAnalysis({
+      src.getAnalysis({
         windowMin: Number.isFinite(w) && w > 0 ? Math.min(w, 24 * 60) : null,
         traders,
         weights: parseDiscordWeights(req.query.weights),
@@ -1108,8 +1120,11 @@ export async function registerRoutes(
   });
 
   app.get("/api/discord-stream/summary", (_req, res) => {
-    if (!discordBridge) return res.status(501).json(discordUnavailable);
-    res.json({ aiAvailable: discordBridge.aiAvailable(), summary: discordBridge.getLastSummary() });
+    if (discordBridge) {
+      return res.json({ aiAvailable: discordBridge.aiAvailable(), summary: discordBridge.getLastSummary() });
+    }
+    if (!discordRelay.hasData()) return res.status(501).json(discordUnavailable);
+    res.json({ aiAvailable: false, relayed: true, summary: discordRelay.getLastSummary() });
   });
 
   // Sends the last hour of captured room messages to OpenAI — only when the owner presses the button.

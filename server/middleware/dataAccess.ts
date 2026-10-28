@@ -25,6 +25,7 @@ const RULES: Rule[] = [
   { level: "owner_admin", method: "POST", pattern: /^\/api\/marketflow\/[^/]+$/ },
   { level: "owner_admin", method: "DELETE", pattern: /^\/api\/marketflow\/[^/]+\/cache$/ },
   // Other people's Discord messages captured on the owner's PC.
+  { level: "public", method: "POST", pattern: /^\/api\/discord-stream\/relay$/ },
   { level: "owner_admin", pattern: /^\/api\/discord-stream(\/|$)/ },
 
   // Operational status on data routers: no vendor values, polled by app chrome.
