@@ -10,7 +10,7 @@ const MAX_HISTORY = 30;
 /**
  * /embed/big-chart — the Market Flow daily + intraday chart pair for Anima's floating chart window.
  * The host sends { source: "anima", type: "set-symbol" } to switch ticker without a reload; prev / next walk
- * the tickers opened this session. Close tells the host to close its window.
+ * the tickers opened this session. Close tells the host to close its window. ?eth=1 starts with extended hours on.
  */
 export default function EmbedBigChartPage() {
   const search = useSearch();
@@ -18,6 +18,7 @@ export default function EmbedBigChartPage() {
     const s = new URLSearchParams(search).get("symbol")?.trim().toUpperCase() ?? "";
     return SYMBOL_RX.test(s) ? s : "";
   }, [search]);
+  const eth = useMemo(() => ["1", "true", "on"].includes(new URLSearchParams(search).get("eth") ?? ""), [search]);
   const [history, setHistory] = useState<string[]>(initial ? [initial] : []);
   const [current, setCurrent] = useState(initial);
 
@@ -57,6 +58,7 @@ export default function EmbedBigChartPage() {
       queueLabel="MarketFlow charts"
       contextLabel="MarketFlow charts"
       closeReturnLabel="Close chart window"
+      initialShowETH={eth}
     />
   );
 }

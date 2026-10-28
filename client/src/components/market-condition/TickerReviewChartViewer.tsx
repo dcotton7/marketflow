@@ -65,6 +65,9 @@ export interface TickerReviewChartViewerProps {
 
   contextLabel?: string;
 
+  /** Start with extended-hours (pre/post-market) candles on. */
+  initialShowETH?: boolean;
+
 }
 
 
@@ -107,13 +110,15 @@ export function TickerReviewChartViewer({
 
   contextLabel,
 
+  initialShowETH = false,
+
 }: TickerReviewChartViewerProps) {
 
   const [index, setIndex] = useState(startIndex);
 
   const [intradayTimeframe, setIntradayTimeframe] = usePersistedIntradayTimeframe();
 
-  const [showETH, setShowETH] = useState(false);
+  const [showETH, setShowETH] = useState(initialShowETH);
 
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
 
