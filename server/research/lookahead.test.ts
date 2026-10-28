@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { atrxFrom50 } from "@shared/chart-indicators";
 import { analyzeSymbol, type AnalyzeContext, type Candidate } from "./analyze-symbol";
 import { STRATEGY_VERSIONS } from "./strategy";
 import { barsFromDrifts, indexFrom, prng, segments } from "./testing";
@@ -43,6 +44,14 @@ for (const seed of [11, 12, 13, 14, 15, 16]) {
   assert.deepEqual(b.stages.slice(0, cut + 1), a.stages.slice(0, cut + 1));
   for (const key of ["sma50", "ema10", "ema20", "atr14", "extSma50", "relVol", "rsLine", "mansfield"] as const)
     assert.deepEqual(b.facts[key].slice(0, cut + 1), a.facts[key].slice(0, cut + 1), key);
+
+  // Don's 7× rule reads the chart's own number.
+  for (let i = 0; i < bars.length; i += 7) {
+    const chart = atrxFrom50(bars[i].close, bars.slice(0, i + 1));
+    const ours = a.facts.extSma50[i];
+    if (chart == null) assert.equal(ours, null, `extSma50 null at ${i}`);
+    else assert.ok(ours != null && Math.abs(ours - chart) < 1e-9, `extSma50 = atrxFrom50 at ${i}`);
+  }
 
   const past = (list: Candidate[]) => list.filter((c) => c.signalIndex <= cut);
   const pa = past(a.candidates);

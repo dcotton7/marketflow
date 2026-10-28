@@ -1,4 +1,4 @@
-import { calculateAtr, calculateEMA, calculateSMA } from "@shared/chart-indicators";
+import { calculateAtr, calculateEMA, calculateSMA, EXTENSION_ATR_PERIOD } from "@shared/chart-indicators";
 import type { DailyBar } from "./types";
 
 /**
@@ -37,7 +37,7 @@ export interface SymbolFacts {
   distFrom52High: Series;
   ret63: Series;
   ret126: Series;
-  /** Don's extension: ((close − SMA) ÷ SMA) ÷ ATR%, ATR% = ATR(14) ÷ close. */
+  /** Don's extension, the chart's ATRx: (close − SMA) ÷ ATR(14); extSma50 equals the shared atrxFrom50. */
   extSma5: Series;
   extSma10: Series;
   extSma20: Series;
@@ -206,11 +206,12 @@ export function computeFacts(bars: DailyBar[], index: IndexCloses): SymbolFacts 
   const avgVol50 = rollingMeanPrior(vols, 50);
   const high52 = rollingMax(bars.map((b) => b.high), 252);
 
+  const atrExt = calculateAtr(bars, EXTENSION_ATR_PERIOD);
   const extSma = (ma: Series): Series =>
     closes.map((c, i) => {
       const m = ma[i];
-      const a = atr14[i];
-      return m != null && a != null && a > 0 && m > 0 ? ((c - m) / m) / (a / c) : null;
+      const a = atrExt[i];
+      return m != null && a != null && a > 0 ? (c - m) / a : null;
     });
   const extEma = (ma: Series): Series =>
     closes.map((c, i) => (ma[i] != null && atr14[i] ? (c - (ma[i] as number)) / (atr14[i] as number) : null));

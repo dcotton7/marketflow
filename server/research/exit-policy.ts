@@ -6,7 +6,7 @@
 export const HARD_RULES = {
   /** Most a trade may lose from entry. A maximum, never the stop itself: wider logical stops skip the trade. */
   maxLossPct: 0.05,
-  /** A trim is due when ((close − SMA50) ÷ SMA50) ÷ ATR% reaches this. */
+  /** A trim is due when the chart's ATRx from 50MA, (close − SMA50) ÷ ATR(14), reaches this. */
   trimExtension: 7,
   /** Trims together never exceed this share of the original position, so a trailing piece is always kept. */
   maxTrimCap: 0.7,

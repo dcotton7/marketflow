@@ -74,7 +74,7 @@ Computed for every symbol and every date, as of that date's close (or that minut
 
 - Moving averages: 5 SMA, 10/20 EMA and SMA, 50/150/200 SMA daily; **10-week and 30-week SMA on weekly closes** (the 30-week MA drives Weinstein stages).
 - MA slopes, including the 30-week MA change over the last 4 weeks.
-- **Extension from an MA in ATR multiples:** `((price − MA) ÷ MA) ÷ ATR%`, with ATR% = ATR(14) ÷ price. Computed for the 50DMA (drives trims) and for the 5, 10 and 20DMA (picks the trailing MA). See section 5.
+- **Extension from an MA in ATR multiples:** `(price − MA) ÷ ATR(14)` on daily bars, the same "ATRx from 50MA" the charts show (`atrxFrom50` in `shared/chart-indicators.ts`). Computed for the 50DMA (drives trims) and for the 5, 10 and 20DMA (picks the trailing MA). See section 5.
 - RSI(14), MACD(12,26,9) and histogram.
 - ATR(14) and ATR as percent of price.
 - Relative volume: today's volume over the 50-day average; weekly volume over the 10-week average; intraday volume vs the same time of day on prior sessions.
@@ -224,7 +224,7 @@ Each setup is a detector like those in section 4, with a logical stop. The 5% ma
 
 **Exhaustion Extension** (2C; trim or sell signal, not an entry)
 - `ext10` at least 3 or `ext20` at least 5, plus a climax sign: a gap up, a day range of at least 2 ATR, or volume at least 2× average after 3 or more up days.
-- Action: trim into strength (section 5). It often fires near Don's 7× rule (`((price − 50 SMA) ÷ 50 SMA) ÷ ATR% ≥ 7`); reports show how often the two coincide and which fires first.
+- Action: trim into strength (section 5). It often fires near Don's 7× rule (`(price − 50 SMA) ÷ ATR(14) ≥ 7`); reports show how often the two coincide and which fires first.
 - No new long entries while the stock is in 2C.
 
 **Wedge Drop** (3A, 3B; exit or avoid signal)
@@ -323,7 +323,7 @@ Reports show how many candidates each setup lost to the 5% cap, since that tells
 One exit policy, with parameters. Each set of parameter values is a separate strategy version, tested and compared like any other.
 
 1. **Initial stop:** as above.
-2. **Trims (trigger fixed):** a trim is due when extension from the 50DMA reaches 7: `((price − 50DMA) ÷ 50DMA) ÷ ATR% ≥ 7`, with ATR% = ATR(14) ÷ price. Confirmed by Don. The trim becomes due at a close where extension is 7 or more, and fills into strength on a later session: the first minute bar that trades above the prior session's high, at that bar's price minus slippage. If no bar does, the trim stays pending while extension stays at 7 or more. A further trim is due each time extension falls back below 7 and reaches it again, up to a cap on the total trimmed (tested: 30%, 50%, 70% of the original position).
+2. **Trims (trigger fixed):** a trim is due when extension from the 50DMA reaches 7: `(price − 50DMA) ÷ ATR(14) ≥ 7`, the chart's "ATRx from 50MA" (`atrxFrom50`). Confirmed by Don. The trim becomes due at a close where extension is 7 or more, and fills into strength on a later session: the first minute bar that trades above the prior session's high, at that bar's price minus slippage. If no bar does, the trim stays pending while extension stays at 7 or more. A further trim is due each time extension falls back below 7 and reaches it again, up to a cap on the total trimmed (tested: 30%, 50%, 70% of the original position).
 3. **Trim size vs VIX (found by the backtest):** trim size is 5% to 25% of the position, set by the VIX bucket at the time of the trim. The mapping is a tested parameter, not a rule.
 
    | VIX bucket | Values tried |
