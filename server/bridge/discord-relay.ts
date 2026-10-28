@@ -90,7 +90,7 @@ export function accept(req: Request, res: Response): void {
     localSummary = body.summary as RoomSummary | null;
   }
   lastPushAt = Date.now();
-  res.json({ ok: true, buffered: received.length, latestSeq: received.at(-1)?.seq ?? 0 });
+  res.json({ ok: true, buffered: received.length, firstSeq: received[0]?.seq ?? 0, latestSeq: received.at(-1)?.seq ?? 0 });
 }
 
 export function getStatus() {
@@ -196,6 +196,9 @@ export function startSender(bridge: Bridge): void {
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       if (fresh.length) sent = fresh[fresh.length - 1].seq;
+      const live = (await r.json().catch(() => ({}))) as { firstSeq?: number };
+      // Live restarted (memory only) and holds less than LOCAL still has: send it all again.
+      if (all.length && Number(live.firstSeq) > all[0].seq) sent = 0;
       lastAt = Date.now();
       if (failing) console.log("[Discord Relay] reaching Live again");
       failing = false;
