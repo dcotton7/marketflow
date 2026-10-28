@@ -12,6 +12,8 @@
 import { getTickerSnapshot, getSPYBenchmark } from "../market-condition/engine/snapshot";
 import { Quote } from "./types";
 
+const SINGLE_QUOTE_CONCURRENCY = 6;
+
 /**
  * Get current quote for a symbol.
  * First checks the snapshot cache (updated every 60-90s during market hours),
@@ -105,16 +107,37 @@ export async function getQuotesBatch(
 
   if (missingSymbols.length > 0) {
     try {
-      const { fetchAlpacaQuote } = await import("../alpaca");
-      
-      for (const symbol of missingSymbols) {
-        const alpacaQuote = await fetchAlpacaQuote(symbol);
-        if (alpacaQuote) {
+      const { fetchAlpacaQuote, fetchAlpacaSnapshotQuotes } = await import("../alpaca");
+
+      const snaps = await fetchAlpacaSnapshotQuotes(missingSymbols);
+      for (const [symbol, s] of snaps) {
+        const change = s.price - s.prevClose;
+        result.set(symbol, {
+          symbol,
+          price: s.price,
+          prevClose: s.prevClose,
+          open: s.open,
+          high: s.high,
+          low: s.low,
+          change,
+          changePct: (change / s.prevClose) * 100,
+          volume: s.volume,
+          vwap: s.vwap,
+          timestamp: new Date(s.timestamp),
+        });
+      }
+
+      // Each single-symbol fallback is two Alpaca calls, so run a few at a time rather than in series.
+      const stillMissing = missingSymbols.filter((s) => !result.has(s));
+      for (let i = 0; i < stillMissing.length; i += SINGLE_QUOTE_CONCURRENCY) {
+        await Promise.all(stillMissing.slice(i, i + SINGLE_QUOTE_CONCURRENCY).map(async (symbol) => {
+          const alpacaQuote = await fetchAlpacaQuote(symbol);
+          if (!alpacaQuote) return;
           const price = alpacaQuote.lastPrice;
           const prevClose = alpacaQuote.prevClose;
           const change = price - prevClose;
           const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-          
+
           result.set(symbol, {
             symbol,
             price,
@@ -128,7 +151,7 @@ export async function getQuotesBatch(
             vwap: price,
             timestamp: new Date(alpacaQuote.timestamp || Date.now()),
           });
-        }
+        }));
       }
     } catch (error) {
       console.error(

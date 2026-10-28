@@ -402,6 +402,60 @@ export async function fetchAlpacaQuote(ticker: string): Promise<{
   }
 }
 
+export interface AlpacaSnapshotQuote {
+  price: number;
+  prevClose: number;
+  open: number;
+  high: number;
+  low: number;
+  volume: number;
+  vwap: number;
+  timestamp: string;
+}
+
+/**
+ * Live quotes for many symbols from GET /v2/stocks/snapshots, 100 symbols per request, chunks in parallel.
+ * Symbols Alpaca returns nothing usable for (no price or no previous daily bar) are left out of the map.
+ */
+export async function fetchAlpacaSnapshotQuotes(symbols: string[]): Promise<Map<string, AlpacaSnapshotQuote>> {
+  const result = new Map<string, AlpacaSnapshotQuote>();
+  const upper = [...new Set(symbols.map((s) => s.toUpperCase()))];
+  const chunks: string[][] = [];
+  for (let i = 0; i < upper.length; i += 100) chunks.push(upper.slice(i, i + 100));
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const data = await alpacaFetchWithRetry(
+          `${ALPACA_DATA_URL}/v2/stocks/snapshots?symbols=${encodeURIComponent(chunk.join(","))}&feed=sip`
+        );
+        const bySymbol = data?.snapshots ?? data;
+        if (!bySymbol || typeof bySymbol !== "object") return;
+        for (const [sym, snap] of Object.entries(bySymbol as Record<string, any>)) {
+          const daily = snap?.dailyBar;
+          const minute = snap?.minuteBar;
+          const prevClose = snap?.prevDailyBar?.c || 0;
+          const price = snap?.latestTrade?.p || daily?.c || 0;
+          if (!(price > 0) || !(prevClose > 0)) continue;
+          result.set(sym.toUpperCase(), {
+            price,
+            prevClose,
+            open: daily?.o || minute?.o || price,
+            high: daily?.h || minute?.h || price,
+            low: daily?.l || minute?.l || price,
+            volume: daily?.v || minute?.v || 0,
+            vwap: daily?.vw || minute?.vw || price,
+            timestamp: snap?.latestTrade?.t || snap?.latestQuote?.t || new Date().toISOString(),
+          });
+        }
+      } catch (error: any) {
+        console.error(`[Alpaca] Snapshot quotes failed for ${chunk.length} symbols: ${error.message}`);
+      }
+    })
+  );
+  return result;
+}
+
 /**
  * Get intraday bars with automatic timeframe mapping
  */

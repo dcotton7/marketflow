@@ -118,7 +118,10 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
   });
 
   const { user } = useSentinelAuth();
-  const streamEnabled = mode !== "off" && user?.isOwner === true;
+  // Anima frames several /embed pages at once; only the scanner embed shows discoveries.
+  const path = window.location.pathname;
+  const streamEnabled =
+    mode !== "off" && user?.isOwner === true && (!path.startsWith("/embed/") || path.startsWith("/embed/scanner"));
 
   const [panelOpen, setPanelOpenState] = useState(false);
   const [discoveries, setDiscoveries] = useState<DiscoveryCard[]>([]);

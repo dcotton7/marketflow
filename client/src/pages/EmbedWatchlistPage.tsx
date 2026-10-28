@@ -45,7 +45,7 @@ export default function EmbedWatchlistPage() {
   const { data: quotes, dataUpdatedAt } = useQuery<Quote[]>({
     queryKey: ["embedWatchlistQuotes", symbols.join(",")],
     queryFn: async () => {
-      const res = await fetch(watchlistQuotesUrl(symbols, { extended: true }), { credentials: "include" });
+      const res = await fetch(watchlistQuotesUrl(symbols, {}), { credentials: "include" });
       if (!res.ok) return [];
       const raw = (await res.json()) as unknown;
       if (!Array.isArray(raw)) return [];
