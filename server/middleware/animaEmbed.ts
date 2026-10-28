@@ -9,7 +9,8 @@ import type { AnimaGatewayOptions } from "./animaGateway";
  * - GET /embed/...?anima_ticket=<exp>.<hmac> with a valid ticket sets EMBED_COOKIE, then redirects without the ticket.
  *   The cookie is Partitioned (CHIPS): the browser only sends it while MarketFlow is framed by that same site.
  * - A GET/HEAD request with a valid EMBED_COOKIE and no normal login runs as the owner (ANIMA_GATEWAY_USER_ID), like
- *   the gateway: nothing stored server-side. Anything else (POST, PUT, ...) is never signed in by it.
+ *   the gateway: nothing stored server-side. Anything else (POST, PUT, ...) is never signed in by it, except the
+ *   JSON POSTs in EMBED_POSTS (they change no stored data; JSON forces a CORS preflight from any other site).
  *
  * Tickets and cookies are HMACs under a key derived from ANIMA_GATEWAY_TOKEN, so only Anima's server can make them.
  */
@@ -17,6 +18,10 @@ export const EMBED_COOKIE = "mf_anima_embed";
 export const COOKIE_SECONDS = 12 * 60 * 60;
 const TICKET_MAX_SECONDS = 600;
 const SESSION_COOKIE = "connect.sid";
+const EMBED_POSTS = /^\/api\/discord-stream\/summary$/;
+
+const embedPost = (req: Request) =>
+  req.method === "POST" && EMBED_POSTS.test(req.path) && /^application\/json\b/i.test(req.get("content-type") || "");
 
 const embedKey = (token: string) => createHash("sha256").update(`anima-embed\n${token}`).digest();
 const sign = (token: string, what: string) => createHmac("sha256", embedKey(token)).update(what).digest("hex");
@@ -49,7 +54,7 @@ export function createAnimaEmbed(
 ): RequestHandler {
   const on = !!opts.token && opts.token.length >= 32 && !!opts.userId;
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!on || (req.method !== "GET" && req.method !== "HEAD")) return next();
+    if (!on || (req.method !== "GET" && req.method !== "HEAD" && !embedPost(req))) return next();
     const token = opts.token!;
     const t = now();
     const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "";

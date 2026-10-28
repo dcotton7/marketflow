@@ -9,14 +9,15 @@
  * - Receiver (Live): keeps what it is sent in memory only, capped like the bridge. Nothing goes to disk or a database,
  *   so a restart starts empty until the next push. The token is compared in constant time; a wrong or missing one
  *   gets a plain 404.
- * Control (start, stop, clear, a new AI summary) stays LOCAL.
+ *   A new AI summary runs on Live over what it holds; the newer of that and the LOCAL one is the summary.
+ * Control (start, stop, clear) stays LOCAL.
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 import { analyze, type RoomAnalysis } from "./discord-analysis";
 import type { DiscordMessage } from "./discord-bridge";
-import type { RoomSummary } from "./discord-summary";
+import { aiAvailable, summarizeRoom, type RoomSummary } from "./discord-summary";
 
 const MAX_MESSAGES = 5000;
 const BATCH = 400;
@@ -121,9 +122,32 @@ export function getAnalysis(opts: { windowMin: number | null; traders?: string[]
   });
 }
 
+let ownSummary: RoomSummary | null = null;
+let summaryInFlight: Promise<RoomSummary> | null = null;
+
 export function getLastSummary(): RoomSummary | null {
-  return localSummary;
+  if (!ownSummary || !localSummary) return ownSummary ?? localSummary;
+  return Date.parse(ownSummary.generatedAt) >= Date.parse(localSummary.generatedAt) ? ownSummary : localSummary;
 }
+
+export function summarize(opts: { minutes: number; traders?: string[]; weights?: Record<string, number> }): Promise<RoomSummary> {
+  if (summaryInFlight) return summaryInFlight;
+  summaryInFlight = summarizeRoom(received, {
+    minutes: opts.minutes,
+    traders: opts.traders?.length ? opts.traders : DEFAULT_TRADERS,
+    weights: opts.weights ?? {},
+  })
+    .then((s) => {
+      ownSummary = s;
+      return s;
+    })
+    .finally(() => {
+      summaryInFlight = null;
+    });
+  return summaryInFlight;
+}
+
+export { aiAvailable };
 
 // ---------------------------------------------------------------- sender (LOCAL)
 

@@ -1124,16 +1124,17 @@ export async function registerRoutes(
       return res.json({ aiAvailable: discordBridge.aiAvailable(), summary: discordBridge.getLastSummary() });
     }
     if (!discordRelay.hasData()) return res.status(501).json(discordUnavailable);
-    res.json({ aiAvailable: false, relayed: true, summary: discordRelay.getLastSummary() });
+    res.json({ aiAvailable: discordRelay.aiAvailable(), relayed: true, summary: discordRelay.getLastSummary() });
   });
 
   // Sends the last hour of captured room messages to OpenAI — only when the owner presses the button.
   app.post("/api/discord-stream/summary", async (req, res) => {
-    if (!discordBridge) return res.status(501).json(discordUnavailable);
-    if (!discordBridge.aiAvailable()) return res.status(503).json({ error: "OpenAI key not configured" });
+    const src = discordRead();
+    if (!src) return res.status(501).json(discordUnavailable);
+    if (!src.aiAvailable()) return res.status(503).json({ error: "OpenAI key not configured" });
     const minutes = Math.min(240, Math.max(5, Number(req.body?.minutes) || 60));
     try {
-      const summary = await discordBridge.summarize({ minutes, weights: parseDiscordWeights(req.body?.weights) });
+      const summary = await src.summarize({ minutes, weights: parseDiscordWeights(req.body?.weights) });
       res.json({ aiAvailable: true, summary });
     } catch (err) {
       console.error("[Discord Watch] summary failed:", err);

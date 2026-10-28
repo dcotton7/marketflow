@@ -58,6 +58,10 @@ await withApp(TOKEN, async (call) => {
 
   assert.equal(JSON.parse((await call("GET", "/api/stocks/AAPL/quote", { cookie })).body).uid, 2, "reads as the owner");
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/evaluate", { cookie })).body).uid, null, "never writes");
+  const json = { cookie, "content-type": "application/json" };
+  assert.equal(JSON.parse((await call("POST", "/api/discord-stream/summary", json)).body).uid, 2, "the room summary button");
+  assert.equal(JSON.parse((await call("POST", "/api/discord-stream/summary", { cookie })).body).uid, null, "JSON only");
+  assert.equal(JSON.parse((await call("POST", "/api/discord-stream/clear", json)).body).uid, null, "only that one");
   assert.equal(JSON.parse((await call("GET", "/api/x", { cookie: `${EMBED_COOKIE}=${NOW + 60}.${"a".repeat(64)}` })).body).uid, null, "forged cookie");
   assert.equal(JSON.parse((await call("GET", "/api/x", { cookie: `connect.sid=s; ${cookie}` })).body).uid, null, "a real login wins");
   assert.equal(JSON.parse((await call("GET", "/api/x")).body).uid, null);
