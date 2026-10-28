@@ -8,6 +8,20 @@ import { getDb } from "../db";
 const STATEMENTS = [
   sql`alter table sentinel_watchlist add column if not exists shares double precision`,
   sql`alter table sentinel_watchlist add column if not exists entry_date date`,
+  sql`create table if not exists position_alerts (
+    id serial primary key,
+    user_id integer not null,
+    watchlist_item_id integer,
+    symbol text not null,
+    rule text not null,
+    level text not null,
+    message text not null,
+    payload jsonb,
+    dedupe_key text not null,
+    created_at timestamp default now(),
+    constraint position_alerts_dedupe_key_unique unique (dedupe_key)
+  )`,
+  sql`create index if not exists position_alerts_user_id on position_alerts (user_id, id)`,
 ];
 
 export async function ensurePositionSchema(): Promise<boolean> {

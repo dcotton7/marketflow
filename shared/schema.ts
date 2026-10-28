@@ -1437,6 +1437,21 @@ export const alertEvents = pgTable("alert_events", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Position and starred-watchlist setup alerts (server/alerts/position-worker.ts); read by Anima via /api/alerts/feed.
+export const positionAlerts = pgTable("position_alerts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  watchlistItemId: integer("watchlist_item_id"),
+  symbol: text("symbol").notNull(),
+  rule: text("rule").notNull(), // stop | trim | trail | wedge_drop | setup:<name>
+  level: text("level").notNull(),
+  message: text("message").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>(),
+  dedupeKey: text("dedupe_key").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export type PositionAlertRow = typeof positionAlerts.$inferSelect;
+
 export const alertDeliveries = pgTable("alert_deliveries", {
   id: serial("id").primaryKey(),
   alertId: integer("alert_id").notNull(),

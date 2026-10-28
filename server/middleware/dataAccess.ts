@@ -39,6 +39,9 @@ const RULES: Rule[] = [
   { level: "owner", pattern: /^\/api\/bigidea\/(scan|scan-tune|marketflow)(\/|$)/ },
   { level: "owner", pattern: /^\/api\/bigidea\/custom-indicators\/test$/ },
   { level: "owner", pattern: /^\/api\/pattern-learning\/scan$/ },
+  { level: "auth", method: "GET", pattern: /^\/api\/alerts\/feed$/ },
+  // Built from vendor bars and quotes.
+  { level: "owner", pattern: /^\/api\/positions\/snapshot$/ },
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/preview$/ },
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/[^/]+\/evaluate$/ },
 ];

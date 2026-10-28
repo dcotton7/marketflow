@@ -66,6 +66,7 @@ const OWNER_ROUTES: Array<[string, string]> = [
   ["POST", "/api/pattern-learning/scan"],
   ["POST", "/api/alerts/preview"],
   ["POST", "/api/alerts/7/evaluate"],
+  ["GET", "/api/positions/snapshot"],
 ];
 
 const OWNER_ADMIN_ROUTES: Array<[string, string]> = [
@@ -89,6 +90,7 @@ const AUTH_ROUTES: Array<[string, string]> = [
   ["GET", "/api/sentinel/dashboard"],
   ["GET", "/api/sentinel/settings/system"],
   ["GET", "/api/alerts"],
+  ["GET", "/api/alerts/feed?after=3"],
   ["GET", "/api/bigidea/thoughts"],
   ["POST", "/api/bigidea/ai/create-thought"],
   ["POST", "/api/pattern-learning/chat"],

@@ -31,6 +31,8 @@ export const ALLOWED: RegExp[] = [
   /^\/api\/bigidea\/(ideas|ideas\/\d+|thoughts|setups|setups\/\d+)$/,
   /^\/api\/discord-stream\/(summary|analysis)$/,
   /^\/api\/sentinel\/(dashboard|trade-journal|trades\/closed|trade\/\d+|watchlists|watchlist)$/,
+  /^\/api\/alerts\/feed$/,
+  /^\/api\/positions\/snapshot$/,
 ];
 const DROPPED = new Set(["force", "refresh"]);
 

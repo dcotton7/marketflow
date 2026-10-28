@@ -11,11 +11,13 @@ const USERS: Record<number, AccessUser> = { 1: { id: 1, isAdmin: true, isActive:
 
 for (const p of ["/api/stocks/AAPL/quote", "/api/stocks/BRK.B/history", "/api/market-condition/leaders",
   "/api/market-condition/themes/ai-infra/members", "/api/bigidea/ideas/12", "/api/discord-stream/summary",
-  "/api/sentinel/trade-journal", "/api/sentinel/trades/closed", "/api/marketflow/NVDA/cached", "/API/News/Top/"]) {
+  "/api/sentinel/trade-journal", "/api/sentinel/trades/closed", "/api/marketflow/NVDA/cached", "/API/News/Top/",
+  "/api/alerts/feed", "/api/positions/snapshot"]) {
   assert.ok(allowedPath(p), `allowed ${p}`);
 }
 for (const p of ["/api/auth/me", "/api/sentinel/evaluate", "/api/marketflow/NVDA", "/api/discord-stream/messages",
-  "/api/market-leaders/book", "/api/alerts", "/api/sentinel/trade/12/labels", "/api/uploads", "/api/stocks/AAPL/quote/x"]) {
+  "/api/market-leaders/book", "/api/alerts", "/api/sentinel/trade/12/labels", "/api/uploads", "/api/stocks/AAPL/quote/x",
+  "/api/alerts/events", "/api/alerts/12", "/api/alerts/12/deliveries", "/api/alerts/feed/x", "/api/positions"]) {
   assert.ok(!allowedPath(p), `refused ${p}`);
 }
 assert.ok(internalRequest({ headers: { host: "marketflow-hrxh:10000" } } as any));
@@ -40,6 +42,8 @@ async function withApp(opts: { token?: string; userId?: number; ips?: string[] }
   app.get("/api/stocks/:t/quote", (req: any, res) => res.json({ t: req.params.t, uid: req.session.userId, q: req.query }));
   app.get("/api/market-condition/briefing", (req, res) => res.json({ q: req.query }));
   app.post("/api/sentinel/evaluate", (_req, res) => res.json({ ran: true }));
+  app.get("/api/alerts/feed", (req: any, res) => res.json({ uid: req.session.userId, q: req.query }));
+  app.get("/api/alerts/events", (_req, res) => res.json({ leaked: true }));
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   const server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
@@ -79,6 +83,10 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
   assert.equal((await call("GET", "/api/anima/auth/me", inside)).status, 403, "not on the list");
   assert.equal((await call("GET", "/api/anima/../sentinel/evaluate", inside)).status, 403, "no climbing out");
   assert.equal((await call("GET", "/api/stocks/AAPL/quote", inside)).status, 401, "the token is not a login anywhere else");
+  const feed = await call("GET", "/api/anima/alerts/feed?after=41&events_after=7", inside);
+  assert.deepEqual(feed.body, { uid: 1, q: { after: "41", events_after: "7" } }, "the alert feed, read after the cursor");
+  assert.equal((await call("GET", "/api/anima/alerts/events", inside)).status, 403, "other alert routes stay closed");
+  assert.equal((await call("POST", "/api/anima/alerts/feed", inside)).status, 405, "the feed is read only");
 });
 
 const edge = { host: "marketflow-hrxh.onrender.com", "x-forwarded-for": "74.220.49.7", "x-anima-token": TOKEN };

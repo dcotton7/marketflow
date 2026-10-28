@@ -1,7 +1,9 @@
 import type { Express, Request, Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { createAlertDefinitionSchema, updateAlertDefinitionSchema } from "@shared/alerts";
-import { alertDeliveries, alertEvents, alertSymbolStates, userAlerts } from "@shared/schema";
+import { alertDeliveries, alertEvents, alertSymbolStates, positionAlerts, userAlerts } from "@shared/schema";
+import { parseFeedCursor } from "./feed-cursor";
+import { snapshotsForUser } from "./position-worker";
 import { db } from "../db";
 import {
   clearAlertSequenceState,
@@ -127,6 +129,54 @@ export function registerAlertRoutes(app: Express): void {
     } catch (error) {
       console.error("[Alerts] event list failed:", error);
       res.status(500).json({ error: "Failed to load alert events" });
+    }
+  });
+
+  // Anima's poll (read-only through the gateway). Without ?after it answers only the cursor, so a first poll never
+  // replays old alerts.
+  app.get("/api/alerts/feed", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!db) return res.status(500).json({ error: "Database not available" });
+      const userId = req.session.userId!;
+      const cursor = parseFeedCursor(req.query as Record<string, unknown>);
+      if (cursor.after == null || cursor.eventsAfter == null) {
+        const [lastAlert] = await db.select({ id: positionAlerts.id }).from(positionAlerts)
+          .where(eq(positionAlerts.userId, userId)).orderBy(desc(positionAlerts.id)).limit(1);
+        const [lastEvent] = await db.select({ id: alertEvents.id }).from(alertEvents)
+          .where(eq(alertEvents.userId, userId)).orderBy(desc(alertEvents.id)).limit(1);
+        return res.json({
+          cursor: { after: cursor.after ?? lastAlert?.id ?? 0, events_after: cursor.eventsAfter ?? lastEvent?.id ?? 0 },
+          alerts: [],
+          events: [],
+        });
+      }
+      const alerts = await db.select().from(positionAlerts)
+        .where(and(eq(positionAlerts.userId, userId), gt(positionAlerts.id, cursor.after)))
+        .orderBy(asc(positionAlerts.id)).limit(cursor.limit);
+      const events = await db.select().from(alertEvents)
+        .where(and(eq(alertEvents.userId, userId), gt(alertEvents.id, cursor.eventsAfter)))
+        .orderBy(asc(alertEvents.id)).limit(cursor.limit);
+      res.json({
+        cursor: {
+          after: alerts.length ? alerts[alerts.length - 1].id : cursor.after,
+          events_after: events.length ? events[events.length - 1].id : cursor.eventsAfter,
+        },
+        alerts,
+        events,
+      });
+    } catch (error) {
+      console.error("[Alerts] feed failed:", error);
+      res.status(500).json({ error: "Failed to load the alert feed" });
+    }
+  });
+
+  app.get("/api/positions/snapshot", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const positions = await snapshotsForUser(req.session.userId!);
+      res.json({ at: new Date().toISOString(), positions });
+    } catch (error) {
+      console.error("[Alerts] position snapshot failed:", error);
+      res.status(500).json({ error: "Failed to build position snapshots" });
     }
   });
 

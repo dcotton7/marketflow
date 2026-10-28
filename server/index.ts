@@ -134,6 +134,8 @@ app.use((req, res, next) => {
 
     // Alert evaluation temporarily paused — re-enable by restoring startAlertPollingWorker().
     console.log("[Startup Stagger] Alert poller PAUSED (not started)");
+    const { startPositionAlertWorker } = await import("./alerts/position-worker");
+    startPositionAlertWorker();
 
     app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
