@@ -36,6 +36,13 @@ import {
 } from "@/lib/sentinel-ma-settings-api";
 import { isTradePlanEnabled } from "@/lib/trade-plan-feature";
 import { formatAtrx50maLine } from "@/lib/live-theme-charts";
+import {
+  calculateEMA,
+  calculateSMA,
+  calculateSessionVwap,
+  chartInfoSnapshot,
+  sessionDateKeyEt,
+} from "@shared/chart-indicators";
 // Cup and Handle detection removed - thumbnails just show candlesticks
 
 export type StartHereInterval = "1d" | "5m" | "15m" | "30m";
@@ -192,41 +199,6 @@ function MiniChartCandleShape(props: {
   );
 }
 
-function calculateSMA(data: { close: number }[], period: number): (number | null)[] {
-  const sma: (number | null)[] = [];
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      sma.push(null);
-    } else {
-      const sum = data.slice(i - period + 1, i + 1).reduce((acc, d) => acc + d.close, 0);
-      sma.push(sum / period);
-    }
-  }
-  return sma;
-}
-
-function calculateAtr(data: { high: number; low: number; close: number }[], period: number): (number | null)[] {
-  const out: (number | null)[] = [];
-  let trSum = 0;
-  const trWindow: number[] = [];
-  for (let i = 0; i < data.length; i++) {
-    const cur = data[i];
-    const prevClose = i > 0 ? data[i - 1].close : cur.close;
-    const tr = Math.max(
-      cur.high - cur.low,
-      Math.abs(cur.high - prevClose),
-      Math.abs(cur.low - prevClose)
-    );
-    trWindow.push(tr);
-    trSum += tr;
-    if (trWindow.length > period) {
-      trSum -= trWindow.shift() ?? 0;
-    }
-    out.push(trWindow.length === period ? trSum / period : null);
-  }
-  return out;
-}
-
 function MiniChartInfoBox({ info }: { info: MiniChartInfoSnapshot | null }) {
   if (!info) return null;
   const line = formatAtrx50maLine(info.adrsFrom50);
@@ -244,43 +216,7 @@ function MiniChartInfoBox({ info }: { info: MiniChartInfoSnapshot | null }) {
   );
 }
 
-function sessionDateKeyEt(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
-
 type VwapBar = { date: string; open: number; high: number; low: number; close: number; volume: number };
-
-/** Cumulative session VWAP (typical price × volume); resets each ET session. */
-function calculateSessionVwap(bars: VwapBar[]): (number | null)[] {
-  let cumPv = 0;
-  let cumVol = 0;
-  let sessionKey: string | null = null;
-  const out: (number | null)[] = [];
-  for (const bar of bars) {
-    const key = sessionDateKeyEt(bar.date);
-    if (key !== sessionKey) {
-      sessionKey = key;
-      cumPv = 0;
-      cumVol = 0;
-    }
-    const h = Number(bar.high);
-    const l = Number(bar.low);
-    const c = Number(bar.close);
-    const tp = (h + l + c) / 3;
-    const v = Math.max(Number(bar.volume) || 0, 0);
-    cumPv += tp * v;
-    cumVol += v;
-    out.push(cumVol > 0 ? cumPv / cumVol : null);
-  }
-  return out;
-}
 
 /** % change for the most recent session in the slice (last close vs that session’s first open). */
 function sessionChangePct(bars: VwapBar[]): number {
@@ -318,28 +254,6 @@ function computeStartHereQuoteSummary(
     : 0;
   const lastPxMa = Number.isFinite(lastCandleMa.close) ? lastCandleMa.close : null;
   return { changePct: dailyChangeMa, lastPrice: lastPxMa };
-}
-
-function calculateEMA(data: { close: number }[], period: number): (number | null)[] {
-  const ema: (number | null)[] = [];
-  const multiplier = 2 / (period + 1);
-  
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      ema.push(null);
-    } else if (i === period - 1) {
-      const sum = data.slice(0, period).reduce((acc, d) => acc + d.close, 0);
-      ema.push(sum / period);
-    } else {
-      const prevEma = ema[i - 1];
-      if (prevEma !== null) {
-        ema.push((data[i].close - prevEma) * multiplier + prevEma);
-      } else {
-        ema.push(null);
-      }
-    }
-  }
-  return ema;
 }
 
 interface ConsolidationChannel {
@@ -765,20 +679,7 @@ export function MiniChart({
   const infoSnapshot = useMemo<MiniChartInfoSnapshot | null>(() => {
     if (!history?.length || !dailyHistory?.length) return null;
     const current = history[history.length - 1]?.close;
-    if (!Number.isFinite(current) || current <= 0) return null;
-    const sma200 = calculateSMA(dailyHistory, 200);
-    const sma50 = calculateSMA(dailyHistory, 50);
-    const atr14 = calculateAtr(dailyHistory, 14);
-    const i = dailyHistory.length - 1;
-    const s200 = sma200[i];
-    const s50 = sma50[i];
-    const atr = atr14[i];
-    return {
-      pctFromEntry:
-        boundedEntryPrice != null ? ((current - boundedEntryPrice) / boundedEntryPrice) * 100 : null,
-      pctFrom200Dma: s200 != null && s200 > 0 ? ((current - s200) / s200) * 100 : null,
-      adrsFrom50: s50 != null && atr != null && atr > 0 ? (current - s50) / atr : null,
-    };
+    return chartInfoSnapshot(current, dailyHistory, boundedEntryPrice);
   }, [history, dailyHistory, boundedEntryPrice]);
 
   const etfStructure = useMemo<MiniChartEtfStructure | null>(() => {

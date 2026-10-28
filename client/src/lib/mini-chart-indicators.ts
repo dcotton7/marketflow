@@ -1,6 +1,7 @@
 import { BARS_PER_DAY } from "@shared/indicatorTemplates";
 import { calcBars, type ChartMaDataLimits, isMaRowFeasibleForTimeframe, getMaxBarsForTimeframe } from "@/lib/chart-ma-feasibility";
 import type { StartHereInterval } from "@/components/MiniChart";
+import { calculateEMA, calculateSMA, calculateSessionVwap, sessionDateKeyEt } from "@shared/chart-indicators";
 
 export interface MiniMaSettingRow {
   rowId: string;
@@ -37,78 +38,7 @@ export interface MiniMaOverlay {
   sessionAware?: boolean;
 }
 
-function sessionDateKeyEt(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
-
-function calculateSMA(data: { close: number }[], period: number): (number | null)[] {
-  const sma: (number | null)[] = [];
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      sma.push(null);
-    } else {
-      const sum = data.slice(i - period + 1, i + 1).reduce((acc, d) => acc + d.close, 0);
-      sma.push(sum / period);
-    }
-  }
-  return sma;
-}
-
-function calculateEMA(data: { close: number }[], period: number): (number | null)[] {
-  const ema: (number | null)[] = [];
-  const k = 2 / (period + 1);
-  let prev: number | null = null;
-  for (let i = 0; i < data.length; i++) {
-    if (prev === null) {
-      if (i < period - 1) {
-        ema.push(null);
-        continue;
-      }
-      const sum = data.slice(i - period + 1, i + 1).reduce((acc, d) => acc + d.close, 0);
-      prev = sum / period;
-      ema.push(prev);
-    } else {
-      prev = data[i].close * k + prev * (1 - k);
-      ema.push(prev);
-    }
-  }
-  return ema;
-}
-
-export function calculateSessionVwap(bars: MiniChartBar[]): (number | null)[] {
-  let cumPv = 0;
-  let cumVol = 0;
-  let sessionKey: string | null = null;
-  const out: (number | null)[] = [];
-  for (const bar of bars) {
-    const key = sessionDateKeyEt(bar.date);
-    if (key !== sessionKey) {
-      sessionKey = key;
-      cumPv = 0;
-      cumVol = 0;
-    }
-    const h = Number(bar.high);
-    const l = Number(bar.low);
-    const c = Number(bar.close);
-    const v = Number(bar.volume);
-    if (![h, l, c, v].every(Number.isFinite) || v <= 0) {
-      out.push(cumVol > 0 ? cumPv / cumVol : null);
-      continue;
-    }
-    const typical = (h + l + c) / 3;
-    cumPv += typical * v;
-    cumVol += v;
-    out.push(cumVol > 0 ? cumPv / cumVol : null);
-  }
-  return out;
-}
+export { calculateSessionVwap };
 
 export function startHereIntervalToMaTimeframe(interval: StartHereInterval): string {
   if (interval === "1d") return "daily";
