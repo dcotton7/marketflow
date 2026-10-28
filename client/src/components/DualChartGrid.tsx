@@ -522,7 +522,8 @@ export function DualChartGrid({
       lastTosSymbolRef.current = null;
       return;
     }
-    if (!symbol || !tosAvailable || !tosCalibrated || !tosNavigate) return;
+    // Helper down: still try, so the click can start it (TosSyncContext autostart).
+    if (!symbol || (tosAvailable && !tosCalibrated) || !tosNavigate) return;
     const clean = symbol.trim().toUpperCase();
     if (lastTosSymbolRef.current === clean) return;
     lastTosSymbolRef.current = clean;

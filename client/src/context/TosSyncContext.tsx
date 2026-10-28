@@ -13,7 +13,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchTosStatus, pokeFidelityLead, tosErrorMessage, tosNavigate as tosNavigateApi } from "@/lib/tos-bridge-client";
+import {
+  fetchTosStatus,
+  isWindowsClient,
+  pokeFidelityLead,
+  startTosLinkHelper,
+  tosErrorMessage,
+  tosNavigate as tosNavigateApi,
+} from "@/lib/tos-bridge-client";
 import { useToast } from "@/hooks/use-toast";
 
 const STORAGE_KEY = "tosSyncEnabled";
@@ -64,6 +71,24 @@ function writeStoredToggle(enabled: boolean): void {
 
 /** Latest-wins queue so arrowing through charts does not type every ticker into ToS. */
 const SAME_SYMBOL_COOLDOWN_MS = 4000;
+const AUTOSTART_EVERY_MS = 60_000;
+const AUTOSTART_WAIT_MS = 12_000;
+let lastAutostart = 0;
+
+/** The helper is down: ask Windows to start it (needs the click's user gesture), then wait for it to answer. */
+async function autostartHelper(): Promise<boolean> {
+  const active = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive;
+  if (!isWindowsClient() || active === false || Date.now() - lastAutostart < AUTOSTART_EVERY_MS) return false;
+  lastAutostart = Date.now();
+  startTosLinkHelper();
+  const until = Date.now() + AUTOSTART_WAIT_MS;
+  while (Date.now() < until) {
+    await new Promise((r) => window.setTimeout(r, 1000));
+    const s = await fetchTosStatus();
+    if (s.available && s.source === "agent") return true;
+  }
+  return false;
+}
 const navigateQueue: {
   inflight: boolean;
   inflightSymbol: string | null;
@@ -131,7 +156,12 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
         navigateQueue.pending = null;
         navigateQueue.inflightSymbol = next;
         try {
-          await tosNavigateApi(next);
+          try {
+            await tosNavigateApi(next);
+          } catch (first) {
+            if ((await fetchTosStatus()).available || !(await autostartHelper())) throw first;
+            await tosNavigateApi(next);
+          }
         } catch (err) {
           console.warn("[ToSLink]", err);
           toastRef.current({
