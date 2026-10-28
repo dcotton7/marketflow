@@ -8,3 +8,7 @@ vite.config.ts.*
 *.tar.gz
 server/scripts/.user-disable-backup-*.json
 server/bridge/DISCORD_WATCH_RESUME.json
+
+# strategy research (local only, Don's PC)
+.research-cache/
+research-results/
