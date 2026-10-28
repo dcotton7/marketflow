@@ -1,6 +1,6 @@
 # Strategy research loop — design spec
 
-Status: **DESIGN ONLY. No code yet.** Don approved the shape of this design and answered the first round of questions (2026-10-28). The draft setup definitions, the remaining confirmations in sections 3 to 5, and the open questions in section 15 need his answers before phase 1 starts.
+Status: **DESIGN ONLY. No code yet.** Don approved the shape of this design and answered two rounds of questions (2026-10-28). The draft filters in section 2, the draft setup definitions in section 3, and the open questions in section 15 need his answers before phase 1 starts.
 Written: 2026-10-28. Owner: Don.
 
 ## Goal
@@ -32,7 +32,7 @@ What this builds on, and what is missing.
 | LLM calls | OpenAI (`gpt-5.1`, `gpt-4o`, `gpt-4.1-mini`), temperatures 0 to 0.7 | `server/market-condition/analysis/synthesis/`, `server/scanner/routes.ts`, `server/bridge/discord-summary.ts` |
 | LLM cache | One row per symbol, 3 market days, overwritten on rerun | `marketflow_analysis_cache`, `server/market-condition/analysis/cacheService.ts` |
 | Earnings and news | Finnhub earnings calendar (today forward 90 days), past surprises, company news | `server/finnhub.ts`, `analysis/modules/earnings.ts`, `analysis/modules/news.ts`, `scanner/lenses/earnings-proximity.ts` |
-| Universe | Today's S&P 500, Russell 2000, and a 2020 Russell 3000 list, plus theme clusters. No Nasdaq-100 list | `server/universe/constituents.ts`, `server/market-condition/universe.ts` |
+| Universe | Today's S&P 500, Russell 2000, and a 2020 Russell 3000 list, plus theme clusters. No list of Nasdaq-listed stocks; `fetchAlpacaActiveSymbols` in `server/alpaca.ts` lists today's active Alpaca assets only | `server/universe/constituents.ts`, `server/market-condition/universe.ts` |
 | Delisted names | Removed from the universe and persisted as excluded | `server/market-condition/utils/delisted-ticker-registry.ts`, `data/delisted-symbols.json` |
 | Discord relay | Room messages held in memory on Live only, lost on restart | `server/bridge/discord-relay.ts` |
 | Anima access | Read-only gateway with a route allowlist, embed cookie for framed pages | `server/middleware/animaGateway.ts` (`ALLOWED`), `server/middleware/animaEmbed.ts`, `server/middleware/dataAccess.ts` (`RULES`) |
@@ -48,12 +48,12 @@ Code to build:
 - **RS in the scanner is one-day only.** `scanner/lenses/relative-strength.ts` compares today's change to SPY. Multi-week RS exists only in the BigIdea indicators, against SPY, not QQQ.
 - **No backtester.** The outcome tracker measures intraday scanner signals forward; nothing replays history with entries, stops, trims and sizing.
 - **`ticker_ma` is not point-in-time.** Backtests compute MAs from `historical_bars` for each date.
-- **Minute bars aren't stored.** Ten years of minute bars for about 600 names is hundreds of millions of rows, too much for the shared database. Intraday backtests fetch minute bars only for days a daily pre-filter flags, and cache them as files on Don's PC.
+- **Minute bars aren't stored.** Ten years of minute bars for a universe of several thousand names is billions of rows, far too much for the shared database. Intraday backtests fetch minute bars only for names that pass the liquidity floor, on days a daily pre-filter flags, and cache them as files on Don's PC.
 
 Data that is genuinely missing:
 
 - **Delisted-name history (survivorship bias).** The universe is today's lists, and delisted names are actively purged. Names that failed in the past are missing from both the universe and `historical_bars`. Backtests on this data look better than reality.
-- **Point-in-time index membership.** Which stocks were in the S&P 500 and Nasdaq-100 on each past date.
+- **Point-in-time universe membership.** Which stocks were in the S&P 500 on each past date, and which common stocks were listed on Nasdaq on each past date (including later delisted, merged or bankrupt ones, and their security type, so ETFs, warrants, units, rights and preferreds can be excluded).
 - **Point-in-time earnings and news.** The earnings module asks Finnhub for dates from today forward. Historical earnings dates (and when they were known), and news as it was known on a past date, need checking against the Finnhub plan.
 - **Market regime inputs that aren't stock prices:** VIX and VIX3M daily history (term structure), the 10-year Treasury yield, and Fed rate decisions. Free official sources exist (Cboe's published VIX history, FRED series such as `VIXCLS`, `DGS10` and the Fed funds target range). VIXY is not a substitute: it decays over time and can't give VIX levels.
 
@@ -72,9 +72,9 @@ Four layers. Each one only does what the layer below can't.
 
 Computed for every symbol and every date, as of that date's close (or that minute for intraday), never using later bars:
 
-- Moving averages: 10/20 EMA and SMA, 50/150/200 SMA daily; **10-week and 30-week SMA on weekly closes** (the 30-week MA drives Weinstein stages).
+- Moving averages: 5 SMA, 10/20 EMA and SMA, 50/150/200 SMA daily; **10-week and 30-week SMA on weekly closes** (the 30-week MA drives Weinstein stages).
 - MA slopes, including the 30-week MA change over the last 4 weeks.
-- **Extension from the 50-day MA in ATR multiples:** `((price − 50DMA) ÷ 50DMA) ÷ ATR%`, with ATR% = ATR(14) ÷ price. Drives trims (section 4).
+- **Extension from an MA in ATR multiples:** `((price − MA) ÷ MA) ÷ ATR%`, with ATR% = ATR(14) ÷ price. Computed for the 50DMA (drives trims) and for the 5, 10 and 20DMA (picks the trailing MA). See section 4.
 - RSI(14), MACD(12,26,9) and histogram.
 - ATR(14) and ATR as percent of price.
 - Relative volume: today's volume over the 50-day average; weekly volume over the 10-week average; intraday volume vs the same time of day on prior sessions.
@@ -102,7 +102,7 @@ Every rule is an explicit check with a name, a threshold, a pass/fail result and
 - [ ] `rs_line_high`: RS line vs SPY within 5% of its 52-week high.
 - [ ] `rs_vs_qqq`: 63-day return above QQQ's.
 
-**Liquidity**
+**Liquidity** (applied first; critical with the whole Nasdaq in the universe, see section 7)
 - [ ] `price_min`: close at least $10.
 - [ ] `dollar_volume_min`: 20-day average dollar volume at least $20M.
 
@@ -212,7 +212,7 @@ These are Don's rules. Every strategy version obeys them. The improvement loop c
 - **Maximum loss per trade: 5% from the entry price.** Smaller is better. A $100,000 position can lose at most $5,000.
 - **If the setup's logical stop is more than 5% below entry, the trade doesn't happen at that price.** Either it is skipped, or entry waits for a price where the logical stop is within 5% (for example a pullback toward the stop level). A waiting entry expires after a set number of sessions (draft: 5) and is logged as "skipped: stop too wide".
 - The stop is always the tighter of the logical stop and entry − 5%.
-- **Trims always happen into strength:** on an up move, never on a down close. Draft definition: a trim fills only when price trades above the prior session's high, or the day closes above the prior close.
+- **Trims always happen into strength:** on an up move, never into weakness. In the backtest a trim fills only when price trades above the prior session's high.
 - **A trailing piece is always kept** after trims and is exited only by the trail (or the original stop).
 
 Reports show how many candidates each setup lost to the 5% cap, since that tells Don which setups fit his risk rule.
@@ -222,23 +222,36 @@ Reports show how many candidates each setup lost to the 5% cap, since that tells
 One exit policy, with parameters. Each set of parameter values is a separate strategy version, tested and compared like any other.
 
 1. **Initial stop:** as above.
-2. **Trims:** when extension from the 50DMA reaches 7 (to confirm: `((price − 50DMA) ÷ 50DMA) ÷ ATR% ≥ 7`), trim part of the position into strength. Trim size is 5% to 25% of the position, larger when VIX is higher. Draft mapping:
+2. **Trims (trigger fixed):** a trim is due when extension from the 50DMA reaches 7: `((price − 50DMA) ÷ 50DMA) ÷ ATR% ≥ 7`, with ATR% = ATR(14) ÷ price. Confirmed by Don. The trim becomes due at a close where extension is 7 or more, and fills into strength on a later session: the first minute bar that trades above the prior session's high, at that bar's price minus slippage. If no bar does, the trim stays pending while extension stays at 7 or more. A further trim is due each time extension falls back below 7 and reaches it again, up to a cap on the total trimmed (tested: 30%, 50%, 70% of the original position).
+3. **Trim size vs VIX (found by the backtest):** trim size is 5% to 25% of the position, set by the VIX bucket at the time of the trim. The mapping is a tested parameter, not a rule.
 
-   | VIX at trim | Trim |
+   | VIX bucket | Values tried |
    | --- | --- |
-   | under 15 | 5% |
-   | 15 to 20 | 10% |
-   | 20 to 30 | 15% |
-   | over 30 | 25% |
+   | under 15 | 5%, 10%, 15%, 20%, 25% |
+   | 15 to 20 | 5%, 10%, 15%, 20%, 25% |
+   | 20 to 30 | 5%, 10%, 15%, 20%, 25% |
+   | over 30 | 5%, 10%, 15%, 20%, 25% |
 
-   A further trim is allowed each time extension falls back below the threshold and reaches it again (draft cap: 50% of the original position trimmed in total).
-3. **Trailing piece:** exit on a daily close below the 10DMA. Once open profit reaches a threshold (to confirm; draft variants 15%, 20%, 25%, or 3R), the trail moves to a daily close below the 20DMA.
-4. **Stop to break-even:** draft option, off by default: after the first trim, move the stop to entry.
+   The search space is every mapping where trim size never falls as VIX rises (70 mappings), plus the 5 flat mappings that ignore VIX as the baseline. Start with a coarse grid (flat 10%, flat 20%, 5/10/15/25, 5/10/20/25, 10/15/20/25) and widen only around the best region. Every mapping tried counts toward the multiple-testing total (section 9).
+4. **Trailing piece (extension-dependent MA, thresholds found by the backtest):** which MA the trail uses depends on how far price is above the MAs, measured in the same ATR multiples. At each close:
+   - **Very extended → 5DMA:** when extension above the 10DMA is at least `X_far`, the trail is a close below the 5DMA.
+   - **Large profit, moderate extension → 20DMA:** when open profit is at least `P_large` and extension above the 20DMA is at most `Y_moderate`, the trail is a close below the 20DMA.
+   - **Otherwise → 10DMA:** a close below the 10DMA.
 
-**Tested variants:** the trim-size-vs-VIX mapping and the profit threshold that moves the trail from the 10DMA to the 20DMA. Exit styles for different holding periods are run as separate strategies on the same entries:
+   The MA choice uses that close's values, which are known at the close. A close below the chosen MA exits the trailing piece at the next open. Trims into strength continue along the way.
 
-- **Short swing:** 10DMA trail only (switch threshold never reached).
-- **Swing:** 10DMA trail switching to 20DMA at the threshold.
+   | Threshold | Starting grid |
+   | --- | --- |
+   | `X_far` (ATR multiples above the 10DMA) | 2, 3, 4, 5 |
+   | `P_large` (open profit) | 3R, 5R, 8R |
+   | `Y_moderate` (ATR multiples above the 20DMA) | 1, 2, 3 |
+   | hysteresis (closes in the new state before switching) | 1, 2 |
+
+5. **Stop to break-even:** option, off by default: after the first trim, move the stop to entry.
+
+**Tested variants:** the trim-size-vs-VIX mapping, the trim cap, and the trail thresholds above. Other exit styles run as separate strategies on the same entries, for comparison:
+
+- **Baseline:** fixed 10DMA trail, flat 10% trims. Shows what the extension-dependent trail and the VIX mapping add.
 - **Position (reference):** trail on a weekly close below the 10-week MA, or the Weinstein exit (weekly close below the 30-week MA). The 5% initial stop and trims still apply.
 - **Intraday only (reference):** flat by the close, for the intraday setups.
 
@@ -320,7 +333,7 @@ A strategy is one immutable package. Changing anything makes a new version.
 | `setups` | which setups from section 3, with their thresholds |
 | `rules` | which layer B filters are required, and their thresholds |
 | `regime_filters` | approved regime filters, if any |
-| `exit_policy` | trim threshold, VIX-to-trim mapping, trail switch threshold, exit style |
+| `exit_policy` | VIX-to-trim mapping, trim cap, trail thresholds (`X_far`, `P_large`, `Y_moderate`, hysteresis), exit style, exit fill (next open or 15:55) |
 | `params` | account risk %, max positions, max position size, wait-for-entry sessions, cost model, universe id |
 | `llm` | model id, its knowledge cutoff, prompt text, prompt version, temperature, on/off |
 | `specialist` | model id and version, on/off |
@@ -337,11 +350,20 @@ One backtester for every strategy version. It runs on Don's PC as a script (like
 
 ### Universe
 
-S&P 500 + Nasdaq-100 to start, as members were on each date (about 600 names at any time). Whether "Nasdaq-100" stays the index or becomes the full Nasdaq composite is an open question. `server/universe/constituents.ts` needs a Nasdaq-100 list and both lists need history.
+**Every Nasdaq-listed common stock, plus the S&P 500**, each as it was on that date. That is roughly 3,000 to 3,500 names at any time, several times larger than an index-only universe. Consequences:
+
+- **Liquidity floors matter much more.** Most Nasdaq listings are small and thinly traded. The price and dollar-volume floors (layer B) are applied first, on each date, before any setup check, and are reported with every result. Floors are tested at a few levels (for example $10 / $20M and $5 / $10M) so Don can see how much edge comes from small, costly-to-trade names. Slippage for names near the floor uses the higher tier.
+- **Membership history is a data need.** Point-in-time Nasdaq listings (with delisted names and security type) don't exist in the repo today; `server/universe/constituents.ts` has no Nasdaq list, and Alpaca's asset list shows only today's symbols. Common-stock-only filtering needs a security-type source (for example Finnhub's US symbol list, which marks common stock).
+- **Compute and cost grow.** Daily facts for about 3,500 names over ten years is around 9 million symbol-days per run, fine for a script on Don's PC but not for Render. More candidates also means more LLM calls, so the code rules and liquidity floor must filter hard before layer C, and per-run budgets apply.
+- **Minute bars only for liquid names.** Intraday setups fetch minute bars only for names that pass the liquidity floor on that date, and only on days the daily pre-filter flags.
 
 ### Point-in-time only
 
-- On each date, only bars, earnings dates, news and regime data available by that time may be used. Daily signals form at the close and enter on the next session (at the open, or at the trigger if price trades through it, with gaps filled at the open). Intraday signals enter on the next minute bar after the trigger. Which entry timing a strategy uses is an open question.
+- On each date, only bars, earnings dates, news and regime data available by that time may be used.
+- **Entries happen exactly when the trigger would have been known in real time, never using later information:**
+  - Intraday setups (low-of-day bounce, VWAP, opening range breakout) fill on the minute bar after the trigger bar, at that bar's price plus slippage.
+  - Daily setups that trigger on the close fill at the next session's open, plus slippage. A variant fills near the close: the trigger is evaluated on the 15:55 minute bar (with that day's values computed as of 15:55) and fills at that bar's price plus slippage.
+  - Exits follow the same rule: a close below the trailing MA exits at the next open (or at 15:55 in the near-close variant); stops fill at the stop price, or at the open if price gaps through it.
 - MAs, RS ranks and breadth are computed from `historical_bars` as of each date, never from `ticker_ma`.
 - The universe on each date is the membership as of that date (see survivorship below).
 - A test asserts that changing future bars changes no past decision.
@@ -388,7 +410,7 @@ A layer stays on only if it improves expectancy or drawdown without cutting trad
 
 ### Survivorship bias
 
-- Build a point-in-time universe: which symbols were S&P 500 or Nasdaq-100 members on each date, including ones later delisted, merged or bankrupt.
+- Build a point-in-time universe: which symbols were S&P 500 members or Nasdaq-listed common stocks on each date, including ones later delisted, merged or bankrupt. Nasdaq has many more delistings than the S&P 500, so the bias is larger there until this is filled.
 - Prices for those names come from Alpaca where it still serves bars for inactive symbols. Names Alpaca no longer serves are the one price gap; how to fill it (a delisted-name history dataset) is an open question.
 - Until that is solved, every report carries a "survivorship-biased universe" warning, and promotion decisions compare versions against each other on the same universe (the bias is roughly shared), never against absolute targets.
 - The delisted registry stays as is for the live app. Research gets its own universe table so the live purge doesn't erase research history.
@@ -426,7 +448,7 @@ It proposes **concrete diffs**, each with a one-line reason tied to logged trade
 - A threshold change (`volume_breakout` 1.5× → 1.8×).
 - A new filter built from existing facts (skip if ATR % over 6).
 - A regime filter (section 5).
-- An exit policy variant (trim mapping, trail switch threshold).
+- An exit policy variant (VIX-to-trim mapping, trim cap, trail thresholds).
 - A prompt edit for the context judge.
 - A new fact to compute (handle volume trend).
 
@@ -526,7 +548,7 @@ Each phase ships on its own and is usable before the next starts.
 
 ### Phase 1 — facts, daily setups, hard rules, regimes, point-in-time backtest
 
-Build: weekly bars from daily; layer A facts as pure functions over bars up to a date; the daily setups in section 3 and the layer B filters as named checks; the hard rules and exit policy in section 4; `regime_daily` with VIX, rates and FOMC data loaded; point-in-time S&P 500 + Nasdaq-100 membership; the backtester with costs, sizing, walk-forward windows and metrics; `strategy_versions` with the first versions (one per exit style).
+Build: weekly bars from daily; layer A facts as pure functions over bars up to a date; the daily setups in section 3 and the layer B filters as named checks; the hard rules and exit policy in section 4; `regime_daily` with VIX, rates and FOMC data loaded; point-in-time S&P 500 membership and Nasdaq common-stock listings, with the liquidity floor applied per date; the backtester with costs, sizing, walk-forward windows and metrics; `strategy_versions` with the first versions (one per exit style).
 
 Acceptance:
 - Facts match hand-checked values on 5 symbols across 3 dates (including the 30-week MA, the 50DMA extension in ATR multiples, and a Stage 2 call on a known chart Don picks).
@@ -606,15 +628,12 @@ Acceptance:
 
 ## 15. Open questions for Don
 
-1. **The 7× extension.** Does "extended from the 50-day MA by 7x" mean `((price − 50DMA) ÷ 50DMA) ÷ ATR% ≥ 7`, as written in section 4? If not, what exactly?
-2. **VIX-to-trim mapping.** Is the draft table right (under 15: 5%, 15–20: 10%, 20–30: 15%, over 30: 25%)? Is there a cap on total trims?
-3. **Trail switch.** At what open profit does the trail move from the 10DMA to the 20DMA (draft variants 15%, 20%, 25%, or 3R)?
-4. **Nasdaq-100 vs composite.** Nasdaq-100 only, or the full Nasdaq composite (thousands of smaller names, much more noise and survivorship risk)?
-5. **Intraday vs end-of-day entries.** For daily setups, enter at the next open after a signal close, or intraday when price crosses the trigger? Should intraday-setup trades be held as swings, closed by the end of the day, or both?
-6. **Waiting entries.** When the logical stop is more than 5% away, skip or wait? If wait, for how many sessions?
-7. **Account risk and positions.** Account risk per trade (0.5%, 0.75% or 1% of equity), maximum open positions, and maximum position size?
-8. **Setup definitions.** Which drafts in section 3 are right, which thresholds change, what is missing? Is the market filter SPY, QQQ, or both?
-9. **Missing data budget.** Pay for delisted-name history and point-in-time earnings and news if Alpaca and Finnhub can't cover them? What monthly budget for that and for LLM calls?
-10. **Benchmark and promotion bar.** Judge against SPY, QQQ, or both? Minimum improvement in expectancy, maximum allowed drawdown increase, and paper period length (default 8 weeks or 20 trades)?
-11. **LLM.** OK to use the OpenAI models MarketFlow already uses, at temperature 0? Any news sources to include or exclude?
-12. **Discord ideas.** Start logging Discord room ideas now so they can become a feature later?
+Answered and written into the spec: the 7× trim trigger (section 4), the VIX-to-trim mapping and trail thresholds (found by the backtest, section 4), entry timing (section 7), and the universe (every Nasdaq-listed common stock plus the S&P 500, section 7). Still open:
+
+1. **Waiting entries.** When the logical stop is more than 5% away, skip or wait? If wait, for how many sessions?
+2. **Account risk and positions.** Account risk per trade (0.5%, 0.75% or 1% of equity), maximum open positions, and maximum position size?
+3. **Setup definitions.** Which drafts in section 3 are right, which thresholds change, what is missing? Is the market filter SPY, QQQ, or both?
+4. **Missing data budget.** Pay for delisted-name history and point-in-time earnings and news if Alpaca and Finnhub can't cover them? What monthly budget for that and for LLM calls?
+5. **Benchmark and promotion bar.** Judge against SPY, QQQ, or both? Minimum improvement in expectancy, maximum allowed drawdown increase, and paper period length (default 8 weeks or 20 trades)?
+6. **LLM.** OK to use the OpenAI models MarketFlow already uses, at temperature 0? Any news sources to include or exclude?
+7. **Discord ideas.** Start logging Discord room ideas now so they can become a feature later?
