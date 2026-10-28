@@ -22,7 +22,8 @@ const SESSION_COOKIE = "connect.sid";
 const EMBED_POSTS = /^\/api\/(discord-stream\/summary|sentinel\/watchlist\/bulk-add)$/;
 
 const embedPost = (req: Request) =>
-  req.method === "POST" && EMBED_POSTS.test(req.path) && /^application\/json\b/i.test(req.get("content-type") || "");
+  req.method === "POST" && EMBED_POSTS.test(req.path) && /^application\/json\b/i.test(req.get("content-type") || "") &&
+  !(req.body && typeof req.body === "object" && ("update" in req.body || "remove" in req.body));
 
 const embedKey = (token: string) => createHash("sha256").update(`anima-embed\n${token}`).digest();
 const sign = (token: string, what: string) => createHmac("sha256", embedKey(token)).update(what).digest("hex");

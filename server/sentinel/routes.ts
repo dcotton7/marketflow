@@ -1635,12 +1635,27 @@ export function registerSentinelRoutes(app: Express): void {
 
   app.post("/api/sentinel/watchlist/bulk-add", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { watchlistId, items } = bulkAddSchema.parse(req.body);
+      const { watchlistId, items, update, remove } = bulkAddSchema.parse(req.body);
       const userId = req.session.userId!;
       const list = await sentinelModels.getWatchlistById(watchlistId);
       if (!list || list.userId !== userId) return res.status(404).json({ error: "Watchlist not found" });
-      const have = await sentinelModels.getWatchlistByUser(userId, watchlistId);
-      const plan = planBulkAdd(items, have.filter((i) => i.status === "watching").map((i) => i.symbol));
+      if ((update || remove?.length) && !list.isPortfolio) {
+        return res.status(400).json({ error: "Only a portfolio watchlist takes position updates" });
+      }
+      const have = (await sentinelModels.getWatchlistByUser(userId, watchlistId)).filter((i) => i.status === "watching");
+      const plan = planBulkAdd(items, have.map((i) => i.symbol), { update, remove });
+      const bySymbol = (s: string) => have.filter((i) => i.symbol.trim().toUpperCase() === s);
+      const updated: string[] = [];
+      for (const it of plan.update) {
+        const patch = { ...(it.shares != null ? { shares: it.shares } : {}), ...(it.entry != null ? { targetEntry: it.entry } : {}) };
+        for (const row of bySymbol(it.symbol)) await sentinelModels.updateWatchlistItem(row.id, patch);
+        updated.push(it.symbol);
+      }
+      const removed: string[] = [];
+      for (const s of plan.remove) {
+        for (const row of bySymbol(s)) await sentinelModels.deleteWatchlistItem(row.id);
+        removed.push(s);
+      }
       const added: string[] = [];
       for (const it of plan.add) {
         await sentinelModels.createWatchlistItem({
@@ -1653,7 +1668,7 @@ export function registerSentinelRoutes(app: Express): void {
         });
         added.push(it.symbol);
       }
-      res.json({ added, existing: plan.existing, invalid: plan.invalid });
+      res.json({ added, existing: plan.existing, invalid: plan.invalid, updated, removed });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors[0].message });

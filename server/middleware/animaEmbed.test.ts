@@ -18,22 +18,23 @@ assert.equal(readCookie("a=1; mf_anima_embed=xyz; b=2", EMBED_COOKIE), "xyz");
 assert.equal(readCookie("xmf_anima_embed=1", EMBED_COOKIE), "");
 
 type Res = { status: number; body: string; headers: http.IncomingHttpHeaders };
-async function withApp(token: string | undefined, fn: (call: (m: string, p: string, h?: Record<string, string>) => Promise<Res>) => Promise<void>) {
+async function withApp(token: string | undefined, fn: (call: (m: string, p: string, h?: Record<string, string>, b?: string) => Promise<Res>) => Promise<void>) {
   const app = express();
+  app.use(express.json());
   app.use(createAnimaEmbed({ token, userId: 2 }, () => NOW));
   app.use((req: any, res) => res.json({ path: req.url, uid: req.session?.userId ?? null }));
   const server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
   const { port } = server.address() as AddressInfo;
   try {
-    await fn((method, path, headers = {}) => new Promise((resolve, reject) => {
+    await fn((method, path, headers = {}, sent) => new Promise((resolve, reject) => {
       const req = http.request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
         let body = "";
         res.on("data", (c) => (body += c));
         res.on("end", () => resolve({ status: res.statusCode!, body, headers: res.headers }));
       });
       req.on("error", reject);
-      req.end();
+      req.end(sent);
     }));
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
@@ -64,6 +65,11 @@ await withApp(TOKEN, async (call) => {
   assert.equal(JSON.parse((await call("POST", "/api/discord-stream/clear", json)).body).uid, null, "only that one");
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json)).body).uid, 2, "the paste in the full panel");
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", { cookie, "content-type": "text/plain" })).body).uid, null, "the paste is JSON only");
+  for (const extra of [{ update: true }, { remove: ["NVDA"] }]) {
+    const sent = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA" }], ...extra });
+    assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json, sent)).body).uid, null,
+      `the panel's paste only adds: ${Object.keys(extra)[0]}`);
+  }
   for (const p of ["/api/sentinel/watchlist", "/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add/x"]) {
     assert.equal(JSON.parse((await call("POST", p, json)).body).uid, null, `no other watchlist write: ${p}`);
   }
