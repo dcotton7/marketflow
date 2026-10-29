@@ -99,6 +99,24 @@ assert.deepEqual(
   "list tickers the screenshot doesn't name, once each",
 );
 
+const twice = normalizeTosScreenExtract({
+  layout: "tos_positions",
+  positions: [
+    { symbol: "NVDA", avgCost: 100, posQty: 10 },
+    { symbol: ".AMD250117C150", avgCost: 4.2, posQty: 2 },
+    { symbol: "MU", avgCost: 90, posQty: 5 },
+    { symbol: "-MU250117P80", avgCost: 1.1, posQty: 3 },
+    { symbol: "AMD", avgCost: 160, posQty: 20 },
+    { symbol: "NVDA", avgCost: 120, posQty: 15 },
+    { symbol: "TSLA 01/17/2025 $300.00 C", avgCost: 9, posQty: 1 },
+  ],
+}).positions;
+assert.deepEqual(
+  twice.map((p) => [p.symbol, p.avgCost, p.posQty]),
+  [["NVDA", 120, 15], ["AMD", 160, 20], ["MU", 90, 5], ["TSLA", null, null]],
+  "a later row wins, an option row is its stock with no cost or qty and never replaces the stock's row",
+);
+
 const empty = normalizeTosScreenExtract(null);
 assert.deepEqual(empty.positions, []);
 assert.equal(empty.layout, "unknown");

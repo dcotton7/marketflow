@@ -13,7 +13,7 @@ import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middlewar
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { checkSharesWrite } from "./shares-write";
-import { bulkAddSchema, planBulkAdd } from "./bulk-add";
+import { bulkAddSchema, planBulkAdd, planRemoveTickers, removeTickersSchema, watchlistNameTaken } from "./bulk-add";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
 // monitor.ts removed — was a stub that only console.logged active trades
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
@@ -1421,6 +1421,9 @@ export function registerSentinelRoutes(app: Express): void {
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
         return res.status(400).json({ error: "Name is required" });
       }
+      if (watchlistNameTaken(name, await sentinelModels.getWatchlistsByUser(req.session.userId!))) {
+        return res.status(409).json({ error: "A watchlist with this name already exists" });
+      }
       const wl = await sentinelModels.createWatchlist({
         userId: req.session.userId!,
         name: name.trim(),
@@ -1639,11 +1642,11 @@ export function registerSentinelRoutes(app: Express): void {
       const userId = req.session.userId!;
       const list = await sentinelModels.getWatchlistById(watchlistId);
       if (!list || list.userId !== userId) return res.status(404).json({ error: "Watchlist not found" });
-      if ((update || remove?.length) && !list.isPortfolio) {
-        return res.status(400).json({ error: "Only a portfolio watchlist takes position updates" });
+      if (remove?.length && !list.isPortfolio) {
+        return res.status(400).json({ error: "Only a portfolio watchlist takes removals with an import" });
       }
       const have = (await sentinelModels.getWatchlistByUser(userId, watchlistId)).filter((i) => i.status === "watching");
-      const plan = planBulkAdd(items, have.map((i) => i.symbol), { update, remove });
+      const plan = planBulkAdd(items, have.map((i) => i.symbol), { update, remove, entryOnly: !list.isPortfolio });
       const bySymbol = (s: string) => have.filter((i) => i.symbol.trim().toUpperCase() === s);
       const updated: string[] = [];
       for (const it of plan.update) {
@@ -1675,6 +1678,31 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Bulk add watchlist error:", error);
       res.status(500).json({ error: "Failed to add tickers" });
+    }
+  });
+
+  app.post("/api/sentinel/watchlist/remove-tickers", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { watchlistId, symbols } = removeTickersSchema.parse(req.body);
+      const userId = req.session.userId!;
+      const list = await sentinelModels.getWatchlistById(watchlistId);
+      if (!list || list.userId !== userId) return res.status(404).json({ error: "Watchlist not found" });
+      const have = (await sentinelModels.getWatchlistByUser(userId, watchlistId)).filter((i) => i.status === "watching");
+      const plan = planRemoveTickers(symbols, have.map((i) => i.symbol));
+      const removed: string[] = [];
+      for (const s of plan.remove) {
+        for (const row of have.filter((i) => i.symbol.trim().toUpperCase() === s)) {
+          await sentinelModels.deleteWatchlistItem(row.id);
+        }
+        removed.push(s);
+      }
+      res.json({ removed, notFound: plan.notFound, invalid: plan.invalid });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      console.error("Remove watchlist tickers error:", error);
+      res.status(500).json({ error: "Failed to remove tickers" });
     }
   });
 

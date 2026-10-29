@@ -1,8 +1,9 @@
 /**
  * From Screen: ToS or Fidelity positions table capture + review.
- * Avg cost is saved as planned entry. In a portfolio list Pos Qty is saved as shares and tickers already in the list
- * are updated (one bulk-add with update); tickers missing from the screenshot are removed only when the box is ticked.
- * A short (negative Pos Qty) is imported without shares or entry.
+ * Avg cost is saved as planned entry, in a portfolio list Pos Qty as shares; tickers already in the list take the
+ * screenshot's values (one bulk-add with update, entry only outside a portfolio list). In a portfolio list tickers
+ * missing from the screenshot are removed only when the box is ticked. A short (negative Pos Qty) is imported
+ * without shares or entry.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -61,7 +62,7 @@ export function TosScreenReviewDialog({
   watchlistName: string;
   isPortfolio?: boolean;
   listSymbols?: string[];
-  /** In Anima's full watchlist panel: one bulk-add (the embed sign-in's only list write), never a remove. */
+  /** In Anima's full watchlist panel: never a remove (the embed sign-in refuses a bulk-add body with one). */
   embed?: boolean;
 }) {
   const tos = useTosSyncSafe();
@@ -200,73 +201,38 @@ export function TosScreenReviewDialog({
     }
     const items = screenImportItems(symbols, result?.positions ?? [], isPortfolio);
     const shorts = items.filter((i) => i.short).map((i) => i.symbol);
+    const withEntry = items.filter((i) => i.entry != null).length;
+    const remove = isPortfolio && removeMissing && !embed ? screenImportMissing(items, listSymbols) : [];
     setImporting(true);
-    if (isPortfolio || embed) {
-      const remove = removeMissing && !embed ? screenImportMissing(items, listSymbols) : [];
-      try {
-        const got = await bulkAdd.mutateAsync({
-          watchlistId,
-          items: items.map(({ symbol, shares, entry }) => ({ symbol, shares, entry })),
-          ...(isPortfolio ? { update: true } : {}),
-          ...(remove.length ? { remove } : {}),
-        });
-        await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
-        const said = [
-          got.added.length ? `${got.added.length} added` : "",
-          got.updated?.length ? `${got.updated.length} updated` : "",
-          got.removed?.length ? `${got.removed.length} removed` : "",
-          got.invalid.length ? `${got.invalid.length} not tickers (${got.invalid.join(", ")})` : "",
-        ].filter(Boolean);
-        toast({
-          title: `Positions imported to ${watchlistName}`,
-          description:
-            (said.join(" · ") || "Nothing changed") +
-            (shorts.length ? `. Shorts kept without shares or entry: ${shorts.join(", ")}` : "") + ".",
-        });
-        onOpenChange(false);
-      } catch (err) {
-        toast({
-          title: "Import failed",
-          description: err instanceof Error ? err.message : "Could not import positions",
-          variant: "destructive",
-        });
-      } finally {
-        setImporting(false);
-      }
-      return;
-    }
-    const entryBySymbol = new Map(items.map((i) => [i.symbol, i.entry] as const));
     try {
-      let withEntry = 0;
-      for (const raw of symbols) {
-        const symbol = raw.toUpperCase().replace("/", ".");
-        const targetEntry = entryBySymbol.get(symbol) ?? undefined;
-        const created = await apiRequest("POST", "/api/sentinel/watchlist", {
-          symbol,
-          watchlistId,
-          priority: "medium",
-          ...(targetEntry != null ? { targetEntry } : {}),
-        });
-        const item = (await created.json()) as { id?: number; targetEntry?: number | null };
-        if (targetEntry != null && item.id && !(Number(item.targetEntry) > 0 && Math.abs(Number(item.targetEntry) - targetEntry) < 0.0001)) {
-          await apiRequest("PATCH", `/api/sentinel/watchlist/${item.id}`, { targetEntry });
-        }
-        if (targetEntry != null) withEntry += 1;
-      }
+      const got = await bulkAdd.mutateAsync({
+        watchlistId,
+        items: items.map(({ symbol, shares, entry }) => ({ symbol, shares, entry })),
+        update: true,
+        ...(remove.length ? { remove } : {}),
+      });
       await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
+      const said = [
+        got.added.length ? `${got.added.length} added` : "",
+        got.updated?.length ? `${got.updated.length} updated` : "",
+        got.removed?.length ? `${got.removed.length} removed` : "",
+        got.invalid.length ? `${got.invalid.length} not tickers (${got.invalid.join(", ")})` : "",
+      ].filter(Boolean);
       toast({
-        title: `Imported ${symbols.length} to ${watchlistName}`,
+        title: `${isPortfolio ? "Positions" : "Tickers"} imported to ${watchlistName}`,
         description:
-          withEntry > 0
-            ? `${withEntry} with avg cost as planned entry.`
-            : "No Avg Cost in the extract — draw the box around Symbol and Average cost / Avg Cost, then Extract again.",
+          (said.join(" · ") || "Nothing changed") +
+          (shorts.length ? `. Shorts kept without shares or entry: ${shorts.join(", ")}` : "") +
+          (withEntry === 0
+            ? ". No Avg Cost in the extract — draw the box around Symbol and Average cost / Avg Cost, then Extract again"
+            : "") + ".",
       });
       onOpenChange(false);
     } catch (err) {
       toast({
         title: "Import failed",
-        description: err instanceof Error ? err.message : "Could not add tickers",
+        description: err instanceof Error ? err.message : "Could not import tickers",
         variant: "destructive",
       });
     } finally {
@@ -284,8 +250,9 @@ export function TosScreenReviewDialog({
             planned entry.{" "}
             {isPortfolio
               ? "This is a portfolio list: Pos Qty is saved as shares, and tickers already in it get the new shares and entry. Shorts come in without shares or entry."
-              : "Quantity is saved only in a portfolio list (the briefcase); here only tickers and entry are added."}{" "}
-            Edit the ticker list before import.
+              : "Quantity is saved only in a portfolio list (the briefcase); here tickers are added with entry, and tickers already in it get the new entry."}{" "}
+            A ticker shown twice takes its lower (newer) row; an option row counts as its stock and never replaces the
+            stock's own row. Edit the ticker list before import.
           </DialogDescription>
         </DialogHeader>
 

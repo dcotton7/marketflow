@@ -3,6 +3,8 @@
  * Missing cells stay null — never coerced to 0.
  */
 
+import { cleanSymbol } from "./ticker-paste";
+
 export type TosScreenPositionRow = {
   symbol: string;
   avgCost: number | null;
@@ -143,11 +145,14 @@ function asFiniteNumber(value: unknown): number | null {
   return neg ? -Math.abs(n) : n;
 }
 
-function asSymbol(value: unknown): string | null {
+/** The row's stock: an option row (as the paste reads them) stands for its underlying. */
+function asSymbol(value: unknown): { symbol: string; option: boolean } | null {
   if (typeof value !== "string") return null;
-  const s = value.toUpperCase().trim().replace(/^\$/, "");
+  const raw = value.toUpperCase().trim().replace(/^\$/, "");
+  const opt = cleanSymbol(raw);
+  const s = opt.option ? opt.symbol : raw;
   if (!TOKEN.test(s) || STOP.has(s)) return null;
-  return s;
+  return { symbol: s, option: !!opt.option };
 }
 
 export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult {
@@ -164,18 +169,29 @@ export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult 
 
   const positions: TosScreenPositionRow[] = [];
   const seen = new Set<string>();
+  const at = new Map<string, { index: number; option: boolean }>();
   const rows = Array.isArray(obj.positions)
     ? obj.positions
     : Array.isArray(obj.rows)
       ? obj.rows
       : [];
 
+  // A ticker seen twice takes the later row's values, except that an option row never replaces its stock's row.
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const r = row as Record<string, unknown>;
-    const symbol = asSymbol(r.symbol);
-    if (!symbol || seen.has(symbol)) continue;
+    const named = asSymbol(r.symbol);
+    if (!named) continue;
+    const { symbol, option } = named;
+    const before = at.get(symbol);
+    if (before && option && !before.option) continue;
     seen.add(symbol);
+    if (option) {
+      const blank = { symbol, avgCost: null, posQty: null, lastPrice: null, hasPosition: false };
+      if (before) positions[before.index] = blank;
+      else at.set(symbol, { index: positions.push(blank) - 1, option });
+      continue;
+    }
     const avgCost = asFiniteNumber(
       r.avgCost ??
         r.avg_cost ??
@@ -187,13 +203,11 @@ export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult 
     const posQty = asFiniteNumber(r.posQty ?? r.qty ?? r.quantity);
     const lastPrice = asFiniteNumber(r.lastPrice ?? r.last);
     const hasPosition = r.hasPosition === true || (posQty != null && posQty !== 0);
-    positions.push({
-      symbol,
-      avgCost,
-      posQty: hasPosition ? posQty : null,
-      lastPrice,
-      hasPosition,
-    });
+    const next = { symbol, avgCost, posQty: hasPosition ? posQty : null, lastPrice, hasPosition };
+    if (before) {
+      positions[before.index] = next;
+      before.option = false;
+    } else at.set(symbol, { index: positions.push(next) - 1, option: false });
   }
 
   const fromCsv = parseWatchlistTickers(String(obj.tickers ?? obj.tickerCsv ?? ""));

@@ -19,11 +19,14 @@ export type HostMessage =
   | { type: "close-big" }
   | { type: "ready"; page: string }
   | { type: "charts-state"; charts: EmbedChart[] }
-  | { type: "symbol"; symbol: string };
+  | { type: "symbol"; symbol: string }
+  | { type: "watchlist"; id: number; name: string };
 
 export type HostCommand =
   | { type: "set-symbol"; symbol: string }
-  | { type: "set-charts"; charts: EmbedChart[]; add: boolean };
+  | { type: "set-charts"; charts: EmbedChart[]; add: boolean }
+  /** The host changed a list: reload it, and show `select` when given. */
+  | { type: "refresh-watchlist"; select?: number };
 
 const SYMBOL_RX = /^[A-Za-z0-9.\-^/]{1,12}$/;
 const MAX_CHARTS = 40;
@@ -72,8 +75,15 @@ function cleanCharts(raw: unknown): EmbedChart[] | null {
 export function onHostCommand(handler: (cmd: HostCommand) => void): () => void {
   const listener = (e: MessageEvent) => {
     if (!EMBED_HOST_ORIGINS.includes(e.origin)) return;
-    const d = e.data as { source?: string; type?: string; symbol?: unknown; charts?: unknown; add?: unknown } | null;
+    const d = e.data as
+      | { source?: string; type?: string; symbol?: unknown; charts?: unknown; add?: unknown; select?: unknown }
+      | null;
     if (d?.source !== "anima") return;
+    if (d.type === "refresh-watchlist") {
+      const select = Number.isInteger(d.select) && (d.select as number) > 0 ? (d.select as number) : undefined;
+      handler({ type: "refresh-watchlist", ...(select ? { select } : {}) });
+      return;
+    }
     if (d.type === "set-symbol" && typeof d.symbol === "string" && SYMBOL_RX.test(d.symbol.trim())) {
       handler({ type: "set-symbol", symbol: d.symbol.trim().toUpperCase() });
     } else if (d.type === "set-charts") {

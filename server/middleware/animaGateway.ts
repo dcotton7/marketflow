@@ -10,8 +10,11 @@ import { normalizeApiPath } from "./dataAccess";
  *   Render's public edge always adds) or, when the services sit in different regions, over the public address from
  *   one of the ANIMA_GATEWAY_IPS ranges (Anima's outbound IPs). Anything else gets a plain 404.
  * - GET only, and only the read routes in ALLOWED. Nothing that trades, writes, or spends LLM credit on demand:
- *   force/refresh are dropped so cached analyses and briefings are served as they are. The single exception is the
- *   JSON POST in ALLOWED_POSTS (a trim's new share count), which the route itself limits to lowering a count.
+ *   force/refresh are dropped so cached analyses and briefings are served as they are. The exceptions are the JSON
+ *   POSTs in ALLOWED_POSTS: a trim's new share count (the route itself only lowers a count), and the watchlist edits
+ *   Don asks Quinn for in chat (add tickers, remove named tickers, create a list), each only with the body shape in
+ *   POST_BODIES: tickers alone (no shares, entry, update or remove), a name alone. Deleting or clearing a list,
+ *   renaming it and every other write stay closed.
  * - The request carries the owner's id (ANIMA_GATEWAY_USER_ID) for this request only; express-session leaves an
  *   existing req.session alone, so nothing is stored and no cookie is issued. dataAccess still checks the route.
  */
@@ -35,13 +38,36 @@ export const ALLOWED: RegExp[] = [
   /^\/api\/alerts\/feed$/,
   /^\/api\/positions\/snapshot$/,
 ];
-/** The one write: "Trimmed" on a position alert sets the new share count. */
-export const ALLOWED_POSTS: RegExp[] = [/^\/api\/sentinel\/watchlist\/\d+\/shares$/];
+const SHARES_POST = /^\/api\/sentinel\/watchlist\/\d+\/shares$/;
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const onlyKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every((k) => keys.includes(k));
+const listId = (v: unknown) => Number.isInteger(v) && (v as number) > 0;
+const symbolText = (v: unknown) => typeof v === "string" && v.length > 0 && v.length <= 12;
+/** The watchlist writes and the only bodies they take. */
+export const POST_BODIES: [RegExp, (body: unknown) => boolean][] = [
+  [/^\/api\/sentinel\/watchlist\/bulk-add$/, (b) => isObject(b) && onlyKeys(b, ["watchlistId", "items"]) &&
+    listId(b.watchlistId) && Array.isArray(b.items) &&
+    b.items.every((i) => isObject(i) && onlyKeys(i, ["symbol"]) && symbolText(i.symbol))],
+  [/^\/api\/sentinel\/watchlist\/remove-tickers$/, (b) => isObject(b) && onlyKeys(b, ["watchlistId", "symbols"]) &&
+    listId(b.watchlistId) && Array.isArray(b.symbols) && b.symbols.every(symbolText)],
+  [/^\/api\/sentinel\/watchlists$/, (b) => isObject(b) && onlyKeys(b, ["name"]) && typeof b.name === "string" &&
+    b.name.trim().length > 0 && b.name.length <= 60],
+];
+/** "Trimmed" on a position alert sets the new share count; the rest are his chat's watchlist edits. */
+export const ALLOWED_POSTS: RegExp[] = [SHARES_POST, ...POST_BODIES.map(([rx]) => rx)];
 const DROPPED = new Set(["force", "refresh"]);
 
 export function allowedPath(path: string, method = "GET"): boolean {
   const p = normalizeApiPath(path);
   return (method === "POST" ? ALLOWED_POSTS : ALLOWED).some((rx) => rx.test(p));
+}
+
+/** A body the write's route may get from Anima; an unparsed body never passes. */
+export function allowedBody(path: string, body: unknown): boolean {
+  const p = normalizeApiPath(path);
+  if (SHARES_POST.test(p)) return true;
+  const rule = POST_BODIES.find(([rx]) => rx.test(p));
+  return !!rule && rule[1](body);
 }
 
 function jsonBody(req: Pick<Request, "headers">): boolean {
@@ -111,6 +137,7 @@ export function createAnimaGateway(opts: AnimaGatewayOptions): RequestHandler {
     const write = req.method === "POST" && allowedPath(target, "POST");
     if (req.method !== "GET" && !write) return res.status(405).json({ error: "Read only" });
     if (write && !jsonBody(req)) return res.status(415).json({ error: "JSON only" });
+    if (write && !allowedBody(target, req.body)) return res.status(403).json({ error: "Not available to Anima" });
     if (!write && !allowedPath(target)) return res.status(403).json({ error: "Not available to Anima" });
     const q = new URLSearchParams(req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "");
     for (const k of [...q.keys()]) if (DROPPED.has(k.toLowerCase())) q.delete(k);

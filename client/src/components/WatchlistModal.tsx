@@ -951,7 +951,7 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
                   title={
                     selectedWatchlist?.isPortfolio
                       ? "Import a ToS or Fidelity positions screenshot: review, then add or update tickers with shares and avg cost"
-                      : "Import tickers from a ToS or Fidelity screenshot: review, then add them with avg cost as entry"
+                      : "Import tickers from a ToS or Fidelity screenshot: review, then add or update them with avg cost as entry"
                   }
                 >
                   <ScanSearch className="w-4 h-4" />
