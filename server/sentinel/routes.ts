@@ -12,7 +12,7 @@ import { checkPasswordWithLockout, createLoginLockout, createPgLockStore, type L
 import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middleware/dataAccess";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
-import { checkSharesWrite } from "./shares-write";
+import { checkSharesWrite, commitSharesWrite, sharesWriteSchema } from "./shares-write";
 import {
   applyBulkAdd,
   bulkAddSchema,
@@ -1773,8 +1773,19 @@ export function registerSentinelRoutes(app: Express): void {
         const { status, ...body } = check;
         return res.status(status).json(body);
       }
-      const updated = await sentinelModels.updateWatchlistItem(id, { shares: check.shares });
-      res.json(updated);
+      const { expectShares } = sharesWriteSchema.parse(req.body);
+      const wrote = await commitSharesWrite(
+        check.shares,
+        expectShares,
+        async (shares, expect) => (await db!.update(sentinelWatchlist).set({ shares, updatedAt: new Date() })
+          .where(and(eq(sentinelWatchlist.id, id), eq(sentinelWatchlist.shares, expect))).returning())[0],
+        async () => (await sentinelModels.getWatchlistItem(id))?.shares,
+      );
+      if (wrote.status !== 200) {
+        const { status, ...body } = wrote;
+        return res.status(status).json(body);
+      }
+      res.json(wrote.row);
     } catch (error) {
       console.error("Trim shares error:", error);
       res.status(500).json({ error: "Failed to update shares" });

@@ -24,3 +24,19 @@ export function checkSharesWrite(
   if (shares >= expectShares) return { status: 400, error: "A trim must lower the share count" };
   return { status: 200, shares };
 }
+
+/**
+ * The write after checkSharesWrite passed on an earlier read: `updateWhere` must set the count only on a row that
+ * still holds expectShares (UPDATE ... WHERE id = ? AND shares = expectShares), so a change between the read and the
+ * write (Don editing the row, a second tap) is answered 409 instead of being written over.
+ */
+export async function commitSharesWrite<T>(
+  shares: number,
+  expectShares: number,
+  updateWhere: (shares: number, expectShares: number) => Promise<T | undefined>,
+  current: () => Promise<number | null | undefined>,
+): Promise<{ status: 200; row: T } | { status: 409; error: string; shares: number | null }> {
+  const row = await updateWhere(shares, expectShares);
+  if (row) return { status: 200, row };
+  return { status: 409, error: "Shares changed since the alert", shares: (await current()) ?? null };
+}
