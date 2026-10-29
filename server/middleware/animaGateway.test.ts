@@ -26,15 +26,22 @@ for (const p of ["/api/sentinel/watchlist/12", "/api/sentinel/watchlist", "/api/
 }
 const add = { watchlistId: 3, items: [{ symbol: "NVDA" }, { symbol: "BRK.B" }] };
 assert.ok(allowedBody("/api/sentinel/watchlist/bulk-add", add));
+// Don's broker screenshot in chat: shares, entry and the short side, update for rows already there (From Screen's body).
+assert.ok(allowedBody("/api/sentinel/watchlist/bulk-add", { ...add, update: true }));
+assert.ok(allowedBody("/api/sentinel/watchlist/bulk-add", { watchlistId: 3, update: true, items: [
+  { symbol: "NVDA", shares: 100, entry: 182.35 }, { symbol: "CVNA", short: true }, { symbol: "META", shares: null, entry: null }] }));
 assert.ok(allowedBody("/api/sentinel/watchlist/remove-tickers", { watchlistId: 3, symbols: ["NVDA"] }));
 assert.ok(allowedBody("/api/sentinel/watchlists", { name: "Energy" }));
 assert.ok(allowedBody("/api/sentinel/watchlist/12/shares", { shares: 1 }), "the trim's body is checked by its route");
 for (const [p, b] of [
   ["/api/sentinel/watchlist/bulk-add", { ...add, remove: ["MSFT"] }],
   ["/api/sentinel/watchlist/bulk-add", { ...add, remove: [] }],
-  ["/api/sentinel/watchlist/bulk-add", { ...add, update: true }],
-  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", shares: 100 }] }],
-  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", entry: 1 }] }],
+  ["/api/sentinel/watchlist/bulk-add", { ...add, update: "yes" }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", shares: -100 }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", entry: "1" }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", short: 1 }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", stop: 170 }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", direction: "short" }] }],
   ["/api/sentinel/watchlist/bulk-add", { watchlistId: "3", items: [{ symbol: "NVDA" }] }],
   ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: "NVDA" }],
   ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "X".repeat(13) }] }],
@@ -161,11 +168,13 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
   assert.deepEqual((await call("POST", "/api/anima/sentinel/watchlist/remove-tickers", json, drops)).body.body, JSON.parse(drops), "removes named tickers");
   const made = await call("POST", "/api/anima/sentinel/watchlists", json, JSON.stringify({ name: "Energy" }));
   assert.deepEqual(made.body, { path: "/api/sentinel/watchlists", uid: 1, body: { name: "Energy" } }, "creates a list");
+  const shot = JSON.stringify({ watchlistId: 7, update: true, items: [{ symbol: "NVDA", shares: 5, entry: 100 }, { symbol: "CVNA", short: true }] });
+  assert.deepEqual((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", json, shot)).body.body, JSON.parse(shot),
+    "his screenshot's positions: shares, entry, short, update");
   for (const body of [{ watchlistId: 7, items: [{ symbol: "NVDA" }], remove: ["GEV"] },
-    { watchlistId: 7, items: [{ symbol: "NVDA" }], update: true },
-    { watchlistId: 7, items: [{ symbol: "NVDA", shares: 5, entry: 100 }] }]) {
+    { watchlistId: 7, items: [{ symbol: "NVDA", shares: 5, stop: 90 }] }]) {
     assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", json, JSON.stringify(body))).status, 403,
-      `no positions or removes through bulk-add: ${JSON.stringify(body)}`);
+      `no removes or other fields through bulk-add: ${JSON.stringify(body)}`);
   }
   const embedCookie = { ...json, cookie: "mf_anima_embed=1.x" };
   assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", embedCookie,

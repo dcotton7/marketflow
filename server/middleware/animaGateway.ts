@@ -13,8 +13,9 @@ import { normalizeApiPath } from "./dataAccess";
  *   force/refresh are dropped so cached analyses and briefings are served as they are. The exceptions are the JSON
  *   POSTs in ALLOWED_POSTS: a trim's new share count (the route itself only lowers a count), and the watchlist edits
  *   Don asks Quinn for in chat (add tickers, remove named tickers, create a list), each only with the body shape in
- *   POST_BODIES: tickers alone (no shares, entry, update or remove), a name alone. Deleting or clearing a list,
- *   renaming it and every other write stay closed.
+ *   POST_BODIES: tickers, with the shares, entry and short side his broker screenshot shows and update (so rows
+ *   already in the list take them, as From Screen does) but never remove; a name alone. Deleting a list, renaming it
+ *   and every other write stay closed.
  * - The request carries the owner's id (ANIMA_GATEWAY_USER_ID) for this request only; express-session leaves an
  *   existing req.session alone, so nothing is stored and no cookie is issued. dataAccess still checks the route.
  */
@@ -42,12 +43,14 @@ const SHARES_POST = /^\/api\/sentinel\/watchlist\/\d+\/shares$/;
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const onlyKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every((k) => keys.includes(k));
 const listId = (v: unknown) => Number.isInteger(v) && (v as number) > 0;
+const positiveOrNull = (v: unknown) => v === undefined || v === null || (typeof v === "number" && Number.isFinite(v) && v > 0);
 const symbolText = (v: unknown) => typeof v === "string" && v.length > 0 && v.length <= 12;
 /** The watchlist writes and the only bodies they take. */
 export const POST_BODIES: [RegExp, (body: unknown) => boolean][] = [
-  [/^\/api\/sentinel\/watchlist\/bulk-add$/, (b) => isObject(b) && onlyKeys(b, ["watchlistId", "items"]) &&
-    listId(b.watchlistId) && Array.isArray(b.items) &&
-    b.items.every((i) => isObject(i) && onlyKeys(i, ["symbol"]) && symbolText(i.symbol))],
+  [/^\/api\/sentinel\/watchlist\/bulk-add$/, (b) => isObject(b) && onlyKeys(b, ["watchlistId", "items", "update"]) &&
+    listId(b.watchlistId) && Array.isArray(b.items) && (b.update === undefined || typeof b.update === "boolean") &&
+    b.items.every((i) => isObject(i) && onlyKeys(i, ["symbol", "shares", "entry", "short"]) && symbolText(i.symbol) &&
+      positiveOrNull(i.shares) && positiveOrNull(i.entry) && (i.short === undefined || typeof i.short === "boolean"))],
   [/^\/api\/sentinel\/watchlist\/remove-tickers$/, (b) => isObject(b) && onlyKeys(b, ["watchlistId", "symbols"]) &&
     listId(b.watchlistId) && Array.isArray(b.symbols) && b.symbols.every(symbolText)],
   [/^\/api\/sentinel\/watchlists$/, (b) => isObject(b) && onlyKeys(b, ["name"]) && typeof b.name === "string" &&
