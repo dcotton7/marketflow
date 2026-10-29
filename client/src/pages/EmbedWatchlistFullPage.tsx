@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAdminTheme } from "@/context/SystemSettingsContext";
 import {
   useNamedWatchlistItems,
@@ -27,7 +27,7 @@ import {
   watchlistShowsEntryGauges,
 } from "@/lib/watchlist-entry-gauges";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
-import { postToHost } from "@/lib/embed-host";
+import { onHostCommand, postToHost } from "@/lib/embed-host";
 import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardPaste, Loader2, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -67,9 +67,12 @@ function seedColumns() {
  * the column picker, a paste box and From Screen (a thinkorswim/Fidelity positions screenshot, reviewed, then one
  * bulk-add; in a portfolio list with shares and entry, updating tickers already there; never a remove), the writes
  * the embed sign-in allows. A row click opens that ticker's big chart in Anima. Shares the small panel's list pick.
+ * Anima is told which list is open (so "add NVDA" in Quinn's chat means this list) and asks for a reload after her
+ * chat changed a list, optionally showing a list she just created.
  */
 export default function EmbedWatchlistFullPage() {
   const { cssVariables } = useAdminTheme();
+  const queryClient = useQueryClient();
   useState(seedColumns);
   const { data: lists } = useWatchlists();
   const [picked, setPicked] = useState<number | null>(() => Number(localStorage.getItem(PICK_KEY)) || null);
@@ -97,6 +100,21 @@ export default function EmbedWatchlistFullPage() {
   useEffect(() => {
     postToHost({ type: "ready", page: "watchlist-full" });
   }, []);
+
+  useEffect(() => {
+    if (list) postToHost({ type: "watchlist", id: list.id, name: list.name });
+  }, [list?.id, list?.name]);
+
+  useEffect(
+    () =>
+      onHostCommand((cmd) => {
+        if (cmd.type !== "refresh-watchlist") return;
+        if (cmd.select) setPicked(cmd.select);
+        void queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlists"] });
+        void queryClient.invalidateQueries({ queryKey: ["/api/sentinel/watchlist"] });
+      }),
+    [queryClient],
+  );
 
   const { data: items, isLoading: itemsLoading } = useNamedWatchlistItems(listId);
   const removeFromWatchlist = useRemoveFromWatchlist();

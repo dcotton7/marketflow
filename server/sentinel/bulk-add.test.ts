@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { BULK_ADD_MAX, bulkAddSchema, planBulkAdd } from "./bulk-add";
+import {
+  BULK_ADD_MAX,
+  bulkAddSchema,
+  planBulkAdd,
+  planRemoveTickers,
+  removeTickersSchema,
+  watchlistNameTaken,
+} from "./bulk-add";
 import { parseTickerPaste } from "@shared/ticker-paste";
 
 const plan = planBulkAdd(
@@ -42,6 +49,27 @@ assert.deepEqual(upd.existing, ["NVDA", "AAPL"]);
 assert.deepEqual(upd.remove, ["MSFT"], "only listed tickers not in the screenshot, once each");
 assert.ok(bulkAddSchema.safeParse({ watchlistId: 3, items: shot, update: true, remove: ["MSFT"] }).success);
 assert.ok(!bulkAddSchema.safeParse({ watchlistId: 3, items: shot, update: "yes" }).success);
+assert.deepEqual(
+  planBulkAdd(shot, have, { update: true, entryOnly: true }).update,
+  [{ symbol: "NVDA", shares: null, entry: 140.5 }],
+  "a list that isn't a portfolio takes the entry, never shares",
+);
+assert.deepEqual(planBulkAdd([{ symbol: "NVDA", shares: 9 }], have, { update: true, entryOnly: true }).update, [],
+  "nothing to set without an entry");
+
+assert.deepEqual(planRemoveTickers(["nvda", "ZZZZ", "NVDA", "corp inc", " tsla ", "zzzz"], have), {
+  remove: ["NVDA", "TSLA"],
+  notFound: ["ZZZZ"],
+  invalid: ["corp inc"],
+});
+assert.ok(removeTickersSchema.safeParse({ watchlistId: 3, symbols: ["NVDA"] }).success);
+for (const bad of [{ watchlistId: 3, symbols: [] }, { watchlistId: 3 }, { symbols: ["NVDA"] }]) {
+  assert.ok(!removeTickersSchema.safeParse(bad).success, JSON.stringify(bad));
+}
+const lists = [{ name: "Port Watch" }, { name: "Energy " }];
+assert.ok(watchlistNameTaken(" energy", lists));
+assert.ok(watchlistNameTaken("PORT WATCH", lists));
+assert.ok(!watchlistNameTaken("Energy 2", lists));
 
 for (const bad of [
   {},

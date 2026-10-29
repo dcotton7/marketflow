@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import session from "express-session";
 import { createApiAccessGuard, type AccessUser } from "./dataAccess";
-import { allowedPath, createAnimaGateway, internalRequest, ipAllowed, loadAnimaGatewayOptions } from "./animaGateway";
+import { allowedBody, allowedPath, createAnimaGateway, internalRequest, ipAllowed, loadAnimaGatewayOptions } from "./animaGateway";
 
 const TOKEN = "t".repeat(40);
 const USERS: Record<number, AccessUser> = { 1: { id: 1, isAdmin: true, isActive: true } };
@@ -15,10 +15,41 @@ for (const p of ["/api/stocks/AAPL/quote", "/api/stocks/BRK.B/history", "/api/ma
   "/api/alerts/feed", "/api/positions/snapshot"]) {
   assert.ok(allowedPath(p), `allowed ${p}`);
 }
-assert.ok(allowedPath("/api/sentinel/watchlist/12/shares", "POST"));
+for (const p of ["/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add", "/api/sentinel/watchlist/remove-tickers",
+  "/api/sentinel/watchlists", "/API/Sentinel/Watchlists/"]) {
+  assert.ok(allowedPath(p, "POST"), `allowed POST ${p}`);
+}
 for (const p of ["/api/sentinel/watchlist/12", "/api/sentinel/watchlist", "/api/sentinel/watchlist/x/shares", "/api/stocks/AAPL/quote",
-  "/api/sentinel/watchlist/bulk-add"]) {
+  "/api/sentinel/watchlists/12", "/api/sentinel/watchlists/12/set-default", "/api/sentinel/watchlists/12/items",
+  "/api/sentinel/watchlist/bulk-add/x", "/api/sentinel/screen-grab/extract", "/api/sentinel/watchlist/remove"]) {
   assert.ok(!allowedPath(p, "POST"), `refused POST ${p}`);
+}
+const add = { watchlistId: 3, items: [{ symbol: "NVDA" }, { symbol: "BRK.B" }] };
+assert.ok(allowedBody("/api/sentinel/watchlist/bulk-add", add));
+assert.ok(allowedBody("/api/sentinel/watchlist/remove-tickers", { watchlistId: 3, symbols: ["NVDA"] }));
+assert.ok(allowedBody("/api/sentinel/watchlists", { name: "Energy" }));
+assert.ok(allowedBody("/api/sentinel/watchlist/12/shares", { shares: 1 }), "the trim's body is checked by its route");
+for (const [p, b] of [
+  ["/api/sentinel/watchlist/bulk-add", { ...add, remove: ["MSFT"] }],
+  ["/api/sentinel/watchlist/bulk-add", { ...add, update: true }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", shares: 100 }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", entry: 1 }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: "3", items: [{ symbol: "NVDA" }] }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: "NVDA" }],
+  ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "X".repeat(13) }] }],
+  ["/api/sentinel/watchlist/bulk-add", undefined],
+  ["/api/sentinel/watchlist/bulk-add", [add]],
+  ["/api/sentinel/watchlist/remove-tickers", { watchlistId: 3, symbols: ["NVDA"], all: true }],
+  ["/api/sentinel/watchlist/remove-tickers", { watchlistId: 3, symbols: [7] }],
+  ["/api/sentinel/watchlist/remove-tickers", { symbols: ["NVDA"] }],
+  ["/api/sentinel/watchlists", { name: "Energy", isPortfolio: true }],
+  ["/api/sentinel/watchlists", { name: "Energy", isDefault: true }],
+  ["/api/sentinel/watchlists", { name: "  " }],
+  ["/api/sentinel/watchlists", { name: "x".repeat(61) }],
+  ["/api/sentinel/watchlists", {}],
+  ["/api/sentinel/watchlists/12", { name: "Energy" }],
+] as [string, unknown][]) {
+  assert.ok(!allowedBody(p, b), `refused body ${p} ${JSON.stringify(b)}`);
 }
 for (const p of ["/api/auth/me", "/api/sentinel/evaluate", "/api/marketflow/NVDA", "/api/discord-stream/messages",
   "/api/market-leaders/book", "/api/alerts", "/api/sentinel/trade/12/labels", "/api/uploads", "/api/stocks/AAPL/quote/x",
@@ -41,6 +72,7 @@ assert.deepEqual(loadAnimaGatewayOptions({ ANIMA_GATEWAY_IPS: " 74.220.49.0/24, 
 
 async function withApp(opts: { token?: string; userId?: number; ips?: string[] }, fn: (call: Call) => Promise<void>) {
   const app = express();
+  app.use(express.json());
   app.use(createAnimaGateway({ token: opts.token, userId: opts.userId, ips: opts.ips }));
   app.use(session({ secret: "x", resave: false, saveUninitialized: false, store: new session.MemoryStore() }));
   app.use(createApiAccessGuard({ config: { ownerIds: new Set([1]) }, getUser: async (id) => USERS[id] ?? null }));
@@ -50,7 +82,17 @@ async function withApp(opts: { token?: string; userId?: number; ips?: string[] }
   app.get("/api/alerts/feed", (req: any, res) => res.json({ uid: req.session.userId, q: req.query }));
   app.get("/api/alerts/events", (_req, res) => res.json({ leaked: true }));
   app.post("/api/sentinel/watchlist/:id/shares", express.json(), (req: any, res) => res.json({ id: req.params.id, uid: req.session.userId, body: req.body }));
+  const echo = (req: any, res: any) => res.json({ path: req.path, uid: req.session.userId, body: req.body });
+  app.post("/api/sentinel/watchlist/bulk-add", echo);
+  app.post("/api/sentinel/watchlist/remove-tickers", echo);
+  app.post("/api/sentinel/watchlists", echo);
   app.post("/api/sentinel/watchlist/:id", (_req, res) => res.json({ leaked: true }));
+  const leak = (_req: any, res: any) => res.json({ leaked: true });
+  app.delete("/api/sentinel/watchlists/:id", leak);
+  app.delete("/api/sentinel/watchlists/:id/items", leak);
+  app.delete("/api/sentinel/watchlist/:id", leak);
+  app.patch("/api/sentinel/watchlists/:id", leak);
+  app.post("/api/sentinel/watchlists/:id/set-default", leak);
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   const server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
@@ -108,6 +150,32 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
   assert.equal((await call("GET", "/api/anima/sentinel/watchlist/12/shares", inside)).status, 403, "not a read route");
   assert.equal((await call("POST", "/api/anima/sentinel/watchlist/12/shares", { ...json, "x-anima-token": "wrong" }, trim)).status, 404, "the write needs the token");
   assert.equal((await call("POST", "/api/sentinel/watchlist/12/shares", json, trim)).status, 401, "not open outside the gateway");
+
+  const adds = JSON.stringify({ watchlistId: 7, items: [{ symbol: "NVDA" }, { symbol: "GEV" }] });
+  const added = await call("POST", "/api/anima/sentinel/watchlist/bulk-add", json, adds);
+  assert.equal(added.status, 200);
+  assert.deepEqual(added.body, { path: "/api/sentinel/watchlist/bulk-add", uid: 1, body: JSON.parse(adds) }, "adds tickers as the owner");
+  assert.equal(added.cookie, undefined);
+  const drops = JSON.stringify({ watchlistId: 7, symbols: ["NVDA"] });
+  assert.deepEqual((await call("POST", "/api/anima/sentinel/watchlist/remove-tickers", json, drops)).body.body, JSON.parse(drops), "removes named tickers");
+  const made = await call("POST", "/api/anima/sentinel/watchlists", json, JSON.stringify({ name: "Energy" }));
+  assert.deepEqual(made.body, { path: "/api/sentinel/watchlists", uid: 1, body: { name: "Energy" } }, "creates a list");
+  for (const body of [{ watchlistId: 7, items: [{ symbol: "NVDA" }], remove: ["GEV"] },
+    { watchlistId: 7, items: [{ symbol: "NVDA" }], update: true },
+    { watchlistId: 7, items: [{ symbol: "NVDA", shares: 5, entry: 100 }] }]) {
+    assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", json, JSON.stringify(body))).status, 403,
+      `no positions or removes through bulk-add: ${JSON.stringify(body)}`);
+  }
+  assert.equal((await call("POST", "/api/anima/sentinel/watchlists", json, JSON.stringify({ name: "P", isPortfolio: true }))).status, 403, "a name only");
+  assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", inside, adds)).status, 415, "the edits are JSON only");
+  for (const [method, path] of [["DELETE", "/api/anima/sentinel/watchlists/7"], ["DELETE", "/api/anima/sentinel/watchlists/7/items"],
+    ["DELETE", "/api/anima/sentinel/watchlist/7"], ["PATCH", "/api/anima/sentinel/watchlists/7"],
+    ["POST", "/api/anima/sentinel/watchlists/7/set-default"], ["POST", "/api/anima/sentinel/watchlist/7"],
+    ["PUT", "/api/anima/sentinel/watchlists"]]) {
+    const r = await call(method, path, inside);
+    assert.equal(r.status, 405, `${method} ${path} refused`);
+    assert.notDeepEqual(r.body, { leaked: true });
+  }
 });
 
 const edge = { host: "marketflow-hrxh.onrender.com", "x-forwarded-for": "74.220.49.7", "x-anima-token": TOKEN };
