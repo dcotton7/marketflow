@@ -1,6 +1,8 @@
+import "dotenv/config";
 import pg from "pg";
 
-const DATABASE_URL = "postgresql://neondb_owner:npg_d1zsHf7jJRmV@ep-broad-truth-afv67u09-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require";
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error("DATABASE_URL is not set (put it in .env)");
 const pool = new pg.Pool({ connectionString: DATABASE_URL });
 
 async function main() {

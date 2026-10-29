@@ -1,9 +1,10 @@
+require("dotenv/config");
 const { Client } = require("pg");
 
 async function main() {
   const connectionString =
-    process.env.DATABASE_URL ||
-    "postgresql://neondb_owner:npg_d1zsHf7jJRmV@ep-broad-truth-afv67u09-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require";
+    process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is not set");
 
   const client = new Client({
     connectionString,

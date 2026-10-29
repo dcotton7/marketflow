@@ -232,6 +232,10 @@ if (-not $Symbol) {
   Write-Result @{ ok = $false; error = "symbol is required" }
   exit 2
 }
+if ($Symbol -notmatch '^[A-Za-z0-9./^$-]{1,12}$') {
+  Write-Result @{ ok = $false; error = "bad symbol" }
+  exit 2
+}
 
 $tosWindows = [TosWin]::FindTosWindows()
 if ($tosWindows.Count -eq 0) {
@@ -271,7 +275,9 @@ if ($hit.isBrowser -or -not $hit.isTos) {
 
 [TosWin]::SendCtrlA()
 Start-Sleep -Milliseconds 80
-[System.Windows.Forms.SendKeys]::SendWait($Symbol)
+# SendKeys treats + ^ % ~ ( ) { } [ ] as keys; send them as literal text.
+$keys = $Symbol -replace '([+^%~(){}\[\]])', '{$1}'
+[System.Windows.Forms.SendKeys]::SendWait($keys)
 Start-Sleep -Milliseconds 80
 [TosWin]::SendEnter()
 Start-Sleep -Milliseconds 120

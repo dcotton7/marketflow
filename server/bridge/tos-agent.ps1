@@ -41,8 +41,31 @@ function Invoke-TosWin([string[]]$WinArgs) {
   return Parse-TosJson $out
 }
 
+# Only these web pages may drive Thinkorswim. Add more (space-separated) with the
+# TOSLINK_EXTRA_ORIGINS environment variable, e.g. a custom domain.
+$AllowedOrigins = @(
+  "http://localhost:5000", "http://127.0.0.1:5000",
+  "https://stock-pattern-stream.onrender.com", "https://marketflow-hrxh.onrender.com",
+  "http://localhost:8770", "http://127.0.0.1:8770", "https://anima-u2fy.onrender.com"
+)
+if ($env:TOSLINK_EXTRA_ORIGINS) { $AllowedOrigins += ($env:TOSLINK_EXTRA_ORIGINS -split "\s+" | Where-Object { $_ }) }
+$script:reqOrigin = ""
+
+# Browsers always send Sec-Fetch-Site; local tools (Anima's pc_link.py, curl) do not.
+# A browser request must come from an allowed Origin. Local tools are allowed.
+function Test-Caller($req) {
+  $origin = [string]$req.Headers["Origin"]
+  $fetchSite = [string]$req.Headers["Sec-Fetch-Site"]
+  if ($origin) { return ($AllowedOrigins -contains $origin) }
+  if ($fetchSite) { return $false }
+  return $true
+}
+
 function Write-Cors([System.Net.HttpListenerResponse]$res) {
-  $res.AppendHeader("Access-Control-Allow-Origin", "*")
+  if ($script:reqOrigin -and ($AllowedOrigins -contains $script:reqOrigin)) {
+    $res.AppendHeader("Access-Control-Allow-Origin", $script:reqOrigin)
+    $res.AppendHeader("Vary", "Origin")
+  }
   $res.AppendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
   $res.AppendHeader("Access-Control-Allow-Headers", "Content-Type, Access-Control-Request-Private-Network")
   $res.AppendHeader("Access-Control-Allow-Private-Network", "true")
@@ -96,6 +119,7 @@ while ($listener.IsListening) {
   $reqPath = $ctx.Request.Url.AbsolutePath.TrimEnd("/").ToLowerInvariant()
   if ($reqPath -eq "") { $reqPath = "/" }
     $method = $ctx.Request.HttpMethod.ToUpperInvariant()
+    $script:reqOrigin = [string]$ctx.Request.Headers["Origin"]
     Write-Host "$method $reqPath"
     Write-HelperLog "$method $reqPath $($ctx.Request.Url.Query)"
 
@@ -104,6 +128,12 @@ while ($listener.IsListening) {
       $ctx.Response.StatusCode = 204
       Write-Cors $ctx.Response
       $ctx.Response.Close()
+      continue
+    }
+
+    if (($reqPath -eq "/navigate" -or $reqPath -eq "/calibrate") -and -not (Test-Caller $ctx.Request)) {
+      Write-HelperLog "REFUSED $method $reqPath from origin '$($script:reqOrigin)'"
+      Write-Json $ctx 403 @{ error = "origin not allowed" }
       continue
     }
 
@@ -194,6 +224,11 @@ while ($listener.IsListening) {
         continue
       }
       $up = $symbol.ToUpperInvariant()
+      if ($up -notmatch '^[A-Z0-9./^$-]{1,12}$') {
+        Write-HelperLog "REFUSED navigate: bad symbol"
+        Write-Json $ctx 400 @{ error = "bad symbol" }
+        continue
+      }
       $now = Get-Date
       if ($up -eq $script:lastNavSymbol -and ($now - $script:lastNavAt).TotalMilliseconds -lt 4000) {
         Write-Host "Skipped duplicate $up"

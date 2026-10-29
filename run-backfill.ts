@@ -1,3 +1,4 @@
+import "dotenv/config";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
@@ -5,9 +6,11 @@ import { historicalBars } from "./shared/schema";
 
 const { Pool } = pg;
 
-const DATABASE_URL = "postgresql://neondb_owner:npg_d1zsHf7jJRmV@ep-broad-truth-afv67u09-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require";
-const ALPACA_API_KEY = "PKCCJS3BA56V4URZ34HXLZMAAR";
-const ALPACA_API_SECRET = "sWXzni6KH7JnP92EqHUCBvhN7LXxYWMnjxcvBBQcSza";
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error("DATABASE_URL is not set (put it in .env)");
+const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+if (!ALPACA_API_KEY || !ALPACA_API_SECRET) throw new Error("ALPACA_API_KEY / ALPACA_API_SECRET are not set");
 const ALPACA_DATA_URL = "https://data.alpaca.markets";
 
 async function sleep(ms: number): Promise<void> {

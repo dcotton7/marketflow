@@ -1,10 +1,12 @@
+import "dotenv/config";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, desc, sql } from "drizzle-orm";
 import { historicalBars, tickerMa } from "./shared/schema";
 
 const { Pool } = pg;
-const DATABASE_URL = "postgresql://neondb_owner:npg_d1zsHf7jJRmV@ep-broad-truth-afv67u09-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require";
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error("DATABASE_URL is not set (put it in .env)");
 
 function calculateSMA(closes: number[], period: number): number | null {
   if (closes.length < period) return null;
