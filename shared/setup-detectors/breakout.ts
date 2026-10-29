@@ -3,10 +3,12 @@ import { avgVolume } from "./bars";
 import { emptyResult, hitResult } from "./result-helpers";
 
 export function detectBreakout(bars: SetupBar[], technicals?: SetupTechnicals) {
-  if (bars.length < 20) return emptyResult("breakout", "O10");
+  if (bars.length < 21) return emptyResult("breakout", "O10");
 
   const current = bars[bars.length - 1]!;
-  const recent20 = bars.slice(-20);
+  // The range is the 20 bars before today. Including today's bar made the pivot
+  // at least today's high, so close > pivot (triggered/extended) could never happen.
+  const recent20 = bars.slice(-21, -1);
   const recent20High = Math.max(...recent20.map((b) => b.high));
   const recent20Low = Math.min(...recent20.map((b) => b.low));
 

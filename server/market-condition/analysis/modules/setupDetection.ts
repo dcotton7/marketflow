@@ -159,9 +159,11 @@ interface PatternResult {
 }
 
 function detectVCP(bars: Array<{ high: number; low: number; close: number; volume: number }>): PatternResult {
-  if (bars.length < 30) return { detected: false, confidence: 0, stage: "forming", entry: null, stop: null, target: null };
+  if (bars.length < 29) return { detected: false, confidence: 0, stage: "forming", entry: null, stop: null, target: null };
 
-  const recent30 = bars.slice(-30);
+  // Base = the 28 bars before today (four 7-bar weeks ending yesterday); today is
+  // excluded so close > pivot can trigger. Same fix as shared/setup-detectors/vcp.ts.
+  const recent30 = bars.slice(-29, -1);
   const ranges: number[] = [];
 
   // Calculate weekly ranges
@@ -218,8 +220,8 @@ function detectHTF(bars: Array<{ high: number; low: number; close: number; open:
 
   if (gainPct < 100) return { detected: false, confidence: 0, stage: "forming", entry: null, stop: null, target: null };
 
-  // Check flag tightness (last 10 bars)
-  const flag = lookback.slice(-10);
+  // Check flag tightness (the 10 bars before today, so close > flag high can trigger)
+  const flag = lookback.slice(-11, -1);
   const flagHigh = Math.max(...flag.map((b) => b.high));
   const flagLow = Math.min(...flag.map((b) => b.low));
   const flagRange = ((flagHigh - flagLow) / flagHigh) * 100;
@@ -281,13 +283,16 @@ function detectBreakout(
   bars: Array<{ high: number; low: number; close: number; volume: number }>,
   technicals: { high52Week?: number } | null
 ): PatternResult {
-  if (bars.length < 20) {
+  if (bars.length < 21) {
     return { detected: false, confidence: 0, stage: "forming", entry: null, stop: null, target: null };
   }
 
+  // Range = the 20 bars before today, so close > range high can trigger
+  // (same fix as shared/setup-detectors/breakout.ts).
+  const prior20 = bars.slice(-21, -1);
   const currentPrice = bars[bars.length - 1].close;
-  const recent20High = Math.max(...bars.slice(-20).map((b) => b.high));
-  const recent20Low = Math.min(...bars.slice(-20).map((b) => b.low));
+  const recent20High = Math.max(...prior20.map((b) => b.high));
+  const recent20Low = Math.min(...prior20.map((b) => b.low));
 
   // Breaking out of range
   const breakingOut = currentPrice > recent20High * 0.98;
@@ -296,7 +301,7 @@ function detectBreakout(
   }
 
   // Volume confirmation
-  const avgVol = bars.slice(-20).reduce((sum, b) => sum + b.volume, 0) / 20;
+  const avgVol = prior20.reduce((sum, b) => sum + b.volume, 0) / 20;
   const todayVol = bars[bars.length - 1].volume;
   const volConfirm = todayVol > avgVol * 1.3;
 

@@ -64,6 +64,25 @@ export interface LeaderState {
 // In-memory state for hysteresis tracking
 const leaderState: Map<string, LeaderState[string]> = new Map();
 
+// Scoring and hysteresis settings for this live LeaderScore. Kept here, not in
+// universe.ts LEADER_RULES: that block describes the planned hybrid model
+// (rsVsSpy30d, rsVsCluster, ...) and has none of these fields, so reading them
+// from it gave undefined and every LeaderScore came out NaN.
+export const LEADER_SCORING = {
+  weights: {
+    rsVsSpy: 35,
+    volumeExpansion: 25,
+    momentum: 25,
+    acceleration: 15,
+  },
+  promoteThreshold: 70,           // score >= 70 counts toward promotion
+  demoteThreshold: 55,            // score <= 55 counts toward demotion
+  promoteConsecutiveRequired: 3,  // refreshes in a row at/above 70 to promote
+  demoteConsecutiveRequired: 5,   // refreshes in a row at/below 55 to demote
+  maxTurnoverPerRefresh: 0.2,     // share of a cluster's leader target per refresh
+  maxTurnoverPerDay: 0.5,         // share of a cluster's leader target per day
+} as const;
+
 // Daily turnover tracking
 let dailyTurnoverCount = 0;
 let dailyTurnoverResetDate: string = "";
@@ -102,7 +121,7 @@ export function calculateLeaderScore(
   historicalBars?: HistoricalBar[],
   avgVolume20D?: number
 ): number {
-  const { weights } = LEADER_RULES;
+  const { weights } = LEADER_SCORING;
   
   // RS vs SPY component (35%)
   const rsVsSpy = snapshot.changePct - spyBenchmark.changePct;
@@ -145,9 +164,11 @@ export function calculateLeaderScore(
   let accelerationScore = 50; // Neutral default
   if (historicalBars && historicalBars.length >= 4) {
     const threeDaysAgo = historicalBars[historicalBars.length - 4]?.close || snapshot.prevClose;
-    const threeDay = ((snapshot.price - threeDaysAgo) / threeDaysAgo) * 100;
-    // Map -10% to +10% → 0-100
-    accelerationScore = Math.max(0, Math.min(100, (threeDay + 10) * 5));
+    if (threeDaysAgo > 0) {
+      const threeDay = ((snapshot.price - threeDaysAgo) / threeDaysAgo) * 100;
+      // Map -10% to +10% → 0-100
+      accelerationScore = Math.max(0, Math.min(100, (threeDay + 10) * 5));
+    }
   }
   
   // Weighted sum
@@ -157,7 +178,7 @@ export function calculateLeaderScore(
      momentumScore * weights.momentum +
      accelerationScore * weights.acceleration) / 100;
   
-  return Math.round(score * 10) / 10;
+  return Number.isFinite(score) ? Math.round(score * 10) / 10 : 0;
 }
 
 /**
@@ -199,8 +220,8 @@ export function processClusterLeaders(
   if (!cluster) return candidates;
   
   const targetLeaders = cluster.leadersTarget;
-  const maxRefreshTurnover = Math.ceil(targetLeaders * LEADER_RULES.maxTurnoverPerRefresh);
-  const maxDailyTurnover = Math.ceil(targetLeaders * LEADER_RULES.maxTurnoverPerDay);
+  const maxRefreshTurnover = Math.ceil(targetLeaders * LEADER_SCORING.maxTurnoverPerRefresh);
+  const maxDailyTurnover = Math.ceil(targetLeaders * LEADER_SCORING.maxTurnoverPerDay);
   
   // Get current leaders
   const currentLeaders = candidates.filter(c => {
@@ -223,10 +244,10 @@ export function processClusterLeaders(
     };
     
     // Update consecutive counters
-    if (candidate.leaderScore >= LEADER_RULES.promoteThreshold) {
+    if (candidate.leaderScore >= LEADER_SCORING.promoteThreshold) {
       state.consecutiveAbove70++;
       state.consecutiveBelow55 = 0;
-    } else if (candidate.leaderScore <= LEADER_RULES.demoteThreshold) {
+    } else if (candidate.leaderScore <= LEADER_SCORING.demoteThreshold) {
       state.consecutiveBelow55++;
       state.consecutiveAbove70 = 0;
     } else {
@@ -237,7 +258,7 @@ export function processClusterLeaders(
     
     // Check for promotion
     if (!state.isLeader &&
-        state.consecutiveAbove70 >= LEADER_RULES.promoteConsecutiveRequired &&
+        state.consecutiveAbove70 >= LEADER_SCORING.promoteConsecutiveRequired &&
         candidate.isEligible) {
       // Check turnover caps
       if (refreshTurnoverCount < maxRefreshTurnover &&
@@ -251,7 +272,7 @@ export function processClusterLeaders(
     // Check for demotion
     if (state.isLeader &&
         !state.isPinned &&
-        state.consecutiveBelow55 >= LEADER_RULES.demoteConsecutiveRequired) {
+        state.consecutiveBelow55 >= LEADER_SCORING.demoteConsecutiveRequired) {
       state.isLeader = false;
       refreshTurnoverCount++;
       dailyTurnoverCount++;

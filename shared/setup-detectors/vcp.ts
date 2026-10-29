@@ -2,9 +2,13 @@ import type { SetupBar } from "./types";
 import { emptyResult, hitResult } from "./result-helpers";
 
 export function detectVcp(bars: SetupBar[]) {
-  if (bars.length < 30) return emptyResult("vcp", "O6");
+  if (bars.length < 29) return emptyResult("vcp", "O6");
 
-  const recent30 = bars.slice(-30);
+  // The base is the 28 bars before today, in four 7-bar weeks ending yesterday.
+  // Today's bar is left out of the pivot so a close above it can register as
+  // triggered (before, the pivot always included today's high), and the old
+  // 30-bar window skipped its two newest bars when measuring contraction.
+  const recent30 = bars.slice(-29, -1);
   const ranges: number[] = [];
 
   for (let i = 0; i < 4; i++) {
