@@ -72,6 +72,50 @@ export function planBulkAdd(
   return plan;
 }
 
+/** The row writes of a bulk add, done inside one database transaction by the caller. */
+export interface BulkAddWrites {
+  insert(row: { symbol: string; shares: number | null; targetEntry: number | null; direction?: "long" | "short" }): Promise<unknown>;
+  update(id: number, patch: Record<string, unknown>): Promise<unknown>;
+  remove(id: number): Promise<unknown>;
+}
+
+/**
+ * Applies a plan to the list's rows (`have`: its watching rows): adds first, then the updates, then the removals, so a
+ * failure part way never leaves a list with tickers taken out and nothing put in. Any write that throws throws out
+ * of here, and the caller's transaction rolls the rest back.
+ */
+export async function applyBulkAdd(
+  plan: BulkAddPlan,
+  have: { id: number; symbol: string }[],
+  w: BulkAddWrites,
+): Promise<{ added: string[]; updated: string[]; removed: string[] }> {
+  const bySymbol = (s: string) => have.filter((i) => i.symbol.trim().toUpperCase() === s);
+  const added: string[] = [];
+  for (const it of plan.add) {
+    await w.insert({ symbol: it.symbol, shares: it.shares, targetEntry: it.entry,
+      ...(it.short != null ? { direction: it.short ? "short" : "long" } : {}) });
+    added.push(it.symbol);
+  }
+  const updated: string[] = [];
+  for (const it of plan.update) {
+    const patch = it.short === true
+      ? { direction: "short", shares: null, targetEntry: null }
+      : {
+          ...(it.shares != null ? { shares: it.shares } : {}),
+          ...(it.entry != null ? { targetEntry: it.entry } : {}),
+          ...(it.short === false ? { direction: "long" } : {}),
+        };
+    for (const row of bySymbol(it.symbol)) await w.update(row.id, patch);
+    updated.push(it.symbol);
+  }
+  const removed: string[] = [];
+  for (const s of plan.remove) {
+    for (const row of bySymbol(s)) await w.remove(row.id);
+    removed.push(s);
+  }
+  return { added, updated, removed };
+}
+
 /** Named tickers out of one list (any list); never the list itself. */
 export const removeTickersSchema = z.object({
   watchlistId: z.number().int().positive(),

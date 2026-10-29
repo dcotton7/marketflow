@@ -13,12 +13,19 @@ import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middlewar
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { checkSharesWrite } from "./shares-write";
-import { bulkAddSchema, planBulkAdd, planRemoveTickers, removeTickersSchema, watchlistNameTaken } from "./bulk-add";
+import {
+  applyBulkAdd,
+  bulkAddSchema,
+  planBulkAdd,
+  planRemoveTickers,
+  removeTickersSchema,
+  watchlistNameTaken,
+} from "./bulk-add";
 import { generateSuggestions, type SuggestRequest } from "./suggest";
 // monitor.ts removed — was a stub that only console.logged active trades
 import { fetchMarketSentiment, fetchSectorSentiment, getSentimentCacheAge } from "./sentiment";
 import type { EvaluationRequest, TradeUpdate, DashboardData, TradeWithEvaluation, EventWithTrade } from "./types";
-import { sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
+import { sentinelWatchlist, sentinelTrades, sentinelTradeLabels, sentinelTradeToLabels, sentinelUsers, insertSentinelTradeLabelSchema, sentinelImportBatches, sentinelImportedTrades, sentinelAccountSettings, sentinelRulePerformance, sentinelRules, sentinelEvaluations, sentinelEvents, sentinelOrderLevels, userMaSettings, userMiniMaSettings, userChartPreferences } from "@shared/schema";
 import { fetchChartData } from "./chartDataEngine";
 import { fetchCompanyLogoBytes } from "../company-logo";
 import { registerChartSetupEnrichRoutes } from "./chart-setup-enrich/routes";
@@ -1647,37 +1654,13 @@ export function registerSentinelRoutes(app: Express): void {
       }
       const have = (await sentinelModels.getWatchlistByUser(userId, watchlistId)).filter((i) => i.status === "watching");
       const plan = planBulkAdd(items, have.map((i) => i.symbol), { update, remove, entryOnly: !list.isPortfolio });
-      const bySymbol = (s: string) => have.filter((i) => i.symbol.trim().toUpperCase() === s);
-      const updated: string[] = [];
-      for (const it of plan.update) {
-        const patch = it.short === true
-          ? { direction: "short", shares: null, targetEntry: null }
-          : {
-              ...(it.shares != null ? { shares: it.shares } : {}),
-              ...(it.entry != null ? { targetEntry: it.entry } : {}),
-              ...(it.short === false ? { direction: "long" } : {}),
-            };
-        for (const row of bySymbol(it.symbol)) await sentinelModels.updateWatchlistItem(row.id, patch);
-        updated.push(it.symbol);
-      }
-      const removed: string[] = [];
-      for (const s of plan.remove) {
-        for (const row of bySymbol(s)) await sentinelModels.deleteWatchlistItem(row.id);
-        removed.push(s);
-      }
-      const added: string[] = [];
-      for (const it of plan.add) {
-        await sentinelModels.createWatchlistItem({
-          userId,
-          watchlistId,
-          symbol: it.symbol,
-          targetEntry: it.entry,
-          shares: it.shares,
-          ...(it.short != null ? { direction: it.short ? "short" : "long" } : {}),
-          priority: "medium",
-        });
-        added.push(it.symbol);
-      }
+      // One transaction, adds before removes: a failure part way changes nothing.
+      const { added, updated, removed } = await db!.transaction((tx) => applyBulkAdd(plan, have, {
+        insert: (row) => tx.insert(sentinelWatchlist).values({ ...row, userId, watchlistId, priority: "medium" }),
+        update: (id, patch) => tx.update(sentinelWatchlist).set({ ...patch, updatedAt: new Date() })
+          .where(eq(sentinelWatchlist.id, id)),
+        remove: (id) => tx.delete(sentinelWatchlist).where(eq(sentinelWatchlist.id, id)),
+      }));
       res.json({ added, existing: plan.existing, invalid: plan.invalid, updated, removed });
     } catch (error) {
       if (error instanceof z.ZodError) {

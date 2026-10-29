@@ -96,3 +96,28 @@ console.log("bulk add ok");
   assert.deepEqual(planBulkAdd([{ symbol: "TSLA", short: true }], ["TSLA"], { update: true, entryOnly: true }).update, []);
   console.log("bulk add shorts ok");
 }
+
+{
+  // applyBulkAdd: adds, then updates, then removals; a failing write stops everything after it (the route's
+  // transaction rolls back what came before).
+  const { applyBulkAdd } = await import("./bulk-add");
+  const have = [{ id: 1, symbol: "AAPL" }, { id: 2, symbol: "MSFT" }, { id: 3, symbol: "TSLA" }];
+  const p = planBulkAdd([{ symbol: "NVDA", shares: 5, entry: 100 }, { symbol: "AAPL", shares: 9 }], have.map((h) => h.symbol),
+    { update: true, remove: ["MSFT", "TSLA"] });
+  const log: string[] = [];
+  const got = await applyBulkAdd(p, have, {
+    insert: async (r) => log.push(`insert ${r.symbol}`),
+    update: async (id) => log.push(`update ${id}`),
+    remove: async (id) => log.push(`remove ${id}`),
+  });
+  assert.deepEqual(log, ["insert NVDA", "update 1", "remove 2", "remove 3"]);
+  assert.deepEqual(got, { added: ["NVDA"], updated: ["AAPL"], removed: ["MSFT", "TSLA"] });
+  const failed: string[] = [];
+  await assert.rejects(applyBulkAdd(p, have, {
+    insert: async () => { throw new Error("db down"); },
+    update: async (id) => failed.push(`update ${id}`),
+    remove: async (id) => failed.push(`remove ${id}`),
+  }), /db down/);
+  assert.deepEqual(failed, [], "nothing is removed when an add fails");
+  console.log("bulk add apply ok");
+}
