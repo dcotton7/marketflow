@@ -21,64 +21,24 @@ export type TosScreenExtractResult = {
   positions: TosScreenPositionRow[];
 };
 
+/** Column headers and noise in a screenshot's text that are not listed tickers. */
 const STOP = new Set([
-  "NASDAQ",
-  "NYSE",
-  "AMEX",
-  "OTC",
-  "LAST",
-  "BID",
-  "ASK",
-  "VOL",
-  "VOLUME",
-  "CHANGE",
-  "CHG",
-  "PRICE",
-  "OPEN",
-  "HIGH",
-  "LOW",
-  "CLOSE",
-  "NET",
-  "THE",
-  "AND",
-  "FOR",
-  "FROM",
-  "WITH",
-  "THIS",
-  "THAT",
-  "CALL",
-  "PUT",
-  "DATE",
-  "TIME",
-  "TODAY",
-  "TOTAL",
-  "CASH",
-  "PNL",
-  "AVG",
-  "SMA",
-  "EMA",
-  "RSI",
-  "MACD",
-  "USD",
-  "QTY",
-  "SIZE",
-  "MARK",
-  "WATCHLIST",
-  "TICKER",
-  "SYMBOL",
-  "STOCK",
-  "STOCKS",
-  "CHART",
-  "CHARTS",
-  "COST",
-  "POS",
+  "NASDAQ", "NYSE", "AMEX", "OTC", "LAST", "BID", "ASK", "VOL", "VOLUME", "CHANGE", "CHG", "PRICE", "CLOSE",
+  "THE", "AND", "FROM", "WITH", "THIS", "THAT", "CALL", "PUT", "DATE", "TIME", "TODAY", "TOTAL", "PNL", "AVG",
+  "SMA", "EMA", "RSI", "MACD", "QTY", "WATCHLIST", "TICKER", "SYMBOL", "STOCK", "STOCKS", "CHART", "CHARTS", "POS",
 ]);
+
+/** Header words that are also real tickers (Costco, Lowe's, Cloudflare, Opendoor, Pathward, Forestar, ...).
+ *  Dropped from loose text, kept in a comma-separated list (the review box) and in a table row that holds a
+ *  position, so From Screen never silently skips them or offers them for removal. */
+const AMBIGUOUS = new Set(["OPEN", "HIGH", "LOW", "NET", "COST", "CASH", "MARK", "FOR", "SIZE", "USD"]);
 
 const TOKEN = /^[A-Z]{1,5}([./][A-Z])?$/;
 
 export function parseWatchlistTickers(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  const list = raw.includes(",");
   const tokens = raw
     .toUpperCase()
     .replace(/\$/g, " ")
@@ -87,6 +47,7 @@ export function parseWatchlistTickers(raw: string): string[] {
     const s = token.replace(/^\./, "").replace(/\.$/, "");
     if (!TOKEN.test(s)) continue;
     if (STOP.has(s)) continue;
+    if (AMBIGUOUS.has(s) && !list) continue;
     if (seen.has(s)) continue;
     seen.add(s);
     out.push(s);
@@ -146,13 +107,13 @@ function asFiniteNumber(value: unknown): number | null {
 }
 
 /** The row's stock: an option row (as the paste reads them) stands for its underlying. */
-function asSymbol(value: unknown): { symbol: string; option: boolean } | null {
+function asSymbol(value: unknown): { symbol: string; option: boolean; ambiguous: boolean } | null {
   if (typeof value !== "string") return null;
   const raw = value.toUpperCase().trim().replace(/^\$/, "");
   const opt = cleanSymbol(raw);
   const s = opt.option ? opt.symbol : raw;
   if (!TOKEN.test(s) || STOP.has(s)) return null;
-  return { symbol: s, option: !!opt.option };
+  return { symbol: s, option: !!opt.option, ambiguous: AMBIGUOUS.has(s) };
 }
 
 export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult {
@@ -203,6 +164,13 @@ export function normalizeTosScreenExtract(raw: unknown): TosScreenExtractResult 
     const posQty = asFiniteNumber(r.posQty ?? r.qty ?? r.quantity);
     const lastPrice = asFiniteNumber(r.lastPrice ?? r.last);
     const hasPosition = r.hasPosition === true || (posQty != null && posQty !== 0);
+    // "Cash", "Open", "Net" as a header or sweep row: such a row counts as that ticker only when it holds shares
+    // or (except CASH, a broker's cash sweep line) shows a last price.
+    const held = posQty != null && posQty !== 0;
+    if (named.ambiguous && !(held || (symbol !== "CASH" && lastPrice != null && lastPrice > 0))) {
+      if (!before) seen.delete(symbol);
+      continue;
+    }
     const next = { symbol, avgCost, posQty: hasPosition ? posQty : null, lastPrice, hasPosition };
     if (before) {
       positions[before.index] = next;

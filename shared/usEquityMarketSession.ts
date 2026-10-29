@@ -1,3 +1,5 @@
+import { isMarketHoliday, regularCloseMinute } from "./us-market-holidays";
+
 const ET_TIME_ZONE = "America/New_York";
 
 export type UsEquityMarketSession = "pre_market" | "regular" | "after_hours" | "closed";
@@ -38,10 +40,13 @@ export function getEtClock(at: Date = new Date()): EtClock {
 }
 
 export function getUsEquityMarketSession(at: Date = new Date()): UsEquityMarketSession {
-  const { weekday, minuteOfDay } = getEtClock(at);
+  const { weekday, minuteOfDay, dateKey } = getEtClock(at);
   if (weekday === "Sat" || weekday === "Sun") return "closed";
+  if (isMarketHoliday(dateKey)) return "closed";
+  const close = regularCloseMinute(dateKey);
   if (minuteOfDay >= 4 * 60 && minuteOfDay < 9 * 60 + 30) return "pre_market";
-  if (minuteOfDay >= 9 * 60 + 30 && minuteOfDay < 16 * 60) return "regular";
+  if (minuteOfDay >= 9 * 60 + 30 && minuteOfDay < close) return "regular";
+  if (minuteOfDay >= close && minuteOfDay < 16 * 60) return "after_hours";
   if (minuteOfDay >= 16 * 60 && minuteOfDay < 20 * 60) return "after_hours";
   return "closed";
 }

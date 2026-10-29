@@ -11,6 +11,8 @@ export const bulkAddSchema = z.object({
         symbol: z.string().min(1).max(12),
         shares: z.number().finite().positive().nullable().optional(),
         entry: z.number().finite().positive().nullable().optional(),
+        /** From Screen: a negative Pos Qty. Stored as direction "short", without shares or entry. */
+        short: z.boolean().optional(),
       }),
     )
     .min(1)
@@ -21,7 +23,7 @@ export const bulkAddSchema = z.object({
   remove: z.array(z.string().min(1).max(12)).max(BULK_ADD_MAX).optional(),
 });
 
-type Position = { symbol: string; shares: number | null; entry: number | null };
+type Position = { symbol: string; shares: number | null; entry: number | null; short?: boolean };
 
 export interface BulkAddPlan {
   add: Position[];
@@ -50,12 +52,17 @@ export function planBulkAdd(
       seen.add(symbol);
       plan.existing.push(symbol);
       const shares = opts.entryOnly ? null : it.shares ?? null;
-      if (opts.update && (shares != null || it.entry != null)) {
-        plan.update.push({ symbol, shares, entry: it.entry ?? null });
+      if (opts.update && it.short === true && !opts.entryOnly) {
+        // Now short in a portfolio list: the row's old long shares and entry no longer apply.
+        plan.update.push({ symbol, shares: null, entry: null, short: true });
+      } else if (opts.update && (shares != null || it.entry != null)) {
+        plan.update.push({ symbol, shares, entry: it.entry ?? null, ...(it.short === false ? { short: false } : {}) });
       }
     } else {
       seen.add(symbol);
-      plan.add.push({ symbol, shares: it.shares ?? null, entry: it.entry ?? null });
+      const short = it.short === true;
+      plan.add.push({ symbol, shares: short ? null : it.shares ?? null, entry: short ? null : it.entry ?? null,
+        ...(it.short != null ? { short } : {}) });
     }
   }
   for (const raw of opts.remove ?? []) {

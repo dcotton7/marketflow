@@ -10,6 +10,8 @@ import { buildSnapshot, materialChange, type IndexInput, type PositionSnapshot }
 import { withLivePrice, type PositionSignal } from "./position-rules";
 import { setupHits, setupParamsFor, todaysBars } from "./setup-rules";
 import { getVix } from "./vix";
+import { holdsWorkerLock } from "./worker-lock";
+import { isMarketHoliday, regularCloseMinute } from "@shared/us-market-holidays";
 
 /**
  * Builds a snapshot of every open position (items in isPortfolio lists with an entry price) each poll, and writes one
@@ -43,14 +45,15 @@ export function etClock(now = new Date()) {
     day: `${parts.year}-${parts.month}-${parts.day}`,
     minutes: Number(parts.hour) * 60 + Number(parts.minute),
     weekend: parts.weekday === "Sat" || parts.weekday === "Sun",
+    holiday: isMarketHoliday(`${parts.year}-${parts.month}-${parts.day}`),
   };
 }
 
 export function sessionTiming(clock: ReturnType<typeof etClock>, lastBarDay: string | undefined, inSession: boolean) {
-  const open = 9 * 60 + 30, close = 16 * 60;
+  const open = 9 * 60 + 30, close = regularCloseMinute(clock.day);
   return {
     sessionFraction: inSession ? Math.max(0, Math.min(1, (clock.minutes - open) / (close - open))) : 1,
-    closeFinal: !inSession && !clock.weekend && clock.minutes >= close && lastBarDay === clock.day,
+    closeFinal: !inSession && !clock.weekend && !clock.holiday && clock.minutes >= close && lastBarDay === clock.day,
   };
 }
 
@@ -76,7 +79,9 @@ async function openPositions(userId?: number) {
       eq(sentinelWatchlist.status, "watching"),
       ...(userId ? [eq(sentinelWatchlist.userId, userId)] : []),
     ));
-  return rows.map((r) => r.item).filter((i) => (i.targetEntry ?? 0) > 0);
+  // Shorts are left out until the rules handle them (stop above, trims below); judging one as a long sent a
+  // "max-loss" alert on a winning short and nothing on a losing one.
+  return rows.map((r) => r.item).filter((i) => (i.targetEntry ?? 0) > 0 && i.direction !== "short");
 }
 
 async function nextEarnings(symbol: string, day: string): Promise<string | null> {
@@ -94,9 +99,11 @@ async function nextEarnings(symbol: string, day: string): Promise<string | null>
   return date;
 }
 
-async function indexInput(symbol: string, live: boolean): Promise<IndexInput | null> {
+async function indexInput(symbol: string, live: boolean, day: string): Promise<IndexInput | null> {
   const [bars, quote] = await Promise.all([dailyBarsOldestFirst(symbol, 60), live ? getQuote(symbol) : null]);
-  return bars?.length ? { bars, price: quote?.price ?? null } : null;
+  if (!bars?.length) return null;
+  const price = quote?.price ?? null;
+  return { bars: withLivePrice(bars, price, { day, open: quote?.open, volume: quote?.volume }), price };
 }
 
 /** Current snapshots for the positions (all users, or one). Reads only. */
@@ -105,7 +112,9 @@ export async function computeSnapshots(userId?: number, now = new Date()) {
   if (!items.length) return [];
   const inSession = getMarketSession() === "MARKET_HOURS";
   const clock = etClock(now);
-  const [spy, qqq, vix] = await Promise.all([indexInput("SPY", inSession), indexInput("QQQ", inSession), getVix()]);
+  const [spy, qqq, vix] = await Promise.all([
+    indexInput("SPY", inSession, clock.day), indexInput("QQQ", inSession, clock.day), getVix(),
+  ]);
   const out: Array<{ userId: number; snapshot: PositionSnapshot }> = [];
   for (const item of items) {
     try {
@@ -154,7 +163,9 @@ async function loadSentToday(day: string) {
     .where(gte(positionAlerts.createdAt, new Date(Date.now() - 24 * 3_600_000)));
   for (const r of rows) {
     sent.keys.add(r.key);
-    for (const k of ((r.payload as { signalKeys?: string[] } | null)?.signalKeys ?? [])) if (k.endsWith(day)) sent.keys.add(k);
+    const p = r.payload as { signalKeys?: string[]; changeKey?: string } | null;
+    for (const k of (p?.signalKeys ?? [])) if (k.endsWith(day)) sent.keys.add(k);
+    if (p?.changeKey?.includes(`:${day}:`)) sent.keys.add(p.changeKey);
   }
 }
 
@@ -194,6 +205,7 @@ export async function runPositionAlertCycle(): Promise<number> {
         payload: {
           hard: rule === "stop" && level === "breach",
           signalKeys: newSignals.map((s) => s.key),
+          changeKey,
           newSignals: newSignals.map(({ key: _k, ...s }) => s),
           change,
           snapshot,
@@ -243,7 +255,8 @@ export async function runSetupAlertCycle(now = new Date()): Promise<number> {
       if (!daily?.length || !(price > 0)) continue;
       const { sessionFraction } = sessionTiming(clock, daily[daily.length - 1].date.slice(0, 10), true);
       const hits = setupHits({
-        symbol, daily: withLivePrice(daily, price), bars: todaysBars(intraday, clock.day), price, confirmed: false,
+        symbol, daily: withLivePrice(daily, price, { day: clock.day, open: quote?.open, volume: quote?.volume }),
+        bars: todaysBars(intraday, clock.day), price, confirmed: false,
         sessionFraction,
       }).filter((h) => !sent.keys.has(`setup:${item.id}:${h.name}:${clock.day}`));
       if (!hits.length) continue;
@@ -289,7 +302,7 @@ export function startPositionAlertWorker(): void {
   if (started || process.env.POSITION_ALERTS_DISABLED === "true") return;
   started = true;
   const tick = async () => {
-    if (!running) {
+    if (!running && (await holdsWorkerLock())) {
       running = true;
       const t0 = Date.now();
       try {

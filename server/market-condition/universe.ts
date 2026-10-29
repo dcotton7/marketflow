@@ -10,6 +10,7 @@
  * - 26 Primary Behavior Clusters + 5 Overlays
  */
 
+import { etDateKey, isMarketHoliday, regularCloseMinute } from "@shared/us-market-holidays";
 import { normalizeWatchlistSymbol, sectorSpdrThemeLabel } from "@shared/watchlist-theme";
 
 // =============================================================================
@@ -166,13 +167,15 @@ export function isMarketHours(): boolean {
   if (day === 0 || day === 6) {
     return false;
   }
+  const dateKey = etDateKey(now);
+  if (isMarketHoliday(dateKey)) return false;
   
   const hours = etTime.getHours();
   const minutes = etTime.getMinutes();
   const currentMinutes = hours * 60 + minutes;
   
   const openMinutes = MARKET_HOURS.openHour * 60 + MARKET_HOURS.openMinute;
-  const closeMinutes = MARKET_HOURS.closeHour * 60 + MARKET_HOURS.closeMinute;
+  const closeMinutes = regularCloseMinute(dateKey);
   
   return currentMinutes >= openMinutes && currentMinutes < closeMinutes;
 }
@@ -188,17 +191,19 @@ export function getMarketSession(): MarketSession {
   const etTime = new Date(now.toLocaleString("en-US", { timeZone: MARKET_HOURS.timezone }));
   const day = etTime.getDay(); // 0 = Sunday, 6 = Saturday
   
-  // Weekend = always closed
+  // Weekend = always closed; exchange holidays too
   if (day === 0 || day === 6) {
     return "CLOSED";
   }
+  const dateKey = etDateKey(now);
+  if (isMarketHoliday(dateKey)) return "CLOSED";
   
   const hours = etTime.getHours();
   const minutes = etTime.getMinutes();
   const currentMinutes = hours * 60 + minutes;
   
   const openMinutes = MARKET_HOURS.openHour * 60 + MARKET_HOURS.openMinute;
-  const closeMinutes = MARKET_HOURS.closeHour * 60 + MARKET_HOURS.closeMinute;
+  const closeMinutes = regularCloseMinute(dateKey);
   const afterHoursEndMinutes = MARKET_HOURS.afterHoursEndHour * 60 + MARKET_HOURS.afterHoursEndMinute;
   
   // Market hours: 9:30 AM - 4:00 PM

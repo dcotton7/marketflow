@@ -122,3 +122,22 @@ assert.deepEqual(empty.positions, []);
 assert.equal(empty.layout, "unknown");
 
 console.log("tos-screen-extract tests passed");
+
+// Real tickers that are also header words (Costco, Lowe's, Cloudflare) import from a position table and a CSV box.
+const realOnes = normalizeTosScreenExtract({
+  layout: "tos_positions",
+  positions: [
+    { symbol: "COST", avgCost: 900, posQty: 10, lastPrice: 950 },
+    { symbol: "LOW", avgCost: 240, posQty: 20 },
+    { symbol: "NET", lastPrice: 110 },
+    { symbol: "OPEN" },
+    { symbol: "CASH", quantity: 0, lastPrice: 1 },
+    { symbol: "NVDA", avgCost: 120, posQty: 5 },
+  ],
+});
+assert.deepEqual(realOnes.tickers, ["COST", "LOW", "NET", "NVDA"], "ambiguous tickers kept when the row shows numbers");
+assert.deepEqual(parseWatchlistTickers("COST, LOW, NET, NVDA"), ["COST", "LOW", "NET", "NVDA"], "kept in a CSV box");
+assert.deepEqual(parseWatchlistTickers("Symbol Last Net Open High Low NVDA"), ["NVDA"], "dropped from loose text");
+const realItems = screenImportItems(parseWatchlistTickers(formatTickersCsv(realOnes.tickers)), realOnes.positions, true);
+assert.deepEqual(screenImportMissing(realItems, ["COST", "LOW", "NET", "NVDA", "AMD"]), ["AMD"], "never offered for removal");
+console.log("tos-screen-extract ambiguous-ticker tests passed");

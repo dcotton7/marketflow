@@ -1650,7 +1650,13 @@ export function registerSentinelRoutes(app: Express): void {
       const bySymbol = (s: string) => have.filter((i) => i.symbol.trim().toUpperCase() === s);
       const updated: string[] = [];
       for (const it of plan.update) {
-        const patch = { ...(it.shares != null ? { shares: it.shares } : {}), ...(it.entry != null ? { targetEntry: it.entry } : {}) };
+        const patch = it.short === true
+          ? { direction: "short", shares: null, targetEntry: null }
+          : {
+              ...(it.shares != null ? { shares: it.shares } : {}),
+              ...(it.entry != null ? { targetEntry: it.entry } : {}),
+              ...(it.short === false ? { direction: "long" } : {}),
+            };
         for (const row of bySymbol(it.symbol)) await sentinelModels.updateWatchlistItem(row.id, patch);
         updated.push(it.symbol);
       }
@@ -1667,6 +1673,7 @@ export function registerSentinelRoutes(app: Express): void {
           symbol: it.symbol,
           targetEntry: it.entry,
           shares: it.shares,
+          ...(it.short != null ? { direction: it.short ? "short" : "long" } : {}),
           priority: "medium",
         });
         added.push(it.symbol);

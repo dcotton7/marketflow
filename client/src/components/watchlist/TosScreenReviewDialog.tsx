@@ -204,7 +204,7 @@ export function TosScreenReviewDialog({
     try {
       const got = await bulkAdd.mutateAsync({
         watchlistId,
-        items: items.map(({ symbol, shares, entry }) => ({ symbol, shares, entry })),
+        items: items.map(({ symbol, shares, entry, short }) => ({ symbol, shares, entry, ...(isPortfolio ? { short } : {}) })),
         update: true,
         ...(remove.length ? { remove } : {}),
       });
@@ -220,7 +220,7 @@ export function TosScreenReviewDialog({
         title: `${isPortfolio ? "Positions" : "Tickers"} imported to ${watchlistName}`,
         description:
           (said.join(" · ") || "Nothing changed") +
-          (shorts.length ? `. Shorts kept without shares or entry: ${shorts.join(", ")}` : "") +
+          (shorts.length ? `. Shorts marked short, without shares or entry (no position alerts yet): ${shorts.join(", ")}` : "") +
           (withEntry === 0
             ? ". No Avg Cost in the extract — draw the box around Symbol and Average cost / Avg Cost, then Extract again"
             : "") + ".",

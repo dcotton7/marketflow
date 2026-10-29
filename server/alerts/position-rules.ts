@@ -76,10 +76,22 @@ export interface PositionSignal {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const money = (n: number) => `$${n.toFixed(2)}`;
 
-/** Today's bar at the live price, as the chart draws it. */
-export function withLivePrice<T extends { high: number; low: number; close: number }>(bars: T[], price: number | null): T[] {
+/** Today's bar at the live price, as the chart draws it. With `today.day` (ET YYYY-MM-DD), a last bar from an
+ *  earlier day is kept as it is and a new bar for today is added (open/volume from the quote when given) — the daily
+ *  cache can lag at the open, and overwriting yesterday's bar made its whole-day volume look like a huge surge. */
+export function withLivePrice<T extends { high: number; low: number; close: number; date?: string; open?: number; volume?: number }>(
+  bars: T[],
+  price: number | null,
+  today?: { day: string; open?: number | null; volume?: number | null },
+): T[] {
   if (price == null || !(price > 0) || !bars.length) return bars;
   const last = bars[bars.length - 1];
+  if (today?.day && typeof last.date === "string" && last.date.slice(0, 10) < today.day) {
+    const open = today.open != null && today.open > 0 ? today.open : price;
+    const fresh = { ...last, date: today.day, open, high: Math.max(open, price), low: Math.min(open, price), close: price,
+      volume: today.volume != null && today.volume > 0 ? today.volume : 0 };
+    return [...bars, fresh];
+  }
   return [...bars.slice(0, -1), { ...last, close: price, high: Math.max(last.high, price), low: Math.min(last.low, price) }];
 }
 
@@ -111,7 +123,7 @@ export function evaluatePosition(
   params: PositionRuleParams = POSITION_RULES,
 ): PositionSignal[] {
   const out: PositionSignal[] = [];
-  const bars = withLivePrice(mkt.bars, mkt.price);
+  const bars = withLivePrice(mkt.bars, mkt.price, mkt.day ? { day: mkt.day } : undefined);
   if (!(pos.entry > 0) || bars.length === 0) return out;
   const sym = pos.symbol.toUpperCase();
   const add = (rule: PositionSignalRule, level: string, message: string, detail: Record<string, unknown>) =>

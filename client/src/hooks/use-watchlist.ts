@@ -531,7 +531,7 @@ export function usePasteToWatchlist() {
   return useMutation({
     mutationFn: async (data: {
       watchlistId: number;
-      items: { symbol: string; shares?: number | null; entry?: number | null }[];
+      items: { symbol: string; shares?: number | null; entry?: number | null; short?: boolean }[];
       update?: boolean;
       remove?: string[];
     }): Promise<PasteAddResult> => {

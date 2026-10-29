@@ -80,7 +80,7 @@ function returnPct(bars: DayBar[], price: number, days: number): number | null {
 export function buildSnapshot(input: SnapshotInput) {
   const { pos } = input;
   const live = input.price != null && input.price > 0 ? input.price : null;
-  const bars = withLivePrice(input.bars, live);
+  const bars = withLivePrice(input.bars, live, { day: input.day, open: input.quote?.open, volume: input.quote?.volume });
   const n = bars.length;
   const last = bars[n - 1];
   const price = live ?? last?.close ?? 0;

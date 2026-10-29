@@ -13,7 +13,8 @@ const flat = (n: number, px = 100) => Array.from({ length: n }, (_, i) => bar(i,
 const path = (closes: number[], range = 2) => closes.map((c, i) => bar(i, c, range, i ? closes[i - 1] : c));
 const pos = { itemId: 7, symbol: "nvda", entry: 100, shares: 100 };
 const mkt = (bars: DayBar[], price: number | null, extra: Partial<{ closeFinal: boolean; vix: number | null; day: string }> = {}) =>
-  ({ bars, price, closeFinal: false, vix: 17, day: "2026-10-28", ...extra });
+  // "Today" is the last fixture bar's day, so the live price lands on that bar (an older last bar gets a new one).
+  ({ bars, price, closeFinal: false, vix: 17, day: bars.length ? bars[bars.length - 1].date : "2026-10-28", ...extra });
 const rules = (sigs: { rule: string; level: string }[]) => sigs.map((s) => `${s.rule}:${s.level}`);
 
 // ---- VIX ladder and the stop
@@ -64,7 +65,7 @@ assert.ok(Number(trail.detail.close) < Number(trail.detail.sma));
 // ---- once per condition per day: the key is stable within a day and new the next day
 const a = evaluatePosition(pos, mkt(base, 95)), b = evaluatePosition(pos, mkt(base, 94));
 assert.deepEqual(a.map((s) => s.key), b.map((s) => s.key));
-assert.ok(a.every((s) => s.key.endsWith(":2026-10-28") && s.key.startsWith("pos:7:")));
+assert.ok(a.every((s) => s.key.endsWith(`:${base[base.length - 1].date}`) && s.key.startsWith("pos:7:")));
 assert.notDeepEqual(evaluatePosition(pos, mkt(base, 95, { day: "2026-10-29" })).map((s) => s.key), a.map((s) => s.key));
 
 // ---- logical levels
@@ -134,8 +135,9 @@ const snapIn = (bars: DayBar[], price: number | null, extra = {}) => buildSnapsh
   pos: { ...pos, entryDate: "2026-09-01" }, bars, price,
   quote: price ? { open: bars[bars.length - 1].open, vwap: price - 1, volume: 2e6 } : null,
   spy: { bars: flat(60, 500), price: 495 }, qqq: { bars: flat(60, 400), price: 404 },
-  vix: { level: 17, change: 0.5 }, earningsDate: "2026-10-30", closeFinal: false, sessionFraction: 0.5,
-  day: "2026-10-28", at: "2026-10-28T15:00:00Z", ...extra,
+  vix: { level: 17, change: 0.5 }, earningsDate: new Date(Date.parse(bars[bars.length - 1].date) + 2 * 86_400_000).toISOString().slice(0, 10),
+  closeFinal: false, sessionFraction: 0.5,
+  day: bars[bars.length - 1].date, at: "2026-10-28T15:00:00Z", ...extra,
 });
 const calm = snapIn(base, 101);
 assert.equal(calm.extensionAtr, 0.49);
@@ -175,3 +177,12 @@ assert.equal(parseCboeVix({ data: {} }), null);
 assert.equal(parseCboeVix(null), null);
 
 console.log("position alerts ok");
+
+// A daily cache that still ends yesterday: today's live bar is added, yesterday's bar and volume stay as they were.
+{
+  const lagged = withLivePrice(base, 101, { day: "2099-01-02", open: 100.5, volume: 3e5 });
+  assert.equal(lagged.length, base.length + 1);
+  assert.deepEqual(lagged[base.length - 1], base[base.length - 1]);
+  assert.equal(lagged[base.length].volume, 3e5);
+  console.log("stale daily bar ok");
+}
