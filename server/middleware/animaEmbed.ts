@@ -12,8 +12,10 @@ import type { AnimaGatewayOptions } from "./animaGateway";
  *   the gateway: nothing stored server-side. Anything else (POST, PUT, ...) is never signed in by it, except the
  *   JSON POSTs in EMBED_POSTS (JSON forces a CORS preflight from any other site): the room summary, and the full
  *   watchlist panel's paste and From Screen, which read a screenshot (screen-grab/extract) and bulk-add tickers to
- *   one of the owner's lists, with `update` (shares and entry of tickers already there; bulk-add allows it only on a
- *   portfolio list). A body with `remove` is never signed in, so nothing is taken out of a list from a frame.
+ *   one of the owner's lists, with `update` (entry, and shares in a portfolio list, of tickers already there) and
+ *   `remove` (the tickers not in the screenshot, when he ticks From Screen's opt-in box after reviewing them;
+ *   bulk-add allows it only on a portfolio list). These are his own clicks in the panel: Anima's server goes through
+ *   the gateway (animaGateway.ts), which refuses `remove`.
  *
  * Tickets and cookies are HMACs under a key derived from ANIMA_GATEWAY_TOKEN, so only Anima's server can make them.
  */
@@ -24,8 +26,7 @@ const SESSION_COOKIE = "connect.sid";
 const EMBED_POSTS = /^\/api\/(discord-stream\/summary|sentinel\/watchlist\/bulk-add|sentinel\/screen-grab\/extract)$/;
 
 const embedPost = (req: Request) =>
-  req.method === "POST" && EMBED_POSTS.test(req.path) && /^application\/json\b/i.test(req.get("content-type") || "") &&
-  !(req.body && typeof req.body === "object" && "remove" in req.body);
+  req.method === "POST" && EMBED_POSTS.test(req.path) && /^application\/json\b/i.test(req.get("content-type") || "");
 
 const embedKey = (token: string) => createHash("sha256").update(`anima-embed\n${token}`).digest();
 const sign = (token: string, what: string) => createHmac("sha256", embedKey(token)).update(what).digest("hex");

@@ -68,10 +68,18 @@ await withApp(TOKEN, async (call) => {
   const update = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA", shares: 10, entry: 100 }], update: true });
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json, update)).body).uid, 2,
     "From Screen updates shares and entry (bulk-add allows it on a portfolio list only)");
-  for (const remove of [{ remove: ["DELL"] }, { update: true, remove: ["DELL"] }, { remove: [] }]) {
+  for (const remove of [{ remove: ["DELL"] }, { update: true, remove: ["DELL"] }]) {
     const sent = JSON.stringify({ watchlistId: 3, items: [{ symbol: "NVDA" }], ...remove });
-    assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json, sent)).body).uid, null,
-      `nothing is removed from a frame: ${sent}`);
+    assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", json, sent)).body).uid, 2,
+      `From Screen's ticked remove box, his click in the panel: ${sent}`);
+    assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", { cookie, "content-type": "text/plain" }, sent)).body).uid,
+      null, "still JSON only");
+    assert.equal(JSON.parse((await call("POST", "/api/sentinel/watchlist/bulk-add", { "content-type": "application/json" }, sent)).body).uid,
+      null, "still needs the embed cookie");
+  }
+  const removeElsewhere = JSON.stringify({ watchlistId: 3, remove: ["DELL"] });
+  for (const p of ["/api/sentinel/watchlists/3/items", "/api/sentinel/watchlist/remove-tickers", "/api/sentinel/watchlist/3"]) {
+    assert.equal(JSON.parse((await call("POST", p, json, removeElsewhere)).body).uid, null, `remove only through bulk-add: ${p}`);
   }
   const shot = JSON.stringify({ model: "auto", imageDataUrl: "data:image/jpeg;base64,AAAA" });
   assert.equal(JSON.parse((await call("POST", "/api/sentinel/screen-grab/extract", json, shot)).body).uid, 2,

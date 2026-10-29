@@ -65,7 +65,8 @@ function seedColumns() {
 /**
  * /embed/watchlist-full — the detailed watchlist for an Anima Lab panel: entry, stop, shares and entry date per row,
  * the column picker, a paste box and From Screen (a thinkorswim/Fidelity positions screenshot, reviewed, then one
- * bulk-add; in a portfolio list with shares and entry, updating tickers already there; never a remove), the writes
+ * bulk-add; in a portfolio list with shares and entry, updating tickers already there, and removing the tickers not
+ * in the screenshot only when he ticks the box after seeing them listed), the writes
  * the embed sign-in allows. A row click opens that ticker's big chart in Anima. Shares the small panel's list pick.
  * Anima is told which list is open (so "add NVDA" in Quinn's chat means this list) and asks for a reload after her
  * chat changed a list, optionally showing a list she just created.
@@ -332,7 +333,6 @@ export default function EmbedWatchlistFullPage() {
         watchlistName={list?.name ?? "this watchlist"}
         isPortfolio={!!list?.isPortfolio}
         listSymbols={symbols}
-        embed
       />
     </div>
   );

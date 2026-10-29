@@ -54,7 +54,6 @@ export function TosScreenReviewDialog({
   watchlistName,
   isPortfolio = false,
   listSymbols = [],
-  embed = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -62,8 +61,6 @@ export function TosScreenReviewDialog({
   watchlistName: string;
   isPortfolio?: boolean;
   listSymbols?: string[];
-  /** In Anima's full watchlist panel: never a remove (the embed sign-in refuses a bulk-add body with one). */
-  embed?: boolean;
 }) {
   const tos = useTosSyncSafe();
   const { toast } = useToast();
@@ -88,10 +85,10 @@ export function TosScreenReviewDialog({
     staleTime: 15_000,
   });
   const extractReady = grabStatus?.extract !== false;
-  const missingCount = result
+  const missing = result
     ? screenImportMissing(screenImportItems(parseWatchlistTickers(tickerCsv), result.positions, isPortfolio), listSymbols)
-        .length
-    : 0;
+    : [];
+  const missingCount = missing.length;
 
   useEffect(() => {
     if (open) void tos?.refreshStatus();
@@ -202,7 +199,7 @@ export function TosScreenReviewDialog({
     const items = screenImportItems(symbols, result?.positions ?? [], isPortfolio);
     const shorts = items.filter((i) => i.short).map((i) => i.symbol);
     const withEntry = items.filter((i) => i.entry != null).length;
-    const remove = isPortfolio && removeMissing && !embed ? screenImportMissing(items, listSymbols) : [];
+    const remove = isPortfolio && removeMissing ? screenImportMissing(items, listSymbols) : [];
     setImporting(true);
     try {
       const got = await bulkAdd.mutateAsync({
@@ -409,17 +406,25 @@ export function TosScreenReviewDialog({
                 spellCheck={false}
                 aria-label="Tickers to import"
               />
-              {isPortfolio && !embed && missingCount > 0 && (
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={removeMissing}
-                    onChange={(e) => setRemoveMissing(e.target.checked)}
-                    data-testid="from-screen-remove-missing"
-                  />
-                  Also remove {missingCount} ticker{missingCount === 1 ? "" : "s"} in {watchlistName} not in this
-                  screenshot
-                </label>
+              {isPortfolio && missingCount > 0 && (
+                <div className="space-y-1">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={removeMissing}
+                      onChange={(e) => setRemoveMissing(e.target.checked)}
+                      data-testid="from-screen-remove-missing"
+                    />
+                    Also remove {missingCount} ticker{missingCount === 1 ? "" : "s"} in {watchlistName} not in this
+                    screenshot
+                  </label>
+                  <p
+                    className={`pl-5 text-xs ${removeMissing ? "text-amber-300" : "text-muted-foreground"}`}
+                    data-testid="from-screen-remove-list"
+                  >
+                    {removeMissing ? "Import will remove" : "Not in this screenshot"}: {missing.join(", ")}
+                  </p>
+                </div>
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <Button

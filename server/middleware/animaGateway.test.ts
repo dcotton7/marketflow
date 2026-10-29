@@ -31,6 +31,7 @@ assert.ok(allowedBody("/api/sentinel/watchlists", { name: "Energy" }));
 assert.ok(allowedBody("/api/sentinel/watchlist/12/shares", { shares: 1 }), "the trim's body is checked by its route");
 for (const [p, b] of [
   ["/api/sentinel/watchlist/bulk-add", { ...add, remove: ["MSFT"] }],
+  ["/api/sentinel/watchlist/bulk-add", { ...add, remove: [] }],
   ["/api/sentinel/watchlist/bulk-add", { ...add, update: true }],
   ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", shares: 100 }] }],
   ["/api/sentinel/watchlist/bulk-add", { watchlistId: 3, items: [{ symbol: "NVDA", entry: 1 }] }],
@@ -166,6 +167,10 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
     assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", json, JSON.stringify(body))).status, 403,
       `no positions or removes through bulk-add: ${JSON.stringify(body)}`);
   }
+  const embedCookie = { ...json, cookie: "mf_anima_embed=1.x" };
+  assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", embedCookie,
+    JSON.stringify({ watchlistId: 7, items: [{ symbol: "NVDA" }], remove: ["GEV"] }))).status, 403,
+    "Quinn never removes through bulk-add, whatever cookie comes along");
   assert.equal((await call("POST", "/api/anima/sentinel/watchlists", json, JSON.stringify({ name: "P", isPortfolio: true }))).status, 403, "a name only");
   assert.equal((await call("POST", "/api/anima/sentinel/watchlist/bulk-add", inside, adds)).status, 415, "the edits are JSON only");
   for (const [method, path] of [["DELETE", "/api/anima/sentinel/watchlists/7"], ["DELETE", "/api/anima/sentinel/watchlists/7/items"],
