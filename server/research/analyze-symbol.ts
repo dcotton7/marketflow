@@ -29,8 +29,11 @@ export interface AnalyzeContext {
   index: IndexCloses;
   /** Signals are evaluated for bars dated on/after this (the session before the trade window start). */
   signalFrom: string;
-  /** Last date a trade may be opened (fills after it are ignored). */
+  /** Last date of the trade window: no bar after it is read, so no trade opens, exits or is marked after it. */
   tradeEnd: string;
+  /** The window ends before the data does (a walk-forward window, one before the locked holdout): a trade still open
+   *  on its last bar closes at that close. Default: when bars after tradeEnd were cut off. */
+  closeAtEnd?: boolean;
   versions: StrategyPackage[];
   rsRankAt: (date: string) => number | null;
   regimeAt: (date: string) => RegimeRow | undefined;
@@ -123,7 +126,11 @@ export interface SymbolAnalysis {
   missingFacts: string[];
 }
 
-export function analyzeSymbol(bars: DailyBar[], ctx: AnalyzeContext): SymbolAnalysis {
+export function analyzeSymbol(allBars: DailyBar[], ctx: AnalyzeContext): SymbolAnalysis {
+  // Nothing past the trade window: no fill, exit or mark on a later bar, so a window that ends before the locked
+  // holdout year never reads its prices. A trade still open at the end closes at the window's last close.
+  const bars = allBars.filter((b) => b.date <= ctx.tradeEnd);
+  const closeAtEnd = ctx.closeAtEnd ?? bars.length < allBars.length;
   const f = computeFacts(bars, ctx.index);
   const cycleParams: CycleParams = ctx.versions[0].cycle.params;
   const stages = classifyCycle(f, cycleParams);
@@ -225,6 +232,7 @@ export function analyzeSymbol(bars: DailyBar[], ctx: AnalyzeContext): SymbolAnal
           minute: ctx.minute,
           wantMinutes: ctx.wantMinutes,
           enforceMaxLoss: sk.enforceMaxLoss,
+          closeAtEnd,
         });
         if (r.fillIndex != null && bars[r.fillIndex].date > ctx.tradeEnd && r.status === "filled") continue;
         for (const d of r.minuteNeeds) minuteNeeds.add(d);

@@ -12,6 +12,7 @@ import { HARD_RULES, type ExitPolicy, type VixBucket } from "./exit-policy";
  * - Stops fill at the stop price, or at the open when price gaps through it.
  * - Trims become due at a close and fill only into strength on a later session: above the prior session's high.
  * - Trail and Kell exits are decided at a close and fill at the next open.
+ * - With closeAtEnd, a position still open on the trade window's last bar closes at that close.
  * Daily bars can't order a trim and a stop on the same day; minute bars decide it when available, otherwise the
  * stop is assumed first.
  */
@@ -37,6 +38,11 @@ export interface TradeInput {
   wantMinutes: boolean;
   /** False only for "would have" outcomes of trades the 5% rule skipped; never for taken trades. */
   enforceMaxLoss?: boolean;
+  /**
+   * The bars stop at the trade window's end, not at the data's: a position still open on the last bar is closed at
+   * that close ("window_end"), so nothing is scored on later prices (the locked holdout year among them).
+   */
+  closeAtEnd?: boolean;
 }
 
 export interface Piece {
@@ -323,6 +329,7 @@ export function simulateTrade(input: TradeInput): TradeResult {
   }
 
   const last = res.path.length ? res.path[res.path.length - 1] : null;
+  if (remaining > 0 && last && input.closeAtEnd) exitAll(last.index, slipDown(last.close, slipBps), "window_end");
   if (remaining > 0 && last) {
     res.open = true;
     res.exitIndex = last.index;

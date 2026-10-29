@@ -92,4 +92,25 @@ for (const seed of [11, 12, 13, 14, 15, 16]) {
 assert.ok(checked >= 10, `enough past candidates compared (${checked})`);
 assert.ok(checkedFills >= 10, `enough past fills compared (${checkedFills})`);
 
-console.log(`lookahead.test.ts: ok (${checked} candidates, ${checkedFills} fills compared)`);
+// A window that ends before the data does (one before the locked holdout year): nothing after tradeEnd is read. No
+// fill, exit, trim or mark is dated after it, a trade still open on its last bar closes at that close, and changing
+// every later bar changes nothing.
+let closedAtEnd = 0;
+for (const [seed, at] of [[21, 140], [22, 230], [23, 340], [24, 345], [25, 470]]) {
+  const bars = barsFromDrifts(drifts, { seed, noise: 0.02 });
+  const end = bars[at].date;
+  const later = bars.map((b) => (b.date <= end ? b : { ...b, open: b.open * 3, high: b.high * 3, low: b.low * 3, close: b.close * 3 }));
+  const a = analyzeSymbol(bars, { ...ctx(), tradeEnd: end });
+  const b = analyzeSymbol(later, { ...ctx(), tradeEnd: end });
+  assert.deepEqual(b.candidates, a.candidates, "bars after tradeEnd change nothing");
+  for (const c of a.candidates)
+    for (const t of Object.values(c.sims)) {
+      for (const d of [t.fillDate, t.exitDate, ...t.pieces.map((p) => p.date)]) assert.ok(d == null || d <= end, `${d} after ${end}`);
+      assert.ok(t.path.every((p) => bars[p.index].date <= end), "no mark after the window");
+      assert.equal(t.open, false, "nothing left open past the window");
+      if (t.exitReason === "window_end") closedAtEnd++;
+    }
+}
+assert.ok(closedAtEnd > 0, "some trades ran to the window's end and closed there");
+
+console.log(`lookahead.test.ts: ok (${checked} candidates, ${checkedFills} fills compared, ${closedAtEnd} closed at the window end)`);

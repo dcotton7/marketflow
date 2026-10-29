@@ -85,8 +85,9 @@ export async function runBacktest(opts: RunOptions) {
   });
   log(`[research] daily bars: ${dailyReport.fromCache} cached, ${dailyReport.fetched} fetched, ${dailyReport.noData.length} without data, ${dailyReport.failed.length} failed`);
 
-  const spyBars = readDailyBars("SPY");
-  const qqqBars = readDailyBars("QQQ");
+  // Every bar read stops at tradeEnd: the calendar, the equity curve, RS ranks and the trades all end with the window.
+  const spyBars = readDailyBars("SPY", undefined, tradeEnd);
+  const qqqBars = readDailyBars("QQQ", undefined, tradeEnd);
   if (spyBars.length < 250 || qqqBars.length < 250) throw new Error("SPY/QQQ bars missing; check Alpaca credentials (ALPACA_API_KEY / ALPACA_API_SECRET in .env)");
   const index: IndexCloses = { spy: new Map(spyBars.map((b) => [b.date, b.close])), qqq: new Map(qqqBars.map((b) => [b.date, b.close])) };
   const calendar = spyBars.map((b) => b.date);
@@ -111,7 +112,7 @@ export async function runBacktest(opts: RunOptions) {
   const breadthUp = new Float64Array(T);
   const breadthN = new Float64Array(T);
   for (const s of symbols) {
-    const bars = readDailyBars(s);
+    const bars = readDailyBars(s, undefined, tradeEnd);
     const sc = new Float64Array(T).fill(NaN);
     const cl = new Float64Array(T).fill(NaN);
     const m = runMembers.find((x) => x.symbol === s)!;
@@ -155,6 +156,7 @@ export async function runBacktest(opts: RunOptions) {
     index,
     signalFrom: prevSession,
     tradeEnd,
+    closeAtEnd: tradeEnd < cutoff,
     versions,
     regimeAt: (d) => regimes.get(d),
     vixBucketAt: (d) => regimes.get(d)?.vixBucket ?? "unknown",
@@ -171,7 +173,7 @@ export async function runBacktest(opts: RunOptions) {
   let done = 0;
   lastLog = 0;
   for (const s of symbols) {
-    const bars = readDailyBars(s);
+    const bars = readDailyBars(s, undefined, tradeEnd);
     done++;
     if (bars.length < 60) continue;
     const r = rank.get(s)!;
