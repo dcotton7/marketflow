@@ -15,9 +15,11 @@ import {
 } from "react";
 import {
   fetchTosStatus,
+  isEmbeddedInAnima,
   isWindowsClient,
   pokeFidelityLead,
   startTosLinkHelper,
+  startTosStatusPolling,
   tosErrorMessage,
   tosNavigate as tosNavigateApi,
 } from "@/lib/tos-bridge-client";
@@ -41,6 +43,8 @@ interface TosSyncContextType {
   tosAvailable: boolean;
   tosCalibrated: boolean;
   refreshStatus: () => Promise<void>;
+  /** In Anima's Lab: Anima drives Thinkorswim, so sync stays off and ToSLink is never called. */
+  animaHosted: boolean;
 }
 
 const TosSyncContext = createContext<TosSyncContextType | undefined>(undefined);
@@ -103,7 +107,25 @@ const navigateQueue: {
   lastAt: 0,
 };
 
+const ANIMA_HOSTED_VALUE: TosSyncContextType = {
+  tosSyncEnabled: false,
+  setTosSyncEnabled: () => {},
+  toggleTosSync: () => {},
+  tosNavigate: async () => {},
+  tosAvailable: false,
+  tosCalibrated: false,
+  refreshStatus: async () => {},
+  animaHosted: true,
+};
+
 export function TosSyncProvider({ children }: { children: ReactNode }) {
+  if (isEmbeddedInAnima()) {
+    return <TosSyncContext.Provider value={ANIMA_HOSTED_VALUE}>{children}</TosSyncContext.Provider>;
+  }
+  return <LocalTosSyncProvider>{children}</LocalTosSyncProvider>;
+}
+
+function LocalTosSyncProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -123,11 +145,7 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
     setStatus(s);
   }, []);
 
-  useEffect(() => {
-    void refreshStatus();
-    const id = window.setInterval(() => { void refreshStatus(); }, 5000);
-    return () => window.clearInterval(id);
-  }, [refreshStatus]);
+  useEffect(() => startTosStatusPolling(() => { void refreshStatus(); }), [refreshStatus]);
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -206,6 +224,7 @@ export function TosSyncProvider({ children }: { children: ReactNode }) {
       tosAvailable: status.available,
       tosCalibrated: status.calibrated,
       refreshStatus,
+      animaHosted: false,
     }),
     [
       tosSyncEnabled,

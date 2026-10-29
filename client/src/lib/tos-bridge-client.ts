@@ -1,15 +1,95 @@
 /**
  * ToS calibrate/navigate: prefer a helper on this Windows PC (Live or LOCAL),
  * then same-origin /api/tos (LOCAL Node). Render cannot click Thinkorswim.
+ * Inside Anima's Lab none of this runs: Anima drives Thinkorswim itself.
  */
+
+import { EMBED_HOST_ORIGINS } from "@/lib/embed-host";
 
 export const TOS_AGENT_ORIGINS = ["http://127.0.0.1:7737", "http://localhost:7737"] as const;
 export const TOSLINK_PROTOCOL_START = "marketflow-toslink:start";
 export const TOSLINK_DOWNLOAD_HREF = "/tos-helper/ToSLink.cmd";
+export const ANIMA_TOS_MESSAGE = "Thinkorswim is driven by Anima here";
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** What isEmbeddedInAnima looks at; a parameter so tests can describe each case. */
+export interface FrameEnv {
+  framed: boolean;
+  selfOrigin: string;
+  ancestorOrigins?: readonly string[];
+  referrer?: string;
+  search?: string;
+}
+
+function isAnimaOrigin(origin: string, selfOrigin: string): boolean {
+  if (EMBED_HOST_ORIGINS.includes(origin)) return true;
+  try {
+    const u = new URL(origin);
+    // Anima on this PC may run on another port; MarketFlow framing itself is not Anima.
+    return u.protocol === "http:" && LOOPBACK_HOSTS.has(u.hostname) && u.origin !== selfOrigin;
+  } catch {
+    return false;
+  }
+}
+
+export function detectAnimaEmbed(env: FrameEnv): boolean {
+  if (!env.framed) return false;
+  const q = new URLSearchParams(env.search || "");
+  if (q.get("host") === "anima" || q.get("embed") === "anima") return true;
+  const ancestors = env.ancestorOrigins ?? [];
+  if (ancestors.length) return ancestors.some((o) => isAnimaOrigin(o, env.selfOrigin));
+  try {
+    return isAnimaOrigin(new URL(env.referrer || "").origin, env.selfOrigin);
+  } catch {
+    return false;
+  }
+}
+
+function currentFrameEnv(): FrameEnv | null {
+  if (typeof window === "undefined") return null;
+  let framed = true;
+  try {
+    framed = window.self !== window.top;
+  } catch {
+    /* a cross-origin top throws on some browsers: framed */
+  }
+  return {
+    framed,
+    selfOrigin: window.location.origin,
+    ancestorOrigins: window.location.ancestorOrigins ? Array.from(window.location.ancestorOrigins) : undefined,
+    referrer: typeof document === "undefined" ? "" : document.referrer,
+    search: window.location.search,
+  };
+}
+
+let animaEmbedCache: boolean | null = null;
+
+/** True in a frame whose host is Anima's Lab; MarketFlow then never calls ToSLink (127.0.0.1:7737). */
+export function isEmbeddedInAnima(): boolean {
+  if (animaEmbedCache === null) {
+    const env = currentFrameEnv();
+    animaEmbedCache = env ? detectAnimaEmbed(env) : false;
+  }
+  return animaEmbedCache;
+}
+
+/** Tests only. */
+export function resetAnimaEmbedCache(): void {
+  animaEmbedCache = null;
+}
+
+/** Polls ToS status every `everyMs`; returns the stop function. Does nothing inside Anima. */
+export function startTosStatusPolling(refresh: () => void, everyMs = 5000): () => void {
+  if (isEmbeddedInAnima()) return () => {};
+  refresh();
+  const id = setInterval(refresh, everyMs);
+  return () => clearInterval(id);
+}
 
 /** Ask Windows to open the installed ToSLink helper. No-op if it was never installed. */
 export function startTosLinkHelper(): void {
-  if (typeof document === "undefined") return;
+  if (typeof document === "undefined" || isEmbeddedInAnima()) return;
   const a = document.createElement("a");
   a.href = TOSLINK_PROTOCOL_START;
   document.body.appendChild(a);
@@ -123,6 +203,7 @@ async function originStatus(): Promise<TosStatus | null> {
 }
 
 export async function fetchTosStatus(): Promise<TosStatus> {
+  if (isEmbeddedInAnima()) return EMPTY_STATUS;
   const [agentRes, origin] = await Promise.all([
     agentFetch("/status", { method: "GET" }, 3000),
     originStatus(),
@@ -169,6 +250,7 @@ async function throwIfNotOk(res: Response): Promise<void> {
 }
 
 export async function tosCalibrate(): Promise<void> {
+  if (isEmbeddedInAnima()) throw new Error(ANIMA_TOS_MESSAGE);
   const agentRes = await agentFetch("/calibrate", { method: "POST" }, 25000);
   if (agentRes) {
     await throwIfNotOk(agentRes);
@@ -182,7 +264,7 @@ export async function tosCalibrate(): Promise<void> {
 
 export async function tosNavigate(symbol: string): Promise<void> {
   const clean = symbol.trim().toUpperCase();
-  if (!clean) return;
+  if (!clean || isEmbeddedInAnima()) return;
   const path = `/navigate?symbol=${encodeURIComponent(clean)}`;
 
   // GET avoids a CORS preflight so Live (HTTPS) can reach the loopback helper.

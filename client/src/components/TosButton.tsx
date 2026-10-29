@@ -5,7 +5,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ANIMA_TOS_MESSAGE,
   fetchTosStatus,
+  isEmbeddedInAnima,
   isWindowsClient,
   startTosLinkHelper,
   TOSLINK_DOWNLOAD_HREF,
@@ -48,6 +50,20 @@ export function useTos() {
 }
 
 export function TosCalibrateButton() {
+  if (isEmbeddedInAnima()) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ToSLink</CardTitle>
+          <CardDescription>{ANIMA_TOS_MESSAGE}. Calibrate in MarketFlow opened on its own.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+  return <TosCalibrateCard />;
+}
+
+function TosCalibrateCard() {
   const { available, calibrated, position, calibratedAt, calibrate, refresh } = useTos();
   const tosSync = useTosSyncSafe();
   const [busy, setBusy] = useState(false);
@@ -255,6 +271,33 @@ export function TosSyncToggle({
   const windows = isWindowsClient();
 
   if (!tos) return null;
+  if (tos.animaHosted) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* A disabled button gets no pointer events, so the span carries the tooltip. */}
+          <span tabIndex={0} className="inline-flex" data-testid="tos-anima-hosted">
+            {appearance === "chip" ? (
+              <button
+                type="button"
+                disabled
+                className="text-xs px-3 py-1 rounded flex items-center bg-slate-700/30 text-muted-foreground opacity-50 pointer-events-none"
+              >
+                ToSLink
+              </button>
+            ) : (
+              <Button type="button" size="sm" variant="outline" disabled className="gap-1.5 pointer-events-none">
+                ToSLink
+              </Button>
+            )}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="text-sm">{ANIMA_TOS_MESSAGE}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
   if (!tos.tosAvailable && !windows) return null;
 
   const { tosSyncEnabled, setTosSyncEnabled, tosCalibrated, tosAvailable, tosNavigate } = tos;
