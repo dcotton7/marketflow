@@ -42,7 +42,7 @@ const RULES: Rule[] = [
   { level: "auth", method: "GET", pattern: /^\/api\/alerts\/feed$/ },
   // Built from vendor bars and quotes.
   { level: "owner", pattern: /^\/api\/positions\/snapshot$/ },
-  { level: "owner", method: "POST", pattern: /^\/api\/sentinel\/watchlist\/\d+\/shares$/ },
+  { level: "owner", method: "POST", pattern: /^\/api\/sentinel\/watchlist\/\d+\/(shares|plan)$/ },
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/preview$/ },
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/[^/]+\/evaluate$/ },
 ];

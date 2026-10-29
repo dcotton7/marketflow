@@ -13,6 +13,7 @@ import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middlewar
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
 import { checkSharesWrite, commitSharesWrite, sharesWriteSchema } from "./shares-write";
+import { checkPlanWrite } from "./plan-write";
 import {
   applyBulkAdd,
   bulkAddSchema,
@@ -1761,6 +1762,33 @@ export function registerSentinelRoutes(app: Express): void {
       }
       console.error("Update watchlist error:", error);
       res.status(500).json({ error: "Failed to update watchlist item" });
+    }
+  });
+
+  // One row's shares, entry, stop, entry date or side, as Don corrects it in Quinn's chat. Compare-and-set: the UPDATE
+  // lands only on a row that still holds every value the caller read (expect), else 409 with the row's current values.
+  app.post("/api/sentinel/watchlist/:id/plan", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id as string);
+      const item = await sentinelModels.getWatchlistItem(id);
+      const check = checkPlanWrite(item as any, req.session.userId, req.body);
+      if (check.status !== 200) {
+        const { status, ...body } = check;
+        return res.status(status).json(body);
+      }
+      const { set, expect } = check.write;
+      const where = [eq(sentinelWatchlist.id, id), ...(Object.keys(set) as (keyof typeof set)[]).map((k) =>
+        expect[k] == null ? isNull(sentinelWatchlist[k]) : eq(sentinelWatchlist[k], expect[k] as never))];
+      const [updated] = await db!.update(sentinelWatchlist).set({ ...(set as object), updatedAt: new Date() })
+        .where(and(...where)).returning();
+      if (!updated) {
+        const now = await sentinelModels.getWatchlistItem(id);
+        return res.status(409).json({ error: "Changed since it was read", current: now ?? null });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error("Plan write error:", error);
+      res.status(500).json({ error: "Failed to update the row" });
     }
   });
 

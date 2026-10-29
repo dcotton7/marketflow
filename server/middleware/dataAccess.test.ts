@@ -68,6 +68,7 @@ const OWNER_ROUTES: Array<[string, string]> = [
   ["POST", "/api/alerts/7/evaluate"],
   ["GET", "/api/positions/snapshot"],
   ["POST", "/api/sentinel/watchlist/12/shares"],
+  ["POST", "/api/sentinel/watchlist/12/plan"],
 ];
 
 const OWNER_ADMIN_ROUTES: Array<[string, string]> = [

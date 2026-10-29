@@ -33,6 +33,12 @@ assert.ok(allowedBody("/api/sentinel/watchlist/bulk-add", { watchlistId: 3, upda
 assert.ok(allowedBody("/api/sentinel/watchlist/remove-tickers", { watchlistId: 3, symbols: ["NVDA"] }));
 assert.ok(allowedBody("/api/sentinel/watchlists", { name: "Energy" }));
 assert.ok(allowedBody("/api/sentinel/watchlist/12/shares", { shares: 1 }), "the trim's body is checked by its route");
+assert.ok(allowedPath("/api/sentinel/watchlist/12/plan", "POST"));
+assert.ok(allowedBody("/api/sentinel/watchlist/12/plan", { shares: 50, targetEntry: 612, expect: { shares: null, targetEntry: null } }));
+assert.ok(!allowedBody("/api/sentinel/watchlist/12/plan", { shares: 50, symbol: "X", expect: { shares: 1 } }));
+assert.ok(!allowedBody("/api/sentinel/watchlist/12/plan", { thesis: "x", expect: {} }));
+assert.ok(!allowedBody("/api/sentinel/watchlist/12/plan", { shares: 5, expect: { userId: 2 } }));
+assert.ok(!allowedBody("/api/sentinel/watchlist/12/plan", { shares: 5 }));
 for (const [p, b] of [
   ["/api/sentinel/watchlist/bulk-add", { ...add, remove: ["MSFT"] }],
   ["/api/sentinel/watchlist/bulk-add", { ...add, remove: [] }],

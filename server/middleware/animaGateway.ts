@@ -14,8 +14,9 @@ import { normalizeApiPath } from "./dataAccess";
  *   POSTs in ALLOWED_POSTS: a trim's new share count (the route itself only lowers a count), and the watchlist edits
  *   Don asks Quinn for in chat (add tickers, remove named tickers, create a list), each only with the body shape in
  *   POST_BODIES: tickers, with the shares, entry and short side his broker screenshot shows and update (so rows
- *   already in the list take them, as From Screen does) but never remove; a name alone. Deleting a list, renaming it
- *   and every other write stay closed.
+ *   already in the list take them, as From Screen does) but never remove; a name alone; and one row's shares, entry,
+ *   stop, entry date or side with the values last read (watchlist/:id/plan, compare-and-set). Deleting a list,
+ *   renaming it and every other write stay closed.
  * - The request carries the owner's id (ANIMA_GATEWAY_USER_ID) for this request only; express-session leaves an
  *   existing req.session alone, so nothing is stored and no cookie is issued. dataAccess still checks the route.
  */
@@ -40,6 +41,8 @@ export const ALLOWED: RegExp[] = [
   /^\/api\/positions\/snapshot$/,
 ];
 const SHARES_POST = /^\/api\/sentinel\/watchlist\/\d+\/shares$/;
+const PLAN_POST = /^\/api\/sentinel\/watchlist\/\d+\/plan$/;
+const PLAN_KEYS = ["targetEntry", "stopPlan", "entryDate", "shares", "direction"];
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const onlyKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every((k) => keys.includes(k));
 const listId = (v: unknown) => Number.isInteger(v) && (v as number) > 0;
@@ -53,6 +56,9 @@ export const POST_BODIES: [RegExp, (body: unknown) => boolean][] = [
       positiveOrNull(i.shares) && positiveOrNull(i.entry) && (i.short === undefined || typeof i.short === "boolean"))],
   [/^\/api\/sentinel\/watchlist\/remove-tickers$/, (b) => isObject(b) && onlyKeys(b, ["watchlistId", "symbols"]) &&
     listId(b.watchlistId) && Array.isArray(b.symbols) && b.symbols.every(symbolText)],
+  // Don's row corrections in chat: those fields and expect only (the route checks values and compare-and-sets).
+  [PLAN_POST, (b) => isObject(b) && onlyKeys(b, [...PLAN_KEYS, "expect"]) && isObject(b.expect) &&
+    onlyKeys(b.expect, PLAN_KEYS)],
   [/^\/api\/sentinel\/watchlists$/, (b) => isObject(b) && onlyKeys(b, ["name"]) && typeof b.name === "string" &&
     b.name.trim().length > 0 && b.name.length <= 60],
 ];
