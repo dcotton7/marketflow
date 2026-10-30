@@ -18,6 +18,8 @@ export type HostMessage =
   | { type: "open-big"; symbol: string }
   | { type: "close-big" }
   | { type: "ready"; page: string }
+  /** The page's sign-in failed (no ticket cookie, or MarketFlow restarted); the host should reload it. */
+  | { type: "auth-failed"; page: string }
   | { type: "charts-state"; charts: EmbedChart[] }
   | { type: "symbol"; symbol: string }
   | { type: "watchlist"; id: number; name: string };

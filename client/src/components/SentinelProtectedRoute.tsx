@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { loginPathWithReturn } from "@/lib/auth-return";
+import { postToHost } from "@/lib/embed-host";
 import { Loader2, Lock } from "lucide-react";
 
 interface ProtectedRouteProps {
@@ -34,6 +35,8 @@ export function SentinelProtectedRoute({ children, requiresData = false }: Prote
 
   useEffect(() => {
     if (!isLoading && !user) {
+      // In an Anima Lab panel, tell the Lab, which mints a fresh ticket and reloads the frame.
+      if (window.location.pathname.startsWith("/embed/")) postToHost({ type: "auth-failed", page: window.location.pathname });
       setLocation(loginPathWithReturn());
     }
   }, [user, isLoading, setLocation]);
