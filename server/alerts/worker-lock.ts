@@ -20,8 +20,16 @@ export async function holdsWorkerLock(): Promise<boolean> {
     const r = await c.query("select pg_try_advisory_lock($1) as ok", [LOCK_KEY]);
     if (r.rows[0]?.ok === true) {
       client = c;
-      c.on("error", () => {
-        client = null;
+      const held = c;
+      held.on("error", (err) => {
+        // Give the dead connection back to the pool as broken; without this it stays checked out for good,
+        // one pool slot lost each time Neon drops it.
+        if (client === held) client = null;
+        try {
+          held.release(err);
+        } catch {
+          // already released
+        }
       });
       console.log("[PositionAlerts] this instance runs the alert worker (advisory lock held)");
       return true;

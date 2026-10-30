@@ -88,6 +88,15 @@ app.use((req, res, next) => {
     const { initializeDatabase } = await import("./db");
     await initializeDatabase();
     logMem("DB connected");
+    // 200 only when the database answers `select 1` within 3s; 503 otherwise. Public, for a host health check.
+    const { getPool } = await import("./db");
+    const { pingDatabase, poolCounts, startDbWatchdog } = await import("./infra/db-watchdog");
+    app.get("/api/health", async (_req, res) => {
+      const r = await pingDatabase(getPool(), 3_000);
+      res.set("Cache-Control", "no-store");
+      res.status(r.ok ? 200 : 503).json({ ok: r.ok, db: r.ok ? "ok" : "unreachable", ms: r.ms, pool: poolCounts(getPool()) });
+    });
+    startDbWatchdog(getPool);
     const { ensurePositionSchema } = await import("./alerts/ensure-schema");
     await ensurePositionSchema().catch((err) => console.error("[Startup] position schema ensure failed:", err));
     

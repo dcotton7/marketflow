@@ -54,7 +54,8 @@ export async function initializeDatabase(): Promise<NodePgDatabase<typeof schema
   
   try {
     console.log("Initializing database connection...");
-    pool = new Pool({ 
+    // maxLifetimeSeconds is in pg-pool 3.6+, but this @types/pg predates it.
+    const poolConfig: pg.PoolConfig & { maxLifetimeSeconds?: number } = {
       connectionString: databaseUrl,
       // Increased pool size to match upgraded DB tier; tune to your plan
       max: 20,
@@ -62,7 +63,14 @@ export async function initializeDatabase(): Promise<NodePgDatabase<typeof schema
       idleTimeoutMillis: 60000,
       // Allow a longer connection timeout for first-time connections
       connectionTimeoutMillis: 20000,
-    });
+      // TCP keepalive, so a connection Neon or the network dropped silently is found and closed instead of
+      // holding a pool slot with a query that never answers (the "timeout exceeded when trying to connect" hang).
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
+      // Replace connections after 30 minutes, so none outlives a Neon compute restart for long.
+      maxLifetimeSeconds: 1800,
+    };
+    pool = new Pool(poolConfig);
     
     pool.on('error', (err) => {
       console.error('Unexpected database pool error:', err);

@@ -228,7 +228,9 @@ export function registerSentinelRoutes(app: Express): void {
   app.use(
     session({
       store: new PgSession({
-        conString: process.env.DATABASE_URL,
+        // Share the app's pool (keepalive, connect timeout) instead of a second pool with no connect timeout,
+        // where a session lookup could wait forever.
+        ...(getPool() ? { pool: getPool()! } : { conString: process.env.DATABASE_URL }),
         tableName: "session",
         createTableIfMissing: true,
       }),
