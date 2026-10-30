@@ -11,6 +11,7 @@
     "test:start-here-smoke": "tsx client/src/components/start-here/dashboard-persistence.smoke.test.ts && tsx client/src/components/MiniChart.entry-line.smoke.test.ts",
     "test:tos-embed": "tsx client/src/lib/tos-bridge-client.test.ts",
     "test:db-watchdog": "tsx server/infra/db-watchdog.test.ts",
+    "test:watchlist-panel": "tsx client/src/lib/watchlist-position-columns.test.ts",
     "db:push": "drizzle-kit push",
     "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",
     "db:ensure-tier-overrides": "tsx server/scripts/ensureSentinelTierAccessOverridesTable.ts",

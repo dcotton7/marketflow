@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAdminTheme } from "@/context/SystemSettingsContext";
 import {
@@ -27,6 +27,7 @@ import {
   watchlistShowsEntryGauges,
 } from "@/lib/watchlist-entry-gauges";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
+import { fitColumns, positionPl } from "@/lib/watchlist-position-columns";
 import { onHostCommand, postToHost } from "@/lib/embed-host";
 import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardPaste, Loader2, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,8 @@ const PICK_KEY = "embed-watchlist-pick";
 const COLUMNS_KEY = "embed.watchlist-full.columns.v1";
 const REFRESH_MS = 15_000;
 const FULL_COLUMNS: WatchlistColumnId[] = [
-  "symbol", "company", "changePct", "entry", "entryPct", "stop", "stopPct", "shares", "entryDate", "actions",
+  "symbol", "company", "changePct", "side", "entry", "entryPct", "stop", "stopPct", "shares", "plToday", "plOpen",
+  "entryDate", "actions",
 ];
 
 type SortField = WatchlistConfigurableSortField;
@@ -171,6 +173,7 @@ export default function EmbedWatchlistFullPage() {
         stopPct: stop && price > 0 ? ((price - stop) / stop) * 100 : null,
         shares: item.shares ?? null,
         entryDate: item.entryDate ?? null,
+        ...positionPl({ direction: item.direction, shares: item.shares, entry, price, change: q?.change ?? null }),
         ...gaugeFieldsFromQuote(q),
       };
     });
@@ -216,11 +219,40 @@ export default function EmbedWatchlistFullPage() {
         case "ema620":
           cmp = compareGaugePct(a.ema620Pct, b.ema620Pct);
           break;
+        case "side":
+          cmp = a.side.localeCompare(b.side);
+          break;
+        case "plToday":
+          cmp = (a.plToday ?? -Infinity) - (b.plToday ?? -Infinity);
+          break;
+        case "plOpen":
+          cmp = (a.plOpen ?? -Infinity) - (b.plOpen ?? -Infinity);
+          break;
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
     return out;
   }, [items, quotes, sortField, sortDir]);
+
+  // The panel's width decides which columns show: lower-priority ones step aside as it narrows and come back as it
+  // widens (fitColumns), so the table fits instead of running off the right edge.
+  const tableBox = useRef<HTMLDivElement | null>(null);
+  const [boxWidth, setBoxWidth] = useState(0);
+  useEffect(() => {
+    const el = tableBox.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setBoxWidth(Math.floor(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const fit = useMemo(() => fitColumns(columns, boxWidth), [columns, boxWidth]);
+  const beginShownResize = useCallback(
+    (i: number, e: PointerEvent<HTMLButtonElement>) => {
+      const at = columns.findIndex((c) => c === fit.shown[i]);
+      if (at >= 0) beginResize(at, e);
+    },
+    [columns, fit.shown, beginResize],
+  );
 
   const handleSort = (field: SortField) => {
     if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -292,6 +324,15 @@ export default function EmbedWatchlistFullPage() {
           From Screen
         </button>
         <span className="flex-1" />
+        {fit.hidden.length > 0 && (
+          <span
+            className="whitespace-nowrap text-slate-500"
+            title={`Hidden to fit the panel: ${fit.hidden.map((id) => WATCHLIST_COLUMN_META[id].label).join(", ")}. Widen the panel to see them.`}
+            data-testid="embed-watchlist-full-hidden"
+          >
+            +{fit.hidden.length} cols
+          </span>
+        )}
         <span className="text-slate-500">
           {dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""}
         </span>
@@ -301,7 +342,7 @@ export default function EmbedWatchlistFullPage() {
           <TickerPasteBox watchlistId={listId} isPortfolio={!!list?.isPortfolio} />
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={tableBox} className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
         {itemsLoading ? (
           <div className="flex justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
@@ -311,8 +352,8 @@ export default function EmbedWatchlistFullPage() {
         ) : (
           <WatchlistConfigurableTable
             variant="modal"
-            columns={columns}
-            beginResize={beginResize}
+            columns={fit.shown}
+            beginResize={beginShownResize}
             sortedTickers={rows}
             sortField={sortField}
             onSort={handleSort}

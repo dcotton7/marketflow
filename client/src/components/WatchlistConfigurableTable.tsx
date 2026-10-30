@@ -37,7 +37,10 @@ export type WatchlistConfigurableSortField =
   | "shares"
   | "entryDate"
   | "vwapPct"
-  | "ema620";
+  | "ema620"
+  | "side"
+  | "plToday"
+  | "plOpen";
 
 function sortFieldForColumn(id: WatchlistColumnId): WatchlistConfigurableSortField | null {
   switch (id) {
@@ -67,6 +70,12 @@ function sortFieldForColumn(id: WatchlistColumnId): WatchlistConfigurableSortFie
       return "vwapPct";
     case "ema620":
       return "ema620";
+    case "side":
+      return "side";
+    case "plToday":
+      return "plToday";
+    case "plOpen":
+      return "plOpen";
     default:
       return null;
   }
@@ -91,6 +100,16 @@ export interface WatchlistConfigurableTickerRow {
   ema620Pct?: number | null;
   ema620Cross?: Ema620Cross | null;
   ema620Tone?: EntryGaugeTone | null;
+  /** MarketFlow's direction on the row; P/L below is signed for it (a short gains when the price falls). */
+  side?: "long" | "short";
+  plToday?: number | null;
+  plOpen?: number | null;
+  plOpenPct?: number | null;
+}
+
+function money(v: number): string {
+  const sign = v > 0 ? "+" : v < 0 ? "-" : "";
+  return `${sign}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) >= 1000 ? 0 : 2 })}`;
 }
 
 export function WatchlistConfigurableTable({
@@ -486,6 +505,44 @@ export function WatchlistConfigurableTable({
             />
           </td>
         );
+      case "side":
+        return (
+          <td
+            key={colId}
+            className={cn(
+              `overflow-hidden ${pad} text-center ${bodyText}`,
+              ticker.side === "short" ? "font-semibold text-amber-400" : "text-muted-foreground"
+            )}
+          >
+            {ticker.side === "short" ? "Short" : "Long"}
+          </td>
+        );
+      case "plToday":
+      case "plOpen": {
+        const v = colId === "plToday" ? ticker.plToday : ticker.plOpen;
+        const pct = colId === "plOpen" ? ticker.plOpenPct : null;
+        return (
+          <td
+            key={colId}
+            className={cn(
+              `overflow-hidden ${pad} text-right font-mono ${bodyText} tabular-nums`,
+              v == null ? "text-muted-foreground" : v >= 0 ? "text-green-500" : "text-red-500"
+            )}
+            title={
+              v == null
+                ? "Needs shares and a price" + (colId === "plOpen" ? " and an entry" : "")
+                : ticker.side === "short"
+                  ? "Short: gains when the price falls"
+                  : undefined
+            }
+          >
+            <span className="block min-w-0 truncate">
+              {v == null ? "—" : money(v)}
+              {pct != null && v != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}
+            </span>
+          </td>
+        );
+      }
       case "actions":
         return (
           <td

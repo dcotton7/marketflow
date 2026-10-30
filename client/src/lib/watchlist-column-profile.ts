@@ -17,6 +17,9 @@ export type WatchlistColumnId =
   | "entryDate"
   | "vwapPct"
   | "ema620"
+  | "side"
+  | "plToday"
+  | "plOpen"
   | "actions";
 
 export const WATCHLIST_COLUMN_PROFILE_VERSION = 3 as const;
@@ -55,6 +58,9 @@ export const WATCHLIST_COLUMN_META: Record<
   entryDate: { label: "Entry date", defaultWidth: 120, minWidth: 60 },
   vwapPct: { label: "VWAP", defaultWidth: 72, minWidth: 52 },
   ema620: { label: "6/20", defaultWidth: 72, minWidth: 52 },
+  side: { label: "Side", defaultWidth: 56, minWidth: 40 },
+  plToday: { label: "P/L today", defaultWidth: 96, minWidth: 56 },
+  plOpen: { label: "P/L open", defaultWidth: 112, minWidth: 56 },
   actions: { label: "", defaultWidth: 48, minWidth: 36 },
 };
 
