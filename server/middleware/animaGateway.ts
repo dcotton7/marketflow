@@ -36,6 +36,8 @@ export const ALLOWED: RegExp[] = [
   new RegExp(`^/api/marketflow/${SYM}/cached$`),
   /^\/api\/bigidea\/(ideas|ideas\/\d+|thoughts|setups|setups\/\d+)$/,
   /^\/api\/discord-stream\/(summary|analysis)$/,
+  // The Lab's Signals scanner panel: its cards (one SELECT on scanner_discoveries) and the scanner's status.
+  /^\/api\/scanner\/(history|status)$/,
   /^\/api\/sentinel\/(dashboard|trade-journal|trades\/closed|trade\/\d+|watchlists|watchlist)$/,
   /^\/api\/alerts\/feed$/,
   /^\/api\/positions\/snapshot$/,
