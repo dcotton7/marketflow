@@ -163,6 +163,11 @@ export default function ScannerPopoutPage() {
 
   const fo = fontOffset;
 
+  // Tell Anima's Lab (when embedded at /embed/scanner) that the panel loaded and signed in.
+  useEffect(() => {
+    postToHost({ type: "ready", page: "scanner" });
+  }, []);
+
   // ── Set window title + notify parent on mount ─────────────────────────────
   useEffect(() => {
     document.title = "Scanner";
