@@ -17,6 +17,7 @@ import { TosScreenReviewDialog } from "@/components/watchlist/TosScreenReviewDia
 import { useWatchlistColumnProfile } from "@/hooks/use-watchlist-table-columns";
 import {
   WATCHLIST_COLUMN_META,
+  parseWatchlistColumnProfile,
   serializeWatchlistColumnProfile,
   type WatchlistColumnId,
 } from "@/lib/watchlist-column-profile";
@@ -27,13 +28,14 @@ import {
   watchlistShowsEntryGauges,
 } from "@/lib/watchlist-entry-gauges";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
-import { fitColumns, positionPl } from "@/lib/watchlist-position-columns";
+import { addMissingPositionColumns, entryStopPct, fitColumns, positionPl } from "@/lib/watchlist-position-columns";
 import { onHostCommand, postToHost } from "@/lib/embed-host";
 import { ArrowDown, ArrowUp, ArrowUpDown, ClipboardPaste, Loader2, ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PICK_KEY = "embed-watchlist-pick";
 const COLUMNS_KEY = "embed.watchlist-full.columns.v1";
+const POSITION_COLUMNS_KEY = "embed.watchlist-full.position-columns.v1";
 const REFRESH_MS = 15_000;
 const FULL_COLUMNS: WatchlistColumnId[] = [
   "symbol", "company", "changePct", "side", "entry", "entryPct", "stop", "stopPct", "shares", "plToday", "plOpen",
@@ -54,10 +56,19 @@ interface Quote {
 
 function seedColumns() {
   try {
-    if (!localStorage.getItem(COLUMNS_KEY)) {
+    const saved = localStorage.getItem(COLUMNS_KEY);
+    if (!saved) {
       const cols = FULL_COLUMNS.map((id) => ({ id, width: WATCHLIST_COLUMN_META[id].defaultWidth }));
       localStorage.setItem(COLUMNS_KEY, serializeWatchlistColumnProfile(cols));
+    } else if (!localStorage.getItem(POSITION_COLUMNS_KEY)) {
+      // A config saved before Side / P/L existed never got them; add them once (he can still remove them after).
+      const cols = parseWatchlistColumnProfile(saved, "modal");
+      localStorage.setItem(
+        COLUMNS_KEY,
+        serializeWatchlistColumnProfile(addMissingPositionColumns(cols, (id) => WATCHLIST_COLUMN_META[id].defaultWidth)),
+      );
     }
+    localStorage.setItem(POSITION_COLUMNS_KEY, "1");
   } catch {
     /* ignore */
   }
@@ -168,9 +179,8 @@ export default function EmbedWatchlistFullPage() {
         change: q?.change || 0,
         changePercent: q?.changePercent || 0,
         entry,
-        entryPct: entry && price > 0 ? ((price - entry) / entry) * 100 : null,
+        ...entryStopPct({ direction: item.direction, entry, stop, price }),
         stop,
-        stopPct: stop && price > 0 ? ((price - stop) / stop) * 100 : null,
         shares: item.shares ?? null,
         entryDate: item.entryDate ?? null,
         ...positionPl({ direction: item.direction, shares: item.shares, entry, price, change: q?.change ?? null }),

@@ -33,6 +33,46 @@ export function positionPl(row: {
   };
 }
 
+/**
+ * % Entry and % Stop, positive (green) when the position is doing well: a long's price above its entry and stop, a
+ * short's price below its entry and stop (a short's stop sits above the price, so room to the stop is stop - price).
+ */
+export function entryStopPct(row: {
+  direction?: string | null;
+  entry?: number | null;
+  stop?: number | null;
+  price?: number | null;
+}): { entryPct: number | null; stopPct: number | null } {
+  const sign = String(row.direction ?? "").toLowerCase() === "short" ? -1 : 1;
+  const price = Number(row.price) || 0;
+  const entry = Number(row.entry) || 0;
+  const stop = Number(row.stop) || 0;
+  return {
+    entryPct: entry > 0 && price > 0 ? (sign * (price - entry) / entry) * 100 : null,
+    stopPct: stop > 0 && price > 0 ? (sign * (price - stop) / stop) * 100 : null,
+  };
+}
+
+/** Columns the panel must show by default, and the one-time catch-up that adds them to a config saved before they existed. */
+export const POSITION_COLUMN_IDS: WatchlistColumnId[] = ["side", "plToday", "plOpen"];
+
+export function addMissingPositionColumns(
+  columns: WatchlistColumnEntry[],
+  defaultWidth: (id: WatchlistColumnId) => number,
+): WatchlistColumnEntry[] {
+  const missing = POSITION_COLUMN_IDS.filter((id) => !columns.some((c) => c.id === id));
+  if (missing.length === 0) return columns;
+  const actions = columns.find((c) => c.id === "actions");
+  const rest = columns.filter((c) => c.id !== "actions");
+  const at = rest.findIndex((c) => c.id === "changePct");
+  const add = missing.map((id) => ({ id, width: defaultWidth(id) }));
+  // Side right after % Chg (as in the default layout); the P/L columns before the remove button.
+  const side = add.filter((c) => c.id === "side");
+  const pl = add.filter((c) => c.id !== "side");
+  const withSide = at >= 0 ? [...rest.slice(0, at + 1), ...side, ...rest.slice(at + 1)] : [...rest, ...side];
+  return [...withSide, ...pl, ...(actions ? [actions] : [])];
+}
+
 /** Which columns go first as the panel narrows (first in this list = first hidden). Ticker and the remove button stay. */
 export const HIDE_ORDER: WatchlistColumnId[] = [
   "company", "theme", "entryDate", "ema620", "vwapPct", "change", "entryPct", "stopPct", "entry", "side", "plOpen",

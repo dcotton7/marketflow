@@ -81,16 +81,16 @@ assert.deepEqual(
   screenImportItems(picked, shot, true),
   [
     { symbol: "NVDA", shares: 150, entry: 140.5, short: false },
-    { symbol: "TSLA", shares: null, entry: null, short: true },
+    { symbol: "TSLA", shares: 50, entry: 410, short: true },
     { symbol: "BRK.B", shares: 10, entry: 455.1, short: false },
     { symbol: "AMD", shares: null, entry: null, short: false },
     { symbol: "COIN", shares: null, entry: null, short: false },
   ],
-  "portfolio list: Pos Qty is shares, a short carries nothing, BRK/B is BRK.B, typed-in tickers come too",
+  "portfolio list: Pos Qty is shares, a short keeps its absolute share count and entry, BRK/B is BRK.B, typed-in tickers come too",
 );
 assert.deepEqual(
   screenImportItems(picked, shot, false).map((i) => [i.symbol, i.shares, i.entry]),
-  [["NVDA", null, 140.5], ["TSLA", null, null], ["BRK.B", null, 455.1], ["AMD", null, null], ["COIN", null, null]],
+  [["NVDA", null, 140.5], ["TSLA", null, 410], ["BRK.B", null, 455.1], ["AMD", null, null], ["COIN", null, null]],
   "other lists: entry only",
 );
 assert.deepEqual(

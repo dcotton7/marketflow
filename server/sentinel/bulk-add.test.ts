@@ -83,15 +83,15 @@ for (const bad of [
 
 console.log("bulk add ok");
 
-// A ticker now short in a portfolio list loses its old long shares and entry and is marked short.
+// A ticker now short in a portfolio list is marked short and keeps its shares and entry (positive; side carries the sign).
 {
-  const p = planBulkAdd([{ symbol: "TSLA", short: true }, { symbol: "AMD", shares: 10, entry: 90, short: false }, { symbol: "XYZ", short: true, shares: 5 }],
+  const p = planBulkAdd([{ symbol: "TSLA", short: true, shares: 20, entry: 250 }, { symbol: "AMD", shares: 10, entry: 90, short: false }, { symbol: "XYZ", short: true, shares: 5 }],
     ["TSLA", "AMD"], { update: true });
   assert.deepEqual(p.update, [
-    { symbol: "TSLA", shares: null, entry: null, short: true },
+    { symbol: "TSLA", shares: 20, entry: 250, short: true },
     { symbol: "AMD", shares: 10, entry: 90, short: false },
   ]);
-  assert.deepEqual(p.add, [{ symbol: "XYZ", shares: null, entry: null, short: true }]);
+  assert.deepEqual(p.add, [{ symbol: "XYZ", shares: 5, entry: null, short: true }]);
   // Outside a portfolio list (entryOnly) a short flag changes nothing on an existing row.
   assert.deepEqual(planBulkAdd([{ symbol: "TSLA", short: true }], ["TSLA"], { update: true, entryOnly: true }).update, []);
   console.log("bulk add shorts ok");

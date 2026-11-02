@@ -62,7 +62,7 @@ export function formatTickersCsv(tickers: string[]): string {
 export type ScreenImportItem = { symbol: string; shares: number | null; entry: number | null; short: boolean };
 
 /** What From Screen imports for the reviewed symbols: Avg Cost is the entry, and in a portfolio list Pos Qty is the
- *  share count. A short (negative Pos Qty) is marked and carries neither. "BRK/B" is stored as "BRK.B". */
+ *  share count. A short (negative Pos Qty) is marked short and carries its share count (positive) and Avg Cost too. "BRK/B" is stored as "BRK.B". */
 export function screenImportItems(
   symbols: string[],
   positions: TosScreenPositionRow[],
@@ -77,8 +77,8 @@ export function screenImportItems(
     seen.add(symbol);
     const row = bySymbol.get(symbol);
     const short = row?.posQty != null && row.posQty < 0;
-    const entry = !short && row?.avgCost != null && row.avgCost > 0 ? row.avgCost : null;
-    const shares = portfolio && !short && row?.posQty != null && row.posQty > 0 ? row.posQty : null;
+    const entry = row?.avgCost != null && row.avgCost > 0 ? row.avgCost : null;
+    const shares = portfolio && row?.posQty != null && row.posQty !== 0 ? Math.abs(row.posQty) : null;
     out.push({ symbol, shares, entry, short });
   }
   return out;

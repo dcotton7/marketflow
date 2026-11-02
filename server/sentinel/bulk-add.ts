@@ -11,7 +11,7 @@ export const bulkAddSchema = z.object({
         symbol: z.string().min(1).max(12),
         shares: z.number().finite().positive().nullable().optional(),
         entry: z.number().finite().positive().nullable().optional(),
-        /** From Screen: a negative Pos Qty. Stored as direction "short", without shares or entry. */
+        /** From Screen: a negative Pos Qty. Stored as direction "short", with its (positive) shares and entry. */
         short: z.boolean().optional(),
       }),
     )
@@ -52,16 +52,13 @@ export function planBulkAdd(
       seen.add(symbol);
       plan.existing.push(symbol);
       const shares = opts.entryOnly ? null : it.shares ?? null;
-      if (opts.update && it.short === true && !opts.entryOnly) {
-        // Now short in a portfolio list: the row's old long shares and entry no longer apply.
-        plan.update.push({ symbol, shares: null, entry: null, short: true });
-      } else if (opts.update && (shares != null || it.entry != null)) {
-        plan.update.push({ symbol, shares, entry: it.entry ?? null, ...(it.short === false ? { short: false } : {}) });
+      if (opts.update && (shares != null || it.entry != null || (it.short != null && !opts.entryOnly))) {
+        plan.update.push({ symbol, shares, entry: it.entry ?? null, ...(it.short != null && !opts.entryOnly ? { short: it.short } : {}) });
       }
     } else {
       seen.add(symbol);
       const short = it.short === true;
-      plan.add.push({ symbol, shares: short ? null : it.shares ?? null, entry: short ? null : it.entry ?? null,
+      plan.add.push({ symbol, shares: it.shares ?? null, entry: it.entry ?? null,
         ...(it.short != null ? { short } : {}) });
     }
   }
@@ -98,13 +95,11 @@ export async function applyBulkAdd(
   }
   const updated: string[] = [];
   for (const it of plan.update) {
-    const patch = it.short === true
-      ? { direction: "short", shares: null, targetEntry: null }
-      : {
-          ...(it.shares != null ? { shares: it.shares } : {}),
-          ...(it.entry != null ? { targetEntry: it.entry } : {}),
-          ...(it.short === false ? { direction: "long" } : {}),
-        };
+    const patch = {
+      ...(it.shares != null ? { shares: it.shares } : {}),
+      ...(it.entry != null ? { targetEntry: it.entry } : {}),
+      ...(it.short != null ? { direction: it.short ? "short" : "long" } : {}),
+    };
     for (const row of bySymbol(it.symbol)) await w.update(row.id, patch);
     updated.push(it.symbol);
   }

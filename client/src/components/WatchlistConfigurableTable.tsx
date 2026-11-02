@@ -147,6 +147,7 @@ export function WatchlistConfigurableTable({
         stopPlan?: number | null;
         shares?: number | null;
         entryDate?: string | null;
+        direction?: "long" | "short";
       };
     }) => void;
   };
@@ -513,8 +514,19 @@ export function WatchlistConfigurableTable({
               `overflow-hidden ${pad} text-center ${bodyText}`,
               ticker.side === "short" ? "font-semibold text-amber-400" : "text-muted-foreground"
             )}
+            onClick={(e) => e.stopPropagation()}
           >
-            {ticker.side === "short" ? "Short" : "Long"}
+            <button
+              type="button"
+              className="w-full cursor-pointer rounded hover:bg-muted/50"
+              title={ticker.side === "short" ? "Short: click to mark Long" : "Long: click to mark Short"}
+              onClick={() =>
+                updateWatchlist.mutate({ id: ticker.id, data: { direction: ticker.side === "short" ? "long" : "short" } })
+              }
+              data-testid={`wl-side-${variant}-${ticker.id}`}
+            >
+              {ticker.side === "short" ? "Short" : "Long"}
+            </button>
           </td>
         );
       case "plToday":

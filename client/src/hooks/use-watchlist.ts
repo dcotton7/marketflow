@@ -458,6 +458,7 @@ export function useUpdateWatchlist() {
         targetPlan?: number | null;
         shares?: number | null;
         entryDate?: string | null;
+        direction?: string;
         thesis?: string;
         priority?: string;
       } 

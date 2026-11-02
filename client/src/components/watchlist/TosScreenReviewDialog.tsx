@@ -220,7 +220,7 @@ export function TosScreenReviewDialog({
         title: `${isPortfolio ? "Positions" : "Tickers"} imported to ${watchlistName}`,
         description:
           (said.join(" · ") || "Nothing changed") +
-          (shorts.length ? `. Shorts marked short, without shares or entry (no position alerts yet): ${shorts.join(", ")}` : "") +
+          (shorts.length ? `. Marked short (no position alerts for shorts yet): ${shorts.join(", ")}` : "") +
           (withEntry === 0
             ? ". No Avg Cost in the extract — draw the box around Symbol and Average cost / Avg Cost, then Extract again"
             : "") + ".",
