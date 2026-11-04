@@ -295,6 +295,22 @@ export function DiscoveryCard({
                 >
                   {timeAgo(card.createdAt)}
                 </span>
+                {!expanded && realTickers.slice(0, 4).map((ticker) => (
+                  <button
+                    key={ticker}
+                    type="button"
+                    className="rounded border border-slate-600/50 bg-slate-800/50 px-1 py-0 text-[10px] font-mono font-bold hover:bg-cyan-900/30 hover:border-cyan-500/30"
+                    style={{ color: cssVariables.textMarketFlow }}
+                    title={`Open ${ticker} chart`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenChart) onOpenChart(ticker);
+                      else navigate(`/sentinel/charts?symbol=${ticker}`);
+                    }}
+                  >
+                    {ticker}
+                  </button>
+                ))}
               </div>
             </div>
 
