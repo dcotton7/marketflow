@@ -463,7 +463,11 @@ export function WatchlistConfigurableTable({
               value={ticker.shares ?? undefined}
               allowClear
               format="count"
-              onSave={(v) => updateWatchlist.mutate({ id: ticker.id, data: { shares: v } })}
+              allowNegative
+              onSave={(v) =>
+                // "-100" is 100 shares short: the count stays positive and the row's side says short.
+                updateWatchlist.mutate({ id: ticker.id, data: v != null && v < 0 ? { shares: -v, direction: "short" } : { shares: v } })
+              }
               data-testid={`wl-shares-${variant}-${ticker.id}`}
             />
           </td>

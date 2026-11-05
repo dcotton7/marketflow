@@ -15,6 +15,17 @@ assert.equal(short.plToday, 200, "a short gains on a down day");
 assert.equal(short.plOpen, 500, "a short gains when the price is under its entry");
 assert.equal(short.plOpenPct, 10);
 
+// TSLA short 100 at 250: a fall to 240 is +$1,000 (+4%), a rise to 262.50 is -$1,250 (-5%).
+const tslaDown = positionPl({ direction: "short", shares: 100, entry: 250, price: 240, change: -6 });
+assert.deepEqual(tslaDown, { side: "short", plToday: 600, plOpen: 1000, plOpenPct: 4 });
+const tslaUp = positionPl({ direction: "short", shares: 100, entry: 250, price: 262.5, change: 4 });
+assert.deepEqual(tslaUp, { side: "short", plToday: -400, plOpen: -1250, plOpenPct: -5 });
+// The same numbers held long read the other way.
+assert.deepEqual(positionPl({ direction: "long", shares: 100, entry: 250, price: 240, change: -6 }),
+  { side: "long", plToday: -600, plOpen: -1000, plOpenPct: -4 });
+// "-100" shares is 100 short even on a row still marked long.
+assert.deepEqual(positionPl({ direction: "long", shares: -100, entry: 250, price: 240, change: -6 }), tslaDown);
+
 const noShares = positionPl({ direction: null, shares: null, entry: 50, price: 55, change: 1 });
 assert.deepEqual(noShares, { side: "long", plToday: null, plOpen: null, plOpenPct: 10 });
 assert.equal(positionPl({ shares: 10, entry: null, price: 55, change: 1 }).plOpen, null, "no entry, no P/L open");

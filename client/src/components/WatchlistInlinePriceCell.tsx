@@ -9,6 +9,8 @@ export interface WatchlistInlinePriceCellProps {
   className?: string;
   /** "count" (shares): no $ and no fixed decimals. */
   format?: "price" | "count";
+  /** A negative number is saved as typed (shares: "-100" is 100 shares short; the server stores the side). */
+  allowNegative?: boolean;
   "data-testid"?: string;
 }
 
@@ -18,6 +20,7 @@ export function WatchlistInlinePriceCell({
   allowClear = false,
   className = "",
   format = "price",
+  allowNegative = false,
   "data-testid": testId = "watchlist-inline-price",
 }: WatchlistInlinePriceCellProps) {
   const editText = (v: number | null | undefined) =>
@@ -48,7 +51,7 @@ export function WatchlistInlinePriceCell({
       return true;
     }
     const numValue = parseFloat(trimmed);
-    if (!isNaN(numValue) && numValue > 0) {
+    if (!isNaN(numValue) && (numValue > 0 || (allowNegative && numValue < 0))) {
       onSave(numValue);
       return true;
     }
@@ -72,7 +75,7 @@ export function WatchlistInlinePriceCell({
       onSave(null);
     } else {
       const numValue = parseFloat(trimmed);
-      if (!isNaN(numValue) && numValue > 0) {
+      if (!isNaN(numValue) && (numValue > 0 || (allowNegative && numValue < 0))) {
         onSave(numValue);
       }
     }

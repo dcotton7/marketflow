@@ -19,9 +19,11 @@ export function positionPl(row: {
   price?: number | null;
   change?: number | null;
 }): PositionPl {
-  const side = String(row.direction ?? "").toLowerCase() === "short" ? "short" : "long";
+  // A negative share count (as thinkorswim shows a short) is a short of that many shares, whatever the side says.
+  const rawShares = Number(row.shares) || 0;
+  const side = String(row.direction ?? "").toLowerCase() === "short" || rawShares < 0 ? "short" : "long";
   const sign = side === "short" ? -1 : 1;
-  const shares = Number(row.shares) || 0;
+  const shares = Math.abs(rawShares);
   const price = Number(row.price) || 0;
   const entry = Number(row.entry) || 0;
   const live = shares > 0 && price > 0;
@@ -75,8 +77,9 @@ export function addMissingPositionColumns(
 
 /** Which columns go first as the panel narrows (first in this list = first hidden). Ticker and the remove button stay. */
 export const HIDE_ORDER: WatchlistColumnId[] = [
-  "company", "theme", "entryDate", "ema620", "vwapPct", "change", "entryPct", "stopPct", "entry", "side", "plOpen",
-  "stop", "shares", "plToday", "changePct",
+  // Side goes late: it is where a short is marked, and every P/L sign reads by it.
+  "company", "theme", "entryDate", "ema620", "vwapPct", "change", "entryPct", "stopPct", "entry", "plOpen",
+  "stop", "shares", "plToday", "side", "changePct",
 ];
 
 /**

@@ -79,9 +79,8 @@ async function openPositions(userId?: number) {
       eq(sentinelWatchlist.status, "watching"),
       ...(userId ? [eq(sentinelWatchlist.userId, userId)] : []),
     ));
-  // Shorts are left out until the rules handle them (stop above, trims below); judging one as a long sent a
-  // "max-loss" alert on a winning short and nothing on a losing one.
-  return rows.map((r) => r.item).filter((i) => (i.targetEntry ?? 0) > 0 && i.direction !== "short");
+  // Shorts are in, worked the short way (position-rules.ts: stop above the price, only the stop rule).
+  return rows.map((r) => r.item).filter((i) => (i.targetEntry ?? 0) > 0);
 }
 
 async function nextEarnings(symbol: string, day: string): Promise<string | null> {
@@ -127,7 +126,7 @@ export async function computeSnapshots(userId?: number, now = new Date()) {
       const timing = sessionTiming(clock, bars[bars.length - 1].date.slice(0, 10), inSession);
       const snapshot = buildSnapshot({
         pos: { itemId: item.id, symbol: item.symbol, entry: item.targetEntry!, stopPlan: item.stopPlan,
-          shares: item.shares, entryDate: item.entryDate },
+          shares: item.shares, entryDate: item.entryDate, direction: item.direction },
         bars,
         price: quote?.price ?? null,
         quote,

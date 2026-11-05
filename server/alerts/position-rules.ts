@@ -16,6 +16,10 @@ import { brokenLevels } from "./levels";
  * - Trail (daily close only): close below the trailing SMA. "Extended" is the chart's ATRx from 50MA, the same number
  *   as the trim rule: ≥ veryExtendedAtr → SMA5; profit ≥ bigProfitPct and ATRx < calmAtr → SMA20; otherwise SMA10.
  * - Wedge Drop (Kell, daily close only): "consider exiting"; nothing is done automatically.
+ * - A short (direction "short") gets the stop rule only, mirrored: the cap is maxLossPct above entry, the stop sits
+ *   above the price, warn within warnPctOfEntry under it, breach at or over it; % from entry is positive when the
+ *   price is under the entry. The other rules are long-side reads (support under the price, trims on extension above
+ *   the 50-day, trail under an SMA) and are not worked for a short.
  */
 export const POSITION_RULES = {
   maxLossPct: 5,
@@ -50,6 +54,15 @@ export interface PositionInput {
   entry: number;
   stopPlan?: number | null;
   shares?: number | null;
+  /** MarketFlow's direction on the row; a short is worked the short way (stop above). Missing means long. */
+  direction?: string | null;
+}
+
+export const isShort = (pos: { direction?: string | null }) => String(pos.direction ?? "").toLowerCase() === "short";
+
+/** % from entry, positive when the position is making money (a short gains as the price falls). */
+export function pctFromEntryFor(entry: number, price: number, short = false): number {
+  return ((short ? entry - price : price - entry) / entry) * 100;
 }
 
 export interface MarketInput {
@@ -104,9 +117,13 @@ export function stopFor(
   entry: number,
   stopPlan: number | null | undefined,
   params = POSITION_RULES,
+  short = false,
 ): { stop: number; planned: boolean } {
-  const hard = entry * (1 - params.maxLossPct / 100);
-  const planned = stopPlan != null && Number.isFinite(stopPlan) && stopPlan > hard;
+  // A long's stop sits under the price and the cap is maxLossPct under entry; a short's sits above, the cap over entry.
+  // The planned stop wins when it is the tighter of the two.
+  const hard = entry * (1 + ((short ? 1 : -1) * params.maxLossPct) / 100);
+  const ok = stopPlan != null && Number.isFinite(stopPlan) && stopPlan > 0;
+  const planned = ok && (short ? stopPlan! < hard : stopPlan! > hard);
   return { stop: planned ? stopPlan! : hard, planned };
 }
 
@@ -130,6 +147,22 @@ export function evaluatePosition(
     out.push({ rule, level, message, detail, key: `pos:${pos.itemId}:${rule}:${level}:${mkt.day}` });
 
   const live = mkt.price != null && mkt.price > 0 ? mkt.price : null;
+  if (isShort(pos)) {
+    if (live == null) return out;
+    const { stop, planned } = stopFor(pos.entry, pos.stopPlan, params, true);
+    const warnAt = stop - (pos.entry * params.warnPctOfEntry) / 100;
+    const fromEntry = pctFromEntryFor(pos.entry, live, true);
+    const what = planned ? `planned stop ${money(stop)}` : `${params.maxLossPct}% max-loss cap ${money(stop)}`;
+    const detail = { price: r2(live), stop: r2(stop), warnAt: r2(warnAt), pctFromEntry: r2(fromEntry), planned,
+      direction: "short" };
+    const how = `${fromEntry >= 0 ? "+" : ""}${fromEntry.toFixed(1)}% on the short from entry ${money(pos.entry)}`;
+    if (live >= stop) {
+      add("stop", "breach", `${sym} (short) hit the ${what}: ${money(live)}, ${how}.`, detail);
+    } else if (live >= warnAt) {
+      add("stop", "warn", `${sym} (short) is near the ${what}: ${money(live)}, ${how}.`, detail);
+    }
+    return out;
+  }
   if (live != null) {
     const { stop, planned } = stopFor(pos.entry, pos.stopPlan, params);
     const warnAt = stop + (pos.entry * params.warnPctOfEntry) / 100;

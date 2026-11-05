@@ -1,8 +1,10 @@
 import { atrxFrom50, calculateAtr, calculateEMA, calculateSMA } from "@shared/chart-indicators";
 import { kellSetups, kellStage, type KellHit, type KellStage } from "./kell";
-import { assessStop, supportLevels } from "./levels";
+import { assessStop, supportLevels, type StopFlag } from "./levels";
 import {
   evaluatePosition,
+  isShort,
+  pctFromEntryFor,
   POSITION_RULES,
   stopFor,
   trailPeriod,
@@ -93,8 +95,10 @@ export function buildSnapshot(input: SnapshotInput) {
   };
   const ema10 = calculateEMA(bars, 10)[n - 1], ema20 = calculateEMA(bars, 20)[n - 1];
   const ext = atrxFrom50(price, bars);
-  const pctFromEntry = pos.entry > 0 ? ((price - pos.entry) / pos.entry) * 100 : null;
-  const { stop, planned } = stopFor(pos.entry, pos.stopPlan);
+  // A short is read the short way: % from entry is positive as the price falls, the stop and cap sit above.
+  const short = isShort(pos);
+  const pctFromEntry = pos.entry > 0 ? pctFromEntryFor(pos.entry, price, short) : null;
+  const { stop, planned } = stopFor(pos.entry, pos.stopPlan, POSITION_RULES, short);
   const tp = trailPeriod(ext, pctFromEntry ?? 0);
   const trailMa = calculateSMA(bars, tp)[n - 1];
 
@@ -119,9 +123,13 @@ export function buildSnapshot(input: SnapshotInput) {
   const vwap = input.quote?.vwap && input.quote.vwap > 0 && live != null ? input.quote.vwap : null;
 
   const levels = supportLevels(bars, price, vwap);
-  const cap = pos.entry * (1 - POSITION_RULES.maxLossPct / 100);
-  const stopCheck = assessStop({ entry: pos.entry, stopPlan: pos.stopPlan, cap, levels, atr: atr || null });
-  const hits: KellHit[] = kellSetups(bars, price, input.closeFinal, input.sessionFraction);
+  const cap = pos.entry * (1 + ((short ? 1 : -1) * POSITION_RULES.maxLossPct) / 100);
+  // The level check and Kell's setups are long-side reads (support under the stop, buys); a short gets neither.
+  const stopCheck = short
+    ? { flags: (pos.stopPlan != null && pos.stopPlan > 0 ? [] : ["no_planned_stop"]) as StopFlag[], plannedAt: null,
+        capAt: null, candidates: [] as typeof levels, note: "" }
+    : assessStop({ entry: pos.entry, stopPlan: pos.stopPlan, cap, levels, atr: atr || null });
+  const hits: KellHit[] = short ? [] : kellSetups(bars, price, input.closeFinal, input.sessionFraction);
   const stage: KellStage = kellStage(bars, price, hits);
   const signals: PositionSignal[] = evaluatePosition(pos, {
     bars, price: live, closeFinal: input.closeFinal, vix: input.vix?.level ?? null, day: input.day,
@@ -148,12 +156,15 @@ export function buildSnapshot(input: SnapshotInput) {
     closeFinal: input.closeFinal,
     price: r2(price),
     entry: pos.entry,
+    direction: short ? "short" : "long",
     entryDate: pos.entryDate ?? null,
     shares: pos.shares ?? null,
     pctFromEntry: num(pctFromEntry),
     stop: {
       price: r2(stop), planned, plannedPrice: pos.stopPlan ?? null, cap: r2(cap),
-      pctAway: price > 0 ? r2(((price - stop) / price) * 100) : null, atrAway: at(stop),
+      // Room to the stop, positive while it holds (a short's stop is above the price).
+      pctAway: price > 0 ? r2((((short ? stop - price : price - stop)) / price) * 100) : null,
+      atrAway: short ? (atr > 0 ? r2((stop - price) / atr) : null) : at(stop),
       ...stopCheck,
     },
     levels,

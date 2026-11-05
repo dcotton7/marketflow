@@ -186,3 +186,38 @@ console.log("position alerts ok");
   assert.equal(lagged[base.length].volume, 3e5);
   console.log("stale daily bar ok");
 }
+
+// ---- shorts: worked the short way (stop above the price, only the stop rule)
+{
+  const short = { ...pos, direction: "short" };
+  assert.deepEqual(stopFor(100, null, undefined, true), { stop: 105, planned: false }, "a short's cap is 5% above entry");
+  assert.deepEqual(stopFor(100, 103, undefined, true), { stop: 103, planned: true }, "a tighter planned stop above wins");
+  assert.deepEqual(stopFor(100, 110, undefined, true), { stop: 105, planned: false }, "never more than 5% above entry");
+  assert.deepEqual(stopFor(100, 97, undefined, true), { stop: 97, planned: true }, "a stop moved under entry locks profit");
+  // Flat at 100, short at 100: a fall is no stop signal; warn at +4% (stop − 1% of entry), breach at +5%.
+  assert.deepEqual(rules(evaluatePosition(short, mkt(base, 90))), [], "a falling price is a winning short, no alert");
+  assert.deepEqual(rules(evaluatePosition(short, mkt(base, 95))), [], "the long's breach price means nothing to a short");
+  assert.deepEqual(rules(evaluatePosition(short, mkt(base, 103.5))), []);
+  assert.deepEqual(rules(evaluatePosition(short, mkt(base, 104))), ["stop:warn"]);
+  const hit = evaluatePosition(short, mkt(base, 105.2));
+  assert.deepEqual(rules(hit), ["stop:breach"]);
+  assert.match(hit[0].message, /\(short\) hit the 5% max-loss cap \$105\.00: \$105\.20, -5\.2% on the short/);
+  assert.equal(hit[0].detail.direction, "short");
+  const plannedShort = evaluatePosition({ ...short, stopPlan: 102 }, mkt(base, 102.5));
+  assert.match(plannedShort[0].message, /planned stop \$102\.00/);
+  assert.deepEqual(rules(evaluatePosition(short, mkt(base, 130))), ["stop:breach"], "far over a short's stop: a breach, no long-side trim");
+  assert.deepEqual(rules(evaluatePosition(short, mkt(base, null))), [], "live price only");
+  // The snapshot reads it the short way too.
+  const s = buildSnapshot({
+    pos: { ...short, entryDate: "2026-09-01" }, bars: base, price: 96, quote: { open: 100, volume: 2e6 },
+    vix: { level: 17, change: 0 }, closeFinal: false, sessionFraction: 0.5, day: base[base.length - 1].date,
+  });
+  assert.equal(s.direction, "short");
+  assert.equal(s.pctFromEntry, 4, "price 4% under a short's entry is +4%");
+  assert.equal(s.stop.price, 105);
+  assert.equal(s.stop.cap, 105);
+  assert.ok(s.stop.pctAway! > 0, "room to a short's stop is positive while the price is under it");
+  assert.deepEqual(s.kell.setups, [], "no Kell buy setups on a short");
+  assert.equal(snapIn(base, 101).direction, "long");
+  console.log("shorts ok");
+}

@@ -12,6 +12,8 @@ import { checkPasswordWithLockout, createLoginLockout, createPgLockStore, type L
 import { createApiAccessGuard, isOwnerUser, loadOwnerConfig } from "../middleware/dataAccess";
 import { sentinelModels } from "./models";
 import { evaluateTrade } from "./evaluate";
+import { normalizeRowEdit } from "./row-edit";
+import { watchlistSchema } from "./watchlist-schema";
 import { checkSharesWrite, commitSharesWrite, sharesWriteSchema } from "./shares-write";
 import { checkPlanWrite } from "./plan-write";
 import {
@@ -155,18 +157,6 @@ const suggestSchema = z.object({
   setupContext: setupContextSchema,
 });
 
-const watchlistSchema = z.object({
-  symbol: z.string().min(1).max(10),
-  watchlistId: z.number().int().positive().optional(),
-  targetEntry: z.number().positive().nullable().optional(),
-  stopPlan: z.number().positive().nullable().optional(),
-  targetPlan: z.number().positive().nullable().optional(),
-  alertPrice: z.number().positive().nullable().optional(),
-  shares: z.number().positive().nullable().optional(),
-  entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "entryDate must be YYYY-MM-DD").nullable().optional(),
-  thesis: z.string().nullable().optional(),
-  priority: z.enum(["high", "medium", "low"]).optional(),
-});
 
 const ruleSchema = z.object({
   name: z.string().min(1),
@@ -1755,7 +1745,7 @@ export function registerSentinelRoutes(app: Express): void {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const data = watchlistSchema.partial().parse(req.body);
+      const data = watchlistSchema.partial().parse(normalizeRowEdit(req.body));
       const updated = await sentinelModels.updateWatchlistItem(id, data);
       res.json(updated);
     } catch (error) {
