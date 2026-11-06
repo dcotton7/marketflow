@@ -247,6 +247,18 @@ async function resolveSequenceExpiration(
     : addMarketHours(anchor, sequenceWindow.value);
 }
 
+/**
+ * getDailyBars returns newest first, but the MA math (calculateSMAAtOffset / calculateEMAAtOffset), the volume check
+ * and resolvePreviousPrice read the series oldest first, like the intraday bars. Without this, a 1D SMA 10 was the
+ * average of bars a year old, "yesterday" in a cross was a year-old value and today's volume was the oldest bar's.
+ */
+export function dailyBarsOldestFirst<T extends { date: string | Date }>(bars: T[] | null): T[] | null {
+  if (!bars) return bars;
+  const copy = [...bars];
+  if (copy.length >= 2 && String(copy[0].date) > String(copy[copy.length - 1].date)) copy.reverse();
+  return copy;
+}
+
 async function getBarsForTimeframe(
   symbol: string,
   timeframe: string,
@@ -254,7 +266,7 @@ async function getBarsForTimeframe(
 ): Promise<Array<DailyBar | IntradayBar>> {
   if (isDailyTimeframe(timeframe)) {
     if (caches.daily === undefined) {
-      caches.daily = await getDailyBars(symbol, 260);
+      caches.daily = dailyBarsOldestFirst(await getDailyBars(symbol, 260));
     }
     return caches.daily ?? [];
   }
@@ -361,7 +373,7 @@ async function resolvePreviousPrice(symbol: string, timeframe: string | undefine
   if (isDailyTimeframe(timeframe)) {
     const bars = await getBarsForTimeframe(symbol, "1D", caches);
     const dailyBars = bars as DailyBar[];
-    return dailyBars.length >= 2 ? dailyBars[1].close : null;
+    return dailyBars.length >= 2 ? dailyBars[dailyBars.length - 2].close : null;
   }
 
   const bars = await getBarsForTimeframe(symbol, timeframeToIntradayInterval(timeframe), caches);

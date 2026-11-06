@@ -162,7 +162,7 @@ function findBaseStructure(candles: HistoricalQuote[]): { bottom: number | null;
   return { bottom, top };
 }
 
-function findSwingHighs(
+export function findSwingHighs(
   candles: HistoricalQuote[],
   referencePrice: number,
   maxResults: number = 8,
@@ -590,8 +590,8 @@ export async function fetchHistoricalTechnicalData(
     const high52Week = Math.max(...allHighs);
     const low52Week = Math.min(...allLows);
     
-    // Swing highs
-    const swingHighs = findSwingHighs(historical);
+    // Swing highs: overhead of that day's close (without a reference price none count as overhead)
+    const swingHighs = findSwingHighs(historical, priceOnDate);
     
     // ADR
     const adr20 = calculateADR(historical, 20);

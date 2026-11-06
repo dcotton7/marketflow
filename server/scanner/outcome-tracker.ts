@@ -80,6 +80,25 @@ function getEtParts(date: Date): { h: number; m: number; dayOfWeek: number; date
   return { h, m, dayOfWeek, dateStr: `${year}-${month}-${day}` };
 }
 
+/**
+ * Daily bars for a row: from 2 days before the signal (daily bars are stamped at midnight ET, before the signal) to a
+ * day past now. It used to be 2 * 24 * 60_000 (48 minutes), which left out the signal day's own bar, so d1_close
+ * and the later daily checkpoints could not fill.
+ */
+export function dailyBarWindow(signalAt: Date, nowMs: number): { from: Date; to: Date } {
+  const DAY = 24 * 60 * 60_000;
+  return { from: new Date(signalAt.getTime() - 2 * DAY), to: new Date(nowMs + DAY) };
+}
+
+/**
+ * The live price counts toward peak move / worst drawdown only while the row is still inside the 4-hour excursion
+ * window. Rows are re-processed for d2/1w/1mo days later, and passing today's price then widened the peak and
+ * drawdown with moves long after the window (the writes only ever widen).
+ */
+export function excursionLivePrice(elapsedMin: number, currentPrice: number | null): number | null {
+  return elapsedMin <= 240 ? currentPrice : null;
+}
+
 function addTradingDays(date: Date, n: number): Date {
   const result = new Date(date);
   let added = 0;
@@ -414,12 +433,13 @@ async function processOutcomes(): Promise<void> {
     };
 
     const ensureDaily = async (symbol: string, signalAt: Date): Promise<DailyBar[]> => {
-      const hit = dailyCache.get(symbol);
+      // Keyed by signal day too: the window starts at this row's signal, so another row's bars may not reach back.
+      const key = `${symbol}:${getEtDate(signalAt)}`;
+      const hit = dailyCache.get(key);
       if (hit) return hit;
-      const from = new Date(signalAt.getTime() - 2 * 24 * 60_000);
-      const to = new Date(nowMs + 24 * 60_000);
+      const { from, to } = dailyBarWindow(signalAt, nowMs);
       const bars = await loadDailyCloses(symbol, from, to);
-      dailyCache.set(symbol, bars);
+      dailyCache.set(key, bars);
       return bars;
     };
 
@@ -477,7 +497,7 @@ async function processOutcomes(): Promise<void> {
         signalPrice,
         direction,
         excursionHorizon,
-        currentPrice
+        excursionLivePrice(elapsedMin, currentPrice)
       );
       if (excursion) {
         const existingPeak = row.peakMove != null ? Number(row.peakMove) : 0;

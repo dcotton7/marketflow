@@ -79,6 +79,15 @@ function messageTs(time: string, capturedAt: number): number {
 
 const normText = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
+/** Whether two texts are the same post (one may be a notification's cut-off copy). An empty text (a chart-only
+ *  post) twins nothing: "".startsWith check used to match every later post by that author and drop it. */
+export function sameTwinText(a: string, b: string): boolean {
+  const x = normText(a);
+  const y = normText(b);
+  if (!x || !y) return false;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
+
 /** Same post seen twice: once as a notification, once in the channel. */
 function findTwin(author: string, text: string, ts: number): DiscordMessage | undefined {
   const a = author.toLowerCase();
@@ -88,8 +97,7 @@ function findTwin(author: string, text: string, ts: number): DiscordMessage | un
     const m = messages[i];
     if (Math.abs(m.ts - ts) > 15 * 60_000) continue;
     if (m.author.toLowerCase() !== a) continue;
-    const mt = normText(m.text);
-    if (mt === t || mt.startsWith(t) || t.startsWith(mt)) return m;
+    if (sameTwinText(m.text, text)) return m;
   }
   return undefined;
 }

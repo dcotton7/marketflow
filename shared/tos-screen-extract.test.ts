@@ -83,10 +83,10 @@ assert.deepEqual(
     { symbol: "NVDA", shares: 150, entry: 140.5, short: false },
     { symbol: "TSLA", shares: 50, entry: 410, short: true },
     { symbol: "BRK.B", shares: 10, entry: 455.1, short: false },
-    { symbol: "AMD", shares: null, entry: null, short: false },
-    { symbol: "COIN", shares: null, entry: null, short: false },
+    { symbol: "AMD", shares: null, entry: null, short: undefined },
+    { symbol: "COIN", shares: null, entry: null, short: undefined },
   ],
-  "portfolio list: Pos Qty is shares, a short keeps its absolute share count and entry, BRK/B is BRK.B, typed-in tickers come too",
+  "portfolio list: Pos Qty is shares, a short keeps its absolute share count and entry, BRK/B is BRK.B, typed-in tickers come too; no Pos Qty means the side is unknown (a saved short stays short)",
 );
 assert.deepEqual(
   screenImportItems(picked, shot, false).map((i) => [i.symbol, i.shares, i.entry]),

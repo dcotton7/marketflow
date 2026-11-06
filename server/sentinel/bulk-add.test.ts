@@ -121,3 +121,21 @@ console.log("bulk add ok");
   assert.deepEqual(failed, [], "nothing is removed when an add fails");
   console.log("bulk add apply ok");
 }
+
+// From Screen: a ticker the screenshot shows without a Pos Qty must not reset a saved short to long.
+{
+  const { screenImportItems } = await import("@shared/tos-screen-extract");
+  const items = screenImportItems(["TSLA", "NVDA"], [{ symbol: "NVDA", avgCost: 140, posQty: 10 } as any], true);
+  const wire = JSON.parse(JSON.stringify(items.map(({ symbol, shares, entry, short }) => ({ symbol, shares, entry, short }))));
+  const p = planBulkAdd(bulkAddSchema.parse({ watchlistId: 1, items: wire, update: true }).items, ["TSLA", "NVDA"], { update: true });
+  const patches: Record<number, Record<string, unknown>> = {};
+  const { applyBulkAdd } = await import("./bulk-add");
+  await applyBulkAdd(p, [{ id: 1, symbol: "TSLA" }, { id: 2, symbol: "NVDA" }], {
+    insert: async () => {},
+    update: async (id, patch) => { patches[id] = patch; },
+    remove: async () => {},
+  });
+  assert.equal(patches[1], undefined, "TSLA with no Pos Qty: nothing written, the saved Side stays");
+  assert.deepEqual(patches[2], { shares: 10, targetEntry: 140, direction: "long" }, "NVDA with a Pos Qty: side comes from the screen");
+  console.log("bulk add from-screen side ok");
+}

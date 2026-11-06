@@ -35,6 +35,7 @@ export function TickerPasteBox({
           symbol: t.symbol,
           shares: isPortfolio ? t.shares : null,
           entry: isPortfolio ? t.entry : null,
+          ...(isPortfolio && t.short != null ? { short: t.short } : {}),
         })),
       });
       const msg =

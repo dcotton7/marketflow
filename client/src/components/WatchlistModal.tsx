@@ -44,6 +44,7 @@ import {
   watchlistShowsEntryGauges,
 } from "@/lib/watchlist-entry-gauges";
 import { sectorSpdrThemeLabel } from "@shared/watchlist-theme";
+import { entryStopPct, positionPl } from "@/lib/watchlist-position-columns";
 import { isDailyThemeWatchlistName } from "@shared/theme-daily-watchlist";
 import {
   watchlistModalColumnWidthsStorageKey,
@@ -450,8 +451,8 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
       const price = quote?.price || 0;
       const entry = item.targetEntry ?? null;
       const stop = item.stopPlan ?? null;
-      const entryPct = entry && price > 0 ? ((price - entry) / entry) * 100 : null;
-      const stopPct = stop && price > 0 ? ((price - stop) / stop) * 100 : null;
+      // Signed by side (a short does well when the price falls), like the full embed's rows.
+      const { entryPct, stopPct } = entryStopPct({ direction: item.direction, entry, stop, price });
       return {
         id: item.id,
         symbol: item.symbol,
@@ -467,6 +468,8 @@ export function WatchlistModal({ open, onOpenChange }: WatchlistModalProps) {
         stopPct,
         shares: item.shares ?? null,
         entryDate: item.entryDate ?? null,
+        // Side, P/L today and P/L open: without these the Side cell always read "Long" and toggling never set Long.
+        ...positionPl({ direction: item.direction, shares: item.shares, entry, price, change: quote?.change ?? null }),
         ...gaugeFieldsFromQuote(quote),
       };
     });

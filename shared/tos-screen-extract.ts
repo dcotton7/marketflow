@@ -59,7 +59,9 @@ export function formatTickersCsv(tickers: string[]): string {
   return tickers.join(", ");
 }
 
-export type ScreenImportItem = { symbol: string; shares: number | null; entry: number | null; short: boolean };
+/** short is undefined when the screenshot has no (or a zero) Pos Qty for the ticker: the side is unknown, so the
+ *  import must leave the saved Side alone rather than reset a short to long. */
+export type ScreenImportItem = { symbol: string; shares: number | null; entry: number | null; short?: boolean };
 
 /** What From Screen imports for the reviewed symbols: Avg Cost is the entry, and in a portfolio list Pos Qty is the
  *  share count. A short (negative Pos Qty) is marked short and carries its share count (positive) and Avg Cost too. "BRK/B" is stored as "BRK.B". */
@@ -76,7 +78,7 @@ export function screenImportItems(
     if (seen.has(symbol)) continue;
     seen.add(symbol);
     const row = bySymbol.get(symbol);
-    const short = row?.posQty != null && row.posQty < 0;
+    const short = row?.posQty != null && row.posQty !== 0 ? row.posQty < 0 : undefined;
     const entry = row?.avgCost != null && row.avgCost > 0 ? row.avgCost : null;
     const shares = portfolio && row?.posQty != null && row.posQty !== 0 ? Math.abs(row.posQty) : null;
     out.push({ symbol, shares, entry, short });

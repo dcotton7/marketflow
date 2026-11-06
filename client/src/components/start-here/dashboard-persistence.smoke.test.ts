@@ -7,6 +7,7 @@ import {
   chartEffectiveSymbol,
   addChartFromWatchlistSymbol,
   appendLinkedChartTriplet,
+  appendWidget,
   clearAllWidgets,
   createDefaultDashboard,
   findBulkChartGridPlacement,
@@ -422,7 +423,22 @@ function testClearAllWidgetsStaysEmpty(): void {
   assert(roundTrip.layout.length === 0, "Empty workspace should survive sanitize");
 }
 
+function testAppendThemeChartsWidget(): void {
+  // Used to throw ReferenceError (DEFAULT_LIVE_THEME_CHARTS_CONFIG was never imported).
+  const base = createDefaultDashboard();
+  const next = appendWidget(base, "themeCharts");
+  assert(next.layout.length === base.layout.length + 1, "Theme Charts widget should add one tile");
+  const added = next.layout[next.layout.length - 1];
+  const meta = next.instances[added.i];
+  assert(meta?.type === "themeCharts", "New tile should be a themeCharts instance");
+  assert(
+    meta?.type === "themeCharts" && !!meta.liveThemeChartsConfig?.top && !!meta.liveThemeChartsConfig?.bottom,
+    "New Theme Charts widget should carry a default config"
+  );
+}
+
 function runAll(): void {
+  testAppendThemeChartsWidget();
   testSpawnChartInheritsGroupIdentity();
   testBulkLoadInheritsGroupIdentity();
   testBulkLoadSyncSkipsDuplicates();

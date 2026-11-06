@@ -11,6 +11,8 @@ export interface PastedTicker {
   shares: number | null;
   /** Cost per share: the average price, else the cost basis over the quantity. */
   entry: number | null;
+  /** A negative quantity: a short of |qty| shares (set only for shorts; new rows default to long). */
+  short?: boolean;
 }
 
 export interface PasteSkip {
@@ -80,7 +82,7 @@ export function parseNumber(raw: string | undefined): number | null {
   if (raw == null) return null;
   const t = raw.trim();
   if (!t || /^-+$/.test(t) || /^n\/?a$/i.test(t)) return null;
-  const neg = /^\(.*\)$/.test(t) || /^-/.test(t);
+  const neg = /^\(.*\)$/.test(t) || /^[$\s]*-/.test(t); // "-12.50", "-$12.50" and "$-12.50"
   const n = Number(t.replace(/[()$,%+\s-]/g, ""));
   if (!Number.isFinite(n)) return null;
   return neg ? -n : n;
@@ -131,15 +133,18 @@ export function parseTickerPaste(text: string): PasteResult {
     seen.add(symbol);
     let shares: number | null = null;
     let entry: number | null = null;
+    let short: boolean | undefined;
     if (cells && cols && !option) {
       const qty = cols.qty >= 0 ? parseNumber(cells[cols.qty]) : null;
-      shares = qty != null && qty > 0 ? qty : null;
+      // A short shows as a negative quantity (and often a negative cost basis): keep its size and mark it short.
+      shares = qty ? Math.abs(qty) : null;
+      if (qty != null && qty < 0) short = true;
       const avg = cols.avg >= 0 ? parseNumber(cells[cols.avg]) : null;
       const basis = cols.basis >= 0 ? parseNumber(cells[cols.basis]) : null;
-      entry = avg != null && avg > 0 ? avg : basis != null && basis > 0 && shares ? basis / shares : null;
+      entry = avg != null && avg > 0 ? avg : basis != null && basis !== 0 && shares ? Math.abs(basis) / shares : null;
       if (entry != null) entry = Math.round(entry * 10000) / 10000;
     }
-    tickers.push({ symbol, option, shares, entry });
+    tickers.push({ symbol, option, shares, entry, ...(short != null ? { short } : {}) });
   };
 
   for (const rawLine of text.split(/\r?\n/)) {

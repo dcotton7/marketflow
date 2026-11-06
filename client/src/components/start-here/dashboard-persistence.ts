@@ -1040,7 +1040,7 @@ export function appendWidget(
         ? {
             type: "themeCharts",
             groupId,
-            liveThemeChartsConfig: { ...DEFAULT_LIVE_THEME_CHARTS_CONFIG },
+            liveThemeChartsConfig: defaultLiveThemeChartsConfig(),
           }
         : { type, groupId };
   return {

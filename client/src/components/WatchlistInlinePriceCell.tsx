@@ -106,8 +106,11 @@ export function WatchlistInlinePriceCell({
             className="h-7 w-[5.5rem] rounded border bg-background px-1 text-right font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             data-testid={`${testId}-input`}
           />
+          {/* onMouseDown preventDefault keeps focus in the input, so its blur (which saves) doesn't fire first:
+              otherwise X saved the typed value (a cleared field deleted the stop) and ✓ saved twice. */}
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
               trySave();
@@ -120,6 +123,7 @@ export function WatchlistInlinePriceCell({
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
               setEditValue(editText(value));

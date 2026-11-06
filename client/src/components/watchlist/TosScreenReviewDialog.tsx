@@ -197,7 +197,7 @@ export function TosScreenReviewDialog({
       return;
     }
     const items = screenImportItems(symbols, result?.positions ?? [], isPortfolio);
-    const shorts = items.filter((i) => i.short).map((i) => i.symbol);
+    const shorts = isPortfolio ? items.filter((i) => i.short === true).map((i) => i.symbol) : [];
     const withEntry = items.filter((i) => i.entry != null).length;
     const remove = isPortfolio && removeMissing ? screenImportMissing(items, listSymbols) : [];
     setImporting(true);

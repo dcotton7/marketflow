@@ -34,6 +34,7 @@ function hydrateDiscoveryFilters(
   };
 }
 import { DEFAULT_SCANNER_CONFIG } from "@shared/scanner-config";
+import { queryInt } from "@shared/query-int";
 import { getScannerState, setScannerMode } from "./index";
 import { getScannerConfig, setScannerConfig, currentFrame } from "./signal-producer";
 import {
@@ -236,7 +237,7 @@ router.get("/stream", (req: Request, res: Response) => {
 // ── GET /history — recent discoveries (DB-backed with memory fallback) ──────
 
 router.get("/history", async (_req: Request, res: Response) => {
-  const limit = Math.min(200, parseInt(String(_req.query.limit) || "50", 10));
+  const limit = queryInt(_req.query.limit, 50, 1, 200);
   const dateFilter = _req.query.date as string | undefined;
   const signalFilter = _req.query.signal_type as string | undefined;
   const subjectFilter = (_req.query.subject as string | undefined)?.toUpperCase();
@@ -717,8 +718,8 @@ router.get("/workbench/cards", async (req: Request, res: Response) => {
   const from = (req.query.from as string) || new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
   const to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
   const statusFilter = (req.query.status as string) || "all";
-  const limit = Math.min(100, parseInt(String(req.query.limit ?? "50"), 10));
-  const offset = parseInt(String(req.query.offset ?? "0"), 10);
+  const limit = queryInt(req.query.limit, 50, 1, 100);
+  const offset = queryInt(req.query.offset, 0, 0, 10_000);
   const themeRankCut = parseThemeRankCut(req.query.theme_rank_cut);
   const themeRankN = parseThemeRankN(req.query.theme_rank_n);
 

@@ -63,5 +63,16 @@ assert.deepEqual(cleanSymbol("$brk/b"), { symbol: "BRK.B", option: null });
 assert.equal(parseNumber("($1,234.50)"), -1234.5);
 assert.equal(parseNumber("--"), null);
 assert.equal(parseNumber("+2.31%"), 2.31);
+assert.equal(parseNumber("$-12.50"), -12.5, "minus after the dollar sign");
+assert.equal(parseNumber("-$12.50"), -12.5);
+
+// Shorts: a negative quantity is a short of that many shares, with its entry (avg price, or |basis| / shares).
+{
+  const shorts = parseTickerPaste("Symbol\tQty\tPrice\tCost Basis\nTSLA\t-100\t240.00\t($25,000.00)\nNVDA\t10\t150\t$1,450.00");
+  assert.deepEqual(shorts.tickers, [
+    { symbol: "TSLA", option: null, shares: 100, entry: 250, short: true },
+    { symbol: "NVDA", option: null, shares: 10, entry: 145 },
+  ]);
+}
 
 console.log("ticker paste ok");
