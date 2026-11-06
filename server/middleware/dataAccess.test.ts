@@ -41,6 +41,8 @@ const OWNER_ROUTES: Array<[string, string]> = [
   ["GET", "/api/scanner/history"],
   ["GET", "/api/scanner/picks"],
   ["GET", "/api/scanner/workbench/cards"],
+  ["GET", "/api/scanner/signal-workbench/grades"],
+  ["GET", "/api/scanner/signal-workbench/events?page=2"],
   ["POST", "/api/scanner/workbench/ai-analyze"],
   ["GET", "/api/scanner/upcoming-earnings"],
   ["GET", "/api/scanner/debug/ma/AAPL"],

@@ -54,6 +54,14 @@ import { getCachedEarningsData } from "../fundamentals";
 import { getEvidenceSnapshot, getLiveEvidenceIndex, evaluateSignalHoldout, themeRankSqlPredicate } from "./evidence-service";
 import type { OutcomeWindowKey } from "@shared/scanner-outcome-v3";
 import { parseThemeRankCut, parseThemeRankN } from "@shared/scanner-theme-rank-filter";
+import {
+  HORIZONS,
+  HORIZON_COLUMNS,
+  buildEventsPage,
+  buildGrades,
+  parseEventsQuery,
+  parseGradesQuery,
+} from "./signal-workbench-read";
 
 const router = Router();
 
@@ -575,6 +583,82 @@ router.get("/workbench/hit-rates", async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.warn("[Workbench] hit-rates error:", String(err).slice(0, 200));
+    res.status(500).json({ error: "Query failed" });
+  }
+});
+
+// ── Signals Lab, read-only (Anima reads these through /api/anima/scanner/…) ──
+// Rank and report only: nothing here changes, hides or re-grades a signal.
+
+router.get("/signal-workbench/grades", async (req: Request, res: Response) => {
+  if (!db) return res.status(503).json({ error: "Database not available" });
+  const q = parseGradesQuery(req.query as Record<string, unknown>);
+  if ("error" in q) return res.status(400).json({ error: q.error });
+  try {
+    // One snapshot per horizon, the page's own query (cached 60s). One at a time to spare the pool.
+    const snapshots: { window: OutcomeWindowKey; snapshot: Awaited<ReturnType<typeof getEvidenceSnapshot>> }[] = [];
+    for (const window of HORIZONS) {
+      const snapshot = await getEvidenceSnapshot({
+        from: q.from,
+        to: q.to,
+        window,
+        hitThreshold: q.hitThreshold,
+        minEpisodes: q.minSamples,
+        session: "all",
+        subjectKind: "all",
+        trust: q.trust,
+        includeCohorts: false,
+        themeRankCut: "all",
+        themeRankN: 5,
+      });
+      snapshots.push({ window, snapshot });
+    }
+    res.json(buildGrades(q, snapshots));
+  } catch (err) {
+    console.warn("[Workbench] grades error:", String(err).slice(0, 200));
+    res.status(500).json({ error: "Query failed" });
+  }
+});
+
+router.get("/signal-workbench/events", async (req: Request, res: Response) => {
+  if (!db) return res.status(503).json({ error: "Database not available" });
+  const q = parseEventsQuery(req.query as Record<string, unknown>);
+  if ("error" in q) return res.status(400).json({ error: q.error });
+  const fromTs = `${q.from}T00:00:00Z`;
+  const toTs = `${q.to}T23:59:59Z`;
+  const where = sql`created_at >= ${fromTs}::timestamptz AND created_at <= ${toTs}::timestamptz
+    AND (${q.type}::text IS NULL OR signal_type = ${q.type})`;
+  const outcomeCols = sql.raw(
+    HORIZONS.map((h) => `price_${HORIZON_COLUMNS[h]}, move_${HORIZON_COLUMNS[h]}`).join(", "),
+  );
+  try {
+    const countResult = await db.execute(sql`SELECT COUNT(*)::int AS n FROM scanner_discoveries WHERE ${where}`);
+    const total = Number((((countResult as any).rows ?? countResult) as any[])[0]?.n ?? 0);
+    // Episode = first directional fire per (signal type, subject, ET day), the same rows the page's DISTINCT ON keeps.
+    const rowsResult = await db.execute(sql`
+      WITH ranked AS (
+        SELECT
+          id, signal_type, subject, subject_kind, direction, headline, tickers, qualify_score, created_at,
+          session_at_signal, regime_at_signal, price_at_signal, ${outcomeCols},
+          peak_move, worst_drawdown, giveback_pct, outcome_status, outcome_failed, outcome_contract_version,
+          outcome_tracked_at, intraday_complete_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY signal_type, subject, (created_at AT TIME ZONE 'America/New_York')::date,
+              (direction IN ('up', 'down'))
+            ORDER BY created_at ASC, id ASC
+          ) AS episode_rank
+        FROM scanner_discoveries
+        WHERE ${where}
+      )
+      SELECT *, (episode_rank = 1 AND direction IN ('up', 'down')) AS episode
+      FROM ranked
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${q.pageSize} OFFSET ${(q.page - 1) * q.pageSize}
+    `);
+    const rows = ((rowsResult as any).rows ?? rowsResult) as Record<string, any>[];
+    res.json(buildEventsPage(q, total, rows));
+  } catch (err) {
+    console.warn("[Workbench] events error:", String(err).slice(0, 200));
     res.status(500).json({ error: "Query failed" });
   }
 });

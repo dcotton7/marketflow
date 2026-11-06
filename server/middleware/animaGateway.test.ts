@@ -12,7 +12,8 @@ const USERS: Record<number, AccessUser> = { 1: { id: 1, isAdmin: true, isActive:
 for (const p of ["/api/stocks/AAPL/quote", "/api/stocks/BRK.B/history", "/api/market-condition/leaders",
   "/api/market-condition/themes/ai-infra/members", "/api/bigidea/ideas/12", "/api/discord-stream/summary",
   "/api/sentinel/trade-journal", "/api/sentinel/trades/closed", "/api/marketflow/NVDA/cached", "/API/News/Top/",
-  "/api/alerts/feed", "/api/positions/snapshot", "/api/scanner/history", "/api/scanner/status"]) {
+  "/api/alerts/feed", "/api/positions/snapshot", "/api/scanner/history", "/api/scanner/status",
+  "/api/scanner/signal-workbench/grades", "/api/scanner/signal-workbench/events"]) {
   assert.ok(allowedPath(p), `allowed ${p}`);
 }
 for (const p of ["/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add", "/api/sentinel/watchlist/remove-tickers",
@@ -68,7 +69,9 @@ for (const [p, b] of [
 for (const p of ["/api/auth/me", "/api/sentinel/evaluate", "/api/marketflow/NVDA", "/api/discord-stream/messages",
   "/api/market-leaders/book", "/api/alerts", "/api/sentinel/trade/12/labels", "/api/uploads", "/api/stocks/AAPL/quote/x",
   "/api/alerts/events", "/api/alerts/12", "/api/alerts/12/deliveries", "/api/alerts/feed/x", "/api/positions",
-  "/api/scanner/stream", "/api/scanner/config", "/api/scanner/catalysts/queue", "/api/scanner/history/x"]) {
+  "/api/scanner/stream", "/api/scanner/config", "/api/scanner/catalysts/queue", "/api/scanner/history/x",
+  "/api/scanner/signal-workbench/grades/x", "/api/scanner/signal-workbench", "/api/scanner/workbench/ai-analyze",
+  "/api/scanner/workbench/cards"]) {
   assert.ok(!allowedPath(p), `refused ${p}`);
 }
 assert.ok(internalRequest({ headers: { host: "marketflow-hrxh:10000" } } as any));
