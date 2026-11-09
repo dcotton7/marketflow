@@ -190,6 +190,11 @@ while ($listener.IsListening) {
         process      = [string]$result.process
         title        = [string]$result.title
       }
+      # Where the point sits in its ToS window, so a moved window still gets the click (older tos-win.ps1: absent)
+      if ($null -ne $result.dx) {
+        $cal.dx = [int]$result.dx; $cal.dy = [int]$result.dy; $cal.w = [int]$result.w; $cal.h = [int]$result.h
+        $cal.dpi = [string]$result.dpi
+      }
       Save-Calibration $cal
       Write-Host ("Locked at ({0}, {1})" -f $cal.x, $cal.y)
       Write-Json $ctx 200 @{
@@ -235,12 +240,17 @@ while ($listener.IsListening) {
         Write-Json $ctx 200 @{ ok = $true; symbol = $up; skipped = $true }
         continue
       }
-      $result = Invoke-TosWin @(
+      $navArgs = @(
         "-Action", "navigate",
         "-Symbol", $up,
         "-X", ([string][int]$cal.x),
         "-Y", ([string][int]$cal.y)
       )
+      if ($null -ne $cal.dx -and $null -ne $cal.dy) {
+        $navArgs += @("-DX", ([string][int]$cal.dx), "-DY", ([string][int]$cal.dy), "-W", ([string][int]$cal.w),
+          "-H", ([string][int]$cal.h), "-Title", [string]$cal.title)
+      }
+      $result = Invoke-TosWin $navArgs
       if (-not $result.ok) {
         Write-Json $ctx 400 @{ error = [string]$result.error }
         continue

@@ -24,6 +24,13 @@ const PS_SCRIPT = path.join(process.cwd(), "server", "bridge", "tos-win.ps1");
 interface Calibration {
   x: number;
   y: number;
+  /** The point inside its ToS window (offset from the window's top-left) and that window's size, so a moved window
+   *  still gets the click. Absent on calibrations made before 9 Nov 2026. */
+  dx?: number;
+  dy?: number;
+  w?: number;
+  h?: number;
+  dpi?: string;
   calibratedAt: string;
   process?: string;
   title?: string;
@@ -34,6 +41,11 @@ interface PsResult {
   error?: string;
   x?: number;
   y?: number;
+  dx?: number;
+  dy?: number;
+  w?: number;
+  h?: number;
+  dpi?: string;
   process?: string;
   title?: string;
   symbol?: string;
@@ -134,6 +146,9 @@ export async function calibrate(_delaySec: number = 5): Promise<Calibration> {
   const cal: Calibration = {
     x: result.x,
     y: result.y,
+    ...(typeof result.dx === "number" && typeof result.dy === "number"
+      ? { dx: result.dx, dy: result.dy, w: result.w, h: result.h, dpi: result.dpi }
+      : {}),
     calibratedAt: new Date().toISOString(),
     process: result.process,
     title: result.title,
@@ -143,6 +158,16 @@ export async function calibrate(_delaySec: number = 5): Promise<Calibration> {
   return cal;
 }
 
+/** tos-win.ps1 navigate arguments: the calibrated point, plus where it sits in its window when Calibrate recorded it. */
+export function navigateArgs(cal: Calibration, symbol: string): string[] {
+  const args = ["-Action", "navigate", "-Symbol", symbol, "-X", String(cal.x), "-Y", String(cal.y)];
+  if (typeof cal.dx === "number" && typeof cal.dy === "number") {
+    args.push("-DX", String(cal.dx), "-DY", String(cal.dy), "-W", String(cal.w ?? 0), "-H", String(cal.h ?? 0));
+    if (cal.title) args.push("-Title", cal.title);
+  }
+  return args;
+}
+
 export async function navigate(symbol: string): Promise<void> {
   if (!IS_WINDOWS) throw new Error("ToS bridge requires Windows");
   if (!calibration) throw new Error("Not calibrated — click the ToS pop-out symbol box and calibrate first");
@@ -150,17 +175,7 @@ export async function navigate(symbol: string): Promise<void> {
   const clean = symbol.toUpperCase().replace(/[^A-Z0-9./-]/g, "");
   if (!clean) throw new Error("Invalid symbol");
 
-  const { x, y } = calibration;
-  const result = await runTosPs([
-    "-Action",
-    "navigate",
-    "-Symbol",
-    clean,
-    "-X",
-    String(x),
-    "-Y",
-    String(y),
-  ]);
+  const result = await runTosPs(navigateArgs(calibration, clean));
   if (!result.ok) {
     throw new Error(result.error || "Navigate failed");
   }
