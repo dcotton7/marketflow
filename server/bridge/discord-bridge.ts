@@ -15,6 +15,7 @@ import fs from "fs";
 import path from "path";
 import { analyze, loadFullSymbolList, tagMessage, TRADE_CHANNELS, type RoomAnalysis, type Side, type TradeAction } from "./discord-analysis";
 import { aiAvailable, summarizeRoom, type RoomSummary } from "./discord-summary";
+import { keepSummary } from "./discord-health";
 
 const BRIDGE_DIR = path.join(process.cwd(), "server", "bridge");
 const PS_SCRIPT = path.join(BRIDGE_DIR, "discord-watch.ps1");
@@ -378,7 +379,7 @@ export function summarize(opts: { minutes: number; traders?: string[]; weights?:
     weights: opts.weights ?? {},
   })
     .then((s) => {
-      lastSummary = s;
+      if (keepSummary(s)) lastSummary = s; // an empty one never replaces the room's summary (discord-health)
       return s;
     })
     .finally(() => {

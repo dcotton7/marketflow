@@ -1056,6 +1056,7 @@ export async function registerRoutes(
       : null;
   const discordUnavailable = { error: "Discord Watch only available on LOCAL Windows" };
   const discordRelay = await import("./bridge/discord-relay");
+  const { discordHealth } = await import("./bridge/discord-health");
   // On Live the room is whatever the LOCAL capture last relayed; LOCAL reads its own bridge and relays it.
   const discordRead = () => discordBridge ?? (discordRelay.hasData() ? discordRelay : null);
   if (discordBridge) discordRelay.startSender(discordBridge);
@@ -1117,6 +1118,18 @@ export async function registerRoutes(
         weights: parseDiscordWeights(req.query.weights),
       }),
     );
+  });
+
+  // Public (under /api/health): counts and ages only, for the PC keep-alive's check of LOCAL and Live.
+  app.get("/api/health/discord", (_req, res) => {
+    const src = discordRead();
+    res.set("Cache-Control", "no-store");
+    res.json(discordHealth({
+      source: discordBridge ? "local" : src ? "relay" : "none",
+      status: src ? src.getStatus() : null,
+      messages: src ? src.getMessages(0, 5000) : [],
+      summary: src ? src.getLastSummary() : null,
+    }));
   });
 
   app.get("/api/discord-stream/summary", (_req, res) => {

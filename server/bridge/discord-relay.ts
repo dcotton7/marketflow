@@ -18,6 +18,7 @@ import type { Request, Response } from "express";
 import { analyze, type RoomAnalysis } from "./discord-analysis";
 import type { DiscordMessage } from "./discord-bridge";
 import { aiAvailable, summarizeRoom, type RoomSummary } from "./discord-summary";
+import { keepSummary } from "./discord-health";
 
 const MAX_MESSAGES = 5000;
 const BATCH = 400;
@@ -86,8 +87,10 @@ export function accept(req: Request, res: Response): void {
   if (appended) received.sort((a, b) => a.seq - b.seq);
   if (received.length > MAX_MESSAGES) received.splice(0, received.length - MAX_MESSAGES);
   if (body.status && typeof body.status === "object") localStatus = body.status as BridgeStatus;
-  if (body.summary === null || (body.summary && typeof body.summary === "object")) {
-    localSummary = body.summary as RoomSummary | null;
+  if (body.summary === null) {
+    localSummary = null;
+  } else if (body.summary && typeof body.summary === "object" && keepSummary(body.summary as RoomSummary)) {
+    localSummary = body.summary as RoomSummary; // an empty one (an older PC build) keeps the last real one
   }
   lastPushAt = Date.now();
   res.json({ ok: true, buffered: received.length, firstSeq: received[0]?.seq ?? 0, latestSeq: received.at(-1)?.seq ?? 0 });
@@ -126,8 +129,12 @@ let ownSummary: RoomSummary | null = null;
 let summaryInFlight: Promise<RoomSummary> | null = null;
 
 export function getLastSummary(): RoomSummary | null {
-  if (!ownSummary || !localSummary) return ownSummary ?? localSummary;
-  return Date.parse(ownSummary.generatedAt) >= Date.parse(localSummary.generatedAt) ? ownSummary : localSummary;
+  // An empty summary (made while the buffer was empty) is never the room's summary: it said "No messages captured"
+  // while the room was busy (Don, 9 Nov).
+  const own = keepSummary(ownSummary);
+  const local = keepSummary(localSummary);
+  if (!own || !local) return own ?? local;
+  return Date.parse(own.generatedAt) >= Date.parse(local.generatedAt) ? own : local;
 }
 
 export function summarize(opts: { minutes: number; traders?: string[]; weights?: Record<string, number> }): Promise<RoomSummary> {
@@ -138,7 +145,7 @@ export function summarize(opts: { minutes: number; traders?: string[]; weights?:
     weights: opts.weights ?? {},
   })
     .then((s) => {
-      ownSummary = s;
+      if (keepSummary(s)) ownSummary = s;
       return s;
     })
     .finally(() => {

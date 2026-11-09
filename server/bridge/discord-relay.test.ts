@@ -42,4 +42,16 @@ assert.deepEqual(relay.getMessages().map((m) => m.seq), [3], "messages the bridg
 call({ bootId: "b", oldestSeq: 1, messages: [msg(1)] }, T);
 assert.deepEqual(relay.getMessages().map((m) => m.seq), [1], "a restarted capture starts over");
 
+// An empty summary (made while the buffer was empty, e.g. just after Live restarted) is never shown as the room's:
+// Don, 9 Nov, the ideas column had 78 messages in 15 minutes and the summary said "No messages captured".
+{
+  const full = { generatedAt: new Date(Date.now() - 60_000).toISOString(), minutes: 60, messageCount: 40, authorCount: 9,
+    model: "m", headline: "semis", mood: "", ideas: [], groupThink: [], staffMoves: [], watchOuts: [] };
+  call({ bootId: "b", oldestSeq: 1, messages: [msg(1)], summary: full }, T);
+  assert.equal(relay.getLastSummary()?.headline, "semis");
+  call({ bootId: "b", oldestSeq: 1, messages: [msg(1)],
+    summary: { ...full, generatedAt: new Date().toISOString(), messageCount: 0, headline: "No messages captured in this window." } }, T);
+  assert.equal(relay.getLastSummary()?.headline, "semis", "a newer empty LOCAL summary doesn't replace the real one");
+}
+
 console.log("discord-relay tests passed");
