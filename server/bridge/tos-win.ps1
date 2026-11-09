@@ -6,7 +6,14 @@ param(
   [string]$Action,
   [string]$Symbol = "",
   [int]$X = 0,
-  [int]$Y = 0
+  [int]$Y = 0,
+  # Where the point sits inside its ToS window at calibration (left/top offset, the window's size and title), so a
+  # moved window still gets the click on its symbol box. Without them (an older calibration) X,Y is used as it is.
+  [int]$DX = -1,
+  [int]$DY = -1,
+  [int]$W = 0,
+  [int]$H = 0,
+  [string]$Title = ""
 )
 
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
@@ -53,6 +60,27 @@ public static class TosWin {
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+  // Per-monitor v2: cursor, window rects and clicks all in physical pixels on every monitor. "System aware" (the old
+  // SetProcessDPIAware) scales coordinates on a monitor whose scaling differs from the primary's (Don's portrait
+  // 4K at 175% beside a 150% main screen read as 1851x3291, not 2160x3840), while ToS (Java) works per monitor.
+  public static string UsePhysicalPixels() {
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return "permonitorv2"; } catch { }
+    SetProcessDPIAware();
+    return "system";
+  }
+
+  public static RECT Rect(IntPtr hWnd) {
+    RECT r;
+    GetWindowRect(hWnd, out r);
+    return r;
+  }
+
+  // "Main@thinkorswim [build 1994]" and "Main@thinkorswim [build 1995]" are the same window.
+  public static string TitleKey(string title) {
+    return System.Text.RegularExpressions.Regex.Replace(title ?? "", @"\s*\[build[^\]]*\]\s*$", "").Trim();
+  }
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   public const int VK_LBUTTON = 0x01;
 
@@ -153,7 +181,7 @@ public static class TosWin {
   }
 }
 "@ | Out-Null
-[void][TosWin]::SetProcessDPIAware()
+$dpiMode = [TosWin]::UsePhysicalPixels()
 
 function Write-Result($obj) {
   ($obj | ConvertTo-Json -Compress)
@@ -217,14 +245,46 @@ if ($Action -eq "calibrate") {
     }
     exit 2
   }
+  $root = [TosWin]::RootFromPoint($px, $py)
+  $r = [TosWin]::Rect($root)
   Write-Result @{
     ok = $true
     x = $px
     y = $py
+    dx = $px - $r.Left
+    dy = $py - $r.Top
+    w = $r.Right - $r.Left
+    h = $r.Bottom - $r.Top
+    dpi = $dpiMode
     process = $hit.proc
     title = $hit.title
   }
   exit 0
+}
+
+# The ToS window to click and where: the calibrated window (same title, else same size) at the calibrated offset, so
+# moving it after Calibrate doesn't matter; else, as before, whichever ToS window holds the calibrated point.
+function Select-TosTarget($windows) {
+  $none = [pscustomobject]@{ hwnd = [IntPtr]::Zero; x = $X; y = $Y; how = "none" }
+  if ($DX -ge 0 -and $DY -ge 0) {
+    $key = [TosWin]::TitleKey($Title)
+    $byTitle = @($windows | Where-Object { $key -and [TosWin]::TitleKey([TosWin]::WindowTitle($_)) -eq $key })
+    $bySize = @($windows | Where-Object {
+      $r = [TosWin]::Rect($_); [Math]::Abs(($r.Right - $r.Left) - $W) -le 4 -and [Math]::Abs(($r.Bottom - $r.Top) - $H) -le 4 })
+    foreach ($set in @(@($byTitle | Where-Object { $bySize -contains $_ }), $byTitle, $bySize)) {
+      # one clear match only: two same-size pop-outs could be either
+      if ($set.Count -ne 1) { continue }
+      $h = $set[0]
+      $r = [TosWin]::Rect($h)
+      $px = $r.Left + $DX
+      $py = $r.Top + $DY
+      if ([TosWin]::ContainsPoint($h, $px, $py)) { return [pscustomobject]@{ hwnd = $h; x = $px; y = $py; how = "window" } }
+    }
+  }
+  foreach ($h in $windows) {
+    if ([TosWin]::ContainsPoint($h, $X, $Y)) { return [pscustomobject]@{ hwnd = $h; x = $X; y = $Y; how = "point" } }
+  }
+  return $none
 }
 
 # navigate
@@ -243,10 +303,10 @@ if ($tosWindows.Count -eq 0) {
   exit 2
 }
 
-$target = [IntPtr]::Zero
-foreach ($h in $tosWindows) {
-  if ([TosWin]::ContainsPoint($h, $X, $Y)) { $target = $h; break }
-}
+$pick = Select-TosTarget $tosWindows
+$target = $pick.hwnd
+$X = $pick.x
+$Y = $pick.y
 if ($target -eq [IntPtr]::Zero) {
   Write-Result @{
     ok = $false
@@ -283,5 +343,5 @@ Start-Sleep -Milliseconds 80
 Start-Sleep -Milliseconds 120
 if ($prev -ne [IntPtr]::Zero) { [void][TosWin]::FocusWindow($prev) }
 
-Write-Result @{ ok = $true; symbol = $Symbol; process = $hit.proc; title = $hit.title }
+Write-Result @{ ok = $true; symbol = $Symbol; process = $hit.proc; title = $hit.title; x = $X; y = $Y; how = $pick.how; dpi = $dpiMode }
 exit 0
