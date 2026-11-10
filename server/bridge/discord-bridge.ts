@@ -130,6 +130,8 @@ export interface WatcherStatus {
   capturing?: string;
   listFound: boolean;
   visible: number;
+  /** Every Discord window the watcher sees (app, PTB, Canary, pop-outs, discord.com in a browser). */
+  windows?: { kind: string; channel: string; server: string; minimized: boolean; watched: boolean; capturing: boolean }[];
   seen: number;
   toastAccess?: string;
   toasts?: number;
@@ -169,7 +171,8 @@ function asReactions(v: unknown): DiscordReaction[] {
     .filter((r) => r.emoji);
 }
 
-function handleLine(line: string): void {
+/** One line of watcher output (exported for tests: the same post from two windows is kept once). */
+export function handleLine(line: string): void {
   const trimmed = line.trim();
   if (!trimmed.startsWith("{")) return;
   let obj: Record<string, unknown>;

@@ -55,7 +55,7 @@ assert.equal(cleanChannel("Messages in 🟢live-long-ideas"), "live-long-ideas")
 
 const wrong = h({ channelName: "📈︱trading-floor", openChannel: "trading-floor" });
 assert.deepEqual(wrong.problems, ["wrong_channel_open"], "ranks above no_new_messages_20m");
-assert.deepEqual(wrong.messages, ["Discord is showing #trading-floor (Market Pulse), not #live-stream-chat"]);
+assert.match(wrong.messages[0], /^No Discord window is showing #live-stream-chat \(Discord is on #trading-floor, Market Pulse\)\. Open #live-stream-chat in a second Discord window/);
 
 const quietRight = h({});
 assert.deepEqual(quietRight.problems, ["no_new_messages_20m"], "right channel, quiet room");

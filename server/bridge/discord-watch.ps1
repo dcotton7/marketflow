@@ -1,8 +1,11 @@
 ﻿# Discord Watch -- read-only capture of Discord channels from the Discord desktop app.
 #
 # Two read-only sources, one JSON object per line on stdout:
-#   1. The open channel, through Windows UI Automation (the accessibility tree), when it is one of
-#      the watched channels. Discord only renders what is on screen, so keep it scrolled to the newest.
+#   1. Every top-level window that shows a watched channel, through Windows UI Automation (the accessibility tree):
+#      the Discord app, Discord PTB and Canary, the app's pop-out windows, and a Chrome / Edge / Firefox window whose
+#      active tab is discord.com. So Don can read any channel in his main Discord while a second window stays parked on
+#      #live-stream-chat. Discord only renders what is on screen, so keep that window scrolled to the newest.
+#      A message seen in two windows is emitted once (same message key).
 #   2. Discord's Windows notifications (pop-ups), from the Windows notification history, so posts in
 #      channels that are not open (trade-call channels) are still caught.
 #
@@ -80,26 +83,99 @@ function Emit($obj) {
   [Console]::Out.Flush()
 }
 
-# IsIconic only reads the window state (no focus, no messages sent to Discord).
-Add-Type -Namespace DW -Name Native -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);' -ErrorAction SilentlyContinue
-
-# Process running at all? A Discord that is closed to the tray has a process but no main window handle.
-function Get-DiscordWindow {
-  $procs = @(Get-Process -Name Discord -ErrorAction SilentlyContinue)
-  $p = $procs | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-  if (-not $p) { return [pscustomobject]@{ Running = ($procs.Count -gt 0); Pid = 0; Handle = [IntPtr]::Zero; Title = ""; Minimized = $false } }
-  $min = $false
-  try { $min = [bool][DW.Native]::IsIconic($p.MainWindowHandle) } catch {}
-  return [pscustomobject]@{ Running = $true; Pid = $p.Id; Handle = $p.MainWindowHandle; Title = $p.MainWindowTitle; Minimized = $min }
+# Window list and state, read only: EnumWindows, IsWindowVisible, IsIconic and GetWindowText never focus a window or
+# send Discord anything.
+if (-not ("DW.Win" -as [type])) {
+  Add-Type -Namespace DW -Name Win -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr h);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern int GetWindowText(System.IntPtr h, System.Text.StringBuilder s, int n);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint pid);
+public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, System.IntPtr l);
+public static System.Collections.Generic.List<object[]> TopWindows() {
+  var r = new System.Collections.Generic.List<object[]>();
+  EnumWindows((h, l) => {
+    if (!IsWindowVisible(h)) return true;
+    var sb = new System.Text.StringBuilder(512);
+    GetWindowText(h, sb, 512);
+    if (sb.Length == 0) return true;
+    uint pid; GetWindowThreadProcessId(h, out pid);
+    r.Add(new object[] { h, (int)pid, sb.ToString(), IsIconic(h) });
+    return true;
+  }, System.IntPtr.Zero);
+  return r;
+}
+'@
 }
 
+$DesktopApps = @{ "discord" = "desktop"; "discordptb" = "ptb"; "discordcanary" = "canary" }
+$Browsers = @("chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc")
+
+# "#📈︱trading-floor | Market Pulse - Discord" (desktop), the same plus " - Google Chrome" / " - Microsoft Edge" /
+# " — Mozilla Firefox" (browser), sometimes with an unread count "(3) " or "• " in front, or "Discord | #chan | Server".
 function Split-Title([string]$title) {
-  # "#live-stream-chat | MarketPulse - Discord"
-  $t = $title -replace '\s*-\s*Discord$', ''
+  $t = $title -replace '\s+(-|—)\s+(Google Chrome|Microsoft.{0,2}Edge|Mozilla Firefox|Brave|Opera|Vivaldi|Arc)$', ''
+  $t = $t -replace '^\(\d+\)\s*', '' -replace '^[•●]\s*', ''
+  $isDiscord = $false
+  # Edge: "... - Discord and 3 more pages - Work"; Chrome profiles: "... - Discord - Person 1".
+  if ($t -match '^(.*?)\s+-\s+Discord(\s+and \d+ more pages?)?(\s+-\s+.*)?$') { $isDiscord = $true; $t = $Matches[1] }
+  elseif ($t -match '^Discord\s+\|\s+') { $isDiscord = $true; $t = $t -replace '^Discord\s+\|\s+', '' }
+  elseif ($t -eq 'Discord') { $isDiscord = $true; $t = '' }
   $parts = $t -split '\s\|\s', 2
-  $chan = if ($parts.Count -ge 1) { $parts[0].TrimStart('#').Trim() } else { "" }
-  $server = if ($parts.Count -ge 2) { $parts[1].Trim() } else { "" }
-  return @{ channel = $chan; server = $server }
+  $chan = if ($parts.Count -ge 1 -and $parts[0].StartsWith('#')) { $parts[0].TrimStart('#').Trim() } else { "" }
+  $server = if ($chan -and $parts.Count -ge 2) { $parts[1].Trim() } else { "" }
+  return @{ channel = $chan; server = $server; isDiscord = $isDiscord }
+}
+
+# One row per top-level window: which app it is and what it shows. Browsers count only when their title says Discord
+# (the active tab is what Chrome and Edge render and expose).
+function Get-DiscordWindowsFrom($rows) {
+  $out = @()
+  foreach ($r in $rows) {
+    $proc = ([string]$r.process).ToLowerInvariant() -replace '\.exe$', ''
+    $ti = Split-Title ([string]$r.title)
+    $kind = if ($DesktopApps.ContainsKey($proc)) { $DesktopApps[$proc] } elseif ($Browsers -contains $proc -and $ti.isDiscord) { "browser" } else { $null }
+    if (-not $kind) { continue }
+    $chan = Normalize-Channel $ti.channel
+    $out += [pscustomobject]@{
+      Handle = $r.handle; Kind = $kind; Title = [string]$r.title; Minimized = [bool]$r.minimized
+      ChannelName = $ti.channel; Channel = $chan; Server = $ti.server; Watched = [bool]($chan -and $Watched -contains $chan)
+    }
+  }
+  return $out
+}
+
+$script:ProcNames = @{}
+function Get-ProcName([int]$id) {
+  if (-not $script:ProcNames.ContainsKey($id)) {
+    $n = ""
+    try { $n = (Get-Process -Id $id -ErrorAction Stop).ProcessName } catch {}
+    $script:ProcNames[$id] = $n
+  }
+  return $script:ProcNames[$id]
+}
+
+function Get-DiscordWindows {
+  if ($script:ProcNames.Count -gt 500) { $script:ProcNames = @{} }
+  $rows = foreach ($w in [DW.Win]::TopWindows()) {
+    [pscustomobject]@{ handle = $w[0]; process = (Get-ProcName $w[1]); title = $w[2]; minimized = $w[3] }
+  }
+  return @(Get-DiscordWindowsFrom @($rows))
+}
+
+# Test hook: classify a mocked window list (JSON array of {process,title,minimized}) and exit. Reads no windows.
+if ($env:DISCORD_WATCH_CLASSIFY) {
+  # PowerShell 5.1 hands a JSON array on as one object; ForEach-Object unrolls it.
+  $rows = @(Get-Content -Raw -Encoding UTF8 -LiteralPath $env:DISCORD_WATCH_CLASSIFY | ConvertFrom-Json | ForEach-Object { $_ })
+  $i = 0
+  foreach ($r in $rows) { $r | Add-Member -NotePropertyName handle -NotePropertyValue ([IntPtr](++$i)) -Force }
+  $res = @(Get-DiscordWindowsFrom $rows) | ForEach-Object {
+    [ordered]@{ kind = $_.Kind; channel = $_.Channel; channelName = $_.ChannelName; server = $_.Server; watched = $_.Watched; minimized = $_.Minimized }
+  }
+  [Console]::Out.WriteLine((ConvertTo-Json -InputObject @($res) -Compress -Depth 4))
+  exit 0
 }
 
 function Find-MessageList($handle) {
@@ -295,19 +371,54 @@ function Read-Message($item, $win) {
   }
 }
 
+# One seen-set for every window: a message's key (chat-messages-<channel>-<message>) is the same in each window, so a
+# post shown by two windows is emitted once.
 $seen = New-Object System.Collections.Generic.HashSet[string]
 $seenOrder = New-Object System.Collections.Generic.Queue[string]
 $seenToasts = New-Object System.Collections.Generic.HashSet[string]
-$list = $null
-$listChannel = ""
-$listTitle = ""
+# Per window handle: the message list found for its current title.
+$tracked = @{}
 $lastStatus = [DateTime]::MinValue
-$firstPass = $true
 $firstToastPass = $true
 $lastError = ""
 $toastCount = 0
 
 Emit @{ type = "started"; channels = $Watched; pid = $PID; intervalMs = $IntervalMs; toastAccess = $script:ToastAccess }
+
+function Read-WindowList($t) {
+  $items = $t.List.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)
+  $t.Visible = $items.Count
+  $script:LastAuthor = ""; $script:LastTag = ""
+  $info = @{ channel = $t.ListChannel; server = $t.Server }
+  foreach ($it in $items) {
+    $aid = ""
+    try { $aid = $it.Current.AutomationId } catch { continue }
+    if ($aid -notlike "chat-messages-*") { continue }
+    if ($seen.Contains($aid)) {
+      # Keep author inheritance correct for the next unseen continuation message.
+      try {
+        foreach ($c in (Get-Children $it)) {
+          if ($c.Current.ClassName -like "*message__*") {
+            $p = Strip-AuthorLabel (($c.Current.Name -split ' , ', 2)[0])
+            if ($p) { $script:LastAuthor = $p }
+            break
+          }
+        }
+      } catch {}
+      continue
+    }
+    $msg = $null
+    try { $msg = Read-Message $it $info } catch { $script:lastError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))" }
+    if (-not $msg) { continue }
+    $msg.initial = $t.FirstPass
+    $msg.window = $t.Kind
+    [void]$seen.Add($aid)
+    $seenOrder.Enqueue($aid)
+    if ($seenOrder.Count -gt 20000) { [void]$seen.Remove($seenOrder.Dequeue()) }
+    Emit $msg
+  }
+  $t.FirstPass = $false
+}
 
 while ($true) {
   if (Test-Path $KillFile) {
@@ -315,65 +426,34 @@ while ($true) {
     exit 0
   }
 
-  $dw = Get-DiscordWindow
-  $win = if ($dw.Handle -ne [IntPtr]::Zero) { $dw } else { $null }
-  $titleInfo = if ($win) { Split-Title $win.Title } else { @{ channel = ""; server = "" } }
-  $openChannel = Normalize-Channel $titleInfo.channel
-  $visible = 0
-
-  try {
-    if (-not $win) {
-      $list = $null; $listTitle = ""
-    } else {
-      if ($win.Title -ne $listTitle) {
-        # Channel switched: re-find the list; the first read of a channel is its on-screen history.
-        $list = $null
-        $listTitle = $win.Title
-        $listChannel = ""
-        if ($Watched -contains $openChannel) {
-          $list = Find-MessageList $win.Handle
-          if ($list) { $listChannel = Normalize-Channel $list.Current.Name; $firstPass = $true }
-          else { $listTitle = "" }
-        }
-      }
-      if ($list) {
-        $items = $list.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)
-        $visible = $items.Count
-        $script:LastAuthor = ""; $script:LastTag = ""
-        $info = @{ channel = $listChannel; server = $titleInfo.server }
-        foreach ($it in $items) {
-          $aid = ""
-          try { $aid = $it.Current.AutomationId } catch { continue }
-          if ($aid -notlike "chat-messages-*") { continue }
-          if ($seen.Contains($aid)) {
-            # Keep author inheritance correct for the next unseen continuation message.
-            try {
-              foreach ($c in (Get-Children $it)) {
-                if ($c.Current.ClassName -like "*message__*") {
-                  $p = Strip-AuthorLabel (($c.Current.Name -split ' , ', 2)[0])
-                  if ($p) { $script:LastAuthor = $p }
-                  break
-                }
-              }
-            } catch {}
-            continue
-          }
-          $msg = $null
-          try { $msg = Read-Message $it $info } catch { $lastError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))" }
-          if (-not $msg) { continue }
-          $msg.initial = $firstPass
-          [void]$seen.Add($aid)
-          $seenOrder.Enqueue($aid)
-          if ($seenOrder.Count -gt 20000) { [void]$seen.Remove($seenOrder.Dequeue()) }
-          Emit $msg
-        }
-        $firstPass = $false
-      }
+  $wins = @()
+  try { $wins = @(Get-DiscordWindows) } catch { $lastError = "windows: $($_.Exception.Message)" }
+  $live = @{}
+  foreach ($w in $wins) {
+    $key = [string]$w.Handle
+    $live[$key] = $true
+    $t = $tracked[$key]
+    if (-not $t -or $t.Title -ne $w.Title) {
+      # New window or channel switched: re-find the list; the first read of a channel is its on-screen history.
+      $t = [pscustomobject]@{ Title = $w.Title; Kind = $w.Kind; Server = $w.Server; List = $null; ListChannel = ""; FirstPass = $true; Visible = 0; Tries = 0 }
+      $tracked[$key] = $t
     }
-  } catch {
-    $lastError = $_.Exception.Message
-    $list = $null; $listTitle = ""
+    $w | Add-Member -NotePropertyName State -NotePropertyValue $t -Force
+    if (-not $w.Watched -or $w.Minimized) { $t.List = $null; continue }
+    try {
+      # A list that isn't there yet (Chromium builds its tree lazily) is looked for on 5 polls, then every 20th.
+      if (-not $t.List -and ($t.Tries -lt 5 -or $t.Tries % 20 -eq 0)) {
+        $t.Tries++
+        $t.List = Find-MessageList $w.Handle
+        if ($t.List) { $t.ListChannel = Normalize-Channel $t.List.Current.Name; $t.FirstPass = $true }
+      } elseif (-not $t.List) { $t.Tries++ }
+      if ($t.List) { Read-WindowList $t }
+    } catch {
+      $lastError = "$($w.Kind): $($_.Exception.Message)"
+      $t.List = $null
+    }
   }
+  foreach ($k in @($tracked.Keys)) { if (-not $live.ContainsKey($k)) { $tracked.Remove($k) } }
 
   try {
     foreach ($t in (Read-DiscordToasts)) {
@@ -388,20 +468,29 @@ while ($true) {
 
   $now = Get-Date
   if (($now - $lastStatus).TotalSeconds -ge $StatusEverySec) {
+    # The single-window fields below describe one window, for older readers: the one capturing if any, else the main
+    # Discord app's, else the first Discord window. `windows` lists every one.
+    $capt = @($wins | Where-Object { $_.State -and $_.State.List })
+    $prim = if ($capt.Count) { $capt[0] } else { @($wins | Where-Object { $_.Kind -eq "desktop" }) + @($wins) | Select-Object -First 1 }
+    $running = $wins.Count -gt 0
+    if (-not $running) { $running = [bool](Get-Process -Name Discord, DiscordPTB, DiscordCanary -ErrorAction SilentlyContinue) }
     Emit ([ordered]@{
       type        = "status"
-      window      = [bool]$win
-      running     = [bool]$dw.Running
-      minimized   = [bool]$dw.Minimized
-      title       = if ($win) { $win.Title } else { "" }
-      openChannel = $openChannel
-      server      = $titleInfo.server
-      channelName = $titleInfo.channel
+      window      = [bool]$prim
+      running     = $running
+      minimized   = if ($prim) { [bool]$prim.Minimized } else { $false }
+      title       = if ($prim) { $prim.Title } else { "" }
+      openChannel = if ($prim) { $prim.Channel } else { "" }
+      server      = if ($prim) { $prim.Server } else { "" }
+      channelName = if ($prim) { $prim.ChannelName } else { "" }
       watching    = $Channel
       channels    = $Watched
-      capturing   = $listChannel
-      listFound   = [bool]$list
-      visible     = $visible
+      capturing   = (@($capt | ForEach-Object { $_.State.ListChannel } | Select-Object -Unique) -join ",")
+      listFound   = $capt.Count -gt 0
+      visible     = [int](($capt | ForEach-Object { $_.State.Visible } | Measure-Object -Sum).Sum)
+      windows     = @($wins | ForEach-Object {
+        [ordered]@{ kind = $_.Kind; channel = $_.Channel; server = $_.Server; minimized = $_.Minimized; watched = $_.Watched; capturing = [bool]($_.State -and $_.State.List) }
+      })
       seen        = $seen.Count
       toastAccess = $script:ToastAccess
       toasts      = $toastCount

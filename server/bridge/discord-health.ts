@@ -48,7 +48,8 @@ function cleanServer(s: unknown): string {
 export function discordProblemText(p: DiscordHealthProblem, d: DiscordHealth["discord"], watching: string): string {
   switch (p) {
     case "wrong_channel_open":
-      return `Discord is showing #${d?.channel || "another channel"}${d?.server ? ` (${d.server})` : ""}, not #${watching}`;
+      return `No Discord window is showing #${watching} (Discord is on #${d?.channel || "another channel"}${d?.server ? `, ${d.server}` : ""}). ` +
+        `Open #${watching} in a second Discord window (Discord PTB, or discord.com in its own browser window) and leave it behind your other windows`;
     case "discord_minimized": return "Discord is minimized, so the room can't be read";
     case "discord_not_running": return "Discord is not running";
     case "no_new_messages_20m": return "No new messages for 20 minutes";
@@ -108,9 +109,16 @@ export function discordHealth(input: {
     : null;
   const stale = input.source === "relay" && relayStale === true; // heartbeat is old: don't trust the window state
   const windowGone = !!discord && !stale && w!.window === false;
+  // Newer watchers list every Discord window (app, PTB, Canary, pop-outs, discord.com in a browser). Any one of them
+  // showing a watched channel, not minimized, is enough: Don can read other channels in his main window.
+  const wins = Array.isArray(w?.windows)
+    ? (w!.windows as Record<string, unknown>[]).map((x) => ({ channel: cleanChannel(x?.channel), minimized: x?.minimized === true }))
+    : null;
+  const anyWatched = !!wins && wins.some((x) => !x.minimized && watchedList.includes(x.channel));
   const cause: DiscordHealthProblem | null =
-    !discord || stale ? null
+    !discord || stale || anyWatched ? null
     : !discord.running ? "discord_not_running"
+    : wins && wins.length ? (wins.some((x) => !x.minimized) ? "wrong_channel_open" : "discord_minimized")
     : discord.minimized || windowGone ? "discord_minimized"
     : discord.channel && !watchedList.includes(discord.channel) ? "wrong_channel_open"
     : null;
