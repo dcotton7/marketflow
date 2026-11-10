@@ -80,11 +80,17 @@ function Emit($obj) {
   [Console]::Out.Flush()
 }
 
+# IsIconic only reads the window state (no focus, no messages sent to Discord).
+Add-Type -Namespace DW -Name Native -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);' -ErrorAction SilentlyContinue
+
+# Process running at all? A Discord that is closed to the tray has a process but no main window handle.
 function Get-DiscordWindow {
-  $p = Get-Process -Name Discord -ErrorAction SilentlyContinue |
-    Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-  if (-not $p) { return $null }
-  return [pscustomobject]@{ Pid = $p.Id; Handle = $p.MainWindowHandle; Title = $p.MainWindowTitle }
+  $procs = @(Get-Process -Name Discord -ErrorAction SilentlyContinue)
+  $p = $procs | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+  if (-not $p) { return [pscustomobject]@{ Running = ($procs.Count -gt 0); Pid = 0; Handle = [IntPtr]::Zero; Title = ""; Minimized = $false } }
+  $min = $false
+  try { $min = [bool][DW.Native]::IsIconic($p.MainWindowHandle) } catch {}
+  return [pscustomobject]@{ Running = $true; Pid = $p.Id; Handle = $p.MainWindowHandle; Title = $p.MainWindowTitle; Minimized = $min }
 }
 
 function Split-Title([string]$title) {
@@ -309,7 +315,8 @@ while ($true) {
     exit 0
   }
 
-  $win = Get-DiscordWindow
+  $dw = Get-DiscordWindow
+  $win = if ($dw.Handle -ne [IntPtr]::Zero) { $dw } else { $null }
   $titleInfo = if ($win) { Split-Title $win.Title } else { @{ channel = ""; server = "" } }
   $openChannel = Normalize-Channel $titleInfo.channel
   $visible = 0
@@ -384,9 +391,12 @@ while ($true) {
     Emit ([ordered]@{
       type        = "status"
       window      = [bool]$win
+      running     = [bool]$dw.Running
+      minimized   = [bool]$dw.Minimized
       title       = if ($win) { $win.Title } else { "" }
       openChannel = $openChannel
       server      = $titleInfo.server
+      channelName = $titleInfo.channel
       watching    = $Channel
       channels    = $Watched
       capturing   = $listChannel

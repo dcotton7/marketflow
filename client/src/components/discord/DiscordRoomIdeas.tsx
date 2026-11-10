@@ -263,6 +263,28 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
     localStorage.removeItem(IGNORE_KEY);
   };
 
+  // Why the room may look dead: Discord on another channel, minimized or closed (public /api/health/discord, same text as the phone alert).
+  const [causeText, setCauseText] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/health/discord", { cache: "no-store" });
+        const h = (await res.json()) as { problems?: string[]; messages?: string[] };
+        const i = (h.problems ?? []).findIndex((p) => p === "wrong_channel_open" || p === "discord_minimized" || p === "discord_not_running");
+        if (alive) setCauseText(i >= 0 ? (h.messages?.[i] ?? null) : null);
+      } catch {
+        if (alive) setCauseText(null);
+      }
+    };
+    void check();
+    const t = setInterval(check, 30_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
   const traderKey = traders.join(",");
   useEffect(() => {
     let alive = true;
@@ -341,6 +363,9 @@ export function DiscordRoomIdeas({ traders, onSymbol }: { traders: string[]; onS
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
+        {causeText && (
+          <div data-testid="discord-health-banner" className="mx-3 mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">{causeText}</div>
+        )}
         {error && <div className="mx-3 mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-300">Analysis unavailable ({error})</div>}
 
         {Object.keys(weights).length > 0 && (

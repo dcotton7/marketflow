@@ -3,7 +3,7 @@
  * Run with: npx tsx server/bridge/discord-health.test.ts
  */
 import assert from "node:assert/strict";
-import { discordHealth, isUsMarketHours, keepSummary } from "./discord-health";
+import { cleanChannel, discordHealth, isUsMarketHours, keepSummary } from "./discord-health";
 
 // Mon 9 Nov 2026, 9:35 ET (14:35Z, EST)
 const now = Date.parse("2026-11-09T14:35:00Z");
@@ -41,6 +41,34 @@ const night = discordHealth({ source: "relay", status: { running: false, relaySt
   now: Date.parse("2026-11-10T03:00:00Z") });
 assert.equal(night.ok, true, "after hours a quiet or stopped capture isn't a problem");
 assert.deepEqual(discordHealth({ source: "none", messages: [], now }).problems, ["no_source"]);
+
+// What the watcher's heartbeat says Discord is showing (10 Nov: trading-floor open for ~13 hours).
+const hb = (o: Record<string, unknown>) => ({ running: true, relayStale: false, watcher: {
+  window: true, running: true, minimized: false, watching: "live-stream-chat",
+  channels: ["live-stream-chat", "live-long-ideas", "live-short-ideas", "nick-drendel"],
+  channelName: "live-stream-chat", openChannel: "live-stream-chat", server: "Market Pulse", ...o } });
+const silent = [{ ts: now - 40 * 60_000 }];
+const h = (o: Record<string, unknown>) => discordHealth({ source: "local", status: hb(o), messages: silent, now });
+
+assert.equal(cleanChannel("#📈︱trading-floor"), "trading-floor", "emoji, separators and # are stripped");
+assert.equal(cleanChannel("Messages in 🟢live-long-ideas"), "live-long-ideas");
+
+const wrong = h({ channelName: "📈︱trading-floor", openChannel: "trading-floor" });
+assert.deepEqual(wrong.problems, ["wrong_channel_open"], "ranks above no_new_messages_20m");
+assert.deepEqual(wrong.messages, ["Discord is showing #trading-floor (Market Pulse), not #live-stream-chat"]);
+
+const quietRight = h({});
+assert.deepEqual(quietRight.problems, ["no_new_messages_20m"], "right channel, quiet room");
+assert.deepEqual(h({ channelName: "🟢live-long-ideas" }).problems, ["no_new_messages_20m"], "also-watched channel is fine");
+assert.deepEqual(h({ minimized: true }).problems, ["discord_minimized"]);
+assert.deepEqual(h({ window: false, channelName: "", openChannel: "" }).problems, ["discord_minimized"], "process, no window (tray)");
+assert.deepEqual(h({ running: false, window: false, channelName: "", openChannel: "" }).problems, ["discord_not_running"]);
+assert.equal(h({ running: false, window: false }).messages[0], "Discord is not running");
+assert.deepEqual(discordHealth({ source: "local", status: { running: true, watcher: { window: true, watching: "live-stream-chat", openChannel: "live-stream-chat" } }, messages: busy, now }).problems, [], "older watcher without new fields");
+assert.deepEqual(wrongAfterHours().problems, [], "after hours is not a problem");
+function wrongAfterHours() {
+  return discordHealth({ source: "local", status: hb({ channelName: "trading-floor" }), messages: [], now: Date.parse("2026-11-10T03:00:00Z") });
+}
 
 const json = JSON.stringify(seen);
 assert.ok(!/text|author|symbol|ticker/i.test(json), "public: counts and ages only");
