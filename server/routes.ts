@@ -12,6 +12,7 @@ import { registerStartHereRoutes } from "./start-here/routes";
 import { registerPatternLearningRoutes } from "./pattern-learning/routes";
 import { registerBigIdeaRoutes } from "./bigidea/routes";
 import { registerAlertRoutes } from "./alerts/routes";
+import { registerSchwabRoutes } from "./schwab/routes";
 import marketConditionRoutes from "./market-condition/routes";
 import marketflowAnalysisRoutes from "./market-condition/analysis/routes";
 import { registerUploadRoutes } from "./uploads/routes";
@@ -946,6 +947,7 @@ export async function registerRoutes(
   registerSentinelRoutes(app);
   registerStartHereRoutes(app);
   registerAlertRoutes(app);
+  registerSchwabRoutes(app);
   registerPatternLearningRoutes(app);
   registerBigIdeaRoutes(app);
   registerUploadRoutes(app);

@@ -145,6 +145,9 @@ app.use((req, res, next) => {
     console.log("[Startup Stagger] Alert poller PAUSED (not started)");
     const { startPositionAlertWorker } = await import("./alerts/position-worker");
     startPositionAlertWorker();
+    // Schwab read-only link: does nothing unless SCHWAB_ENABLED and the keys are set (docs/schwab-readonly.md).
+    const { schwab } = await import("./schwab/service");
+    await schwab.init().catch((err) => console.error("[Startup] Schwab link init failed:", err));
 
     app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
