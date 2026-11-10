@@ -14,7 +14,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type { DiscoveryCard, ScannerMode, ScannerStatus } from "@shared/scanner-types";
+import { isScannerStatus, type DiscoveryCard, type ScannerMode, type ScannerStatus } from "@shared/scanner-types";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 
 interface ScannerContextValue {
@@ -260,9 +260,9 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
 
     const pullHistory = (bumpUnread: boolean) => {
       fetch("/api/scanner/history?limit=100")
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (cancelled || !data.discoveries?.length) return;
+          if (cancelled || !Array.isArray(data?.discoveries) || !data.discoveries.length) return;
           setDiscoveries((prev) => {
             const { next, added } = mergeDiscoveries(prev, data.discoveries);
             if (bumpUnread && added > 0 && !panelOpenRef.current) {
@@ -293,8 +293,10 @@ export function ScannerProvider({ children }: { children: ReactNode }) {
 
     const fetchStatus = () => {
       fetch("/api/scanner/status")
-        .then((r) => r.json())
-        .then((s: ScannerStatus) => setStatus(s))
+        // A 401 answer ({ error: "Login required" }) is not a status: once stored as one, the scanner page
+        // crashed on status.sessionMode.replace (10 Nov, an embed open past its 12 h cookie).
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s: ScannerStatus | null) => { if (isScannerStatus(s)) setStatus(s); })
         .catch(() => {});
     };
 

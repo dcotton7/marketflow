@@ -303,6 +303,12 @@ export interface ScannerStatus {
   sessionMode: MarketSession;
 }
 
+/** A real /api/scanner/status answer, not an error body such as { error: "Login required" }. */
+export function isScannerStatus(s: unknown): s is ScannerStatus {
+  const o = s as Partial<ScannerStatus> | null;
+  return !!o && typeof o === "object" && typeof o.sessionMode === "string" && typeof o.mode === "string";
+}
+
 // ── Font preferences ────────────────────────────────────────────────────────
 
 export interface ScannerFontPrefs {

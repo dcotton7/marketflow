@@ -31,7 +31,15 @@ const INTERVAL_MS = 3 * 60_000;
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
 
-/** First print of (type, subject, ET day) for flood detectors; other types unchanged. */
+/**
+ * First print of (type, subject, ET day) for flood detectors; other types unchanged.
+ *
+ * Kept as "no earlier row of the same type and name that ET day" with a created_at range, which the
+ * (signal_type, created_at) index can answer. It was MIN(id) over (created_at AT TIME ZONE ...)::date = ...,
+ * which no index answers: per open row it ANDed every row of the name with every row of the type (79k for
+ * lod_bounce). With ~590k never-clocked flood repeats open, the selection took 12-54 min a cycle (dev-local.log,
+ * 10 Nov) and one lod_bounce query ran past 60 s; this form ran it in 25 s, and the 027 indexes make it smaller.
+ */
 function floodFirstEpisodeSql() {
   const listed = sql.join(
     FLOOD_TRACK_ONCE_PER_DAY.map((t) => sql`${t}`),
@@ -39,15 +47,40 @@ function floodFirstEpisodeSql() {
   );
   return sql`(
     scanner_discoveries.signal_type NOT IN (${listed})
-    OR scanner_discoveries.id = (
-      SELECT MIN(d2.id)
+    OR NOT EXISTS (
+      SELECT 1
       FROM scanner_discoveries d2
       WHERE d2.signal_type = scanner_discoveries.signal_type
         AND d2.subject = scanner_discoveries.subject
-        AND (d2.created_at AT TIME ZONE 'America/New_York')::date
-          = (scanner_discoveries.created_at AT TIME ZONE 'America/New_York')::date
+        AND d2.id < scanner_discoveries.id
+        AND d2.created_at >= (date_trunc('day', scanner_discoveries.created_at AT TIME ZONE 'America/New_York')
+                              AT TIME ZONE 'America/New_York')
+        AND d2.created_at < ((date_trunc('day', scanner_discoveries.created_at AT TIME ZONE 'America/New_York')
+                              + interval '1 day') AT TIME ZONE 'America/New_York')
     )
   )`;
+}
+
+// Each selection query runs in its own short transaction with a statement timeout (SET LOCAL works through
+// Neon's transaction pooler; a session SET or a startup option would not), so one slow query costs at most
+// SELECT_TIMEOUT_MS and its pool connection, not the whole cycle. Slow steps are logged by name.
+const SELECT_TIMEOUT_MS = 60_000;
+const SLOW_STEP_MS = 5_000;
+
+async function timedSelect<T>(label: string, fallback: T, run: (tx: any) => Promise<T>): Promise<T> {
+  const t0 = Date.now();
+  try {
+    return await db!.transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${SELECT_TIMEOUT_MS}`));
+      return run(tx);
+    });
+  } catch (err) {
+    console.warn(`[Outcome Tracker] ${label} failed after ${Date.now() - t0} ms, skipped: ${String(err).slice(0, 160)}`);
+    return fallback;
+  } finally {
+    const ms = Date.now() - t0;
+    if (ms >= SLOW_STEP_MS) console.log(`[Outcome Tracker] slow step ${label}: ${ms} ms`);
+  }
 }
 
 const MARKET_LEVEL_SIGNAL_TYPES = new Set([
@@ -300,12 +333,16 @@ async function processOutcomes(): Promise<void> {
       floodFirstEpisodeSql()
     );
 
-    const newestPending = await db
-      .select()
-      .from(scannerDiscoveries)
-      .where(eligibleWhere)
-      .orderBy(sql`id DESC`)
-      .limit(2000);
+    const selectStart = Date.now();
+    type Row = typeof scannerDiscoveries.$inferSelect;
+    const newestPending: Row[] = await timedSelect("newest", [] as Row[], (tx) =>
+      tx
+        .select()
+        .from(scannerDiscoveries)
+        .where(eligibleWhere)
+        .orderBy(sql`id DESC`)
+        .limit(2000)
+    );
 
     const OVERDUE_SIGNAL_TYPES = [
       "lod_bounce", "hod_fade", "gap", "ma_proximity", "failed_breakout",
@@ -326,7 +363,7 @@ async function processOutcomes(): Promise<void> {
     const partialOverdue: typeof newestPending = [];
     const oldestOverdue: typeof newestPending = [];
     for (const signalType of OVERDUE_SIGNAL_TYPES) {
-      const partialRows = await db
+      const partialRows: Row[] = await timedSelect(`partial ${signalType}`, [] as Row[], (tx) => tx
         .select()
         .from(scannerDiscoveries)
         .where(
@@ -339,10 +376,10 @@ async function processOutcomes(): Promise<void> {
           )
         )
         .orderBy(sql`id ASC`)
-        .limit(PER_TYPE_PARTIAL);
+        .limit(PER_TYPE_PARTIAL));
       partialOverdue.push(...partialRows);
 
-      const oldestRows = await db
+      const oldestRows: Row[] = await timedSelect(`oldest ${signalType}`, [] as Row[], (tx) => tx
         .select()
         .from(scannerDiscoveries)
         .where(
@@ -358,7 +395,7 @@ async function processOutcomes(): Promise<void> {
           )
         )
         .orderBy(sql`id ASC`)
-        .limit(PER_TYPE_OLDEST);
+        .limit(PER_TYPE_OLDEST));
       oldestOverdue.push(...oldestRows);
     }
 
@@ -405,7 +442,7 @@ async function processOutcomes(): Promise<void> {
       `[Outcome Tracker] Fetched ${pending.length} across ${byType.size} types ` +
         `(${PER_TYPE_LIMIT}/type; partialOverdue=${partialOverdue.length}, ` +
         `oldestOverdue=${oldestOverdue.length}, newest=${newestPending.length}; ` +
-        `open tracked_at only, flood first-episode)`
+        `open tracked_at only, flood first-episode; selected in ${Math.round((Date.now() - selectStart) / 1000)} s)`
     );
     if (pending.length === 0) return;
 
@@ -723,11 +760,29 @@ async function processOutcomes(): Promise<void> {
 }
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
+let cycleStartedAt: number | null = null;
+
+// One cycle at a time. Without this, a cycle slower than INTERVAL_MS overlapped the next; on 2026-11-09 none
+// finished, so they piled up one pool connection each, and about 55 min after a start (cycle 19) all 20 were taken:
+// the scanner, alerts and logins all stalled on "timeout exceeded when trying to connect".
+async function runOutcomeCycle(): Promise<void> {
+  if (cycleStartedAt !== null) {
+    const min = Math.round((Date.now() - cycleStartedAt) / 60_000);
+    console.warn(`[Outcome Tracker] Previous cycle still running (${min} min), skipping this one`);
+    return;
+  }
+  cycleStartedAt = Date.now();
+  try {
+    await processOutcomes();
+  } finally {
+    cycleStartedAt = null;
+  }
+}
 
 export function startOutcomeTracker(): void {
   if (intervalId) return;
-  intervalId = setInterval(processOutcomes, INTERVAL_MS);
-  setTimeout(processOutcomes, 30_000);
+  intervalId = setInterval(runOutcomeCycle, INTERVAL_MS);
+  setTimeout(runOutcomeCycle, 30_000);
   console.log("[Outcome Tracker] Started V3 (every 3 min, exact bars + bar MFE/MAE)");
 }
 

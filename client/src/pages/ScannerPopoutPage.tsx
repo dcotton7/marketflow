@@ -340,7 +340,7 @@ export default function ScannerPopoutPage() {
             )}
             {status && (
               <span className="tabular-nums" style={{ color: cssVariables.textTiny, fontSize: scannerPx("tiny", fo) }}>
-                {status.universeSize} tickers · {status.activePipelines} pipes · {status.sessionMode.replace(/_/g, " ")}
+                {status.universeSize} tickers · {status.activePipelines} pipes · {String(status.sessionMode ?? "").replace(/_/g, " ")}
               </span>
             )}
           </div>

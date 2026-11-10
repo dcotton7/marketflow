@@ -19,7 +19,8 @@ export type HostMessage =
   | { type: "close-big" }
   | { type: "ready"; page: string }
   /** The page's sign-in failed (no ticket cookie, or MarketFlow restarted); the host should reload it. */
-  | { type: "auth-failed"; page: string }
+  /** reason "expired": it was signed in, then its 12 h cookie ran out (embed-session.ts). */
+  | { type: "auth-failed"; page: string; reason?: "expired" }
   | { type: "charts-state"; charts: EmbedChart[] }
   | { type: "symbol"; symbol: string }
   | { type: "watchlist"; id: number; name: string };

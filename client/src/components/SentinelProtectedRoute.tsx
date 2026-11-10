@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useSentinelAuth } from "@/context/SentinelAuthContext";
 import { loginPathWithReturn } from "@/lib/auth-return";
 import { postToHost } from "@/lib/embed-host";
+import { isEmbedPath, markEmbedSignedIn } from "@/lib/embed-session";
 import { Loader2, Lock } from "lucide-react";
 
 interface ProtectedRouteProps {
@@ -52,6 +53,9 @@ export function SentinelProtectedRoute({ children, requiresData = false }: Prote
   if (!user) {
     return null;
   }
+
+  // Signed in: from now on a 401 from /api means the embed's 12 h cookie ran out (embed-session.ts).
+  if (isEmbedPath(window.location.pathname)) markEmbedSignedIn();
 
   if (requiresData && user.isOwner !== true) {
     return <DataNotAvailable />;

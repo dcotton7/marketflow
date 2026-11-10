@@ -2,6 +2,9 @@ import { createRoot } from "react-dom/client";
 import { Component, type ReactNode } from "react";
 import App from "./App";
 import "./index.css";
+import { installEmbedSessionWatch } from "./lib/embed-session";
+
+installEmbedSessionWatch();
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
