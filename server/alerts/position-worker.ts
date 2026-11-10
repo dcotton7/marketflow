@@ -2,7 +2,8 @@ import { and, eq, gte } from "drizzle-orm";
 import { positionAlerts, sentinelWatchlist, watchlists } from "@shared/schema";
 import { getDb } from "../db";
 import { getIntradayBars } from "../data-layer/intraday-bars";
-import { getQuote } from "../data-layer/quotes";
+// Schwab stream ticks when connected, the current quotes otherwise (docs/schwab-readonly.md).
+import { getAlertQuote as getQuote, watchAlertSymbols } from "../schwab/alert-price";
 import { fetchEarningsCalendar } from "../finnhub";
 import { getMarketSession } from "../market-condition/universe";
 import { dailyBarsOldestFirst } from "./chart-numbers";
@@ -108,6 +109,7 @@ async function indexInput(symbol: string, live: boolean, day: string): Promise<I
 /** Current snapshots for the positions (all users, or one). Reads only. */
 export async function computeSnapshots(userId?: number, now = new Date()) {
   const items = await openPositions(userId);
+  if (!userId) watchAlertSymbols("alerts:positions", ["SPY", "QQQ", ...items.map((i) => i.symbol.toUpperCase())]);
   if (!items.length) return [];
   const inSession = getMarketSession() === "MARKET_HOURS";
   const clock = etClock(now);
@@ -241,6 +243,7 @@ export async function runSetupAlertCycle(now = new Date()): Promise<number> {
   await loadSentToday(clock.day);
   const held = new Set((await openPositions()).map((i) => `${i.userId}:${i.symbol.toUpperCase()}`));
   const items = (await starredItems()).filter((i) => !held.has(`${i.userId}:${i.symbol.toUpperCase()}`));
+  watchAlertSymbols("alerts:starred", items.map((i) => i.symbol.toUpperCase()));
   let written = 0;
   for (const item of items) {
     try {

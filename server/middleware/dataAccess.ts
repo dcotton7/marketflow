@@ -21,6 +21,10 @@ const RULES: Rule[] = [
   { level: "public", method: "GET", pattern: /^\/api\/auth\/me$/ },
   { level: "public", pattern: /^\/api\/health(\/|$)/ },
   { level: "public", method: "POST", pattern: /^\/api\/alerts\/deliveries\/twilio-status$/ },
+  // Schwab's OAuth redirect: the signed state names the user (schwab/config.ts checkState).
+  { level: "public", method: "GET", pattern: /^\/api\/schwab\/callback$/ },
+  // His brokerage account and Schwab's market data: the owner only.
+  { level: "owner", pattern: /^\/api\/schwab(\/|$)/ },
 
   { level: "owner_admin", method: "POST", pattern: /^\/api\/marketflow\/[^/]+$/ },
   { level: "owner_admin", method: "DELETE", pattern: /^\/api\/marketflow\/[^/]+\/cache$/ },

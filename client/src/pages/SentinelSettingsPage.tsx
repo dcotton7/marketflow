@@ -28,6 +28,7 @@ interface UsageInfo {
 }
 
 import { TosCalibrateButton } from "@/components/TosButton";
+import { SchwabCard } from "@/components/SchwabCard";
 
 export default function SentinelSettingsPage() {
   const { toast } = useToast();
@@ -194,6 +195,8 @@ export default function SentinelSettingsPage() {
           </Card>
 
           <TosCalibrateButton />
+
+          <SchwabCard />
 
           <Card>
             <CardHeader>
