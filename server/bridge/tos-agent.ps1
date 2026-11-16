@@ -46,7 +46,7 @@ function Invoke-TosWin([string[]]$WinArgs) {
 $AllowedOrigins = @(
   "http://localhost:5000", "http://127.0.0.1:5000",
   "https://stock-pattern-stream.onrender.com", "https://marketflow-hrxh.onrender.com",
-  "http://localhost:8770", "http://127.0.0.1:8770", "https://anima-u2fy.onrender.com"
+  "http://localhost:8770", "http://127.0.0.1:8770", "https://anima-u2fy.onrender.com", "https://anitir.ai"
 )
 if ($env:TOSLINK_EXTRA_ORIGINS) { $AllowedOrigins += ($env:TOSLINK_EXTRA_ORIGINS -split "\s+" | Where-Object { $_ }) }
 $script:reqOrigin = ""

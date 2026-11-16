@@ -16,6 +16,7 @@ const MF = "https://marketflow.example";
 // detectAnimaEmbed: each way MarketFlow can be loaded.
 assert.equal(detectAnimaEmbed({ framed: false, selfOrigin: MF, referrer: "https://anima-u2fy.onrender.com/" }), false, "top-level");
 assert.equal(detectAnimaEmbed({ framed: true, selfOrigin: MF, ancestorOrigins: ["https://anima-u2fy.onrender.com"] }), true, "Anima online");
+assert.equal(detectAnimaEmbed({ framed: true, selfOrigin: MF, ancestorOrigins: ["https://anitir.ai"] }), true, "Anima at anitir.ai");
 assert.equal(detectAnimaEmbed({ framed: true, selfOrigin: "http://127.0.0.1:5000", ancestorOrigins: ["http://127.0.0.1:8770"] }), true, "Anima local");
 assert.equal(detectAnimaEmbed({ framed: true, selfOrigin: "http://localhost:5000", ancestorOrigins: ["http://localhost:8771"] }), true, "Anima on another local port");
 assert.equal(detectAnimaEmbed({ framed: true, selfOrigin: MF, referrer: "http://localhost:8770/lab" }), true, "referrer (no ancestorOrigins)");

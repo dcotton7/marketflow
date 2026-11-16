@@ -62,9 +62,26 @@ async function testWatch() {
   assert(msg.page === "/embed/scanner", "names the page");
 }
 
+async function testWatchAnitir() {
+  const posted: unknown[] = [];
+  const win = {
+    location: { pathname: "/embed/scanner", origin: ORIGIN, ancestorOrigins: ["https://anitir.ai"] },
+    parent: { postMessage: (m: unknown, o: string) => posted.push([m, o]) },
+    fetch: async () => ({ status: 401 }) as Response,
+  } as unknown as Window & typeof globalThis;
+  (globalThis as { window?: unknown }).window = win;
+  _resetEmbedSession();
+  installEmbedSessionWatch(win);
+  markEmbedSignedIn();
+  await win.fetch("/api/scanner/status");
+  await win.fetch("/api/scanner/status");
+  assert(posted.length === 1, `anitir.ai host told once, got ${posted.length}`);
+  assert((posted[0] as [unknown, string])[1] === "https://anitir.ai", "posted to anitir.ai");
+}
+
 testSessionLoss();
 testStatusGuard();
-testWatch().then(
+testWatch().then(testWatchAnitir).then(
   () => console.log("embed-session tests passed"),
   (e) => {
     console.error(e);

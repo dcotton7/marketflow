@@ -41,7 +41,7 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: jsonBodyLimit }));
 
 // Only MarketFlow itself and Anima Lab (on the owner's PC, or Anima online) may show MarketFlow pages in a frame.
-const FRAME_ANCESTORS = "frame-ancestors 'self' http://localhost:8770 http://127.0.0.1:8770 https://anima-u2fy.onrender.com";
+const FRAME_ANCESTORS = "frame-ancestors 'self' http://localhost:8770 http://127.0.0.1:8770 https://anima-u2fy.onrender.com https://anitir.ai";
 app.use((_req, res, next) => {
   res.setHeader("Content-Security-Policy", FRAME_ANCESTORS);
   next();
