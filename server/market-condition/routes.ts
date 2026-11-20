@@ -848,6 +848,19 @@ router.get("/history/:kind", requireAdmin, async (req: Request, res: Response) =
   }
 });
 
+/** GET /api/market-condition/history-delisted?date=YYYY-MM-DD: tickers (with their memberships) delisted on or before date. */
+router.get("/history-delisted", requireAdmin, async (req: Request, res: Response) => {
+  const date = String(req.query.date ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date=YYYY-MM-DD required" });
+  try {
+    const t: any = await db!.execute(sql`SELECT symbol, delisted_at, row FROM tickers_delisted WHERE delisted_at < (${date}::date + 1) ORDER BY symbol, delisted_at`);
+    const m: any = await db!.execute(sql`SELECT symbol, delisted_at, row FROM ticker_slice_memberships_delisted WHERE delisted_at < (${date}::date + 1) ORDER BY symbol, delisted_at`);
+    res.json({ date, tickers: t.rows ?? t, memberships: m.rows ?? m });
+  } catch (err) {
+    res.status(500).json({ error: "history read failed (the archive exists after the first delisting)" });
+  }
+});
+
 // =============================================================================
 // Control Endpoints (Admin)
 // =============================================================================

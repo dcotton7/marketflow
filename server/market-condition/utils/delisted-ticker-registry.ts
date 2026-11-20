@@ -13,6 +13,7 @@ import {
   getTickerPrimaryCluster,
   type ClusterId,
 } from "../universe";
+import { archiveDelisted } from "./delisted-archive";
 import { refreshThemeMembersCache, isCacheInitialized, getThemesForSymbol } from "./theme-db-loader";
 
 const DELISTED_FILE = path.resolve(process.cwd(), "data/delisted-symbols.json");
@@ -22,6 +23,16 @@ let registryLoaded = false;
 const checkCooldownMs = 60 * 60 * 1000;
 const lastCheckedAt = new Map<string, number>();
 const purgeInFlight = new Set<string>();
+
+/** The live rows go as before, but only after a copy is kept, in the same transaction (delisted-archive.ts). */
+async function deleteWithArchive(sym: string): Promise<void> {
+  if (!db) return;
+  await db.transaction(async (tx) => {
+    await archiveDelisted(tx, sym);
+    await tx.delete(tickerSliceMemberships).where(eq(tickerSliceMemberships.symbol, sym));
+    await tx.delete(tickerTable).where(eq(tickerTable.symbol, sym));
+  });
+}
 
 function normalize(symbol: string): string {
   return symbol.trim().toUpperCase();
@@ -99,8 +110,7 @@ export async function initializeDelistedTickerRegistry(): Promise<void> {
     let purged = 0;
     for (const sym of fromFile) {
       try {
-        await db.delete(tickerSliceMemberships).where(eq(tickerSliceMemberships.symbol, sym));
-        await db.delete(tickerTable).where(eq(tickerTable.symbol, sym));
+        await deleteWithArchive(sym);
         purged++;
       } catch (err) {
         console.warn(`[DelistedRegistry] DB purge failed for ${sym}:`, err);
@@ -168,8 +178,7 @@ export async function removeTickerFromUniverse(
   const themes = removeFromClusters(sym);
 
   if (db) {
-    await db.delete(tickerSliceMemberships).where(eq(tickerSliceMemberships.symbol, sym));
-    await db.delete(tickerTable).where(eq(tickerTable.symbol, sym));
+    await deleteWithArchive(sym);
   }
 
   try {
