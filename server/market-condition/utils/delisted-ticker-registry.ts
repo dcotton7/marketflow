@@ -13,7 +13,7 @@ import {
   getTickerPrimaryCluster,
   type ClusterId,
 } from "../universe";
-import { archiveDelisted } from "./delisted-archive";
+import { archiveDelisted, ensureArchiveTables } from "./delisted-archive";
 import { refreshThemeMembersCache, isCacheInitialized, getThemesForSymbol } from "./theme-db-loader";
 
 const DELISTED_FILE = path.resolve(process.cwd(), "data/delisted-symbols.json");
@@ -27,6 +27,7 @@ const purgeInFlight = new Set<string>();
 /** The live rows go as before, but only after a copy is kept, in the same transaction (delisted-archive.ts). */
 async function deleteWithArchive(sym: string): Promise<void> {
   if (!db) return;
+  await ensureArchiveTables(db); // outside the transaction: a rollback must not undo the tables
   await db.transaction(async (tx) => {
     await archiveDelisted(tx, sym);
     await tx.delete(tickerSliceMemberships).where(eq(tickerSliceMemberships.symbol, sym));
