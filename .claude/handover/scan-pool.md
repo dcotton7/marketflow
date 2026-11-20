@@ -1,8 +1,8 @@
-# Handover: the scan pool (job 3; Don 20 Nov 2026: "expand the universe to cover them all", "volume to be 50m+")
+# Handover: the scan pool (job 3; Don 20 Nov 2026: "expand the universe to cover them all"; floor $30M a day)
 
 Pool = US-listed (NYSE, NASDAQ) common stocks with market cap >= $1B, price >= $6, average traded value (avg volume x price)
->= $50M a day, from FMP `/stable/company-screener` (the key in use). Dry run on 20 Nov: 1,167 qualify, 663 already in the
-theme universe, 504 new.
+>= $30M a day (Don chose $30M over $50M on 20 Nov; the dollar floor is the setting env `SCAN_POOL_MIN_DOLLAR_VOL`, dollars, default 30000000), from FMP `/stable/company-screener` (the key in use). Dry run on 20 Nov at $30M: 1,423 qualify, 696 already in the
+theme universe, 727 new (at $50M it was 1,167 / 663 / 504).
 
 ## Design
 - `server/data-layer/scan-pool.ts`: table `scan_pool` (symbol, name, exchange, sector, industry, market_cap, price,
@@ -30,3 +30,8 @@ Daily run of each reader over every symbol in historical_bars (2,622 today, 3,12
 Neither reader holds every bar at once (batch of 150 names, then released; only hit rows and theme members' closes are kept).
 So the pool adds about 5 MB of working memory to the setup jobs; storage is the real cost (+~88 MB on 188 MB in the table).
 Not measured: the SEC and earnings jobs (they walk `followed()` = every symbol with bars + tickers; +~500 names of lookups).
+
+## Re-measured at the $30M floor (728 extra symbols cloned, same harness)
+Leader Shakeout: peak RSS +23 MB, heap +19 MB (11 s). Market card: peak RSS +35 MB, heap +69 MB (the harness reads each clone's donor
+bars twice, so its 115 s is not the real time). Same picture as at 503: no growth worth the name. Storage: 727 new x ~621 bars = ~451k
+rows, about +127 MB on the 188 MB table.
