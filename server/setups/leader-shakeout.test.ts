@@ -65,6 +65,7 @@ function memStore() {
   const store: SetupStore = {
     async doneDates(setup, v) { return new Set([...runs.values()].filter((r) => r.setup === setup && r.ruleVersion === v).map((r) => r.marketDate)); },
     async insertShakeouts(rows) { let n = 0; for (const r of rows) { const k = `${r.ruleVersion}|${r.date}|${r.symbol}`; if (!hits.has(k)) { hits.set(k, r); n++; } } return n; },
+    async shakeoutKeys(v, from) { return new Set([...hits.values()].filter((r) => r.ruleVersion === v && r.date >= from).map((r) => `${r.symbol}|${r.date}`)); },
     async insertRun(r) { const k = `${r.setup}|${r.ruleVersion}|${r.marketDate}`; if (runs.has(k)) return 0; runs.set(k, r); return 1; },
   };
   return { store, runs, hits };
@@ -105,6 +106,28 @@ function fakeSource(bars: Record<string, DBar[]>, extra: Partial<BarSource> = {}
     // a second run finds nothing left to do and writes nothing
     const again = await scanLeaderShakeout(src, m.store, {});
     assert.deepEqual(again, { dates: [], hits: 0, waiting: null, stopped: false });
+  }
+  {
+    // rescan: names that had no bars at the time get their hits; stored rows and run rows are not touched
+    const m = memStore();
+    const early = hit.slice(0, 40); // a first scan when HIT had only 40 bars; LATE had none
+    await scanLeaderShakeout(fakeSource({ HIT: hit, FLAT: flat, SPY: hit }), m.store, { today: last });
+    const before = JSON.stringify([...m.hits.values()]);
+    const runsBefore = m.runs.size;
+    const again = await scanLeaderShakeout(fakeSource({ HIT: hit, FLAT: flat, SPY: hit }), m.store, { rescan: true });
+    assert.equal(again.hits, 0, "nothing new: the stored hit is skipped");
+    assert.equal(JSON.stringify([...m.hits.values()]), before, "stored hits unchanged");
+    assert.equal(m.runs.size, runsBefore, "no run row written");
+    // now a name that was missing then: LATE has the same bars as HIT, but no hit row stored for it
+    const wider = await scanLeaderShakeout(fakeSource({ HIT: hit, FLAT: flat, SPY: hit, LATE: hit }), m.store, { rescan: true });
+    assert.equal(wider.hits, 1, "LATE's hit is inserted");
+    assert.equal([...m.hits.values()].filter((r) => r.symbol === "LATE")[0]!.source, "backfill");
+    assert.equal(m.hits.size, 2);
+    assert.equal(m.runs.size, runsBefore, "still no run row touched");
+    const from = await scanLeaderShakeout(fakeSource({ HIT: hit, FLAT: flat, LATE: hit, NEW2: hit }), m.store, { rescan: true, rescanFrom: hit[hit.length - 1].date });
+    assert.equal(from.dates.length, 1, "rescanFrom limits the sessions");
+    assert.equal(from.hits, 1);
+    void early;
   }
   {
     // the newest session waits while its bars are still coming in (1 of 3 symbols)

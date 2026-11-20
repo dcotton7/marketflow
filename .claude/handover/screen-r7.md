@@ -28,3 +28,8 @@ on Anima's gateway allow-list (`/api/anima/market-condition/screen`).
 ## Tests / measured
 `npm run test:screen`. Live data, read-only harness (1,038 theme names + 727 cloned as the pool): building the summaries = 263k bars
 read in 28 s, peak +66 MB RSS once a day; the map held ~12 MB; one screen call 0.8 ms over 1,659 rows.
+
+## Already in the live database (20 Nov, 17:37 ET, by a Builder test run, not by the app)
+Table `ticker_daily_summary` exists with 1,749 rows (as_of 2026-11-20, built_at 22:37-22:38 UTC), written by a harness that ran the summary
+build (this commit's `ensureDailySummary`) against the live database by mistake. Nothing reads it yet. PM decision: leave it; R7's first build
+expects it (CREATE TABLE IF NOT EXISTS, then it upserts every row by symbol, so the rows are simply refreshed).

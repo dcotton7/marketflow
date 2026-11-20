@@ -214,6 +214,22 @@ router.post("/market-caps/override", requireAdmin, async (req: Request, res: Res
   res.status(r.ok ? 200 : 400).json(r);
 });
 
+/**
+ * POST /leader-shakeout/rescan?from=YYYY-MM-DD (admin): scan the sessions from `from` again over today's wider universe and
+ * insert only the hits that are not stored (names that had no bars then). Stored hits and run rows are never changed. The
+ * count comes back as `hits`. Run it after the bars are backfilled.
+ */
+router.post("/leader-shakeout/rescan", requireAdmin, async (req: Request, res: Response) => {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  const from = String(req.query.from ?? "");
+  if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) return res.status(400).json({ error: "from must be YYYY-MM-DD" });
+  const { scanLeaderShakeout } = await import("./leader-shakeout-job");
+  const { pgBarSource } = await import("./jobs");
+  const { pgSetupStore } = await import("./store");
+  res.json(await scanLeaderShakeout(pgBarSource(db), pgSetupStore(db), { rescan: true, rescanFrom: from || undefined, source: "manual" }));
+});
+
 router.post("/run/:job", requireAdmin, async (req: Request, res: Response) => {
   res.json(await runSetupJob(String(req.params.job), "manual"));
 });

@@ -58,6 +58,8 @@ export interface SetupStore {
   doneDates(setup: string, ruleVersion: string): Promise<Set<string>>;
   insertShakeouts(rows: ShakeoutRow[]): Promise<number>;
   insertRun(row: RunRow): Promise<number>;
+  /** "SYMBOL|date" of every stored hit on or after `from` (a rescan skips them; it never rewrites a stored row). */
+  shakeoutKeys?(ruleVersion: string, from: string): Promise<Set<string>>;
 }
 
 type Exec = { execute: (q: any) => Promise<any> };
@@ -93,6 +95,11 @@ export function pgSetupStore(db: Exec): SetupStore {
         );
       }
       return n;
+    },
+    async shakeoutKeys(ruleVersion, from) {
+      await ensureSetupTables(db);
+      const r = await db.execute(sql`SELECT market_date::text AS d, symbol FROM setup_leader_shakeout WHERE rule_version = ${ruleVersion} AND market_date >= ${from}::date`);
+      return new Set(rowsOf(r).map((x) => `${String(x.symbol).toUpperCase()}|${String(x.d).slice(0, 10)}`));
     },
     async insertRun(r) {
       await ensureSetupTables(db);

@@ -53,13 +53,17 @@ const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") 
 export async function scanLeaderShakeout(
   src: BarSource,
   store: SetupStore,
-  opts: { source?: RunRow["source"]; today?: string; maxDates?: number } = {},
+  opts: { source?: RunRow["source"]; today?: string; maxDates?: number; rescan?: boolean; rescanFrom?: string } = {},
 ): Promise<ScanResult> {
   const sessions = await src.sessions();
   const out: ScanResult = { dates: [], hits: 0, waiting: null, stopped: false };
   if (sessions.length <= LOOKBACK) return out;
-  const done = await store.doneDates(SETUP, RULE_VERSION);
-  let todo = sessions.slice(LOOKBACK).filter((d) => !done.has(d));
+  // A rescan goes back over sessions already done (from `rescanFrom`), to find hits among names that had no bars at the
+  // time. It only inserts hits whose (symbol, date) is not stored, labelled "backfill"; stored hits and run rows are not touched.
+  const done = opts.rescan ? new Set<string>() : await store.doneDates(SETUP, RULE_VERSION);
+  let todo = sessions.slice(LOOKBACK).filter((d) => !done.has(d) && (!opts.rescan || !opts.rescanFrom || d >= opts.rescanFrom));
+  if (opts.rescan && !store.shakeoutKeys) throw new Error("rescan needs a store that can list the stored hits");
+  const stored = opts.rescan && todo.length ? await store.shakeoutKeys!(RULE_VERSION, todo[0]) : null;
   if (!todo.length) return out;
 
   // the newest session waits for its bars
@@ -102,6 +106,7 @@ export async function scanLeaderShakeout(
         bump(scanned, d);
         const r = evaluateAt(p, i, gs);
         if (!r?.hit) continue;
+        if (stored?.has(`${sym.toUpperCase()}|${d}`)) continue; // already stored: a rescan leaves it alone
         const { hit: _h, failed: _f, ...numbers } = r;
         hits.push({
           ...numbers,
@@ -139,11 +144,11 @@ export async function scanLeaderShakeout(
 
   for (const d of todo) {
     // a scheduled run labels its older days (the first run's backfill, a missed evening) as backfill
-    const source = (opts.source ?? "daily") === "daily" && d !== last ? "backfill" : opts.source ?? "daily";
+    const source = opts.rescan ? "backfill" : (opts.source ?? "daily") === "daily" && d !== last ? "backfill" : opts.source ?? "daily";
     const lab = labels.get(d) ?? null;
     const dayHits = full.filter((h) => h.date === d).map((h) => ({ ...h, marketLabel: lab?.label ?? null, source }));
     out.hits += await store.insertShakeouts(dayHits);
-    await store.insertRun({
+    if (!opts.rescan) await store.insertRun({
       setup: SETUP,
       ruleVersion: RULE_VERSION,
       marketDate: d,
