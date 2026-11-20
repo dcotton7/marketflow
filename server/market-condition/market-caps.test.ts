@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { bucketOf, BOUNDARIES } from "./utils/cap-size";
-import { judge, needsSecondOpinion, plan, refreshMarketCaps, type Sources, type Stored } from "./utils/market-cap-refresh";
+import { isStale, judge, liveSources, needsSecondOpinion, plan, refreshMarketCaps, toFmpSymbol, type Sources, type Stored } from "./utils/market-cap-refresh";
 
 // ---- one set of boundaries -------------------------------------------------------------------------------------------
 assert.deepEqual(BOUNDARIES, { MEGA: 200e9, LARGE: 10e9, MID: 2e9, SMALL: 300e6 });
@@ -51,7 +51,7 @@ assert.deepEqual({ ...p.counts, byBucket: undefined }, { bucketChanged: 1, nullT
     },
   };
   let finnhubCalls = 0;
-  const sources: Sources = { async fmpBatch(syms) { return new Map([...fetched].filter(([s]) => syms.includes(s))); }, async finnhub() { finnhubCalls++; return 1e9; }, async sleep() {} };
+  const sources: Sources = { async fmpBatch(syms) { return new Map([...fetched].filter(([s]) => syms.includes(s)).map(([s, cap]) => [s, { cap, date: "2026-11-20" }])); }, async finnhub() { finnhubCalls++; return 1e9; }, async sleep() {} };
   const logs: string[] = [];
   const dry: any = await refreshMarketCaps(db, { dryRun: true, sources, asOf: "2026-11-20", log: (s) => logs.push(s) });
   assert.equal(dry.dryRun, true);
@@ -76,5 +76,24 @@ assert.deepEqual({ ...p.counts, byBucket: undefined }, { bucketChanged: 1, nullT
   assert.equal(failed.written, 0);
   assert.equal(failed.aborted, "FMP batch failed");
   assert.equal(statements.length, 1);
+  // a cap FMP last dated weeks ago (the ticker stopped trading) is listed as stale, not written
+  statements.length = 0;
+  const old: any = await refreshMarketCaps(db, { dryRun: true, sources: { ...sources, async fmpBatch(syms) { return new Map(syms.filter((s) => s === "CRDO").map((s) => [s, { cap: 10e9, date: "2026-10-05" }])); } }, asOf: "2026-11-20", log: () => {} });
+  assert.deepEqual(old.rejected.map((r: any) => [r.symbol, r.reason]), [["CRDO", "stale: FMP's latest cap is dated 2026-10-05"]]);
+  assert.equal(old.accepted, 0);
+  assert.equal(isStale("2026-11-10", "2026-11-20"), false, "10 days is not stale");
+  assert.equal(isStale("2026-11-09", "2026-11-20"), true);
+  assert.equal(isStale(null, "2026-11-20"), false);
+  // share classes: MarketFlow's BRK.B is FMP's BRK-B
+  assert.equal(toFmpSymbol("BRK.B"), "BRK-B");
+  assert.equal(toFmpSymbol("bf.b"), "BF-B");
+  assert.equal(toFmpSymbol("AAPL"), "AAPL");
+  const realFetch = globalThis.fetch;
+  let asked = "";
+  globalThis.fetch = (async (url: string) => { asked = String(url); return new Response(JSON.stringify([{ symbol: "BRK-B", date: "2026-11-20", marketCap: 8.07e11 }]), { status: 200 }); }) as any;
+  const got = await liveSources({ FMP_API_KEY: "k" }).fmpBatch(["BRK.B", "AAPL"]);
+  globalThis.fetch = realFetch;
+  assert.match(decodeURIComponent(asked), /symbols=BRK-B,AAPL&/);
+  assert.deepEqual([...got], [["BRK.B", { cap: 8.07e11, date: "2026-11-20" }]], "mapped back to MarketFlow's symbol");
   console.log("market cap refresh tests passed");
 })().catch((e) => { console.error(e); process.exit(1); });

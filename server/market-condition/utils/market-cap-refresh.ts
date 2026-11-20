@@ -66,9 +66,11 @@ export interface Plan {
   counts: { bucketChanged: number; nullToBucket: number; sameBucket: number; byBucket: Record<CapSize, number>; keptOldBucketNoData: number };
 }
 
-export function plan(stored: Stored[], fetched: Map<string, number>, second: Map<string, number | null>, failedBatches = 0): Plan {
-  const accepted: Accepted[] = [], rejected: Rejected[] = [], noData: string[] = [];
+export function plan(stored: Stored[], fetched: Map<string, number>, second: Map<string, number | null>, failedBatches = 0, preRejected: Rejected[] = []): Plan {
+  const accepted: Accepted[] = [], rejected: Rejected[] = [...preRejected], noData: string[] = [];
+  const pre = new Set(preRejected.map((r) => r.symbol));
   for (const s of stored) {
+    if (pre.has(s.symbol)) continue;
     const cap = fetched.get(s.symbol);
     if (cap === undefined) { noData.push(s.symbol); continue; }
     const j = judge(s, cap, second.get(s.symbol));
@@ -94,9 +96,18 @@ const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : r?.rows ?? []);
 
 export interface Sources {
   /** FMP caps for up to 100 symbols; throws on a failed call (that batch is counted, its symbols get no data). */
-  fmpBatch(symbols: string[]): Promise<Map<string, number>>;
+  /** cap in dollars and FMP's date for that cap, keyed by MarketFlow's symbol (BRK.B, not BRK-B). */
+  fmpBatch(symbols: string[]): Promise<Map<string, { cap: number; date: string | null }>>;
   finnhub(symbol: string): Promise<number | null>;
   sleep(ms: number): Promise<void>;
+}
+
+export const toFmpSymbol = (s: string) => s.toUpperCase().replace(/\./g, "-");
+/** A cap whose own date is older than this is not today's cap (the ticker may have stopped trading). */
+export const MAX_CAP_AGE_DAYS = 10;
+export function isStale(capDate: string | null, asOf: string): boolean {
+  if (!capDate) return false;
+  return (Date.parse(asOf + "T00:00:00Z") - Date.parse(capDate + "T00:00:00Z")) / 864e5 > MAX_CAP_AGE_DAYS;
 }
 
 export function liveSources(env: NodeJS.ProcessEnv = process.env): Sources {
@@ -104,12 +115,18 @@ export function liveSources(env: NodeJS.ProcessEnv = process.env): Sources {
     async fmpBatch(symbols) {
       const key = env.FMP_API_KEY;
       if (!key) throw new Error("FMP_API_KEY is not set");
-      const r = await fetch(`https://financialmodelingprep.com/stable/market-capitalization-batch?symbols=${encodeURIComponent(symbols.join(","))}&apikey=${key}`, { signal: AbortSignal.timeout(20_000) });
+      // FMP writes share classes with a dash (BRK-B); MarketFlow keeps the dot (BRK.B)
+      const back = new Map(symbols.map((s) => [toFmpSymbol(s), s]));
+      const r = await fetch(`https://financialmodelingprep.com/stable/market-capitalization-batch?symbols=${encodeURIComponent([...back.keys()].join(","))}&apikey=${key}`, { signal: AbortSignal.timeout(20_000) });
       if (!r.ok) throw new Error(`FMP ${r.status}`);
       const data = await r.json();
       if (!Array.isArray(data)) throw new Error("FMP: unexpected response");
-      const out = new Map<string, number>();
-      for (const row of data) if (row?.symbol && typeof row.marketCap === "number") out.set(String(row.symbol).toUpperCase(), row.marketCap);
+      const out = new Map<string, { cap: number; date: string | null }>();
+      for (const row of data) {
+        if (!row?.symbol || typeof row.marketCap !== "number") continue;
+        const fmp = String(row.symbol).toUpperCase();
+        out.set(back.get(fmp) ?? fmp, { cap: row.marketCap, date: typeof row.date === "string" ? row.date.slice(0, 10) : null });
+      }
       return out;
     },
     async finnhub(symbol) {
@@ -132,11 +149,15 @@ export async function refreshMarketCaps(db: Exec, opts: { dryRun: boolean; sourc
     symbol: String(x.symbol).toUpperCase(), marketCap: x.market_cap === null || x.market_cap === undefined ? null : Number(x.market_cap), bucket: normalizeCapSize(x.market_cap_size),
   }));
   const fetched = new Map<string, number>();
+  const stale: Rejected[] = [];
   let failed = 0;
   for (let i = 0; i < stored.length; i += 100) {
     if (i) await src.sleep(1000);
     try {
-      for (const [s, c] of await src.fmpBatch(stored.slice(i, i + 100).map((x) => x.symbol))) fetched.set(s, c);
+      for (const [s, c] of await src.fmpBatch(stored.slice(i, i + 100).map((x) => x.symbol))) {
+        if (isStale(c.date, asOf)) stale.push({ symbol: s, storedCap: stored.find((x) => x.symbol === s)?.marketCap ?? null, sourceCap: c.cap, reason: `stale: FMP's latest cap is dated ${c.date}` });
+        else fetched.set(s, c.cap);
+      }
     } catch (err) {
       failed++;
       log(`[MarketCaps] batch ${i / 100 + 1} failed: ${String(err).slice(0, 120)}`);
@@ -147,7 +168,7 @@ export async function refreshMarketCaps(db: Exec, opts: { dryRun: boolean; sourc
     const c = fetched.get(s.symbol);
     if (c !== undefined && needsSecondOpinion(s, c)) { second.set(s.symbol, await src.finnhub(s.symbol)); await src.sleep(1100); }
   }
-  const p = plan(stored, fetched, second, failed);
+  const p = plan(stored, fetched, second, failed, stale);
   log(`[MarketCaps] ${opts.dryRun ? "DRY RUN" : "RUN"} ${asOf}: ${p.tickers} tickers, ${p.fetched} caps fetched (${p.failedBatches} failed batches)`);
   log(`[MarketCaps] would write ${p.accepted.length}: ${p.counts.bucketChanged} change bucket, ${p.counts.nullToBucket} go from no bucket to a bucket, ${p.counts.sameBucket} keep their bucket; by bucket ${JSON.stringify(p.counts.byBucket)}`);
   log(`[MarketCaps] not written: ${p.rejected.length} implausible, ${p.noData.length} with no data from FMP (${p.counts.keptOldBucketNoData} of those keep an old bucket)`);
