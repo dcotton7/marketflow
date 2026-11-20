@@ -195,7 +195,7 @@ router.get("/scan-pool", async (_req: Request, res: Response) => {
   if (!db) return res.status(503).json({ error: "database unavailable" });
   try {
     const r = rowsOf(await db.execute(sql`SELECT COUNT(*) FILTER (WHERE active)::int AS active, COUNT(*) FILTER (WHERE NOT active)::int AS inactive, COUNT(*) FILTER (WHERE active AND NOT in_universe)::int AS pool_only, MAX(refreshed_at) AS refreshed_at FROM scan_pool`));
-    res.json({ ...r[0], floors: { marketCap: 1e9, price: 6, avgDollarVolume: 50e6 } });
+    res.json({ ...r[0], floors: { marketCap: 1e9, price: 6, avgDollarVolume: (await import("../data-layer/scan-pool")).poolMinDollarVol() } });
   } catch {
     res.json({ active: 0, inactive: 0, pool_only: 0, refreshed_at: null, note: "not refreshed yet" });
   }

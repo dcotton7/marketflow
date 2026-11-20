@@ -2,7 +2,8 @@
  * The scan pool (Don, 20 Nov 2026: "expand the universe to cover them all", "volume to be 50m+").
  *
  * Every US-listed common stock (NYSE, NASDAQ) with market cap >= $1B, price >= $6 and average traded value
- * (average volume x price) >= $50M a day. Source: FMP /stable/company-screener (the key already in use), refreshed weekly.
+ * (average volume x price) >= $30M a day (Don chose $30M over $50M on 20 Nov; the dollar floor is the setting
+ * SCAN_POOL_MIN_DOLLAR_VOL, in dollars, default 30000000). Source: FMP /stable/company-screener (the key already in use), refreshed weekly.
  *
  * Kept apart from the themes: pool names live in their own table (scan_pool), not in `tickers`, so they join no
  * theme, are not in the 1-minute snapshot polling, and do not enter the regime or theme readings. They get daily
@@ -11,7 +12,7 @@
  * Rules:
  *   - nothing is deleted: a name that falls out is marked inactive (inactive_since) and its bars stay; it simply
  *     stops being refreshed. A name that returns is reactivated.
- *   - hysteresis: a name enters at the full floor and leaves only below 80% of it, so one that hovers at $50M does not
+ *   - hysteresis: a name enters at the full floor and leaves only below 80% of it, so one that hovers at the floor does not
  *     flip every week and leave holes in its bars.
  *   - a partial answer from the vendor (fewer than 600 rows, or under half of the active pool) deactivates nothing.
  *
@@ -21,7 +22,13 @@ import { sql } from "drizzle-orm";
 
 export const POOL_MIN_CAP = 1e9;
 export const POOL_MIN_PRICE = 6;
-export const POOL_MIN_DOLLAR_VOL = 50e6;
+export const DEFAULT_POOL_MIN_DOLLAR_VOL = 30e6;
+
+/** The dollar-volume floor: env SCAN_POOL_MIN_DOLLAR_VOL (dollars a day), else $30M. A bad value falls back to the default. */
+export function poolMinDollarVol(env: NodeJS.ProcessEnv = process.env): number {
+  const v = Number(env.SCAN_POOL_MIN_DOLLAR_VOL);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_POOL_MIN_DOLLAR_VOL;
+}
 /** A member stays until it is below this share of every floor. */
 export const POOL_KEEP_SHARE = 0.8;
 export const MIN_SCREENER_ROWS = 600;
@@ -77,7 +84,7 @@ export function parseScreenerRows(body: unknown): PoolCandidate[] {
 
 export function meetsFloor(c: PoolCandidate, share = 1): boolean {
   const f = share - 1e-9; // 0.8 x 6 is 4.800000000000001: a name exactly at the band must count
-  return c.marketCap >= POOL_MIN_CAP * f && c.price >= POOL_MIN_PRICE * f && c.avgDollarVol >= POOL_MIN_DOLLAR_VOL * f;
+  return c.marketCap >= POOL_MIN_CAP * f && c.price >= POOL_MIN_PRICE * f && c.avgDollarVol >= poolMinDollarVol() * f;
 }
 
 export interface PoolPlan {
