@@ -17,8 +17,8 @@ None of the tests need a key or live data (baseline 19 Nov: all pass).
 - Targeted: `npx tsx <path to .test.ts>` for each file the change touches (and its siblings in the same folder).
 - Full run (about 7 min, run in background, 120 s cap per file):
   `git ls-files | grep -E '\.test\.ts$' | while read f; do timeout 120 npx tsx "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`
-- Type check: `npx tsc --noEmit` (about 40 s). Known baseline errors, not caused by a new change: `server/uploads/routes.ts` lines 293 and 310.
-  A change fails only if it adds errors beyond that.
+- Type check: `npx tsc --noEmit` (about 40 s). Baseline has many old errors (TradeJournal, JournalCashSetupCard, SaveEnrichModelDialog, uploads/routes and more).
+  Judge by the touched files only: `npx tsc --noEmit | grep -E "<touched file names>"` must print nothing.
 - Build: `npm run build` (what Render runs). Run it when the change touches build config, imports or `package.json`.
 - Flaky on baseline: `server/bridge/discord-bridge-twin.test.ts` failed once in the full run and passed on rerun; rerun before calling it a fail.
 
