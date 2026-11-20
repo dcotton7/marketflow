@@ -10,6 +10,7 @@
  */
 import { sql } from "drizzle-orm";
 import { bucketOf, normalizeCapSize } from "./utils/cap-size";
+import { logPhase } from "../infra/job-guard";
 
 export const BASE_SESSIONS = 30;
 export const BAR_LOOKBACK_DAYS = 330; // calendar days: enough for a 200-day average
@@ -211,6 +212,7 @@ export async function buildDailySummaries(db: any, symbols: string[], opts: { sh
           sector = EXCLUDED.sector, industry = EXCLUDED.industry, market_cap = EXCLUDED.market_cap, cap_size = EXCLUDED.cap_size, built_at = NOW()`);
       summarized += chunk.length;
     }
+    logPhase("DailySummary", `batch ${Math.floor(i / BATCH) + 1}/${Math.ceil(symbols.length / BATCH)} (${summarized} rows)`);
   }
   map = null; // re-read the table on the next request
   return { symbols: symbols.length, summarized, skipped, asOf };
