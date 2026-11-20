@@ -14,6 +14,7 @@ import { registerBigIdeaRoutes } from "./bigidea/routes";
 import { registerAlertRoutes } from "./alerts/routes";
 import { registerSchwabRoutes } from "./schwab/routes";
 import marketConditionRoutes from "./market-condition/routes";
+import setupRoutes from "./setups/routes";
 import marketflowAnalysisRoutes from "./market-condition/analysis/routes";
 import { registerUploadRoutes } from "./uploads/routes";
 import { initMarketCondition } from "./market-condition";
@@ -953,6 +954,7 @@ export async function registerRoutes(
   registerUploadRoutes(app);
   
   // Register Market Condition routes (mount immediately for API availability)
+  app.use("/api/market-condition/setups", setupRoutes);
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 
