@@ -95,6 +95,8 @@ export interface AlpacaCandle {
   low: number;
   close: number;
   volume: number;
+  /** The bar's volume-weighted average price, when Alpaca sends it (multi-symbol daily bars). */
+  vwap?: number;
 }
 
 export interface AlpacaTradingCalendarDay {
@@ -532,6 +534,7 @@ export async function fetchAlpacaMultiSymbolDailyBars(
               low: b.l,
               close: b.c,
               volume: b.v || 0,
+              ...(typeof b.vw === "number" ? { vwap: b.vw } : {}),
             }));
           const existing = result.get(sym.toUpperCase()) || [];
           result.set(sym.toUpperCase(), [...existing, ...candles]);

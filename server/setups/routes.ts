@@ -18,6 +18,7 @@ import { SETUP } from "./leader-shakeout-job";
 import { getSetupJobStatus, runSetupJob } from "./jobs";
 import { ensureSetupTables, rowsOf } from "./store";
 import { parseRange } from "./routes-helpers";
+import { byGrade, flags, gradesWanted, loadGradeSettings, parseSettings, saveGradeSettings, type GradeSettings } from "./grades";
 import { EG, EG_RULE_VERSION, EG_SETUP, ensureEgTables } from "./earnings-gap-up";
 import { upcomingStatus } from "../earnings/upcoming";
 import { secUserAgent } from "../earnings/sec";
@@ -25,6 +26,13 @@ import { ensureCardTables } from "./market-card-job";
 import { CARD_VERSION } from "./market-card";
 
 const router = Router();
+const GRADE_TEXT = (g: GradeSettings) =>
+  `Every hit is the base rule. liquid = 20-day average dollar volume >= $${g.liquidDollarVol / 1e6}M; gapped = opened at least ${g.gapAtr} ATR below the prior close. ` +
+  `Grade A = both, B = one, C = neither. Rows come grade A first, then B; C only with grades=all (or grades=C). Grades use the current settings; grade_stored is the grade when the row was written.`;
+const STOP_TEXT =
+  `stop_levels: each of the 50-day, 20-day, 5-day and 10-day averages (closes, including the hit day), the low of the day, the previous day's low and the day's VWAP that sits below the close, ` +
+  `with its distance from the close in percent. stop_first = the first in that order within 5% of the close; none = "no logical stop inside 5%". Levels and distances only.`;
+
 const RULE_TEXT =
   `Leader Shakeout (research S1): close >= $${LS.minPrice}, prior 20-day average dollar volume >= $${LS.minDollarVol / 1e6}M, ` +
   `a one-day fall of at least ${LS.minDropAtr} x the prior 14-day ATR and at least ${-LS.maxRet * 100}%, on at least ${LS.minRelVol} x the prior 20-day average volume, ` +
@@ -42,10 +50,15 @@ router.get("/leader-shakeout", async (req: Request, res: Response) => {
     const runs = rowsOf(await db.execute(
       sql`SELECT market_date, symbols_scanned, hits, market_label, skipped, source FROM setup_scan_runs WHERE setup = ${SETUP} AND rule_version = ${RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date`,
     ));
-    const rows = rowsOf(await db.execute(
-      sql`SELECT market_date, symbol, close, prev_close, open, volume, drop_pct, drop_atr, atr14_prev, rel_volume, avg_vol20_prev, run20, rsi2, dollar_vol20_prev, gap_atr, liquid, gapped, themes, themes_as_of, market_label, mf_regime, source FROM setup_leader_shakeout WHERE rule_version = ${RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date, drop_atr DESC`,
-    ));
-    res.json({ rule: { version: RULE_VERSION, text: RULE_TEXT }, ...range, runs, rows });
+    const gs = await loadGradeSettings(db);
+    const want = gradesWanted((req.query as any).grades);
+    const all = rowsOf(await db.execute(
+      sql`SELECT market_date, symbol, close, prev_close, open, volume, drop_pct, drop_atr, atr14_prev, rel_volume, avg_vol20_prev, run20, rsi2, dollar_vol20_prev, gap_atr, grade AS grade_stored, grade_settings, vwap, stop_levels, stop_first, stop_first_dist_pct, no_stop_inside_5, themes, themes_as_of, market_label, mf_regime, source FROM setup_leader_shakeout WHERE rule_version = ${RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to}`,
+    )).map((r) => ({ ...r, ...flags(Number(r.dollar_vol20_prev), Number(r.gap_atr), gs), stop_note: r.no_stop_inside_5 ? "no logical stop inside 5%" : null }));
+    const counts = { A: 0, B: 0, C: 0 } as Record<string, number>;
+    for (const r of all) counts[r.grade]++;
+    const rows = byGrade(all.filter((r) => want.includes(r.grade)));
+    res.json({ rule: { version: RULE_VERSION, text: RULE_TEXT, grades: GRADE_TEXT(gs), stops: STOP_TEXT }, ...range, grades: want, counts, runs, rows });
   } catch (err) {
     console.error("[Setups] leader-shakeout read failed:", err);
     res.status(500).json({ error: "read failed" });
@@ -71,9 +84,9 @@ router.get("/earnings-gap-up", async (req: Request, res: Response) => {
       sql`SELECT setup, market_date, symbols_scanned, hits, market_label, source FROM setup_scan_runs WHERE setup LIKE ${EG_SETUP + ":%"} AND rule_version = ${EG_RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date, setup`,
     ));
     const rows = rowsOf(await db.execute(
-      sql`SELECT market_date, symbol, report_date, report_hour, hour_known, date_source, open, high, low, close, prev_close, volume, gap_pct, gap_atr, atr14_prev, clv, rel_volume, avg_vol20_prev, dollar_vol20_prev, day_change_pct, themes, themes_as_of, market_label, source FROM setup_earnings_gap_up WHERE rule_version = ${EG_RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date, gap_atr DESC`,
+      sql`SELECT market_date, symbol, report_date, report_hour, hour_known, date_source, open, high, low, close, prev_close, volume, gap_pct, gap_atr, atr14_prev, clv, rel_volume, avg_vol20_prev, dollar_vol20_prev, day_change_pct, vwap, stop_levels, stop_first, stop_first_dist_pct, no_stop_inside_5, CASE WHEN no_stop_inside_5 THEN 'no logical stop inside 5%' END AS stop_note, themes, themes_as_of, market_label, source FROM setup_earnings_gap_up WHERE rule_version = ${EG_RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date, gap_atr DESC`,
     ));
-    res.json({ rule: { version: EG_RULE_VERSION, text: EG_TEXT }, ...range, runs, rows });
+    res.json({ rule: { version: EG_RULE_VERSION, text: EG_TEXT, stops: STOP_TEXT }, ...range, runs, rows });
   } catch (err) {
     console.error("[Setups] earnings-gap-up read failed:", err);
     res.status(500).json({ error: "read failed" });
@@ -103,6 +116,18 @@ router.get("/market-card", async (req: Request, res: Response) => {
 
 router.get("/status", (_req: Request, res: Response) => {
   res.json({ jobs: getSetupJobStatus(), upcomingEarnings: upcomingStatus(), secJob: secUserAgent() ? "on" : "off (SEC_USER_AGENT is empty)" });
+});
+
+/** GET /settings: the grade thresholds now in use. PUT (admin) { liquidDollarVol, gapAtr }: change them. */
+router.get("/settings", async (_req: Request, res: Response) => {
+  res.json({ grades: await loadGradeSettings(getDb()) });
+});
+router.put("/settings", requireAdmin, async (req: Request, res: Response) => {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  const s = parseSettings({ ...(await loadGradeSettings(db)), ...(req.body ?? {}) });
+  await saveGradeSettings(db, s);
+  res.json({ grades: s });
 });
 
 router.post("/run/:job", requireAdmin, async (req: Request, res: Response) => {

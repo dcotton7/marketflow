@@ -12,6 +12,8 @@ import { contiguous, looksLikeSplit, RESEARCH_ETFS, volumePrev, type DBar } from
 import { evaluateAt, LOOKBACK, prepare, RULE_VERSION } from "./leader-shakeout";
 import { addBreadth, labelDates, type Breadth, type MarketLabel } from "./market-label";
 import type { RunRow, SetupStore, ShakeoutRow } from "./store";
+import { stopLevels } from "./stop-levels";
+import { DEFAULT_GRADES, flags, type GradeSettings } from "./grades";
 
 export const SETUP = "leader_shakeout";
 /** Sessions of history loaded before the first day to compute: 21 for the rule, 50 + 21 for breadth's 50-day. */
@@ -33,6 +35,10 @@ export interface BarSource {
   mfRegime(date: string): string | null;
   /** True when the job should stop between batches (memory pressure). */
   shouldStop?(): boolean;
+  /** The day's VWAP for (symbol, date) pairs, key "SYM|date" (Alpaca daily bars). Missing pairs stay null. */
+  vwaps?(pairs: { symbol: string; date: string }[]): Promise<Map<string, number>>;
+  /** Grade thresholds (settings). */
+  gradeSettings?(): Promise<GradeSettings>;
 }
 
 export interface ScanResult {
@@ -77,7 +83,8 @@ export async function scanLeaderShakeout(
   const scanned = new Map<string, number>();
   const gaps = new Map<string, number>();
   const splits = new Map<string, string[]>();
-  const hits: Omit<ShakeoutRow, "marketLabel" | "source">[] = [];
+  const gs = (await src.gradeSettings?.().catch(() => DEFAULT_GRADES)) ?? DEFAULT_GRADES;
+  const hits: (Omit<ShakeoutRow, "marketLabel" | "source" | "vwap" | "stops"> & { bars: DBar[]; i: number })[] = [];
   const bump = (m: Map<string, number>, d: string) => m.set(d, (m.get(d) ?? 0) + 1);
 
   for (let k = 0; k < symbols.length; k += SYMBOL_BATCH) {
@@ -93,11 +100,15 @@ export async function scanLeaderShakeout(
         if (!contiguous(b, i, LOOKBACK, sessionIndex)) { bump(gaps, d); continue; }
         if (looksLikeSplit(b[i - 1].close, b[i].open, b[i].close)) { splits.set(d, [...(splits.get(d) ?? []), sym]); continue; }
         bump(scanned, d);
-        const r = evaluateAt(p, i);
+        const r = evaluateAt(p, i, gs);
         if (!r?.hit) continue;
         const { hit: _h, failed: _f, ...numbers } = r;
         hits.push({
           ...numbers,
+          grade: flags(r.dollarVol20Prev, r.gapAtr, gs).grade,
+          gradeSettings: gs,
+          bars: b,
+          i,
           symbol: sym.toUpperCase(),
           ruleVersion: RULE_VERSION,
           themes: src.themes(sym),
@@ -115,11 +126,22 @@ export async function scanLeaderShakeout(
     console.warn("[LeaderShakeout] market label unavailable:", err);
   }
 
+  let vw = new Map<string, number>();
+  try {
+    if (hits.length && src.vwaps) vw = await src.vwaps(hits.map((h) => ({ symbol: h.symbol, date: h.date })));
+  } catch (err) {
+    console.warn("[LeaderShakeout] VWAP lookup failed (stop levels keep VWAP empty):", err);
+  }
+  const full = hits.map(({ bars, i, ...h }) => {
+    const v = vw.get(`${h.symbol}|${h.date}`) ?? null;
+    return { ...h, vwap: v, stops: stopLevels(bars, i, v) };
+  });
+
   for (const d of todo) {
     // a scheduled run labels its older days (the first run's backfill, a missed evening) as backfill
     const source = (opts.source ?? "daily") === "daily" && d !== last ? "backfill" : opts.source ?? "daily";
     const lab = labels.get(d) ?? null;
-    const dayHits = hits.filter((h) => h.date === d).map((h) => ({ ...h, marketLabel: lab?.label ?? null, source }));
+    const dayHits = full.filter((h) => h.date === d).map((h) => ({ ...h, marketLabel: lab?.label ?? null, source }));
     out.hits += await store.insertShakeouts(dayHits);
     await store.insertRun({
       setup: SETUP,

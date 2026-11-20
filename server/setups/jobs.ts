@@ -14,6 +14,7 @@ import { isMemoryPressureHigh, shouldRunHeavyBackgroundWork } from "../infra/mem
 import { getThemesForSymbol } from "../market-condition/utils/theme-db-loader";
 import { getCachedRAI } from "../market-condition/engine/rai";
 import type { DBar } from "./daily-math";
+import { loadGradeSettings } from "./grades";
 import { scanLeaderShakeout, type BarSource } from "./leader-shakeout-job";
 import { pgSetupStore, rowsOf, type RunRow } from "./store";
 import { loadLatest, refreshUpcomingEarnings } from "../earnings/upcoming";
@@ -69,7 +70,26 @@ export function pgBarSource(db: Db): BarSource {
       return getEtClock(new Date(rai.calculatedAt)).dateKey === date ? rai.label : null;
     },
     shouldStop: () => isMemoryPressureHigh(),
+    vwaps: (pairs) => alpacaVwaps(pairs),
+    gradeSettings: () => loadGradeSettings(db),
   };
+}
+
+/** The day's VWAP for each (symbol, date), from Alpaca daily bars (one multi-symbol call per 50 symbols). */
+export async function alpacaVwaps(pairs: { symbol: string; date: string }[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!pairs.length) return out;
+  const syms = [...new Set(pairs.map((p) => p.symbol))];
+  const from = pairs.reduce((a, p) => (p.date < a ? p.date : a), pairs[0].date);
+  const want = new Set(pairs.map((p) => `${p.symbol}|${p.date}`));
+  for (let k = 0; k < syms.length; k += 50) {
+    const m = await fetchAlpacaMultiSymbolDailyBars(syms.slice(k, k + 50), new Date(from + "T00:00:00Z"), new Date());
+    for (const [s, candles] of m) for (const c of candles) {
+      const key = `${s}|${getEtClock(new Date(c.date)).dateKey}`;
+      if (want.has(key) && typeof c.vwap === "number") out.set(key, c.vwap);
+    }
+  }
+  return out;
 }
 
 /** Daily bars from MarketFlow's Alpaca client (split-adjusted), keyed by ET session date, oldest first. */

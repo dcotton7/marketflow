@@ -12,7 +12,9 @@
  */
 import { atrPrev, run20, rsi2Series, trueRanges, volumePrev, type DBar } from "./daily-math";
 
-export const RULE_VERSION = "S1-2026-11-20";
+// The rule is S1 at Don's floor; "-g1" = rows carry the A/B/C grade and the stop levels (Don, 20 Nov). Rows
+// written under the first version stay as they were, beside these.
+export const RULE_VERSION = "S1-2026-11-20-g1";
 export const LS = {
   minPrice: 6,
   minDollarVol: 30e6,
@@ -59,7 +61,11 @@ export function prepare(b: DBar[]) {
   return { b, tr: trueRanges(b), rsi2: rsi2Series(b) };
 }
 
-export function evaluateAt(p: ReturnType<typeof prepare>, i: number): ShakeoutResult | null {
+export function evaluateAt(
+  p: ReturnType<typeof prepare>,
+  i: number,
+  grades: { liquidDollarVol: number; gapAtr: number } = { liquidDollarVol: LS.liquidDollarVol, gapAtr: -LS.gapAtr },
+): ShakeoutResult | null {
   const { b, tr, rsi2 } = p;
   if (i < LOOKBACK || i >= b.length) return null;
   const t = b[i], prev = b[i - 1].close;
@@ -81,8 +87,8 @@ export function evaluateAt(p: ReturnType<typeof prepare>, i: number): ShakeoutRe
     rsi2: rsi2[i],
     dollarVol20Prev: dollarVol,
     gapAtr: (t.open - prev) / atr,
-    liquid: dollarVol >= LS.liquidDollarVol,
-    gapped: (t.open - prev) <= LS.gapAtr * atr,
+    liquid: dollarVol >= grades.liquidDollarVol,
+    gapped: (t.open - prev) <= -grades.gapAtr * atr,
   };
   const failed: Condition[] = [];
   if (!(n.close >= LS.minPrice)) failed.push("price");

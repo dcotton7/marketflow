@@ -20,8 +20,9 @@ import { reactionSessions } from "../earnings/upcoming";
 import { reactionSession } from "../earnings/sec";
 import type { BarSource } from "./leader-shakeout-job";
 import type { RunRow, SetupStore } from "./store";
+import { stopLevels, type StopLevels } from "./stop-levels";
 
-export const EG_RULE_VERSION = "A6-real-2026-11-20";
+export const EG_RULE_VERSION = "A6-real-2026-11-20-s1"; // "-s1": rows carry the stop levels (Don, 20 Nov)
 export const EG = { minGapAtr: 1, minGapPct: 0.03, minClv: 0.5, minRelVol: 2, minPrice: 6, minDollarVol: 30e6 } as const;
 export const EG_SETUP = "earnings_gap_up";
 const LOOKBACK = 21;
@@ -59,11 +60,17 @@ export function evaluateGapUp(b: DBar[], i: number, tr = trueRanges(b)): (EgNumb
 export const DDL = [
   `CREATE TABLE IF NOT EXISTS setup_earnings_gap_up (id SERIAL PRIMARY KEY, rule_version TEXT NOT NULL, market_date TEXT NOT NULL, symbol TEXT NOT NULL, report_date TEXT, report_hour TEXT, hour_known BOOLEAN NOT NULL, date_source TEXT NOT NULL, open DOUBLE PRECISION NOT NULL, high DOUBLE PRECISION NOT NULL, low DOUBLE PRECISION NOT NULL, close DOUBLE PRECISION NOT NULL, prev_close DOUBLE PRECISION NOT NULL, volume DOUBLE PRECISION NOT NULL, gap_pct DOUBLE PRECISION NOT NULL, gap_atr DOUBLE PRECISION NOT NULL, atr14_prev DOUBLE PRECISION NOT NULL, clv DOUBLE PRECISION NOT NULL, rel_volume DOUBLE PRECISION NOT NULL, avg_vol20_prev DOUBLE PRECISION NOT NULL, dollar_vol20_prev DOUBLE PRECISION NOT NULL, day_change_pct DOUBLE PRECISION NOT NULL, themes JSONB NOT NULL DEFAULT '[]'::jsonb, themes_as_of TEXT, market_label TEXT, source TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW(), UNIQUE (rule_version, market_date, symbol))`,
   `CREATE INDEX IF NOT EXISTS idx_setup_earnings_gap_up_date ON setup_earnings_gap_up (market_date)`,
+  `ALTER TABLE setup_earnings_gap_up ADD COLUMN IF NOT EXISTS vwap DOUBLE PRECISION`,
+  `ALTER TABLE setup_earnings_gap_up ADD COLUMN IF NOT EXISTS stop_levels JSONB`,
+  `ALTER TABLE setup_earnings_gap_up ADD COLUMN IF NOT EXISTS stop_first TEXT`,
+  `ALTER TABLE setup_earnings_gap_up ADD COLUMN IF NOT EXISTS stop_first_dist_pct DOUBLE PRECISION`,
+  `ALTER TABLE setup_earnings_gap_up ADD COLUMN IF NOT EXISTS no_stop_inside_5 BOOLEAN`,
 ];
 
 export interface EgRow extends EgNumbers {
   symbol: string; reportDate: string | null; reportHour: string | null; hourKnown: boolean; dateSource: string;
   themes: { id: string; name: string }[]; themesAsOf: string | null; marketLabel: string | null; source: RunRow["source"];
+  vwap: number | null; stops: StopLevels;
 }
 export interface EgStore extends Pick<SetupStore, "doneDates" | "insertRun"> {
   insertGapUps(rows: EgRow[]): Promise<number>;
@@ -87,8 +94,8 @@ export function pgEgInsert(db: Exec) {
   return async (rows: EgRow[]) => {
     if (!rows.length) return 0;
     await ensureEgTables(db);
-    const v = rows.map((r) => sql`(${EG_RULE_VERSION}, ${r.date}, ${r.symbol}, ${r.reportDate}, ${r.reportHour}, ${r.hourKnown}, ${r.dateSource}, ${r.open}, ${r.high}, ${r.low}, ${r.close}, ${r.prevClose}, ${r.volume}, ${r.gapPct}, ${r.gapAtr}, ${r.atr14Prev}, ${r.clv}, ${r.relVol}, ${r.avgVol20Prev}, ${r.dollarVol20Prev}, ${r.dayChangePct}, ${JSON.stringify(r.themes)}::jsonb, ${r.themesAsOf}, ${r.marketLabel}, ${r.source})`);
-    return affected(await db.execute(sql`INSERT INTO setup_earnings_gap_up (rule_version, market_date, symbol, report_date, report_hour, hour_known, date_source, open, high, low, close, prev_close, volume, gap_pct, gap_atr, atr14_prev, clv, rel_volume, avg_vol20_prev, dollar_vol20_prev, day_change_pct, themes, themes_as_of, market_label, source) VALUES ${sql.join(v, sql`, `)} ON CONFLICT (rule_version, market_date, symbol) DO NOTHING`));
+    const v = rows.map((r) => sql`(${EG_RULE_VERSION}, ${r.date}, ${r.symbol}, ${r.reportDate}, ${r.reportHour}, ${r.hourKnown}, ${r.dateSource}, ${r.open}, ${r.high}, ${r.low}, ${r.close}, ${r.prevClose}, ${r.volume}, ${r.gapPct}, ${r.gapAtr}, ${r.atr14Prev}, ${r.clv}, ${r.relVol}, ${r.avgVol20Prev}, ${r.dollarVol20Prev}, ${r.dayChangePct}, ${JSON.stringify(r.themes)}::jsonb, ${r.themesAsOf}, ${r.marketLabel}, ${r.source}, ${r.vwap}, ${JSON.stringify(r.stops.levels)}::jsonb, ${r.stops.first}, ${r.stops.firstDistPct}, ${r.stops.noStopInside5})`);
+    return affected(await db.execute(sql`INSERT INTO setup_earnings_gap_up (rule_version, market_date, symbol, report_date, report_hour, hour_known, date_source, open, high, low, close, prev_close, volume, gap_pct, gap_atr, atr14_prev, clv, rel_volume, avg_vol20_prev, dollar_vol20_prev, day_change_pct, themes, themes_as_of, market_label, source, vwap, stop_levels, stop_first, stop_first_dist_pct, no_stop_inside_5) VALUES ${sql.join(v, sql`, `)} ON CONFLICT (rule_version, market_date, symbol) DO NOTHING`));
   };
 }
 
@@ -149,7 +156,7 @@ export async function scanEarningsGapUp(
     const bySym = new Map<string, typeof s.days>();
     for (const d of s.days) if (want.has(d.session)) bySym.set(d.symbol, [...(bySym.get(d.symbol) ?? []), d]);
     const from = sessions[Math.max(0, sessionIndex.get(todo[0])! - LOOKBACK - 5)];
-    const hits: Omit<EgRow, "marketLabel" | "source">[] = [];
+    const hits: (Omit<EgRow, "marketLabel" | "source" | "vwap" | "stops"> & { bars: DBar[]; i: number })[] = [];
     const tested = new Map<string, number>();
     const syms = [...bySym.keys()];
     for (let k = 0; k < syms.length; k += 150) {
@@ -168,16 +175,19 @@ export async function scanEarningsGapUp(
           const r = evaluateGapUp(b, i, tr);
           if (!r?.hit) continue;
           const { hit: _h, failed: _f, ...n } = r;
-          hits.push({ ...n, symbol: sym.toUpperCase(), reportDate: day.reportDate, reportHour: day.hour, hourKnown: day.hourKnown, dateSource: s.name, themes: src.themes(sym), themesAsOf: opts.today ?? null });
+          hits.push({ ...n, bars: b, i, symbol: sym.toUpperCase(), reportDate: day.reportDate, reportHour: day.hour, hourKnown: day.hourKnown, dateSource: s.name, themes: src.themes(sym), themesAsOf: opts.today ?? null });
         }
       }
     }
     const labels = await store.labels(todo).catch(() => new Map<string, string>());
+    let vw = new Map<string, number>();
+    try { if (hits.length && src.vwaps) vw = await src.vwaps(hits.map((h) => ({ symbol: h.symbol, date: h.date }))); } catch { /* VWAP stays empty */ }
+    const full = hits.map(({ bars, i, ...h }) => { const v = vw.get(`${h.symbol}|${h.date}`) ?? null; return { ...h, vwap: v, stops: stopLevels(bars, i, v) }; });
     let inserted = 0;
     for (const d of todo) {
       const source: RunRow["source"] = (opts.source ?? "daily") === "daily" && d !== last ? "backfill" : opts.source ?? "daily";
       const lab = labels.get(d) ?? null;
-      const dayHits = hits.filter((h) => h.date === d).map((h) => ({ ...h, marketLabel: lab, source }));
+      const dayHits = full.filter((h) => h.date === d).map((h) => ({ ...h, marketLabel: lab, source }));
       inserted += await store.insertGapUps(dayHits);
       await store.insertRun({ setup, ruleVersion: EG_RULE_VERSION, marketDate: d, symbolsScanned: tested.get(d) ?? 0, hits: dayHits.length, skipped: {}, marketLabel: lab, marketInputs: null, source });
     }

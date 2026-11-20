@@ -192,6 +192,13 @@ export async function fetchEarningsCalendar(
   }
 }
 
+/** The same call, but a failure throws (the daily calendar job must not store a partial day). */
+export async function fetchEarningsCalendarStrict(from: string, to: string): Promise<FinnhubEarningsCalendar[]> {
+  const data = await finnhubFetchWithRetry(`/calendar/earnings?from=${from}&to=${to}`);
+  if (!data || !Array.isArray(data.earningsCalendar)) throw new Error("Finnhub earnings calendar: unexpected response");
+  return data.earningsCalendar;
+}
+
 /**
  * Fetch EPS surprises (historical earnings beats/misses)
  */

@@ -9,7 +9,7 @@
  * never shown as upcoming, whatever its source.
  */
 import { sql } from "drizzle-orm";
-import { fetchEarningsCalendar, type FinnhubEarningsCalendar } from "../finnhub";
+import { fetchEarningsCalendarStrict, type FinnhubEarningsCalendar } from "../finnhub";
 import { getEtClock } from "@shared/usEquityMarketSession";
 
 export const DDL: string[] = [
@@ -50,7 +50,8 @@ export async function ensureEarningsTables(db: Exec) {
 /** The calendar from `from` for HORIZON_DAYS, in week windows; a window that hits Finnhub's cap is split by day. */
 export async function pullCalendar(
   from: string,
-  fetcher: (from: string, to: string) => Promise<FinnhubEarningsCalendar[]> = async (f, t) => (await fetchEarningsCalendar(f, t)).earningsCalendar ?? [],
+  // a failed window (403, 429 after retries, ...) throws: the job then stores nothing for the day and says why
+  fetcher: (from: string, to: string) => Promise<FinnhubEarningsCalendar[]> = fetchEarningsCalendarStrict,
 ): Promise<{ rows: FinnhubEarningsCalendar[]; calls: number; capped: string[] }> {
   const rows: FinnhubEarningsCalendar[] = [];
   const capped: string[] = [];
@@ -149,10 +150,17 @@ export async function refreshUpcomingEarnings(
   db: Exec,
   follow: Set<string>,
   opts: { fetchedOn?: string; fetcher?: Parameters<typeof pullCalendar>[1] } = {},
-): Promise<{ fetchedOn: string; calls: number; calendarRows: number; kept: number; inserted: number; capped: string[] }> {
+): Promise<{ fetchedOn: string; calls: number; calendarRows: number; kept: number; inserted: number; capped: string[]; failed?: string }> {
   await ensureEarningsTables(db);
   const fetchedOn = opts.fetchedOn ?? today();
-  const { rows, calls, capped } = await pullCalendar(fetchedOn, opts.fetcher);
+  let pulled: Awaited<ReturnType<typeof pullCalendar>>;
+  try {
+    pulled = await pullCalendar(fetchedOn, opts.fetcher);
+  } catch (err) {
+    console.warn(`[EarningsCalendar] ${fetchedOn}: not stored (a calendar window failed; earlier days' rows stay):`, String(err).slice(0, 200));
+    return { fetchedOn, calls: 0, calendarRows: 0, kept: 0, inserted: 0, capped: [], failed: String(err).slice(0, 200) };
+  }
+  const { rows, calls, capped } = pulled;
   const keep = toRows(rows, fetchedOn, follow);
   let inserted = 0;
   for (let i = 0; i < keep.length; i += 300) {
