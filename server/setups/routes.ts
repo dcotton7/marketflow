@@ -115,6 +115,18 @@ router.get("/market-card", async (req: Request, res: Response) => {
   }
 });
 
+/** GET /vix: the real Cboe VIX (FMP) beside the VIXY proxy the market card's rules use. Read-only. */
+router.get("/vix", async (_req: Request, res: Response) => {
+  const { fetchRealVixQuote, realVixForScoresEnabled } = await import("../market-condition/vix-source");
+  const real = await fetchRealVixQuote();
+  res.json({
+    realVix: real,
+    marketCardUses: "VIXY proxy and SPY realized volatility (rules and stored rows unchanged)",
+    regimeAndSentinelUseRealVix: realVixForScoresEnabled(),
+    note: real ? null : "FMP did not answer; every surface keeps the VIXY proxy",
+  });
+});
+
 router.get("/status", (_req: Request, res: Response) => {
   res.json({ jobs: getSetupJobStatus(), upcomingEarnings: upcomingStatus(), secJob: secUserAgent() ? "on" : "off (SEC_USER_AGENT is empty)" });
 });

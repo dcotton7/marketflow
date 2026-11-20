@@ -1,6 +1,7 @@
 import * as alpaca from "../alpaca";
 import { getSectorForSymbol } from "../fundamentals";
 import { getDailyBars } from "../data-layer";
+import { fetchRealVixCloses, realVixForScoresEnabled } from "../market-condition/vix-source";
 
 // Resample daily bars to weekly bars
 function resampleToWeekly(dailyBars: alpaca.AlpacaCandle[]): alpaca.AlpacaCandle[] {
@@ -116,6 +117,8 @@ export interface MarketSentiment {
   daily: DailyBasket;
   choppiness?: ChoppinessRegime;
   summary: string;
+  /** Which volatility series fed the basket: the real Cboe VIX or the VIXY ETF proxy (the default). */
+  volatilitySource?: "VIX" | "VIXY";
   updatedAt: Date;
 }
 
@@ -515,6 +518,16 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
     ...RISK_BASKET.map((s) => fetchHistoricalPrices(s, 30)),
   ]);
 
+  // Setting REAL_VIX_FOR_SCORES (off by default): the real VIX's closes stand in for VIXY's; VIXY stays the fallback.
+  let volSource: "VIX" | "VIXY" = "VIXY";
+  if (realVixForScoresEnabled()) {
+    const vixCloses = await fetchRealVixCloses(30);
+    if (vixCloses && vixCloses.length >= 20) {
+      basketPrices[RISK_BASKET.indexOf("VIXY")] = vixCloses;
+      volSource = "VIX";
+    }
+  }
+
   const instruments: Record<string, InstrumentTrend> = {};
   RISK_BASKET.forEach((symbol, i) => {
     const prices = basketPrices[i];
@@ -557,6 +570,7 @@ export async function fetchMarketSentiment(): Promise<MarketSentiment> {
     daily,
     choppiness: choppiness || undefined,
     summary,
+    volatilitySource: volSource,
     updatedAt: new Date(),
   };
 

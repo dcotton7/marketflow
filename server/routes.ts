@@ -1673,7 +1673,7 @@ export async function registerRoutes(
         { symbol: 'DIA', label: 'Dow' },
         { symbol: 'IWM', label: 'Russell 2K' },
         { symbol: 'GLD', label: 'Gold' },
-        { symbol: 'VIXY', label: 'VIX' },
+        { symbol: 'VIXY', label: 'VIXY' },
         { symbol: 'RSP', label: 'S&P EW' },
         { symbol: 'QQQE', label: 'NDX EW' },
       ];
@@ -1699,6 +1699,13 @@ export async function registerRoutes(
         })
       );
       
+      // The "VIX" tile: the real Cboe VIX when FMP serves it, else the VIXY ETF, and the tile says which.
+      const vixIdx = results.findIndex((r) => r.symbol === 'VIXY');
+      if (vixIdx >= 0) {
+        const { fetchRealVixQuote, vixTile } = await import('./market-condition/vix-source');
+        results[vixIdx] = { ...results[vixIdx], ...vixTile(await fetchRealVixQuote(), results[vixIdx]) } as any;
+      }
+
       res.json(results);
     } catch (error) {
       console.error('Market indicators error:', error);

@@ -13,6 +13,7 @@
 
 import { getAlpacaProvider } from "../providers/alpaca";
 import { BenchmarkData, HistoricalBar } from "../providers/types";
+import { fetchRealVixQuote, realVixForScoresEnabled } from "../vix-source";
 import { ThemeMetrics } from "./theme-score";
 
 // =============================================================================
@@ -97,7 +98,9 @@ export async function calculateRAI(
     const smallVsLargeResult = calculateSmallVsLarge(snapshots);
     const specResult = calculateSpecLeadership(snapshots, themeMetrics);
     const breadthResult = calculateMarketBreadth(snapshots);
-    const volResult = calculateVolatilityRegime(snapshots);
+    // Off by default (REAL_VIX_FOR_SCORES): the real VIX's day change replaces UVXY's in the same formula.
+    const realVix = realVixForScoresEnabled() ? await fetchRealVixQuote() : null;
+    const volResult = calculateVolatilityRegime(snapshots, realVix);
     
     const components: RAIComponents = {
       trendPosition: trendResult.score,
@@ -294,8 +297,9 @@ function calculateMarketBreadth(
  * Volatility Regime: Is volatility elevated or suppressed?
  * VIX level (inverted - low VIX = risk-on)
  */
-function calculateVolatilityRegime(
-  snapshots: Map<string, BenchmarkData>
+export function calculateVolatilityRegime(
+  snapshots: Map<string, BenchmarkData>,
+  realVix: { changePct: number } | null = null
 ): { score: number; detail: string } {
   // Note: VIX is typically not available via Alpaca snapshots
   // We'll use UVXY as a proxy if available, or estimate from market data
@@ -306,7 +310,11 @@ function calculateVolatilityRegime(
   let score = 10; // Neutral default
   let detail = "Volatility data limited";
   
-  if (uvxy) {
+  if (realVix) {
+    // Real VIX (setting on): same formula, its own day change. Detail says which input was used.
+    score = Math.max(0, Math.min(20, Math.round((-realVix.changePct + 5) * 2)));
+    detail = `VIX (Cboe): ${realVix.changePct > 0 ? "+" : ""}${realVix.changePct.toFixed(2)}%`;
+  } else if (uvxy) {
     // UVXY change: +5% = 0 (high vol), 0% = 10, -5% = 20 (low vol)
     score = Math.max(0, Math.min(20, Math.round((-uvxy.changePct + 5) * 2)));
     detail = `UVXY: ${uvxy.changePct > 0 ? "+" : ""}${uvxy.changePct.toFixed(2)}%`;
