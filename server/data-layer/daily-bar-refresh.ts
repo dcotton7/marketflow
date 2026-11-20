@@ -3,11 +3,16 @@
  *
  * Ensures historical_bars stays current. Runs:
  *   1. On server startup (if bars are stale or missing)
- *   2. On a scheduled timer (every 6 hours)
+ *   2. On a scheduled timer (every 30 minutes; fetches only what is behind the last finished session)
  *
  * Smart refresh: only fetches symbols that are actually stale or missing,
  * not the entire universe. Respects a memory gate to avoid OOM during
  * concurrent MC snapshot polling.
+ *
+ * Universe: static theme lists + the tickers table - retired file (bar-universe.ts). It used to be the static
+ * lists only, which left every tickers-table-only name (about 430) without a bar since March.
+ * Stale = newest bar older than the last finished session. Stalest names go first, so a run cut short by the
+ * memory gate or night mode still moves on, and a retry follows in 30 minutes instead of 6 hours.
  */
 
 import { getDb } from "../db";
@@ -15,6 +20,7 @@ import { historicalBars, tickerMa } from "@shared/schema";
 import { sql, eq, desc } from "drizzle-orm";
 import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
+import { expectedLastSession, loadBarUniverse, loadNewestBars, splitStale } from "./bar-universe";
 import {
   isMemoryPressureHigh,
   isNightMode,
@@ -22,14 +28,27 @@ import {
 } from "../infra/memory-gate";
 import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
 
-const STALE_THRESHOLD_DAYS = 3;
 const REFRESH_LOOKBACK_DAYS = 10;
 const BATCH_SIZE = 5;
+const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 let lastRefreshAttempt: Date | null = null;
 let lastRefreshSuccess: Date | null = null;
 let apiKeyBroken = false;
 let refreshInProgress = false;
+let lastRun: {
+  at: string; expectedSession: string; universe: number; stale: number; withBars: number;
+  noBars: number; noBarsSample: string[]; needsBackfill: number; complete: boolean;
+} | null = null;
+const loggedToday = new Map<string, string>();
+
+/** Log a line at most once per day per key (night-mode and all-fresh lines used to repeat on every check). */
+function logOncePerDay(key: string, line: string): void {
+  const day = new Date().toISOString().slice(0, 10);
+  if (loggedToday.get(key) === day) return;
+  loggedToday.set(key, day);
+  console.log(line);
+}
 
 export function isDailyBarApiHealthy(): boolean {
   return !apiKeyBroken;
@@ -41,93 +60,63 @@ export function getDailyBarRefreshStatus() {
     lastSuccess: lastRefreshSuccess?.toISOString() ?? null,
     apiKeyBroken,
     refreshInProgress,
+    lastRun,
   };
 }
 
 /**
- * Identify which universe symbols have stale or missing bars.
- * Returns the actual list of symbols that need refreshing.
+ * Identify which universe symbols have stale or missing bars (older than the last finished session).
+ * Stalest first.
  */
-async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: number }> {
+async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: number; expected: string; newest: Map<string, string> }> {
+  const expected = expectedLastSession();
   const db = getDb();
-  if (!db) return { staleSymbols: [], freshCount: 0 };
-
-  const universeTickers = getAllUniverseTickers();
-
+  if (!db) return { staleSymbols: [], freshCount: 0, expected, newest: new Map() };
   try {
-    const result = await db.execute(sql`
-      SELECT symbol, MAX(bar_date) as newest_bar
-      FROM historical_bars
-      GROUP BY symbol
-    `);
-
-    const rows = (result as any)?.rows ?? result ?? [];
-    const freshMap = new Map<string, string>();
-
-    if (Array.isArray(rows)) {
-      for (const row of rows) {
-        const sym = (row.symbol as string)?.toUpperCase();
-        const newest = row.newest_bar ?? row.newestBar ?? row.newest ?? null;
-        if (sym && newest) freshMap.set(sym, newest);
-      }
-    }
-
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - STALE_THRESHOLD_DAYS);
-    const cutoffStr = cutoff.toISOString().split("T")[0]!;
-
-    const staleSymbols: string[] = [];
-    let freshCount = 0;
-
-    for (const ticker of universeTickers) {
-      const newest = freshMap.get(ticker.toUpperCase());
-      if (!newest || newest < cutoffStr) {
-        staleSymbols.push(ticker);
-      } else {
-        freshCount++;
-      }
-    }
-
-    return { staleSymbols, freshCount };
+    const universe = await loadBarUniverse(db, getAllUniverseTickers());
+    const newest = await loadNewestBars(db);
+    const { stale, fresh } = splitStale(universe, newest, expected);
+    return { staleSymbols: stale, freshCount: fresh.length, expected, newest };
   } catch (err) {
     console.warn("[DailyBarRefresh] getStaleSymbols error:", err);
-    return { staleSymbols: [], freshCount: 0 };
+    return { staleSymbols: [], freshCount: 0, expected, newest: new Map() };
   }
 }
 
-export async function checkAndRefreshDailyBars(): Promise<void> {
-  if (refreshInProgress) return;
+/** True when this check did not finish the stale list (deferred, cut short, or failed): the scheduler retries soon. */
+export async function checkAndRefreshDailyBars(): Promise<boolean> {
+  if (refreshInProgress) return false;
 
   if (isNightMode()) {
-    console.log("[DailyBarRefresh] Night mode (8pm–4am ET) — deferring refresh.");
-    return;
+    logOncePerDay("night", "[DailyBarRefresh] Night mode (8pm-4am ET, weekends) - bars wait for the next check.");
+    return false;
   }
 
   if (!shouldRunHeavyBackgroundWork()) {
-    console.warn("[DailyBarRefresh] Memory pressure high — deferring refresh.");
-    return;
+    logOncePerDay(`pressure-${new Date().getHours()}`, "[DailyBarRefresh] Memory pressure high - deferring refresh, retry in 30 min.");
+    return true;
   }
 
-  const { staleSymbols, freshCount } = await getStaleSymbols();
+  const { staleSymbols, freshCount, expected, newest } = await getStaleSymbols();
   const total = staleSymbols.length + freshCount;
 
   if (staleSymbols.length === 0) {
     // Mark healthy so server-status is not stuck on lastSuccess=null forever.
     lastRefreshAttempt = new Date();
     lastRefreshSuccess = lastRefreshAttempt;
-    console.log(`[DailyBarRefresh] All ${total} symbols are fresh. No refresh needed.`);
-    return;
+    logOncePerDay(`fresh-${expected}`, `[DailyBarRefresh] All ${total} symbols have the ${expected} bar. No refresh needed.`);
+    return false;
   }
 
-  console.log(`[DailyBarRefresh] ${staleSymbols.length}/${total} symbols need refresh (${freshCount} fresh). Starting smart refresh...`);
-  await refreshDailyBars(staleSymbols);
+  console.log(`[DailyBarRefresh] ${staleSymbols.length}/${total} symbols are behind ${expected} (${freshCount} fresh). Starting smart refresh...`);
+  return refreshDailyBars(staleSymbols, expected, total, newest);
 }
 
-async function refreshDailyBars(symbols: string[]): Promise<void> {
+async function refreshDailyBars(symbols: string[], expected: string, universeSize: number, newest: Map<string, string>): Promise<boolean> {
   const db = getDb();
   if (!db) {
     console.warn("[DailyBarRefresh] No database available.");
-    return;
+    return false;
   }
 
   refreshInProgress = true;
@@ -136,7 +125,7 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
   if (symbols.length === 0) {
     console.log("[DailyBarRefresh] No symbols to refresh.");
     refreshInProgress = false;
-    return;
+    return false;
   }
 
   const endDate = new Date();
@@ -146,6 +135,9 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
   let totalUpserted = 0;
   let totalFailed = 0;
   let memorySkipped = 0;
+  let processed = 0;
+  let withBars = 0;
+  const noBarsList: string[] = [];
 
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
     // Abort remaining work if night mode starts mid-run or RSS/heap pressure persists.
@@ -168,12 +160,13 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
     }
 
     const batch = symbols.slice(i, i + BATCH_SIZE);
+    processed = i + batch.length;
 
     const results = await Promise.allSettled(
       batch.map(async (symbol) => {
         try {
-          const bars = await fetchAlpacaIntradayBars(symbol, startDate, endDate, "1Day", true).catch(() => []);
-          if (bars.length === 0) return { symbol, count: 0 };
+          const bars = await fetchAlpacaIntradayBars(symbol, startDate, endDate, "1Day", true);
+          if (bars.length === 0) return { symbol, count: 0, empty: true };
 
           let inserted = 0;
           const now = new Date();
@@ -223,13 +216,16 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
     for (const r of results) {
       if (r.status === "fulfilled" && r.value.count > 0) {
         totalUpserted += r.value.count;
+        withBars++;
+      } else if (r.status === "fulfilled" && (r.value as any).empty) {
+        noBarsList.push(r.value.symbol);
       } else if (r.status === "rejected") {
         const msg = String(r.reason?.message ?? "");
         if (msg.includes("401")) {
           console.error(`[DailyBarRefresh] ❌ CRITICAL: Alpaca API key is INVALID (401). Cannot refresh bars.`);
           apiKeyBroken = true;
           refreshInProgress = false;
-          return;
+          return false;
         }
         totalFailed++;
       } else {
@@ -249,6 +245,31 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
     }
   }
 
+  const complete = processed >= symbols.length;
+  const doneSymbols = symbols.slice(0, processed);
+  const cutoff = new Date(`${expected}T12:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - REFRESH_LOOKBACK_DAYS);
+  const cutoffKey = cutoff.toISOString().slice(0, 10);
+  // A name whose newest bar is older than the lookback window leaves a hole this job does not fill: the backfill tool does.
+  const needsBackfill = symbols.filter((sym) => (newest.get(sym) ?? "") < cutoffKey).length;
+  lastRun = {
+    at: new Date().toISOString(),
+    expectedSession: expected,
+    universe: universeSize,
+    stale: symbols.length,
+    withBars,
+    noBars: noBarsList.length,
+    noBarsSample: noBarsList.slice(0, 40),
+    needsBackfill,
+    complete,
+  };
+  if (noBarsList.length > 0) {
+    console.warn(`[DailyBarRefresh] ${noBarsList.length} symbol(s) returned no bars: ${noBarsList.slice(0, 40).join(", ")}${noBarsList.length > 40 ? " ..." : ""}`);
+  }
+  if (needsBackfill > 0) {
+    console.warn(`[DailyBarRefresh] ${needsBackfill} symbol(s) are more than ${REFRESH_LOOKBACK_DAYS} days behind: run the backfill (server/scripts/backfillMissingBars.ts).`);
+  }
+
   try {
     if (totalUpserted > 0) {
       apiKeyBroken = false;
@@ -259,7 +280,7 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
           `Now recalculating MAs...`
       );
       if (!isNightMode() && !isMemoryPressureHigh()) {
-        await recalculateTickerMAs(db, symbols);
+        await recalculateTickerMAs(db, doneSymbols);
       } else {
         console.warn("[DailyBarRefresh] Skipping MA recalculation — night mode or memory pressure.");
       }
@@ -269,6 +290,7 @@ async function refreshDailyBars(symbols: string[]): Promise<void> {
   } finally {
     refreshInProgress = false;
   }
+  return !complete;
 }
 
 function calculateSMA(closes: number[], period: number): number | null {
@@ -287,7 +309,7 @@ function calculateEMA(closes: number[], period: number): number | null {
   return ema;
 }
 
-async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
+export async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
   let updated = 0;
   let errors = 0;
 
@@ -348,26 +370,23 @@ async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
 }
 
 /**
- * Schedule daily refresh. Runs on startup (deferred 60s) and every 6 hours.
+ * Schedule: first check 60 s after start, then every 30 minutes. A check is cheap when everything is fresh (one
+ * aggregate query); it only fetches names behind the last finished session, and night mode / memory pressure just
+ * move it to the next check. Before, it ran every 6 hours and a cut-short run waited the full 6 hours.
  */
 export function startDailyBarRefreshScheduler(): void {
-  setTimeout(() => {
+  const run = (label: string) =>
     checkAndRefreshDailyBars().catch((err) => {
-      // Do not flip apiKeyBroken on generic startup errors — night/pressure skips and
-      // transient DB blips were falsely marking the key broken and hiding real status.
-      console.error("[DailyBarRefresh] Startup check failed (non-fatal):", String(err).slice(0, 200));
+      // Do not flip apiKeyBroken on generic errors - night/pressure skips and transient DB blips
+      // were falsely marking the key broken and hiding real status.
+      console.error(`[DailyBarRefresh] ${label} check failed (non-fatal):`, String(err).slice(0, 200));
     });
-  }, 60_000);
 
-  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
-  setInterval(() => {
-    checkAndRefreshDailyBars().catch((err) => {
-      console.error("[DailyBarRefresh] Scheduled refresh failed (non-fatal):", String(err).slice(0, 200));
-    });
-  }, SIX_HOURS_MS);
+  setTimeout(() => void run("Startup"), 60_000);
+  setInterval(() => void run("Scheduled"), CHECK_INTERVAL_MS);
 
   console.log(
-    "[DailyBarRefresh] Scheduler started — first check in 60s, then every 6 hours " +
-      "(skips night mode 8pm–4am ET and RSS/heap pressure)."
+    "[DailyBarRefresh] Scheduler started - first check in 60s, then every 30 min " +
+      "(skips night mode 8pm-4am ET and RSS/heap pressure; only names behind the last session are fetched)."
   );
 }
