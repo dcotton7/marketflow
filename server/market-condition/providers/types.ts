@@ -23,6 +23,8 @@ export interface TickerSnapshot {
   avgVolume20D?: number; // 20-day average volume (if available)
   prevDayHigh?: number;  // Previous day's high (for breakout detection)
   prevDayLow?: number;   // Previous day's low (for breakdown detection)
+  /** ET session date of the provider's latest daily bar; the stale-ticker guard judges by it. */
+  dailyBarDate?: string;
   timestamp: Date;
 }
 

@@ -5,6 +5,7 @@
  * Uses Alpaca's multi-symbol snapshot endpoint to minimize API calls.
  */
 
+import { getEtClock } from "@shared/usEquityMarketSession";
 import {
   MarketDataProvider,
   TickerSnapshot,
@@ -432,6 +433,7 @@ export class AlpacaProvider implements MarketDataProvider {
       changePct,
       prevDayHigh: prevBar?.h || 0,
       prevDayLow: prevBar?.l || 0,
+      ...(dailyBar?.t ? { dailyBarDate: getEtClock(new Date(dailyBar.t)).dateKey } : {}),
       timestamp: new Date(trade?.t || quote?.t || minuteBar?.t || dailyBar?.t || Date.now()),
     };
   }

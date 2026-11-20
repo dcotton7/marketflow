@@ -15,6 +15,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { loadCapSizes, withCapSize } from "./utils/cap-size";
+import { getStaleTickers } from "./utils/stale-guard";
 import { parseDays, readRegimeHistory } from "./engine/regime-history-read";
 import { requireSentinelAuth } from "../middleware/requireSentinelAuth";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
@@ -858,6 +859,11 @@ router.get("/history/:kind", requireAdmin, async (req: Request, res: Response) =
   } catch (err) {
     res.status(500).json({ error: "history read failed" });
   }
+});
+
+/** GET /api/market-condition/stale-tickers (admin): tickers left out for having no bar for more than 5 sessions. */
+router.get("/stale-tickers", requireAdmin, (_req: Request, res: Response) => {
+  res.json(getStaleTickers());
 });
 
 /** GET /api/market-condition/history-delisted?date=YYYY-MM-DD: tickers (with their memberships) delisted on or before date. */

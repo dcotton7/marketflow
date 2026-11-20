@@ -34,6 +34,7 @@ import {
   type MaMode,
 } from "../../data-layer";
 import { getNightModeWindow, shouldRunHeavyBackgroundWork } from "../../infra/memory-gate";
+import { dropStaleSnapshots } from "../utils/stale-guard";
 
 // =============================================================================
 // Types
@@ -199,7 +200,9 @@ export async function refreshSnapshot(
     console.log(`[MC-Snapshot] Fetching ${allTickers.length} tickers`);
     
     // Fetch snapshots with optional intraday baseline
-    const snapshots = await provider.getSnapshots(allTickers, useIntradayBaseline);
+    // A ticker with no bar for more than 5 sessions is left out of everything built from these snapshots
+    // (theme scores, member moves, leaders, the scanner, briefings) and listed as stale (utils/stale-guard.ts).
+    const snapshots = await dropStaleSnapshots(await provider.getSnapshots(allTickers, useIntradayBaseline));
     state.snapshots = snapshots;
     
     // Get all benchmarks (QQQ, IWM, MDY, SPY)
