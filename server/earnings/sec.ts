@@ -121,6 +121,8 @@ export function secGetter(ua: string, fetchImpl: typeof fetch = fetch) {
   };
 }
 
+let offLoggedOn: string | null = null; // the "switched off" line is logged once a day, not on every check
+
 /**
  * The daily SEC job. Off (returns at once, logs why) while SEC_USER_AGENT is empty. On: snapshot the ticker map;
  * for each followed ticker's CIK read its submissions (and, the first time, its older pages from 2010), insert
@@ -134,7 +136,9 @@ export async function runSecJob(
 ): Promise<Record<string, unknown>> {
   const ua = secUserAgent(opts.env);
   if (!ua) {
-    console.log("[SEC] SEC_USER_AGENT is empty: the SEC filings job is switched off (it needs a name and contact email; nothing was requested).");
+    const day = new Date().toISOString().slice(0, 10);
+    if (offLoggedOn !== day) console.log("[SEC] SEC_USER_AGENT is empty: the SEC filings job is switched off (it needs a name and contact email; nothing was requested).");
+    offLoggedOn = day;
     return { off: true, reason: "SEC_USER_AGENT is empty" };
   }
   for (const s of DDL) await db.execute(sql.raw(s));
