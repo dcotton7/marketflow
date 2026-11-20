@@ -3,7 +3,7 @@
  * Run with: tsx client/src/lib/watchlist-position-columns.test.ts
  */
 import assert from "node:assert/strict";
-import { addMissingPositionColumns, entryStopPct, fitColumns, positionPl } from "./watchlist-position-columns";
+import { addMissingPositionColumns, entryStopPct, fitColumns, plCell, plTotals, positionPl } from "./watchlist-position-columns";
 import type { WatchlistColumnEntry } from "./watchlist-column-profile";
 
 const long = positionPl({ direction: "long", shares: 100, entry: 50, price: 55, change: 1.5 });
@@ -73,3 +73,25 @@ const tiny = fitColumns(cols, 100);
 assert.deepEqual(tiny.shown.map((c) => c.id), ["symbol", "actions"], "ticker and remove always stay");
 
 console.log("watchlist-position-columns: ok");
+
+// P/L Open's three display states: dollars, per share without a share count, and what is missing.
+const rowOf = (r: Parameters<typeof positionPl>[0]) => ({ ...r, side: positionPl(r).side, ...positionPl(r), changePercent: 3 });
+assert.deepEqual(plCell(rowOf({ shares: 100, entry: 50, price: 55, change: 1.5 }), "plOpen"), { state: "full", dollars: 500, pct: 10 });
+assert.deepEqual(plCell(rowOf({ shares: null, entry: 50, price: 55, change: 1.5 }), "plOpen"), { state: "perShare", perShare: 5, pct: 10 });
+assert.deepEqual(plCell(rowOf({ direction: "short", shares: null, entry: 50, price: 45, change: -1 }), "plOpen"), { state: "perShare", perShare: 5, pct: 10 }, "short, no shares");
+assert.deepEqual(plCell(rowOf({ shares: null, entry: null, price: 55, change: 1.5 }), "plOpen"), { state: "missing", why: "No entry" });
+assert.deepEqual(plCell(rowOf({ shares: 100, entry: null, price: 55, change: 1.5 }), "plOpen"), { state: "missing", why: "No entry" }, "shares but no entry");
+assert.deepEqual(plCell(rowOf({ shares: 100, entry: 50, price: 0, change: 0 }), "plOpen"), { state: "missing", why: "No price" });
+// P/L Today: dollars, or the day's move per share.
+assert.deepEqual(plCell(rowOf({ shares: 100, entry: 50, price: 55, change: 1.5 }), "plToday"), { state: "full", dollars: 150, pct: null });
+assert.deepEqual(plCell(rowOf({ shares: null, entry: 50, price: 55, change: 1.5 }), "plToday"), { state: "perShare", perShare: 1.5, pct: 3 });
+
+// The list total counts only rows with shares; pct is over their cost.
+const t = plTotals([
+  rowOf({ shares: 100, entry: 50, price: 55, change: 1 }),
+  rowOf({ direction: "short", shares: 10, entry: 100, price: 90, change: -2 }),
+  rowOf({ shares: null, entry: 20, price: 25, change: 1 }),
+], "plOpen");
+assert.deepEqual(t, { dollars: 600, pct: (600 / 6000) * 100, counted: 2, rows: 3 });
+assert.equal(plTotals([rowOf({ shares: null, entry: 20, price: 25, change: 1 })], "plOpen").counted, 0);
+console.log("watchlist-position-columns: display states and totals passed");

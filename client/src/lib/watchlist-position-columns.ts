@@ -35,6 +35,66 @@ export function positionPl(row: {
   };
 }
 
+/** What a P/L cell shows: dollars when shares are known, else the move per share, else what is missing (never blank). */
+export type PlCell =
+  | { state: "full"; dollars: number; pct: number | null }
+  | { state: "perShare"; perShare: number; pct: number | null }
+  | { state: "missing"; why: "No price" | "No entry" };
+
+export interface PlRow {
+  side?: "long" | "short";
+  shares?: number | null;
+  entry?: number | null;
+  price?: number | null;
+  change?: number | null;
+  changePercent?: number | null;
+  plToday?: number | null;
+  plOpen?: number | null;
+  plOpenPct?: number | null;
+}
+
+/** The three display states of the P/L Today and P/L Open cells. */
+export function plCell(row: PlRow, col: "plToday" | "plOpen"): PlCell {
+  const sign = row.side === "short" ? -1 : 1;
+  const dollars = col === "plToday" ? row.plToday : row.plOpen;
+  if (dollars != null) return { state: "full", dollars, pct: col === "plOpen" ? row.plOpenPct ?? null : null };
+  const price = Number(row.price) || 0;
+  if (!(price > 0)) return { state: "missing", why: "No price" };
+  if (col === "plOpen") {
+    if (!(Number(row.entry) > 0)) return { state: "missing", why: "No entry" };
+    return { state: "perShare", perShare: sign * (price - Number(row.entry)), pct: row.plOpenPct ?? null };
+  }
+  const change = Number(row.change);
+  if (!Number.isFinite(change)) return { state: "missing", why: "No price" };
+  const cp = Number(row.changePercent);
+  return { state: "perShare", perShare: sign * change, pct: Number.isFinite(cp) ? sign * cp : null };
+}
+
+export interface PlTotal {
+  dollars: number;
+  pct: number | null;
+  /** Rows that had dollars (shares known) out of all rows. */
+  counted: number;
+  rows: number;
+}
+
+/** The list's total P/L: only rows with a dollar figure add in; pct is over the cost of those rows. */
+export function plTotals(rows: PlRow[], col: "plToday" | "plOpen"): PlTotal {
+  let dollars = 0;
+  let cost = 0;
+  let counted = 0;
+  for (const r of rows) {
+    const d = col === "plToday" ? r.plToday : r.plOpen;
+    if (d == null) continue;
+    counted++;
+    dollars += d;
+    cost += Math.abs(Number(r.shares) || 0) * (Number(r.entry) || 0);
+  }
+  // A percent only for P/L Open (over the cost of the counted rows); today's has no cost base.
+  const pct = col === "plOpen" && counted > 0 && cost > 0 ? (dollars / cost) * 100 : null;
+  return { dollars, pct, counted, rows: rows.length };
+}
+
 /**
  * % Entry and % Stop, positive (green) when the position is doing well: a long's price above its entry and stop, a
  * short's price below its entry and stop (a short's stop sits above the price, so room to the stop is stop - price).
@@ -77,9 +137,9 @@ export function addMissingPositionColumns(
 
 /** Which columns go first as the panel narrows (first in this list = first hidden). Ticker and the remove button stay. */
 export const HIDE_ORDER: WatchlistColumnId[] = [
-  // Side goes late: it is where a short is marked, and every P/L sign reads by it.
-  "company", "theme", "entryDate", "ema620", "vwapPct", "change", "entryPct", "stopPct", "entry", "plOpen",
-  "stop", "shares", "plToday", "side", "changePct",
+  // P/L Open is what he opened the panel for: it is the last to go, with Side (every P/L sign reads by it) near it.
+  "company", "theme", "entryDate", "ema620", "vwapPct", "change", "entryPct", "stopPct", "entry",
+  "stop", "shares", "changePct", "plToday", "side", "plOpen",
 ];
 
 /**
