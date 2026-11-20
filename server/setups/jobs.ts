@@ -16,6 +16,9 @@ import { getCachedRAI } from "../market-condition/engine/rai";
 import type { DBar } from "./daily-math";
 import { scanLeaderShakeout, type BarSource } from "./leader-shakeout-job";
 import { pgSetupStore, rowsOf, type RunRow } from "./store";
+import { loadLatest, refreshUpcomingEarnings } from "../earnings/upcoming";
+import { runSecJob, secEarningsReports } from "../earnings/sec";
+import { pgEgInsert, pgLabels, pgReportSource, scanEarningsGapUp } from "./earnings-gap-up";
 
 const TICK_MS = 10 * 60_000;
 const WINDOW_START = 18 * 60;
@@ -80,10 +83,44 @@ const status: Record<string, JobStatus> = {};
 export function getSetupJobStatus() { return status; }
 
 type Job = { name: string; run: (db: Db, source: RunRow["source"]) => Promise<unknown> };
+/** The symbols MarketFlow follows: everything with daily bars, plus the tickers table. */
+async function followed(db: Db): Promise<string[]> {
+  const r = await db.execute(sql`SELECT symbol FROM (SELECT DISTINCT symbol FROM historical_bars UNION SELECT symbol FROM tickers) x ORDER BY symbol`);
+  return rowsOf(r).map((x) => String(x.symbol).toUpperCase());
+}
+async function exists(db: Db, q: ReturnType<typeof sql>): Promise<boolean> {
+  try { return rowsOf(await db.execute(q)).length > 0; } catch { return false; }
+}
+
+// In this order: the label the earnings job copies comes from the Leader Shakeout run; the earnings job reads the
+// calendar and SEC rows the two jobs before it wrote.
 const JOBS: Job[] = [
   {
     name: "leader_shakeout",
     run: (db, source) => scanLeaderShakeout(pgBarSource(db), pgSetupStore(db), { source, today: getEtClock().dateKey }),
+  },
+  {
+    name: "earnings_calendar",
+    async run(db) {
+      const today = getEtClock().dateKey;
+      if (await exists(db, sql`SELECT 1 FROM earnings_estimates_daily WHERE fetched_on = ${today}::date LIMIT 1`)) return { skipped: `already fetched ${today}` };
+      return refreshUpcomingEarnings(db, new Set(await followed(db)), { fetchedOn: today });
+    },
+  },
+  {
+    name: "sec_filings",
+    async run(db) {
+      const today = getEtClock().dateKey;
+      if (await exists(db, sql`SELECT 1 FROM sec_ticker_map WHERE snapshot_date = ${today}::date LIMIT 1`)) return { skipped: `already ran ${today}` };
+      return runSecJob(db, await followed(db), { today, shouldStop: () => isMemoryPressureHigh() });
+    },
+  },
+  {
+    name: "earnings_gap_up",
+    run: (db, source) => {
+      const store = { ...pgSetupStore(db), insertGapUps: pgEgInsert(db), labels: (d: string[]) => pgLabels(db, d) };
+      return scanEarningsGapUp(pgBarSource(db), pgReportSource(db, () => secEarningsReports(db, "2010-01-01")), store, { source, today: getEtClock().dateKey });
+    },
   },
 ];
 export function registerSetupJob(job: Job) { if (!JOBS.some((j) => j.name === job.name)) JOBS.push(job); }
@@ -120,6 +157,8 @@ export function inSetupWindow(now = new Date()): boolean {
 let timer: NodeJS.Timeout | null = null;
 export function startSetupJobs(): void {
   if (timer) return;
+  const db = getDb();
+  if (db) loadLatest(db).catch((e) => console.warn("[SetupJobs] upcoming earnings load failed:", e));
   const tick = async () => {
     if (!inSetupWindow() || !shouldRunHeavyBackgroundWork()) return;
     for (const j of JOBS) {

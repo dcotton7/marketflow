@@ -76,6 +76,7 @@ async function withFinnhubLimit<T>(fn: () => Promise<T>): Promise<T> {
 
 import { getOrCreateBreaker } from "./infra/circuit-breaker";
 import { retryWithBackoff } from "./infra/retry";
+import { latestUpcoming, withUpcomingEarnings } from "./earnings/upcoming";
 
 const fmpBreaker = getOrCreateBreaker("FMP", { failureThreshold: 5, resetTimeoutMs: 120_000 });
 const finnhubBreaker = getOrCreateBreaker("Finnhub", { failureThreshold: 5, resetTimeoutMs: 120_000 });
@@ -877,9 +878,8 @@ export async function getCachedEarningsData(symbol: string): Promise<{
     const rows = await withCacheReadLimit(() =>
       withRetry(() => _db.select().from(tickers).where(eq(tickers.symbol, symbol.toUpperCase())).limit(1))
     );
-    if (rows.length === 0) return null;
-    const row = rows[0];
-    if (!row.nextEarningsDate && !row.lastEarningsDate) return null;
+    const row: any = rows[0] ?? {};
+    if (!row.nextEarningsDate && !row.lastEarningsDate && !latestUpcoming(symbol)) return null;
     // Recalculate nextEarningsDays relative to today
     let nextEarningsDays = row.nextEarningsDays ?? -1;
     if (row.nextEarningsDate && row.nextEarningsDate !== "N/A") {
@@ -889,8 +889,9 @@ export async function getCachedEarningsData(symbol: string): Promise<{
         (new Date(row.nextEarningsDate + "T00:00:00").getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
       );
     }
-    return {
-      nextEarningsDate: row.nextEarningsDate || null,
+    // the daily earnings calendar (server/earnings/upcoming.ts) wins; a past "next" date is never returned
+    return withUpcomingEarnings(symbol, {
+      nextEarningsDate: row.nextEarningsDate && row.nextEarningsDate !== "N/A" ? row.nextEarningsDate : null,
       nextEarningsDays,
       earningsTime: row.earningsTime || null,
       lastEarningsDate: row.lastEarningsDate || null,
@@ -898,7 +899,7 @@ export async function getCachedEarningsData(symbol: string): Promise<{
       epsEstimate: row.epsEstimate ?? null,
       revenueActual: row.revenueActual ?? null,
       revenueEstimate: row.revenueEstimate ?? null,
-    };
+    }, { missing: null });
   } catch {
     return null;
   }
@@ -1355,7 +1356,8 @@ export async function getExtendedFundamentals(symbol: string): Promise<ExtendedF
     };
   };
 
-  const promise = doWork();
+  // the daily earnings calendar (server/earnings/upcoming.ts) wins; a past "next" date is never shown as upcoming
+  const promise = doWork().then((r) => withUpcomingEarnings(upper, r));
   pendingRequests.set(`ext:${upper}`, promise);
   try {
     return await promise;

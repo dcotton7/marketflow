@@ -18,6 +18,9 @@ import { SETUP } from "./leader-shakeout-job";
 import { getSetupJobStatus, runSetupJob } from "./jobs";
 import { ensureSetupTables, rowsOf } from "./store";
 import { parseRange } from "./routes-helpers";
+import { EG, EG_RULE_VERSION, EG_SETUP, ensureEgTables } from "./earnings-gap-up";
+import { upcomingStatus } from "../earnings/upcoming";
+import { secUserAgent } from "../earnings/sec";
 
 const router = Router();
 const RULE_TEXT =
@@ -47,8 +50,36 @@ router.get("/leader-shakeout", async (req: Request, res: Response) => {
   }
 });
 
+const EG_TEXT =
+  `Earnings gap up that holds (research A6, real earnings dates): on the first session that could react to an earnings release, ` +
+  `opened at least ${EG.minGapAtr} ATR and ${EG.minGapPct * 100}% above the prior close, closed above the open in the upper half of the range, ` +
+  `on at least ${EG.minRelVol}x the prior 20-day average volume; price >= $${EG.minPrice}, 20-day dollar volume >= $${EG.minDollarVol / 1e6}M. ` +
+  `date_source: sec_8k (8-K item 2.02 acceptance time) or finnhub_calendar (MarketFlow's daily calendar, listed before the date; hour_known false = the release time was not given). ` +
+  `History (research): 5-day mean +0.27% / +0.68% (earlier / later), 20-day +2.2% / +3.1%; not a buy signal.`;
+
+router.get("/earnings-gap-up", async (req: Request, res: Response) => {
+  const range = parseRange(req.query as Record<string, unknown>);
+  if ("error" in range) return res.status(400).json(range);
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  try {
+    await ensureSetupTables(db);
+    await ensureEgTables(db);
+    const runs = rowsOf(await db.execute(
+      sql`SELECT setup, market_date, symbols_scanned, hits, market_label, source FROM setup_scan_runs WHERE setup LIKE ${EG_SETUP + ":%"} AND rule_version = ${EG_RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date, setup`,
+    ));
+    const rows = rowsOf(await db.execute(
+      sql`SELECT market_date, symbol, report_date, report_hour, hour_known, date_source, open, high, low, close, prev_close, volume, gap_pct, gap_atr, atr14_prev, clv, rel_volume, avg_vol20_prev, dollar_vol20_prev, day_change_pct, themes, themes_as_of, market_label, source FROM setup_earnings_gap_up WHERE rule_version = ${EG_RULE_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date, gap_atr DESC`,
+    ));
+    res.json({ rule: { version: EG_RULE_VERSION, text: EG_TEXT }, ...range, runs, rows });
+  } catch (err) {
+    console.error("[Setups] earnings-gap-up read failed:", err);
+    res.status(500).json({ error: "read failed" });
+  }
+});
+
 router.get("/status", (_req: Request, res: Response) => {
-  res.json({ jobs: getSetupJobStatus() });
+  res.json({ jobs: getSetupJobStatus(), upcomingEarnings: upcomingStatus(), secJob: secUserAgent() ? "on" : "off (SEC_USER_AGENT is empty)" });
 });
 
 router.post("/run/:job", requireAdmin, async (req: Request, res: Response) => {
