@@ -7,6 +7,7 @@ import type { CssVariables } from "@/context/SystemSettingsContext";
 import { EntryGaugeValue } from "@/components/EntryGaugeValue";
 import type { WatchlistColumnEntry, WatchlistColumnId } from "@/lib/watchlist-column-profile";
 import { WATCHLIST_COLUMN_META } from "@/lib/watchlist-column-profile";
+import { plCell, plTotals } from "@/lib/watchlist-position-columns";
 import type { Ema620Cross, EntryGaugeTone } from "@shared/entry-gauge";
 import { BarChart3, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,7 @@ export interface WatchlistConfigurableTickerRow {
   themeLabel?: string;
   change: number;
   changePercent: number;
+  price?: number;
   entry: number | null;
   entryPct: number | null;
   stop: number | null;
@@ -535,27 +537,36 @@ export function WatchlistConfigurableTable({
         );
       case "plToday":
       case "plOpen": {
-        const v = colId === "plToday" ? ticker.plToday : ticker.plOpen;
-        const pct = colId === "plOpen" ? ticker.plOpenPct : null;
+        const c = plCell(ticker, colId);
+        const val = c.state === "full" ? c.dollars : c.state === "perShare" ? c.perShare : null;
+        const pct = c.state === "missing" ? null : c.pct;
+        const text =
+          c.state === "full"
+            ? money(c.dollars) + (pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "")
+            : c.state === "perShare"
+              ? (pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}% ` : "") + `(${money(c.perShare)}/sh)`
+              : c.why;
         return (
           <td
             key={colId}
             className={cn(
               `overflow-hidden ${pad} text-right font-mono ${bodyText} tabular-nums`,
-              v == null ? "text-muted-foreground" : v >= 0 ? "text-green-500" : "text-red-500"
+              val == null ? "text-muted-foreground" : val >= 0 ? "text-green-500" : "text-red-500"
             )}
             title={
-              v == null
-                ? "Needs shares and a price" + (colId === "plOpen" ? " and an entry" : "")
-                : ticker.side === "short"
-                  ? "Short: gains when the price falls"
-                  : undefined
+              c.state === "missing"
+                ? c.why === "No price"
+                  ? "No price yet for this ticker"
+                  : "Needs an entry price: set it in the Entry column or paste shares and cost"
+                : c.state === "perShare"
+                  ? "No share count yet, so this is the move per share. Paste shares and cost for dollars."
+                  : ticker.side === "short"
+                    ? "Short: gains when the price falls"
+                    : undefined
             }
+            data-testid={`wl-${colId}-${variant}-${ticker.id}`}
           >
-            <span className="block min-w-0 truncate">
-              {v == null ? "—" : money(v)}
-              {pct != null && v != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}
-            </span>
+            <span className="block min-w-0 truncate">{text}</span>
           </td>
         );
       }
@@ -644,6 +655,38 @@ export function WatchlistConfigurableTable({
           </tr>
         ))}
       </tbody>
+      {columns.some((c) => c.id === "plOpen" || c.id === "plToday") && sortedTickers.some((t) => t.plOpen != null || t.plToday != null) && (
+        <tfoot className="sticky bottom-0 border-t bg-background">
+          <tr data-testid={`wl-total-${variant}`}>
+            {columns.map((c, i) => {
+              if (c.id !== "plOpen" && c.id !== "plToday") {
+                return (
+                  <td key={c.id} className={`overflow-hidden ${pad} ${bodyText} font-medium text-muted-foreground`}>
+                    {i === 0 ? "Total" : ""}
+                  </td>
+                );
+              }
+              const t = plTotals(sortedTickers, c.id);
+              return (
+                <td
+                  key={c.id}
+                  className={cn(
+                    `overflow-hidden ${pad} text-right font-mono font-semibold ${bodyText} tabular-nums`,
+                    t.dollars >= 0 ? "text-green-500" : "text-red-500"
+                  )}
+                  title={`${t.counted} of ${t.rows} rows have shares${t.counted < t.rows ? "; the rest are left out (*)" : ""}`}
+                >
+                  <span className="block min-w-0 truncate">
+                    {money(t.dollars)}
+                    {t.pct != null ? ` (${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(1)}%)` : ""}
+                    {t.counted < t.rows ? "*" : ""}
+                  </span>
+                </td>
+              );
+            })}
+          </tr>
+        </tfoot>
+      )}
     </table>
   );
 }
