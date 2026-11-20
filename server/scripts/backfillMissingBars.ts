@@ -17,7 +17,7 @@ import { initializeDatabase } from "../db";
 import { historicalBars } from "@shared/schema";
 import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
-import { loadBarUniverse } from "../data-layer/bar-universe";
+import { loadBarUniverse, loadThemeUniverse } from "../data-layer/bar-universe";
 import { backfillSymbol, loadBarStats, planBackfill, type SymbolResult } from "../data-layer/bar-backfill";
 import { recalculateTickerMAs } from "../data-layer/daily-bar-refresh";
 
@@ -40,7 +40,11 @@ async function main() {
     process.exit(1);
   }
 
-  const universe = await loadBarUniverse(db, getAllUniverseTickers());
+  // The universe is the theme universe plus the active scan pool (empty until the pool's first refresh);
+  // --theme-only leaves the pool out, for a staged run.
+  const themeOnly = flag("theme-only");
+  const themeUniverse = await loadThemeUniverse(db, getAllUniverseTickers());
+  const universe = await loadBarUniverse(db, getAllUniverseTickers(), { includePool: !themeOnly });
   const stats = await loadBarStats(db);
   const plan = planBackfill(universe, stats, { from, only });
   const targets = limit ? plan.targets.slice(0, limit) : plan.targets;
@@ -48,6 +52,7 @@ async function main() {
   const summary = {
     mode: dryRun ? "DRY RUN (nothing fetched, nothing written)" : "LIVE",
     universe: plan.universe,
+    ofWhichScanPoolOnly: plan.universe - themeUniverse.length,
     latestStoredSession: plan.latestSession,
     withBarOnLatestSession: plan.withLatest,
     targets: targets.length,

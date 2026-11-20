@@ -13,6 +13,7 @@ import path from "node:path";
 import { sql } from "drizzle-orm";
 import { getEtClock } from "@shared/usEquityMarketSession";
 import { isMarketHoliday } from "@shared/us-market-holidays";
+import { loadActivePoolSymbols } from "./scan-pool";
 
 export function normalizeSymbol(s: string): string {
   return s.trim().toUpperCase();
@@ -41,9 +42,23 @@ function rowsOf(result: any): any[] {
   return result?.rows ?? (Array.isArray(result) ? result : []);
 }
 
-export async function loadBarUniverse(db: any, staticTickers: string[]): Promise<string[]> {
+/** SCAN_POOL=off is the kill switch: bars (and the pool refresh) go back to the theme universe alone. */
+export function scanPoolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.SCAN_POOL ?? "").trim().toLowerCase() !== "off";
+}
+
+/** The theme universe: static lists + tickers table - retired. No pool names. */
+export async function loadThemeUniverse(db: any, staticTickers: string[]): Promise<string[]> {
   const rows = rowsOf(await db.execute(sql`SELECT symbol FROM tickers`));
   return mergeBarUniverse(staticTickers, rows.map((r) => String(r.symbol ?? "")), readRetiredSymbols());
+}
+
+/** Bars universe: the theme universe plus the active scan pool (scan-pool.ts), minus retired. */
+export async function loadBarUniverse(db: any, staticTickers: string[], opts: { includePool?: boolean } = {}): Promise<string[]> {
+  const theme = await loadThemeUniverse(db, staticTickers);
+  if (opts.includePool === false || !scanPoolEnabled()) return theme;
+  const pool = await loadActivePoolSymbols(db);
+  return mergeBarUniverse(theme, pool, readRetiredSymbols());
 }
 
 function addDays(dateKey: string, delta: number): string {
