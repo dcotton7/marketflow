@@ -7,6 +7,20 @@ import { sql } from "drizzle-orm";
 export type CapSize = "MEGA" | "LARGE" | "MID" | "SMALL" | "MICRO";
 const BUCKETS = new Set<CapSize>(["MEGA", "LARGE", "MID", "SMALL", "MICRO"]);
 
+/**
+ * The one set of size boundaries (lower bounds, in dollars), used when a bucket is written (market-cap-refresh.ts);
+ * the size filter and capSize both read the written bucket. MEGA $200B+, LARGE $10B-$200B, MID $2B-$10B,
+ * SMALL $300M-$2B, MICRO under $300M (the common convention, and what refreshMarketCaps.ts already documented).
+ */
+export const BOUNDARIES = { MEGA: 200e9, LARGE: 10e9, MID: 2e9, SMALL: 300e6 } as const;
+export function bucketOf(marketCap: number): CapSize {
+  if (marketCap >= BOUNDARIES.MEGA) return "MEGA";
+  if (marketCap >= BOUNDARIES.LARGE) return "LARGE";
+  if (marketCap >= BOUNDARIES.MID) return "MID";
+  if (marketCap >= BOUNDARIES.SMALL) return "SMALL";
+  return "MICRO";
+}
+
 export function normalizeCapSize(v: unknown): CapSize | null {
   const s = typeof v === "string" ? v.trim().toUpperCase() : "";
   return BUCKETS.has(s as CapSize) ? (s as CapSize) : null;

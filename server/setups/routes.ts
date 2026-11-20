@@ -18,6 +18,7 @@ import { SETUP } from "./leader-shakeout-job";
 import { getSetupJobStatus, runSetupJob } from "./jobs";
 import { ensureSetupTables, rowsOf } from "./store";
 import { parseRange } from "./routes-helpers";
+import { refreshMarketCaps } from "../market-condition/utils/market-cap-refresh";
 import { byGrade, flags, gradesWanted, loadGradeSettings, parseSettings, saveGradeSettings, type GradeSettings } from "./grades";
 import { EG, EG_RULE_VERSION, EG_SETUP, ensureEgTables } from "./earnings-gap-up";
 import { upcomingStatus } from "../earnings/upcoming";
@@ -128,6 +129,28 @@ router.put("/settings", requireAdmin, async (req: Request, res: Response) => {
   const s = parseSettings({ ...(await loadGradeSettings(db)), ...(req.body ?? {}) });
   await saveGradeSettings(db, s);
   res.json({ grades: s });
+});
+
+/**
+ * POST /market-caps/refresh?dryRun=1 (admin): the market cap refresh (market-condition/utils/market-cap-refresh.ts).
+ * dryRun=1 prints and returns the plan and counts and writes nothing; without it, it appends market_cap_history
+ * and updates tickers. One at a time.
+ */
+let capsRunning = false;
+router.post("/market-caps/refresh", requireAdmin, async (req: Request, res: Response) => {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  if (capsRunning) return res.status(409).json({ error: "already running" });
+  capsRunning = true;
+  try {
+    const dryRun = ["1", "true", "yes"].includes(String(req.query.dryRun ?? "").toLowerCase());
+    res.json(await refreshMarketCaps(db, { dryRun }));
+  } catch (err) {
+    console.error("[MarketCaps] refresh failed:", err);
+    res.status(500).json({ error: String(err).slice(0, 200) });
+  } finally {
+    capsRunning = false;
+  }
 });
 
 router.post("/run/:job", requireAdmin, async (req: Request, res: Response) => {
