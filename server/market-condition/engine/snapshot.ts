@@ -6,7 +6,10 @@
  */
 
 import { ClusterId, CLUSTERS, CLUSTER_IDS, getAllUniverseTickers, DEFAULT_CADENCE, isMarketHours, getPollingInterval, getMarketSession, MarketSession, TimeSlice, MARKET_HOURS, type SizeFilter } from "../universe";
-import { getAllThemeTickerSymbols } from "../utils/theme-db-loader";
+import { getAllThemeTickerSymbols, getThemeMembersFromCache } from "../utils/theme-db-loader";
+import { getDb } from "../../db";
+import { recordMarketHistory, pgHistoryStore } from "./market-history";
+import { calculateRAI } from "./rai";
 import { getAlpacaProvider } from "../providers/alpaca";
 import { TickerSnapshot, BenchmarkData } from "../providers/types";
 import { ThemeMetrics, calculateAllThemeMetrics, getClusterTickerMetrics, TickerMetrics } from "./theme-score";
@@ -326,6 +329,15 @@ export async function refreshSnapshot(
 
     // Save historical snapshots if needed
     await saveHistoricalSnapshotsIfNeeded(state.themeMetrics);
+
+    // Append-only research history (5-min theme read, daily membership, 15-min regime). Never throws, never deletes.
+    const historyDb = getDb();
+    if (historyDb) {
+      await recordMarketHistory(pgHistoryStore(historyDb), state.themeMetrics, {
+        membership: (id) => getThemeMembersFromCache(id as ClusterId),
+        regime: async () => calculateRAI(state.themeMetrics),
+      });
+    }
     
   } catch (error) {
     console.error("[MC-Snapshot] Refresh failed:", error);

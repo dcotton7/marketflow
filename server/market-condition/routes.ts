@@ -822,6 +822,33 @@ router.put("/settings", requireAdmin, async (req: Request, res: Response) => {
 });
 
 // =============================================================================
+// Research history (append-only; see engine/market-history.ts)
+// =============================================================================
+
+/** GET /api/market-condition/history/:kind?date=YYYY-MM-DD[&theme=ID]  kind = theme-ticks | membership | regime */
+router.get("/history/:kind", requireAdmin, async (req: Request, res: Response) => {
+  const kind = String(req.params.kind);
+  const tables: Record<string, [string, string]> = {
+    "theme-ticks": ["theme_ticks_5m", "slot_at, theme_id"],
+    membership: ["theme_membership_daily", "theme_id, symbol"],
+    regime: ["regime_history", "slot_at"],
+  };
+  const t = tables[kind];
+  const date = String(req.query.date ?? "");
+  if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "kind and date=YYYY-MM-DD required" });
+  const theme = req.query.theme ? String(req.query.theme) : null;
+  try {
+    const q = theme && kind !== "regime"
+      ? sql`SELECT * FROM ${sql.raw(t[0])} WHERE market_date = ${date} AND theme_id = ${theme} ORDER BY ${sql.raw(t[1])}`
+      : sql`SELECT * FROM ${sql.raw(t[0])} WHERE market_date = ${date} ORDER BY ${sql.raw(t[1])}`;
+    const r: any = await db!.execute(q);
+    res.json({ date, rows: r.rows ?? r });
+  } catch (err) {
+    res.status(500).json({ error: "history read failed" });
+  }
+});
+
+// =============================================================================
 // Control Endpoints (Admin)
 // =============================================================================
 
