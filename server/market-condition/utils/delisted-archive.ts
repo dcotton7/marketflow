@@ -17,12 +17,17 @@ export const ARCHIVE_DDL: string[] = [
 type Tx = { execute: (q: any) => Promise<any> };
 let ensured = false;
 
-/** Copy this symbol's ticker and membership rows into the archive. Call inside the transaction that deletes them. */
+/** Create the archive tables. Run on the plain connection BEFORE the delisting transaction, so a rollback can never
+ * undo them. Safe to call every time; the statements are IF NOT EXISTS and are only sent once per process. */
+export async function ensureArchiveTables(db: Tx): Promise<void> {
+  if (ensured) return;
+  for (const stmt of ARCHIVE_DDL) await db.execute(sql.raw(stmt));
+  ensured = true;
+}
+
+/** Copy this symbol's ticker and membership rows into the archive. Call inside the transaction that deletes them
+ * (after ensureArchiveTables). A failure here aborts that transaction, so the live delete does not run. */
 export async function archiveDelisted(tx: Tx, symbol: string): Promise<void> {
-  if (!ensured) {
-    for (const stmt of ARCHIVE_DDL) await tx.execute(sql.raw(stmt));
-    ensured = true;
-  }
   await tx.execute(sql`INSERT INTO tickers_delisted (symbol, row) SELECT t.symbol, to_jsonb(t) FROM tickers t WHERE t.symbol = ${symbol} AND NOT EXISTS (SELECT 1 FROM tickers_delisted a WHERE a.symbol = t.symbol AND a.row = to_jsonb(t))`);
   await tx.execute(sql`INSERT INTO ticker_slice_memberships_delisted (symbol, row) SELECT m.symbol, to_jsonb(m) FROM ticker_slice_memberships m WHERE m.symbol = ${symbol} AND NOT EXISTS (SELECT 1 FROM ticker_slice_memberships_delisted a WHERE a.symbol = m.symbol AND a.row = to_jsonb(m))`);
 }

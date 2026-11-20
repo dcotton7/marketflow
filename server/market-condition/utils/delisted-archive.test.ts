@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { archiveDelisted, ARCHIVE_DDL } from "./delisted-archive";
+import { archiveDelisted, ensureArchiveTables, ARCHIVE_DDL } from "./delisted-archive";
 
 const dir = join(process.cwd(), "server/market-condition/utils");
 
@@ -11,6 +11,7 @@ const dir = join(process.cwd(), "server/market-condition/utils");
   const seen: string[] = [];
   const dialect = new PgDialect();
   const tx = { execute: async (q: any) => { seen.push(q.queryChunks ? dialect.sqlToQuery(q).sql : String(q)); return { rowCount: 1 }; } };
+  await ensureArchiveTables(tx);
   await archiveDelisted(tx, "IIVI");
   const run = [...seen];
   assert.equal(run.length, ARCHIVE_DDL.length + 2, "tables ensured once, then the two copies");
@@ -20,6 +21,7 @@ const dir = join(process.cwd(), "server/market-condition/utils");
   assert.ok(copies.every((c) => c.includes("to_jsonb(")), "the whole row is kept, whatever columns it has");
   // Running it twice: the tables are not ensured again, and each copy skips rows already kept (NOT EXISTS above).
   seen.length = 0;
+  await ensureArchiveTables(tx);
   await archiveDelisted(tx, "IIVI");
   assert.equal(seen.length, 2);
 
@@ -32,6 +34,7 @@ const dir = join(process.cwd(), "server/market-condition/utils");
   const reg = readFileSync(join(dir, "delisted-ticker-registry.ts"), "utf8");
   const fn = reg.slice(reg.indexOf("async function deleteWithArchive"), reg.indexOf("function normalize"));
   assert.ok(fn.indexOf("db.transaction") >= 0);
+  assert.ok(fn.indexOf("ensureArchiveTables(db)") >= 0 && fn.indexOf("ensureArchiveTables(db)") < fn.indexOf("db.transaction"), "tables are made outside the transaction");
   assert.ok(fn.indexOf("archiveDelisted(tx, sym)") < fn.indexOf("tx.delete(tickerSliceMemberships)"));
   assert.ok(fn.indexOf("tx.delete(tickerSliceMemberships)") < fn.indexOf("tx.delete(tickerTable)"));
   assert.ok(!/\bdb\.delete\(/.test(reg), "no delete outside the archive-first helper");
