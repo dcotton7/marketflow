@@ -936,81 +936,6 @@ export async function calculateDeltaRanks(
 }
 
 // =============================================================================
-// Cleanup Operations
-// =============================================================================
-
-/**
- * Delete hourly snapshots older than the configured retention window.
- * Keep enough 15-minute history for long Race lookbacks and historical replay.
- */
-export async function cleanupOldHourlySnapshots(currentDate: string, daysToKeep: number = 400): Promise<number> {
-  const db = getDb();
-  if (!db) return 0;
-
-  try {
-    const cutoffDate = new Date(`${currentDate}T12:00:00Z`);
-    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - daysToKeep);
-    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
-
-    const result = await db
-      .delete(themeSnapshots)
-      .where(
-        and(
-          eq(themeSnapshots.snapshotType, "hourly"),
-          lt(themeSnapshots.marketDate, cutoffStr)
-        )
-      );
-
-    const deletedCount = (result as any)?.rowCount ?? 0;
-    
-    if (deletedCount > 0) {
-      console.log(
-        `[ThemeSnapshots] Cleaned up ${deletedCount} hourly snapshots older than ${cutoffStr} (${daysToKeep}d retention)`
-      );
-    }
-    
-    return deletedCount;
-  } catch (error) {
-    console.error("[ThemeSnapshots] Failed to cleanup old snapshots:", error);
-    return 0;
-  }
-}
-
-/**
- * Delete daily snapshots older than N days (default 90 days)
- */
-export async function cleanupOldDailySnapshots(daysToKeep: number = 90): Promise<number> {
-  const db = getDb();
-  if (!db) return 0;
-
-  try {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-    const cutoffStr = cutoffDate.toISOString().split("T")[0];
-
-    const result = await db
-      .delete(themeSnapshots)
-      .where(
-        and(
-          eq(themeSnapshots.snapshotType, "daily_close"),
-          lt(themeSnapshots.marketDate, cutoffStr)
-        )
-      );
-
-    const deletedCount = (result as any)?.rowCount ?? 0;
-    
-    if (deletedCount > 0) {
-      console.log(`[ThemeSnapshots] Cleaned up ${deletedCount} daily snapshots older than ${daysToKeep} days`);
-    }
-    
-    return deletedCount;
-  } catch (error) {
-    console.error("[ThemeSnapshots] Failed to cleanup old daily snapshots:", error);
-    return 0;
-  }
-}
-
-// =============================================================================
 // Snapshot Schedule Manager (15-minute intervals for intraday rotation tracking)
 // =============================================================================
 
@@ -1106,8 +1031,8 @@ export function markDailySnapshotSaved(date: string): void {
  * Historical 15-minute snapshots are critical for Theme Tracker and Race timeline.
  * Deleting them breaks intraday comparisons and visualization.
  * 
- * This function is kept only for reference. Cleanup of old snapshots happens
- * automatically via `cleanupOldHourlySnapshots()` when saving new data.
+ * This function is kept only for reference. Snapshots are never deleted (Don, 20 Nov);
+ * the only delete left is the same-slot dedupe in saveThemeSnapshots.
  */
 export async function clearTodayHourlySnapshots(): Promise<void> {
   console.warn("⚠️ clearTodayHourlySnapshots() is DEPRECATED and should NEVER be called!");

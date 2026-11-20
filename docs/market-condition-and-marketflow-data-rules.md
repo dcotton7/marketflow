@@ -36,7 +36,7 @@ This document ties together **when data is captured**, **what window it covers**
 | **Cadence** | One save per **new** 15-minute **slot** (in-memory `lastIntradaySnapshot` tracks date/hour/slot). |
 | **Weekdays** | No saves Sat/Sun (`currentDate` parsed as UTC noon for DOW check). |
 | **Session** | Roughly **9:30 AM–4:00 PM ET**: `hour < 9` or `hour > 15` → no save; **9:00** hour requires **`slot >= 30`** (9:30+). |
-| **Cleanup** | **Historical snapshots are NEVER deleted on startup.** Runtime cleanup is env-controlled in `snapshot.ts`: set `DISABLE_HOURLY_SNAPSHOT_CLEANUP=true` to preserve all imported 15-minute history, or tune `HOURLY_SNAPSHOT_RETENTION_DAYS` for bounded retention. |
+| **Cleanup** | **None.** Snapshots are never deleted (Don, 20 Nov); the cleanup functions and the `DISABLE_HOURLY_SNAPSHOT_CLEANUP` / `HOURLY_SNAPSHOT_RETENTION_DAYS` env values are gone. The only delete is the same-slot dedupe when a slot is rewritten. |
 
 ### Daily close (`snapshotType = "daily_close"`)
 

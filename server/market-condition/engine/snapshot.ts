@@ -16,7 +16,6 @@ import { ThemeMetrics, calculateAllThemeMetrics, getClusterTickerMetrics, Ticker
 import { LeaderCandidate, buildClusterLeaderCandidates, processClusterLeaders, resetRefreshTurnover } from "./leader-score";
 import {
   saveThemeSnapshots,
-  cleanupOldHourlySnapshots,
   shouldSaveHourlySnapshot,
   shouldSaveDailySnapshot,
   markHourlySnapshotSaved,
@@ -120,14 +119,6 @@ let isSleeping = false;
 let watchdogHandle: ReturnType<typeof setInterval> | null = null;
 const WATCHDOG_INTERVAL_MS = 2 * 60 * 1000; // Check every 2 minutes
 const MAX_STALE_TIME_MS = 10 * 60 * 1000; // Alert if no update for 10 minutes
-const DISABLE_HOURLY_SNAPSHOT_CLEANUP =
-  process.env.DISABLE_HOURLY_SNAPSHOT_CLEANUP === undefined
-    ? true
-    : process.env.DISABLE_HOURLY_SNAPSHOT_CLEANUP === "1" ||
-      process.env.DISABLE_HOURLY_SNAPSHOT_CLEANUP === "true";
-const HOURLY_SNAPSHOT_RETENTION_DAYS = Number.isFinite(Number(process.env.HOURLY_SNAPSHOT_RETENTION_DAYS))
-  ? Math.max(1, Number(process.env.HOURLY_SNAPSHOT_RETENTION_DAYS))
-  : 400;
 
 // =============================================================================
 // Post-refresh callback (used by Discovery Scanner)
@@ -387,14 +378,6 @@ async function saveHistoricalSnapshotsIfNeeded(themes: ThemeMetrics[]): Promise<
     if (saved) {
       markHourlySnapshotSaved(date, hour, slot);
       console.log(`[MC-Snapshot] Saved 15-min snapshot for ${date} ${hour}:${slot.toString().padStart(2, '0')}`);
-      
-      // Historical 15m snapshots are critical for Theme Tracker / Race.
-      // Cleanup is now explicitly controllable via env for long-import preservation.
-      if (DISABLE_HOURLY_SNAPSHOT_CLEANUP) {
-        console.log("[MC-Snapshot] Hourly snapshot cleanup disabled by env (DISABLE_HOURLY_SNAPSHOT_CLEANUP)");
-      } else {
-        await cleanupOldHourlySnapshots(date, HOURLY_SNAPSHOT_RETENTION_DAYS);
-      }
     }
   }
   
@@ -518,7 +501,7 @@ export function startPolling(intervalMs?: number): void {
   
   // RULE: NEVER delete historical 15-minute snapshots on server restart.
   // These are critical for Theme Tracker intraday comparisons and Race timeline visualization.
-  // Snapshots are automatically cleaned up by `cleanupOldHourlySnapshots()` when saving new data.
+  // Snapshots are never deleted (Don, 20 Nov: market history is kept forever).
   
   // If a specific interval is provided, use it for market hours
   if (intervalMs) {
