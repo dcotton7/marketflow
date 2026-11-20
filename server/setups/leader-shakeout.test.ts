@@ -142,6 +142,7 @@ function fakeSource(bars: Record<string, DBar[]>, extra: Partial<BarSource> = {}
   assert.equal(allowedPath("/api/market-condition/setups/leader-shakeout"), true);
   assert.equal(allowedPath("/api/market-condition/setups/status"), true);
   assert.equal(allowedPath("/api/market-condition/setups/earnings-gap-up"), true);
+  assert.equal(allowedPath("/api/market-condition/setups/market-card"), true);
   assert.equal(allowedPath("/api/market-condition/setups/run/leader_shakeout", "POST"), false, "the admin run stays closed to Anima");
 
   console.log("leader-shakeout tests passed");

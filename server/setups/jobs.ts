@@ -19,6 +19,10 @@ import { pgSetupStore, rowsOf, type RunRow } from "./store";
 import { loadLatest, refreshUpcomingEarnings } from "../earnings/upcoming";
 import { runSecJob, secEarningsReports } from "../earnings/sec";
 import { pgEgInsert, pgLabels, pgReportSource, scanEarningsGapUp } from "./earnings-gap-up";
+import { pgCardSource, runMarketCard } from "./market-card-job";
+import { CARD_ETFS } from "./market-card";
+import { getThemeMembersFromCache } from "../market-condition/utils/theme-db-loader";
+import { CLUSTERS } from "../market-condition/universe";
 
 const TICK_MS = 10 * 60_000;
 const WINDOW_START = 18 * 60;
@@ -120,6 +124,17 @@ const JOBS: Job[] = [
     run: (db, source) => {
       const store = { ...pgSetupStore(db), insertGapUps: pgEgInsert(db), labels: (d: string[]) => pgLabels(db, d) };
       return scanEarningsGapUp(pgBarSource(db), pgReportSource(db, () => secEarningsReports(db, "2010-01-01")), store, { source, today: getEtClock().dateKey });
+    },
+  },
+  {
+    name: "market_card",
+    run: (db, source) => {
+      const bars = pgBarSource(db);
+      return runMarketCard(pgCardSource(db, {
+        bars: bars.bars, symbols: bars.symbols, mfRegime: bars.mfRegime, shouldStop: bars.shouldStop,
+        etfBars: (from) => alpacaDaily(CARD_ETFS, from),
+        themeMembers: () => Object.fromEntries(CLUSTERS.map((c) => [String(c.id), getThemeMembersFromCache(c.id).map((m) => m.symbol.toUpperCase())])),
+      }), { source: source === "manual" ? "manual" : "daily" });
     },
   },
 ];

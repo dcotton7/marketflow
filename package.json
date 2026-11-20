@@ -12,7 +12,7 @@
     "test:tos-embed": "tsx client/src/lib/tos-bridge-client.test.ts",
     "test:db-watchdog": "tsx server/infra/db-watchdog.test.ts",
     "test:market-history": "tsx server/market-condition/engine/market-history.test.ts && tsx server/market-condition/utils/delisted-archive.test.ts",
-    "test:setups": "tsx server/setups/leader-shakeout.test.ts && tsx server/bigidea/indicators-setups.test.ts && tsx server/earnings/earnings.test.ts",
+    "test:setups": "tsx server/setups/leader-shakeout.test.ts && tsx server/bigidea/indicators-setups.test.ts && tsx server/earnings/earnings.test.ts && tsx server/setups/market-card.test.ts",
     "test:watchlist-panel": "tsx client/src/lib/watchlist-position-columns.test.ts && tsx shared/position-paste.test.ts",
     "db:push": "drizzle-kit push",
     "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",

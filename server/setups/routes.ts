@@ -21,6 +21,8 @@ import { parseRange } from "./routes-helpers";
 import { EG, EG_RULE_VERSION, EG_SETUP, ensureEgTables } from "./earnings-gap-up";
 import { upcomingStatus } from "../earnings/upcoming";
 import { secUserAgent } from "../earnings/sec";
+import { ensureCardTables } from "./market-card-job";
+import { CARD_VERSION } from "./market-card";
 
 const router = Router();
 const RULE_TEXT =
@@ -74,6 +76,27 @@ router.get("/earnings-gap-up", async (req: Request, res: Response) => {
     res.json({ rule: { version: EG_RULE_VERSION, text: EG_TEXT }, ...range, runs, rows });
   } catch (err) {
     console.error("[Setups] earnings-gap-up read failed:", err);
+    res.status(500).json({ error: "read failed" });
+  }
+});
+
+/** GET /market-card?date=YYYY-MM-DD (or from=&to=; no date = the latest): the day's market card and watch list. */
+router.get("/market-card", async (req: Request, res: Response) => {
+  const q = req.query as Record<string, unknown>;
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  try {
+    await ensureCardTables(db);
+    if (!q.date && !q.from) {
+      const r = rowsOf(await db.execute(sql`SELECT market_date, label, card, watch, source, created_at FROM market_card_daily WHERE version = ${CARD_VERSION} ORDER BY market_date DESC LIMIT 1`));
+      return res.json({ version: CARD_VERSION, rows: r });
+    }
+    const range = parseRange(q);
+    if ("error" in range) return res.status(400).json(range);
+    const r = rowsOf(await db.execute(sql`SELECT market_date, label, card, watch, source, created_at FROM market_card_daily WHERE version = ${CARD_VERSION} AND market_date BETWEEN ${range.from} AND ${range.to} ORDER BY market_date`));
+    res.json({ version: CARD_VERSION, ...range, rows: r });
+  } catch (err) {
+    console.error("[Setups] market-card read failed:", err);
     res.status(500).json({ error: "read failed" });
   }
 });
