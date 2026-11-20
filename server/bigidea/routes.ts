@@ -3344,6 +3344,9 @@ Common add requests and their indicators:
 - "add price crossed above/below X MA" on daily bars only → add_criterion with MA-9 (Price Crosses MA)
 - "add price crossed above/below X-day MA in the last N minutes" → add_criterion with MA-10 (Intraday Cross of Daily MA)
 - "add RSI above/below X" or "RSI filter" → add_criterion with RS-4 (RSI Range)
+- "add RSI(2)" or "2-day RSI" → add_criterion with RS-4, period: 2, method: "wilder"
+- "add a drop of N ATRs" or "move in ATRs" → add_criterion with VLT-6 (One-Day Move in ATRs)
+- "add dollar volume floor" or "liquid names only" → add_criterion with VOL-6 (Average Dollar Volume)
 - "add volume surge" or "high volume" → add_criterion with VOL-5 (Volume Spike)
 - "add near 52-week high" → add_criterion with PA-6 (Distance from 52-Week High)
 - "add MA slope" or "rising MA" → add_criterion with MA-4 (MA Slope)

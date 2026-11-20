@@ -136,6 +136,22 @@ function calcRSI(candles: CandleData[], period: number): number {
   return 100 - 100 / (1 + rs);
 }
 
+/**
+ * Wilder RSI on closes (candles newest first), smoothed from the oldest candle with zero starting averages, as in
+ * research/bounce/build_events.cjs. With period 2 the start has decayed by 2^-n after n bars.
+ */
+export function calcWilderRSI(candles: CandleData[], period: number): number {
+  if (candles.length < period + 1) return 50;
+  let up = 0, dn = 0;
+  for (let i = candles.length - 2; i >= 0; i--) {
+    const ch = candles[i].close - candles[i + 1].close;
+    up = (up * (period - 1) + Math.max(ch, 0)) / period;
+    dn = (dn * (period - 1) + Math.max(-ch, 0)) / period;
+  }
+  if (dn === 0) return 100;
+  return 100 - 100 / (1 + up / dn);
+}
+
 function calcMACD(candles: CandleData[], fastPeriod: number, slowPeriod: number, signalPeriod: number): { macd: number; signal: number; histogram: number } {
   const fastEMA = calcEMA(candles, fastPeriod);
   const slowEMA = calcEMA(candles, slowPeriod);
@@ -725,6 +741,34 @@ const VOLUME: IndicatorDefinition[] = [
         if (r > maxMult) allBelow = false;
       }
       return { pass: allBelow, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `max ${maxSeen.toFixed(2)}x avg`, threshold: `≤${maxMult}x for ${dryUpDays} bars` } } };
+    },
+  },
+  {
+    id: "VOL-6",
+    name: "Average Dollar Volume",
+    category: "Volume",
+    description: "A liquidity floor: the average of close x volume over the last N sessions, in millions of dollars. By default the window is the N sessions before today, so a big day does not lift its own baseline (the research scans' definition). Use $30M+ for names that trade cleanly; $100M+ for the most liquid.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "period", label: "Average Period", type: "number", defaultValue: 20, min: 1, max: 200, step: 1 },
+      { name: "minDollarVolM", label: "Min Avg $ Volume ($M)", type: "number", defaultValue: 30, min: 0, max: 100000, step: 1 },
+      { name: "maxDollarVolM", label: "Max Avg $ Volume ($M, 0 = no max)", type: "number", defaultValue: 0, min: 0, max: 100000, step: 1 },
+      { name: "includeToday", label: "Include Today's Bar", type: "boolean", defaultValue: false },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const period = params.period ?? 20;
+      const minM = params.minDollarVolM ?? 30;
+      const maxM = params.maxDollarVolM ?? 0;
+      const start = params.includeToday ? 0 : 1;
+      const threshold = maxM > 0 ? `$${minM}M-$${maxM}M` : `≥$${minM}M`;
+      if (candles.length < skip + start + period) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      let sum = 0;
+      for (let i = start; i < start + period; i++) sum += effectiveCandles[i].close * effectiveCandles[i].volume;
+      const avgM = sum / period / 1e6;
+      const pass = avgM >= minM && (maxM <= 0 || avgM <= maxM);
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, avgDollarVolM: avgM, _diagnostics: { value: `$${avgM.toFixed(1)}M avg`, threshold, detail: `${period} sessions ${params.includeToday ? "including" : "before"} the bar` } } };
     },
   },
 ];
@@ -1940,18 +1984,23 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
     description: "The classic RSI momentum oscillator, ranging 0-100. Values above 50 show bullish momentum; above 70 is overbought (strong but potentially extended). Values below 30 are oversold (weak but potentially bouncing). Use a 50-80 range to find stocks with healthy upward momentum that aren't overheated.",
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
-      { name: "period", label: "RSI Period", type: "number", defaultValue: 14, min: 5, max: 50, step: 1 },
+      { name: "period", label: "RSI Period", type: "number", defaultValue: 14, min: 2, max: 50, step: 1 },
       { name: "minRSI", label: "Min RSI", type: "number", defaultValue: 50, min: 0, max: 100, step: 1 },
       { name: "maxRSI", label: "Max RSI", type: "number", defaultValue: 80, min: 0, max: 100, step: 1 },
+      // "simple" is the formula every saved scan has used (average gain/loss over the last N changes). "wilder" is
+      // Wilder's smoothing over all the bars the scan has, the RSI(2) of the Leader Shakeout research.
+      { name: "method", label: "RSI Method", type: "select", defaultValue: "simple", options: ["simple", "wilder"] },
     ],
     evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
       const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
       const period = params.period ?? 14;
       const minRSI = params.minRSI ?? 50;
       const maxRSI = params.maxRSI ?? 80;
-      if (candles.length < skip + period + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minRSI}-${maxRSI}` } } };
+      const method = params.method === "wilder" ? "wilder" : "simple";
+      const need = method === "wilder" ? Math.max(period * 10, 20) : period;
+      if (candles.length < skip + need + 1) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold: `${minRSI}-${maxRSI}` } } };
       const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
-      const rsi = calcRSI(effectiveCandles, period);
+      const rsi = method === "wilder" ? calcWilderRSI(effectiveCandles, period) : calcRSI(effectiveCandles, period);
       return { pass: rsi >= minRSI && rsi <= maxRSI, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${rsi.toFixed(1)}`, threshold: `${minRSI}-${maxRSI}` } } };
     },
   },
@@ -2068,6 +2117,36 @@ const RELATIVE_STRENGTH: IndicatorDefinition[] = [
 ];
 
 const VOLATILITY: IndicatorDefinition[] = [
+  {
+    id: "VLT-6",
+    name: "One-Day Move in ATRs",
+    category: "Volatility",
+    description: "Today's close-to-close change measured in ATRs: (close - previous close) divided by the average true range of the N sessions before today. A decline of 2+ ATR is an unusually large down day for that stock, whatever its price or volatility (the Leader Shakeout research's drop). Choose decline, gain or either way.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
+      { name: "atrPeriod", label: "ATR Period (bars before today)", type: "number", defaultValue: 14, min: 2, max: 100, step: 1 },
+      { name: "direction", label: "Direction", type: "select", defaultValue: "decline", options: ["decline", "gain", "any"] },
+      { name: "minAtr", label: "Min Move (ATRs)", type: "number", defaultValue: 2, min: 0, max: 50, step: 0.1 },
+      { name: "maxAtr", label: "Max Move (ATRs)", type: "number", defaultValue: 50, min: 0, max: 100, step: 0.1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const period = params.atrPeriod ?? 14;
+      const direction = params.direction ?? "decline";
+      const minAtr = params.minAtr ?? 2;
+      const maxAtr = params.maxAtr ?? 50;
+      const threshold = `${direction} ${minAtr}-${maxAtr} ATR`;
+      if (candles.length < skip + period + 2) return { pass: false, data: { _diagnostics: { value: 'insufficient data', threshold } } };
+      const effectiveCandles = skip > 0 ? candles.slice(skip) : candles;
+      const atr = calcATR(effectiveCandles.slice(1), period);
+      if (!(atr > 0)) return { pass: false, data: { _diagnostics: { value: 'ATR=0', threshold } } };
+      const moveAtr = (effectiveCandles[0].close - effectiveCandles[1].close) / atr;
+      const size = Math.abs(moveAtr);
+      const sideOk = direction === "decline" ? moveAtr < 0 : direction === "gain" ? moveAtr > 0 : true;
+      const pass = sideOk && size >= minAtr && size <= maxAtr;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, moveAtr, _diagnostics: { value: `${moveAtr >= 0 ? "+" : ""}${moveAtr.toFixed(2)} ATR`, threshold, detail: `ATR(${period}) before the bar $${atr.toFixed(2)}` } } };
+    },
+  },
   {
     id: "VLT-1",
     name: "Bollinger Band Width",
