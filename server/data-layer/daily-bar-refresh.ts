@@ -93,6 +93,22 @@ async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: 
   }
 }
 
+/** The end-of-day summary the screen route (R7) serves from: built once a day, after the bars are in. Never throws. */
+async function summaryIfDue(expected: string): Promise<void> {
+  try {
+    const db = getDb();
+    if (!db || isNightMode() || isMemoryPressureHigh()) return;
+    const { ensureDailySummary } = await import("../market-condition/daily-summary");
+    logPhase("DailySummary", "check start");
+    const built = await ensureDailySummary(db, expected, await loadBarUniverse(db, getAllUniverseTickers()), {
+      shouldStop: () => isMemoryPressureHigh() || overLimit("DailySummary", "summary build"),
+    });
+    logPhase("DailySummary", built ? `build end (${built.summarized} rows)` : "up to date");
+  } catch (err) {
+    console.warn("[DailyBarRefresh] daily summary failed (non-fatal):", String(err).slice(0, 160));
+  }
+}
+
 /**
  * True when this check did not finish the stale list (deferred, cut short, or failed): the scheduler retries soon.
  * One data job at a time (job-guard.ts): a check that finds another running (a pool refresh, the backfill) is skipped and logged.
@@ -128,12 +144,15 @@ async function runCheck(): Promise<boolean> {
     lastRefreshAttempt = new Date();
     lastRefreshSuccess = lastRefreshAttempt;
     logOncePerDay(`fresh-${expected}`, `[DailyBarRefresh] All ${total} symbols have the ${expected} bar. No refresh needed.`);
+    await summaryIfDue(expected);
     return false;
   }
 
   console.log(`[DailyBarRefresh] ${staleSymbols.length}/${total} symbols are behind ${expected} (${freshCount} fresh). Starting smart refresh...`);
   logPhase("DailyBarRefresh", "refresh start");
-  return refreshDailyBars(staleSymbols, expected, total, newest);
+  const incomplete = await refreshDailyBars(staleSymbols, expected, total, newest);
+  if (!incomplete) await summaryIfDue(expected);
+  return incomplete;
 }
 
 async function refreshDailyBars(symbols: string[], expected: string, universeSize: number, newest: Map<string, string>): Promise<boolean> {

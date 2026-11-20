@@ -486,6 +486,25 @@ router.get("/rai", async (req: Request, res: Response) => {
 // =============================================================================
 
 /**
+ * GET /api/market-condition/screen (R7): filter and sort the whole universe (theme names live from the in-memory
+ * snapshot, scan-pool names from the end-of-day summary). Parameters, fields and rules: screen-core.ts.
+ * Reads no bars, no Alpaca, no entry gauges; at most 100 rows.
+ */
+router.get("/screen", async (req: Request, res: Response) => {
+  try {
+    touchActivity();
+    const { parseScreenQuery } = await import("./screen-core");
+    const parsed = parseScreenQuery(req.query as Record<string, unknown>);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const { screen } = await import("./screen");
+    res.json(await screen(db, parsed.query));
+  } catch (error) {
+    console.error("[MC-API] screen failed:", error);
+    res.status(500).json({ error: "Failed to run the screen" });
+  }
+});
+
+/**
  * GET /api/market-condition/leaders
  * Returns current leaders across all themes
  */

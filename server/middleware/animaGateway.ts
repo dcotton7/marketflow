@@ -29,7 +29,7 @@ export const ALLOWED: RegExp[] = [
   new RegExp(`^/api/news/${SYM}$`),
   /^\/api\/market\/indicators$/,
   new RegExp(
-    `^/api/market-condition/(themes|themes/[\\w-]+|themes/[\\w-]+/(members|subthemes)|ticker-theme/${SYM}|rai|leaders|` +
+    `^/api/market-condition/(themes|themes/[\\w-]+|themes/[\\w-]+/(members|subthemes)|ticker-theme/${SYM}|rai|leaders|screen|` +
       `regime|regime/history|race-timeline|status|subthemes|subthemes/[\\w-]+/members|search|briefing|briefing/preview|` +
       // the research-backed daily setups (server/setups/routes.ts): hits by date or range, and the jobs' status
       `setups/(leader-shakeout|earnings-gap-up|market-card|status))$`,
