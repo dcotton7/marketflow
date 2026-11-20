@@ -15,6 +15,7 @@ import {
 } from "../universe";
 import { archiveDelisted, ensureArchiveTables } from "./delisted-archive";
 import { refreshThemeMembersCache, isCacheInitialized, getThemesForSymbol } from "./theme-db-loader";
+import { applyTickerRenames } from "./ticker-renames";
 
 const DELISTED_FILE = path.resolve(process.cwd(), "data/delisted-symbols.json");
 
@@ -101,6 +102,12 @@ export function applyDelistedSymbolsToClusters(symbols: string[]): ClusterId[] {
  */
 export async function initializeDelistedTickerRegistry(): Promise<void> {
   if (registryLoaded) return;
+  // renames first (data/ticker-renames.json): the new symbol takes the old one's theme slots and gets a copy of
+  // its history before the old symbol is pruned and purged below; a rename that failed keeps its old rows
+  const { blocked } = await applyTickerRenames(db).catch((err) => {
+    console.warn("[DelistedRegistry] ticker renames failed:", err);
+    return { blocked: ["*"] as string[], safeToPurge: new Set<string>() };
+  });
   const fromFile = await loadDelistedFile();
   for (const sym of fromFile) delistedSet.add(sym);
   const touched = applyDelistedSymbolsToClusters(fromFile);
@@ -110,6 +117,10 @@ export async function initializeDelistedTickerRegistry(): Promise<void> {
   if (db && fromFile.length > 0) {
     let purged = 0;
     for (const sym of fromFile) {
+      if (blocked.includes(sym) || blocked.includes("*")) {
+        console.warn(`[DelistedRegistry] ${sym}: rename not applied, not purged this start`);
+        continue;
+      }
       try {
         await deleteWithArchive(sym);
         purged++;

@@ -1,0 +1,26 @@
+[
+  {
+    "old": "BK",
+    "new": "BNY",
+    "cik": "0001390777",
+    "cusip": "064058100",
+    "evidence": "FMP profile: BK and BNY both CIK 0001390777, CUSIP 064058100, NYSE; BK inactive, BNY active (Alpaca: BK unknown, BNY active)",
+    "recordedOn": "2026-11-20"
+  },
+  {
+    "old": "VSCO",
+    "new": "VSXY",
+    "cik": "0001856437",
+    "cusip": "926400102",
+    "evidence": "FMP profile: VSCO and VSXY both CIK 0001856437, CUSIP 926400102, NYSE; VSCO inactive, VSXY active (Alpaca: VSCO unknown, VSXY active)",
+    "recordedOn": "2026-11-20"
+  },
+  {
+    "old": "MMC",
+    "new": "MRSH",
+    "cik": "0000062709",
+    "cusip": "571748102",
+    "evidence": "FMP profile: MMC and MRSH both CIK 0000062709, CUSIP 571748102, NYSE, Marsh & McLennan Companies; MMC inactive, MRSH active (Alpaca: MMC unknown, MRSH active)",
+    "recordedOn": "2026-11-20"
+  }
+]
