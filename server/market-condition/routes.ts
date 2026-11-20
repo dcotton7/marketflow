@@ -14,6 +14,8 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/requireAdmin";
+import { loadCapSizes, withCapSize } from "./utils/cap-size";
+import { parseDays, readRegimeHistory } from "./engine/regime-history-read";
 import { requireSentinelAuth } from "../middleware/requireSentinelAuth";
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { ClusterId, CLUSTERS, CLUSTER_IDS, OVERLAYS, getAllUniverseTickers, TimeSlice, getClusterById } from "./universe";
@@ -446,7 +448,7 @@ router.get("/themes/:id/members", async (req: Request, res: Response) => {
 
     res.json({
       themeId: id,
-      members: withGauges,
+      members: withCapSize(withGauges, await loadCapSizes(db)),
       accDistStats, // Theme-specific A/D aggregates
       totalCount: enrichedMembers.length,
       leaderCount: enrichedMembers.filter(m => m.isLeader).length,
@@ -497,12 +499,13 @@ router.get("/leaders", async (req: Request, res: Response) => {
       }
       const leaders = getClusterLeaderCandidates(theme as ClusterId)
         .filter(l => l.isLeader);
-      return res.json({ themeId: theme, leaders });
+      return res.json({ themeId: theme, leaders: withCapSize(leaders, await loadCapSizes(db)) });
     }
-    
+
     const allLeaders = getAllLeaders();
     res.json({
-      leaders: allLeaders,
+      // capSize: the stored size bucket (MEGA..MICRO) the size filter uses; null when none is stored
+      leaders: withCapSize(allLeaders, await loadCapSizes(db)),
       totalCount: allLeaders.length,
     });
   } catch (error) {
@@ -519,6 +522,15 @@ router.get("/leaders", async (req: Request, res: Response) => {
  * GET /api/market-condition/regime
  * Returns simplified regime data for Scanner
  */
+/**
+ * GET /api/market-condition/regime/history?days=60 (max 400)
+ * One row a market day, the day's last stored reading: { date, raiLabel, regime, raiScore, lastReadingAt }, newest first.
+ */
+router.get("/regime/history", async (req: Request, res: Response) => {
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  res.json(await readRegimeHistory(db, parseDays(req.query.days)));
+});
+
 router.get("/regime", async (req: Request, res: Response) => {
   try {
     touchActivity(); // Wake from sleep if needed
