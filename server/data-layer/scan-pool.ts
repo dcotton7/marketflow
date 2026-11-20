@@ -19,6 +19,7 @@
  * The planning is pure (planPoolRefresh) and tested; the vendor call and the writes are thin.
  */
 import { sql } from "drizzle-orm";
+import { guardState, guardTrippedToday, logPhase, withJobLock } from "../infra/job-guard";
 
 export const POOL_MIN_CAP = 1e9;
 export const POOL_MIN_PRICE = 6;
@@ -172,7 +173,10 @@ export async function fetchScreenerRows(): Promise<PoolCandidate[]> {
     apikey: key,
   });
   const r = await fetch(`https://financialmodelingprep.com/stable/company-screener?${qs}`, { signal: AbortSignal.timeout(60_000) });
-  if (!r.ok) throw new Error(`FMP screener answered ${r.status}`);
+  if (!r.ok) {
+    await r.body?.cancel().catch(() => {}); // release the connection and its buffer now
+    throw new Error(`FMP screener answered ${r.status}`);
+  }
   return parseScreenerRows(await r.json());
 }
 
@@ -192,7 +196,9 @@ export interface PoolRefreshResult {
 /** `universe` = the theme universe (static lists + tickers table), only to mark which pool names are new to MarketFlow. */
 export async function refreshScanPool(db: any, opts: { dryRun?: boolean; universe: Set<string>; fetchRows?: () => Promise<PoolCandidate[]> }): Promise<PoolRefreshResult> {
   const dryRun = !!opts.dryRun;
+  logPhase("ScanPool", `refresh start${dryRun ? " (dry run)" : ""}`);
   const rows = await (opts.fetchRows ?? fetchScreenerRows)();
+  logPhase("ScanPool", `screener answered (${rows.length} rows)`);
   let stored: StoredPool[] = [];
   try {
     stored = rowsOf(await db.execute(sql`SELECT symbol, active FROM scan_pool`)).map((r) => ({ symbol: String(r.symbol), active: !!r.active }));
@@ -214,7 +220,10 @@ export async function refreshScanPool(db: any, opts: { dryRun?: boolean; univers
     alreadyInUniverse: [...plan.added, ...plan.reactivated, ...plan.kept].filter((a) => opts.universe.has(a.symbol)).length,
     guard: plan.guard,
   };
-  if (dryRun) return result;
+  if (dryRun) {
+    logPhase("ScanPool", "refresh end (dry run, nothing written)");
+    return result;
+  }
 
   await ensurePoolTable(db);
   const today = new Date().toISOString().slice(0, 10);
@@ -234,7 +243,15 @@ export async function refreshScanPool(db: any, opts: { dryRun?: boolean; univers
     await db.execute(sql`UPDATE scan_pool SET active = FALSE, inactive_since = ${today}::date, refreshed_at = NOW()
       WHERE symbol IN (${sql.join(plan.deactivated.map((s) => sql`${s}`), sql`, `)})`);
   }
+  logPhase("ScanPool", "refresh end");
   return result;
+}
+
+/** The refresh under the one-data-job-at-a-time lock (job-guard.ts): skipped, and logged, while a bar job or backfill runs. */
+export async function refreshScanPoolLocked(db: any, opts: Parameters<typeof refreshScanPool>[1]): Promise<PoolRefreshResult | { skipped: true }> {
+  if (guardTrippedToday()) return { skipped: true };
+  const r = await withJobLock("scan pool refresh", () => refreshScanPool(db, opts), db);
+  return r.skipped ? { skipped: true } : r.value;
 }
 
 let schedulerStarted = false;
@@ -255,7 +272,12 @@ export function startScanPoolScheduler(getUniverse: () => Promise<Set<string>>, 
         last = null;
       }
       if (last && Date.now() - last < REFRESH_EVERY_MS) return;
-      const res = await refreshScanPool(db, { universe: await getUniverse() });
+      if (guardTrippedToday()) {
+        console.log(`[ScanPool] refresh waits: the memory guard stopped a data job today (${guardState()?.where})`);
+        return;
+      }
+      const res = await refreshScanPoolLocked(db, { universe: await getUniverse() });
+      if ("skipped" in res) return; // another data job is running; the next 6-hour check tries again
       console.log(`[ScanPool] refreshed: ${res.screenerRows} screener rows, +${res.added} new, ${res.reactivated} back, ${res.deactivated.length} out, active ${res.active.after}${res.guard ? ` (${res.guard})` : ""}`);
     } catch (err) {
       console.error("[ScanPool] refresh failed (non-fatal):", String(err).slice(0, 200));

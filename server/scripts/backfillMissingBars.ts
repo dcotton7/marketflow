@@ -20,6 +20,7 @@ import { getAllUniverseTickers } from "../market-condition/universe";
 import { loadBarUniverse, loadThemeUniverse } from "../data-layer/bar-universe";
 import { backfillSymbol, loadBarStats, planBackfill, type SymbolResult } from "../data-layer/bar-backfill";
 import { recalculateTickerMAs } from "../data-layer/daily-bar-refresh";
+import { logPhase, tryAcquire } from "../infra/job-guard";
 
 function arg(name: string): string | undefined {
   const hit = process.argv.slice(2).find((a) => a.startsWith(`--${name}=`));
@@ -68,6 +69,13 @@ async function main() {
     process.exit(0);
   }
 
+  // one data job at a time, across processes: the service's bar job and pool refresh hold the same Postgres advisory lock
+  const release = await tryAcquire("backfill", db);
+  if (!release) {
+    console.error("Another data job (the service's bar job or pool refresh) holds the lock. Try again in a few minutes.");
+    process.exit(2);
+  }
+  logPhase("Backfill", "start");
   const fromDate = new Date(`${from}T00:00:00Z`);
   const toDate = new Date();
   const insertChunk = async (rows: any[]) => {
@@ -103,6 +111,7 @@ async function main() {
     await recalculateTickerMAs(db, served.filter((r) => r.inserted > 0).map((r) => r.symbol));
   }
 
+  logPhase("Backfill", "bars done");
   const statsAfter = await loadBarStats(db);
   const universeWithLatest = universe.filter((u) => (statsAfter.get(u)?.max ?? "") >= plan.latestSession).length;
   const report = {
@@ -113,6 +122,8 @@ async function main() {
     universeTickersWithBarOnLatestSession_afterRun: universeWithLatest,
   };
   console.log(JSON.stringify(report, null, 1));
+  logPhase("Backfill", "end");
+  await release();
   process.exit(0);
 }
 

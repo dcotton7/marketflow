@@ -178,11 +178,16 @@ router.post("/scan-pool/refresh", requireAdmin, async (req: Request, res: Respon
   if (poolRunning) return res.status(409).json({ error: "already running" });
   poolRunning = true;
   try {
-    const { refreshScanPool } = await import("../data-layer/scan-pool");
+    const { refreshScanPool, refreshScanPoolLocked } = await import("../data-layer/scan-pool");
     const { loadThemeUniverse } = await import("../data-layer/bar-universe");
     const { getAllUniverseTickers } = await import("../market-condition/universe");
     const yes = ["1", "true", "yes"].includes(String(req.query.dryRun ?? "").toLowerCase());
-    res.json(await refreshScanPool(db, { dryRun: yes, universe: new Set(await loadThemeUniverse(db, getAllUniverseTickers())) }));
+    const opts = { dryRun: yes, universe: new Set(await loadThemeUniverse(db, getAllUniverseTickers())) };
+    // a dry run only reads; a real refresh waits its turn behind the bar job and backfill (409 if one is running)
+    if (yes) return res.json(await refreshScanPool(db, opts));
+    const out = await refreshScanPoolLocked(db, opts);
+    if ("skipped" in out) return res.status(409).json({ error: "another data job is running (bar job, backfill) or the memory guard stopped one today; try later" });
+    res.json(out);
   } catch (err) {
     console.error("[ScanPool] refresh failed:", err);
     res.status(500).json({ error: String(err).slice(0, 200) });

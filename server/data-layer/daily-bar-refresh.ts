@@ -17,10 +17,11 @@
 
 import { getDb } from "../db";
 import { historicalBars, tickerMa } from "@shared/schema";
-import { sql, eq, desc } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { fetchAlpacaMultiSymbolDailyBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
-import { expectedLastSession, loadBarUniverse, loadNewestBars, splitStale } from "./bar-universe";
+import { expectedLastSession, loadBarUniverse, loadNewestBars, loadThemeUniverse, splitStale } from "./bar-universe";
+import { guardState, guardTrippedToday, logPhase, overLimit, withJobLock } from "../infra/job-guard";
 import {
   isMemoryPressureHigh,
   isNightMode,
@@ -31,6 +32,14 @@ import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSess
 const REFRESH_LOOKBACK_DAYS = 10;
 const BATCH_SIZE = 100;
 const BATCH_PAUSE_MS = 1000;
+const UPSERT_CHUNK = 500;
+
+/** Pure: split rows into chunks of at most `n`. */
+export function chunkRows<T>(rows: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < rows.length; i += n) out.push(rows.slice(i, i + n));
+  return out;
+}
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 let lastRefreshAttempt: Date | null = null;
@@ -84,9 +93,22 @@ async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: 
   }
 }
 
-/** True when this check did not finish the stale list (deferred, cut short, or failed): the scheduler retries soon. */
+/**
+ * True when this check did not finish the stale list (deferred, cut short, or failed): the scheduler retries soon.
+ * One data job at a time (job-guard.ts): a check that finds another running (a pool refresh, the backfill) is skipped and logged.
+ * After the memory guard has stopped a job today, nothing restarts until tomorrow.
+ */
 export async function checkAndRefreshDailyBars(): Promise<boolean> {
   if (refreshInProgress) return false;
+  if (guardTrippedToday()) {
+    logOncePerDay("guard", `[DailyBarRefresh] The memory guard stopped a data job today (${guardState()?.where}, rss ${guardState()?.rssMb} MB): bars wait until tomorrow.`);
+    return false;
+  }
+  const ran = await withJobLock("daily bar job", runCheck, getDb());
+  return ran.skipped ? true : ran.value;
+}
+
+async function runCheck(): Promise<boolean> {
 
   if (isNightMode()) {
     logOncePerDay("night", "[DailyBarRefresh] Night mode (8pm-4am ET, weekends) - bars wait for the next check.");
@@ -110,6 +132,7 @@ export async function checkAndRefreshDailyBars(): Promise<boolean> {
   }
 
   console.log(`[DailyBarRefresh] ${staleSymbols.length}/${total} symbols are behind ${expected} (${freshCount} fresh). Starting smart refresh...`);
+  logPhase("DailyBarRefresh", "refresh start");
   return refreshDailyBars(staleSymbols, expected, total, newest);
 }
 
@@ -138,6 +161,7 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
   let memorySkipped = 0;
   let processed = 0;
   let withBars = 0;
+  let stoppedByGuard = false;
   const noBarsList: string[] = [];
   const now0 = new Date();
   const currentEtDate = getEtClock(now0).dateKey;
@@ -183,18 +207,21 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
     }
     processed = i + batch.length;
 
+    // One statement per chunk of rows for the whole batch (about 700 rows), not one per name: fewer round trips, and
+    // nothing from the batch is kept once it is written.
+    const batchRows: { symbol: string; barDate: string; open: string; high: string; low: string; close: string; volume: number }[] = [];
+    const namesWithRows = new Set<string>();
     for (const symbol of batch) {
       const bars = fetched.get(symbol.toUpperCase()) ?? [];
       if (bars.length === 0) {
         noBarsList.push(symbol);
         continue;
       }
-      const rows = [];
       for (const bar of bars) {
         const barDate = getEtClock(new Date(bar.date)).dateKey;
         // today's bar is not final while the session is open
         if (barDate === currentEtDate && (currentSession === "pre_market" || currentSession === "regular")) continue;
-        rows.push({
+        batchRows.push({
           symbol: symbol.toUpperCase(),
           barDate,
           open: bar.open.toString(),
@@ -203,10 +230,13 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
           close: bar.close.toString(),
           volume: bar.volume,
         });
+        namesWithRows.add(symbol.toUpperCase());
       }
-      if (rows.length === 0) continue;
+    }
+    fetched = undefined as any; // the vendor answer is not needed past this point
+    for (const chunk of chunkRows(batchRows, UPSERT_CHUNK)) {
       try {
-        await db.insert(historicalBars).values(rows).onConflictDoUpdate({
+        await db.insert(historicalBars).values(chunk).onConflictDoUpdate({
           target: [historicalBars.symbol, historicalBars.barDate],
           set: {
             open: sql`excluded.open`,
@@ -216,20 +246,24 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
             volume: sql`excluded.volume`,
           },
         });
-        totalUpserted += rows.length;
-        withBars++;
-      } catch {
-        totalFailed++;
+        totalUpserted += chunk.length;
+      } catch (err) {
+        totalFailed += new Set(chunk.map((r) => r.symbol)).size;
+        console.warn("[DailyBarRefresh] batch write failed:", String(err).slice(0, 120));
       }
+    }
+    withBars += namesWithRows.size;
+
+    const batchNo = Math.floor(i / BATCH_SIZE) + 1;
+    logPhase("DailyBarRefresh", `batch ${batchNo}/${Math.ceil(symbols.length / BATCH_SIZE)} (${processed}/${symbols.length} names, ${totalUpserted} bars)`);
+    if (overLimit("DailyBarRefresh", `batch ${batchNo}, name ${processed} of ${symbols.length}`)) {
+      stoppedByGuard = true;
+      break;
     }
 
     // Rate limit: pause between batches
     if (i + BATCH_SIZE < symbols.length) await new Promise((r) => setTimeout(r, BATCH_PAUSE_MS));
 
-    if ((Math.floor(i / BATCH_SIZE) + 1) % 5 === 0) {
-      const mem = process.memoryUsage();
-      console.log(`[DailyBarRefresh] Progress: ${Math.min(i + BATCH_SIZE, symbols.length)}/${symbols.length} symbols, ${totalUpserted} bars upserted, heap ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
-    }
   }
 
   const complete = processed >= symbols.length;
@@ -266,8 +300,12 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
           `(${totalFailed} failed${memorySkipped > 0 ? `, ${memorySkipped} batches deferred for memory` : ""}). ` +
           `Now recalculating MAs...`
       );
-      if (!isNightMode() && !isMemoryPressureHigh()) {
-        await recalculateTickerMAs(db, doneSymbols);
+      if (!isNightMode() && !isMemoryPressureHigh() && !stoppedByGuard) {
+        // ticker_ma serves the theme readings; scan-pool-only names have no use for it (R7 has its own summary)
+        const themeSet = new Set(await loadThemeUniverse(db, getAllUniverseTickers()));
+        logPhase("DailyBarRefresh", "MA phase start");
+        await recalculateTickerMAs(db, doneSymbols.filter((s) => themeSet.has(s.toUpperCase())));
+        logPhase("DailyBarRefresh", "MA phase end");
       } else {
         console.warn("[DailyBarRefresh] Skipping MA recalculation — night mode or memory pressure.");
       }
@@ -277,6 +315,7 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
   } finally {
     refreshInProgress = false;
   }
+  logPhase("DailyBarRefresh", `refresh end (${complete ? "complete" : stoppedByGuard ? "stopped by the memory guard" : "incomplete"})`);
   return !complete;
 }
 
@@ -296,41 +335,57 @@ function calculateEMA(closes: number[], period: number): number | null {
   return ema;
 }
 
+/** Pure: the five averages from closes newest first (the existing method), null where there are too few. */
+export function maFromClosesDesc(closes: number[]) {
+  return {
+    ema10: calculateEMA(closes, 10),
+    ema20: calculateEMA(closes, 20),
+    sma20: calculateSMA(closes, 20),
+    sma50: calculateSMA(closes, 50),
+    sma200: closes.length >= 200 ? calculateSMA(closes, 200) : null,
+  };
+}
+
+const MA_BATCH = 50;
+
+/**
+ * Recalculate ticker_ma for `tickers`: 50 names per read (their last 250 closes in one query) and one upsert, instead of
+ * a read and a write per name; stops between batches on the memory limit.
+ */
 export async function recalculateTickerMAs(db: any, tickers: string[]): Promise<void> {
   let updated = 0;
   let errors = 0;
-
-  for (let i = 0; i < tickers.length; i++) {
-    const symbol = tickers[i]!;
+  for (let i = 0; i < tickers.length; i += MA_BATCH) {
+    if (overLimit("DailyBarRefresh", `MA phase, name ${i} of ${tickers.length}`)) break;
+    const batch = tickers.slice(i, i + MA_BATCH);
     try {
-      const bars = await db
-        .select({ close: historicalBars.close, date: historicalBars.barDate })
-        .from(historicalBars)
-        .where(eq(historicalBars.symbol, symbol))
-        .orderBy(desc(historicalBars.barDate))
-        .limit(250);
-
-      if (bars.length < 20) continue;
-
-      const closes = bars.map((b: any) => Number(b.close));
-      const ema10 = calculateEMA(closes, 10);
-      const ema20 = calculateEMA(closes, 20);
-      const sma20 = calculateSMA(closes, 20);
-      const sma50 = calculateSMA(closes, 50);
-      const sma200 = closes.length >= 200 ? calculateSMA(closes, 200) : null;
-
-      await db
-        .insert(tickerMa)
-        .values({
+      const res: any = await db.execute(sql`SELECT symbol, close::float8 AS c FROM (
+          SELECT symbol, close, bar_date, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY bar_date DESC) AS rn
+          FROM historical_bars WHERE symbol IN (${sql.join(batch.map((s) => sql`${s}`), sql`, `)})) x
+        WHERE rn <= 250 ORDER BY symbol, rn`);
+      const bySym = new Map<string, number[]>();
+      for (const r of res?.rows ?? res ?? []) {
+        const k = String(r.symbol);
+        if (!bySym.has(k)) bySym.set(k, []);
+        bySym.get(k)!.push(Number(r.c));
+      }
+      const values = [];
+      for (const symbol of batch) {
+        const closes = bySym.get(symbol);
+        if (!closes || closes.length < 20) continue;
+        const m = maFromClosesDesc(closes);
+        values.push({
           symbol,
-          ema10d: ema10?.toFixed(4) || null,
-          ema20d: ema20?.toFixed(4) || null,
-          sma20d: sma20?.toFixed(4) || null,
-          sma50d: sma50?.toFixed(4) || null,
-          sma200d: sma200?.toFixed(4) || null,
+          ema10d: m.ema10?.toFixed(4) || null,
+          ema20d: m.ema20?.toFixed(4) || null,
+          sma20d: m.sma20?.toFixed(4) || null,
+          sma50d: m.sma50?.toFixed(4) || null,
+          sma200d: m.sma200?.toFixed(4) || null,
           updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
+        });
+      }
+      if (values.length) {
+        await db.insert(tickerMa).values(values).onConflictDoUpdate({
           target: tickerMa.symbol,
           set: {
             ema10d: sql`excluded.ema_10d`,
@@ -341,17 +396,13 @@ export async function recalculateTickerMAs(db: any, tickers: string[]): Promise<
             updatedAt: sql`now()`,
           },
         });
-      updated++;
-    } catch (err) {
-      errors++;
-      if (errors <= 3) {
-        console.warn(`[DailyBarRefresh] MA calc error for ${symbol}:`, String(err).slice(0, 100));
+        updated += values.length;
       }
+    } catch (err) {
+      errors += batch.length;
+      if (errors <= MA_BATCH * 3) console.warn("[DailyBarRefresh] MA batch error:", String(err).slice(0, 100));
     }
-
-    if (i > 0 && i % 50 === 0) {
-      await new Promise((r) => setTimeout(r, 10));
-    }
+    await new Promise((r) => setTimeout(r, 10));
   }
   console.log(`[DailyBarRefresh] ✅ Recalculated MAs for ${updated} symbols (${errors} errors).`);
 }

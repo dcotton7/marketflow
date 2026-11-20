@@ -66,7 +66,10 @@ async function fmpGet(path: string): Promise<unknown | null> {
   if (!key) return null;
   try {
     const r = await fetch(`https://financialmodelingprep.com/stable/${path}&apikey=${key}`, { signal: AbortSignal.timeout(8_000) });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      await r.body?.cancel().catch(() => {}); // an unread body holds its connection until the garbage collector runs
+      return null;
+    }
     return await r.json();
   } catch {
     return null;
