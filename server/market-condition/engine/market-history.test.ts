@@ -95,5 +95,13 @@ const at = (hh: number, mm: number, day = "2026-11-16") => new Date(`${day}T${St
     assert.equal(r.ticks, 0);
     assert.equal(r.regime, 1);
   }
+  // No cleanup code remains for the 15-minute theme snapshots, and no env value can turn deletion on.
+  {
+    const dir = join(process.cwd(), "server/market-condition/engine");
+    const snap = readFileSync(join(dir, "snapshot.ts"), "utf8");
+    const themes = readFileSync(join(dir, "theme-snapshots.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.ok(!/cleanupOld|DISABLE_HOURLY_SNAPSHOT_CLEANUP|HOURLY_SNAPSHOT_RETENTION_DAYS/.test(snap + themes));
+    assert.equal((themes.match(/\.delete\(themeSnapshots\)/g) ?? []).length, 1, "only the same-slot dedupe deletes");
+  }
   console.log("market-history tests passed");
 })().catch((e) => { console.error(e); process.exit(1); });
