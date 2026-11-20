@@ -80,7 +80,12 @@ export async function dropStaleSnapshots<T extends { dailyBarDate?: string; time
   }
 }
 
-export function getStaleTickers(): { rule: string; tickers: StaleEntry[] } {
-  return { rule: `no daily bar for more than ${STALE_SESSIONS} trading sessions: left out of leaders, theme moves, scans and briefings; still in the universe until someone decides`, tickers: current };
+/** Tickers someone has to look at for a reason other than a missing bar (decided by the PM; listed, not acted on). */
+export const NEEDS_A_LOOK: { symbol: string; since: string; reason: string }[] = [
+  { symbol: "VWAV", since: "2026-11-20", reason: "market cap: the stored value and FMP's differ by more than 100x and neither is confirmed; left unwritten" },
+];
+
+export function getStaleTickers(): { rule: string; tickers: StaleEntry[]; needsALook: typeof NEEDS_A_LOOK } {
+  return { rule: `no daily bar for more than ${STALE_SESSIONS} trading sessions: left out of leaders, theme moves, scans and briefings; still in the universe until someone decides`, tickers: current, needsALook: NEEDS_A_LOOK };
 }
 export function setStaleForTests(list: StaleEntry[]) { current = list; }

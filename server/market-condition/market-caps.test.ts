@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { bucketOf, BOUNDARIES } from "./utils/cap-size";
-import { isStale, judge, liveSources, needsSecondOpinion, plan, refreshMarketCaps, toFmpSymbol, type Sources, type Stored } from "./utils/market-cap-refresh";
+import { bigStoredIgnored, isStale, judge, manualOverride, liveSources, needsSecondOpinion, plan, refreshMarketCaps, toFmpSymbol, type Sources, type Stored } from "./utils/market-cap-refresh";
 
 // ---- one set of boundaries -------------------------------------------------------------------------------------------
 assert.deepEqual(BOUNDARIES, { MEGA: 200e9, LARGE: 10e9, MID: 2e9, SMALL: 300e6 });
@@ -95,5 +95,37 @@ assert.deepEqual({ ...p.counts, byBucket: undefined }, { bucketChanged: 1, nullT
   globalThis.fetch = realFetch;
   assert.match(decodeURIComponent(asked), /symbols=BRK-B,AAPL&/);
   assert.deepEqual([...got], [["BRK.B", { cap: 8.07e11, date: "2026-11-20" }]], "mapped back to MarketFlow's symbol");
+  // ---- big-stored rule: off by default, lists what it would touch; on, a $5.98T stored yen figure no longer vetoes
+  const hmc = st("HMC", 5.98e12, null);
+  assert.equal(judge(hmc, 43.0e9).ok, false, "off: the stored $5.98T vetoes $43B (more than 10x)");
+  assert.deepEqual(judge(hmc, 43.0e9, null, { bigStoredRule: true }), { ok: true, note: "stored cap above $2T ignored (big-stored rule)" });
+  assert.equal(bigStoredIgnored(st("AAPL", 5.07e12), 5.09e12), false, "a company really that large is not touched");
+  assert.equal(bigStoredIgnored(st("NVDA", 3.33e12), 3.4e12), false);
+  assert.equal(bigStoredIgnored(st("X", 1.9e12), 1e9), false, "under $2T stored: the normal rules");
+  const withHmc = [...stored, hmc];
+  const dbH = { async execute(q: any) { const t = JSON.stringify(q?.queryChunks ?? q ?? ""); if (/FROM tickers ORDER BY/.test(t)) return { rows: withHmc.map((x) => ({ symbol: x.symbol, market_cap: x.marketCap, market_cap_size: x.bucket })) }; return { rows: [], rowCount: 1 }; } };
+  const srcH: Sources = { ...sources, async fmpBatch(syms) { return new Map(syms.filter((x) => x === "HMC" || fetched.has(x)).map((x) => [x, { cap: x === "HMC" ? 43.0e9 : fetched.get(x)!, date: "2026-11-20" }])); } };
+  const off: any = await refreshMarketCaps(dbH, { dryRun: true, sources: srcH, asOf: "2026-11-20", log: () => {} });
+  assert.equal(off.bigStoredRule, false);
+  assert.deepEqual(off.bigStoredTouches, ["HMC stored 5980000000000 fetched 43000000000"], "listed while off");
+  assert.ok(off.rejected.some((r: any) => r.symbol === "HMC"));
+  const on: any = await refreshMarketCaps(dbH, { dryRun: true, sources: srcH, asOf: "2026-11-20", log: () => {}, bigStoredRule: true });
+  assert.equal(on.rejected.some((r: any) => r.symbol === "HMC"), false);
+  assert.ok(on.bucketChanges.includes("HMC none->LARGE"));
+
+  // ---- manual override: a history row marked manual_override with its reason, then the current value ------------
+  const ov: string[] = [];
+  const dbO = { async execute(q: any) { const t = JSON.stringify(q?.queryChunks ?? q ?? ""); ov.push(t); if (/SELECT market_cap, market_cap_size FROM tickers WHERE symbol/.test(t)) return { rows: /HMC/.test(t) ? [{ market_cap: 5.98e12, market_cap_size: null }] : [] }; return { rows: [], rowCount: 1 }; } };
+  const r1: any = await manualOverride(dbO, { symbol: "hmc", marketCap: 43.0e9, reason: "stored $5.98T is a yen figure; FMP $43.0B (PM, 20 Nov)", asOf: "2026-11-20" });
+  assert.equal(r1.ok, true);
+  assert.equal(r1.bucket, "LARGE");
+  assert.deepEqual(r1.previous, { marketCap: 5.98e12, bucket: null });
+  const hist = ov.find((t) => /INSERT INTO market_cap_history/.test(t))!;
+  assert.match(hist, /manual_override/);
+  assert.match(hist, /yen figure/);
+  assert.ok(ov.findIndex((t) => /INSERT INTO market_cap_history/.test(t)) < ov.findIndex((t) => /UPDATE tickers/.test(t)), "history first");
+  assert.equal((await manualOverride(dbO, { symbol: "HMC", marketCap: 43e9, reason: "" }) as any).ok, false, "a reason is required");
+  assert.equal((await manualOverride(dbO, { symbol: "HMC", marketCap: 2e13, reason: "x" }) as any).ok, false, "an implausible cap is refused");
+  assert.equal((await manualOverride(dbO, { symbol: "NOPE", marketCap: 1e9, reason: "x" }) as any).ok, false, "an unknown symbol is refused");
   console.log("market cap refresh tests passed");
 })().catch((e) => { console.error(e); process.exit(1); });

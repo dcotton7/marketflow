@@ -26,7 +26,19 @@ export const SECOND_OPINION_TOLERANCE = 0.25;
 export const DDL = [
   `CREATE TABLE IF NOT EXISTS market_cap_history (id SERIAL PRIMARY KEY, as_of DATE NOT NULL, symbol TEXT NOT NULL, market_cap DOUBLE PRECISION NOT NULL, bucket TEXT NOT NULL, source TEXT NOT NULL, boundaries JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (as_of, symbol, source))`,
   `CREATE INDEX IF NOT EXISTS idx_market_cap_history_symbol ON market_cap_history (symbol, as_of)`,
+  `ALTER TABLE market_cap_history ADD COLUMN IF NOT EXISTS note TEXT`,
 ];
+
+/**
+ * Big-stored rule (PM, 20 Nov; OFF until switched on): a stored cap above $2T is treated as bad and does not veto
+ * a fetched cap under $1T. The handful of companies really that large have fetched values above $1T too, so the
+ * rule never touches them; it catches stored values in the wrong currency (HMC: $5.98T, in yen).
+ */
+export const BIG_STORED = 2e12;
+export const BIG_FETCHED = 1e12;
+export function bigStoredIgnored(stored: Stored, sourceCap: number): boolean {
+  return typeof stored.marketCap === "number" && stored.marketCap > BIG_STORED && sourceCap > 0 && sourceCap < BIG_FETCHED;
+}
 
 export interface Stored { symbol: string; marketCap: number | null; bucket: CapSize | null }
 export interface Accepted { symbol: string; oldCap: number | null; newCap: number; oldBucket: CapSize | null; newBucket: CapSize; source: string; note?: string }
@@ -35,9 +47,10 @@ export interface Rejected { symbol: string; storedCap: number | null; sourceCap:
 const plausible = (x: number | null): x is number => typeof x === "number" && Number.isFinite(x) && x > 0 && x <= MAX_PLAUSIBLE_CAP;
 
 /** Accept or reject one fetched cap. `second` is Finnhub's cap in dollars, asked only for a >10x move. */
-export function judge(stored: Stored, sourceCap: number, second?: number | null): { ok: true; note?: string } | { ok: false; reason: string } {
+export function judge(stored: Stored, sourceCap: number, second?: number | null, opts: { bigStoredRule?: boolean } = {}): { ok: true; note?: string } | { ok: false; reason: string } {
   if (!Number.isFinite(sourceCap) || sourceCap <= 0) return { ok: false, reason: "zero or negative" };
   if (sourceCap > MAX_PLAUSIBLE_CAP) return { ok: false, reason: "above $10T" };
+  if (opts.bigStoredRule && bigStoredIgnored(stored, sourceCap)) return { ok: true, note: `stored cap above $2T ignored (big-stored rule)` };
   if (plausible(stored.marketCap)) {
     const r = sourceCap / stored.marketCap;
     if (r > MAX_RATIO || r < 1 / MAX_RATIO) {
@@ -50,7 +63,8 @@ export function judge(stored: Stored, sourceCap: number, second?: number | null)
   return { ok: true };
 }
 
-export function needsSecondOpinion(stored: Stored, sourceCap: number): boolean {
+export function needsSecondOpinion(stored: Stored, sourceCap: number, opts: { bigStoredRule?: boolean } = {}): boolean {
+  if (opts.bigStoredRule && bigStoredIgnored(stored, sourceCap)) return false;
   if (!plausible(stored.marketCap) || !(sourceCap > 0) || sourceCap > MAX_PLAUSIBLE_CAP) return false;
   const r = sourceCap / stored.marketCap;
   return r > MAX_RATIO || r < 1 / MAX_RATIO;
@@ -66,14 +80,14 @@ export interface Plan {
   counts: { bucketChanged: number; nullToBucket: number; sameBucket: number; byBucket: Record<CapSize, number>; keptOldBucketNoData: number };
 }
 
-export function plan(stored: Stored[], fetched: Map<string, number>, second: Map<string, number | null>, failedBatches = 0, preRejected: Rejected[] = []): Plan {
+export function plan(stored: Stored[], fetched: Map<string, number>, second: Map<string, number | null>, failedBatches = 0, preRejected: Rejected[] = [], opts: { bigStoredRule?: boolean } = {}): Plan {
   const accepted: Accepted[] = [], rejected: Rejected[] = [...preRejected], noData: string[] = [];
   const pre = new Set(preRejected.map((r) => r.symbol));
   for (const s of stored) {
     if (pre.has(s.symbol)) continue;
     const cap = fetched.get(s.symbol);
     if (cap === undefined) { noData.push(s.symbol); continue; }
-    const j = judge(s, cap, second.get(s.symbol));
+    const j = judge(s, cap, second.get(s.symbol), opts);
     if (!j.ok) { rejected.push({ symbol: s.symbol, storedCap: s.marketCap, sourceCap: cap, reason: j.reason }); continue; }
     accepted.push({ symbol: s.symbol, oldCap: s.marketCap, newCap: cap, oldBucket: s.bucket, newBucket: bucketOf(cap), source: "fmp", ...(j.note ? { note: j.note } : {}) });
   }
@@ -141,7 +155,7 @@ export function liveSources(env: NodeJS.ProcessEnv = process.env): Sources {
   };
 }
 
-export async function refreshMarketCaps(db: Exec, opts: { dryRun: boolean; sources?: Sources; asOf?: string; log?: (s: string) => void }) {
+export async function refreshMarketCaps(db: Exec, opts: { dryRun: boolean; sources?: Sources; asOf?: string; log?: (s: string) => void; bigStoredRule?: boolean }) {
   const src = opts.sources ?? liveSources();
   const log = opts.log ?? ((s: string) => console.log(s));
   const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10);
@@ -166,28 +180,55 @@ export async function refreshMarketCaps(db: Exec, opts: { dryRun: boolean; sourc
   const second = new Map<string, number | null>();
   for (const s of stored) {
     const c = fetched.get(s.symbol);
-    if (c !== undefined && needsSecondOpinion(s, c)) { second.set(s.symbol, await src.finnhub(s.symbol)); await src.sleep(1100); }
+    if (c !== undefined && needsSecondOpinion(s, c, { bigStoredRule: opts.bigStoredRule })) { second.set(s.symbol, await src.finnhub(s.symbol)); await src.sleep(1100); }
   }
-  const p = plan(stored, fetched, second, failed, stale);
+  const p = plan(stored, fetched, second, failed, stale, { bigStoredRule: opts.bigStoredRule });
+  // which tickers the big-stored rule touches (or would, while it is off): listed on every run
+  const bigStored = stored.filter((s) => { const c = fetched.get(s.symbol); return c !== undefined && bigStoredIgnored(s, c); })
+    .map((s) => `${s.symbol} stored ${s.marketCap} fetched ${fetched.get(s.symbol)}`);
+  log(`[MarketCaps] big-stored rule ${opts.bigStoredRule ? "ON" : "off"}; it ${opts.bigStoredRule ? "touches" : "would touch"}: ${bigStored.join("; ") || "none"}`);
   log(`[MarketCaps] ${opts.dryRun ? "DRY RUN" : "RUN"} ${asOf}: ${p.tickers} tickers, ${p.fetched} caps fetched (${p.failedBatches} failed batches)`);
   log(`[MarketCaps] would write ${p.accepted.length}: ${p.counts.bucketChanged} change bucket, ${p.counts.nullToBucket} go from no bucket to a bucket, ${p.counts.sameBucket} keep their bucket; by bucket ${JSON.stringify(p.counts.byBucket)}`);
   log(`[MarketCaps] not written: ${p.rejected.length} implausible, ${p.noData.length} with no data from FMP (${p.counts.keptOldBucketNoData} of those keep an old bucket)`);
   for (const r of p.rejected) log(`[MarketCaps]   rejected ${r.symbol}: ${r.reason} (stored ${r.storedCap ?? "none"}, source ${r.sourceCap})`);
-  if (opts.dryRun) return { dryRun: true, asOf, ...summary(p) };
+  const extra = { bigStoredRule: !!opts.bigStoredRule, bigStoredTouches: bigStored };
+  if (opts.dryRun) return { dryRun: true, asOf, ...extra, ...summary(p) };
   if (p.failedBatches) {
     log(`[MarketCaps] not writing: ${p.failedBatches} FMP batch(es) failed; rerun when the source answers`);
-    return { dryRun: false, asOf, written: 0, aborted: "FMP batch failed", ...summary(p) };
+    return { dryRun: false, asOf, written: 0, aborted: "FMP batch failed", ...extra, ...summary(p) };
   }
   for (const s of DDL) await db.execute(sql.raw(s));
   let written = 0;
   for (const a of p.accepted) {
-    await db.execute(sql`INSERT INTO market_cap_history (as_of, symbol, market_cap, bucket, source, boundaries) VALUES (${asOf}::date, ${a.symbol}, ${a.newCap}, ${a.newBucket}, ${a.source}, ${JSON.stringify(BOUNDARIES)}::jsonb) ON CONFLICT (as_of, symbol, source) DO NOTHING`);
+    await db.execute(sql`INSERT INTO market_cap_history (as_of, symbol, market_cap, bucket, source, boundaries, note) VALUES (${asOf}::date, ${a.symbol}, ${a.newCap}, ${a.newBucket}, ${a.source}, ${JSON.stringify(BOUNDARIES)}::jsonb, ${a.note ?? null}) ON CONFLICT (as_of, symbol, source) DO NOTHING`);
     await db.execute(sql`UPDATE tickers SET market_cap = ${a.newCap}, market_cap_size = ${a.newBucket} WHERE symbol = ${a.symbol}`);
     written++;
   }
   resetCapSizeCacheForTests(); // capSize reads the new buckets at once
   log(`[MarketCaps] written ${written}`);
-  return { dryRun: false, asOf, written, ...summary(p) };
+  return { dryRun: false, asOf, written, ...extra, ...summary(p) };
+}
+
+/**
+ * A one-off manual correction (PM, 20 Nov: HMC's stored $5.98T is a yen figure; FMP's $43.0B is in line with the
+ * company): a history row marked manual_override with the reason, then the current value and bucket. Refuses an
+ * implausible cap, an unknown symbol or an empty reason.
+ */
+export async function manualOverride(db: Exec, input: { symbol: string; marketCap: number; reason: string; asOf?: string }) {
+  const symbol = String(input.symbol ?? "").trim().toUpperCase();
+  const cap = Number(input.marketCap);
+  const reason = String(input.reason ?? "").trim();
+  if (!symbol || !reason) return { ok: false, error: "symbol and reason required" };
+  if (!plausible(cap)) return { ok: false, error: "marketCap must be above 0 and at most $10T" };
+  const row = rowsOf(await db.execute(sql`SELECT market_cap, market_cap_size FROM tickers WHERE symbol = ${symbol} LIMIT 1`))[0];
+  if (!row) return { ok: false, error: `no tickers row for ${symbol}` };
+  const asOf = input.asOf ?? new Date().toISOString().slice(0, 10);
+  const bucket = bucketOf(cap);
+  for (const s of DDL) await db.execute(sql.raw(s));
+  await db.execute(sql`INSERT INTO market_cap_history (as_of, symbol, market_cap, bucket, source, boundaries, note) VALUES (${asOf}::date, ${symbol}, ${cap}, ${bucket}, ${"manual_override"}, ${JSON.stringify(BOUNDARIES)}::jsonb, ${reason}) ON CONFLICT (as_of, symbol, source) DO NOTHING`);
+  await db.execute(sql`UPDATE tickers SET market_cap = ${cap}, market_cap_size = ${bucket} WHERE symbol = ${symbol}`);
+  resetCapSizeCacheForTests();
+  return { ok: true, symbol, previous: { marketCap: row.market_cap === null ? null : Number(row.market_cap), bucket: normalizeCapSize(row.market_cap_size) }, marketCap: cap, bucket, asOf, reason };
 }
 
 function summary(p: Plan) {

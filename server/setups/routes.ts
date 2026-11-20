@@ -18,7 +18,7 @@ import { SETUP } from "./leader-shakeout-job";
 import { getSetupJobStatus, runSetupJob } from "./jobs";
 import { ensureSetupTables, rowsOf } from "./store";
 import { parseRange } from "./routes-helpers";
-import { refreshMarketCaps } from "../market-condition/utils/market-cap-refresh";
+import { manualOverride, refreshMarketCaps } from "../market-condition/utils/market-cap-refresh";
 import { byGrade, flags, gradesWanted, loadGradeSettings, parseSettings, saveGradeSettings, type GradeSettings } from "./grades";
 import { EG, EG_RULE_VERSION, EG_SETUP, ensureEgTables } from "./earnings-gap-up";
 import { upcomingStatus } from "../earnings/upcoming";
@@ -143,14 +143,23 @@ router.post("/market-caps/refresh", requireAdmin, async (req: Request, res: Resp
   if (capsRunning) return res.status(409).json({ error: "already running" });
   capsRunning = true;
   try {
-    const dryRun = ["1", "true", "yes"].includes(String(req.query.dryRun ?? "").toLowerCase());
-    res.json(await refreshMarketCaps(db, { dryRun }));
+    const yes = (v: unknown) => ["1", "true", "yes"].includes(String(v ?? "").toLowerCase());
+    // bigStoredRule=1 switches on the big-stored rule (off by default; every run lists what it would touch)
+    res.json(await refreshMarketCaps(db, { dryRun: yes(req.query.dryRun), bigStoredRule: yes(req.query.bigStoredRule) }));
   } catch (err) {
     console.error("[MarketCaps] refresh failed:", err);
     res.status(500).json({ error: String(err).slice(0, 200) });
   } finally {
     capsRunning = false;
   }
+});
+
+/** POST /market-caps/override (admin) { symbol, marketCap, reason }: a one-off manual correction, kept in history. */
+router.post("/market-caps/override", requireAdmin, async (req: Request, res: Response) => {
+  const db = getDb();
+  if (!db) return res.status(503).json({ error: "database unavailable" });
+  const r = await manualOverride(db, req.body ?? {});
+  res.status(r.ok ? 200 : 400).json(r);
 });
 
 router.post("/run/:job", requireAdmin, async (req: Request, res: Response) => {

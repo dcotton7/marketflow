@@ -49,6 +49,7 @@ setStaleForTests(stale);
 const list = getStaleTickers();
 assert.ok(list.tickers.some((x) => x.symbol === "QRVO"));
 assert.match(list.rule, /still in the universe until someone decides/);
+assert.ok(list.needsALook.some((x) => x.symbol === "VWAV" && /more than 100x/.test(x.reason)), "VWAV is on the needs-a-look list");
 
 // QRVO is retired through the delisted registry (loaded at boot: removed from SEMIS, rows archived, then deleted)
 const delisted: string[] = JSON.parse(readFileSync(join(process.cwd(), "data", "delisted-symbols.json"), "utf8"));
