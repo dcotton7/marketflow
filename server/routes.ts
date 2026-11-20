@@ -1234,6 +1234,17 @@ export async function registerRoutes(
       console.log("[Startup Stagger] Starting daily bar refresh scheduler (t+120s)...");
       const { startDailyBarRefreshScheduler } = await import("./data-layer/daily-bar-refresh");
       startDailyBarRefreshScheduler();
+      // The scan pool (cap >= $1B, price >= $6, >= $50M a day): weekly refresh from FMP; SCAN_POOL=off switches it off.
+      const { scanPoolEnabled, loadThemeUniverse } = await import("./data-layer/bar-universe");
+      if (scanPoolEnabled()) {
+        const { startScanPoolScheduler } = await import("./data-layer/scan-pool");
+        const { getDb } = await import("./db");
+        const { getAllUniverseTickers } = await import("./market-condition/universe");
+        startScanPoolScheduler(async () => {
+          const d = getDb();
+          return new Set(d ? await loadThemeUniverse(d, getAllUniverseTickers()) : []);
+        }, getDb);
+      }
     } catch (err) {
       console.error("[Startup Stagger] Daily bar refresh init failed (non-fatal):", err);
     }
