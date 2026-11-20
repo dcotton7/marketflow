@@ -166,41 +166,6 @@ router.post("/market-caps/refresh", requireAdmin, async (req: Request, res: Resp
   }
 });
 
-/**
- * POST /scan-pool/refresh?dryRun=1 (admin): refresh the scan pool now (data-layer/scan-pool.ts). dryRun=1 returns the
- * plan and counts and writes nothing. GET /scan-pool: counts and the newest entries. Pool names have daily bars and are
- * scanned; they are in no theme and not in the live polling. Nothing is deleted: fall-outs are marked inactive.
- */
-let poolRunning = false;
-router.post("/scan-pool/refresh", requireAdmin, async (req: Request, res: Response) => {
-  const db = getDb();
-  if (!db) return res.status(503).json({ error: "database unavailable" });
-  if (poolRunning) return res.status(409).json({ error: "already running" });
-  poolRunning = true;
-  try {
-    const { refreshScanPool } = await import("../data-layer/scan-pool");
-    const { loadThemeUniverse } = await import("../data-layer/bar-universe");
-    const { getAllUniverseTickers } = await import("../market-condition/universe");
-    const yes = ["1", "true", "yes"].includes(String(req.query.dryRun ?? "").toLowerCase());
-    res.json(await refreshScanPool(db, { dryRun: yes, universe: new Set(await loadThemeUniverse(db, getAllUniverseTickers())) }));
-  } catch (err) {
-    console.error("[ScanPool] refresh failed:", err);
-    res.status(500).json({ error: String(err).slice(0, 200) });
-  } finally {
-    poolRunning = false;
-  }
-});
-router.get("/scan-pool", async (_req: Request, res: Response) => {
-  const db = getDb();
-  if (!db) return res.status(503).json({ error: "database unavailable" });
-  try {
-    const r = rowsOf(await db.execute(sql`SELECT COUNT(*) FILTER (WHERE active)::int AS active, COUNT(*) FILTER (WHERE NOT active)::int AS inactive, COUNT(*) FILTER (WHERE active AND NOT in_universe)::int AS pool_only, MAX(refreshed_at) AS refreshed_at FROM scan_pool`));
-    res.json({ ...r[0], floors: { marketCap: 1e9, price: 6, avgDollarVolume: (await import("../data-layer/scan-pool")).poolMinDollarVol() } });
-  } catch {
-    res.json({ active: 0, inactive: 0, pool_only: 0, refreshed_at: null, note: "not refreshed yet" });
-  }
-});
-
 /** POST /market-caps/override (admin) { symbol, marketCap, reason }: a one-off manual correction, kept in history. */
 router.post("/market-caps/override", requireAdmin, async (req: Request, res: Response) => {
   const db = getDb();

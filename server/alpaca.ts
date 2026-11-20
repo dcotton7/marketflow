@@ -493,8 +493,7 @@ const MULTI_SYMBOL_BATCH_SIZE = 100; // Stay under URL length limits
 export async function fetchAlpacaMultiSymbolDailyBars(
   symbols: string[],
   startDate: Date,
-  endDate: Date,
-  opts: { throwOnError?: boolean } = {}
+  endDate: Date
 ): Promise<Map<string, AlpacaCandle[]>> {
   const result = new Map<string, AlpacaCandle[]>();
   symbols.forEach((s) => result.set(s.toUpperCase(), []));
@@ -552,8 +551,6 @@ export async function fetchAlpacaMultiSymbolDailyBars(
     }
   } catch (error: any) {
     console.error(`[Alpaca] Multi-symbol bars failed: ${error.message}`);
-    // The daily bar job needs to tell "the vendor failed" (retry, 401 = key) from "no bars for these names".
-    if (opts.throwOnError) throw error;
   }
 
   return result;

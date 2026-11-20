@@ -18,7 +18,7 @@
 import { getDb } from "../db";
 import { historicalBars, tickerMa } from "@shared/schema";
 import { sql, eq, desc } from "drizzle-orm";
-import { fetchAlpacaMultiSymbolDailyBars } from "../alpaca";
+import { fetchAlpacaIntradayBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
 import { expectedLastSession, loadBarUniverse, loadNewestBars, splitStale } from "./bar-universe";
 import {
@@ -29,8 +29,7 @@ import {
 import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
 
 const REFRESH_LOOKBACK_DAYS = 10;
-const BATCH_SIZE = 100;
-const BATCH_PAUSE_MS = 1000;
+const BATCH_SIZE = 5;
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 let lastRefreshAttempt: Date | null = null;
@@ -139,94 +138,108 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
   let processed = 0;
   let withBars = 0;
   const noBarsList: string[] = [];
-  const now0 = new Date();
-  const currentEtDate = getEtClock(now0).dateKey;
-  const currentSession = getUsEquityMarketSession(now0);
 
-  // One multi-symbol vendor call per BATCH_SIZE names (about 16 calls for 1,550 names, was one per name).
-  // Memory: one batch of 100 names x about 7 bars at a time.
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
     // Abort remaining work if night mode starts mid-run or RSS/heap pressure persists.
     if (isNightMode()) {
-      console.warn("[DailyBarRefresh] Night mode started mid-run - stopping remaining batches.");
+      console.warn("[DailyBarRefresh] Night mode started mid-run — stopping remaining batches.");
       break;
     }
     if (isMemoryPressureHigh()) {
       memorySkipped++;
       if (memorySkipped <= 3) {
-        console.warn(`[DailyBarRefresh] Memory pressure high (heap or RSS) - pausing 10s (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
+        console.warn(
+          `[DailyBarRefresh] Memory pressure high (heap or RSS) — pausing 10s (batch ${Math.floor(i / BATCH_SIZE) + 1})`
+        );
       }
       await new Promise((r) => setTimeout(r, 10_000));
       if (isMemoryPressureHigh() || isNightMode()) {
-        console.warn("[DailyBarRefresh] Still under pressure / night mode - stopping remaining batches.");
+        console.warn("[DailyBarRefresh] Still under pressure / night mode — stopping remaining batches.");
         break;
       }
     }
 
     const batch = symbols.slice(i, i + BATCH_SIZE);
-    let fetched: Awaited<ReturnType<typeof fetchAlpacaMultiSymbolDailyBars>>;
-    try {
-      fetched = await fetchAlpacaMultiSymbolDailyBars(batch, startDate, endDate, { throwOnError: true });
-    } catch (err: any) {
-      const msg = String(err?.message ?? "");
-      if (msg.includes("401")) {
-        console.error(`[DailyBarRefresh] CRITICAL: Alpaca API key is INVALID (401). Cannot refresh bars.`);
-        apiKeyBroken = true;
-        refreshInProgress = false;
-        return false;
-      }
-      totalFailed += batch.length; // this batch is retried at the next check (its names are still stale)
-      processed = i + batch.length;
-      console.warn(`[DailyBarRefresh] batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${msg.slice(0, 120)}`);
-      await new Promise((r) => setTimeout(r, BATCH_PAUSE_MS));
-      continue;
-    }
     processed = i + batch.length;
 
-    for (const symbol of batch) {
-      const bars = fetched.get(symbol.toUpperCase()) ?? [];
-      if (bars.length === 0) {
-        noBarsList.push(symbol);
-        continue;
-      }
-      const rows = [];
-      for (const bar of bars) {
-        const barDate = getEtClock(new Date(bar.date)).dateKey;
-        // today's bar is not final while the session is open
-        if (barDate === currentEtDate && (currentSession === "pre_market" || currentSession === "regular")) continue;
-        rows.push({
-          symbol: symbol.toUpperCase(),
-          barDate,
-          open: bar.open.toString(),
-          high: bar.high.toString(),
-          low: bar.low.toString(),
-          close: bar.close.toString(),
-          volume: bar.volume,
-        });
-      }
-      if (rows.length === 0) continue;
-      try {
-        await db.insert(historicalBars).values(rows).onConflictDoUpdate({
-          target: [historicalBars.symbol, historicalBars.barDate],
-          set: {
-            open: sql`excluded.open`,
-            high: sql`excluded.high`,
-            low: sql`excluded.low`,
-            close: sql`excluded.close`,
-            volume: sql`excluded.volume`,
-          },
-        });
-        totalUpserted += rows.length;
+    const results = await Promise.allSettled(
+      batch.map(async (symbol) => {
+        try {
+          const bars = await fetchAlpacaIntradayBars(symbol, startDate, endDate, "1Day", true);
+          if (bars.length === 0) return { symbol, count: 0, empty: true };
+
+          let inserted = 0;
+          const now = new Date();
+          const currentEtDate = getEtClock(now).dateKey;
+          const currentSession = getUsEquityMarketSession(now);
+          for (const bar of bars) {
+            const barDate = getEtClock(new Date(bar.date)).dateKey;
+            const currentDayStillDeveloping =
+              barDate === currentEtDate &&
+              (currentSession === "pre_market" || currentSession === "regular");
+            if (currentDayStillDeveloping) {
+              continue;
+            }
+            try {
+              await db!.insert(historicalBars).values({
+                symbol: symbol.toUpperCase(),
+                barDate,
+                open: bar.open.toString(),
+                high: bar.high.toString(),
+                low: bar.low.toString(),
+                close: bar.close.toString(),
+                volume: bar.volume,
+              }).onConflictDoUpdate({
+                target: [historicalBars.symbol, historicalBars.barDate],
+                set: {
+                  open: bar.open.toString(),
+                  high: bar.high.toString(),
+                  low: bar.low.toString(),
+                  close: bar.close.toString(),
+                  volume: bar.volume,
+                },
+              });
+              inserted++;
+            } catch {
+              // Individual bar insert failure — skip
+            }
+          }
+          return { symbol, count: inserted };
+        } catch (err: any) {
+          const msg = String(err?.message ?? "");
+          if (msg.includes("401")) throw err;
+          return { symbol, count: 0, error: msg.slice(0, 80) };
+        }
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.count > 0) {
+        totalUpserted += r.value.count;
         withBars++;
-      } catch {
+      } else if (r.status === "fulfilled" && (r.value as any).empty) {
+        noBarsList.push(r.value.symbol);
+      } else if (r.status === "rejected") {
+        const msg = String(r.reason?.message ?? "");
+        if (msg.includes("401")) {
+          console.error(`[DailyBarRefresh] ❌ CRITICAL: Alpaca API key is INVALID (401). Cannot refresh bars.`);
+          apiKeyBroken = true;
+          refreshInProgress = false;
+          return false;
+        }
+        totalFailed++;
+      } else {
         totalFailed++;
       }
     }
 
     // Rate limit: pause between batches
-    if (i + BATCH_SIZE < symbols.length) await new Promise((r) => setTimeout(r, BATCH_PAUSE_MS));
+    if (i + BATCH_SIZE < symbols.length) {
+      await new Promise((r) => setTimeout(r, 1500));
+    }
 
-    if ((Math.floor(i / BATCH_SIZE) + 1) % 5 === 0) {
+    // Progress log every 10 batches
+    if ((Math.floor(i / BATCH_SIZE) + 1) % 10 === 0) {
       const mem = process.memoryUsage();
       console.log(`[DailyBarRefresh] Progress: ${Math.min(i + BATCH_SIZE, symbols.length)}/${symbols.length} symbols, ${totalUpserted} bars upserted, heap ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
     }

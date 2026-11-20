@@ -14,7 +14,6 @@
     "test:market-history": "tsx server/market-condition/engine/market-history.test.ts && tsx server/market-condition/utils/delisted-archive.test.ts && tsx server/market-condition/regime-cap.test.ts && tsx server/market-condition/market-caps.test.ts && tsx server/market-condition/stale-guard.test.ts && tsx server/market-condition/ticker-renames.test.ts",
     "test:setups": "tsx server/setups/leader-shakeout.test.ts && tsx server/setups/grades-stops.test.ts && tsx server/bigidea/indicators-setups.test.ts && tsx server/earnings/earnings.test.ts && tsx server/setups/market-card.test.ts",
     "test:bars": "tsx server/data-layer/bar-backfill.test.ts",
-    "test:pool": "tsx server/data-layer/scan-pool.test.ts",
     "test:vix": "tsx server/market-condition/vix-source.test.ts",
     "test:watchlist-panel": "tsx client/src/lib/watchlist-position-columns.test.ts && tsx shared/position-paste.test.ts",
     "db:push": "drizzle-kit push",
