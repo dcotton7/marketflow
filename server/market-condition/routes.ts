@@ -505,6 +505,23 @@ router.get("/screen", async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/market-condition/bars/refresh (admin): run one daily bar cycle now, in the background, ignoring night mode for
+ * that run only. Same lock, memory guard and phase lines as the scheduled job. 409 when it cannot start (another data job is
+ * running, the guard stopped one today, memory pressure high), with the reason. Progress: the service log and the status below.
+ */
+router.post("/bars/refresh", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const { startManualBarCycle, getDailyBarRefreshStatus } = await import("../data-layer/daily-bar-refresh");
+    const r = await startManualBarCycle();
+    if (!r.started) return res.status(409).json({ started: false, reason: r.reason });
+    res.status(202).json({ started: true, status: getDailyBarRefreshStatus() });
+  } catch (error) {
+    console.error("[MC-API] manual bar cycle failed to start:", error);
+    res.status(500).json({ error: "Failed to start the bar cycle" });
+  }
+});
+
+/**
  * GET /api/market-condition/leaders
  * Returns current leaders across all themes
  */

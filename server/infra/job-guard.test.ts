@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ADVISORY_KEY, guardState, guardTrippedToday, lockHolder, memLine, overLimit, resetGuardForTests, rssLimitMb, tryAcquire, withJobLock } from "./job-guard";
-import { chunkRows, maFromClosesDesc, recalculateTickerMAs } from "../data-layer/daily-bar-refresh";
+import { chunkRows, maFromClosesDesc, recalculateTickerMAs, startManualBarCycle } from "../data-layer/daily-bar-refresh";
 
 const logs: string[] = [];
 const origLog = console.log, origWarn = console.warn;
@@ -83,6 +83,21 @@ const quiet = () => { console.log = origLog; console.warn = origWarn; };
   assert.equal(selects, 3, "120 names read in 3 queries, not 120");
   assert.equal(upserts, 3, "and written in 3 statements");
   assert.equal(rowsUpserted, 120);
+  // ---- the manual bar cycle refuses, with a reason, instead of starting ------------------------------------------------
+  resetGuardForTests();
+  const held = await tryAcquire("scan pool refresh");
+  const busy = await startManualBarCycle();
+  assert.deepEqual(busy, { started: false, reason: "another data job is running (scan pool refresh)" }, "refused while another data job runs");
+  await held!();
+  overLimit("DailyBarRefresh", "batch 3", 1);
+  const off = await startManualBarCycle();
+  assert.equal(off.started, false);
+  assert.match((off as any).reason, /memory guard stopped a data job today \(DailyBarRefresh: batch 3\)/, "refused after the guard tripped");
+  resetGuardForTests();
+  const nodb = await startManualBarCycle();
+  assert.deepEqual(nodb, { started: false, reason: "database unavailable" }, "refused with no database (the test process has none)");
+  assert.equal(lockHolder(), null, "a refused start leaves no lock behind");
+
   quiet();
   console.log("job-guard tests passed");
 })();

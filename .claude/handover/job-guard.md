@@ -22,3 +22,9 @@ This commit does not claim a fix. It makes the next run safe and readable; the f
 ## Watch on the first live run
 `[Memory]` lines and the phase lines above; if RSS passes 1,300 the job stops and says where. Kill switches: SCAN_POOL=off (pool out of bars and
 refresh), JOB_RSS_LIMIT_MB (lower it to be stricter).
+
+## Manual bar cycle (21 Nov)
+`POST /api/market-condition/bars/refresh` (admin session): starts one bar cycle now, in the background (202 `{started:true,status}`), ignoring
+night mode for that run only; same lock, RSS guard, phase lines, summary build. 409 `{started:false,reason}` when another data job runs, the guard
+stopped one today, or memory pressure is already high. Progress: service log lines `[DailyBarRefresh] ... rss ...` and `Manual cycle started/finished`.
+Code: `startManualBarCycle` in data-layer/daily-bar-refresh.ts. Test: `npm run test:guard`.

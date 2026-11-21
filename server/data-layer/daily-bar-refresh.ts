@@ -21,15 +21,15 @@ import { sql } from "drizzle-orm";
 import { fetchAlpacaMultiSymbolDailyBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
 import { expectedLastSession, loadBarUniverse, loadNewestBars, loadThemeUniverse, splitStale } from "./bar-universe";
-import { guardState, guardTrippedToday, logPhase, overLimit, withJobLock } from "../infra/job-guard";
-import {
-  isMemoryPressureHigh,
-  isNightMode,
-  shouldRunHeavyBackgroundWork,
-} from "../infra/memory-gate";
+import { guardState, guardTrippedToday, lockHolder, logPhase, overLimit, tryAcquire, withJobLock } from "../infra/job-guard";
+import { isMemoryPressureHigh, isNightMode } from "../infra/memory-gate";
 import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
 
 const REFRESH_LOOKBACK_DAYS = 10;
+
+/** True only while a manually started cycle runs: night mode (8pm-4am ET, weekends) is ignored for that one run. */
+let manualRun = false;
+const nightNow = () => !manualRun && isNightMode();
 const BATCH_SIZE = 100;
 const BATCH_PAUSE_MS = 1000;
 const UPSERT_CHUNK = 500;
@@ -97,7 +97,7 @@ async function getStaleSymbols(): Promise<{ staleSymbols: string[]; freshCount: 
 async function summaryIfDue(expected: string): Promise<void> {
   try {
     const db = getDb();
-    if (!db || isNightMode() || isMemoryPressureHigh()) return;
+    if (!db || nightNow() || isMemoryPressureHigh()) return;
     const { ensureDailySummary } = await import("../market-condition/daily-summary");
     logPhase("DailySummary", "check start");
     const built = await ensureDailySummary(db, expected, await loadBarUniverse(db, getAllUniverseTickers()), {
@@ -126,12 +126,12 @@ export async function checkAndRefreshDailyBars(): Promise<boolean> {
 
 async function runCheck(): Promise<boolean> {
 
-  if (isNightMode()) {
+  if (nightNow()) {
     logOncePerDay("night", "[DailyBarRefresh] Night mode (8pm-4am ET, weekends) - bars wait for the next check.");
     return false;
   }
 
-  if (!shouldRunHeavyBackgroundWork()) {
+  if (nightNow() || isMemoryPressureHigh()) {
     logOncePerDay(`pressure-${new Date().getHours()}`, "[DailyBarRefresh] Memory pressure high - deferring refresh, retry in 30 min.");
     return true;
   }
@@ -190,7 +190,7 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
   // Memory: one batch of 100 names x about 7 bars at a time.
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
     // Abort remaining work if night mode starts mid-run or RSS/heap pressure persists.
-    if (isNightMode()) {
+    if (nightNow()) {
       console.warn("[DailyBarRefresh] Night mode started mid-run - stopping remaining batches.");
       break;
     }
@@ -200,7 +200,7 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
         console.warn(`[DailyBarRefresh] Memory pressure high (heap or RSS) - pausing 10s (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
       }
       await new Promise((r) => setTimeout(r, 10_000));
-      if (isMemoryPressureHigh() || isNightMode()) {
+      if (isMemoryPressureHigh() || nightNow()) {
         console.warn("[DailyBarRefresh] Still under pressure / night mode - stopping remaining batches.");
         break;
       }
@@ -319,7 +319,7 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
           `(${totalFailed} failed${memorySkipped > 0 ? `, ${memorySkipped} batches deferred for memory` : ""}). ` +
           `Now recalculating MAs...`
       );
-      if (!isNightMode() && !isMemoryPressureHigh() && !stoppedByGuard) {
+      if (!nightNow() && !isMemoryPressureHigh() && !stoppedByGuard) {
         // ticker_ma serves the theme readings; scan-pool-only names have no use for it (R7 has its own summary)
         const themeSet = new Set(await loadThemeUniverse(db, getAllUniverseTickers()));
         logPhase("DailyBarRefresh", "MA phase start");
@@ -424,6 +424,33 @@ export async function recalculateTickerMAs(db: any, tickers: string[]): Promise<
     await new Promise((r) => setTimeout(r, 10));
   }
   console.log(`[DailyBarRefresh] ✅ Recalculated MAs for ${updated} symbols (${errors} errors).`);
+}
+
+/**
+ * Start one bar cycle now, by hand (admin route POST /api/market-condition/bars/refresh): ignores night mode for this run only,
+ * under the same lock, memory guard and phase lines as the scheduled one. Refuses (and says why) when another data job is
+ * running, the memory guard stopped one today, or memory pressure is already high. The cycle runs in the background: the answer
+ * comes at once, progress is in the log (`[DailyBarRefresh] ... rss`) and in getDailyBarRefreshStatus().
+ */
+export async function startManualBarCycle(): Promise<{ started: true } | { started: false; reason: string }> {
+  if (refreshInProgress) return { started: false, reason: "a bar refresh is already running" };
+  if (lockHolder()) return { started: false, reason: `another data job is running (${lockHolder()})` };
+  if (guardTrippedToday()) return { started: false, reason: `the memory guard stopped a data job today (${guardState()?.where}); wait until tomorrow` };
+  if (isMemoryPressureHigh()) return { started: false, reason: "memory pressure is already high" };
+  const db = getDb();
+  if (!db) return { started: false, reason: "database unavailable" };
+  const release = await tryAcquire("daily bar job (manual)", db);
+  if (!release) return { started: false, reason: "another data job is running (bar job, pool refresh or backfill)" };
+  manualRun = true;
+  console.log("[DailyBarRefresh] Manual cycle started (night mode ignored for this run).");
+  void runCheck()
+    .catch((err) => console.error("[DailyBarRefresh] Manual cycle failed:", String(err).slice(0, 200)))
+    .finally(async () => {
+      manualRun = false;
+      await release();
+      console.log("[DailyBarRefresh] Manual cycle finished.");
+    });
+  return { started: true };
 }
 
 /**
