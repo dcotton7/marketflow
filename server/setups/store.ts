@@ -98,7 +98,7 @@ export function pgSetupStore(db: Exec): SetupStore {
     },
     async shakeoutKeys(ruleVersion, from) {
       await ensureSetupTables(db);
-      const r = await db.execute(sql`SELECT market_date::text AS d, symbol FROM setup_leader_shakeout WHERE rule_version = ${ruleVersion} AND market_date >= ${from}::date`);
+      const r = await db.execute(sql`SELECT market_date::text AS d, symbol FROM setup_leader_shakeout WHERE rule_version = ${ruleVersion} AND market_date >= ${from}`); // market_date is TEXT (YYYY-MM-DD): compare as text
       return new Set(rowsOf(r).map((x) => `${String(x.symbol).toUpperCase()}|${String(x.d).slice(0, 10)}`));
     },
     async insertRun(r) {
