@@ -187,7 +187,7 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
   const ideas = new Map<number, any>();
   if (ideaIds.length) {
     try {
-      for (const r of rowsOf(await db.execute(sql`SELECT id, user_id, nodes, edges FROM scanner_ideas WHERE id = ANY(${ideaIds})`))) ideas.set(Number(r.id), r);
+      for (const r of rowsOf(await db.execute(sql`SELECT id, user_id, nodes, edges FROM scanner_ideas WHERE id IN (${sql.join(ideaIds.map((x) => sql`${x}`), sql`, `)})`))) ideas.set(Number(r.id), r);
     } catch { /* each such setup then reports "idea not found" */ }
   }
   const resolved = resolveIdeas(stored, ideas);
@@ -223,7 +223,7 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
   const into = newAcc();
   for (let i = 0; i < all.length; i += 200) {
     const chunk = all.slice(i, i + 200);
-    const r = await db.execute(sql`SELECT symbol, bar_date::text AS d, open, high, low, close, volume FROM historical_bars WHERE symbol = ANY(${chunk}) AND bar_date >= ${cutoff}::date AND bar_date < ${date}::date ORDER BY symbol, bar_date`);
+    const r = await db.execute(sql`SELECT symbol, bar_date::text AS d, open, high, low, close, volume FROM historical_bars WHERE symbol IN (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)}) AND bar_date >= ${cutoff}::date AND bar_date < ${date}::date ORDER BY symbol, bar_date`);
     const bars = new Map<string, DailyBar[]>();
     for (const x of rowsOf(r)) {
       const s = String(x.symbol).toUpperCase();

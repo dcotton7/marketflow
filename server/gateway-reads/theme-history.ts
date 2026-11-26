@@ -429,7 +429,7 @@ export function pgHistorySource(db: Exec, opts: { themeMembersNow?: () => Promis
       if (!symbols.length) return out;
       for (let i = 0; i < symbols.length; i += 2000) {
         const chunk = symbols.slice(i, i + 2000);
-        for (const r of rowsOf(await db.execute(sql`SELECT symbol, bar_date::text AS d, close::float8 AS c FROM historical_bars WHERE symbol = ANY(${chunk}) AND bar_date = ANY(${dates}::date[])`))) {
+        for (const r of rowsOf(await db.execute(sql`SELECT symbol, bar_date::text AS d, close::float8 AS c FROM historical_bars WHERE symbol IN (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)}) AND bar_date IN (${sql.join(dates.map((x) => sql`${x}`), sql`, `)})`))) {
           const s = String(r.symbol).toUpperCase();
           (out.get(s) ?? out.set(s, new Map()).get(s)!).set(String(r.d).slice(0, 10), Number(r.c));
         }

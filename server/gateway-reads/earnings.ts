@@ -176,7 +176,7 @@ const text = (x: unknown) => (x === null || x === undefined ? null : String(x).s
 export function pgEarningsSource(db: Exec): EarningsSource {
   const listed = async (symbols: string[], today: string) => {
     if (!symbols.length) return new Map<string, string>();
-    const r = rowsOf(await db.execute(sql`SELECT symbol, report_date::text AS d, MIN(fetched_on)::text AS f FROM earnings_estimates_daily WHERE symbol = ANY(${symbols}) AND report_date >= ${today}::date GROUP BY symbol, report_date`));
+    const r = rowsOf(await db.execute(sql`SELECT symbol, report_date::text AS d, MIN(fetched_on)::text AS f FROM earnings_estimates_daily WHERE symbol IN (${sql.join(symbols.map((x) => sql`${x}`), sql`, `)}) AND report_date >= ${today}::date GROUP BY symbol, report_date`));
     return new Map(r.map((x) => [`${x.symbol}|${text(x.d)}`, String(text(x.f))]));
   };
   return {
@@ -192,7 +192,7 @@ export function pgEarningsSource(db: Exec): EarningsSource {
     },
     async calendarFor(fetchedOn, symbols, today) {
       if (!symbols.length) return [];
-      const r = rowsOf(await db.execute(sql`SELECT DISTINCT ON (symbol) symbol, report_date::text AS d, hour, eps_estimate, source FROM earnings_estimates_daily WHERE fetched_on = ${fetchedOn}::date AND symbol = ANY(${symbols}) AND report_date >= ${today}::date ORDER BY symbol, report_date`));
+      const r = rowsOf(await db.execute(sql`SELECT DISTINCT ON (symbol) symbol, report_date::text AS d, hour, eps_estimate, source FROM earnings_estimates_daily WHERE fetched_on = ${fetchedOn}::date AND symbol IN (${sql.join(symbols.map((x) => sql`${x}`), sql`, `)}) AND report_date >= ${today}::date ORDER BY symbol, report_date`));
       const since = await listed(r.map((x) => String(x.symbol)), today);
       return r.map((x) => ({ symbol: String(x.symbol), date: String(text(x.d)), hour: x.hour ?? null, epsEstimate: numOrNull(x.eps_estimate), source: String(x.source), listedSince: since.get(`${x.symbol}|${text(x.d)}`) ?? null }));
     },
@@ -213,12 +213,12 @@ export function pgEarningsSource(db: Exec): EarningsSource {
     },
     async tickerDates(symbols) {
       if (!symbols.length) return [];
-      const r = rowsOf(await db.execute(sql`SELECT symbol, next_earnings_date, earnings_time, earnings_fetched_at FROM tickers WHERE symbol = ANY(${symbols})`));
+      const r = rowsOf(await db.execute(sql`SELECT symbol, next_earnings_date, earnings_time, earnings_fetched_at FROM tickers WHERE symbol IN (${sql.join(symbols.map((x) => sql`${x}`), sql`, `)})`));
       return r.map((x) => ({ symbol: String(x.symbol), date: x.next_earnings_date ? String(x.next_earnings_date) : null, time: x.earnings_time ?? null, fetchedAt: x.earnings_fetched_at ? new Date(x.earnings_fetched_at).toISOString() : null }));
     },
     async followed(symbols) {
       if (!symbols.length) return new Set();
-      const r = rowsOf(await db.execute(sql`SELECT symbol FROM tickers WHERE symbol = ANY(${symbols}) UNION SELECT DISTINCT symbol FROM historical_bars WHERE symbol = ANY(${symbols}) AND bar_date >= ${addDays(getEtClock().dateKey, -14)}::date`));
+      const r = rowsOf(await db.execute(sql`SELECT symbol FROM tickers WHERE symbol IN (${sql.join(symbols.map((x) => sql`${x}`), sql`, `)}) UNION SELECT DISTINCT symbol FROM historical_bars WHERE symbol IN (${sql.join(symbols.map((x) => sql`${x}`), sql`, `)}) AND bar_date >= ${addDays(getEtClock().dateKey, -14)}::date`));
       return new Set(r.map((x) => String(x.symbol).toUpperCase()));
     },
   };

@@ -159,10 +159,11 @@ export function pgTriggerStore(db: Exec): TriggerStore {
     },
     async listCandidates(q) {
       await ensureTriggerTables(db);
+      if (!q.grades.length) return [];
       const owner = q.viewerUserId === null ? sql`setup_owner = 'builtin'` : sql`(setup_owner = 'builtin' OR owner_user_id = ${q.viewerUserId})`;
       const side = q.side ? sql` AND side = ${q.side}` : sql``;
       const setup = q.setup ? sql` AND setup_key = ${q.setup}` : sql``;
-      const r = await db.execute(sql`SELECT * FROM trigger_candidates WHERE market_date = ${q.day} AND id > ${q.since} AND grade = ANY(${q.grades}) AND ${owner}${side}${setup} ORDER BY id ASC LIMIT ${q.limit}`);
+      const r = await db.execute(sql`SELECT * FROM trigger_candidates WHERE market_date = ${q.day} AND id > ${q.since} AND grade IN (${sql.join(q.grades.map((x) => sql`${x}`), sql`, `)}) AND ${owner}${side}${setup} ORDER BY id ASC LIMIT ${q.limit}`);
       return rowsOf(r).map(fromRow);
     },
     async dedupeSeeds(day) {
