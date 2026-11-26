@@ -23,7 +23,7 @@ import OpenAI from "openai";
 import * as alpaca from "../alpaca";
 import * as fundamentals from "../fundamentals";
 import { getDailyBars, getIntradayBars } from "../data-layer";
-import { autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
+import { autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext, weeklyImprovementPct } from "./queryOptimizer";
 import { decideOptimization } from "./scan-plan";
 import { sessionUserId, loadCaller, isAdminOrOwner } from "./access";
 import { setupLibraryGuard, setupOwnershipGuard } from "./setup-library";
@@ -4421,17 +4421,12 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         .orderBy(desc(scanSessions.createdAt))
         .limit(100);
       
-      const avgRecentEvals = recentSessions.length > 0
-        ? recentSessions.reduce((sum, s) => sum + (s.totalEvaluations || 0), 0) / recentSessions.length
-        : 0;
-      
-      const avgPreviousEvals = previousSessions.length > 0
-        ? previousSessions.reduce((sum, s) => sum + (s.totalEvaluations || 0), 0) / previousSessions.length
-        : avgRecentEvals;
-      
-      const weeklyImprovement = avgPreviousEvals > 0
-        ? ((avgPreviousEvals - avgRecentEvals) / avgPreviousEvals) * 100
-        : 0;
+      // scan_sessions has no totalEvaluations column (this read undefined, so the figure was always 0): use the
+      // thought evaluations per name each session's funnel recorded
+      const weeklyImprovement = weeklyImprovementPct(
+        recentSessions.map((s) => s.funnelData),
+        previousSessions.map((s) => s.funnelData),
+      );
       
       // Find top improved indicator
       const sortedBySelectivity = [...stats].sort((a, b) => b.selectivityScore - a.selectivityScore);

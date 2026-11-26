@@ -433,3 +433,25 @@ export async function recordThoughtPerformance(
     console.error(`[QueryOptimizer] Failed to record performance for ${indicatorId}:`, error);
   }
 }
+
+/**
+ * Thought evaluations per name in one scan, from the funnel the scan stored on scan_sessions (perThought[].evaluated,
+ * totalTickers). Null when the funnel lacks them. Fewer per name = the optimizer skipped more work.
+ */
+export function thoughtEvaluationsPerName(funnelData: unknown): number | null {
+  const f = funnelData as { totalTickers?: number; perThought?: Record<string, { evaluated?: number }> } | null;
+  if (!f || !f.perThought || !(Number(f.totalTickers) > 0)) return null;
+  const evaluated = Object.values(f.perThought).reduce((s, t) => s + (Number(t?.evaluated) || 0), 0);
+  return evaluated / Number(f.totalTickers);
+}
+
+/** % fewer thought evaluations per name in the recent scans than in the previous ones; 0 when either side is empty. */
+export function weeklyImprovementPct(recent: unknown[], previous: unknown[]): number {
+  const avg = (xs: unknown[]) => {
+    const v = xs.map(thoughtEvaluationsPerName).filter((x): x is number => x !== null);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  };
+  const r = avg(recent), p = avg(previous);
+  if (r === null || p === null || p <= 0) return 0;
+  return ((p - r) / p) * 100;
+}
