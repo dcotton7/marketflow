@@ -5,6 +5,7 @@ import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor, criterionPass, setupIndicatorChoices } from "./indicators";
 import { earningsDays } from "./earnings-days";
+import { logAiCall, promptChars } from "./ai-cost";
 import { loadLatest as loadLatestEarnings, upcomingStatus as earningsCalendarStatus } from "../earnings/upcoming";
 import { etDateKey } from "@shared/us-market-holidays";
 import { evaluateDslIndicator, validateDslDefinition, DslLogicDefinition } from "./dsl-evaluator";
@@ -1512,15 +1513,17 @@ ${summaries}`;
         // Non-critical, continue without existing thoughts context
       }
 
+      const createMessages = [
+        { role: "system" as const, content: systemPrompt + existingThoughtsContext },
+        { role: "user" as const, content: description },
+      ];
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt + existingThoughtsContext },
-          { role: "user", content: description },
-        ],
+        messages: createMessages,
         response_format: { type: "json_object" },
         temperature: 0.3,
       });
+      logAiCall({ route: "ai/create-thought", model: "gpt-4o", userId, promptChars: promptChars(createMessages), usage: completion.usage });
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {
@@ -1805,6 +1808,7 @@ Respond with valid JSON in this format:
         response_format: { type: "json_object" },
         temperature: 0.3,
       });
+      logAiCall({ route: "ai/refine-proposal", model: "gpt-4o", userId, promptChars: promptChars(messages), usage: completion.usage });
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {
@@ -1967,15 +1971,17 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(500).json({ error: "AI service not configured." });
       }
 
+      const restateMessages = [
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: instruction },
+      ];
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: instruction },
-        ],
+        messages: restateMessages,
         response_format: { type: "json_object" },
         temperature: 0.3,
       });
+      logAiCall({ route: "ai/restate-thought", model: "gpt-4o", userId, promptChars: promptChars(restateMessages), usage: completion.usage });
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {
