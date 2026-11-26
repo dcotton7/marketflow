@@ -5,8 +5,9 @@
  * per scan: user_id, idea_id, scan_config ({ nodes, edges, universe }), result_count, result_symbols (the matched
  * tickers, in result order), funnel_data (totalTickers, fetchFails, tooFewCandles, perThought and perIndicator counts),
  * created_at. Nothing in the app deletes or prunes those rows. Not stored: each match's price, name and passed paths.
- * The app's two callers (BigIdeaPage, ValidationMode) send no ideaId, so idea_id is null on their rows; the thoughts'
- * names are in funnel_data.perThought.
+ * The BigIdea page sends the saved idea's id (none for an unsaved canvas) and the route keeps it only when the idea is
+ * the caller's own; Validation Mode scans an extracted idea, not a saved one, so its rows have no idea_id. Rows saved
+ * before 26 Nov have none either. The thoughts' names are in funnel_data.perThought.
  *
  *   GET /api/bigidea/scan-results[?ideaId=N][&limit=N (1-50, default 20)][&symbols=N (per scan, 1-500, default 200)]
  *       the user's newest scans first, with the idea's name, the universe, the time, the counts and the matches.
@@ -84,7 +85,7 @@ export function scanResultsRoutes(deps: { source?: () => ScanSource | null } = {
         notes: [
           "One row per run of a BigIdea scan (POST /api/bigidea/scan), newest first; symbols are the matched tickers in result order.",
           "Stored per scan: idea, universe, time, result count, matched symbols, per-thought pass/fail counts. Not stored: each match's price and which paths it passed.",
-          "ideaId / ideaName are null when the page did not send the idea (the BigIdea page and Validation Mode send none today); the thoughts' names are in funnel.perThought.",
+          "ideaId / ideaName are the saved idea the scan was run from; null for an unsaved canvas, a Validation Mode scan, or a scan saved before 26 Nov 2026. The thoughts' names are in funnel.perThought.",
           "A scan of a watchlist is sent as a ticker list: its universe is null and the list itself is not stored.",
         ],
       });

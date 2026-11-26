@@ -1571,7 +1571,10 @@ export default function BigIdeaPage() {
 
       const scanStartTime = Date.now();
 
-      let scanBody: any = { nodes: scanNodes, edges: scanEdges, universe };
+      // the saved idea this canvas is (null for an unsaved canvas): stored on the scan session; the server keeps it
+      // only when the idea is the caller's own
+      const ideaId = currentIdeaId ?? null;
+      let scanBody: any = { nodes: scanNodes, edges: scanEdges, universe, ideaId };
       if (universe.startsWith("watchlist-")) {
         const watchlistId = parseInt(universe.replace("watchlist-", ""));
         const wlRes = await apiRequest("GET", `/api/sentinel/watchlist?watchlistId=${watchlistId}`);
@@ -1581,7 +1584,7 @@ export default function BigIdeaPage() {
           toast({ title: "This watchlist is empty — add tickers first", variant: "destructive" });
           return;
         }
-        scanBody = { nodes: scanNodes, edges: scanEdges, customTickers: wlTickers };
+        scanBody = { nodes: scanNodes, edges: scanEdges, customTickers: wlTickers, ideaId };
       }
 
       const res = await apiRequest("POST", "/api/bigidea/scan", scanBody);

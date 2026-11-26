@@ -168,10 +168,12 @@ Not stored: each match's price, name and which paths it passed (only in the scan
 the user's thumbs up / down per symbol; `saved_scans` an old, unrelated filter store; `scanner_discoveries` is the
 Signals scanner, not BigIdea.
 
-**A gap found:** the app's two callers (`client/src/pages/BigIdeaPage.tsx`, `client/src/components/bigidea/
-ValidationMode.tsx`) send no `ideaId`, so `idea_id` is null on their rows and a scan cannot be tied to a saved idea by
-id; the thoughts' names are in `funnel_data.perThought`. The smallest fix: send `ideaId` in those two request bodies
-(the server already stores it). Not done here (BigIdea's lane).
+**A gap found, and closed on 26 Nov:** the app's callers sent no `ideaId`, so `idea_id` was null on every row. The
+BigIdea page (`client/src/pages/BigIdeaPage.tsx`) now sends the saved idea's id (null for an unsaved canvas), and
+`POST /api/bigidea/scan` stores it only when that idea is the caller's own; another user's id, a missing idea or a
+non-number is stored as null and the scan is still saved (`server/bigidea/private-per-user.test.ts`). Validation Mode
+(`client/src/components/bigidea/ValidationMode.tsx`) scans an extracted idea, not a saved one, so it sends none. Rows
+saved before then keep a null `idea_id`; the thoughts' names are in `funnel_data.perThought`.
 
 So no new table and no line in `server/bigidea/routes.ts` was needed: matched symbols are already stored.
 

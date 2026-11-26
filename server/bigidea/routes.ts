@@ -2824,11 +2824,13 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       if (userId && isDatabaseAvailable() && db) {
         try {
           const resultSymbols = results.map((r: any) => r.symbol);
-          // a session may point only at the caller's own idea
+          // a session may point only at the caller's own idea; anything else (another user's idea, no such idea,
+          // not a whole number) is stored as no idea, and the scan is still saved
           let ownScanIdeaId: number | undefined;
-          if (ideaId) {
+          const askedIdeaId = Number(ideaId);
+          if (ideaId != null && Number.isInteger(askedIdeaId) && askedIdeaId > 0 && askedIdeaId <= 2147483647) {
             const [own] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
-              .where(and(eq(scannerIdeas.id, parseInt(String(ideaId))), eq(scannerIdeas.userId, userId)));
+              .where(and(eq(scannerIdeas.id, askedIdeaId), eq(scannerIdeas.userId, userId)));
             ownScanIdeaId = own?.id;
           }
           const [session] = await db
