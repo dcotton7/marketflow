@@ -2466,20 +2466,11 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                 }
                 
                 const mergedUpstream: Record<string, any> = {};
-                const incomingEdges = optimizedEdges.filter((e: any) => e.target === node.id);
-                
+                // (An edge's linkTolerance used to be copied in here as _linkTolerance; no indicator ever read it
+                // and the canvas never set it, so it is gone. Upstream data is passed exactly as produced.)
                 for (const srcId of upstreamNodes) {
                   const srcData = nodeOutputData[srcId];
-                  if (srcData) {
-                    Object.assign(mergedUpstream, srcData);
-                    
-                    // Apply link tolerance if specified on the edge
-                    const edge = incomingEdges.find((e: any) => e.source === srcId);
-                    if (edge?.linkTolerance !== undefined) {
-                      mergedUpstream._linkTolerance = edge.linkTolerance;
-                      mergedUpstream._linkToleranceType = edge.linkToleranceType || "bars";
-                    }
-                  }
+                  if (srcData) Object.assign(mergedUpstream, srcData);
                 }
                 
                 // Add fundamental data if available (always include if fetched, even if no upstream nodes)
