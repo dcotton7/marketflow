@@ -204,3 +204,17 @@ size, worth one if it grows into the tens of thousands).
 
 Still never: Schwab orders and transactions, any `/ai/*` route, any new POST, `POST bigidea/scan`, the admin
 `market-condition/history/:kind` dump.
+
+## 6. Checks
+
+`npm run test:gateway-reads` (earnings, theme history, scan results, gateway, access guard): fixed fixture cases, no
+database, no network. `npm run check`: 674 errors on main before and after (none in these files).
+
+## Must be checked live before merging
+
+- `earnings/upcoming?days=7`: the liquidity CTE's cost on the real `historical_bars` (it reads ~45 days of bars for the
+  window's symbols only); `?symbols=` for a followed, unfollowed and ETF symbol.
+- `setups/vix`: whether FMP's quote carries `timestamp` (`reading.quoteTime`).
+- `themes/move` both methods against what the Theme Tracker shows for the same days; `themes/velocity` in market hours.
+- `group_ticks_5m` rows appear after the first market-hours slot following the deploy, ~20 per slot.
+- `bigidea/scan-results` returns Don's rows only (`user_id` = the gateway user).
