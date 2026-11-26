@@ -81,6 +81,33 @@ async function main() {
     assert.ok(libB.includes("MA-1"), "built-ins for everyone");
     assert.equal((await call("GET", "/api/bigidea/indicators", null)).status, 401);
 
+    // scan sessions keep the idea only when it is the scanner's own; the gateway read then shows it with its name
+    {
+      const sym = `ZS${Date.now() % 100000}`; // no bars: the scan finds nothing, but the session is still saved
+      const scanAs = async (user: number, id: unknown) => {
+        const r = await call("POST", "/api/bigidea/scan", user, { nodes, edges: [{ source: "n1", target: "results" }], customTickers: [sym], ideaId: id });
+        assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+        assert.ok(r.body.sessionId, "a session is saved");
+        return (await sql("SELECT user_id, idea_id FROM scan_sessions WHERE id = $1", [r.body.sessionId]))[0];
+      };
+      assert.equal((await scanAs(alice, ideaId)).idea_id, ideaId, "own idea kept");
+      assert.equal((await scanAs(alice, String(ideaId))).idea_id, ideaId, "as text too");
+      assert.equal((await scanAs(bob, ideaId)).idea_id, null, "another user's idea is not stored");
+      assert.equal((await scanAs(alice, null)).idea_id, null, "unsaved canvas");
+      assert.equal((await scanAs(alice, "abc")).idea_id, null, "junk id: no idea, scan still saved");
+      assert.equal((await scanAs(alice, 99999999999)).idea_id, null, "out of range: no idea, scan still saved");
+
+      const { getDb } = await import("../db");
+      const { pgScanSource, toScanRow } = await import("../gateway-reads/scan-results");
+      const src = pgScanSource(getDb()!);
+      const mine = (await src.recent(alice, { ideaId, limit: 50 })).map((r) => toScanRow(r, 200));
+      assert.equal(mine.length, 2, "Alice's two scans of her idea");
+      for (const s of mine) { assert.equal(s.ideaId, ideaId); assert.equal(s.ideaName, "A idea"); }
+      assert.deepEqual(await src.recent(bob, { ideaId, limit: 50 }), [], "Bob's scan is not filed under Alice's idea");
+      const bobs = (await src.recent(bob, { ideaId: null, limit: 50 })).map((r) => toScanRow(r, 200));
+      assert.ok(bobs.length >= 1 && bobs.every((s) => s.ideaId === null && s.ideaName === null));
+    }
+
     console.log("private-per-user: all checks passed");
   } finally {
     await h.close();

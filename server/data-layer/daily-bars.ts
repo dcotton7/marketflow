@@ -8,7 +8,7 @@
  * This eliminates API calls for daily bar data in scans and technicals.
  */
 
-import { desc, eq, and, gte, sql } from "drizzle-orm";
+import { desc, eq, and, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { historicalBars } from "@shared/schema";
 import { getTickerSnapshot } from "../market-condition/engine/snapshot";
@@ -107,6 +107,15 @@ export async function getDailyBars(
 }
 
 /**
+ * The batch read's filter. inArray sends one placeholder per symbol: symbol in ($1, $2, ...). The old form, a JS
+ * list inside sql`` after "= ANY", was sent as ANY(($1, $2)), which Postgres refuses ("op ANY/ALL (array) requires
+ * array on right side"). See array-sql.test.ts.
+ */
+export function batchBarsWhere(upperSymbols: string[], cutoffStr: string) {
+  return and(inArray(historicalBars.symbol, upperSymbols), gte(historicalBars.barDate, cutoffStr));
+}
+
+/**
  * Get daily bars for multiple symbols (batch operation).
  * More efficient than calling getDailyBars individually.
  * 
@@ -135,12 +144,7 @@ export async function getDailyBarsBatch(
     const dbBars = await db
       .select()
       .from(historicalBars)
-      .where(
-        and(
-          sql`${historicalBars.symbol} = ANY(${upperSymbols})`,
-          gte(historicalBars.barDate, cutoffStr)
-        )
-      )
+      .where(batchBarsWhere(upperSymbols, cutoffStr))
       .orderBy(historicalBars.symbol, desc(historicalBars.barDate));
 
     const barsBySymbol = new Map<string, typeof dbBars>();
