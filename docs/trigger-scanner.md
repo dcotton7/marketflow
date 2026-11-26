@@ -6,7 +6,7 @@ and stores it append-only. The result is a **pass list** served read-only throug
 model anywhere in it. Each person's own AI reads the pass list and picks the short list (Don, 26 Nov: "run the scan
 in marketflow and the AI analysis on the short list or pass list into each persons AI").
 
-Code: `server/trigger-scanner/`. Tables: `migrations/029_trigger_scanner.sql`. Tests: `npm run test:trigger-scanner`.
+Code: `server/trigger-scanner/`. Setups: the seven intraday triggers below, gap and go, Leader Shakeout, and users' own. Tables: `migrations/029_trigger_scanner.sql`. Tests: `npm run test:trigger-scanner`.
 Replay: `npm run trigger:replay -- [fixture.json] [--grade=A,B|all] [--json]`.
 
 ## The flag and what it changes
@@ -28,7 +28,7 @@ The flag is `TRIGGER_SCANNER=on`. It is unset in the repo.
 | `TRIGGER_SCANNER_SHORTLIST_MAX` | 300 | Names given bars in the shortlist tier |
 | `TRIGGER_SCANNER_MAX_PER_DAY` | 5000 | Candidates stored a day |
 
-Every trigger threshold is in `settings.ts` `DEFAULTS`. `RULE_VERSION` (`ts-2026-11-26-v1`) is stored on every row,
+Every trigger threshold is in `settings.ts` `DEFAULTS`. `RULE_VERSION` (`ts-2026-11-26-v2`; v2 added gap and go) is stored on every row,
 so a later change to a threshold never changes the meaning of stored rows.
 
 **Lines changed outside the new folder:**
@@ -132,12 +132,98 @@ measured. A measured per-name curve needs about 20 days of stored 5-minute histo
 | `level_hold` / `level_reject` | long / short | Daily levels: SMA 5/10/20/50, EMA 10/20, previous low/high, and gap edges whose role fits. Earlier today price was at least `levelApproachAdr` 0.3 ADR on the right side. The previous bar closed on the right side. This bar tags the level within `touchTolPct` 0.15% and closes back. One hit a bar: the level nearest the close. The variant is the level name | 120 min per level |
 | `lod_reversal` / `hod_reversal` | long / short | This bar or the one before set a new session low (high), not on the first bar. The open is at least `reversalMinMoveAdr` 0.5 ADR from that extreme. This bar closes up (down), in the top (bottom) `reversalCloseShare` 60% of its range, past the previous close | 60 min |
 | `new_high_volume` / `new_low_volume` | long / short | After the range, a close above every earlier high (under every earlier low). The bar's volume and the day's volume so far are both at least `newExtremeMinRelVol` 1.5x their norms | 60 min |
+| `gap_and_go` / `gap_down_and_go` | long / short | A true gap (open beyond the prior high / low) on volume that has held, within `goMaxDays` 10 sessions (the gap day is day 0). The first close beyond the go level (the highest high / lowest low since the gap; on day 0 the opening-range high / low) by `goBreakAdr` 0.05 ADR, on `goRelVol` 1.5x. On day 0 it replaces `orb_breakout` / `orb_breakdown` on the same bar (`facts.also`). The full rule is in the next section | once per gap per day; at most `goMaxFires` 2 per gap |
 | `leader_shakeout` (daily in range) | long | A Leader Shakeout hit of the last 5 sessions. This bar closes within `inRangeAdr` 0.5 ADR of the drop day's close (entry level; PROPOSAL) and closes up. Tested: 2 grade points | 1 day |
 | user setups (`daily_in_range`) | the setup's | Passed on last night's bars. This bar closes within the setup's `range_adr` (or 0.5) of its entry level and moves the setup's way | 1 day |
 
 The noise guards (approach, cross size, break size) were added after a synthetic worst case: 1,750 random walks with
 every daily level within 1.5% of the price. That case produced 29k candidates, and 16.6k after the guards. Real
 counts are unknown until a live day; the daily cap (5,000) bounds storage.
+
+## Gap and go (Don, 26 Nov: "add gap and GO, the GO can happen up to n-number of days after the gap up")
+
+Code: `gap.ts`. Tests: `gap.test.ts`. Every number below is a setting in `settings.ts`.
+
+**The gap day.** Gap days in the finished sessions are found once a day, before the open. Today's own gap is read
+intraday. A session is a gap up when all of these hold:
+- **Size.** The open is at least `gapMinPct` **4%** and at least `gapMinAdr` **1.0 ADR** beyond the **edge**. ADR here is
+  the 20 sessions before the gap.
+- **The edge.** By default it is the prior session's **high** (`gapFrom = "prior_high"`: a true gap, the open clears
+  all of yesterday's trading). `gapFrom = "prior_close"` (or `TRIGGER_SCANNER_GAP_FROM=prior_close`) measures from
+  the prior close instead.
+- **Volume.** Day volume is at least `gapVolMult` **2.0x** the average of the `gapVolDays` **50** sessions before it
+  (at least 20 are needed).
+- **Close.** In the upper half of the day's range (CLV at least 0.5) and above the edge.
+- **Not a split cliff** in the stored bars (`setups/daily-math.ts` `looksLikeSplit`).
+
+On day 0 the volume test is the day's volume so far against its time-of-day norm (from the 50-day average). The
+close tests use the bar just closed.
+
+The **short mirror** opens below the prior **low** (or close) by the same amounts, closes in the lower half and
+below the edge.
+
+**`earnings_gap`** is a fact, never a requirement:
+- `true` when the gap session is a reaction session of a report (bmo/dmh = that day, amc = the next, via
+  `earnings/upcoming.ts` `reactionSessions`) or within `earningsWindow` **1** session after one;
+- `false` when the calendar was pulled this week and has none;
+- `unknown` otherwise.
+
+**Still valid.** Today is day `d`, the number of sessions after the gap day (today counts). The gap stays valid while:
+- `d` is at most `goMaxDays` **10** (`TRIGGER_SCANNER_GO_MAX_DAYS`);
+- no session since has **closed** below the edge (a short: above). Intraday dips that close back above do not count.
+
+A close through the edge kills the setup for good: the gap failed and flipped to resistance, and that gap is never
+raised again. On day 0, a 5-minute close back through the edge counts as failing. The newest valid gap per direction
+is the one watched.
+
+**The GO.** It fires on the first 5-minute close today beyond the **go level** by `goBreakAdr` **0.05 ADR**, with the
+bar's relative volume at least `goRelVol` **1.5**.
+- **Go level:** the highest high from the gap day through yesterday. That is the gap-day high (`gap_day_high`), or
+  the consolidation high (`consolidation_high`) when a later day went higher.
+- **Day 0:** the opening-range high (first 15 minutes, `opening_range_high`). When `orb_breakout` would fire on the
+  same bar, only `gap_and_go` is raised, with `facts.also = "orb_breakout"`.
+- **Once per gap per day.**
+- **Repeat:** a later day fires again only when, since the last fire, price pulled back at least
+  `repeatPullbackAdr` **1.0 ADR** from its high and the go level is now higher. At most `goMaxFires` **2** fires per
+  gap. Earlier fires are read from `trigger_candidates`.
+
+**The stop** is the nearest valid level (the same rule as every setup: 0.25 ADR noise floor, 5% refusal) among:
+- the **consolidation low**: the lowest low of the sessions after the gap day through yesterday, used only when it is
+  above the edge;
+- today's **VWAP**;
+- **today's low**;
+- the **5- and 10-day SMA**;
+- the **gap edge**.
+
+The level used is stored in `stop_level`.
+
+**Grade.** It is a built-in, untested setup: 1 point. A stop at a **tight** consolidation's low (range at most
+`tightRangeAdr` **1.5 ADR** over at least `tightMinDays` **2** sessions) earns the "stop level has company" point
+(`facts.company = "tight consolidation"`). Nothing else in the grade changes.
+
+**Facts:**
+- the gap: `gapDate`, `gapPct`, `gapAdr`, `volMult`, `gapEdge`;
+- the timing: `daysSinceGap`, `fireNo`, `also` (when it replaced an ORB);
+- the go: `goLevel`, `goFrom`, `relVol`;
+- the consolidation: `pullbackAdr` (from the best price since the gap to the worst after it, in ADR),
+  `consRangeAdr`, `consDays`, `tight`;
+- `earningsGap`.
+
+**How it differs from `setups/earnings-gap-up.ts`.** That setup measures from the prior **close**, by at least 3% and
+1 ATR14, needs volume at least 2x the **20**-day average, needs close > open and CLV at least 0.5, and runs on
+earnings reaction days only.
+
+This one reuses from it:
+- the CLV definition;
+- the split guard;
+- `reactionSessions` for the earnings fact.
+
+It differs in that it:
+- measures from the prior **high** by default (4%, 1 ADR);
+- uses the **50**-day volume;
+- runs on any day;
+- needs no close > open;
+- adds the held / n-day / go-level logic.
 
 ## The stop rule
 
@@ -249,7 +335,7 @@ company. Expect many A's until `gradeA` moves or setup records exist.
 Example (`orb_breakout` on the invented fixture, trimmed):
 
 ```json
-{ "as_of": "2026-11-24T15:00:00.000Z", "market_date": "2026-11-24", "rule_version": "ts-2026-11-26-v1",
+{ "as_of": "2026-11-24T15:00:00.000Z", "market_date": "2026-11-24", "rule_version": "ts-2026-11-26-v2",
   "since": 0, "next_cursor": 7, "has_more": true, "count": 1,
   "candidates": [{ "id": 7, "symbol": "ORBX", "side": "long", "setup_key": "orb_breakout", "setup_owner": "builtin",
     "grade": "A", "grade_points": 8,

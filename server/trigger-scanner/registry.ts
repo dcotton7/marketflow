@@ -7,6 +7,7 @@
  * Every candidate names its setup key and owner, so results are measured per setup.
  */
 import type { ScannerSettings } from "./settings";
+import { gapAndGo } from "./gap";
 import { dailyInRange } from "./triggers/daily-in-range";
 import { dayExtremeReversal } from "./triggers/day-extreme-reversal";
 import { failedOrb } from "./triggers/failed-orb";
@@ -65,6 +66,10 @@ export const TRIGGERS: TriggerModule[] = [
   { key: "new_extreme", fn: newExtremeVolume, setups: [
     b("new_high_volume", "long", "Close at a new session high on volume above the time-of-day norm", ["newExtremeMinRelVol"], 60),
     b("new_low_volume", "short", "Close at a new session low on volume above the time-of-day norm", ["newExtremeMinRelVol"], 60),
+  ] },
+  { key: "gap_and_go", fn: gapAndGo, setups: [
+    b("gap_and_go", "long", "A true gap up (open over the prior high) on volume that held its edge; the first close over the highest high since, within goMaxDays (day 0: the opening-range high)", ["gapFrom", "gapMinPct", "gapMinAdr", "gapVolMult", "gapVolDays", "goMaxDays", "goBreakAdr", "goRelVol", "repeatPullbackAdr", "goMaxFires", "earningsWindow", "tightRangeAdr", "tightMinDays"], DAY),
+    b("gap_down_and_go", "short", "The mirror: a gap down under the prior low that held; the first close under the lowest low since", ["gapFrom", "gapMinPct", "gapMinAdr", "gapVolMult", "gapVolDays", "goMaxDays", "goBreakAdr", "goRelVol", "repeatPullbackAdr", "goMaxFires", "earningsWindow", "tightRangeAdr", "tightMinDays"], DAY),
   ] },
   { key: "daily_in_range", fn: dailyInRange, setups: [
     b("leader_shakeout", "long", "A Leader Shakeout hit of the last sessions trading back to its entry level (the drop day's close)", ["inRangeAdr", "shakeoutLookbackSessions"], DAY, true),

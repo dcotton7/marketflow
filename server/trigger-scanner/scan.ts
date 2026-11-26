@@ -96,8 +96,15 @@ export function runPass(p: PassInput): PassResult {
       if (!out.newestBar || bar.t > out.newestBar) out.newestBar = bar.t;
       const triggerAt = barCloseIso(bar);
       const atMs = Date.parse(triggerAt);
-      for (const mod of TRIGGERS) {
-        const hits = mod.fn({ ctx, s, i, settings: st, watch: p.watch.get(symbol) });
+      let hits = TRIGGERS.flatMap((mod) => mod.fn({ ctx, s, i, settings: st, watch: p.watch.get(symbol) }));
+      // a setup that replaces another on the same bar and side (gap_and_go day 0 over orb_breakout): raise one, note both
+      for (const h of hits.filter((x) => x.replaces)) {
+        if (hits.some((x) => x.setupKey === h.replaces && x.side === h.side)) {
+          hits = hits.filter((x) => !(x.setupKey === h.replaces && x.side === h.side));
+          h.facts = { ...h.facts, also: h.replaces! };
+        }
+      }
+      {
         for (const h of hits) {
           out.triggers++;
           const setupOwner = typeof h.facts.setupOwner === "string" ? h.facts.setupOwner : "builtin";
@@ -106,14 +113,16 @@ export function runPass(p: PassInput): PassResult {
           const base = Dedupe.base({ marketDate: p.date, symbol, side: h.side, setupKey: h.setupKey, setupOwner, variant: h.variant });
           const levels = levelsAt(ctx, s, i);
           const entry = bar.c;
-          const stop = pickStop(h.side, entry, levels, ctx.adr, st);
+          const stop = pickStop(h.side, entry, h.stopLevels ?? levels, ctx.adr, st);
           if (!stop.ok) { bump(out.refused, `${h.setupKey}:${stop.refused}`); continue; }
           if (!p.dedupe.take(base, atMs, info?.dedupeMin ?? 60)) { out.deduped++; continue; }
+          const company: string[] = [...stop.company];
+          if (h.companyIf && stop.level!.name === h.companyIf.level) company.push(h.companyIf.reason);
           const leading = groupLeading(p.rotation, ctx.capSize, ctx.sector);
           const earningsIn = !ctx.earningsKnown ? undefined : ctx.nextEarnings ? sessionsUntil(p.date, ctx.nextEarnings) : null;
           const kind = info?.kind === "user" ? "user" : info?.tested || h.facts.tested === 1 ? "tested" : "builtin";
           const g = gradeCandidate({
-            side: h.side, riskPct: stop.riskPct!, riskAdr: stop.riskAdr!, hasCompany: stop.company.length > 0,
+            side: h.side, riskPct: stop.riskPct!, riskAdr: stop.riskAdr!, hasCompany: company.length > 0,
             setupKind: kind, regime: p.regime, groupLeading: leading, dollarVol20: ctx.dollarVol20,
             earningsInSessions: earningsIn !== undefined && earningsIn !== null && earningsIn < 0 ? null : earningsIn,
           }, st);
@@ -151,7 +160,7 @@ export function runPass(p: PassInput): PassResult {
             gradePoints: g.points,
             gradeComponents: g.components,
             dataAsOf: { bars: triggerAt, daily: ctx.asOf, regime: p.regime.asOf, rotation: p.rotation.asOf, earnings: ctx.earningsKnown ? p.earningsAsOf ?? null : null },
-            facts: { ...h.facts, company: stop.company.join(",") || null },
+            facts: { ...h.facts, company: company.join(",") || null },
             dedupeKey: `${base}|${triggerAt}`,
             ruleVersion: RULE_VERSION,
           });

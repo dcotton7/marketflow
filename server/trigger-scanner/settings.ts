@@ -5,7 +5,7 @@
  * a later settings row can replace. A changed default gets a new RULE_VERSION so stored rows keep their meaning.
  */
 
-export const RULE_VERSION = "ts-2026-11-26-v1";
+export const RULE_VERSION = "ts-2026-11-26-v2"; // v2: gap_and_go / gap_down_and_go added
 
 export function scannerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.TRIGGER_SCANNER ?? "").trim().toLowerCase() === "on";
@@ -68,6 +68,20 @@ export interface ScannerSettings {
   /** Rotation: "hot" when ahead of SPY by this much today, or over 5 sessions. */
   hotTodayPct: number;
   hot5dPct: number;
+  /** Gap and go (Don, 26 Nov: "add gap and GO, the GO can happen up to n-number of days after the gap up"). */
+  gapFrom: "prior_high" | "prior_close";
+  gapMinPct: number;
+  gapMinAdr: number;
+  gapVolMult: number;
+  gapVolDays: number;
+  goMaxDays: number;
+  goBreakAdr: number;
+  goRelVol: number;
+  repeatPullbackAdr: number;
+  goMaxFires: number;
+  earningsWindow: number;
+  tightRangeAdr: number;
+  tightMinDays: number;
   /** At most this many candidates stored a day; past it they are counted in the run rows, not stored. */
   maxStoredPerDay: number;
   /** User setups (BigIdea criteria), per account. */
@@ -108,6 +122,19 @@ export const DEFAULTS: ScannerSettings = {
   gradeB: 5,
   hotTodayPct: 0.75,
   hot5dPct: 2,
+  gapFrom: "prior_high",
+  gapMinPct: 4,
+  gapMinAdr: 1.0,
+  gapVolMult: 2.0,
+  gapVolDays: 50,
+  goMaxDays: 10,
+  goBreakAdr: 0.05,
+  goRelVol: 1.5,
+  repeatPullbackAdr: 1.0,
+  goMaxFires: 2,
+  earningsWindow: 1,
+  tightRangeAdr: 1.5,
+  tightMinDays: 2,
   maxStoredPerDay: 5000,
   userSetupsMaxPerAccount: 10,
   userSetupMaxCriteria: 12,
@@ -128,6 +155,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ScannerSetti
     minDollarVol: num(env.TRIGGER_SCANNER_MIN_DOLLAR_VOL, DEFAULTS.minDollarVol),
     tier: tier === "shortlist" ? "shortlist" : "bars",
     shortlistMax: Math.round(num(env.TRIGGER_SCANNER_SHORTLIST_MAX, DEFAULTS.shortlistMax)),
+    gapFrom: (env.TRIGGER_SCANNER_GAP_FROM ?? "").trim().toLowerCase() === "prior_close" ? "prior_close" : "prior_high",
+    goMaxDays: Math.round(num(env.TRIGGER_SCANNER_GO_MAX_DAYS, DEFAULTS.goMaxDays)),
     maxStoredPerDay: Math.round(num(env.TRIGGER_SCANNER_MAX_PER_DAY, DEFAULTS.maxStoredPerDay)),
     feed: feed === "iex" ? "iex" : "sip",
   };

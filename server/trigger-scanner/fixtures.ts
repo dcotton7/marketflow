@@ -16,7 +16,7 @@ export function ctx(over: Partial<DailyContext> = {}): DailyContext {
   return {
     symbol: "TEST", asOf: "2026-11-23", prevClose: 100, prevHigh: 120, prevLow: 80,
     sma5: null, sma10: null, sma20: null, sma50: null, ema10: null, ema20: null,
-    adrPct: 3, adr: 3, avgVol20: 1_000_000, dollarVol20: 100e6, close5dAgo: 100, gaps: [],
+    adrPct: 3, adr: 3, avgVol20: 1_000_000, avgVol50: 1_000_000, dollarVol20: 100e6, gapGo: { up: null, down: null }, earningsToday: "unknown", close5dAgo: 100, gaps: [],
     capSize: "MID", sector: "Technology", nextEarnings: null, earningsKnown: true,
     ...over,
   };

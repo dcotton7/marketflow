@@ -14,6 +14,7 @@
  * Growth (estimate): candidates 50-300 rows/day at ~3 KB = under 1 MB/day; runs 78 rows/day.
  */
 import { sql } from "drizzle-orm";
+import type { PriorFire } from "./gap";
 import type { Candidate, Side } from "./types";
 
 export const DDL: string[] = [
@@ -83,6 +84,8 @@ export interface TriggerStore {
   countsToday(day: string, viewerUserId: number | null): Promise<{ setupKey: string; grade: string; n: number }[]>;
   lastRun(): Promise<RunRow | null>;
   activeUserSetups(): Promise<UserSetupRow[]>;
+  /** Gap-and-go fires on market days in [from, before): the repeat rule's input. */
+  gapFires(from: string, before: string): Promise<(PriorFire & { symbol: string })[]>;
 }
 
 type Exec = { execute: (q: any) => Promise<any> };
@@ -184,6 +187,11 @@ export function pgTriggerStore(db: Exec): TriggerStore {
         paused: r.paused, durationMs: r.duration_ms, rssMb: r.rss_mb, ruleVersion: r.rule_version,
       };
     },
+    async gapFires(from, before) {
+      await ensureTriggerTables(db);
+      const r = await db.execute(sql`SELECT symbol, side, market_date, facts->>'gapDate' AS gap_date, facts->>'goLevel' AS go_level FROM trigger_candidates WHERE setup_key IN ('gap_and_go', 'gap_down_and_go') AND market_date >= ${from} AND market_date < ${before}`);
+      return rowsOf(r).map((x) => ({ symbol: String(x.symbol), side: x.side, marketDate: String(x.market_date), gapDate: String(x.gap_date), goLevel: Number(x.go_level) }));
+    },
     async activeUserSetups() {
       await ensureTriggerTables(db);
       const r = await db.execute(sql`SELECT DISTINCT ON (owner_user_id, setup_key) owner_user_id, setup_key, version, name, side, timeframe, idea_id, criteria, entry_rule, range_adr, active FROM trigger_user_setups ORDER BY owner_user_id, setup_key, version DESC`);
@@ -236,6 +244,11 @@ export function memoryTriggerStore(userSetups: UserSetupRow[] = []): TriggerStor
     },
     async lastRun() {
       return runs.length ? [...runs].sort((a, b) => b.passAt.getTime() - a.passAt.getTime())[0] : null;
+    },
+    async gapFires(from, before) {
+      return candidates
+        .filter((c) => (c.setupKey === "gap_and_go" || c.setupKey === "gap_down_and_go") && c.marketDate >= from && c.marketDate < before)
+        .map((c) => ({ symbol: c.symbol, side: c.side, marketDate: c.marketDate, gapDate: String(c.facts.gapDate), goLevel: Number(c.facts.goLevel) }));
     },
     async activeUserSetups() {
       const newest = new Map<string, UserSetupRow>();

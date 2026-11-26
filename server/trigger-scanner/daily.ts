@@ -14,6 +14,8 @@
  *   support; filled_held / open -> resistance.
  */
 import { smaAt } from "../setups/daily-math";
+import { precomputeGapGo, type PriorFire } from "./gap";
+import { DEFAULTS, type ScannerSettings } from "./settings";
 import type { DailyBar, DailyContext, GapLevel } from "./types";
 
 
@@ -58,10 +60,16 @@ export interface ContextExtras {
   sector?: string | null;
   nextEarnings?: string | null;
   earningsKnown?: boolean;
+  /** Earnings reaction sessions of this name (recent), or null when the calendar is not fresh. */
+  earningsReactions?: string[] | null;
+  /** Today's date, to say whether today is a reaction session (a day-0 gap's earnings fact). */
+  today?: string;
+  /** Earlier gap-and-go fires of this name (the repeat rule). */
+  gapFires?: PriorFire[];
 }
 
 /** null when there are too few bars (21) to know the ADR and the 20-day volume. */
-export function buildDailyContext(symbol: string, bars: DailyBar[], extras: ContextExtras = {}, gapLookback = 60): DailyContext | null {
+export function buildDailyContext(symbol: string, bars: DailyBar[], extras: ContextExtras = {}, gapLookback = 60, settings: ScannerSettings = DEFAULTS): DailyContext | null {
   const b = bars.filter((x) => x.high > 0 && x.low > 0 && x.close > 0);
   if (b.length < 21) return null;
   const closes = b.map((x) => x.close);
@@ -72,6 +80,10 @@ export function buildDailyContext(symbol: string, bars: DailyBar[], extras: Cont
   const adrPct = (w.reduce((s, x) => s + (x.high / x.low - 1), 0) / w.length) * 100;
   const avgVol20 = w.reduce((s, x) => s + x.volume, 0) / w.length;
   const dollarVol20 = w.reduce((s, x) => s + x.volume * x.close, 0) / w.length;
+  const w50 = b.slice(-50);
+  const avgVol50 = w50.reduce((s, x) => s + x.volume, 0) / w50.length;
+  const adr = (adrPct / 100) * last.close;
+  const reactions = extras.earningsReactions === undefined ? null : extras.earningsReactions;
   return {
     symbol: symbol.toUpperCase(),
     asOf: last.date,
@@ -85,8 +97,11 @@ export function buildDailyContext(symbol: string, bars: DailyBar[], extras: Cont
     ema10: ema(closes, 10),
     ema20: ema(closes, 20),
     adrPct,
-    adr: (adrPct / 100) * last.close,
+    adr,
     avgVol20,
+    avgVol50,
+    gapGo: precomputeGapGo(b, settings, { adrNow: adr, fires: extras.gapFires ?? [], earningsReactions: reactions }),
+    earningsToday: reactions === null || !extras.today ? "unknown" : reactions.includes(extras.today),
     dollarVol20,
     close5dAgo: b.length >= 6 ? b[b.length - 6].close : null,
     gaps: classifyGaps(b, gapLookback),

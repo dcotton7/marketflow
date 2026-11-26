@@ -36,6 +36,31 @@ export interface GapLevel {
   role: "support" | "resistance";
 }
 
+/** A gap that can still GO (gap.ts): found on the finished daily bars, held since, within goMaxDays. */
+export interface GapGo {
+  dir: "up" | "down";
+  date: string; // the gap session (day 0)
+  day: number; // today's day number: sessions after the gap day, today included
+  edge: number; // up: the prior session's high (or close, per gapFrom); down: the prior low (or close)
+  gapPct: number; // open beyond the edge, %
+  gapAdr: number; // open beyond the edge, in the ADR before the gap
+  volMult: number; // gap-day volume / the 50-session average before it
+  goLevel: number; // up: the highest high from the gap day through yesterday; down: the lowest low
+  goFrom: "gap_day_high" | "consolidation_high" | "gap_day_low" | "consolidation_low";
+  /** Sessions after the gap day through yesterday: their low and high (null on day 1), count and range in ADR. */
+  consLow: number | null;
+  consHigh: number | null;
+  consDays: number;
+  consRangeAdr: number | null;
+  /** From the best price since the gap back to the worst after it, through yesterday, in ADR. */
+  pullbackAdr: number;
+  earningsGap: boolean | "unknown";
+  /** Earlier fires of this gap (from the store) and whether another is allowed today. */
+  fires: number;
+  repeatOk: boolean;
+  repeatWhy: string | null;
+}
+
 /** What the scanner knows about a symbol from its finished daily bars (loaded once a day). */
 export interface DailyContext {
   symbol: string;
@@ -58,6 +83,12 @@ export interface DailyContext {
   gaps: GapLevel[];
   capSize: string | null;
   sector: string | null;
+  /** 50-session average volume (the gap-day volume test). */
+  avgVol50: number;
+  /** Gap and go state from the finished sessions (gap.ts), one per direction; null when no live gap. */
+  gapGo: { up: GapGo | null; down: GapGo | null };
+  /** Today is an earnings reaction session (for a day-0 gap); "unknown" when the calendar is not fresh. */
+  earningsToday: boolean | "unknown";
   /** The ET session date of the next report, when the earnings calendar has one within the horizon. */
   nextEarnings: string | null;
   earningsKnown: boolean;
@@ -65,7 +96,8 @@ export interface DailyContext {
 
 export type LevelName =
   | "sma5" | "sma10" | "sma20" | "sma50" | "ema10" | "ema20"
-  | "prev_low" | "prev_high" | "gap" | "vwap" | "range_low" | "range_high" | "low_of_day" | "high_of_day";
+  | "prev_low" | "prev_high" | "gap" | "vwap" | "range_low" | "range_high" | "low_of_day" | "high_of_day"
+  | "consolidation_low" | "consolidation_high";
 
 export interface Level {
   name: LevelName;
@@ -82,6 +114,12 @@ export interface TriggerHit {
   variant: string;
   why: string;
   facts: Record<string, number | string | null>;
+  /** The levels this setup's stop may use (gap and go names its own set); all levels at the bar when absent. */
+  stopLevels?: Level[];
+  /** A stop at this level earns the "has company" grade point for the given reason (a tight flag's low). */
+  companyIf?: { level: LevelName; reason: string };
+  /** Another setup's hit on the same bar and side that this one replaces (noted in facts.also). */
+  replaces?: string;
 }
 
 export interface StopPick {

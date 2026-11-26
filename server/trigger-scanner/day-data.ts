@@ -5,6 +5,7 @@
  * the last sessions, and the users' stored daily setups evaluated on the same bars. Reads only; no vendor calls.
  */
 import { buildDailyContext, floorReason } from "./daily";
+import type { PriorFire } from "./gap";
 import { registerUserSetup, clearUserSetups } from "./registry";
 import { ROTATION_SYMBOLS } from "./rotation";
 import type { ScannerSettings } from "./settings";
@@ -32,6 +33,12 @@ export interface Extras {
   /** Next report date per symbol from the newest calendar pull; null map = calendar not available. */
   earnings: Map<string, string> | null;
   earningsAsOf: string | null;
+  /** Recent earnings reaction sessions per symbol (earnings/upcoming.ts reactionSessions); null = calendar not fresh. */
+  reactions?: Map<string, string[]> | null;
+  /** Earlier gap-and-go fires per symbol, from the store. */
+  gapFires?: Map<string, PriorFire[]>;
+  /** The session day being loaded. */
+  today?: string;
 }
 
 export interface ChunkAcc {
@@ -62,7 +69,10 @@ export function assembleChunk(
       sector: extras.sector.get(sym) ?? null,
       nextEarnings: extras.earnings?.get(sym) ?? null,
       earningsKnown: extras.earnings !== null,
-    }, settings.gapLookback);
+      earningsReactions: extras.reactions ? extras.reactions.get(sym) ?? [] : null,
+      today: extras.today,
+      gapFires: extras.gapFires?.get(sym) ?? [],
+    }, settings.gapLookback, settings);
     if (!ctx) { bump("too_few_daily_bars"); continue; }
     const why = floorReason(ctx, settings);
     if (why && !etfs.has(sym)) { bump(`floor_${why}`); continue; }
@@ -182,6 +192,31 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
   }
   const resolved = resolveIdeas(stored, ideas);
   const { runnable, report } = prepareUserSetups(resolved.rows, settings);
+  // gap and go: recent earnings reaction sessions (fresh calendar only) and this gap's earlier fires
+  let reactions: Map<string, string[]> | null = null;
+  if (earnings) {
+    try {
+      const { reactionSessions } = await import("../earnings/upcoming");
+      const { isMarketHoliday } = await import("@shared/us-market-holidays");
+      const from = new Date(Date.parse(`${date}T12:00:00Z`) - 45 * 864e5).toISOString().slice(0, 10);
+      const sessions: string[] = [];
+      for (let d = new Date(`${from}T12:00:00Z`); d.toISOString().slice(0, 10) <= date; d.setUTCDate(d.getUTCDate() + 1)) {
+        const k = d.toISOString().slice(0, 10);
+        if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !isMarketHoliday(k)) sessions.push(k);
+      }
+      const rows = rowsOf(await db.execute(sql`SELECT DISTINCT symbol, report_date::text AS d, hour FROM earnings_estimates_daily WHERE report_date >= ${from}::date AND report_date <= ${date}::date AND fetched_on < report_date + 1`));
+      const days = reactionSessions(rows.map((x) => ({ symbol: String(x.symbol).toUpperCase(), reportDate: String(x.d).slice(0, 10), hour: x.hour ?? null, source: "finnhub_calendar" })), sessions);
+      reactions = new Map();
+      for (const r of days) reactions.set(r.symbol, [...(reactions.get(r.symbol) ?? []), r.session]);
+    } catch {
+      reactions = null;
+    }
+  }
+  const gapFires = new Map<string, PriorFire[]>();
+  try {
+    const from = new Date(Date.parse(`${date}T12:00:00Z`) - Math.ceil(settings.goMaxDays * 1.6 + 5) * 864e5).toISOString().slice(0, 10);
+    for (const f of await store.gapFires(from, date)) gapFires.set(f.symbol, [...(gapFires.get(f.symbol) ?? []), f]);
+  } catch { /* no earlier fires known: each gap may fire as new */ }
   report.push(...resolved.report);
   const sessions = runnable.length ? 260 : 75;
   const cutoff = new Date(Date.parse(`${date}T12:00:00Z`) - Math.ceil(sessions * 1.5) * 864e5).toISOString().slice(0, 10);
@@ -197,7 +232,7 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
       bars.set(s, arr);
     }
     for (const s of chunk) if (!bars.has(s)) into.skipped.no_daily_bars = (into.skipped.no_daily_bars ?? 0) + 1;
-    assembleChunk(bars, { capSize, sector, earnings, earningsAsOf }, settings, runnable, into);
+    assembleChunk(bars, { capSize, sector, earnings, earningsAsOf, reactions, gapFires, today: date }, settings, runnable, into);
   }
   try {
     const from = new Date(Date.parse(`${date}T12:00:00Z`) - Math.ceil(settings.shakeoutLookbackSessions * 1.6) * 864e5).toISOString().slice(0, 10);

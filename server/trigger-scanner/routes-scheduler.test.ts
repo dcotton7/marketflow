@@ -117,6 +117,8 @@ try {
   assert.deepEqual([st.body.running, st.body.universe_size, st.body.bars_lag_sec, st.body.tier], [true, 1746, 21, "bars"]);
   assert.ok(st.body.today.total >= 3 && st.body.today.by_setup.orb_breakout);
   assert.ok(st.body.setups.some((s: any) => s.key === "orb_breakout" && s.owner === "builtin"));
+  const gg = st.body.setups.find((s: any) => s.key === "gap_and_go");
+  assert.ok(gg && gg.side === "long" && gg.params.includes("goMaxDays") && st.body.setups.some((s: any) => s.key === "gap_down_and_go" && s.side === "short"), "gap and go in the registry");
   // through the Anima gateway, as its owner (user 7): read only
   const inside = { host: "marketflow-hrxh:10000", "x-anima-token": "t".repeat(40) };
   const gw = await get("/api/anima/triggers?grade=all&day=2026-11-24", inside);
