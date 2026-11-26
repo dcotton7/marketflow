@@ -18,6 +18,7 @@ import * as fundamentals from "../fundamentals";
 import { getDailyBars, getIntradayBars } from "../data-layer";
 import { autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
 import { decideOptimization } from "./scan-plan";
+import { sessionUserId, loadCaller, isAdminOrOwner, canModify } from "./access";
 import { extractIdeasFromText, suggestIndicatorMappings } from "./extraction";
 
 function getOpenAI(): OpenAI | null {
@@ -176,7 +177,7 @@ async function getMergedIndicatorLibrary(userId: number): Promise<IndicatorDefin
   }
 
   try {
-    const customIndicators = await db
+    const customIndicators = await db!
       .select()
       .from(userIndicators)
       .where(eq(userIndicators.userId, userId));
@@ -5838,7 +5839,9 @@ Format for updates:
       }
 
       const { name, category, description, params, logicDefinition, aiPrompt, aiModel, provides, consumes } = req.body;
-      const userId = (req.user as any)?.id || 1;
+      // The signed-in user (req.user is never set in this app; it used to save everyone's under user 1)
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!name || !category || !description || !logicDefinition) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -5854,7 +5857,7 @@ Format for updates:
 
       const customId = `CUSTOM-${userId}-${Date.now()}`;
 
-      const [indicator] = await db.insert(userIndicators).values({
+      const [indicator] = await db!.insert(userIndicators).values({
         userId,
         customId,
         name,
@@ -5888,9 +5891,11 @@ Format for updates:
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const userId = (req.user as any)?.id || 1;
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-      const indicators = await db
+      // Only the caller's own custom indicators (the built-ins come from /api/bigidea/indicators)
+      const indicators = await db!
         .select()
         .from(userIndicators)
         .where(eq(userIndicators.userId, userId))
@@ -5940,6 +5945,7 @@ Format for updates:
   app.post("/api/bigidea/custom-indicators/generate", async (req: Request, res: Response) => {
     console.log("[CustomIndicator] Generate endpoint called with:", JSON.stringify(req.body, null, 2));
     try {
+      if (!sessionUserId(req)) return res.status(401).json({ error: "Unauthorized" });
       const { requestText, existingIndicators } = req.body;
       const openai = getOpenAI();
 
@@ -6098,13 +6104,16 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const indicatorId = parseInt(req.params.id);
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const indicatorId = parseInt(String(req.params.id));
       const { passed } = req.body;
 
-      const [indicator] = await db
+      // Only the owner's own indicator: someone else's reads as not found
+      const [indicator] = await db!
         .select()
         .from(userIndicators)
-        .where(eq(userIndicators.id, indicatorId));
+        .where(and(eq(userIndicators.id, indicatorId), eq(userIndicators.userId, userId)));
 
       if (!indicator) {
         return res.status(404).json({ error: "Indicator not found" });
@@ -6127,7 +6136,7 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
       if (timesUsed === 5 && !indicator.autoSubmittedAt && !indicator.isAdminApproved) {
         updates.autoSubmittedAt = new Date();
         
-        await db.insert(indicatorApprovalQueue).values({
+        await db!.insert(indicatorApprovalQueue).values({
           indicatorId: indicator.id,
           submittedAt: new Date(),
         });
@@ -6135,10 +6144,10 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         console.log(`[Custom Indicator] Auto-submitted indicator ${indicator.customId} to approval queue after 5 uses`);
       }
 
-      await db
+      await db!
         .update(userIndicators)
         .set(updates)
-        .where(eq(userIndicators.id, indicatorId));
+        .where(and(eq(userIndicators.id, indicatorId), eq(userIndicators.userId, userId)));
 
       res.json({ success: true, timesUsed, autoSubmitted: timesUsed === 5 });
     } catch (error: any) {
@@ -6154,12 +6163,14 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const user = req.user as any;
-      if (!user?.isAdmin) {
+      const sessionId = sessionUserId(req);
+      if (!sessionId) return res.status(401).json({ error: "Unauthorized" });
+      const user = await loadCaller(sessionId);
+      if (!user || !isAdminOrOwner(user)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
-      const queue = await db
+      const queue = await db!
         .select({
           queueItem: indicatorApprovalQueue,
           indicator: userIndicators,
@@ -6189,19 +6200,21 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const user = req.user as any;
-      if (!user?.isAdmin) {
+      const sessionId = sessionUserId(req);
+      if (!sessionId) return res.status(401).json({ error: "Unauthorized" });
+      const user = await loadCaller(sessionId);
+      if (!user || !isAdminOrOwner(user)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
-      const queueId = parseInt(req.params.queueId);
+      const queueId = parseInt(String(req.params.queueId));
       const { decision, reviewNotes, rejectionReason } = req.body;
 
       if (!["approved", "rejected", "needs_revision"].includes(decision)) {
         return res.status(400).json({ error: "Invalid decision" });
       }
 
-      const [queueItem] = await db
+      const [queueItem] = await db!
         .select()
         .from(indicatorApprovalQueue)
         .where(eq(indicatorApprovalQueue.id, queueId));
@@ -6210,7 +6223,7 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(404).json({ error: "Queue item not found" });
       }
 
-      await db
+      await db!
         .update(indicatorApprovalQueue)
         .set({
           decision,
@@ -6222,7 +6235,7 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         .where(eq(indicatorApprovalQueue.id, queueId));
 
       if (decision === "approved") {
-        await db
+        await db!
           .update(userIndicators)
           .set({
             isAdminApproved: true,
