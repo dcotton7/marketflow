@@ -52,6 +52,12 @@ export type IndicatorDefinition = {
   evaluate: (candles: CandleData[], params: Record<string, any>, benchmarkCandles?: CandleData[], upstreamData?: Record<string, any>) => IndicatorResult;
 };
 
+/** An inverted criterion passes when the indicator fails, except when the indicator had no data to judge (_noData). */
+export function criterionPass(pass: boolean, inverted: boolean | undefined, data?: Record<string, any>): boolean {
+  if (!inverted) return pass;
+  return data?._noData ? false : !pass;
+}
+
 export function normalizeResult(result: IndicatorResult): { pass: boolean; data?: Record<string, any> } {
   if (typeof result === "boolean") return { pass: result };
   return result;
@@ -2692,7 +2698,7 @@ const FUNDAMENTAL: IndicatorDefinition[] = [
     id: "FND-4",
     name: "Earnings Proximity",
     category: "Fundamental",
-    description: "Filters stocks based on how close they are to their next earnings report. Avoid stocks with earnings in 1-5 days to reduce binary event risk. Or target stocks with imminent earnings for volatility plays. Negative days means earnings have already passed. Requires fundamental data with next earnings date.",
+    description: "Filters stocks based on how close they are to their next earnings report. Avoid stocks with earnings in 1-5 days to reduce binary event risk. Or target stocks with imminent earnings for volatility plays. Negative days means earnings have already passed (judged from the last report). Uses the app's stored earnings calendar; a name with no known date never passes (shown as 'no earnings date').",
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "minDays", label: "Min Days to Earnings", type: "number", defaultValue: 7, min: -30, max: 90, step: 1 },
@@ -2703,13 +2709,20 @@ const FUNDAMENTAL: IndicatorDefinition[] = [
       const minDays = params.minDays ?? 7;
       const maxDays = params.maxDays ?? 60;
       const daysToEarnings = upstreamData?.fundamentalData?.daysToEarnings;
+      const daysSince = upstreamData?.fundamentalData?.daysSinceEarnings;
+      const has = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
       
-      if (daysToEarnings === undefined || daysToEarnings === null) {
-        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: 'no earnings date', threshold: `${minDays}-${maxDays} days` } } };
+      // "-N days" = reported N days ago: judged from the last report when the window reaches below zero
+      const nextOk = has(daysToEarnings) && daysToEarnings >= minDays && daysToEarnings <= maxDays;
+      const pastOk = minDays < 0 && has(daysSince) && -daysSince >= minDays && -daysSince <= maxDays;
+      if (!has(daysToEarnings) && !(minDays < 0 && has(daysSince))) {
+        // no data: never a pass, and an inverted criterion does not turn it into one (_noData)
+        return { pass: false, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _noData: true, _diagnostics: { value: 'no earnings date', threshold: `${minDays}-${maxDays} days` } } };
       }
       
-      const pass = daysToEarnings >= minDays && daysToEarnings <= maxDays;
-      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value: `${daysToEarnings} days`, threshold: `${minDays}-${maxDays} days` } } };
+      const pass = nextOk || pastOk;
+      const value = has(daysToEarnings) ? `${daysToEarnings} days` + (has(daysSince) ? `, last ${daysSince} days ago` : "") : `last ${daysSince} days ago`;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, _diagnostics: { value, threshold: `${minDays}-${maxDays} days` } } };
     },
   },
 ];

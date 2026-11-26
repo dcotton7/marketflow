@@ -3,7 +3,10 @@ import { db, isDatabaseAvailable } from "../db";
 import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights, indicatorExecutionStats, optimizerDisplaySettings, bigideaSetups, bigideaSetupIndicators, bigideaExtractedIdeas, bigideaValidationRatings, uploads, setupUploads, userIndicators, indicatorApprovalQueue, type ExtractedThought } from "@shared/schema";
 import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor } from "./indicators";
+import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor, criterionPass } from "./indicators";
+import { earningsDays } from "./earnings-days";
+import { loadLatest as loadLatestEarnings, upcomingStatus as earningsCalendarStatus } from "../earnings/upcoming";
+import { etDateKey } from "@shared/us-market-holidays";
 import { evaluateDslIndicator, validateDslDefinition, DslLogicDefinition } from "./dsl-evaluator";
 import { evaluateScanQuality } from "./quality";
 import {
@@ -501,12 +504,11 @@ function evaluateThoughtCriteria(
     const cocHighlight2 = normalized.data?._cocHighlight2 as CriterionResult["cocHighlight2"] | undefined;
 
     if (normalized.data) {
-      const { _diagnostics, _cocHighlight, _cocHighlight2, ...rest } = normalized.data;
+      const { _diagnostics, _cocHighlight, _cocHighlight2, _noData, ...rest } = normalized.data;
       Object.assign(outputData, rest);
     }
 
-    let pass = normalized.pass;
-    if (criterion.inverted) pass = !pass;
+    const pass = criterionPass(normalized.pass, criterion.inverted, normalized.data);
 
     criteriaResults.push({
       indicatorId: indicator.id,
@@ -2300,12 +2302,21 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       const BATCH_SIZE = 12;
       
       // Check if any FND-* indicators are used (needed for market cap stats)
+      // Vendor fundamentals (Finnhub/FMP per symbol) only for FND-1..3; FND-4 reads our own earnings tables
       const hasFundamentalIndicators = sortedThoughtNodes.some((node: any) => 
         (node.thoughtCriteria || []).some((c: any) => 
-          !c.muted && c.indicatorId && c.indicatorId.startsWith("FND-")
+          !c.muted && c.indicatorId && c.indicatorId.startsWith("FND-") && c.indicatorId !== "FND-4"
         )
       );
       
+      // FND-4 Earnings Proximity reads the stored earnings calendar; load it if this process has not yet
+      const usesEarnings = sortedThoughtNodes.some((node: any) =>
+        !node.isMuted && (node.thoughtCriteria || []).some((c: any) => !c.muted && c.indicatorId === "FND-4"));
+      let earningsKnown = 0;
+      if (usesEarnings && !earningsCalendarStatus().fetchedOn && db) {
+        try { await loadLatestEarnings(db); } catch (e) { console.warn("[BigIdea Scan] Could not load the earnings calendar:", e); }
+      }
+
       // Track market cap data availability for debugging
       let marketCapStats = { total: 0, hasData: 0, missing: 0, sampleValues: [] as Array<{ symbol: string; marketCap: number }> };
 
@@ -2351,7 +2362,16 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 
               // Fetch fundamental data if any FND-* indicators are used
               let fundamentalData: any = null;
+              // FND-4: days to/since earnings from the app's stored earnings data (no vendor call)
+              let earnings: { daysToEarnings?: number; daysSinceEarnings?: number } = {};
+              if (usesEarnings) {
+                try {
+                  earnings = earningsDays(await fundamentals.getCachedEarningsData(symbol), etDateKey());
+                } catch { earnings = {}; }
+                if (earnings.daysToEarnings !== undefined || earnings.daysSinceEarnings !== undefined) earningsKnown++;
+              }
               
+              if (usesEarnings && !hasFundamentalIndicators) fundamentalData = { ...earnings };
               if (hasFundamentalIndicators) {
                 try {
                   // Use getFundamentals only: 1 API call per symbol (profile). Avoid getExtendedFundamentals
@@ -2359,7 +2379,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   const basic = await fundamentals.getFundamentals(symbol);
                   fundamentalData = {
                     ...basic,
-                    daysToEarnings: undefined as number | undefined,
+                    ...earnings,
                   };
 
                   // If Finnhub/cache had no market cap, use FMP batch result so FND-1 can still pass
@@ -2384,7 +2404,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   marketCapStats.total++;
                   marketCapStats.missing++;
                   console.warn(`[BigIdea Scan] Failed to fetch fundamental data for ${symbol}:`, error);
-                  fundamentalData = null;
+                  // earnings come from our own tables, so FND-4 still works when the vendor call fails
+                  fundamentalData = usesEarnings ? { ...earnings } : null;
                 }
               }
 
@@ -2974,6 +2995,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         sessionId,
         // saved ideas that still use a retired indicator: it ran exactly as before, this says what replaces it
         retiredIndicators: retiredNotesFor(thoughtNodes.flatMap((n: any) => n.thoughtCriteria || [])),
+        ...(usesEarnings ? { earningsData: { namesWithDate: earningsKnown, names: tickers.length,
+          ...(earningsKnown === 0 ? { warning: "FND-4 Earnings Proximity: no earnings dates were found for any name, so it could not pass" } : {}) } } : {}),
         debugInfo: enhancedDebugInfo,
         ...(marketFlow ? {
           universeMeta: {
