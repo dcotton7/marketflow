@@ -955,6 +955,8 @@ export async function registerRoutes(
   
   // Register Market Condition routes (mount immediately for API availability)
   app.use("/api/market-condition/setups", setupRoutes);
+  // Trigger scanner pass list (server/trigger-scanner, docs/trigger-scanner.md): answers 404 unless TRIGGER_SCANNER=on.
+  app.use("/api/triggers", await (await import("./trigger-scanner/routes")).liveTriggerRoutes());
   app.use("/api/market-condition", marketConditionRoutes);
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 

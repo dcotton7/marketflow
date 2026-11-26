@@ -18,6 +18,8 @@
     "test:screen": "tsx server/market-condition/screen.test.ts",
     "test:pool": "tsx server/data-layer/scan-pool.test.ts",
     "test:vix": "tsx server/market-condition/vix-source.test.ts",
+    "test:trigger-scanner": "tsx server/trigger-scanner/triggers.test.ts && tsx server/trigger-scanner/routes-scheduler.test.ts && tsx server/middleware/animaGateway.test.ts && tsx server/middleware/dataAccess.test.ts",
+    "trigger:replay": "tsx server/trigger-scanner/replay.ts",
     "test:watchlist-panel": "tsx client/src/lib/watchlist-position-columns.test.ts && tsx shared/position-paste.test.ts",
     "db:push": "drizzle-kit push",
     "db:ensure-start-here": "tsx server/scripts/ensureStartHereTables.ts",

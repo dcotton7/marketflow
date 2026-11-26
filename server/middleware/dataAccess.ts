@@ -46,6 +46,8 @@ const RULES: Rule[] = [
   { level: "auth", method: "GET", pattern: /^\/api\/alerts\/feed$/ },
   // Built from vendor bars and quotes.
   { level: "owner", pattern: /^\/api\/positions\/snapshot$/ },
+  // The trigger scanner's pass list: built from vendor bars and quotes.
+  { level: "owner", pattern: /^\/api\/triggers(\/|$)/ },
   { level: "owner", method: "POST", pattern: /^\/api\/sentinel\/watchlist\/\d+\/(shares|plan)$/ },
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/preview$/ },
   { level: "owner", method: "POST", pattern: /^\/api\/alerts\/[^/]+\/evaluate$/ },

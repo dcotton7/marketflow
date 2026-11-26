@@ -44,6 +44,8 @@ export const ALLOWED: RegExp[] = [
   /^\/api\/sentinel\/(dashboard|trade-journal|trades\/closed|trade\/\d+|watchlists|watchlist)$/,
   /^\/api\/alerts\/feed$/,
   /^\/api\/positions\/snapshot$/,
+  // The trigger scanner's pass list and its status (server/trigger-scanner/routes.ts), read only.
+  /^\/api\/triggers(\/status)?$/,
   // Schwab read-only link: positions, balances, quotes and the link's status. No orders, transactions or writes.
   /^\/api\/schwab\/(positions|balances|quotes|status)$/,
 ];

@@ -148,6 +148,9 @@ app.use((req, res, next) => {
     // Research-backed daily setups (Leader Shakeout, ...): after the close, append-only (server/setups/jobs.ts).
     const { startSetupJobs } = await import("./setups/jobs");
     startSetupJobs();
+    // Trigger scanner: starts nothing (no timer, no query) unless TRIGGER_SCANNER=on (docs/trigger-scanner.md).
+    const { startTriggerScanner } = await import("./trigger-scanner/scheduler");
+    await startTriggerScanner().catch((err) => console.error("[Startup] Trigger scanner start failed:", err));
     // Schwab read-only link: does nothing unless SCHWAB_ENABLED and the keys are set (docs/schwab-readonly.md).
     const { schwab } = await import("./schwab/service");
     await schwab.init().catch((err) => console.error("[Startup] Schwab link init failed:", err));
