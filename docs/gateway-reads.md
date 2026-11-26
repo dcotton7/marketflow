@@ -188,3 +188,19 @@ session user's newest scans first (new file `server/gateway-reads/scan-results.t
 The canvas criteria, the per-ticker failure lists and the per-indicator samples do not leave. A watchlist scan is sent
 as a ticker list: its `universe` is null and the list itself is not stored. Not cached: one SELECT of at most 50 rows filtered by user (`scan_sessions` has no index on `user_id`; fine at its
 size, worth one if it grows into the tens of thousands).
+
+## 5. The rest of the reach spec's group 3
+
+| Route | Decision | Why |
+|---|---|---|
+| `scanner/picks` | allowed | today's picks from memory (`getScannerPicks`); nothing to strip |
+| `sentinel/ticker/:sym` | allowed | one Alpaca quote per read, plus one Finnhub profile the first time a name is seen (then stored in the tickers cache; deduped and rate-limited by `withFinnhubLimit`); one symbol per request; no account data |
+| `market-condition/setups/scan-pool` | allowed | one COUNT query on `scan_pool` |
+| `market-condition/setups/settings` | allowed | the grade thresholds (one small read) |
+| `market-condition/universe`, `universe/:id` | allowed | the static theme lists |
+| `sentinel/chart-data` | allowed, capped | Alpaca bars per request (the same as `stocks/:sym/history`); the gateway sets `lookbackDays` to at most 120 for daily (absent = 120, the route's own default is 750) and 5 / 10 / 20 days for 5 / 15 / 30-minute bars, and keeps one `timeframe` |
+| `sentinel/rule-performance` | **left out** | `sentinel_rule_performance` has no user column: it pools every user's journal trades, so it is other users' data |
+| `sentinel/sentiment/*` | **left out** | no model, but it calls Alpaca for SPY / sector bars and FMP's VIX history on a cold 30-minute cache, and the sector read can call Finnhub per symbol: paid vendor calls on demand |
+
+Still never: Schwab orders and transactions, any `/ai/*` route, any new POST, `POST bigidea/scan`, the admin
+`market-condition/history/:kind` dump.
