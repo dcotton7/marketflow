@@ -230,6 +230,8 @@ const PARAM_DESCRIPTIONS: Record<string, string> = {
 
 interface ScanResponse {
   results: ScanResultItem[];
+  /** notes for retired indicators the idea still uses (they ran as before) */
+  retiredIndicators?: string[];
   thoughtCounts: Record<string, number>;
   totalScanned: number;
   linkOverrides?: Array<{ thoughtId: string; thoughtName: string; paramName: string; indicatorId: string; originalValue: any; linkedValue: any; sourceName: string }>;
@@ -1608,6 +1610,10 @@ export default function BigIdeaPage() {
       return data;
     },
     onSuccess: (data) => {
+      const retiredNotes = data?.retiredIndicators ?? [];
+      if (retiredNotes.length) {
+        toast({ title: "This idea uses a retired indicator", description: retiredNotes.join(" ") });
+      }
       setScanResults(data.results);
       setScanTotalScanned(data.totalScanned);
       setShowResults(true);
@@ -4693,7 +4699,8 @@ function IndicatorAutocompleteTextarea({
       });
     });
     indicatorLibrary.forEach((m: any) => {
-      if (m.name) namesFromCanvas.add(m.name);
+      // retired indicators (ITD-1, ITD-2) are not offered; old saved ideas still show and run them
+      if (m.name && !m.retired) namesFromCanvas.add(m.name);
     });
     return Array.from(namesFromCanvas).sort();
   }, [nodes, indicatorLibrary]);

@@ -1,4 +1,5 @@
 import { calculateSessionVwap, sessionDateKeyEt } from "@shared/chart-indicators";
+import { openingRange } from "@shared/intraday-session";
 import { detectIntradayCrossOfDailyMa } from "../shared/intraday-daily-ma-cross";
 import { KELL, kellSetups, type KellBar, type KellParams } from "./kell";
 
@@ -59,12 +60,13 @@ export function vwapReclaim(symbol: string, bars: FiveMinBar[], price: number, p
   };
 }
 
-/** Price above the high of the first `bars` 5-minute bars by at least `minBreakoutPct`, once that range is complete. */
+/** Price above the high of the first `bars` 5-minute bars of the session (9:30 ET on) by at least `minBreakoutPct`, once
+ *  that range is complete. The range is shared/intraday-session.ts openingRange, as BigIdea's ITD-5 uses. */
 export function openingRangeBreakout(symbol: string, bars: FiveMinBar[], price: number, p = SETUPS.openingRange): SetupHit | null {
-  if (bars.length <= p.bars || !(price > 0)) return null;
-  const range = bars.slice(0, p.bars);
-  const high = Math.max(...range.map((b) => b.high));
-  const low = Math.min(...range.map((b) => b.low));
+  if (!(price > 0)) return null;
+  const range = openingRange(bars.map((b) => ({ ...b, date: b.timestamp })), p.bars * 5);
+  if (!range || !range.complete) return null;
+  const { high, low } = range;
   if (!(price > high * (1 + p.minBreakoutPct / 100))) return null;
   return {
     name: "orb_breakout",

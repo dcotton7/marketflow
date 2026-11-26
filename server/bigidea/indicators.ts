@@ -1,4 +1,5 @@
 import { detectIntradayCrossOfDailyMaFromCandles } from "../shared/intraday-daily-ma-cross";
+import { etClock, highLowOfDay, openingRange, priorDayLevels, RTH_OPEN_MINUTE, sessionVwap, sessionWindow } from "@shared/intraday-session";
 
 export type CandleData = {
   date: string;
@@ -46,6 +47,8 @@ export type IndicatorDefinition = {
   params: IndicatorParam[];
   provides?: IndicatorProvides[];
   consumes?: IndicatorConsumes[];
+  /** Kept only so old saved ideas evaluate exactly as before: hidden from the picker and the AI, flagged where shown. */
+  retired?: { replacedBy: string[]; note: string };
   evaluate: (candles: CandleData[], params: Record<string, any>, benchmarkCandles?: CandleData[], upstreamData?: Record<string, any>) => IndicatorResult;
 };
 
@@ -2717,7 +2720,8 @@ const INTRADAY: IndicatorDefinition[] = [
     id: "ITD-1",
     name: "Opening Range Breakout",
     category: "Intraday",
-    description: "Detects stocks breaking out of their opening range — the high and low established in the first N minutes of trading. A breakout above the opening range high with volume suggests strong buyer interest. Works best on intraday timeframes (5min, 15min). The opening range is calculated from the first N bars of the session.",
+    retired: { replacedBy: ["ITD-5"], note: "Retired: use ITD-5 Opening Range (session). This one measures the bars 15-30 minutes before the bar it judges, not 9:30-9:45 ET; kept so old saved ideas give the same results." },
+    description: "RETIRED: use ITD-5 Opening Range (session). This one measures a rolling window (the N bars before the last N bars), not the 9:30 ET opening range. Kept unchanged so old saved ideas give the same results. Original description: Detects stocks breaking out of their opening range — the high and low established in the first N minutes of trading. A breakout above the opening range high with volume suggests strong buyer interest. Works best on intraday timeframes (5min, 15min). The opening range is calculated from the first N bars of the session.",
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "orbBars", label: "Opening Range Bars", type: "number", defaultValue: 3, min: 1, max: 12, step: 1 },
@@ -2767,7 +2771,8 @@ const INTRADAY: IndicatorDefinition[] = [
     id: "ITD-2",
     name: "VWAP Position",
     category: "Intraday",
-    description: "Checks where price is relative to VWAP (Volume Weighted Average Price). VWAP is the average price weighted by volume — institutional traders often use it as a benchmark. Price above VWAP suggests buyers are in control; below suggests sellers. A cross above VWAP can be a bullish signal. Best used on intraday timeframes.",
+    retired: { replacedBy: ["ITD-4"], note: "Retired: use ITD-4 Session VWAP. This one averages the last N bars including pre-market, not today's session VWAP; kept so old saved ideas give the same results." },
+    description: "RETIRED: use ITD-4 Session VWAP. This one averages the last N bars including pre-market and earlier days, not today's VWAP from 9:30 ET. Kept unchanged so old saved ideas give the same results. Original description: Checks where price is relative to VWAP (Volume Weighted Average Price). VWAP is the average price weighted by volume — institutional traders often use it as a benchmark. Price above VWAP suggests buyers are in control; below suggests sellers. A cross above VWAP can be a bullish signal. Best used on intraday timeframes.",
     params: [
       { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1, autoLink: { linkType: "sequenceOffset" } },
       { name: "vwapBars", label: "VWAP Calculation Bars", type: "number", defaultValue: 78, min: 10, max: 390, step: 1 },
@@ -2878,6 +2883,151 @@ const INTRADAY: IndicatorDefinition[] = [
       };
     },
   },
+  // ---- Regular-session indicators (26 Nov 2026). Today's 9:30 ET session only: pre-market, after-hours, weekend and
+  // holiday bars are ignored, early-close days end at 13:00. The judged bar is the newest regular-session bar (after
+  // the close: the session's last bar), or skipBars session bars before it. Math in shared/intraday-session.ts.
+  {
+    id: "ITD-4",
+    name: "Session VWAP",
+    category: "Intraday",
+    description: "Price against today's VWAP, counted from 9:30 ET (regular session only, pre-market left out). 'above'/'below' compare the latest closed bar's close with VWAP; 'reclaim' is a close back above VWAP after at least N closes below it, 'loss' a close back below after N closes above. Use on 5, 15 or 30 minute thoughts.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1 },
+      { name: "event", label: "Event", type: "select", defaultValue: "above", options: ["above", "below", "reclaim", "loss"] },
+      { name: "minBarsOtherSide", label: "Closes on the other side first", type: "number", defaultValue: 2, min: 1, max: 20, step: 1 },
+      { name: "maxDistancePct", label: "Max distance from VWAP % (0 = any)", type: "number", defaultValue: 0, min: 0, max: 20, step: 0.1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const event = String(params.event ?? "above");
+      const need = Math.max(1, Number(params.minBarsOtherSide ?? 2));
+      const maxDist = Number(params.maxDistancePct ?? 0);
+      const w = sessionWindow(candles, skip);
+      if (!w) return { pass: false, data: { _diagnostics: { value: "no regular-session bars", threshold: `VWAP ${event}` } } };
+      const vwap = sessionVwap(w.today);
+      const v = vwap[vwap.length - 1];
+      const close = w.bar.close;
+      if (v == null) return { pass: false, data: { _diagnostics: { value: "no volume yet", threshold: `VWAP ${event}` } } };
+      const distPct = ((close - v) / v) * 100;
+      const near = maxDist <= 0 || Math.abs(distPct) <= maxDist;
+      const priorSide = (above: boolean) => {
+        if (w.today.length < need + 1) return false;
+        for (let i = w.today.length - 1 - need; i < w.today.length - 1; i++) {
+          const pv = vwap[i];
+          if (pv == null || (above ? !(w.today[i].close > pv) : !(w.today[i].close < pv))) return false;
+        }
+        return true;
+      };
+      let pass = false;
+      if (event === "above") pass = close > v;
+      else if (event === "below") pass = close < v;
+      else if (event === "reclaim") pass = close > v && priorSide(false);
+      else if (event === "loss") pass = close < v && priorSide(true);
+      pass = pass && near;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, sessionVwap: v,
+        _diagnostics: { value: `close $${close.toFixed(2)} vs VWAP $${v.toFixed(2)} (${distPct.toFixed(2)}%)`, threshold: event === "reclaim" || event === "loss" ? `${event} after ${need} closes` : event, detail: `${w.day} ${w.today.length} session bars` } } };
+    },
+  },
+  {
+    id: "ITD-5",
+    name: "Opening Range (session)",
+    category: "Intraday",
+    description: "The true opening range: high and low of the first N minutes of today's regular session from 9:30 ET (15 = 9:30-9:45). Events on the latest closed bar after the range is complete: 'break_above'/'break_below' (this bar is the first close outside the range), 'above'/'below' (close outside it now), 'inside', and 'failed_break_above'/'failed_break_below' (an earlier close broke out and this bar closed back inside). Use on 5, 15 or 30 minute thoughts.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1 },
+      { name: "rangeMinutes", label: "Range minutes from 9:30", type: "number", defaultValue: 15, min: 5, max: 120, step: 5 },
+      { name: "event", label: "Event", type: "select", defaultValue: "break_above", options: ["break_above", "break_below", "above", "below", "inside", "failed_break_above", "failed_break_below"] },
+      { name: "minBreakPct", label: "Min break beyond range %", type: "number", defaultValue: 0, min: 0, max: 5, step: 0.05 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const minutes = Number(params.rangeMinutes ?? 15);
+      const event = String(params.event ?? "break_above");
+      const k = Number(params.minBreakPct ?? 0) / 100;
+      const w = sessionWindow(candles, skip);
+      if (!w) return { pass: false, data: { _diagnostics: { value: "no regular-session bars", threshold: `ORB ${event}` } } };
+      const range = openingRange(w.today, minutes);
+      if (!range || !range.complete) return { pass: false, data: { _diagnostics: { value: range ? "opening range not complete yet" : "no opening-range bars", threshold: `${minutes}-min ORB ${event}` } } };
+      const hi = range.high * (1 + k), lo = range.low * (1 - k);
+      const end = RTH_OPEN_MINUTE + minutes;
+      const after = w.today.filter((b) => (etClock(b.date)?.minute ?? -1) >= end);
+      const close = w.bar.close;
+      const prev = after.length >= 2 ? after[after.length - 2].close : null;
+      const earlier = after.slice(0, -1);
+      const isAbove = close > hi, isBelow = close < lo, isInside = close <= range.high && close >= range.low;
+      let pass = false;
+      if (event === "above") pass = isAbove;
+      else if (event === "below") pass = isBelow;
+      else if (event === "inside") pass = isInside;
+      else if (event === "break_above") pass = isAbove && !earlier.some((b) => b.close > hi);
+      else if (event === "break_below") pass = isBelow && !earlier.some((b) => b.close < lo);
+      else if (event === "failed_break_above") pass = isInside && earlier.some((b) => b.close > hi);
+      else if (event === "failed_break_below") pass = isInside && earlier.some((b) => b.close < lo);
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, openingRangeHigh: range.high, openingRangeLow: range.low,
+        _diagnostics: { value: `close $${close.toFixed(2)}, range $${range.low.toFixed(2)}-$${range.high.toFixed(2)}`, threshold: `${minutes}-min ORB ${event}`, detail: `${w.day}${prev != null ? `, prev close $${prev.toFixed(2)}` : ""}` } } };
+    },
+  },
+  {
+    id: "ITD-6",
+    name: "High / Low of Day",
+    category: "Intraday",
+    description: "Today's regular-session high and low (from 9:30 ET, pre-market left out). 'new_high'/'new_low': the latest closed bar made a new high (low) of the day; 'near_high'/'near_low': it closed within X% of the day's high (low).",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1 },
+      { name: "event", label: "Event", type: "select", defaultValue: "new_high", options: ["new_high", "new_low", "near_high", "near_low"] },
+      { name: "withinPct", label: "Within % (near)", type: "number", defaultValue: 0.5, min: 0, max: 10, step: 0.1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const event = String(params.event ?? "new_high");
+      const within = Number(params.withinPct ?? 0.5) / 100;
+      const w = sessionWindow(candles, skip);
+      if (!w) return { pass: false, data: { _diagnostics: { value: "no regular-session bars", threshold: event } } };
+      const day = highLowOfDay(w.today)!;
+      const before = highLowOfDay(w.today.slice(0, -1));
+      const b = w.bar;
+      let pass = false;
+      if (event === "new_high") pass = !!before && b.high > before.high;
+      else if (event === "new_low") pass = !!before && b.low < before.low;
+      else if (event === "near_high") pass = b.close >= day.high * (1 - within);
+      else if (event === "near_low") pass = b.close <= day.low * (1 + within);
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, highOfDay: day.high, lowOfDay: day.low,
+        _diagnostics: { value: `close $${b.close.toFixed(2)}, day $${day.low.toFixed(2)}-$${day.high.toFixed(2)}`, threshold: event, detail: w.day } } };
+    },
+  },
+  {
+    id: "ITD-7",
+    name: "Prior-Day Level",
+    category: "Intraday",
+    description: "Price against the previous session's regular-hours high, low or close. 'above'/'below': the latest closed bar's close; 'cross_above'/'cross_below': this bar closed across the level and the bar before did not (today's first bar compares with the prior close); 'near': closed within X%.",
+    params: [
+      { name: "skipBars", label: "Skip Recent Bars", type: "number", defaultValue: 0, min: 0, max: 200, step: 1 },
+      { name: "level", label: "Level", type: "select", defaultValue: "high", options: ["high", "low", "close"] },
+      { name: "event", label: "Event", type: "select", defaultValue: "above", options: ["above", "below", "cross_above", "cross_below", "near"] },
+      { name: "withinPct", label: "Within % (near)", type: "number", defaultValue: 0.5, min: 0, max: 10, step: 0.1 },
+    ],
+    evaluate: (candles, params, _benchmarkCandles, upstreamData) => {
+      const skip = upstreamData?.patternEndBar ?? params.skipBars ?? 0;
+      const which = String(params.level ?? "high") as "high" | "low" | "close";
+      const event = String(params.event ?? "above");
+      const within = Number(params.withinPct ?? 0.5) / 100;
+      const w = sessionWindow(candles, skip);
+      if (!w) return { pass: false, data: { _diagnostics: { value: "no regular-session bars", threshold: `prior-day ${which} ${event}` } } };
+      const pd = priorDayLevels(w.prior);
+      if (!pd) return { pass: false, data: { _diagnostics: { value: "no prior session in the data", threshold: `prior-day ${which} ${event}` } } };
+      const level = pd[which];
+      const close = w.bar.close;
+      const prevClose = w.today.length >= 2 ? w.today[w.today.length - 2].close : pd.close;
+      let pass = false;
+      if (event === "above") pass = close > level;
+      else if (event === "below") pass = close < level;
+      else if (event === "cross_above") pass = close > level && !(prevClose > level);
+      else if (event === "cross_below") pass = close < level && !(prevClose < level);
+      else if (event === "near") pass = Math.abs(close - level) <= level * within;
+      return { pass, data: { evaluationStartBar: skip, evaluationEndBar: skip, patternEndBar: skip, priorDayHigh: pd.high, priorDayLow: pd.low, priorDayClose: pd.close,
+        _diagnostics: { value: `close $${close.toFixed(2)} vs prior ${which} $${level.toFixed(2)}`, threshold: event, detail: w.day } } };
+    },
+  },
 ];
 
 export const INDICATOR_LIBRARY: IndicatorDefinition[] = [
@@ -2927,4 +3077,23 @@ export async function getIndicatorLibraryForUser(userId: number): Promise<Indica
     console.error('[getIndicatorLibraryForUser] Error loading custom indicators:', error);
     return INDICATOR_LIBRARY;
   }
+}
+
+export function isRetiredIndicator(id: string): boolean {
+  return !!INDICATOR_LIBRARY.find((i) => i.id === id)?.retired;
+}
+
+/** The library without retired indicators: what the picker and the AI may offer. */
+export function activeIndicators<T extends { id: string; retired?: unknown }>(library: T[]): T[] {
+  return library.filter((i) => !i.retired);
+}
+
+/** "ITD-1 (retired: use ITD-5)" notes for the criteria of saved thoughts, empty when none is retired. */
+export function retiredNotesFor(criteria: Array<{ indicatorId?: string; muted?: boolean }> | undefined): string[] {
+  const out: string[] = [];
+  for (const c of criteria || []) {
+    const def = c.indicatorId ? INDICATOR_LIBRARY.find((i) => i.id === c.indicatorId) : undefined;
+    if (def?.retired && !out.some((n) => n.startsWith(`${def.id} `))) out.push(`${def.id} ${def.name}: ${def.retired.note}`);
+  }
+  return out;
 }

@@ -8,15 +8,18 @@ export type CloseBar = { close: number };
 export type HlcBar = { high: number; low: number; close: number };
 export type VwapBar = { date: string; high: number; low: number; close: number; volume: number };
 
+// One formatter for every call: building an Intl.DateTimeFormat per bar is the slow part of a session VWAP.
+const ET_DATE_KEY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 export function sessionDateKeyEt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
+  return ET_DATE_KEY.format(d);
 }
 
 export function calculateSMA(data: CloseBar[], period: number): (number | null)[] {

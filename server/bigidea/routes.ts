@@ -3,7 +3,7 @@ import { db, isDatabaseAvailable } from "../db";
 import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights, indicatorExecutionStats, optimizerDisplaySettings, bigideaSetups, bigideaSetupIndicators, bigideaExtractedIdeas, bigideaValidationRatings, uploads, setupUploads, userIndicators, indicatorApprovalQueue, type ExtractedThought } from "@shared/schema";
 import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition } from "./indicators";
+import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor } from "./indicators";
 import { evaluateDslIndicator, validateDslDefinition, DslLogicDefinition } from "./dsl-evaluator";
 import { evaluateScanQuality } from "./quality";
 import {
@@ -34,7 +34,7 @@ const OHLCV_MAX_ENTRIES = 20;
 const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
 
-const INTRADAY_INDICATORS = ["ITD-1", "ITD-2", "ITD-3"];
+const INTRADAY_INDICATORS = ["ITD-1", "ITD-2", "ITD-3", "ITD-4", "ITD-5", "ITD-6", "ITD-7"];
 const MA10_INDICATOR = "MA-10";
 
 function thoughtUsesIntradayData(criteria: any[]): boolean {
@@ -1040,6 +1040,8 @@ export function registerBigIdeaRoutes(app: Express): void {
         params: ind.params,
         provides: ind.provides || [],
         consumes: ind.consumes || [],
+        // the client keeps retired ones for showing old saved ideas, but not in its picker
+        ...(ind.retired ? { retired: ind.retired } : {}),
       }));
       res.json(indicators);
     } catch (error) {
@@ -1062,7 +1064,7 @@ export function registerBigIdeaRoutes(app: Express): void {
       }
 
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
-      const indicatorSummary = mergedLibrary.map((ind) => ({
+      const indicatorSummary = activeIndicators(mergedLibrary).map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -1373,7 +1375,7 @@ You MUST detect intraday timeframe references from the user's description and se
 - "daily", "D1", "day", or no timeframe mentioned → timeframe: "daily"
 
 INTRADAY INDICATOR RULE — CRITICAL:
-When using ITD-* (Intraday category) indicators like ITD-1 (Opening Range Breakout), ITD-2 (VWAP Position), or ITD-3 (Gap Detection for intraday), the thought timeframe MUST be set to an intraday value ("5min", "15min", or "30min"). These indicators are designed for intraday candles and will produce meaningless results on daily data. If the user requests VWAP, ORB, or other ITD-* indicators without specifying a timeframe, default to "5min".
+When using ITD-* (Intraday category) indicators like ITD-4 (Session VWAP), ITD-5 (Opening Range from 9:30 ET), ITD-6 (High/Low of Day), ITD-7 (Prior-Day Level) or ITD-3 (Gap Detection for intraday), the thought timeframe MUST be set to an intraday value ("5min", "15min", or "30min"). These indicators are designed for intraday candles and will produce meaningless results on daily data. If the user requests VWAP, ORB, or other ITD-* indicators without specifying a timeframe, default to "5min".
 When the user's description contains a combined/multi-part idea where SOME parts reference an intraday timeframe and others reference daily, split into separate thoughts with the appropriate timeframe on each.
 
 MULTI-TIMEFRAME PATTERN:
@@ -1697,7 +1699,7 @@ ${summaries}`;
       }
 
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
-      const indicatorSummary = mergedLibrary.map((ind) => ({
+      const indicatorSummary = activeIndicators(mergedLibrary).map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -1884,7 +1886,7 @@ Respond with valid JSON in this format:
       }
 
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
-      const indicatorSummary = mergedLibrary.map((ind) => ({
+      const indicatorSummary = activeIndicators(mergedLibrary).map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -2970,6 +2972,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         dynamicDataFlows,
         funnelData,
         sessionId,
+        // saved ideas that still use a retired indicator: it ran exactly as before, this says what replaces it
+        retiredIndicators: retiredNotesFor(thoughtNodes.flatMap((n: any) => n.thoughtCriteria || [])),
         debugInfo: enhancedDebugInfo,
         ...(marketFlow ? {
           universeMeta: {
@@ -3427,7 +3431,7 @@ Return a JSON object with this exact structure:
 }`;
 
       const usedIndicatorIds = new Set(indicatorMeta.map(m => m.id));
-      const availableIndicators = INDICATOR_LIBRARY
+      const availableIndicators = activeIndicators(INDICATOR_LIBRARY)
         .filter(ind => !usedIndicatorIds.has(ind.id))
         .map(ind => ({
           id: ind.id,
@@ -5020,7 +5024,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       }
 
       // Build indicator library summary
-      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+      const indicatorSummary = activeIndicators(INDICATOR_LIBRARY).map(ind => 
         `- ${ind.id}: ${ind.name} (${ind.category})`
       ).join("\n");
 
@@ -5129,7 +5133,7 @@ Remember: Most articles describe ONE setup with examples. Be conservative - only
         return res.status(500).json({ error: "OpenAI not configured" });
       }
 
-      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+      const indicatorSummary = activeIndicators(INDICATOR_LIBRARY).map(ind => 
         `- ${ind.id}: ${ind.name} (${ind.category})`
       ).join("\n");
 
@@ -5754,7 +5758,7 @@ If no changes needed, return response without updatedPreview.`;
       }
 
       // Build indicator library summary for context
-      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+      const indicatorSummary = activeIndicators(INDICATOR_LIBRARY).map(ind => 
         `- ${ind.id}: ${ind.name} (${ind.category}) - ${ind.description}`
       ).join("\n");
 
