@@ -132,7 +132,7 @@ measured. A measured per-name curve needs about 20 days of stored 5-minute histo
 | `level_hold` / `level_reject` | long / short | Daily levels: SMA 5/10/20/50, EMA 10/20, previous low/high, and gap edges whose role fits. Earlier today price was at least `levelApproachAdr` 0.3 ADR on the right side. The previous bar closed on the right side. This bar tags the level within `touchTolPct` 0.15% and closes back. One hit a bar: the level nearest the close. The variant is the level name | 120 min per level |
 | `lod_reversal` / `hod_reversal` | long / short | This bar or the one before set a new session low (high), not on the first bar. The open is at least `reversalMinMoveAdr` 0.5 ADR from that extreme. This bar closes up (down), in the top (bottom) `reversalCloseShare` 60% of its range, past the previous close | 60 min |
 | `new_high_volume` / `new_low_volume` | long / short | After the range, a close above every earlier high (under every earlier low). The bar's volume and the day's volume so far are both at least `newExtremeMinRelVol` 1.5x their norms | 60 min |
-| `gap_and_go` / `gap_down_and_go` | long / short | A true gap (open beyond the prior high / low) on volume that has held, within `goMaxDays` 10 sessions (the gap day is day 0). The first close beyond the go level (the highest high / lowest low since the gap; on day 0 the opening-range high / low) by `goBreakAdr` 0.05 ADR, on `goRelVol` 1.5x. On day 0 it replaces `orb_breakout` / `orb_breakdown` on the same bar (`facts.also`). The full rule is in the next section | once per gap per day; at most `goMaxFires` 2 per gap |
+| `gap_and_go` / `gap_down_and_go` | long / short | A true gap (open beyond the prior high / low) on volume that has held, within `goMaxDays` 10 sessions (the gap day is day 0). The first close beyond the **pivot**: the top (bottom) of the post-gap consolidation, which may be below the gap-day high. Days 1-2 use today's opening-range high (or the gap-day high); day 0 uses the opening-range high. The close must clear it by `goBreakAdr` 0.05 ADR, on `goRelVol` 1.5x. A later close beyond the gap-day high is a second variant, `gap_high_break`. On day 0 it replaces `orb_breakout` / `orb_breakdown` on the same bar (`facts.also`). The full rule is in the next section | once per gap and variant per day; at most `goMaxFires` 2 per gap |
 | `leader_shakeout` (daily in range) | long | A Leader Shakeout hit of the last 5 sessions. This bar closes within `inRangeAdr` 0.5 ADR of the drop day's close (entry level; PROPOSAL) and closes up. Tested: 2 grade points | 1 day |
 | user setups (`daily_in_range`) | the setup's | Passed on last night's bars. This bar closes within the setup's `range_adr` (or 0.5) of its entry level and moves the setup's way | 1 day |
 
@@ -176,18 +176,45 @@ A close through the edge kills the setup for good: the gap failed and flipped to
 raised again. On day 0, a 5-minute close back through the edge counts as failing. The newest valid gap per direction
 is the one watched.
 
-**The GO.** It fires on the first 5-minute close today beyond the **go level** by `goBreakAdr` **0.05 ADR**, with the
-bar's relative volume at least `goRelVol` **1.5**.
-- **Go level:** the highest high from the gap day through yesterday. That is the gap-day high (`gap_day_high`), or
-  the consolidation high (`consolidation_high`) when a later day went higher.
-- **Day 0:** the opening-range high (first 15 minutes, `opening_range_high`). When `orb_breakout` would fire on the
-  same bar, only `gap_and_go` is raised, with `facts.also = "orb_breakout"`.
-- **Once per gap per day.**
-- **Repeat:** a later day fires again only when, since the last fire, price pulled back at least
-  `repeatPullbackAdr` **1.0 ADR** from its high and the go level is now higher. At most `goMaxFires` **2** fires per
-  gap. Earlier fires are read from `trigger_candidates`.
+**The GO and its level (the pivot).** Don, 26 Nov: "be smart, if its been basing for weeks at 100 and peaked on gap
+day at 105, then a 102 break etc would be noteworthy". So the go level is **not** the highest high since the gap. It
+fires on the first 5-minute close today beyond the pivot by `goBreakAdr` **0.05 ADR**, with the bar's relative volume
+at least `goRelVol` **1.5**. Every candidate records which pivot it used, as `pivot_kind`:
 
-**The stop** is the nearest valid level (the same rule as every setup: 0.25 ADR noise floor, 5% refusal) among:
+| When | Pivot | `pivot_kind` |
+|---|---|---|
+| At least `consolMinDays` **2** sessions after the gap day | The highest high of the **post-gap** sessions (the gap day's own bar excluded). This holds whether it is below or above the gap-day high | `consolidation` |
+| Same, but the top is a single-bar poke (no other high within `shelfTolAdr` **0.25 ADR** of it) that closed back under a shelf of two or more highs within 0.25 ADR of each other | The shelf; the poke is ignored | `shelf` |
+| Fewer sessions since the gap (days 1 and 2 by default) | Today's opening-range high when it is under the gap-day high | `opening_range` |
+| Same, but the opening range is over the gap-day high | The gap-day high | `gap_high` |
+| Day 0 | The opening-range high. When `orb_breakout` would fire on the same bar only `gap_and_go` is raised, with `facts.also = "orb_breakout"` | `opening_range` |
+
+The days 1-2 rows are a **weaker read**: there is no consolidation yet.
+
+**The gap-day high as a second level** (variant `gap_high_break:<gap date>`). It is raised when all of these hold:
+- the pivot already fired, on an earlier day or earlier today;
+- the gap-day high is more than `gapHighApartAdr` **0.5 ADR** beyond the pivot;
+- a later close clears the gap-day high.
+
+It fires once per gap and counts toward `goMaxFires`.
+
+**Repeat.** Both variants together fire at most `goMaxFires` **2** times per gap. A later fire of the pivot variant
+needs a `repeatPullbackAdr` **1.0 ADR** pullback since the last fire and a higher pivot. Earlier fires and their
+variants are read from `trigger_candidates`.
+
+**Overhead and base, carried on every candidate.**
+- `pivot`, `pivot_kind`, `gap_day_high` (a short: the gap-day low), and `distance_to_gap_high_adr`. That distance is
+  how far the gap-day extreme sits beyond the entry: overhead that is real resistance, and the `why` line says so.
+- The pre-gap base: `base_days` and `base_top` (the longest run before the gap whose range stays within
+  `baseRangeAdr` **3 ADR**; the screen has no base routine, and CB-1 is too heavy), `gap_cleared_base`, and
+  `from_base` (a base of at least `baseMinDays` **15** sessions that the gap cleared).
+- `holds_upper_half`: the post-gap range is tight (at most 1.5 ADR) and every low stayed in the upper half of the gap
+  day's range. This is the strongest form.
+- `risk_from_pivot_pct`: from the pivot to the stop.
+- `risk_to_cons_low_pct`: from the entry to the post-gap low, the stop Don prefers.
+
+**The stop** is the nearest valid level (the same rule as every setup: 0.25 ADR noise floor, 5% refusal). After a
+pivot break that is often the post-gap low itself, which is the low risk Don wants. The candidates are:
 - the **consolidation low**: the lowest low of the sessions after the gap day through yesterday, used only when it is
   above the edge;
 - today's **VWAP**;
@@ -199,15 +226,19 @@ The level used is stored in `stop_level`.
 
 **Grade.** It is a built-in, untested setup: 1 point. A stop at a **tight** consolidation's low (range at most
 `tightRangeAdr` **1.5 ADR** over at least `tightMinDays` **2** sessions) earns the "stop level has company" point
-(`facts.company = "tight consolidation"`). Nothing else in the grade changes.
+(`facts.company = "tight consolidation"`). The pre-gap base is **not** put into the grade: the company point is about
+the stop's level, and a base is about the setup's quality. Using it would double-count with the tight-flag point.
+It is carried as the `from_base` fact for the AI and for later tuning.
 
-**Facts:**
-- the gap: `gapDate`, `gapPct`, `gapAdr`, `volMult`, `gapEdge`;
-- the timing: `daysSinceGap`, `fireNo`, `also` (when it replaced an ORB);
-- the go: `goLevel`, `goFrom`, `relVol`;
-- the consolidation: `pullbackAdr` (from the best price since the gap to the worst after it, in ADR),
-  `consRangeAdr`, `consDays`, `tight`;
-- `earningsGap`.
+**Facts** (snake_case):
+- the gap: `gap_date`, `gap_pct`, `gap_adr`, `vol_mult`, `gap_edge`;
+- the timing: `days_since_gap`, `fire_no`, `also` (when it replaced an ORB);
+- the pivot and overhead: `pivot`, `pivot_kind`, `gap_day_high`, `distance_to_gap_high_adr`, `rel_vol`;
+- the consolidation: `pullback_adr` (from the best price since the gap to the worst after it, in ADR),
+  `cons_range_adr`, `cons_days`, `cons_low`, `tight`, `holds_upper_half`;
+- the base: `base_days`, `base_top`, `gap_cleared_base`, `from_base`;
+- the risk: `risk_from_pivot_pct`, `risk_to_cons_low_pct`;
+- `earnings_gap`.
 
 **How it differs from `setups/earnings-gap-up.ts`.** That setup measures from the prior **close**, by at least 3% and
 1 ATR14, needs volume at least 2x the **20**-day average, needs close > open and CLV at least 0.5, and runs on
@@ -223,7 +254,7 @@ It differs in that it:
 - uses the **50**-day volume;
 - runs on any day;
 - needs no close > open;
-- adds the held / n-day / go-level logic.
+- adds the held / n-day / pivot logic.
 
 ## The stop rule
 

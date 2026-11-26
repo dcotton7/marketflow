@@ -160,7 +160,14 @@ export function runPass(p: PassInput): PassResult {
             gradePoints: g.points,
             gradeComponents: g.components,
             dataAsOf: { bars: triggerAt, daily: ctx.asOf, regime: p.regime.asOf, rotation: p.rotation.asOf, earnings: ctx.earningsKnown ? p.earningsAsOf ?? null : null },
-            facts: { ...h.facts, company: company.join(",") || null },
+            facts: {
+              ...h.facts,
+              company: company.join(",") || null,
+              // gap and go: the risk from the pivot itself to the stop (the entry Don has in mind)
+              ...(typeof h.facts.pivot === "number" ? { risk_from_pivot_pct: round((Math.abs(Number(h.facts.pivot) - stop.stop!) / Number(h.facts.pivot)) * 100) } : {}),
+              // and from the entry to the post-gap consolidation's low (a short: its high), the stop Don prefers
+              ...(typeof h.facts.cons_low === "number" ? { risk_to_cons_low_pct: round((Math.abs(entry - Number(h.facts.cons_low)) / entry) * 100) } : {}),
+            },
             dedupeKey: `${base}|${triggerAt}`,
             ruleVersion: RULE_VERSION,
           });

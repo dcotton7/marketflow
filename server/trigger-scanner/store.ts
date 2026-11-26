@@ -189,8 +189,8 @@ export function pgTriggerStore(db: Exec): TriggerStore {
     },
     async gapFires(from, before) {
       await ensureTriggerTables(db);
-      const r = await db.execute(sql`SELECT symbol, side, market_date, facts->>'gapDate' AS gap_date, facts->>'goLevel' AS go_level FROM trigger_candidates WHERE setup_key IN ('gap_and_go', 'gap_down_and_go') AND market_date >= ${from} AND market_date < ${before}`);
-      return rowsOf(r).map((x) => ({ symbol: String(x.symbol), side: x.side, marketDate: String(x.market_date), gapDate: String(x.gap_date), goLevel: Number(x.go_level) }));
+      const r = await db.execute(sql`SELECT symbol, side, market_date, variant, facts->>'gap_date' AS gap_date, facts->>'pivot' AS go_level FROM trigger_candidates WHERE setup_key IN ('gap_and_go', 'gap_down_and_go') AND market_date >= ${from} AND market_date < ${before}`);
+      return rowsOf(r).map((x) => ({ symbol: String(x.symbol), side: x.side, marketDate: String(x.market_date), gapDate: String(x.gap_date), goLevel: Number(x.go_level), variant: String(x.variant) }));
     },
     async activeUserSetups() {
       await ensureTriggerTables(db);
@@ -248,7 +248,7 @@ export function memoryTriggerStore(userSetups: UserSetupRow[] = []): TriggerStor
     async gapFires(from, before) {
       return candidates
         .filter((c) => (c.setupKey === "gap_and_go" || c.setupKey === "gap_down_and_go") && c.marketDate >= from && c.marketDate < before)
-        .map((c) => ({ symbol: c.symbol, side: c.side, marketDate: c.marketDate, gapDate: String(c.facts.gapDate), goLevel: Number(c.facts.goLevel) }));
+        .map((c) => ({ symbol: c.symbol, side: c.side, marketDate: c.marketDate, gapDate: String(c.facts.gap_date), goLevel: Number(c.facts.pivot), variant: c.variant }));
     },
     async activeUserSetups() {
       const newest = new Map<string, UserSetupRow>();

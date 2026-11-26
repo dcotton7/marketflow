@@ -45,8 +45,11 @@ export interface GapGo {
   gapPct: number; // open beyond the edge, %
   gapAdr: number; // open beyond the edge, in the ADR before the gap
   volMult: number; // gap-day volume / the 50-session average before it
-  goLevel: number; // up: the highest high from the gap day through yesterday; down: the lowest low
-  goFrom: "gap_day_high" | "consolidation_high" | "gap_day_low" | "consolidation_low";
+  /** The post-gap consolidation pivot (null before consolMinDays sessions: then today's opening range or the gap-day high). */
+  pivot: number | null;
+  pivotKind: "consolidation" | "shelf" | "early";
+  /** Up: the gap day's high; down: its low (the overhead the AI should see). */
+  gapExtreme: number;
   /** Sessions after the gap day through yesterday: their low and high (null on day 1), count and range in ADR. */
   consLow: number | null;
   consHigh: number | null;
@@ -54,9 +57,17 @@ export interface GapGo {
   consRangeAdr: number | null;
   /** From the best price since the gap back to the worst after it, through yesterday, in ADR. */
   pullbackAdr: number;
+  /** The post-gap range is tight and every low held the upper half of the gap day's range (down: highs, lower half). */
+  holdsUpperHalf: boolean;
+  /** The base before the gap: sessions, its top (down: its bottom), and whether the gap opened beyond it. */
+  baseDays: number;
+  baseTop: number;
+  gapClearedBase: boolean;
   earningsGap: boolean | "unknown";
   /** Earlier fires of this gap (from the store) and whether another is allowed today. */
   fires: number;
+  firedPivot: boolean;
+  firedGapHigh: boolean;
   repeatOk: boolean;
   repeatWhy: string | null;
 }

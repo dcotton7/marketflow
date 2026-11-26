@@ -20,13 +20,24 @@
  *   the gap HELD: no session since closed below the edge (short: above). A close through it kills the setup for good
  *   (the gap failed and flipped to resistance). The newest valid gap per direction is the one watched.
  *
- * THE GO (on a 5-minute close): the first close today above the go level + goBreakAdr [0.05] ADR, with the bar's
- *   relative volume >= goRelVol [1.5]. Go level = the highest high from the gap day through yesterday (the gap-day
- *   high, or the consolidation high when a later day exceeded it). On day 0 the go level is the opening-range high,
- *   after the range; when orb_breakout would fire on the same bar only gap_and_go is raised (facts.also).
- *   Once per gap per day. A later fire needs a new, higher go level after a pullback of at least repeatPullbackAdr
- *   [1.0] ADR since the last fire, and at most goMaxFires [2] fires per gap.
- *
+ * THE GO (on a 5-minute close, bar relative volume >= goRelVol [1.5], close beyond the level by goBreakAdr [0.05] ADR,
+ *   the first such close today). The level is the PIVOT (Don, 26 Nov: "if its been basing for weeks at 100 and peaked on
+ *   gap day at 105, then a 102 break etc would be noteworthy"):
+ *   - once at least consolMinDays [2] sessions have passed since the gap day: the top of the POST-GAP range (the gap
+ *     day's own bar excluded), pivot_kind "consolidation"; a single-bar poke above a shelf of two or more highs within
+ *     shelfTolAdr [0.25] ADR that closed back under it is ignored, pivot_kind "shelf". This fires whether the pivot
+ *     is under or over the gap-day high;
+ *   - before that (days 1 and 2 by default): today's opening-range high when it is under the gap-day high
+ *     ("opening_range"), else the gap-day high ("gap_high"); a weaker read;
+ *   - day 0: the opening-range high; when orb_breakout would fire on the same bar only gap_and_go is raised.
+ *   A second candidate, variant gap_high_break, when a later close clears the gap-day high and that is more than
+ *   gapHighApartAdr [0.5] ADR over the pivot that already fired; it counts toward goMaxFires.
+ *   A later pivot fire needs a repeatPullbackAdr [1.0] ADR pullback since the last one and a higher pivot; at most
+ *   goMaxFires [2] fires per gap. Every candidate carries pivot, pivot_kind, gap_day_high and
+ *   distance_to_gap_high_adr (the overhead: real resistance), and the pre-gap base (base_days, base_top: the longest
+ *   run before the gap within baseRangeAdr [3] ADR; gap_cleared_base) and holds_upper_half (the post-gap range is
+ *   tight and every low stayed in the upper half of the gap day's range). from_base = a base of at least
+ *   baseMinDays [15] sessions that the gap cleared: a fact only, the grade does not use it.
  * STOP: the nearest valid level (levels.ts: 0.25 ADR noise floor, 5% refusal) among: the consolidation low (the
  *   sessions after the gap day through yesterday, only when above the edge), VWAP, today's low, the 5- and 10-day
  *   SMA, and the gap edge. A stop at a TIGHT consolidation's low (range <= tightRangeAdr [1.5] ADR over at least
@@ -39,9 +50,10 @@ import type { TriggerFn } from "./triggers/common";
 import { r2 } from "./triggers/common";
 import type { DailyBar, GapGo, Level, TriggerHit } from "./types";
 
-export interface PriorFire { gapDate: string; marketDate: string; goLevel: number; side: "long" | "short" }
+/** An earlier fire of a gap (from trigger_candidates): the level it fired on and which variant. */
+export interface PriorFire { gapDate: string; marketDate: string; goLevel: number; side: "long" | "short"; variant?: string }
 
-type GapSettings = Pick<ScannerSettings, "gapFrom" | "gapMinPct" | "gapMinAdr" | "gapVolMult" | "gapVolDays" | "goMaxDays" | "repeatPullbackAdr" | "goMaxFires" | "earningsWindow">;
+type GapSettings = Pick<ScannerSettings, "gapFrom" | "gapMinPct" | "gapMinAdr" | "gapVolMult" | "gapVolDays" | "goMaxDays" | "repeatPullbackAdr" | "goMaxFires" | "earningsWindow" | "consolMinDays" | "shelfTolAdr" | "tightRangeAdr" | "baseRangeAdr">;
 
 const clv = (b: { high: number; low: number; close: number }) => (b.high > b.low ? (b.close - b.low) / (b.high - b.low) : 0.5);
 
@@ -91,9 +103,41 @@ export function earningsGapFact(gapDate: string, sessions: string[], reactions: 
   });
 }
 
+/** The longest run of sessions ending at index `end` whose high-low range stays within `maxRangeAdr` ADR. */
+export function preGapBase(b: DailyBar[], end: number, adr: number, maxRangeAdr: number, lookback = 60): { days: number; top: number; bottom: number } {
+  let hi = -Infinity, lo = Infinity, days = 0;
+  for (let j = end; j >= Math.max(0, end - lookback + 1); j--) {
+    const h = Math.max(hi, b[j].high), l = Math.min(lo, b[j].low);
+    if (days > 0 && h - l > maxRangeAdr * adr) break;
+    hi = h; lo = l; days++;
+  }
+  return { days, top: hi, bottom: lo };
+}
+
+/**
+ * The post-gap consolidation pivot (Don: "if its been basing for weeks at 100 and peaked on gap day at 105, then a
+ * 102 break etc would be noteworthy"). Over the sessions AFTER the gap day: the highest high (a short: the lowest
+ * low), kind "consolidation". When that top is a single poke (no other high within shelfTolAdr ADR of it) that closed
+ * back under a shelf of two or more highs within shelfTolAdr of each other, the shelf is the pivot, kind "shelf".
+ */
+export function postGapPivot(post: DailyBar[], up: boolean, tol: number): { pivot: number; kind: "consolidation" | "shelf" } {
+  const ext = (x: DailyBar) => (up ? x.high : x.low);
+  const better = (a: number, c: number) => (up ? a > c : a < c);
+  let top = 0;
+  for (let j = 1; j < post.length; j++) if (better(ext(post[j]), ext(post[top]))) top = j;
+  const T = ext(post[top]);
+  const others = post.filter((_, j) => j !== top);
+  if (!others.length || others.some((x) => Math.abs(T - ext(x)) <= tol)) return { pivot: T, kind: "consolidation" };
+  const L = others.reduce((m, x) => (better(ext(x), m) ? ext(x) : m), ext(others[0]));
+  const shelf = others.filter((x) => Math.abs(L - ext(x)) <= tol);
+  const pokeClosedBack = up ? post[top].close <= L : post[top].close >= L;
+  if (shelf.length >= 2 && pokeClosedBack) return { pivot: L, kind: "shelf" };
+  return { pivot: T, kind: "consolidation" };
+}
+
 /**
  * The live gap per direction from finished sessions (oldest first, today NOT included): the newest gap day within
- * goMaxDays that has held. One pass over the last goMaxDays + 1 sessions.
+ * goMaxDays that has held. One pass over the last goMaxDays + 1 sessions (plus the base before it).
  */
 export function precomputeGapGo(
   b: DailyBar[],
@@ -107,41 +151,50 @@ export function precomputeGapGo(
     const day = n - k; // today's day number
     const g = gapDay(b, k, s);
     if (!g || out[g.dir]) continue;
-    const after = b.slice(k + 1);
+    const post = b.slice(k + 1); // the sessions after the gap day, through yesterday
     const up = g.dir === "up";
-    if (after.some((x) => (up ? x.close < g.edge : x.close > g.edge))) continue; // failed: never again from this gap
-    const since = b.slice(k); // gap day through yesterday
-    const extremeIdx = since.reduce((best, x, j) => ((up ? x.high > since[best].high : x.low < since[best].low) ? j : best), 0);
-    const goLevel = up ? since[extremeIdx].high : since[extremeIdx].low;
-    // sessions AFTER the one that made the extreme (inside that session the order of high and low is unknown)
-    const afterExtreme = since.slice(extremeIdx + 1);
-    const worst = !afterExtreme.length ? goLevel : up ? Math.min(...afterExtreme.map((x) => x.low)) : Math.max(...afterExtreme.map((x) => x.high));
+    if (post.some((x) => (up ? x.close < g.edge : x.close > g.edge))) continue; // failed: never again from this gap
     const adr = opts.adrNow > 0 ? opts.adrNow : g.adr;
-    const consLow = after.length ? Math.min(...after.map((x) => x.low)) : null;
-    const consHigh = after.length ? Math.max(...after.map((x) => x.high)) : null;
-    // the repeat rule, against this gap's earlier fires
-    const fires = (opts.fires ?? []).filter((f) => f.gapDate === b[k].date && f.side === (up ? "long" : "short")).sort((x, y) => x.marketDate.localeCompare(y.marketDate));
+    const gd = b[k];
+    const gapExtreme = up ? gd.high : gd.low;
+    const piv = post.length >= s.consolMinDays ? postGapPivot(post, up, s.shelfTolAdr * adr) : null;
+    const consLow = post.length ? Math.min(...post.map((x) => x.low)) : null;
+    const consHigh = post.length ? Math.max(...post.map((x) => x.high)) : null;
+    const consRangeAdr = consLow !== null && consHigh !== null ? (consHigh - consLow) / adr : null;
+    const mid = (gd.high + gd.low) / 2;
+    const base = preGapBase(b, k - 1, g.adr, s.baseRangeAdr);
+    // pullback: from the best price since the gap to the worst in the sessions after the one that made it
+    const since = b.slice(k);
+    const bi = since.reduce((best, x, j) => ((up ? x.high > since[best].high : x.low < since[best].low) ? j : best), 0);
+    const best = up ? since[bi].high : since[bi].low;
+    const tail = since.slice(bi + 1);
+    const worst = !tail.length ? best : up ? Math.min(...tail.map((x) => x.low)) : Math.max(...tail.map((x) => x.high));
+    // the repeat rule, against this gap's earlier fires (both variants count toward goMaxFires)
+    const fires = (opts.fires ?? []).filter((f) => f.gapDate === gd.date && f.side === (up ? "long" : "short")).sort((x, y) => x.marketDate.localeCompare(y.marketDate));
+    const pivotFires = fires.filter((f) => !f.variant?.startsWith("gap_high_break"));
     let repeatOk = true, repeatWhy: string | null = null;
     if (fires.length >= s.goMaxFires) { repeatOk = false; repeatWhy = `fired ${fires.length} times (max ${s.goMaxFires})`; }
-    else if (fires.length) {
-      const last = fires[fires.length - 1];
+    else if (pivotFires.length) {
+      const last = pivotFires[pivotFires.length - 1];
       const fromLast = b.filter((x) => x.date >= last.marketDate);
-      const pi = fromLast.reduce((best, x, j) => ((up ? x.high > fromLast[best].high : x.low < fromLast[best].low) ? j : best), 0);
+      const pi = fromLast.reduce((bb, x, j) => ((up ? x.high > fromLast[bb].high : x.low < fromLast[bb].low) ? j : bb), 0);
       const peak = fromLast.length ? (up ? fromLast[pi].high : fromLast[pi].low) : last.goLevel;
-      const tail = fromLast.slice(pi + 1);
-      const trough = tail.length ? (up ? Math.min(...tail.map((x) => x.low)) : Math.max(...tail.map((x) => x.high))) : peak;
+      const after = fromLast.slice(pi + 1);
+      const trough = after.length ? (up ? Math.min(...after.map((x) => x.low)) : Math.max(...after.map((x) => x.high))) : peak;
       const pull = Math.abs(peak - trough) / adr;
-      const higher = up ? goLevel > last.goLevel : goLevel < last.goLevel;
-      if (!(pull >= s.repeatPullbackAdr) || !higher) { repeatOk = false; repeatWhy = `no ${s.repeatPullbackAdr} ADR pullback and new go level since the fire on ${last.marketDate} (pullback ${r2(pull)} ADR)`; }
+      const higher = piv !== null && (up ? piv.pivot > last.goLevel : piv.pivot < last.goLevel);
+      if (!(pull >= s.repeatPullbackAdr) || !higher) { repeatOk = false; repeatWhy = `no ${s.repeatPullbackAdr} ADR pullback and new pivot since the fire on ${last.marketDate} (pullback ${r2(pull)} ADR)`; }
     }
     out[g.dir] = {
-      dir: g.dir, date: b[k].date, day, edge: g.edge, gapPct: g.gapPct, gapAdr: g.gapAdr, volMult: g.volMult,
-      goLevel, goFrom: up ? (extremeIdx === 0 ? "gap_day_high" : "consolidation_high") : (extremeIdx === 0 ? "gap_day_low" : "consolidation_low"),
-      consLow, consHigh, consDays: after.length,
-      consRangeAdr: consLow !== null && consHigh !== null ? (consHigh - consLow) / adr : null,
-      pullbackAdr: Math.abs(goLevel - worst) / adr,
-      earningsGap: earningsGapFact(b[k].date, sessions, opts.earningsReactions ?? null, s.earningsWindow),
-      fires: fires.length, repeatOk, repeatWhy,
+      dir: g.dir, date: gd.date, day, edge: g.edge, gapPct: g.gapPct, gapAdr: g.gapAdr, volMult: g.volMult,
+      pivot: piv?.pivot ?? null, pivotKind: piv?.kind ?? "early", gapExtreme,
+      consLow, consHigh, consDays: post.length, consRangeAdr,
+      pullbackAdr: Math.abs(best - worst) / adr,
+      holdsUpperHalf: post.length > 0 && consRangeAdr !== null && consRangeAdr <= s.tightRangeAdr && post.every((x) => (up ? x.low >= mid : x.high <= mid)),
+      baseDays: base.days, baseTop: up ? base.top : base.bottom, gapClearedBase: up ? gd.open > base.top : gd.open < base.bottom,
+      earningsGap: earningsGapFact(gd.date, sessions, opts.earningsReactions ?? null, s.earningsWindow),
+      fires: fires.length, firedPivot: pivotFires.length > 0, firedGapHigh: fires.some((f) => f.variant?.startsWith("gap_high_break") ?? false),
+      repeatOk, repeatWhy,
     };
     if (out.up && out.down) break;
   }
@@ -155,38 +208,72 @@ export const gapAndGo: TriggerFn = ({ ctx, s, i, settings: st }) => {
   const rv = relVol(s, i, ctx.avgVol20);
   if (rv === null || rv < st.goRelVol) return [];
   const out: TriggerHit[] = [];
-  const firstClose = (level: number, up: boolean) => {
-    const thr = up ? level + st.goBreakAdr * ctx.adr : level - st.goBreakAdr * ctx.adr;
-    const crossed = (c: number) => (up ? c >= thr : c <= thr);
-    if (!crossed(b.c)) return false;
-    for (let j = 0; j < i; j++) if (crossed(s.bars[j].c)) return false;
-    return true;
-  };
+  const thr = (level: number, up: boolean) => (up ? level + st.goBreakAdr * ctx.adr : level - st.goBreakAdr * ctx.adr);
+  const crossed = (c: number, level: number, up: boolean) => (up ? c >= thr(level, up) : c <= thr(level, up));
+  const crossedBefore = (level: number, up: boolean) => { for (let j = 0; j < i; j++) if (crossed(s.bars[j].c, level, up)) return true; return false; };
+  const firstClose = (level: number, up: boolean) => crossed(b.c, level, up) && !crossedBefore(level, up);
+  const orReady = s.orHigh !== null && s.orLow !== null && i >= s.orEnd;
   for (const g of [ctx.gapGo.up, ctx.gapGo.down]) {
-    if (!g || !g.repeatOk) continue;
+    if (!g) continue;
     const up = g.dir === "up";
-    if (!firstClose(g.goLevel, up)) continue;
+    // the pivot: the post-gap consolidation; early on (fewer than consolMinDays sessions since the gap) today's
+    // opening-range high when it is under the gap-day high, else the gap-day high (a weaker read)
+    let pivot = g.pivot, kind: string = g.pivotKind;
+    if (pivot === null) {
+      if (!orReady) continue;
+      const orx = up ? s.orHigh! : s.orLow!;
+      const under = up ? orx < g.gapExtreme : orx > g.gapExtreme;
+      pivot = under ? orx : g.gapExtreme;
+      kind = under ? "opening_range" : "gap_high";
+    }
     const tight = g.consRangeAdr !== null && g.consDays >= st.tightMinDays && g.consRangeAdr <= st.tightRangeAdr;
-    out.push(hit(up, g.date, g.day, g.edge, g.goLevel, g.goFrom, ctx.sma5, ctx.sma10, s.vwap[i], up ? s.lod[i] : s.hod[i], up ? g.consLow : g.consHigh, tight, rv, {
-      gapPct: r2(g.gapPct), gapAdr: r2(g.gapAdr), volMult: r2(g.volMult), pullbackAdr: r2(g.pullbackAdr),
-      consRangeAdr: r2(g.consRangeAdr), consDays: g.consDays, earningsGap: String(g.earningsGap), fireNo: g.fires + 1,
-    }));
+    const facts = (entry: number, p: number, k: string, fireNo: number) => ({
+      pivot: r2(p), pivot_kind: k, gap_day_high: r2(g.gapExtreme),
+      distance_to_gap_high_adr: r2(((up ? g.gapExtreme - entry : entry - g.gapExtreme)) / ctx.adr),
+      gap_pct: r2(g.gapPct), gap_adr: r2(g.gapAdr), vol_mult: r2(g.volMult), pullback_adr: r2(g.pullbackAdr),
+      cons_range_adr: r2(g.consRangeAdr), cons_days: g.consDays, holds_upper_half: g.holdsUpperHalf ? 1 : 0,
+      base_days: g.baseDays, base_top: r2(g.baseTop), gap_cleared_base: g.gapClearedBase ? 1 : 0, from_base: g.baseDays >= st.baseMinDays && g.gapClearedBase ? 1 : 0,
+      cons_low: r2(up ? g.consLow : g.consHigh),
+      earnings_gap: String(g.earningsGap), fire_no: fireNo,
+    });
+    const cons = up ? g.consLow : g.consHigh;
+    const dayExt = up ? s.lod[i] : s.hod[i];
+    if (g.repeatOk && firstClose(pivot, up)) {
+      out.push(hit(up, g.date, g.day, g.edge, pivot, kind, ctx.sma5, ctx.sma10, s.vwap[i], dayExt, cons, tight, rv, `gap:${g.date}`, facts(b.c, pivot, kind, g.fires + 1)));
+      continue;
+    }
+    // the second level: the gap-day high, when it is more than gapHighApartAdr over the pivot that fired
+    const apart = (up ? g.gapExtreme - pivot : pivot - g.gapExtreme) > st.gapHighApartAdr * ctx.adr;
+    // did the pivot fire earlier today? exactly the trigger's own test: the first close over it, on enough volume
+    let firstJ = -1;
+    for (let j = 0; j < i && firstJ < 0; j++) if (crossed(s.bars[j].c, pivot, up)) firstJ = j;
+    const pivotFiredToday = g.repeatOk && firstJ >= 0 && (relVol(s, firstJ, ctx.avgVol20) ?? 0) >= st.goRelVol;
+    const used = g.fires + (pivotFiredToday ? 1 : 0);
+    if (apart && !g.firedGapHigh && (g.firedPivot || pivotFiredToday) && used < st.goMaxFires && firstClose(g.gapExtreme, up)) {
+      out.push(hit(up, g.date, g.day, g.edge, g.gapExtreme, "gap_high", ctx.sma5, ctx.sma10, s.vwap[i], dayExt, cons, tight, rv, `gap_high_break:${g.date}`, facts(b.c, g.gapExtreme, "gap_high", used + 1)));
+    }
   }
-  // day 0: today's own gap, read from the open; the go level is the opening-range high
+  // day 0: today's own gap, read from the open; the pivot is the opening-range high
   const open = s.bars[0]?.o;
-  if (open > 0 && s.orHigh !== null && s.orLow !== null && i >= s.orEnd) {
+  if (open > 0 && orReady) {
     const crv = cumRelVol(s, i, ctx.avgVol50 > 0 ? ctx.avgVol50 : ctx.avgVol20); // the day's volume so far vs the 50-day norm for this time of day
     const upEdge = st.gapFrom === "prior_close" ? ctx.prevClose : ctx.prevHigh;
     const dnEdge = st.gapFrom === "prior_close" ? ctx.prevClose : ctx.prevLow;
     const dayRange = s.hod[i] - s.lod[i];
     const dayClv = dayRange > 0 ? (b.c - s.lod[i]) / dayRange : 0.5;
     const volOk = crv !== null && crv >= st.gapVolMult;
-    const facts = (edge: number) => ({ gapPct: r2(Math.abs(open / edge - 1) * 100), gapAdr: r2(Math.abs(open - edge) / ctx.adr), volMult: r2(crv), pullbackAdr: null, consRangeAdr: null, consDays: 0, earningsGap: String(ctx.earningsToday), fireNo: 1 });
-    if (volOk && open >= upEdge * (1 + st.gapMinPct / 100) && open - upEdge >= st.gapMinAdr * ctx.adr && dayClv >= 0.5 && b.c > upEdge && !closedThrough(s, i, upEdge, true) && firstClose(s.orHigh, true)) {
-      out.push({ ...hit(true, s.date, 0, upEdge, s.orHigh, "opening_range_high", ctx.sma5, ctx.sma10, s.vwap[i], s.lod[i], null, false, rv, facts(upEdge)), replaces: "orb_breakout" });
+    const facts = (edge: number, p: number, up: boolean) => ({
+      pivot: r2(p), pivot_kind: "opening_range", gap_day_high: r2(up ? s.hod[i] : s.lod[i]),
+      distance_to_gap_high_adr: r2((up ? s.hod[i] - b.c : b.c - s.lod[i]) / ctx.adr),
+      gap_pct: r2(Math.abs(open / edge - 1) * 100), gap_adr: r2(Math.abs(open - edge) / ctx.adr), vol_mult: r2(crv),
+      pullback_adr: null, cons_range_adr: null, cons_days: 0, holds_upper_half: null, base_days: null, base_top: null,
+      gap_cleared_base: null, from_base: null, cons_low: null, earnings_gap: String(ctx.earningsToday), fire_no: 1,
+    });
+    if (volOk && open >= upEdge * (1 + st.gapMinPct / 100) && open - upEdge >= st.gapMinAdr * ctx.adr && dayClv >= 0.5 && b.c > upEdge && !closedThrough(s, i, upEdge, true) && firstClose(s.orHigh!, true)) {
+      out.push({ ...hit(true, s.date, 0, upEdge, s.orHigh!, "opening_range", ctx.sma5, ctx.sma10, s.vwap[i], s.lod[i], null, false, rv, `gap:${s.date}`, facts(upEdge, s.orHigh!, true)), replaces: "orb_breakout" });
     }
-    if (volOk && open <= dnEdge * (1 - st.gapMinPct / 100) && dnEdge - open >= st.gapMinAdr * ctx.adr && dayClv <= 0.5 && b.c < dnEdge && !closedThrough(s, i, dnEdge, false) && firstClose(s.orLow, false)) {
-      out.push({ ...hit(false, s.date, 0, dnEdge, s.orLow, "opening_range_low", ctx.sma5, ctx.sma10, s.vwap[i], s.hod[i], null, false, rv, facts(dnEdge)), replaces: "orb_breakdown" });
+    if (volOk && open <= dnEdge * (1 - st.gapMinPct / 100) && dnEdge - open >= st.gapMinAdr * ctx.adr && dayClv <= 0.5 && b.c < dnEdge && !closedThrough(s, i, dnEdge, false) && firstClose(s.orLow!, false)) {
+      out.push({ ...hit(false, s.date, 0, dnEdge, s.orLow!, "opening_range", ctx.sma5, ctx.sma10, s.vwap[i], s.hod[i], null, false, rv, `gap:${s.date}`, facts(dnEdge, s.orLow!, false)), replaces: "orb_breakdown" });
     }
   }
   return out;
@@ -201,7 +288,7 @@ function closedThrough(s: { bars: { c: number }[] }, i: number, edge: number, up
 function hit(
   up: boolean, gapDate: string, day: number, edge: number, goLevel: number, goFrom: string,
   sma5: number | null, sma10: number | null, vwap: number, dayExtreme: number, cons: number | null, tight: boolean,
-  rv: number, extra: Record<string, number | string | null>,
+  rv: number, variant: string, extra: Record<string, number | string | null>,
 ): TriggerHit {
   const gapLevel: Level = { name: "gap", price: edge, gap: { date: gapDate, dir: up ? "up" : "down", state: day === 0 ? "open" : "filled_held", role: up ? "support" : "resistance" } };
   const levels: Level[] = [gapLevel, { name: "vwap", price: vwap }, { name: up ? "low_of_day" : "high_of_day", price: dayExtreme }];
@@ -211,9 +298,9 @@ function hit(
   return {
     setupKey: up ? "gap_and_go" : "gap_down_and_go",
     side: up ? "long" : "short",
-    variant: `gap:${gapDate}`,
-    why: `${up ? "gap up" : "gap down"} ${gapDate} (day ${day}) held its edge ${r2(edge)}; closed ${up ? "above" : "under"} the go level ${r2(goLevel)} (${goFrom}) on ${r2(rv)}x volume`,
-    facts: { gapDate, daysSinceGap: day, gapEdge: r2(edge), goLevel: r2(goLevel), goFrom, tight: tight ? 1 : 0, relVol: r2(rv), ...extra },
+    variant,
+    why: `${up ? "gap up" : "gap down"} ${gapDate} (day ${day}) held its edge ${r2(edge)}; closed ${up ? "above" : "under"} the ${goFrom} pivot ${r2(goLevel)} on ${r2(rv)}x volume; ${extra.distance_to_gap_high_adr !== null && Number(extra.distance_to_gap_high_adr) > 0 ? `gap-day ${up ? "high" : "low"} ${extra.gap_day_high} is ${extra.distance_to_gap_high_adr} ADR ${up ? "overhead (resistance)" : "below (support)"}` : `past the gap-day ${up ? "high" : "low"}`}`,
+    facts: { gap_date: gapDate, days_since_gap: day, gap_edge: r2(edge), tight: tight ? 1 : 0, rel_vol: r2(rv), ...extra },
     stopLevels: levels,
     companyIf: tight ? { level: up ? "consolidation_low" : "consolidation_high", reason: "tight consolidation" } : undefined,
   };

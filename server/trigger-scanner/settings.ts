@@ -82,6 +82,11 @@ export interface ScannerSettings {
   earningsWindow: number;
   tightRangeAdr: number;
   tightMinDays: number;
+  consolMinDays: number;
+  shelfTolAdr: number;
+  gapHighApartAdr: number;
+  baseRangeAdr: number;
+  baseMinDays: number;
   /** At most this many candidates stored a day; past it they are counted in the run rows, not stored. */
   maxStoredPerDay: number;
   /** User setups (BigIdea criteria), per account. */
@@ -135,6 +140,11 @@ export const DEFAULTS: ScannerSettings = {
   earningsWindow: 1,
   tightRangeAdr: 1.5,
   tightMinDays: 2,
+  consolMinDays: 2,
+  shelfTolAdr: 0.25,
+  gapHighApartAdr: 0.5,
+  baseRangeAdr: 3,
+  baseMinDays: 15,
   maxStoredPerDay: 5000,
   userSetupsMaxPerAccount: 10,
   userSetupMaxCriteria: 12,
