@@ -115,11 +115,26 @@ router.get("/market-card", async (req: Request, res: Response) => {
   }
 });
 
-/** GET /vix: the real Cboe VIX (FMP) beside the VIXY proxy the market card's rules use. Read-only. */
+/**
+ * GET /vix: the real Cboe VIX (FMP, delayed about 15 minutes) beside the VIXY proxy the market card's rules use.
+ * Read-only: one FMP quote a minute at most (cached), and one VIXY quote only when FMP did not answer. `reading` says
+ * which it is: the VIX with its quote time, or VIXY labelled as the fallback.
+ */
 router.get("/vix", async (_req: Request, res: Response) => {
-  const { fetchRealVixQuote, realVixForScoresEnabled } = await import("../market-condition/vix-source");
+  const { fetchRealVixQuote, realVixForScoresEnabled, vixReading } = await import("../market-condition/vix-source");
   const real = await fetchRealVixQuote();
+  let proxy: { price: number; changePercent: number; asOf: string } | null = null;
+  if (!real) {
+    try {
+      const { fetchAlpacaQuote } = await import("../alpaca");
+      const q = await fetchAlpacaQuote("VIXY");
+      if (q && q.lastPrice > 0) proxy = { price: q.lastPrice, changePercent: q.prevClose ? Math.round(((q.lastPrice - q.prevClose) / q.prevClose) * 10000) / 100 : 0, asOf: new Date().toISOString() };
+    } catch {
+      proxy = null;
+    }
+  }
   res.json({
+    reading: vixReading(real, proxy),
     realVix: real,
     marketCardUses: "VIXY proxy and SPY realized volatility (rules and stored rows unchanged)",
     regimeAndSentinelUseRealVix: realVixForScoresEnabled(),

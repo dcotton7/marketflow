@@ -957,7 +957,12 @@ export async function registerRoutes(
   app.use("/api/market-condition/setups", setupRoutes);
   // Trigger scanner pass list (server/trigger-scanner, docs/trigger-scanner.md): answers 404 unless TRIGGER_SCANNER=on.
   app.use("/api/triggers", await (await import("./trigger-scanner/routes")).liveTriggerRoutes());
+  // Reads built for Quinn (server/gateway-reads, docs/gateway-reads.md): stored earnings dates, theme / sector / size
+  // moves between instants and intraday velocity. Before the market-condition router, so /themes/move is not a theme id.
+  app.use("/api/market-condition", (await import("./gateway-reads/routes")).gatewayReadRoutes());
   app.use("/api/market-condition", marketConditionRoutes);
+  // The user's stored BigIdea scans (scan_sessions), read only (server/gateway-reads/scan-results.ts).
+  app.use("/api/bigidea", (await import("./gateway-reads/scan-results")).scanResultsRoutes());
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 
   const tosHelperDir = path.join(process.cwd(), "server", "bridge");

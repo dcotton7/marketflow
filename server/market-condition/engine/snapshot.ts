@@ -9,6 +9,7 @@ import { ClusterId, CLUSTERS, CLUSTER_IDS, getAllUniverseTickers, DEFAULT_CADENC
 import { getAllThemeTickerSymbols, getThemeMembersFromCache } from "../utils/theme-db-loader";
 import { getDb } from "../../db";
 import { recordMarketHistory, pgHistoryStore } from "./market-history";
+import { loadGroupClasses, pgGroupTickStore, recordGroupTicks } from "./group-ticks";
 import { calculateRAI } from "./rai";
 import { getAlpacaProvider } from "../providers/alpaca";
 import { TickerSnapshot, BenchmarkData } from "../providers/types";
@@ -325,11 +326,22 @@ export async function refreshSnapshot(
     await saveHistoricalSnapshotsIfNeeded(state.themeMetrics);
 
     // Append-only research history (5-min theme read, daily membership, 15-min regime). Never throws, never deletes.
+    // Only from a default refresh (previous-close baseline, all sizes): a page that asks for the 9:30 baseline or a
+    // size filter refreshes the same state, and its numbers are not the day's move of the whole theme.
     const historyDb = getDb();
-    if (historyDb) {
+    if (historyDb && !useIntradayBaseline && sizeFilter === "ALL") {
       await recordMarketHistory(pgHistoryStore(historyDb), state.themeMetrics, {
         membership: (id) => getThemeMembersFromCache(id as ClusterId),
         regime: async () => calculateRAI(state.themeMetrics),
+      });
+      // Sectors and cap-size buckets, same slot rule (engine/group-ticks.ts).
+      await recordGroupTicks(pgGroupTickStore(historyDb), async () => {
+        const classes = await loadGroupClasses(historyDb);
+        return {
+          live: [...snapshots.values()].map((s) => ({ symbol: s.symbol, changePct: s.changePct })),
+          classOf: (sym) => classes.get(sym),
+          spyPct: Number.isFinite(spyBenchmark?.changePct) ? spyBenchmark.changePct : null,
+        };
       });
     }
     

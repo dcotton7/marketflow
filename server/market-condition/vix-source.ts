@@ -22,7 +22,9 @@ export interface RealVixQuote {
   price: number;
   changePct: number;
   previousClose: number | null;
-  asOf: string; // ISO time
+  asOf: string; // ISO time: when MarketFlow fetched it
+  /** The quote's own time, from FMP's timestamp, when the body carries one. */
+  quoteTime?: string;
   source: "Cboe VIX via FMP";
 }
 
@@ -48,7 +50,9 @@ export function parseVixQuote(body: unknown, now: Date = new Date()): RealVixQuo
   let changePct = Number(row.changePercentage ?? row.changesPercentage);
   if (!Number.isFinite(changePct)) changePct = previousClose ? ((price - previousClose) / previousClose) * 100 : NaN;
   if (!Number.isFinite(changePct)) return null;
-  return { price, changePct, previousClose, asOf: now.toISOString(), source: "Cboe VIX via FMP" };
+  const ts = Number(row.timestamp);
+  const quoteTime = Number.isFinite(ts) && ts > 1e9 ? new Date((ts > 1e12 ? ts : ts * 1000)).toISOString() : undefined;
+  return { price, changePct, previousClose, asOf: now.toISOString(), ...(quoteTime ? { quoteTime } : {}), source: "Cboe VIX via FMP" };
 }
 
 /** FMP /stable/historical-price-eod/light body (newest first) -> closes, newest first. null when too short or bad. */
@@ -105,6 +109,40 @@ export function vixTile(real: RealVixQuote | null, proxy: { price: number; chang
     };
   }
   return { symbol: "VIXY", label: "VIXY", price: proxy.price, changePercent: proxy.changePercent, source: "VIXY ETF (proxy for the VIX)", isProxy: true };
+}
+
+/**
+ * The read GET /api/market-condition/setups/vix serves (and Quinn reads through the Anima gateway): the real VIX with
+ * what it is (Cboe's index, delayed about 15 minutes at FMP) and its time; when FMP does not answer, the VIXY ETF,
+ * labelled as the fallback it is and never as the VIX.
+ */
+export function vixReading(real: RealVixQuote | null, proxy: { price: number; changePercent: number; asOf?: string } | null) {
+  if (real) {
+    return {
+      kind: "VIX" as const,
+      label: "Cboe Volatility Index (VIX)",
+      price: real.price,
+      changePct: Math.round(real.changePct * 100) / 100,
+      previousClose: real.previousClose,
+      quoteTime: real.quoteTime ?? null,
+      fetchedAt: real.asOf,
+      delayed: "Cboe index via FMP: a delayed quote, about 15 minutes behind",
+      source: real.source,
+      isFallback: false,
+    };
+  }
+  return {
+    kind: "VIXY_FALLBACK" as const,
+    label: "VIXY ETF (fallback: NOT the VIX; FMP did not answer)",
+    price: proxy && proxy.price > 0 ? proxy.price : null,
+    changePct: proxy && proxy.price > 0 ? proxy.changePercent : null,
+    previousClose: null,
+    quoteTime: proxy?.asOf ?? null,
+    fetchedAt: proxy?.asOf ?? null,
+    delayed: null,
+    source: "VIXY ETF quote (Alpaca)",
+    isFallback: true,
+  };
 }
 
 export function resetVixCacheForTests(): void {

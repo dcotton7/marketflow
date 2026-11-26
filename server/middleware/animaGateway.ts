@@ -31,16 +31,29 @@ export const ALLOWED: RegExp[] = [
   new RegExp(
     `^/api/market-condition/(themes|themes/[\\w-]+|themes/[\\w-]+/(members|subthemes)|ticker-theme/${SYM}|rai|leaders|screen|` +
       `regime|regime/history|race-timeline|status|subthemes|subthemes/[\\w-]+/members|search|briefing|briefing/preview|` +
-      // the research-backed daily setups (server/setups/routes.ts): hits by date or range, and the jobs' status
-      `setups/(leader-shakeout|earnings-gap-up|market-card|status))$`,
+      // every theme's universe (static lists)
+      `universe|universe/[\\w-]+|` +
+      // stored earnings dates (server/gateway-reads/earnings.ts; never calls a vendor). themes/move and
+      // themes/velocity (server/gateway-reads/theme-history.ts) match themes/[\\w-]+ above.
+      `earnings/upcoming|` +
+      // the research-backed daily setups (server/setups/routes.ts): hits by date or range, the jobs' status, the real
+      // VIX (Cboe, delayed, or VIXY labelled as the fallback), the scan pool's counts and the grade thresholds
+      `setups/(leader-shakeout|earnings-gap-up|market-card|status|vix|scan-pool|settings))$`,
   ),
   /^\/api\/marketflow\/options\/(pulse|regime)$/,
   new RegExp(`^/api/marketflow/${SYM}/cached$`),
-  /^\/api\/bigidea\/(ideas|ideas\/\d+|thoughts|setups|setups\/\d+)$/,
+  // ...and his stored BigIdea scans: matched symbols and counts per run (server/gateway-reads/scan-results.ts).
+  /^\/api\/bigidea\/(ideas|ideas\/\d+|thoughts|setups|setups\/\d+|scan-results)$/,
   /^\/api\/discord-stream\/(summary|analysis)$/,
   // The Lab's Signals scanner panel: its cards (one SELECT on scanner_discoveries) and the scanner's status. And the
   // Signals Lab's evidence: per-horizon grades and the recorded fires with their outcomes (read only, paged).
   /^\/api\/scanner\/(history|status|signal-workbench\/grades|signal-workbench\/events)$/,
+  // Today's scanner picks (in memory).
+  /^\/api\/scanner\/picks$/,
+  // A name's sector and industry (one Alpaca quote; one Finnhub profile the first time a name is seen, then stored),
+  // and bars with MarketFlow's indicator lines (lookbackDays capped in QUERY_CAPS).
+  new RegExp(`^/api/sentinel/ticker/${SYM}$`),
+  /^\/api\/sentinel\/chart-data$/,
   /^\/api\/sentinel\/(dashboard|trade-journal|trades\/closed|trade\/\d+|watchlists|watchlist)$/,
   /^\/api\/alerts\/feed$/,
   /^\/api\/positions\/snapshot$/,
@@ -74,6 +87,17 @@ export const POST_BODIES: [RegExp, (body: unknown) => boolean][] = [
 /** "Trimmed" on a position alert sets the new share count; the rest are his chat's watchlist edits. */
 export const ALLOWED_POSTS: RegExp[] = [SHARES_POST, ...POST_BODIES.map(([rx]) => rx)];
 const DROPPED = new Set(["force", "refresh"]);
+/** chart-data's lookbackDays, capped on the way through (absent = the cap; its own default is 750 daily bars). */
+export const CHART_LOOKBACK_CAP: Record<string, number> = { daily: 120, "5min": 5, "15min": 10, "30min": 20 };
+export const QUERY_CAPS: [RegExp, (q: URLSearchParams) => void][] = [
+  [/^\/api\/sentinel\/chart-data$/, (q) => {
+    const tf = q.get("timeframe");
+    if (tf !== null) q.set("timeframe", tf); // one value: the one the cap is for
+    const cap = CHART_LOOKBACK_CAP[tf || "daily"] ?? 10;
+    const v = Math.floor(Number(q.get("lookbackDays")));
+    q.set("lookbackDays", String(Number.isFinite(v) && v > 0 ? Math.min(v, cap) : cap));
+  }],
+];
 
 export function allowedPath(path: string, method = "GET"): boolean {
   const p = normalizeApiPath(path);
@@ -159,6 +183,7 @@ export function createAnimaGateway(opts: AnimaGatewayOptions): RequestHandler {
     if (!write && !allowedPath(target)) return res.status(403).json({ error: "Not available to Anima" });
     const q = new URLSearchParams(req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "");
     for (const k of [...q.keys()]) if (DROPPED.has(k.toLowerCase())) q.delete(k);
+    for (const [rx, cap] of QUERY_CAPS) if (rx.test(normalizeApiPath(target))) cap(q);
     const done = (cb?: (err?: unknown) => void) => { cb?.(); };
     (req as any).session = { userId: opts.userId, save: done, reload: done, regenerate: done, destroy: done, touch() {} };
     req.url = target + (q.toString() ? `?${q}` : "");

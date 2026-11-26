@@ -45,6 +45,10 @@ const OWNER_ROUTES: Array<[string, string]> = [
   ["GET", "/api/scanner/signal-workbench/events?page=2"],
   ["POST", "/api/scanner/workbench/ai-analyze"],
   ["GET", "/api/scanner/upcoming-earnings"],
+  // stored vendor data read for Quinn (server/gateway-reads): owner only, like the rest of market-condition
+  ["GET", "/api/market-condition/earnings/upcoming"],
+  ["GET", "/api/market-condition/themes/move"],
+  ["GET", "/api/market-condition/themes/velocity"],
   ["GET", "/api/scanner/debug/ma/AAPL"],
   ["GET", "/api/market-condition/themes"],
   ["GET", "/api/market-condition/themes/abc/members"],
@@ -88,6 +92,8 @@ const OWNER_ADMIN_ROUTES: Array<[string, string]> = [
 
 /** Logged-in, user-owned content: any active account. */
 const AUTH_ROUTES: Array<[string, string]> = [
+  // the user's own stored BigIdea scans (server/gateway-reads/scan-results.ts filters by the session's user)
+  ["GET", "/api/bigidea/scan-results"],
   ["GET", "/api/sentinel/trade-journal"],
   ["GET", "/api/sentinel/rules"],
   ["GET", "/api/sentinel/watchlists"],

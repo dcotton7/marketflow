@@ -16,6 +16,21 @@ for (const p of ["/api/stocks/AAPL/quote", "/api/stocks/BRK.B/history", "/api/ma
   "/api/scanner/signal-workbench/grades", "/api/scanner/signal-workbench/events"]) {
   assert.ok(allowedPath(p), `allowed ${p}`);
 }
+// docs/gateway-reads.md: stored earnings, the real VIX, theme / sector / size moves and velocity, stored scans, and the
+// plain reads from the reach spec's group 3
+const READS = ["/api/market-condition/earnings/upcoming", "/api/market-condition/setups/vix", "/api/market-condition/themes/move",
+  "/api/market-condition/themes/velocity", "/api/bigidea/scan-results", "/api/scanner/picks", "/api/sentinel/ticker/BRK.B",
+  "/api/market-condition/setups/scan-pool", "/api/market-condition/setups/settings", "/api/market-condition/universe",
+  "/api/market-condition/universe/SEMIS", "/api/sentinel/chart-data"];
+for (const p of READS) assert.ok(allowedPath(p), `allowed ${p}`);
+for (const p of READS) assert.ok(!allowedPath(p, "POST"), `refused POST ${p}`);
+// left out on purpose: every user's journal rules pooled, paid vendor calls on demand, orders, the AI routes, scans
+for (const p of ["/api/sentinel/rule-performance", "/api/sentinel/sentiment/market", "/api/sentinel/sentiment/sector/XLK",
+  "/api/schwab/orders", "/api/schwab/transactions", "/api/bigidea/ai/create-thought", "/api/scanner/workbench/ai-analyze",
+  "/api/bigidea/scan", "/api/bigidea/scan-results/7", "/api/market-condition/history/theme_ticks_5m", "/api/market-condition/setups/run/x",
+  "/api/market-condition/earnings", "/api/market-condition/earnings/upcoming/x", "/api/sentinel/ticker/AAPL/x", "/api/scanner/upcoming-earnings"]) {
+  assert.ok(!allowedPath(p), `refused ${p}`);
+}
 for (const p of ["/api/sentinel/watchlist/12/shares", "/api/sentinel/watchlist/bulk-add", "/api/sentinel/watchlist/remove-tickers",
   "/api/sentinel/watchlists", "/API/Sentinel/Watchlists/"]) {
   assert.ok(allowedPath(p, "POST"), `allowed POST ${p}`);
@@ -111,6 +126,9 @@ async function withApp(opts: { token?: string; userId?: number; ips?: string[] }
   app.delete("/api/sentinel/watchlist/:id", leak);
   app.patch("/api/sentinel/watchlists/:id", leak);
   app.post("/api/sentinel/watchlists/:id/set-default", leak);
+  for (const p of READS) app.get(p, (req: any, res) => res.json({ path: req.path, uid: req.session.userId, q: req.query }));
+  // a read whose feature is off answers 404, and the gateway passes it on as it is
+  app.get("/api/market-condition/themes/velocity-off", (_req, res) => res.status(404).json({ error: "no 5-minute size history is stored yet" }));
   app.use((_req, res) => res.status(404).json({ error: "Not found" }));
   const server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", () => r()));
@@ -200,6 +218,34 @@ await withApp({ token: TOKEN, userId: 1 }, async (call) => {
     assert.equal(r.status, 405, `${method} ${path} refused`);
     assert.notDeepEqual(r.body, { leaked: true });
   }
+});
+
+await withApp({ token: TOKEN, userId: 1 }, async (call) => {
+  for (const p of READS) {
+    const r = await call("GET", `/api/anima${p.slice(4)}?x=1`, inside);
+    assert.equal(r.status, 200, `GET ${p}`);
+    assert.equal(r.body.uid, 1, `${p} runs as the gateway's owner user`);
+    assert.equal(r.body.path, p);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const w = await call(method, `/api/anima${p.slice(4)}`, { ...inside, "content-type": "application/json" }, "{}");
+      assert.equal(w.status, 405, `${method} ${p} refused`);
+    }
+  }
+  const off = await call("GET", "/api/anima/market-condition/themes/velocity-off", inside);
+  assert.equal(off.status, 404, "a feature that is off: its 404 comes through");
+  assert.match(off.body.error, /is stored yet/);
+  // chart-data: lookbackDays capped (absent = the cap); intraday capped tighter
+  const chart = async (qs: string) => (await call("GET", `/api/anima/sentinel/chart-data?ticker=NVDA${qs}`, inside)).body.q;
+  assert.equal((await chart("")).lookbackDays, "120", "absent: 120 daily bars, not the route's 750");
+  assert.equal((await chart("&lookbackDays=750")).lookbackDays, "120");
+  assert.equal((await chart("&lookbackDays=30")).lookbackDays, "30", "a smaller ask stays");
+  assert.equal((await chart("&lookbackDays=-4")).lookbackDays, "120");
+  assert.equal((await chart("&timeframe=5min&lookbackDays=60")).lookbackDays, "5", "5-minute bars: 5 days at most");
+  assert.equal((await chart("&timeframe=15min")).lookbackDays, "10");
+  assert.equal((await chart("&lookbackDays=500&lookbackDays=20")).lookbackDays, "120", "repeated keys collapse to one capped value");
+  assert.equal((await chart("&timeframe=daily&timeframe=5min&lookbackDays=60")).timeframe, "daily", "one timeframe, the one the cap used");
+  assert.equal((await call("GET", "/api/anima/market-condition/earnings/upcoming?symbols=NVDA&force=1", inside)).body.q.force, undefined, "force dropped");
+  assert.equal((await call("GET", "/api/anima/sentinel/rule-performance", inside)).status, 403);
 });
 
 const edge = { host: "marketflow-hrxh.onrender.com", "x-forwarded-for": "74.220.49.7", "x-anima-token": TOKEN };
