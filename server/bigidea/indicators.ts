@@ -3110,3 +3110,17 @@ export function retiredNotesFor(criteria: Array<{ indicatorId?: string; muted?: 
   }
   return out;
 }
+
+/**
+ * GET /api/bigidea/setup-indicators: the indicators a setup may map to, with their real ids and default parameters.
+ * (It used Object.entries on the library array, so the ids came out "0", "1", ..., and read a defaultParams field
+ * that does not exist.) Retired indicators are left out.
+ */
+export function setupIndicatorChoices(): Array<{ id: string; name: string; category: string; defaultParams: Record<string, number | string | boolean> }> {
+  return activeIndicators(INDICATOR_LIBRARY).map((ind) => ({
+    id: ind.id,
+    name: ind.name,
+    category: ind.category,
+    defaultParams: Object.fromEntries(ind.params.map((p) => [p.name, p.defaultValue])),
+  }));
+}

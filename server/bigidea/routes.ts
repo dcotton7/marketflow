@@ -3,7 +3,7 @@ import { db, isDatabaseAvailable } from "../db";
 import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights, indicatorExecutionStats, optimizerDisplaySettings, bigideaSetups, bigideaSetupIndicators, bigideaExtractedIdeas, bigideaValidationRatings, uploads, setupUploads, userIndicators, indicatorApprovalQueue, type ExtractedThought } from "@shared/schema";
 import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor, criterionPass } from "./indicators";
+import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor, criterionPass, setupIndicatorChoices } from "./indicators";
 import { earningsDays } from "./earnings-days";
 import { loadLatest as loadLatestEarnings, upcomingStatus as earningsCalendarStatus } from "../earnings/upcoming";
 import { etDateKey } from "@shared/us-market-holidays";
@@ -4990,13 +4990,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
 
   // Get indicator library (for selecting indicators when creating setups)
   app.get("/api/bigidea/setup-indicators", (_req: Request, res: Response) => {
-    const library = Object.entries(INDICATOR_LIBRARY).map(([id, ind]) => ({
-      id,
-      name: ind.name,
-      category: ind.category,
-      defaultParams: ind.defaultParams,
-    }));
-    res.json(library);
+    res.json(setupIndicatorChoices());
   });
 
   // =============================================================================
