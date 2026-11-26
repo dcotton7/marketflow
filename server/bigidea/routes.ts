@@ -18,7 +18,8 @@ import * as fundamentals from "../fundamentals";
 import { getDailyBars, getIntradayBars } from "../data-layer";
 import { autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
 import { decideOptimization } from "./scan-plan";
-import { sessionUserId, loadCaller, isAdminOrOwner, canModify } from "./access";
+import { sessionUserId, loadCaller, isAdminOrOwner } from "./access";
+import { setupLibraryGuard, setupOwnershipGuard } from "./setup-library";
 import { extractIdeasFromText, suggestIndicatorMappings } from "./extraction";
 
 function getOpenAI(): OpenAI | null {
@@ -656,6 +657,10 @@ async function upsertIndicatorLearningSummary(record: any) {
 }
 
 export function registerBigIdeaRoutes(app: Express): void {
+  // The Setup Library is off unless SETUP_LIBRARY=on; changes to a setup need its creator or an admin (setup-library.ts)
+  app.use(setupLibraryGuard());
+  app.use(setupOwnershipGuard());
+
   app.get("/api/bigidea/thoughts", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
