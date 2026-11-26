@@ -31,7 +31,8 @@ export const ALLOWED: RegExp[] = [
   new RegExp(
     `^/api/market-condition/(themes|themes/[\\w-]+|themes/[\\w-]+/(members|subthemes)|ticker-theme/${SYM}|rai|leaders|screen|` +
       `regime|regime/history|race-timeline|status|subthemes|subthemes/[\\w-]+/members|search|briefing|briefing/preview|` +
-      // stored earnings dates (server/gateway-reads/earnings.ts; never calls a vendor)
+      // stored earnings dates (server/gateway-reads/earnings.ts; never calls a vendor). themes/move and
+      // themes/velocity (server/gateway-reads/theme-history.ts) match themes/[\\w-]+ above.
       `earnings/upcoming|` +
       // the research-backed daily setups (server/setups/routes.ts): hits by date or range, the jobs' status, and the
       // real VIX (Cboe, delayed, or VIXY labelled as the fallback)

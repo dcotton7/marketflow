@@ -70,3 +70,87 @@ When FMP does not answer: `"kind":"VIXY_FALLBACK"`, `"label":"VIXY ETF (fallback
 quote a minute at most (cached 60 s, `vix-source.ts`); the VIXY quote only on the fallback. `quoteTime` is FMP's own
 timestamp when the body carries one; `fetchedAt` is when MarketFlow fetched it. Whether FMP's `/stable/quote` body for
 `^VIX` carries `timestamp` was not checked live (no key here); if it does not, `quoteTime` is null.
+
+## 3. Theme, sector and size moves, and velocity
+
+### What history is stored
+
+| What | Table | From | Per | Fields |
+|---|---|---|---|---|
+| themes, every 5 min in market hours | `theme_ticks_5m` (migration 028) | 20 Nov 2026 | theme | rank, score, median day % of members (vs previous close), RS vs SPY, % green |
+| theme membership, once a day | `theme_membership_daily` (028) | 20 Nov 2026 | theme x symbol | core or not |
+| regime, every 15 min | `regime_history` (028) | 20 Nov 2026 | slot | score, label, components |
+| themes, hourly and daily close | `theme_snapshots` (older) | long before | theme | rank, score, median %; hourly rows are deleted at day end, daily_close rows kept |
+| daily closes | `historical_bars` | ~330 calendar days | symbol | OHLCV |
+| **sectors, cap-size buckets, SPY, every 5 min** | **`group_ticks_5m` (new, migration 030)** | **the deploy of this branch** | sector / size bucket | median day %, % green, names, rank in its kind; SPY's day % |
+
+Sector and size history was **not** stored before this change, and no member-level intraday prices are stored at all.
+So intraday sector / size velocity starts from the day this branch is deployed; a sector or size move between two
+*dates* works now (from member daily closes). SPY's day % at a theme tick is derived exactly from the stored row
+(median % - RS vs SPY = SPY's %, rounded to 0.01).
+
+**Fixed with this change (snapshot.ts):** the 5-minute history used to be written by whichever refresh came first in a
+slot, including a page's request for the 9:30 baseline or a size filter, whose numbers are not the whole theme's day
+move. From this deploy on, history (themes and the new groups) is written only by default refreshes (previous-close
+baseline, all sizes). Ticks stored before cannot be told apart.
+
+The new sector / size writer sits next to the theme tick, under the same guard (`inMarketHours`, the same 5-minute
+slot, once per slot, never throws, only `INSERT ... ON CONFLICT DO NOTHING`). It uses the live snapshot the theme tick
+uses (every ticker the theme engine polls, ~650+ names) and the tickers table's `sector` and `market_cap_size` (the
+bucket the size filter uses). Groups with fewer than 3 names are skipped. About 20 rows a slot, ~150 KB a day.
+
+### `GET /api/market-condition/themes/move?from=&to=[&group=theme|sector|size][&ids=A,B]`
+
+`from` / `to`: `YYYY-MM-DD` (that day's close, 16:00 New York) or `YYYY-MM-DDTHH:MM` (New York time; or with `Z` / an
+offset). Two methods, named in `method`:
+
+- **`member_closes`** (both ends are dates): each member's close-to-close % between the two sessions' daily bars; the
+  median, the share of members up over the span and the member count are exact. Each date resolves to the nearest
+  session at or before it (`offsetDays`). Themes use the stored membership of the first session (the earliest stored
+  day, 20 Nov, when the span starts before it); sectors and sizes use the tickers table's current classes. Ranks at
+  each end: the theme engine's rank at that session's last 5-minute read, or its `theme_snapshots` daily close before
+  20 Nov. Up to 400 days, as far back as daily bars go.
+- **`stored_ticks`** (an end has a time): each end is the nearest stored read at or before the instant
+  (`offsetMinutes`). The move carries the group's stored median day %: `(1 + m_to) / (1 + m_from) - 1` within a session,
+  chained through each session's last read across sessions. This is the move of the group's median, not the median of
+  its members' own moves (members' intraday prices are not stored); breadth is the day's % green at each read. Refused
+  if a trading day inside the span has no reads (names them). Up to 62 days.
+
+Refusals: 400 for bad input or `from >= to` or `to` in the future; 404 when no history of that kind is stored; 422 when
+the span starts before the stored history, or both ends land on the same read / session, with `available` (the range
+that IS stored). Cached 5 minutes.
+
+```json
+{"group":"theme","method":"stored_ticks",
+ "from":{"asked":"2026-11-24T10:02","resolved":"2026-11-24T15:00:00.000Z","offsetMinutes":2,"session":"2026-11-24"},
+ "to":{"asked":"2026-11-24T10:30","resolved":"2026-11-24T15:30:00.000Z","offsetMinutes":0,"session":"2026-11-24"},
+ "spyMovePct":0.1,
+ "rows":[{"id":"SEMIS","name":"Semiconductors","movePct":1.1,"vsSpyPct":1,"rankByMove":1,"breadthUpPct":null,"dayBreadthFrom":55,"dayBreadthTo":70,
+          "rankFrom":6,"rankTo":2,"rankChange":4,"members":null}],
+ "available":{"from":"2026-11-20T14:30:00.000Z","to":"2026-11-24T15:30:00.000Z"},
+ "notes":["stored_ticks: ...", "rankChange > 0 = climbed. ..."]}
+```
+
+In `member_closes` rows, `breadthUpPct` and `members` / `membersMissing` are filled and `dayBreadthFrom/To` are null.
+
+### `GET /api/market-condition/themes/velocity?window=5|15|30|60[&at=][&group=..][&limit=..][&ids=..]`
+
+Three stored reads in the same session: `end` (at or before `at`, default now), `start` (at or before end - window) and
+`prevStart` (at or before start - window). Per group: `deltaPct` = `(1 + m_end) / (1 + m_start) - 1` of the median day
+%, `perHourPct` = deltaPct x 60 / minutes, `rankChange` (> 0 climbed) and `rankPerHour`, `prevPerHourPct` and
+`accelerationPerHour` (= perHourPct - prevPerHourPct). `rows` sorted by |perHourPct| (at most `limit`, default and max
+50), `up` / `down`: the five fastest each way. Regular session only (reads exist 9:30-16:00 ET). When the market is
+closed at `at` (weekend, holiday, before 9:30, after 16:00), `marketOpen` is false and the answer is the last session's
+final windows, said so in `notes[0]`. A window longer than the session so far is `partial` with its real `minutes`.
+Cached 60 seconds.
+
+```json
+{"group":"theme","windowMinutes":15,"at":"2026-11-24T15:31:00.000Z","marketOpen":true,"session":"2026-11-24",
+ "end":"2026-11-24T15:30:00.000Z","start":"2026-11-24T15:15:00.000Z","prevStart":"2026-11-24T15:00:00.000Z","minutes":15,"prevMinutes":15,"partial":false,
+ "rows":[{"id":"SEMIS","name":"Semiconductors","medianPct":1.5,"rank":2,"deltaPct":0.59,"perHourPct":2.38,"rankChange":2,"rankPerHour":8,
+          "prevPerHourPct":1.99,"accelerationPerHour":0.39,"members":null}],
+ "up":[...],"down":[...],"notes":["deltaPct: ...","regular session only ..."]}
+```
+
+Cost: move = 4-6 indexed queries (or one closes query of at most ~2 x members rows); velocity = 4 point lookups and 3
+slot reads (~45 rows each). Both bounded by the number of groups (~40 themes, ~11 sectors, 5 sizes).
