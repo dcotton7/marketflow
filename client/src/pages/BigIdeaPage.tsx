@@ -115,9 +115,11 @@ function getScoreColor(score: number): string {
 }
 
 const INDEX_OPTIONS = [
+  { value: "scan-pool", label: "Scan pool (liquid: $1B+, $6+, $30M/day)" },
   { value: "sp500", label: "S&P 500" },
   { value: "russell2000", label: "Russell 2000" },
-  { value: "russell3000", label: "Russell 3000" },
+  // the constituents file is dated 2020-06-29 (server/universe/constituents.ts); kept, but say so
+  { value: "russell3000", label: "Russell 3000 (June 2020 list, stale)" },
 ];
 
 const PARAM_DESCRIPTIONS: Record<string, string> = {

@@ -14,6 +14,10 @@ import {
   marketFlowUniverseLabel,
   resolveMarketFlowUniverseTickers,
   resolveScanUniverseTickers,
+  resolveScanUniverse,
+  resolveScanPoolTickers,
+  SCAN_POOL_UNIVERSE,
+  SCAN_POOL_NOTE,
 } from "./marketflow-universe";
 import OpenAI from "openai";
 import * as alpaca from "../alpaca";
@@ -710,7 +714,9 @@ export function registerBigIdeaRoutes(app: Express): void {
         ];
       });
 
-      res.json({ options, updatedAt: new Date().toISOString() });
+      let scanPoolCount = 0;
+      try { scanPoolCount = (await resolveScanPoolTickers(db)).length; } catch { scanPoolCount = 0; }
+      res.json({ options, scanPool: { value: SCAN_POOL_UNIVERSE, tickerCount: scanPoolCount, note: SCAN_POOL_NOTE }, updatedAt: new Date().toISOString() });
     } catch (error) {
       console.error("Error fetching MarketFlow universes:", error);
       res.status(500).json({ error: "Failed to fetch MarketFlow universes" });
@@ -1999,10 +2005,11 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "nodes, edges, and universe (or customTickers) are required" });
       }
 
-      const { tickers, marketFlow } = resolveScanUniverseTickers(universe, customTickers);
+      const { tickers, marketFlow, scanPool } = await resolveScanUniverse(universe, customTickers, db);
       if (tickers.length === 0) {
         const hint = isMarketFlowUniverse(universe)
           ? "MarketFlow theme universe is empty — ensure Market Condition has loaded theme data"
+          : scanPool ? "The scan pool is empty (it is filled by the weekly pool refresh)"
           : "Invalid universe or empty watchlist";
         return res.status(400).json({ error: hint });
       }
@@ -2998,6 +3005,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         ...(usesEarnings ? { earningsData: { namesWithDate: earningsKnown, names: tickers.length,
           ...(earningsKnown === 0 ? { warning: "FND-4 Earnings Proximity: no earnings dates were found for any name, so it could not pass" } : {}) } } : {}),
         debugInfo: enhancedDebugInfo,
+        ...(scanPool ? { universeMeta: { type: "scan-pool", tickerCount: tickers.length, note: SCAN_POOL_NOTE } } : {}),
         ...(marketFlow ? {
           universeMeta: {
             type: "marketflow",

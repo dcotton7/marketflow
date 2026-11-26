@@ -2,6 +2,8 @@ import { getAllThemes } from "../market-condition/engine/snapshot";
 import { getThemeMembersFromCache } from "../market-condition/utils/theme-db-loader";
 import type { ClusterId } from "../market-condition/universe";
 import { getUniverseTickers } from "./universes";
+import { loadActivePoolSymbols } from "../data-layer/scan-pool";
+import { readRetiredSymbols } from "../data-layer/bar-universe";
 
 export interface MarketFlowThemeSummary {
   id: string;
@@ -90,4 +92,30 @@ export function resolveScanUniverseTickers(
   }
 
   return { tickers: getUniverseTickers(universe) };
+}
+
+/**
+ * The scan pool as a BigIdea universe: the active rows of scan_pool (data-layer/scan-pool.ts: US common stocks with
+ * market cap >= $1B, price >= $6 and >= $30M a day traded, refreshed weekly), minus retired symbols.
+ */
+export const SCAN_POOL_UNIVERSE = "scan-pool";
+export const SCAN_POOL_NOTE =
+  "Pool names are not in the live snapshot polling: during market hours their newest daily bar is the last close.";
+
+export async function resolveScanPoolTickers(db: any): Promise<string[]> {
+  if (!db) return [];
+  const retired = new Set(readRetiredSymbols());
+  return (await loadActivePoolSymbols(db)).filter((s) => !retired.has(s));
+}
+
+/** resolveScanUniverseTickers plus the scan pool, which needs the database. */
+export async function resolveScanUniverse(
+  universe: string,
+  customTickers: string[] | null | undefined,
+  db: any,
+): Promise<{ tickers: string[]; marketFlow?: MarketFlowUniverseResult; scanPool?: boolean }> {
+  if (!(customTickers && customTickers.length > 0) && universe === SCAN_POOL_UNIVERSE) {
+    return { tickers: await resolveScanPoolTickers(db), scanPool: true };
+  }
+  return resolveScanUniverseTickers(universe, customTickers);
 }

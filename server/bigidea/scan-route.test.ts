@@ -6,6 +6,9 @@
 import assert from "node:assert/strict";
 import { startHarness } from "./route-harness";
 import { etDateKey } from "@shared/us-market-holidays";
+import { ensurePoolTable } from "../data-layer/scan-pool";
+import { getDb } from "../db";
+const db = () => getDb();
 
 const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
 /** `closes` newest first, one weekday per bar ending today-ish. */
@@ -95,6 +98,21 @@ async function main() {
     const e3 = await scan(fnd4(false), [{ id: "e1", source: "e", target: "results", logicType: "AND" }]);
     assert.equal(e3.results.length, 0);
     assert.match(e3.earningsData.warning, /no earnings dates were found/);
+
+    // 6. the scan pool as a universe: its active rows only
+    await ensurePoolTable(db());
+    await sql(`DELETE FROM scan_pool WHERE symbol LIKE 'ZQ%'`);
+    await sql(`INSERT INTO scan_pool (symbol, active, first_seen) VALUES ($1, TRUE, $4), ($2, TRUE, $4), ($3, FALSE, $4)`, [A, B, C, today]);
+    const activeCount = (await sql(`SELECT count(*)::int AS n FROM scan_pool WHERE active`))[0].n;
+    const sp = await call("POST", "/api/bigidea/scan", users.owner, { nodes: [thought("b", belowSma5), results],
+      edges: [{ id: "e1", source: "b", target: "results", logicType: "AND" }], universe: "scan-pool" });
+    assert.equal(sp.status, 200, JSON.stringify(sp.body).slice(0, 300));
+    assert.equal(sp.body.funnelData.totalTickers, activeCount);
+    assert.deepEqual(sp.body.results.map((x: any) => x.symbol).filter((x: string) => x.startsWith(sym)).sort(), [A, B], "the inactive pool name is not scanned");
+    assert.equal(sp.body.universeMeta.type, "scan-pool");
+    const opts = await call("GET", "/api/bigidea/marketflow/universes", users.owner);
+    assert.equal(opts.body.scanPool.value, "scan-pool");
+    assert.equal(opts.body.scanPool.tickerCount, activeCount);
 
     console.log("scan-route: all checks passed");
   } finally {
