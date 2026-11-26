@@ -29,6 +29,7 @@ import BetaChartsPage from "@/pages/BetaChartsPage";
 import AnalysisPopoutPage from "@/pages/AnalysisPopoutPage";
 import LiveThemeChartsPopoutPage from "@/pages/LiveThemeChartsPopoutPage";
 import SetupLibraryPage from "@/pages/SetupLibraryPage";
+import { SetupLibraryGate } from "@/components/bigidea/SetupLibraryGate";
 import SentinelSettingsPage from "@/pages/SentinelSettingsPage";
 import SymbolPage from "@/pages/SymbolPage";
 import StartHerePage from "@/pages/StartHerePage";
@@ -109,7 +110,9 @@ function Router() {
       </Route>
       <Route path="/sentinel/setup-library">
         <SentinelProtectedRoute>
-          <SetupLibraryPage />
+          <SetupLibraryGate>
+            <SetupLibraryPage />
+          </SetupLibraryGate>
         </SentinelProtectedRoute>
       </Route>
       <Route path="/sentinel/charts/:symbol?">

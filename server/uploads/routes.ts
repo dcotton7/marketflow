@@ -6,6 +6,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { extractTextFromFile } from "./processor";
+import { setupLibraryGuard, setupOwnershipGuard } from "../bigidea/setup-library";
 
 // Configure multer for file uploads
 const UPLOAD_DIR = path.join(process.cwd(), "uploads");
@@ -50,6 +51,10 @@ const upload = multer({
 });
 
 export function registerUploadRoutes(app: Express) {
+  // Document uploads belong to the Setup Library: off unless SETUP_LIBRARY=on (bigidea/setup-library.ts)
+  app.use(setupLibraryGuard());
+  app.use(setupOwnershipGuard());
+
   // Upload a file
   app.post("/api/uploads", upload.single("file"), async (req: Request, res: Response) => {
     try {

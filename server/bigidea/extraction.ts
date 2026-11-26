@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { INDICATOR_LIBRARY } from "./indicators";
+import { INDICATOR_LIBRARY, activeIndicators } from "./indicators";
 import { ExtractedThought, ExtractedIdeaData } from "@shared/schema";
 import { v4 as uuidv4 } from "uuid";
 
@@ -13,7 +13,7 @@ function getOpenAI(): OpenAI | null {
 function getIndicatorSummary(): string {
   const grouped: Record<string, Array<{ id: string; name: string; description: string }>> = {};
   
-  for (const ind of INDICATOR_LIBRARY) {
+  for (const ind of activeIndicators(INDICATOR_LIBRARY)) {
     if (!grouped[ind.category]) grouped[ind.category] = [];
     grouped[ind.category].push({
       id: ind.id,

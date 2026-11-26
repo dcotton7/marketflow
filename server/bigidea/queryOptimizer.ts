@@ -12,6 +12,7 @@ import { db, isDatabaseAvailable } from "../db";
 import { indicatorExecutionStats } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { INDICATOR_LIBRARY } from "./indicators";
+import { decideOptimization } from "./scan-plan";
 
 export interface ThoughtNode {
   id: string;
@@ -24,6 +25,7 @@ export interface ThoughtNode {
 export interface ScanEdge {
   source: string;
   target: string;
+  logicType?: string;
 }
 
 export interface OptimizationContext {
@@ -248,27 +250,15 @@ function calculateEffectiveCost(
 }
 
 /**
- * Detect if the scan has a "parallel to results" pattern (all thoughts connect to results)
+ * True only for a "pure AND star" (every thought feeds Results by an AND edge, no thought links
+ * to another), where reordering cannot change which names pass. OR links and linked thoughts
+ * are always evaluated exactly as written. See scan-plan.ts.
  */
-export function shouldAutoOptimize(thoughts: ThoughtNode[], edges: ScanEdge[]): boolean {
-  // Find result node (target with no outgoing edges)
+export function shouldAutoOptimize(thoughts: ThoughtNode[], edges: ScanEdge[], resultsId?: string): boolean {
   const targets = new Set(edges.map(e => e.target));
   const sources = new Set(edges.map(e => e.source));
-  
-  // Result nodes are targets that are NOT sources (no outgoing edges)
-  const resultNodes = Array.from(targets).filter(t => !sources.has(t));
-  
-  if (resultNodes.length === 0) return false;
-  
-  // Count how many thoughts connect directly to result
-  const thoughtIds = new Set(thoughts.map(th => th.id));
-  const thoughtsToResult = edges.filter(e => 
-    resultNodes.includes(e.target) && 
-    thoughtIds.has(e.source)
-  );
-  
-  // If 2+ thoughts connect directly to result with no chain, optimize
-  return thoughtsToResult.length >= 2;
+  const resultId = resultsId ?? Array.from(targets).find(t => !sources.has(t));
+  return decideOptimization(thoughts, edges, resultId).optimize;
 }
 
 /**
@@ -324,34 +314,14 @@ export async function autoOptimizeThoughtOrder(
     stocksRemaining = Math.max(1, Math.floor(stocksRemaining * (1 - estimate.estimatedSelectivity)));
   }
   
-  // Rebuild edges as a sequential chain
-  const optimizedEdges: ScanEdge[] = [];
-  for (let i = 0; i < optimizedOrder.length - 1; i++) {
-    optimizedEdges.push({
-      source: optimizedOrder[i].id,
-      target: optimizedOrder[i + 1].id,
-    });
-  }
-  
-  // Find the result node ID from original edges
-  const targets = new Set(edges.map(e => e.target));
-  const sources = new Set(edges.map(e => e.source));
-  const resultNodeId = Array.from(targets).find(t => !sources.has(t)) || 'results';
-  
-  // Connect last thought to results
-  if (optimizedOrder.length > 0) {
-    optimizedEdges.push({
-      source: optimizedOrder[optimizedOrder.length - 1].id,
-      target: resultNodeId,
-    });
-  }
-  
+  // The order is used only to evaluate cheap, selective thoughts first and stop at the first
+  // failure. No edges are made: upstream data never flows between thoughts the user did not link.
   const optimizationSummary = `Reordered ${thoughts.length} thoughts: ${optimizedOrder.map(t => t.thoughtName || t.id).join(' → ')}`;
   console.log(`[QueryOptimizer] ${optimizationSummary}`);
   
   return {
     nodes: optimizedOrder,
-    edges: optimizedEdges,
+    edges,
     optimization: optimizationSummary,
   };
 }
@@ -462,4 +432,26 @@ export async function recordThoughtPerformance(
   } catch (error) {
     console.error(`[QueryOptimizer] Failed to record performance for ${indicatorId}:`, error);
   }
+}
+
+/**
+ * Thought evaluations per name in one scan, from the funnel the scan stored on scan_sessions (perThought[].evaluated,
+ * totalTickers). Null when the funnel lacks them. Fewer per name = the optimizer skipped more work.
+ */
+export function thoughtEvaluationsPerName(funnelData: unknown): number | null {
+  const f = funnelData as { totalTickers?: number; perThought?: Record<string, { evaluated?: number }> } | null;
+  if (!f || !f.perThought || !(Number(f.totalTickers) > 0)) return null;
+  const evaluated = Object.values(f.perThought).reduce((s, t) => s + (Number(t?.evaluated) || 0), 0);
+  return evaluated / Number(f.totalTickers);
+}
+
+/** % fewer thought evaluations per name in the recent scans than in the previous ones; 0 when either side is empty. */
+export function weeklyImprovementPct(recent: unknown[], previous: unknown[]): number {
+  const avg = (xs: unknown[]) => {
+    const v = xs.map(thoughtEvaluationsPerName).filter((x): x is number => x !== null);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  };
+  const r = avg(recent), p = avg(previous);
+  if (r === null || p === null || p <= 0) return 0;
+  return ((p - r) / p) * 100;
 }

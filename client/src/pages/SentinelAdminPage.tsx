@@ -16,6 +16,7 @@ import { Brain, Settings, Users, Tags, ChevronDown, ChevronUp, CheckCircle2, XCi
 import { useThemeEditor } from "@/context/ThemeEditorContext";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useSetupLibraryEnabled } from "@/lib/setup-library";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -3164,6 +3165,7 @@ function TuningReviewPanel() {
 export default function SentinelAdminPage() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const setupLibraryOn = useSetupLibraryEnabled();
   const { settings: systemSettings, cssVariables, pageShellStyle } = useSystemSettings();
   const [activeTab, setActiveTab] = useState("tnn");
   const [tnnSubTab, setTnnSubTab] = useState("discipline");
@@ -3476,10 +3478,12 @@ export default function SentinelAdminPage() {
               Add Setup Types
             </Button>
           )}
-          <Button onClick={() => navigate("/sentinel/setup-library")} variant="outline" data-testid="button-setup-library">
-            <BookOpen className="w-4 h-4 mr-2" />
-            Setup Library
-          </Button>
+          {setupLibraryOn && (
+            <Button onClick={() => navigate("/sentinel/setup-library")} variant="outline" data-testid="button-setup-library">
+              <BookOpen className="w-4 h-4 mr-2" />
+              Setup Library
+            </Button>
+          )}
         </div>
 
         <div

@@ -3,7 +3,11 @@ import { db, isDatabaseAvailable } from "../db";
 import { scannerThoughts, scannerIdeas, scannerFavorites, scanChartRatings, scanTuningHistory, scanSessions, sentinelUsers, indicatorLearningSummary, thoughtScoreRules, thoughtSelectionWeights, indicatorExecutionStats, optimizerDisplaySettings, bigideaSetups, bigideaSetupIndicators, bigideaExtractedIdeas, bigideaValidationRatings, uploads, setupUploads, userIndicators, indicatorApprovalQueue, type ExtractedThought } from "@shared/schema";
 import { fetchMarketSentiment } from "../sentinel/sentiment";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
-import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition } from "./indicators";
+import { INDICATOR_LIBRARY, CandleData, normalizeResult, IndicatorDefinition, activeIndicators, retiredNotesFor, criterionPass, setupIndicatorChoices } from "./indicators";
+import { earningsDays } from "./earnings-days";
+import { logAiCall, promptChars } from "./ai-cost";
+import { loadLatest as loadLatestEarnings, upcomingStatus as earningsCalendarStatus } from "../earnings/upcoming";
+import { etDateKey } from "@shared/us-market-holidays";
 import { evaluateDslIndicator, validateDslDefinition, DslLogicDefinition } from "./dsl-evaluator";
 import { evaluateScanQuality } from "./quality";
 import {
@@ -11,12 +15,19 @@ import {
   marketFlowUniverseLabel,
   resolveMarketFlowUniverseTickers,
   resolveScanUniverseTickers,
+  resolveScanUniverse,
+  resolveScanPoolTickers,
+  SCAN_POOL_UNIVERSE,
+  SCAN_POOL_NOTE,
 } from "./marketflow-universe";
 import OpenAI from "openai";
 import * as alpaca from "../alpaca";
 import * as fundamentals from "../fundamentals";
 import { getDailyBars, getIntradayBars } from "../data-layer";
-import { shouldAutoOptimize, autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
+import { autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext, weeklyImprovementPct } from "./queryOptimizer";
+import { decideOptimization } from "./scan-plan";
+import { sessionUserId, loadCaller, isAdminOrOwner } from "./access";
+import { setupLibraryGuard, setupOwnershipGuard } from "./setup-library";
 import { extractIdeasFromText, suggestIndicatorMappings } from "./extraction";
 
 function getOpenAI(): OpenAI | null {
@@ -31,7 +42,7 @@ const OHLCV_MAX_ENTRIES = 20;
 const CACHE_TTL = 60 * 60 * 1000;
 const INTRADAY_CACHE_TTL = 5 * 60 * 1000;
 
-const INTRADAY_INDICATORS = ["ITD-1", "ITD-2", "ITD-3"];
+const INTRADAY_INDICATORS = ["ITD-1", "ITD-2", "ITD-3", "ITD-4", "ITD-5", "ITD-6", "ITD-7"];
 const MA10_INDICATOR = "MA-10";
 
 function thoughtUsesIntradayData(criteria: any[]): boolean {
@@ -175,7 +186,7 @@ async function getMergedIndicatorLibrary(userId: number): Promise<IndicatorDefin
   }
 
   try {
-    const customIndicators = await db
+    const customIndicators = await db!
       .select()
       .from(userIndicators)
       .where(eq(userIndicators.userId, userId));
@@ -498,12 +509,11 @@ function evaluateThoughtCriteria(
     const cocHighlight2 = normalized.data?._cocHighlight2 as CriterionResult["cocHighlight2"] | undefined;
 
     if (normalized.data) {
-      const { _diagnostics, _cocHighlight, _cocHighlight2, ...rest } = normalized.data;
+      const { _diagnostics, _cocHighlight, _cocHighlight2, _noData, ...rest } = normalized.data;
       Object.assign(outputData, rest);
     }
 
-    let pass = normalized.pass;
-    if (criterion.inverted) pass = !pass;
+    const pass = criterionPass(normalized.pass, criterion.inverted, normalized.data);
 
     criteriaResults.push({
       indicatorId: indicator.id,
@@ -654,6 +664,10 @@ async function upsertIndicatorLearningSummary(record: any) {
 }
 
 export function registerBigIdeaRoutes(app: Express): void {
+  // The Setup Library is off unless SETUP_LIBRARY=on; changes to a setup need its creator or an admin (setup-library.ts)
+  app.use(setupLibraryGuard());
+  app.use(setupOwnershipGuard());
+
   app.get("/api/bigidea/thoughts", async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any)?.userId;
@@ -701,7 +715,9 @@ export function registerBigIdeaRoutes(app: Express): void {
         ];
       });
 
-      res.json({ options, updatedAt: new Date().toISOString() });
+      let scanPoolCount = 0;
+      try { scanPoolCount = (await resolveScanPoolTickers(db)).length; } catch { scanPoolCount = 0; }
+      res.json({ options, scanPool: { value: SCAN_POOL_UNIVERSE, tickerCount: scanPoolCount, note: SCAN_POOL_NOTE }, updatedAt: new Date().toISOString() });
     } catch (error) {
       console.error("Error fetching MarketFlow universes:", error);
       res.status(500).json({ error: "Failed to fetch MarketFlow universes" });
@@ -895,13 +911,13 @@ export function registerBigIdeaRoutes(app: Express): void {
       try {
         const thoughtIds = (nodes as any[]).filter((n: any) => n.type === "thought" && n.thoughtId).map((n: any) => n.thoughtId as number);
         if (thoughtIds.length > 0) {
-          await touchThoughtsLastUsed(thoughtIds);
+          await touchThoughtsLastUsed(thoughtIds, userId);
           const rules = await getScoreRulesMap();
           const modifiedRule = rules["idea_save_modified"];
           if (modifiedRule?.enabled && modifiedRule.scoreValue !== 0) {
-            const modifiedIds = await detectModifiedThoughts(nodes as any[]);
+            const modifiedIds = await detectModifiedThoughts(nodes as any[], userId);
             if (modifiedIds.length > 0) {
-              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue);
+              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue, userId);
             }
           }
         }
@@ -955,13 +971,13 @@ export function registerBigIdeaRoutes(app: Express): void {
         const newNodes = (req.body.nodes || updated.nodes) as any[];
         const thoughtIds = newNodes.filter((n: any) => n.type === "thought" && n.thoughtId).map((n: any) => n.thoughtId as number);
         if (thoughtIds.length > 0) {
-          await touchThoughtsLastUsed(thoughtIds);
+          await touchThoughtsLastUsed(thoughtIds, userId);
           const rules = await getScoreRulesMap();
           const modifiedRule = rules["idea_save_modified"];
           if (modifiedRule?.enabled && modifiedRule.scoreValue !== 0) {
-            const modifiedIds = await detectModifiedThoughts(newNodes as any[]);
+            const modifiedIds = await detectModifiedThoughts(newNodes as any[], userId);
             if (modifiedIds.length > 0) {
-              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue);
+              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue, userId);
             }
           }
         }
@@ -1020,7 +1036,9 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.get("/api/bigidea/indicators", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.userId || 1;
+      // the caller's own custom indicators only (it used to fall back to user 1's)
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
 
       const indicators = mergedLibrary.map((ind) => ({
@@ -1031,6 +1049,8 @@ export function registerBigIdeaRoutes(app: Express): void {
         params: ind.params,
         provides: ind.provides || [],
         consumes: ind.consumes || [],
+        // the client keeps retired ones for showing old saved ideas, but not in its picker
+        ...(ind.retired ? { retired: ind.retired } : {}),
       }));
       res.json(indicators);
     } catch (error) {
@@ -1053,7 +1073,7 @@ export function registerBigIdeaRoutes(app: Express): void {
       }
 
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
-      const indicatorSummary = mergedLibrary.map((ind) => ({
+      const indicatorSummary = activeIndicators(mergedLibrary).map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -1364,7 +1384,7 @@ You MUST detect intraday timeframe references from the user's description and se
 - "daily", "D1", "day", or no timeframe mentioned → timeframe: "daily"
 
 INTRADAY INDICATOR RULE — CRITICAL:
-When using ITD-* (Intraday category) indicators like ITD-1 (Opening Range Breakout), ITD-2 (VWAP Position), or ITD-3 (Gap Detection for intraday), the thought timeframe MUST be set to an intraday value ("5min", "15min", or "30min"). These indicators are designed for intraday candles and will produce meaningless results on daily data. If the user requests VWAP, ORB, or other ITD-* indicators without specifying a timeframe, default to "5min".
+When using ITD-* (Intraday category) indicators like ITD-4 (Session VWAP), ITD-5 (Opening Range from 9:30 ET), ITD-6 (High/Low of Day), ITD-7 (Prior-Day Level) or ITD-3 (Gap Detection for intraday), the thought timeframe MUST be set to an intraday value ("5min", "15min", or "30min"). These indicators are designed for intraday candles and will produce meaningless results on daily data. If the user requests VWAP, ORB, or other ITD-* indicators without specifying a timeframe, default to "5min".
 When the user's description contains a combined/multi-part idea where SOME parts reference an intraday timeframe and others reference daily, split into separate thoughts with the appropriate timeframe on each.
 
 MULTI-TIMEFRAME PATTERN:
@@ -1493,15 +1513,17 @@ ${summaries}`;
         // Non-critical, continue without existing thoughts context
       }
 
+      const createMessages = [
+        { role: "system" as const, content: systemPrompt + existingThoughtsContext },
+        { role: "user" as const, content: description },
+      ];
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt + existingThoughtsContext },
-          { role: "user", content: description },
-        ],
+        messages: createMessages,
         response_format: { type: "json_object" },
         temperature: 0.3,
       });
+      logAiCall({ route: "ai/create-thought", model: "gpt-4o", userId, promptChars: promptChars(createMessages), usage: completion.usage });
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {
@@ -1553,7 +1575,8 @@ ${summaries}`;
         const t = result.thoughts[i];
         if (t.reuseThoughtId && isDatabaseAvailable() && db) {
           try {
-            const [existing] = await db.select().from(scannerThoughts).where(eq(scannerThoughts.id, t.reuseThoughtId));
+            // only the caller's own thoughts may be reused (the model could name any id)
+            const [existing] = await db.select().from(scannerThoughts).where(and(eq(scannerThoughts.id, Number(t.reuseThoughtId)), eq(scannerThoughts.userId, userId)));
             if (existing) {
               result.thoughts[i] = {
                 thoughtKey: t.thoughtKey,
@@ -1687,7 +1710,7 @@ ${summaries}`;
       }
 
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
-      const indicatorSummary = mergedLibrary.map((ind) => ({
+      const indicatorSummary = activeIndicators(mergedLibrary).map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -1785,6 +1808,7 @@ Respond with valid JSON in this format:
         response_format: { type: "json_object" },
         temperature: 0.3,
       });
+      logAiCall({ route: "ai/refine-proposal", model: "gpt-4o", userId, promptChars: promptChars(messages), usage: completion.usage });
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {
@@ -1874,7 +1898,7 @@ Respond with valid JSON in this format:
       }
 
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
-      const indicatorSummary = mergedLibrary.map((ind) => ({
+      const indicatorSummary = activeIndicators(mergedLibrary).map((ind) => ({
         id: ind.id,
         name: ind.name,
         category: ind.category,
@@ -1947,15 +1971,17 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(500).json({ error: "AI service not configured." });
       }
 
+      const restateMessages = [
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: instruction },
+      ];
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: instruction },
-        ],
+        messages: restateMessages,
         response_format: { type: "json_object" },
         temperature: 0.3,
       });
+      logAiCall({ route: "ai/restate-thought", model: "gpt-4o", userId, promptChars: promptChars(restateMessages), usage: completion.usage });
 
       const content = completion.choices[0]?.message?.content;
       if (!content) {
@@ -1985,10 +2011,11 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "nodes, edges, and universe (or customTickers) are required" });
       }
 
-      const { tickers, marketFlow } = resolveScanUniverseTickers(universe, customTickers);
+      const { tickers, marketFlow, scanPool } = await resolveScanUniverse(universe, customTickers, db);
       if (tickers.length === 0) {
         const hint = isMarketFlowUniverse(universe)
           ? "MarketFlow theme universe is empty — ensure Market Condition has loaded theme data"
+          : scanPool ? "The scan pool is empty (it is filled by the weekly pool refresh)"
           : "Invalid universe or empty watchlist";
         return res.status(400).json({ error: hint });
       }
@@ -2158,12 +2185,17 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       });
       let evalOrder = topoSort(thoughtNodes, thoughtEdges);
       let sortedThoughtNodes = evalOrder.map((id: string) => thoughtNodes.find((n: any) => n.id === id)!).filter(Boolean);
-      let optimizedEdges = thoughtEdges;
+      // Upstream data and "skip if upstream failed" follow only the thought-to-thought edges the
+      // user drew. The optimizer may reorder a pure-AND idea and stop at its first failure, which
+      // cannot change the answer; it never adds edges (scan-plan.ts).
+      const optimizedEdges = thoughtEdges;
+      let stopAtFirstFailure = false;
       
       console.log(`[BigIdea Scan] Initial evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
       
-      // AUTO-OPTIMIZATION: Check if we should reorder thoughts for efficiency
-      if (shouldAutoOptimize(thoughtNodes, edges)) {
+      const optimizeDecision = decideOptimization(thoughtNodes, edges, resultsNodeForNorm ? String(resultsNodeForNorm.id) : undefined);
+      // AUTO-OPTIMIZATION: only where reordering is provably result-neutral
+      if (optimizeDecision.optimize) {
         try {
           // Fetch market sentiment for optimization context
           let marketRegime: any = undefined;
@@ -2182,16 +2214,16 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           
           const optimized = await autoOptimizeThoughtOrder(thoughtNodes, edges, optimizationContext);
           
-          // Use optimized order and edges (keep all edges including connections to Results)
-          sortedThoughtNodes = optimized.nodes;
-          optimizedEdges = optimized.edges;
+          // Use the optimized order only; edges stay as the user drew them
+          sortedThoughtNodes = optimized.nodes as typeof sortedThoughtNodes;
+          stopAtFirstFailure = true;
           
           console.log(`[BigIdea Scan] ✨ AUTO-OPTIMIZED evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
         } catch (error) {
           console.error(`[QueryOptimizer] Optimization failed, using topological order:`, error);
         }
       } else {
-        console.log(`[BigIdea Scan] Using graph-defined order (no optimization needed)`);
+        console.log(`[BigIdea Scan] Using graph-defined order (${optimizeDecision.reason})`);
       }
 
       const downstreamMap: Record<string, string[]> = {};
@@ -2283,12 +2315,21 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       const BATCH_SIZE = 12;
       
       // Check if any FND-* indicators are used (needed for market cap stats)
+      // Vendor fundamentals (Finnhub/FMP per symbol) only for FND-1..3; FND-4 reads our own earnings tables
       const hasFundamentalIndicators = sortedThoughtNodes.some((node: any) => 
         (node.thoughtCriteria || []).some((c: any) => 
-          !c.muted && c.indicatorId && c.indicatorId.startsWith("FND-")
+          !c.muted && c.indicatorId && c.indicatorId.startsWith("FND-") && c.indicatorId !== "FND-4"
         )
       );
       
+      // FND-4 Earnings Proximity reads the stored earnings calendar; load it if this process has not yet
+      const usesEarnings = sortedThoughtNodes.some((node: any) =>
+        !node.isMuted && (node.thoughtCriteria || []).some((c: any) => !c.muted && c.indicatorId === "FND-4"));
+      let earningsKnown = 0;
+      if (usesEarnings && !earningsCalendarStatus().fetchedOn && db) {
+        try { await loadLatestEarnings(db); } catch (e) { console.warn("[BigIdea Scan] Could not load the earnings calendar:", e); }
+      }
+
       // Track market cap data availability for debugging
       let marketCapStats = { total: 0, hasData: 0, missing: 0, sampleValues: [] as Array<{ symbol: string; marketCap: number }> };
 
@@ -2334,7 +2375,16 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
 
               // Fetch fundamental data if any FND-* indicators are used
               let fundamentalData: any = null;
+              // FND-4: days to/since earnings from the app's stored earnings data (no vendor call)
+              let earnings: { daysToEarnings?: number; daysSinceEarnings?: number } = {};
+              if (usesEarnings) {
+                try {
+                  earnings = earningsDays(await fundamentals.getCachedEarningsData(symbol), etDateKey());
+                } catch { earnings = {}; }
+                if (earnings.daysToEarnings !== undefined || earnings.daysSinceEarnings !== undefined) earningsKnown++;
+              }
               
+              if (usesEarnings && !hasFundamentalIndicators) fundamentalData = { ...earnings };
               if (hasFundamentalIndicators) {
                 try {
                   // Use getFundamentals only: 1 API call per symbol (profile). Avoid getExtendedFundamentals
@@ -2342,7 +2392,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   const basic = await fundamentals.getFundamentals(symbol);
                   fundamentalData = {
                     ...basic,
-                    daysToEarnings: undefined as number | undefined,
+                    ...earnings,
                   };
 
                   // If Finnhub/cache had no market cap, use FMP batch result so FND-1 can still pass
@@ -2367,7 +2417,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   marketCapStats.total++;
                   marketCapStats.missing++;
                   console.warn(`[BigIdea Scan] Failed to fetch fundamental data for ${symbol}:`, error);
-                  fundamentalData = null;
+                  // earnings come from our own tables, so FND-4 still works when the vendor call fails
+                  fundamentalData = usesEarnings ? { ...earnings } : null;
                 }
               }
 
@@ -2391,6 +2442,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   nodeResults[node.id] = false;
                   const downstream = getTransitiveDownstream(node.id);
                   for (const dId of downstream) skippedNodes.add(dId);
+                  if (stopAtFirstFailure) for (const n of sortedThoughtNodes) if (nodeResults[n.id] === undefined) skippedNodes.add(n.id);
                   continue;
                 }
 
@@ -2420,20 +2472,11 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                 }
                 
                 const mergedUpstream: Record<string, any> = {};
-                const incomingEdges = optimizedEdges.filter((e: any) => e.target === node.id);
-                
+                // (An edge's linkTolerance used to be copied in here as _linkTolerance; no indicator ever read it
+                // and the canvas never set it, so it is gone. Upstream data is passed exactly as produced.)
                 for (const srcId of upstreamNodes) {
                   const srcData = nodeOutputData[srcId];
-                  if (srcData) {
-                    Object.assign(mergedUpstream, srcData);
-                    
-                    // Apply link tolerance if specified on the edge
-                    const edge = incomingEdges.find((e: any) => e.source === srcId);
-                    if (edge?.linkTolerance !== undefined) {
-                      mergedUpstream._linkTolerance = edge.linkTolerance;
-                      mergedUpstream._linkToleranceType = edge.linkToleranceType || "bars";
-                    }
-                  }
+                  if (srcData) Object.assign(mergedUpstream, srcData);
                 }
                 
                 // Add fundamental data if available (always include if fetched, even if no upstream nodes)
@@ -2473,6 +2516,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   }
                   const downstream = getTransitiveDownstream(node.id);
                   for (const dId of downstream) skippedNodes.add(dId);
+                  // Pure-AND idea: one failed thought already decides the name, skip the rest
+                  if (stopAtFirstFailure) for (const n of sortedThoughtNodes) if (nodeResults[n.id] === undefined) skippedNodes.add(n.id);
                 }
 
                 for (const cr of evalResult.criteriaResults) {
@@ -2779,11 +2824,18 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       if (userId && isDatabaseAvailable() && db) {
         try {
           const resultSymbols = results.map((r: any) => r.symbol);
+          // a session may point only at the caller's own idea
+          let ownScanIdeaId: number | undefined;
+          if (ideaId) {
+            const [own] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
+              .where(and(eq(scannerIdeas.id, parseInt(String(ideaId))), eq(scannerIdeas.userId, userId)));
+            ownScanIdeaId = own?.id;
+          }
           const [session] = await db
             .insert(scanSessions)
             .values({
               userId,
-              ideaId: ideaId ? parseInt(String(ideaId)) : undefined,
+              ideaId: ownScanIdeaId,
               scanConfig: { nodes, edges, universe },
               resultCount: results.length,
               resultSymbols,
@@ -2803,7 +2855,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
                   .map((n: any) => n.thoughtId as number);
                 if (nonMutedThoughtIds.length > 0) {
-                  await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue);
+                  await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue, userId);
                 }
               }
             } catch (scoreErr) {
@@ -2851,7 +2903,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           const [idea] = await db
             .select({ name: scannerIdeas.name, description: scannerIdeas.description })
             .from(scannerIdeas)
-            .where(eq(scannerIdeas.id, ideaId))
+            .where(and(eq(scannerIdeas.id, Number(ideaId)), eq(scannerIdeas.userId, userId)))
             .limit(1);
           if (idea) {
             ideaInfo = { name: idea.name, description: idea.description };
@@ -2872,7 +2924,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           const thoughts = await db
             .select({ id: scannerThoughts.id, aiPrompt: scannerThoughts.aiPrompt, description: scannerThoughts.description })
             .from(scannerThoughts)
-            .where(inArray(scannerThoughts.id, thoughtIdsFromNodes));
+            .where(and(inArray(scannerThoughts.id, thoughtIdsFromNodes), eq(scannerThoughts.userId, userId)));
           for (const t of thoughts) {
             thoughtPrompts.set(t.id, { aiPrompt: t.aiPrompt, description: t.description });
           }
@@ -2945,7 +2997,12 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         dynamicDataFlows,
         funnelData,
         sessionId,
+        // saved ideas that still use a retired indicator: it ran exactly as before, this says what replaces it
+        retiredIndicators: retiredNotesFor(thoughtNodes.flatMap((n: any) => n.thoughtCriteria || [])),
+        ...(usesEarnings ? { earningsData: { namesWithDate: earningsKnown, names: tickers.length,
+          ...(earningsKnown === 0 ? { warning: "FND-4 Earnings Proximity: no earnings dates were found for any name, so it could not pass" } : {}) } } : {}),
         debugInfo: enhancedDebugInfo,
+        ...(scanPool ? { universeMeta: { type: "scan-pool", tickerCount: tickers.length, note: SCAN_POOL_NOTE } } : {}),
         ...(marketFlow ? {
           universeMeta: {
             type: "marketflow",
@@ -2975,6 +3032,9 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       if (!ideaId || !symbol) {
         return res.status(400).json({ error: "ideaId and symbol are required" });
       }
+      const [ownIdea] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
+        .where(and(eq(scannerIdeas.id, Number(ideaId)), eq(scannerIdeas.userId, userId)));
+      if (!ownIdea) return res.status(404).json({ error: "Idea not found" });
 
       const [favorite] = await db
         .insert(scannerFavorites)
@@ -3053,13 +3113,21 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "symbol and rating ('up'|'down') are required" });
       }
 
+      // A rating may point only at the caller's own idea (it scores that idea's thoughts)
+      let ownIdeaId: number | null = null;
+      if (ideaId) {
+        const [own] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
+          .where(and(eq(scannerIdeas.id, Number(ideaId)), eq(scannerIdeas.userId, userId)));
+        ownIdeaId = own ? own.id : null;
+      }
+
       const [record] = await db
         .insert(scanChartRatings)
         .values({
           userId,
           symbol,
           rating,
-          ideaId: ideaId || null,
+          ideaId: ownIdeaId,
           sessionId: sessionId || null,
           scanConfig: scanConfig || null,
           indicatorSnapshot: indicatorSnapshot || null,
@@ -3071,20 +3139,20 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         .returning();
 
       // Rule 3: Score thoughts on chart thumbs-up/down
-      if (ideaId) {
+      if (ownIdeaId) {
         try {
           const rules = await getScoreRulesMap();
           const ruleKey = rating === "up" ? "chart_thumbs_up" : "chart_thumbs_down";
           const rule = rules[ruleKey];
           if (rule?.enabled && rule.scoreValue !== 0) {
-            const idea = await db.select().from(scannerIdeas).where(eq(scannerIdeas.id, ideaId));
+            const idea = await db.select().from(scannerIdeas).where(and(eq(scannerIdeas.id, ownIdeaId), eq(scannerIdeas.userId, userId)));
             if (idea.length > 0) {
               const ideaNodes = idea[0].nodes as any[];
               const nonMutedThoughtIds = ideaNodes
                 .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
                 .map((n: any) => n.thoughtId as number);
               if (nonMutedThoughtIds.length > 0) {
-                await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue);
+                await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue, userId);
               }
             }
           }
@@ -3220,7 +3288,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         const indIds = indicatorMeta.map((m: any) => m.id);
         if (indIds.length > 0) {
           const summaries = await db.select().from(indicatorLearningSummary)
-            .where(sql`${indicatorLearningSummary.indicatorId} = ANY(${indIds})`);
+            .where(inArray(indicatorLearningSummary.indicatorId, indIds));
 
           let currentRegime: any = null;
           try {
@@ -3280,6 +3348,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
             .from(scanTuningHistory)
             .where(
               and(
+                eq(scanTuningHistory.userId, userId), // the caller's own sessions only
                 sql`${scanTuningHistory.outcome} IS NOT NULL`,
                 sql`${scanTuningHistory.adminApproved} IS NOT FALSE`
               )
@@ -3390,7 +3459,7 @@ Return a JSON object with this exact structure:
 }`;
 
       const usedIndicatorIds = new Set(indicatorMeta.map(m => m.id));
-      const availableIndicators = INDICATOR_LIBRARY
+      const availableIndicators = activeIndicators(INDICATOR_LIBRARY)
         .filter(ind => !usedIndicatorIds.has(ind.id))
         .map(ind => ({
           id: ind.id,
@@ -3686,7 +3755,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       if (indicatorIds.length === 0) return res.json({ history: {}, summaries: {} });
 
       const summaries = await db.select().from(indicatorLearningSummary)
-        .where(sql`${indicatorLearningSummary.indicatorId} = ANY(${indicatorIds})`);
+        .where(inArray(indicatorLearningSummary.indicatorId, indicatorIds));
 
       const summaryMap: Record<string, any> = {};
       for (const s of summaries) {
@@ -3710,6 +3779,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         .from(scanTuningHistory)
         .where(
           and(
+            eq(scanTuningHistory.userId, userId), // the caller's own sessions only
             sql`${scanTuningHistory.outcome} IS NOT NULL`,
             sql`${scanTuningHistory.adminApproved} IS NOT FALSE`
           )
@@ -4230,7 +4300,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           if (tIds.length === 0) continue;
           const rule = r.rating === "up" ? upRule : downRule;
           if (rule?.enabled && rule.scoreValue !== 0) {
-            await applyScoreToThoughts(tIds, rule.scoreValue);
+            await applyScoreToThoughts(tIds, rule.scoreValue, r.userId);
             stats.thoughtsScored += tIds.length;
           }
           stats.ratingsProcessed++;
@@ -4246,7 +4316,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           if (!config?.nodes) continue;
           const tIds = resolveThoughtIdsFromNodes(config.nodes as any[]);
           if (tIds.length === 0) continue;
-          await applyScoreToThoughts(tIds, scanRule.scoreValue);
+          await applyScoreToThoughts(tIds, scanRule.scoreValue, s.userId);
           stats.thoughtsScored += tIds.length;
           stats.sessionsProcessed++;
         }
@@ -4348,17 +4418,12 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         .orderBy(desc(scanSessions.createdAt))
         .limit(100);
       
-      const avgRecentEvals = recentSessions.length > 0
-        ? recentSessions.reduce((sum, s) => sum + (s.totalEvaluations || 0), 0) / recentSessions.length
-        : 0;
-      
-      const avgPreviousEvals = previousSessions.length > 0
-        ? previousSessions.reduce((sum, s) => sum + (s.totalEvaluations || 0), 0) / previousSessions.length
-        : avgRecentEvals;
-      
-      const weeklyImprovement = avgPreviousEvals > 0
-        ? ((avgPreviousEvals - avgRecentEvals) / avgPreviousEvals) * 100
-        : 0;
+      // scan_sessions has no totalEvaluations column (this read undefined, so the figure was always 0): use the
+      // thought evaluations per name each session's funnel recorded
+      const weeklyImprovement = weeklyImprovementPct(
+        recentSessions.map((s) => s.funnelData),
+        previousSessions.map((s) => s.funnelData),
+      );
       
       // Find top improved indicator
       const sortedBySelectivity = [...stats].sort((a, b) => b.selectivityScore - a.selectivityScore);
@@ -4503,19 +4568,20 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
   }
 
   // Helper: apply score delta to thoughts by IDs
-  async function applyScoreToThoughts(thoughtIds: number[], delta: number) {
+  // Only the given user's thoughts: an idea's nodes are client JSON and may name anyone's thought id
+  async function applyScoreToThoughts(thoughtIds: number[], delta: number, userId: number) {
     if (!isDatabaseAvailable() || !db || thoughtIds.length === 0 || delta === 0) return;
     await db.update(scannerThoughts)
       .set({ score: sql`${scannerThoughts.score} + ${delta}` })
-      .where(sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(and(eq(scannerThoughts.userId, userId), sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`));
   }
 
   // Helper: update lastUsedAt for thoughts by IDs
-  async function touchThoughtsLastUsed(thoughtIds: number[]) {
+  async function touchThoughtsLastUsed(thoughtIds: number[], userId: number) {
     if (!isDatabaseAvailable() || !db || thoughtIds.length === 0) return;
     await db.update(scannerThoughts)
       .set({ lastUsedAt: new Date() })
-      .where(sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(and(eq(scannerThoughts.userId, userId), sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`));
   }
 
   async function selectThoughtsByWeight(userId: number, count: number): Promise<any[]> {
@@ -4603,14 +4669,14 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     }
   });
 
-  async function detectModifiedThoughts(ideaNodes: any[]): Promise<number[]> {
+  async function detectModifiedThoughts(ideaNodes: any[], userId: number): Promise<number[]> {
     if (!isDatabaseAvailable() || !db) return [];
     const thoughtNodes = ideaNodes.filter((n: any) => n.type === "thought" && n.thoughtId);
     if (thoughtNodes.length === 0) return [];
     const ids = thoughtNodes.map((n: any) => n.thoughtId as number);
     const stored = await db.select({ id: scannerThoughts.id, criteria: scannerThoughts.criteria })
       .from(scannerThoughts)
-      .where(sql`${scannerThoughts.id} IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`);
+      .where(and(eq(scannerThoughts.userId, userId), sql`${scannerThoughts.id} IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`));
     const storedMap = new Map(stored.map(s => [s.id, JSON.stringify(s.criteria || [])]));
     const modified: number[] = [];
     for (const n of thoughtNodes) {
@@ -4916,13 +4982,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
 
   // Get indicator library (for selecting indicators when creating setups)
   app.get("/api/bigidea/setup-indicators", (_req: Request, res: Response) => {
-    const library = Object.entries(INDICATOR_LIBRARY).map(([id, ind]) => ({
-      id,
-      name: ind.name,
-      category: ind.category,
-      defaultParams: ind.defaultParams,
-    }));
-    res.json(library);
+    res.json(setupIndicatorChoices());
   });
 
   // =============================================================================
@@ -4981,7 +5041,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       }
 
       // Build indicator library summary
-      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+      const indicatorSummary = activeIndicators(INDICATOR_LIBRARY).map(ind => 
         `- ${ind.id}: ${ind.name} (${ind.category})`
       ).join("\n");
 
@@ -5090,7 +5150,7 @@ Remember: Most articles describe ONE setup with examples. Be conservative - only
         return res.status(500).json({ error: "OpenAI not configured" });
       }
 
-      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+      const indicatorSummary = activeIndicators(INDICATOR_LIBRARY).map(ind => 
         `- ${ind.id}: ${ind.name} (${ind.category})`
       ).join("\n");
 
@@ -5715,7 +5775,7 @@ If no changes needed, return response without updatedPreview.`;
       }
 
       // Build indicator library summary for context
-      const indicatorSummary = INDICATOR_LIBRARY.map(ind => 
+      const indicatorSummary = activeIndicators(INDICATOR_LIBRARY).map(ind => 
         `- ${ind.id}: ${ind.name} (${ind.category}) - ${ind.description}`
       ).join("\n");
 
@@ -5829,7 +5889,9 @@ Format for updates:
       }
 
       const { name, category, description, params, logicDefinition, aiPrompt, aiModel, provides, consumes } = req.body;
-      const userId = (req.user as any)?.id || 1;
+      // The signed-in user (req.user is never set in this app; it used to save everyone's under user 1)
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       if (!name || !category || !description || !logicDefinition) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -5845,7 +5907,7 @@ Format for updates:
 
       const customId = `CUSTOM-${userId}-${Date.now()}`;
 
-      const [indicator] = await db.insert(userIndicators).values({
+      const [indicator] = await db!.insert(userIndicators).values({
         userId,
         customId,
         name,
@@ -5879,9 +5941,11 @@ Format for updates:
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const userId = (req.user as any)?.id || 1;
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-      const indicators = await db
+      // Only the caller's own custom indicators (the built-ins come from /api/bigidea/indicators)
+      const indicators = await db!
         .select()
         .from(userIndicators)
         .where(eq(userIndicators.userId, userId))
@@ -5931,6 +5995,7 @@ Format for updates:
   app.post("/api/bigidea/custom-indicators/generate", async (req: Request, res: Response) => {
     console.log("[CustomIndicator] Generate endpoint called with:", JSON.stringify(req.body, null, 2));
     try {
+      if (!sessionUserId(req)) return res.status(401).json({ error: "Unauthorized" });
       const { requestText, existingIndicators } = req.body;
       const openai = getOpenAI();
 
@@ -6089,13 +6154,16 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const indicatorId = parseInt(req.params.id);
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const indicatorId = parseInt(String(req.params.id));
       const { passed } = req.body;
 
-      const [indicator] = await db
+      // Only the owner's own indicator: someone else's reads as not found
+      const [indicator] = await db!
         .select()
         .from(userIndicators)
-        .where(eq(userIndicators.id, indicatorId));
+        .where(and(eq(userIndicators.id, indicatorId), eq(userIndicators.userId, userId)));
 
       if (!indicator) {
         return res.status(404).json({ error: "Indicator not found" });
@@ -6118,7 +6186,7 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
       if (timesUsed === 5 && !indicator.autoSubmittedAt && !indicator.isAdminApproved) {
         updates.autoSubmittedAt = new Date();
         
-        await db.insert(indicatorApprovalQueue).values({
+        await db!.insert(indicatorApprovalQueue).values({
           indicatorId: indicator.id,
           submittedAt: new Date(),
         });
@@ -6126,10 +6194,10 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         console.log(`[Custom Indicator] Auto-submitted indicator ${indicator.customId} to approval queue after 5 uses`);
       }
 
-      await db
+      await db!
         .update(userIndicators)
         .set(updates)
-        .where(eq(userIndicators.id, indicatorId));
+        .where(and(eq(userIndicators.id, indicatorId), eq(userIndicators.userId, userId)));
 
       res.json({ success: true, timesUsed, autoSubmitted: timesUsed === 5 });
     } catch (error: any) {
@@ -6145,12 +6213,14 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const user = req.user as any;
-      if (!user?.isAdmin) {
+      const sessionId = sessionUserId(req);
+      if (!sessionId) return res.status(401).json({ error: "Unauthorized" });
+      const user = await loadCaller(sessionId);
+      if (!user || !isAdminOrOwner(user)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
-      const queue = await db
+      const queue = await db!
         .select({
           queueItem: indicatorApprovalQueue,
           indicator: userIndicators,
@@ -6180,19 +6250,21 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const user = req.user as any;
-      if (!user?.isAdmin) {
+      const sessionId = sessionUserId(req);
+      if (!sessionId) return res.status(401).json({ error: "Unauthorized" });
+      const user = await loadCaller(sessionId);
+      if (!user || !isAdminOrOwner(user)) {
         return res.status(403).json({ error: "Admin access required" });
       }
 
-      const queueId = parseInt(req.params.queueId);
+      const queueId = parseInt(String(req.params.queueId));
       const { decision, reviewNotes, rejectionReason } = req.body;
 
       if (!["approved", "rejected", "needs_revision"].includes(decision)) {
         return res.status(400).json({ error: "Invalid decision" });
       }
 
-      const [queueItem] = await db
+      const [queueItem] = await db!
         .select()
         .from(indicatorApprovalQueue)
         .where(eq(indicatorApprovalQueue.id, queueId));
@@ -6201,7 +6273,7 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         return res.status(404).json({ error: "Queue item not found" });
       }
 
-      await db
+      await db!
         .update(indicatorApprovalQueue)
         .set({
           decision,
@@ -6213,7 +6285,7 @@ Return ONLY a JSON object with this structure (no markdown, no explanation):
         .where(eq(indicatorApprovalQueue.id, queueId));
 
       if (decision === "approved") {
-        await db
+        await db!
           .update(userIndicators)
           .set({
             isAdminApproved: true,
