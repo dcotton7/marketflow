@@ -154,3 +154,37 @@ Cached 60 seconds.
 
 Cost: move = 4-6 indexed queries (or one closes query of at most ~2 x members rows); velocity = 4 point lookups and 3
 slot reads (~45 rows each). Both bounded by the number of groups (~40 themes, ~11 sectors, 5 sizes).
+
+## 4. Stored BigIdea scan results
+
+**Where they are:** `scan_sessions`. Every `POST /api/bigidea/scan` that gets to the end writes one row
+(`server/bigidea/routes.ts`, the insert after the scan loop): `user_id`, `idea_id`, `scan_config` (the canvas nodes and
+edges, and `universe`), `result_count`, **`result_symbols` (the matched tickers, in result order)**, `funnel_data`
+(totalTickers, fetchFails, tooFewCandles, per-thought passed / failed / evaluated / skipped with the failed tickers, and
+per-indicator diagnostic samples), `created_at`. Per user. Kept for good: nothing in the app deletes or prunes them.
+
+Not stored: each match's price, name and which paths it passed (only in the scan's HTTP answer). The other tables:
+`scan_tuning_history` holds the AI tuning rounds (config before / after, suggestions, counts); `scan_chart_ratings`
+the user's thumbs up / down per symbol; `saved_scans` an old, unrelated filter store; `scanner_discoveries` is the
+Signals scanner, not BigIdea.
+
+**A gap found:** the app's two callers (`client/src/pages/BigIdeaPage.tsx`, `client/src/components/bigidea/
+ValidationMode.tsx`) send no `ideaId`, so `idea_id` is null on their rows and a scan cannot be tied to a saved idea by
+id; the thoughts' names are in `funnel_data.perThought`. The smallest fix: send `ideaId` in those two request bodies
+(the server already stores it). Not done here (BigIdea's lane).
+
+So no new table and no line in `server/bigidea/routes.ts` was needed: matched symbols are already stored.
+
+`GET /api/bigidea/scan-results[?ideaId=N][&limit=1-50, default 20][&symbols=1-500 per scan, default 200]`, the
+session user's newest scans first (new file `server/gateway-reads/scan-results.ts`; `server/bigidea/*` untouched):
+
+```json
+{"scans":[{"id":812,"ideaId":null,"ideaName":null,"universe":"sp500","createdAt":"2026-11-25T15:00:00.000Z","resultCount":3,
+  "symbols":["NVDA","AMD","AVGO"],"symbolsTruncated":false,
+  "funnel":{"totalTickers":500,"fetchFails":2,"tooFewCandles":1,"perThought":[{"name":"Base","passed":40,"failed":460,"evaluated":500,"skipped":0}]}}],
+ "notes":["..."]}
+```
+
+The canvas criteria, the per-ticker failure lists and the per-indicator samples do not leave. A watchlist scan is sent
+as a ticker list: its `universe` is null and the list itself is not stored. Not cached: one SELECT of at most 50 rows filtered by user (`scan_sessions` has no index on `user_id`; fine at its
+size, worth one if it grows into the tens of thousands).

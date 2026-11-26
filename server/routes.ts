@@ -961,6 +961,8 @@ export async function registerRoutes(
   // moves between instants and intraday velocity. Before the market-condition router, so /themes/move is not a theme id.
   app.use("/api/market-condition", (await import("./gateway-reads/routes")).gatewayReadRoutes());
   app.use("/api/market-condition", marketConditionRoutes);
+  // The user's stored BigIdea scans (scan_sessions), read only (server/gateway-reads/scan-results.ts).
+  app.use("/api/bigidea", (await import("./gateway-reads/scan-results")).scanResultsRoutes());
   app.use("/api/marketflow", marketflowAnalysisRoutes);
 
   const tosHelperDir = path.join(process.cwd(), "server", "bridge");

@@ -40,7 +40,8 @@ export const ALLOWED: RegExp[] = [
   ),
   /^\/api\/marketflow\/options\/(pulse|regime)$/,
   new RegExp(`^/api/marketflow/${SYM}/cached$`),
-  /^\/api\/bigidea\/(ideas|ideas\/\d+|thoughts|setups|setups\/\d+)$/,
+  // ...and his stored BigIdea scans: matched symbols and counts per run (server/gateway-reads/scan-results.ts).
+  /^\/api\/bigidea\/(ideas|ideas\/\d+|thoughts|setups|setups\/\d+|scan-results)$/,
   /^\/api\/discord-stream\/(summary|analysis)$/,
   // The Lab's Signals scanner panel: its cards (one SELECT on scanner_discoveries) and the scanner's status. And the
   // Signals Lab's evidence: per-horizon grades and the recorded fires with their outcomes (read only, paged).
