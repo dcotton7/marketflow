@@ -16,7 +16,8 @@ import OpenAI from "openai";
 import * as alpaca from "../alpaca";
 import * as fundamentals from "../fundamentals";
 import { getDailyBars, getIntradayBars } from "../data-layer";
-import { shouldAutoOptimize, autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
+import { autoOptimizeThoughtOrder, recordThoughtPerformance, OptimizationContext } from "./queryOptimizer";
+import { decideOptimization } from "./scan-plan";
 import { extractIdeasFromText, suggestIndicatorMappings } from "./extraction";
 
 function getOpenAI(): OpenAI | null {
@@ -2158,12 +2159,17 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       });
       let evalOrder = topoSort(thoughtNodes, thoughtEdges);
       let sortedThoughtNodes = evalOrder.map((id: string) => thoughtNodes.find((n: any) => n.id === id)!).filter(Boolean);
-      let optimizedEdges = thoughtEdges;
+      // Upstream data and "skip if upstream failed" follow only the thought-to-thought edges the
+      // user drew. The optimizer may reorder a pure-AND idea and stop at its first failure, which
+      // cannot change the answer; it never adds edges (scan-plan.ts).
+      const optimizedEdges = thoughtEdges;
+      let stopAtFirstFailure = false;
       
       console.log(`[BigIdea Scan] Initial evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
       
-      // AUTO-OPTIMIZATION: Check if we should reorder thoughts for efficiency
-      if (shouldAutoOptimize(thoughtNodes, edges)) {
+      const optimizeDecision = decideOptimization(thoughtNodes, edges, resultsNodeForNorm ? String(resultsNodeForNorm.id) : undefined);
+      // AUTO-OPTIMIZATION: only where reordering is provably result-neutral
+      if (optimizeDecision.optimize) {
         try {
           // Fetch market sentiment for optimization context
           let marketRegime: any = undefined;
@@ -2182,16 +2188,16 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           
           const optimized = await autoOptimizeThoughtOrder(thoughtNodes, edges, optimizationContext);
           
-          // Use optimized order and edges (keep all edges including connections to Results)
-          sortedThoughtNodes = optimized.nodes;
-          optimizedEdges = optimized.edges;
+          // Use the optimized order only; edges stay as the user drew them
+          sortedThoughtNodes = optimized.nodes as typeof sortedThoughtNodes;
+          stopAtFirstFailure = true;
           
           console.log(`[BigIdea Scan] ✨ AUTO-OPTIMIZED evaluation order: ${sortedThoughtNodes.map((n: any) => `"${n.thoughtName}"`).join(" → ")}`);
         } catch (error) {
           console.error(`[QueryOptimizer] Optimization failed, using topological order:`, error);
         }
       } else {
-        console.log(`[BigIdea Scan] Using graph-defined order (no optimization needed)`);
+        console.log(`[BigIdea Scan] Using graph-defined order (${optimizeDecision.reason})`);
       }
 
       const downstreamMap: Record<string, string[]> = {};
@@ -2391,6 +2397,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   nodeResults[node.id] = false;
                   const downstream = getTransitiveDownstream(node.id);
                   for (const dId of downstream) skippedNodes.add(dId);
+                  if (stopAtFirstFailure) for (const n of sortedThoughtNodes) if (nodeResults[n.id] === undefined) skippedNodes.add(n.id);
                   continue;
                 }
 
@@ -2473,6 +2480,8 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   }
                   const downstream = getTransitiveDownstream(node.id);
                   for (const dId of downstream) skippedNodes.add(dId);
+                  // Pure-AND idea: one failed thought already decides the name, skip the rest
+                  if (stopAtFirstFailure) for (const n of sortedThoughtNodes) if (nodeResults[n.id] === undefined) skippedNodes.add(n.id);
                 }
 
                 for (const cr of evalResult.criteriaResults) {
