@@ -173,7 +173,7 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
     // the calendar counts only when it was pulled in the last week
     if (earningsAsOf && Date.parse(date) - Date.parse(earningsAsOf) <= 7 * 864e5) {
       earnings = new Map();
-      for (const r of rowsOf(await db.execute(sql`SELECT symbol, MIN(report_date)::text AS d FROM earnings_estimates_daily WHERE fetched_on = ${earningsAsOf}::date AND report_date >= ${date}::date GROUP BY symbol`))) {
+      for (const r of rowsOf(await db.execute(sql`SELECT symbol, MIN(report_date)::text AS d FROM earnings_estimates_daily WHERE fetched_on = ${earningsAsOf} AND report_date >= ${date} GROUP BY symbol`))) {
         earnings.set(String(r.symbol).toUpperCase(), String(r.d).slice(0, 10));
       }
     }
@@ -204,7 +204,7 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
         const k = d.toISOString().slice(0, 10);
         if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !isMarketHoliday(k)) sessions.push(k);
       }
-      const rows = rowsOf(await db.execute(sql`SELECT DISTINCT symbol, report_date::text AS d, hour FROM earnings_estimates_daily WHERE report_date >= ${from}::date AND report_date <= ${date}::date AND fetched_on < report_date + 1`));
+      const rows = rowsOf(await db.execute(sql`SELECT DISTINCT symbol, report_date::text AS d, hour FROM earnings_estimates_daily WHERE report_date >= ${from} AND report_date <= ${date} AND fetched_on::date < report_date::date + 1`));
       const days = reactionSessions(rows.map((x) => ({ symbol: String(x.symbol).toUpperCase(), reportDate: String(x.d).slice(0, 10), hour: x.hour ?? null, source: "finnhub_calendar" })), sessions);
       reactions = new Map();
       for (const r of days) reactions.set(r.symbol, [...(reactions.get(r.symbol) ?? []), r.session]);
@@ -223,7 +223,7 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
   const into = newAcc();
   for (let i = 0; i < all.length; i += 200) {
     const chunk = all.slice(i, i + 200);
-    const r = await db.execute(sql`SELECT symbol, bar_date::text AS d, open, high, low, close, volume FROM historical_bars WHERE symbol IN (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)}) AND bar_date >= ${cutoff}::date AND bar_date < ${date}::date ORDER BY symbol, bar_date`);
+    const r = await db.execute(sql`SELECT symbol, bar_date::text AS d, open, high, low, close, volume FROM historical_bars WHERE symbol IN (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)}) AND bar_date >= ${cutoff} AND bar_date < ${date} ORDER BY symbol, bar_date`);
     const bars = new Map<string, DailyBar[]>();
     for (const x of rowsOf(r)) {
       const s = String(x.symbol).toUpperCase();

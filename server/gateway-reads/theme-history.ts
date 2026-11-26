@@ -400,7 +400,7 @@ export function pgHistorySource(db: Exec, opts: { themeMembersNow?: () => Promis
       return r?.a ? { first: String(r.a).slice(0, 10), last: String(r.b).slice(0, 10) } : null;
     }, null),
     async sessionOnOrBefore(date) {
-      const r = rowsOf(await db.execute(sql`SELECT MAX(bar_date)::text AS d FROM historical_bars WHERE symbol = 'SPY' AND bar_date <= ${date}::date`))[0];
+      const r = rowsOf(await db.execute(sql`SELECT MAX(bar_date)::text AS d FROM historical_bars WHERE symbol = 'SPY' AND bar_date <= ${date}`))[0];
       return r?.d ? String(r.d).slice(0, 10) : null;
     },
     async members(g, date) {
