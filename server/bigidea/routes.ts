@@ -902,13 +902,13 @@ export function registerBigIdeaRoutes(app: Express): void {
       try {
         const thoughtIds = (nodes as any[]).filter((n: any) => n.type === "thought" && n.thoughtId).map((n: any) => n.thoughtId as number);
         if (thoughtIds.length > 0) {
-          await touchThoughtsLastUsed(thoughtIds);
+          await touchThoughtsLastUsed(thoughtIds, userId);
           const rules = await getScoreRulesMap();
           const modifiedRule = rules["idea_save_modified"];
           if (modifiedRule?.enabled && modifiedRule.scoreValue !== 0) {
-            const modifiedIds = await detectModifiedThoughts(nodes as any[]);
+            const modifiedIds = await detectModifiedThoughts(nodes as any[], userId);
             if (modifiedIds.length > 0) {
-              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue);
+              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue, userId);
             }
           }
         }
@@ -962,13 +962,13 @@ export function registerBigIdeaRoutes(app: Express): void {
         const newNodes = (req.body.nodes || updated.nodes) as any[];
         const thoughtIds = newNodes.filter((n: any) => n.type === "thought" && n.thoughtId).map((n: any) => n.thoughtId as number);
         if (thoughtIds.length > 0) {
-          await touchThoughtsLastUsed(thoughtIds);
+          await touchThoughtsLastUsed(thoughtIds, userId);
           const rules = await getScoreRulesMap();
           const modifiedRule = rules["idea_save_modified"];
           if (modifiedRule?.enabled && modifiedRule.scoreValue !== 0) {
-            const modifiedIds = await detectModifiedThoughts(newNodes as any[]);
+            const modifiedIds = await detectModifiedThoughts(newNodes as any[], userId);
             if (modifiedIds.length > 0) {
-              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue);
+              await applyScoreToThoughts(modifiedIds, modifiedRule.scoreValue, userId);
             }
           }
         }
@@ -1027,7 +1027,9 @@ export function registerBigIdeaRoutes(app: Express): void {
 
   app.get("/api/bigidea/indicators", async (req: Request, res: Response) => {
     try {
-      const userId = (req.session as any)?.userId || 1;
+      // the caller's own custom indicators only (it used to fall back to user 1's)
+      const userId = sessionUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const mergedLibrary = await getMergedIndicatorLibrary(userId);
 
       const indicators = mergedLibrary.map((ind) => ({
@@ -1560,7 +1562,8 @@ ${summaries}`;
         const t = result.thoughts[i];
         if (t.reuseThoughtId && isDatabaseAvailable() && db) {
           try {
-            const [existing] = await db.select().from(scannerThoughts).where(eq(scannerThoughts.id, t.reuseThoughtId));
+            // only the caller's own thoughts may be reused (the model could name any id)
+            const [existing] = await db.select().from(scannerThoughts).where(and(eq(scannerThoughts.id, Number(t.reuseThoughtId)), eq(scannerThoughts.userId, userId)));
             if (existing) {
               result.thoughts[i] = {
                 thoughtKey: t.thoughtKey,
@@ -2794,11 +2797,18 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       if (userId && isDatabaseAvailable() && db) {
         try {
           const resultSymbols = results.map((r: any) => r.symbol);
+          // a session may point only at the caller's own idea
+          let ownScanIdeaId: number | undefined;
+          if (ideaId) {
+            const [own] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
+              .where(and(eq(scannerIdeas.id, parseInt(String(ideaId))), eq(scannerIdeas.userId, userId)));
+            ownScanIdeaId = own?.id;
+          }
           const [session] = await db
             .insert(scanSessions)
             .values({
               userId,
-              ideaId: ideaId ? parseInt(String(ideaId)) : undefined,
+              ideaId: ownScanIdeaId,
               scanConfig: { nodes, edges, universe },
               resultCount: results.length,
               resultSymbols,
@@ -2818,7 +2828,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
                   .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
                   .map((n: any) => n.thoughtId as number);
                 if (nonMutedThoughtIds.length > 0) {
-                  await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue);
+                  await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue, userId);
                 }
               }
             } catch (scoreErr) {
@@ -2866,7 +2876,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           const [idea] = await db
             .select({ name: scannerIdeas.name, description: scannerIdeas.description })
             .from(scannerIdeas)
-            .where(eq(scannerIdeas.id, ideaId))
+            .where(and(eq(scannerIdeas.id, Number(ideaId)), eq(scannerIdeas.userId, userId)))
             .limit(1);
           if (idea) {
             ideaInfo = { name: idea.name, description: idea.description };
@@ -2887,7 +2897,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
           const thoughts = await db
             .select({ id: scannerThoughts.id, aiPrompt: scannerThoughts.aiPrompt, description: scannerThoughts.description })
             .from(scannerThoughts)
-            .where(inArray(scannerThoughts.id, thoughtIdsFromNodes));
+            .where(and(inArray(scannerThoughts.id, thoughtIdsFromNodes), eq(scannerThoughts.userId, userId)));
           for (const t of thoughts) {
             thoughtPrompts.set(t.id, { aiPrompt: t.aiPrompt, description: t.description });
           }
@@ -2990,6 +3000,9 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
       if (!ideaId || !symbol) {
         return res.status(400).json({ error: "ideaId and symbol are required" });
       }
+      const [ownIdea] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
+        .where(and(eq(scannerIdeas.id, Number(ideaId)), eq(scannerIdeas.userId, userId)));
+      if (!ownIdea) return res.status(404).json({ error: "Idea not found" });
 
       const [favorite] = await db
         .insert(scannerFavorites)
@@ -3068,13 +3081,21 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         return res.status(400).json({ error: "symbol and rating ('up'|'down') are required" });
       }
 
+      // A rating may point only at the caller's own idea (it scores that idea's thoughts)
+      let ownIdeaId: number | null = null;
+      if (ideaId) {
+        const [own] = await db.select({ id: scannerIdeas.id }).from(scannerIdeas)
+          .where(and(eq(scannerIdeas.id, Number(ideaId)), eq(scannerIdeas.userId, userId)));
+        ownIdeaId = own ? own.id : null;
+      }
+
       const [record] = await db
         .insert(scanChartRatings)
         .values({
           userId,
           symbol,
           rating,
-          ideaId: ideaId || null,
+          ideaId: ownIdeaId,
           sessionId: sessionId || null,
           scanConfig: scanConfig || null,
           indicatorSnapshot: indicatorSnapshot || null,
@@ -3086,20 +3107,20 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         .returning();
 
       // Rule 3: Score thoughts on chart thumbs-up/down
-      if (ideaId) {
+      if (ownIdeaId) {
         try {
           const rules = await getScoreRulesMap();
           const ruleKey = rating === "up" ? "chart_thumbs_up" : "chart_thumbs_down";
           const rule = rules[ruleKey];
           if (rule?.enabled && rule.scoreValue !== 0) {
-            const idea = await db.select().from(scannerIdeas).where(eq(scannerIdeas.id, ideaId));
+            const idea = await db.select().from(scannerIdeas).where(and(eq(scannerIdeas.id, ownIdeaId), eq(scannerIdeas.userId, userId)));
             if (idea.length > 0) {
               const ideaNodes = idea[0].nodes as any[];
               const nonMutedThoughtIds = ideaNodes
                 .filter((n: any) => n.type === "thought" && n.thoughtId && !n.isMuted)
                 .map((n: any) => n.thoughtId as number);
               if (nonMutedThoughtIds.length > 0) {
-                await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue);
+                await applyScoreToThoughts(nonMutedThoughtIds, rule.scoreValue, userId);
               }
             }
           }
@@ -3295,6 +3316,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
             .from(scanTuningHistory)
             .where(
               and(
+                eq(scanTuningHistory.userId, userId), // the caller's own sessions only
                 sql`${scanTuningHistory.outcome} IS NOT NULL`,
                 sql`${scanTuningHistory.adminApproved} IS NOT FALSE`
               )
@@ -3725,6 +3747,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
         .from(scanTuningHistory)
         .where(
           and(
+            eq(scanTuningHistory.userId, userId), // the caller's own sessions only
             sql`${scanTuningHistory.outcome} IS NOT NULL`,
             sql`${scanTuningHistory.adminApproved} IS NOT FALSE`
           )
@@ -4245,7 +4268,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           if (tIds.length === 0) continue;
           const rule = r.rating === "up" ? upRule : downRule;
           if (rule?.enabled && rule.scoreValue !== 0) {
-            await applyScoreToThoughts(tIds, rule.scoreValue);
+            await applyScoreToThoughts(tIds, rule.scoreValue, r.userId);
             stats.thoughtsScored += tIds.length;
           }
           stats.ratingsProcessed++;
@@ -4261,7 +4284,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
           if (!config?.nodes) continue;
           const tIds = resolveThoughtIdsFromNodes(config.nodes as any[]);
           if (tIds.length === 0) continue;
-          await applyScoreToThoughts(tIds, scanRule.scoreValue);
+          await applyScoreToThoughts(tIds, scanRule.scoreValue, s.userId);
           stats.thoughtsScored += tIds.length;
           stats.sessionsProcessed++;
         }
@@ -4518,19 +4541,20 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
   }
 
   // Helper: apply score delta to thoughts by IDs
-  async function applyScoreToThoughts(thoughtIds: number[], delta: number) {
+  // Only the given user's thoughts: an idea's nodes are client JSON and may name anyone's thought id
+  async function applyScoreToThoughts(thoughtIds: number[], delta: number, userId: number) {
     if (!isDatabaseAvailable() || !db || thoughtIds.length === 0 || delta === 0) return;
     await db.update(scannerThoughts)
       .set({ score: sql`${scannerThoughts.score} + ${delta}` })
-      .where(sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(and(eq(scannerThoughts.userId, userId), sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`));
   }
 
   // Helper: update lastUsedAt for thoughts by IDs
-  async function touchThoughtsLastUsed(thoughtIds: number[]) {
+  async function touchThoughtsLastUsed(thoughtIds: number[], userId: number) {
     if (!isDatabaseAvailable() || !db || thoughtIds.length === 0) return;
     await db.update(scannerThoughts)
       .set({ lastUsedAt: new Date() })
-      .where(sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`);
+      .where(and(eq(scannerThoughts.userId, userId), sql`${scannerThoughts.id} IN (${sql.join(thoughtIds.map(id => sql`${id}`), sql`, `)})`));
   }
 
   async function selectThoughtsByWeight(userId: number, count: number): Promise<any[]> {
@@ -4618,14 +4642,14 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
     }
   });
 
-  async function detectModifiedThoughts(ideaNodes: any[]): Promise<number[]> {
+  async function detectModifiedThoughts(ideaNodes: any[], userId: number): Promise<number[]> {
     if (!isDatabaseAvailable() || !db) return [];
     const thoughtNodes = ideaNodes.filter((n: any) => n.type === "thought" && n.thoughtId);
     if (thoughtNodes.length === 0) return [];
     const ids = thoughtNodes.map((n: any) => n.thoughtId as number);
     const stored = await db.select({ id: scannerThoughts.id, criteria: scannerThoughts.criteria })
       .from(scannerThoughts)
-      .where(sql`${scannerThoughts.id} IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`);
+      .where(and(eq(scannerThoughts.userId, userId), sql`${scannerThoughts.id} IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`));
     const storedMap = new Map(stored.map(s => [s.id, JSON.stringify(s.criteria || [])]));
     const modified: number[] = [];
     for (const n of thoughtNodes) {
