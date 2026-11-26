@@ -53,3 +53,20 @@ date (if not past); otherwise `unknown` with the reason. Cached 10 minutes. No v
 (the vendor does not say); `listedSince` (the first pull that carried the same date) is the honest stand-in. `stale`
 is true when the newest pull is more than 4 days old. Window rows add `dollarVol20`. Unknown reasons: no pull stored
 yet; MarketFlow does not follow the symbol; no date within 91 days of the pull.
+
+## 2. The real VIX
+
+`GET /api/market-condition/setups/vix` (allowed on the gateway) now carries `reading`:
+
+```json
+{"reading":{"kind":"VIX","label":"Cboe Volatility Index (VIX)","price":17.2,"changePct":-3.1,"previousClose":17.75,
+  "quoteTime":"2026-11-26T14:45:00.000Z","fetchedAt":"2026-11-26T15:01:12.000Z",
+  "delayed":"Cboe index via FMP: a delayed quote, about 15 minutes behind","source":"Cboe VIX via FMP","isFallback":false},
+ "realVix":{...}, "marketCardUses":"VIXY proxy and SPY realized volatility (rules and stored rows unchanged)", "regimeAndSentinelUseRealVix":false, "note":null}
+```
+
+When FMP does not answer: `"kind":"VIXY_FALLBACK"`, `"label":"VIXY ETF (fallback: NOT the VIX; FMP did not answer)"`,
+`"isFallback":true`, `"delayed":null`, with VIXY's price from one Alpaca quote (null if that fails too). Cost: one FMP
+quote a minute at most (cached 60 s, `vix-source.ts`); the VIXY quote only on the fallback. `quoteTime` is FMP's own
+timestamp when the body carries one; `fetchedAt` is when MarketFlow fetched it. Whether FMP's `/stable/quote` body for
+`^VIX` carries `timestamp` was not checked live (no key here); if it does not, `quoteTime` is null.

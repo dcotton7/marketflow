@@ -33,8 +33,9 @@ export const ALLOWED: RegExp[] = [
       `regime|regime/history|race-timeline|status|subthemes|subthemes/[\\w-]+/members|search|briefing|briefing/preview|` +
       // stored earnings dates (server/gateway-reads/earnings.ts; never calls a vendor)
       `earnings/upcoming|` +
-      // the research-backed daily setups (server/setups/routes.ts): hits by date or range, and the jobs' status
-      `setups/(leader-shakeout|earnings-gap-up|market-card|status))$`,
+      // the research-backed daily setups (server/setups/routes.ts): hits by date or range, the jobs' status, and the
+      // real VIX (Cboe, delayed, or VIXY labelled as the fallback)
+      `setups/(leader-shakeout|earnings-gap-up|market-card|status|vix))$`,
   ),
   /^\/api\/marketflow\/options\/(pulse|regime)$/,
   new RegExp(`^/api/marketflow/${SYM}/cached$`),
