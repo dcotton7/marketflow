@@ -3235,7 +3235,7 @@ IMPORTANT: For every number param, you MUST copy the min, max, and step values f
         const indIds = indicatorMeta.map((m: any) => m.id);
         if (indIds.length > 0) {
           const summaries = await db.select().from(indicatorLearningSummary)
-            .where(sql`${indicatorLearningSummary.indicatorId} = ANY(${indIds})`);
+            .where(inArray(indicatorLearningSummary.indicatorId, indIds));
 
           let currentRegime: any = null;
           try {
@@ -3701,7 +3701,7 @@ ${userInstruction ? `User's specific instruction: "${userInstruction}"` : "No sp
       if (indicatorIds.length === 0) return res.json({ history: {}, summaries: {} });
 
       const summaries = await db.select().from(indicatorLearningSummary)
-        .where(sql`${indicatorLearningSummary.indicatorId} = ANY(${indicatorIds})`);
+        .where(inArray(indicatorLearningSummary.indicatorId, indicatorIds));
 
       const summaryMap: Record<string, any> = {};
       for (const s of summaries) {
