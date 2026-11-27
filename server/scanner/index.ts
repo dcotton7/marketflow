@@ -327,10 +327,15 @@ async function onSnapshotRefreshed(
 // ── 5-day high/low data refresh ─────────────────────────────────────────────
 
 let lastFiveDayRefresh = 0;
+let fiveDayInFlight = false;
 const FIVE_DAY_REFRESH_INTERVAL = 6 * 60 * 60_000; // every 6 hours
 
 async function refreshFiveDayLevels(): Promise<void> {
   if (Date.now() - lastFiveDayRefresh < FIVE_DAY_REFRESH_INTERVAL) return;
+  // One at a time: lastFiveDayRefresh is set only when a run ends, and this is called on every MC refresh (each
+  // minute), so a run that takes longer than a minute used to be started again, and again, on top of itself.
+  if (fiveDayInFlight) return;
+  fiveDayInFlight = true;
   const { trackJob } = await import("../infra/memory-gate");
   const untrack = trackJob("5-day levels");
 
@@ -373,6 +378,7 @@ async function refreshFiveDayLevels(): Promise<void> {
     console.error("[Scanner] Failed to refresh 5-day levels:", err);
   } finally {
     untrack();
+    fiveDayInFlight = false;
   }
 }
 
