@@ -14,7 +14,7 @@
 
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
-import { eq, and, isNull, sql, inArray, notInArray, lt } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray, notInArray, lt, getTableColumns } from "drizzle-orm";
 import { FLOOD_TRACK_ONCE_PER_DAY } from "@shared/scanner-outcome-queue";
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
@@ -28,6 +28,13 @@ import {
 } from "@shared/scanner-outcome-v3";
 
 const INTERVAL_MS = 3 * 60_000;
+
+/**
+ * The columns a cycle reads: every column but the card text and context (headline, narrative, tickers, context_json),
+ * which the tracker never uses. A cycle selects up to ~3,400 rows every 3 minutes; context_json was most of each row.
+ */
+const { headline: _headline, narrative: _narrative, tickers: _tickers, contextJson: _contextJson, ...TRACKER_COLUMNS } =
+  getTableColumns(scannerDiscoveries);
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
 
@@ -334,10 +341,10 @@ async function processOutcomes(): Promise<void> {
     );
 
     const selectStart = Date.now();
-    type Row = typeof scannerDiscoveries.$inferSelect;
+    type Row = Omit<typeof scannerDiscoveries.$inferSelect, "headline" | "narrative" | "tickers" | "contextJson">;
     const newestPending: Row[] = await timedSelect("newest", [] as Row[], (tx) =>
       tx
-        .select()
+        .select(TRACKER_COLUMNS)
         .from(scannerDiscoveries)
         .where(eligibleWhere)
         .orderBy(sql`id DESC`)
@@ -364,7 +371,7 @@ async function processOutcomes(): Promise<void> {
     const oldestOverdue: typeof newestPending = [];
     for (const signalType of OVERDUE_SIGNAL_TYPES) {
       const partialRows: Row[] = await timedSelect(`partial ${signalType}`, [] as Row[], (tx) => tx
-        .select()
+        .select(TRACKER_COLUMNS)
         .from(scannerDiscoveries)
         .where(
           and(
@@ -380,7 +387,7 @@ async function processOutcomes(): Promise<void> {
       partialOverdue.push(...partialRows);
 
       const oldestRows: Row[] = await timedSelect(`oldest ${signalType}`, [] as Row[], (tx) => tx
-        .select()
+        .select(TRACKER_COLUMNS)
         .from(scannerDiscoveries)
         .where(
           and(
