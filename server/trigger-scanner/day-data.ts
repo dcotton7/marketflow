@@ -1,7 +1,7 @@
 /**
  * What the scanner loads once a session day, before the first pass: the universe, every name's daily context from
- * the stored daily bars (historical_bars, finished sessions only, read in chunks of 200 symbols so at most ~15k rows
- * are in memory at a time), its size bucket and sector, the earnings calendar's next date, the Leader Shakeout hits of
+ * the stored daily bars (historical_bars, finished sessions only, read in chunks of DAILY_CHUNK [100] symbols x about 255 sessions,
+ * so about 25k rows are in memory at a time), its size bucket and sector, the earnings calendar's next date, the Leader Shakeout hits of
  * the last sessions, and the users' stored daily setups evaluated on the same bars. Reads only; no vendor calls.
  */
 import { buildDailyContext, floorReason } from "./daily";
@@ -11,6 +11,7 @@ import { ROTATION_SYMBOLS } from "./rotation";
 import type { ScannerSettings } from "./settings";
 import type { TriggerStore, UserSetupRow } from "./store";
 import type { DailyWatch } from "./triggers/common";
+import { TREND_SESSIONS } from "./trend";
 import type { DailyBar, DailyContext } from "./types";
 import { capPerAccount, criteriaFromIdea, USER_SETUP_BUDGET_MS, userSetupPasses, userWatch, validateUserSetup } from "./user-setups";
 
@@ -142,6 +143,24 @@ export function prepareUserSetups(rows: UserSetupRow[], settings: ScannerSetting
 
 // ---- live loader (Postgres) -------------------------------------------------------------------------------------
 
+/** Symbols per daily read. 100 since the trend facts (was 200): at about 255 sessions that is about 25k rows, about
+ *  9 MB in hand at a time, near the old 200 x 75 (15k rows, about 5 MB); measured in docs/trigger-scanner.md. */
+export const DAILY_CHUNK = 100;
+/** Finished sessions the daily load reads: the trend facts need TREND_SESSIONS (the 200-day, its slope and the
+ *  reclaim look-back); users' stored setups 260. Was 75 before the trend facts. */
+export function dailySessions(userSetups: boolean): number {
+  return Math.max(TREND_SESSIONS, userSetups ? 260 : 0);
+}
+/** Calendar days back for that many sessions (1.5 x covers weekends and holidays). A YYYY-MM-DD string: bar_date is
+ *  TEXT on the live database, so it is compared as text and never cast. */
+export function dailyCutoff(date: string, sessions: number): string {
+  return new Date(Date.parse(`${date}T12:00:00Z`) - Math.ceil(sessions * 1.5) * 864e5).toISOString().slice(0, 10);
+}
+/** One chunk's daily bars: an IN list (one param per symbol, never `= ANY(array)`), text date bounds. */
+export function dailyChunkQuery(sql: typeof import("drizzle-orm").sql, chunk: string[], cutoff: string, date: string) {
+  return sql`SELECT symbol, bar_date::text AS d, open, high, low, close, volume FROM historical_bars WHERE symbol IN (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)}) AND bar_date >= ${cutoff} AND bar_date < ${date} ORDER BY symbol, bar_date`;
+}
+
 type Exec = { execute: (q: any) => Promise<any> };
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : r?.rows ?? []);
 
@@ -218,12 +237,12 @@ export async function loadDayFromDb(db: Exec, store: TriggerStore, date: string,
     for (const f of await store.gapFires(from, date)) gapFires.set(f.symbol, [...(gapFires.get(f.symbol) ?? []), f]);
   } catch { /* no earlier fires known: each gap may fire as new */ }
   report.push(...resolved.report);
-  const sessions = runnable.length ? 260 : 75;
-  const cutoff = new Date(Date.parse(`${date}T12:00:00Z`) - Math.ceil(sessions * 1.5) * 864e5).toISOString().slice(0, 10);
+  const sessions = dailySessions(runnable.length > 0);
+  const cutoff = dailyCutoff(date, sessions);
   const into = newAcc();
-  for (let i = 0; i < all.length; i += 200) {
-    const chunk = all.slice(i, i + 200);
-    const r = await db.execute(sql`SELECT symbol, bar_date::text AS d, open, high, low, close, volume FROM historical_bars WHERE symbol IN (${sql.join(chunk.map((x) => sql`${x}`), sql`, `)}) AND bar_date >= ${cutoff} AND bar_date < ${date} ORDER BY symbol, bar_date`);
+  for (let i = 0; i < all.length; i += DAILY_CHUNK) {
+    const chunk = all.slice(i, i + DAILY_CHUNK);
+    const r = await db.execute(dailyChunkQuery(sql, chunk, cutoff, date));
     const bars = new Map<string, DailyBar[]>();
     for (const x of rowsOf(r)) {
       const s = String(x.symbol).toUpperCase();

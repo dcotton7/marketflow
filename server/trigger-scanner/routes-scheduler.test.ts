@@ -21,8 +21,10 @@ import type { DayData } from "./day-data";
 
 // ---- insert-only: no statement in the store or the migration rewrites or removes a row ------------------------------
 {
-  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "").replace(/--.*$/gm, "").replace(/DO NOTHING/g, "");
-  for (const f of ["server/trigger-scanner/store.ts", "server/trigger-scanner/scheduler.ts", "server/trigger-scanner/day-data.ts", "server/trigger-scanner/routes.ts", "migrations/029_trigger_scanner.sql"]) {
+  const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "").replace(/--.*$/gm, "").replace(/DO NOTHING/g, "")
+    // adding a nullable column (031, the trend facts) changes no row; any other ALTER still fails
+    .replace(/ALTER TABLE trigger_candidates ADD COLUMN IF NOT EXISTS \w+ JSONB/g, "");
+  for (const f of ["server/trigger-scanner/store.ts", "server/trigger-scanner/scheduler.ts", "server/trigger-scanner/day-data.ts", "server/trigger-scanner/routes.ts", "migrations/029_trigger_scanner.sql", "migrations/031_trigger_candidate_trend.sql"]) {
     const src = strip(readFileSync(join(process.cwd(), f), "utf8"));
     assert.ok(!/\b(DELETE|UPDATE|TRUNCATE|DROP|ALTER)\b/i.test(src), `${f} never removes or rewrites`);
   }
@@ -94,6 +96,8 @@ try {
   for (const k of ["symbol", "side", "setup_key", "setup_owner", "grade", "grade_points", "grade_components", "trigger_at", "entry_ref", "stop", "risk_pct", "risk_adr", "adr_pct", "rel_volume", "trigger_bar", "levels", "liquidity", "regime", "cap_size", "sector", "group_leading", "rotation", "data_as_of", "dedupe_key"]) {
     assert.ok(k in c0, `field ${k}`);
   }
+  // the trend facts are served (contexts without daily trend here: known false, every fact null, never a guess)
+  assert.ok(c0.trend && c0.trend.v === 1 && c0.trend.known === false && c0.trend.above_50_and_200 === null, "trend served");
   assert.match(c0.trigger_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "ISO time");
   assert.ok(c0.stop.level && c0.stop.price > 0);
   // the cursor: page by 2, no row lost or repeated

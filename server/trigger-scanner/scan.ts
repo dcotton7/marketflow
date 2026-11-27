@@ -5,11 +5,12 @@
  * any rule of its own.
  */
 import { gradeCandidate } from "./grade";
-import { levelsAt, pickStop, rightSide } from "./levels";
+import { dailyLevels, levelsAt, pickStop, rightSide } from "./levels";
 import { setupInfo, TRIGGERS } from "./registry";
 import { groupLeading } from "./rotation";
 import { barCloseIso, buildSession, relVol } from "./session";
 import { RULE_VERSION, type ScannerSettings } from "./settings";
+import { candidateTrend } from "./trend";
 import type { DailyWatch } from "./triggers/common";
 import type { Bar, Candidate, DailyContext, Regime, Rotation } from "./types";
 
@@ -80,6 +81,7 @@ export function runPass(p: PassInput): PassResult {
   const out: PassResult = { candidates: [], symbolsScanned: 0, barsEvaluated: 0, triggers: 0, deduped: 0, refused: {}, skipped: {}, newestBar: null };
   const bump = (o: Record<string, number>, k: string) => (o[k] = (o[k] ?? 0) + 1);
   const st = p.settings;
+  const spyTrend = p.contexts.get("SPY")?.trend ?? null;
   for (const [symbol, raw] of p.bars) {
     if (p.only && !p.only.has(symbol)) continue;
     const ctx = p.contexts.get(symbol);
@@ -170,6 +172,8 @@ export function runPass(p: PassInput): PassResult {
             },
             dedupeKey: `${base}|${triggerAt}`,
             ruleVersion: RULE_VERSION,
+            // measured beside the candidate, never used above: the grade, the stop and the pass rules do not see it
+            trend: candidateTrend({ daily: ctx.trend, spy: spyTrend, side: h.side, entry, adr: ctx.adr, dailyLevels: dailyLevels(ctx), prevClose: ctx.prevClose, setupKey: h.setupKey, facts: h.facts }, st),
           });
         }
       }

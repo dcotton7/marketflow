@@ -1,4 +1,5 @@
 /** Shared shapes for the trigger scanner. Bars are oldest first. Times are ISO strings (UTC). */
+import type { CandidateTrend, TrendDaily } from "./trend";
 
 export type Side = "long" | "short";
 
@@ -103,6 +104,8 @@ export interface DailyContext {
   /** The ET session date of the next report, when the earnings calendar has one within the horizon. */
   nextEarnings: string | null;
   earningsKnown: boolean;
+  /** Trend facts from the same bars (trend.ts), measured, never a filter; absent in hand-made contexts. */
+  trend?: TrendDaily | null;
 }
 
 export type LevelName =
@@ -207,4 +210,6 @@ export interface Candidate {
   facts: Record<string, number | string | null>;
   dedupeKey: string;
   ruleVersion: string;
+  /** Trend facts at the trigger (trend.ts): measured, never a filter; null on rows stored before it existed. */
+  trend?: CandidateTrend | null;
 }

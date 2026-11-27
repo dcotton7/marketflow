@@ -20,6 +20,8 @@ import type { Candidate, Side } from "./types";
 export const DDL: string[] = [
   `CREATE TABLE IF NOT EXISTS trigger_candidates (id SERIAL PRIMARY KEY, market_date TEXT NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL, setup_key TEXT NOT NULL, setup_owner TEXT NOT NULL DEFAULT 'builtin', owner_user_id INTEGER, variant TEXT NOT NULL, why TEXT NOT NULL, trigger_at TIMESTAMPTZ NOT NULL, bar JSONB NOT NULL, entry_ref DOUBLE PRECISION NOT NULL, stop_level TEXT NOT NULL, stop_level_price DOUBLE PRECISION NOT NULL, stop_price DOUBLE PRECISION NOT NULL, stop_gap JSONB, risk_pct DOUBLE PRECISION NOT NULL, risk_adr DOUBLE PRECISION NOT NULL, adr_pct DOUBLE PRECISION NOT NULL, levels JSONB NOT NULL, rel_volume DOUBLE PRECISION, liquidity JSONB NOT NULL, regime JSONB NOT NULL, cap_size TEXT, sector TEXT, group_leading BOOLEAN NOT NULL, rotation JSONB NOT NULL, grade TEXT NOT NULL, grade_points INTEGER NOT NULL, grade_components JSONB NOT NULL, data_as_of JSONB NOT NULL, facts JSONB NOT NULL, dedupe_key TEXT NOT NULL UNIQUE, rule_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW())`,
   `CREATE INDEX IF NOT EXISTS idx_trigger_candidates_date ON trigger_candidates (market_date, id)`,
+  // migrations/031_trigger_candidate_trend.sql: nullable, no default (no rewrite of the live table)
+  `ALTER TABLE trigger_candidates ADD COLUMN IF NOT EXISTS trend JSONB`,
   `CREATE TABLE IF NOT EXISTS trigger_scan_runs (id SERIAL PRIMARY KEY, market_date TEXT NOT NULL, pass_at TIMESTAMPTZ NOT NULL UNIQUE, tier TEXT NOT NULL, universe_size INTEGER NOT NULL, symbols_scanned INTEGER NOT NULL, bars_evaluated INTEGER NOT NULL, requests INTEGER NOT NULL, bars_lag_sec INTEGER, triggers INTEGER NOT NULL, candidates INTEGER NOT NULL, deduped INTEGER NOT NULL, refused JSONB NOT NULL DEFAULT '{}'::jsonb, skipped JSONB NOT NULL DEFAULT '{}'::jsonb, paused TEXT, duration_ms INTEGER NOT NULL, rss_mb INTEGER, rule_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW())`,
   `CREATE INDEX IF NOT EXISTS idx_trigger_scan_runs_date ON trigger_scan_runs (market_date, pass_at)`,
   `CREATE TABLE IF NOT EXISTS trigger_user_setups (id SERIAL PRIMARY KEY, owner_user_id INTEGER NOT NULL, setup_key TEXT NOT NULL, version INTEGER NOT NULL, name TEXT NOT NULL, side TEXT NOT NULL, timeframe TEXT NOT NULL DEFAULT 'daily', idea_id INTEGER, criteria JSONB NOT NULL DEFAULT '[]'::jsonb, entry_rule TEXT NOT NULL, range_adr DOUBLE PRECISION, active BOOLEAN NOT NULL DEFAULT TRUE, source TEXT NOT NULL DEFAULT 'manual', created_at TIMESTAMP NOT NULL DEFAULT NOW(), UNIQUE (owner_user_id, setup_key, version))`,
@@ -136,6 +138,7 @@ function fromRow(r: any): StoredCandidate {
     facts: r.facts,
     dedupeKey: String(r.dedupe_key),
     ruleVersion: String(r.rule_version),
+    trend: r.trend ?? null,
   };
 }
 
@@ -147,9 +150,9 @@ export function pgTriggerStore(db: Exec): TriggerStore {
       let n = 0;
       for (let i = 0; i < rows.length; i += 100) {
         const values = rows.slice(i, i + 100).map(
-          (c) => sql`(${c.marketDate}, ${c.symbol}, ${c.side}, ${c.setupKey}, ${c.setupOwner}, ${c.ownerUserId}, ${c.variant}, ${c.why}, ${c.triggerAt}::timestamptz, ${j(c.bar)}::jsonb, ${c.entryRef}, ${c.stopLevel}, ${c.stopLevelPrice}, ${c.stopPrice}, ${j(c.stopGap)}::jsonb, ${c.riskPct}, ${c.riskAdr}, ${c.adrPct}, ${j(c.levels)}::jsonb, ${c.relVolume}, ${j(c.liquidity)}::jsonb, ${j(c.regime)}::jsonb, ${c.capSize}, ${c.sector}, ${c.groupLeading}, ${j(c.rotation)}::jsonb, ${c.grade}, ${c.gradePoints}, ${j(c.gradeComponents)}::jsonb, ${j(c.dataAsOf)}::jsonb, ${j(c.facts)}::jsonb, ${c.dedupeKey}, ${c.ruleVersion})`,
+          (c) => sql`(${c.marketDate}, ${c.symbol}, ${c.side}, ${c.setupKey}, ${c.setupOwner}, ${c.ownerUserId}, ${c.variant}, ${c.why}, ${c.triggerAt}::timestamptz, ${j(c.bar)}::jsonb, ${c.entryRef}, ${c.stopLevel}, ${c.stopLevelPrice}, ${c.stopPrice}, ${j(c.stopGap)}::jsonb, ${c.riskPct}, ${c.riskAdr}, ${c.adrPct}, ${j(c.levels)}::jsonb, ${c.relVolume}, ${j(c.liquidity)}::jsonb, ${j(c.regime)}::jsonb, ${c.capSize}, ${c.sector}, ${c.groupLeading}, ${j(c.rotation)}::jsonb, ${c.grade}, ${c.gradePoints}, ${j(c.gradeComponents)}::jsonb, ${j(c.dataAsOf)}::jsonb, ${j(c.facts)}::jsonb, ${c.dedupeKey}, ${c.ruleVersion}, ${j(c.trend)}::jsonb)`,
         );
-        n += affected(await db.execute(sql`INSERT INTO trigger_candidates (market_date, symbol, side, setup_key, setup_owner, owner_user_id, variant, why, trigger_at, bar, entry_ref, stop_level, stop_level_price, stop_price, stop_gap, risk_pct, risk_adr, adr_pct, levels, rel_volume, liquidity, regime, cap_size, sector, group_leading, rotation, grade, grade_points, grade_components, data_as_of, facts, dedupe_key, rule_version) VALUES ${sql.join(values, sql`, `)} ON CONFLICT (dedupe_key) DO NOTHING`));
+        n += affected(await db.execute(sql`INSERT INTO trigger_candidates (market_date, symbol, side, setup_key, setup_owner, owner_user_id, variant, why, trigger_at, bar, entry_ref, stop_level, stop_level_price, stop_price, stop_gap, risk_pct, risk_adr, adr_pct, levels, rel_volume, liquidity, regime, cap_size, sector, group_leading, rotation, grade, grade_points, grade_components, data_as_of, facts, dedupe_key, rule_version, trend) VALUES ${sql.join(values, sql`, `)} ON CONFLICT (dedupe_key) DO NOTHING`));
       }
       return n;
     },

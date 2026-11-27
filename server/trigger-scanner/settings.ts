@@ -87,6 +87,23 @@ export interface ScannerSettings {
   gapHighApartAdr: number;
   baseRangeAdr: number;
   baseMinDays: number;
+  /** Trend facts (trend.ts; Don, 27 Nov): measured on every candidate, never a filter. Slope look-backs in sessions,
+   *  the flat band in % (|slope| <= band), the tight spread (10/20/50-day, % of price), room in ADR, the reclaim
+   *  rule (closes-ago for "closing the gap", closes below before a reclaim, "recent", look-back) and the off-the-low
+   *  window. The base uses the gap rule's baseRangeAdr / baseMinDays. */
+  trendSlope20Sessions: number;
+  trendSlope50Sessions: number;
+  trendSlope200Sessions: number;
+  trendFlat20Pct: number;
+  trendFlat50Pct: number;
+  trendFlat200Pct: number;
+  trendTightPct: number;
+  trendRoomAdr: number;
+  trendReclaimCloseN: number;
+  trendReclaimMinBelow: number;
+  trendReclaimRecent: number;
+  trendReclaimLookback: number;
+  trendOffLowSessions: number;
   /** At most this many candidates stored a day; past it they are counted in the run rows, not stored. */
   maxStoredPerDay: number;
   /** User setups (BigIdea criteria), per account. */
@@ -145,6 +162,19 @@ export const DEFAULTS: ScannerSettings = {
   gapHighApartAdr: 0.5,
   baseRangeAdr: 3,
   baseMinDays: 15,
+  trendSlope20Sessions: 10,
+  trendSlope50Sessions: 10,
+  trendSlope200Sessions: 20,
+  trendFlat20Pct: 1,
+  trendFlat50Pct: 0.5,
+  trendFlat200Pct: 0.5,
+  trendTightPct: 3,
+  trendRoomAdr: 1,
+  trendReclaimCloseN: 5,
+  trendReclaimMinBelow: 5,
+  trendReclaimRecent: 10,
+  trendReclaimLookback: 40,
+  trendOffLowSessions: 40,
   maxStoredPerDay: 5000,
   userSetupsMaxPerAccount: 10,
   userSetupMaxCriteria: 12,

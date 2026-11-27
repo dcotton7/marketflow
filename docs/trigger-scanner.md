@@ -80,9 +80,14 @@ So the scanner adds about 16% to the app's Alpaca calls.
 **Memory arithmetic:**
 - Bars: today's bars only, 78 a name, about 200 bytes each as JS objects (the BigIdea review measured this). That is
   1,750 x 78 x 200 B, about 27 MB at the close.
-- Daily contexts: about 1 KB a name, about 2 MB.
-- Daily load: chunks of 200 symbols x 75 sessions, about 15k rows, a few MB transient.
-- With users' setups: 260 sessions a chunk, about 52k rows transient.
+- Daily contexts: about 2 KB a name, about 3.7 MB; the trend facts add about 1 KB a name (1.7 MB for 1,750 names,
+  measured).
+- Daily load (since the trend facts, 27 Nov): about 255 finished sessions (375 calendar days; was 75) in chunks of
+  100 symbols (was 200), about 25k rows, about 9 MB transient a chunk (measured on synthetic rows in the pg shape:
+  200 x 75 = 15k rows was 5.2 MB; 200 x 250 = 50k rows would be 17.4 MB, so the chunk was halved). The whole read is
+  about 440k rows a day (was about 131k), 18 queries instead of 9, once before the open. Building 1,750 contexts with
+  the trend facts takes under 100 ms.
+- With users' setups: 260 sessions a chunk, about 26k rows transient.
 - Never held: 60 days of 5-minute bars for the universe. The review puts that at about 2.7 GB, over the 1.5 GB heap.
 - Pass time, measured on synthetic bars (1,750 names x 78 bars, every level near the price): worst pass 114-161 ms,
   4-6 s for the whole day.
@@ -341,6 +346,45 @@ company. Expect many A's until `gradeA` moves or setup records exist.
 | `facts` | The trigger's own numbers, plus `company` |
 | `dedupe_key` | `day\|symbol\|side\|setup\|owner\|variant\|trigger time` |
 | `market_date`, `rule_version` | |
+| `trend` | The trend facts (below), measured, never a filter; `null` on rows stored before migration 031 |
+
+## Trend facts (Don, 27 Nov): measured on every candidate, never a filter
+
+His words: "setups above 50d, 200d, with no clear immediate resistance are best for longs. If not above, like to see
+flatening or rising 50d, 200d, really all averages, but 200d, 50d most important then 20d. Tight MA's and basing is
+also desireable. But lets have her continue to test these various setups." And: "In a recovery market though, we need
+to see which stocks are recovering first and also after a market correction we will of course look at stocks below
+50d etc, getting back to it, base and go is ideal of course".
+
+So `trend.ts` measures them and stores them on each candidate (`trend`, JSONB, migration 031). **Nothing is refused,
+dropped, re-graded or re-ranked for them**: the grade, the stop, the pass rules and every other field are the same
+with or without them (a test runs one pass both ways and compares). Anitir carries them into her pick, her ideas,
+the shadows and the scorecard split. A name with too little history gets nulls and a reason in `trend.missing`.
+
+The daily part is computed once a day per name with the daily context (`daily.ts` -> `dailyTrend`); the rest at the
+trigger (`scan.ts` -> `candidateTrend`). Every number is a setting in `settings.ts`:
+
+| Fact | Definition | Setting (default) |
+|---|---|---|
+| `ma.sma20/50/200` | Simple averages of daily closes through the last finished session; `above` / `pct`: the trigger bar's close (`entry_ref`) against it | |
+| `slope`, `slope_pct` | (average now / average k sessions ago - 1) x 100. k = 10 for the 20 and 50-day, 20 for the 200-day. rising / flat / falling; flat = within the band | `trendSlope20Sessions` 10, `trendSlope50Sessions` 10, `trendSlope200Sessions` 20; `trendFlat20Pct` 1, `trendFlat50Pct` 0.5, `trendFlat200Pct` 0.5 |
+| `above_50_and_200`, `below_50_and_200` | Both averages known and the price on that side of both | |
+| `tight` | (max - min of the 10, 20 and 50-day SMAs) / price x 100; `ok` when <= the limit | `trendTightPct` 3 |
+| `base` | A **proxy**: gap.ts's `preGapBase`, the longest run of finished sessions ending yesterday whose high-low range stays within N ADR; a base when it lasts at least M sessions. Its `high`, `low`, `range_pct`, `range_adr` are given | the gap rule's own `baseRangeAdr` 3, `baseMinDays` 15 (one base definition, not two) |
+| `room` | The nearest daily level in the trade's direction (above a long's entry, below a short's): the scanner's daily levels (5/10/20/50-day SMA, 10/20-day EMA, previous high/low, gap edges of the opposing role), the 200-day SMA and the 20-session high (short: low). Session levels (VWAP, opening range, high/low of day) are not counted. `dist_adr`, `dist_pct`; `clear` = none within the limit (no level at all = clear, `level` null) | `trendRoomAdr` 1 |
+| `reclaim.sma20/50/200` | `dist_now_pct` / `dist_then_pct`: the last close against the average now and N sessions ago; `closing` = on the far side now and nearer than then. `date` / `sessions_ago` (yesterday = 1): the newest close back over it after at least M closes under, within the look-back; `recent` within R sessions. A short mirrors it (a close back under) | `trendReclaimCloseN` 5, `trendReclaimMinBelow` 5, `trendReclaimLookback` 40, `trendReclaimRecent` 10 |
+| `vs_spy` | `off_low_pct`: last close / lowest close of the last L sessions - 1, for the name and SPY, and `vs_spy_off_low_pct` the difference; `reclaimed_50_before_spy`: the name's 50-day reclaim date before SPY's (true when only the name has one, false when only SPY, null when neither) | `trendOffLowSessions` 40 |
+| `base_and_go` | Any setup: a base present and the trigger bar closing over the base high while yesterday's close was at or under it (short: under the low, from at or over it). `gap_and_go` / `gap_down_and_go`: the gap rule's own pre-gap base fact (`from_base`), so its consolidation and base logic are reused, not redefined | |
+| `market` | SPY against its own 50-day: `spy_above_50`, `spy_pct_vs_50`, `spy_reclaim_50_sessions_ago`, `spy_reclaimed_50_recent`. Context for the split, not a fact about the name | |
+
+**The short** is the mirror image of the long (below the 200 and 50-day, averages flat or falling, no support within
+1 ADR below). That is the **coordinator's assumption**, not Don's words, until he confirms; the facts are side-neutral
+(`above`/`below`, the slope class) except `room`, `reclaim` and `base_and_go`, which look in the trade's direction.
+
+History: the 200-day needs 200 sessions, its slope 220, its reclaim look-back about 245; the load reads about 255.
+A newer listing gets `sma200: 120 sessions, needs 200` in `missing` and nulls for those facts.
+
+`trend.v` is 1. A changed definition gets a new `v`; the grade's `RULE_VERSION` is unchanged (no rule changed).
 
 ## Routes
 
@@ -396,7 +440,7 @@ routes and the migration for `UPDATE`, `DELETE`, `TRUNCATE`, `DROP` and `ALTER`.
 | `trigger_scan_runs` | One per pass or paused slot | `pass_at` | tier, universe, names, bars, requests, lag, triggers, candidates, dedupes, refusals, skips, pause reason, duration, RSS |
 | `trigger_user_setups` | One per version of a user's setup | (owner, key, version) | An edit is a new version; switching a setup off is a new row with `active = false`; the newest version is in force |
 
-Growth: 100-1,000 candidates a day is 0.2-2.3 MB a day. The 5,000 cap is about 11.5 MB a day at most.
+Growth: 100-1,000 candidates a day is 0.2-2.3 MB a day (the `trend` column adds about 2 KB a row). The 5,000 cap is about 11.5 MB a day at most.
 
 ## Setups: two kinds behind one interface
 
