@@ -178,6 +178,23 @@ try {
   assert.match(await sc3.tick(), /^pass:1$/);
   assert.equal(capped.candidates.length, 1);
   assert.ok(sc3.status.overCapToday >= 1 && capped.runs[0].skipped.over_daily_cap >= 1, "over the cap: counted, not stored");
+  // the open: at 9:30:30 no bar of the session has closed, so nothing is asked of Alpaca and nothing has failed
+  // (live, 27 Nov: an end before the start answered 400 twice and the scanner fell to the shortlist tier at 9:31)
+  const open = memoryTriggerStore();
+  let openNow = new Date("2026-11-24T14:30:30Z");
+  let openCalls = 0;
+  const sc4 = new TriggerScanner({ ...deps, now: () => openNow, store: open, fetchBars: async (symbols, start, end) => {
+    openCalls++;
+    assert.ok(end.getTime() > start.getTime(), "never an end before the start");
+    return { bars: new Map(), requests: 1 };
+  } });
+  assert.equal(await sc4.tick(), "no_closed_bar");
+  openNow = new Date("2026-11-24T14:31:30Z");
+  assert.equal(await sc4.tick(), "no_closed_bar");
+  assert.deepEqual([openCalls, sc4.status.fetchFailuresToday, sc4.status.tier], [0, 0, "bars"], "no fetch, no failure, still the bars tier");
+  openNow = new Date("2026-11-24T14:35:25Z");
+  assert.match(await sc4.tick(), /^pass:/, "the first closed bar is fetched");
+  assert.equal(openCalls, 1);
   now = new Date("2026-11-24T14:55:05Z");
   assert.equal(await sc.tick(), "settling", "waits barSettleSec after the boundary");
   now = new Date("2026-11-24T14:55:30Z");

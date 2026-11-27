@@ -146,6 +146,14 @@ export class TriggerScanner {
     const day = this.day;
     const symbols = this.fetchList(day, boundary);
     const from = new Date(book.fetchedThroughMs !== null ? book.fetchedThroughMs - BAR_MS : sessionOpenMs(dateKey));
+    // The first check after the open: the last closed boundary is the open itself, so no bar of this session has
+    // closed. Asking Alpaca for an end before the start answered 400 twice on 27 Nov (the first live session) and
+    // dropped the scanner to the shortlist tier for the day. Nothing to fetch is not a failure.
+    if (boundary - 1000 <= from.getTime()) {
+      this.status.state = "running";
+      this.status.why = "no bar of this session has closed yet";
+      return "no_closed_bar";
+    }
     let fetched;
     try {
       fetched = await this.deps.fetchBars(symbols, from, new Date(boundary - 1000));
