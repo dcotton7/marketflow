@@ -97,17 +97,21 @@ const MARKET_LEVEL_SIGNAL_TYPES = new Set([
 const BROAD_MARKET_PROXIES = ["SPY", "QQQ", "IWM"];
 const MARKET_STRENGTH_PROXIES = ["QQQ", "SPY"];
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_PARTS_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false,
+  weekday: "short",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function getEtParts(date: Date): { h: number; m: number; dayOfWeek: number; dateStr: string } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-    weekday: "short",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = ET_PARTS_FMT.formatToParts(date);
 
   const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);

@@ -6,15 +6,19 @@
 import type { Signal, RegimeContextResult, MarketSession } from "@shared/scanner-types";
 import type { Lens, LensContext } from "./types";
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_SESSION_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "numeric",
+  weekday: "short",
+  hour12: false,
+});
+
 function getMarketSession(): MarketSession {
   const now = new Date();
-  const et = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "numeric",
-    weekday: "short",
-    hour12: false,
-  }).formatToParts(now);
+  const et = ET_SESSION_FMT.formatToParts(now);
 
   const h = parseInt(et.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(et.find((p) => p.type === "minute")?.value ?? "0", 10);

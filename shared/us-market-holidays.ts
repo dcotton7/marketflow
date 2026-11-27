@@ -33,9 +33,13 @@ export function isKnownHolidayYear(etDate: string): boolean {
   return KNOWN_YEARS.has(etDate.slice(0, 4));
 }
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_DATE_KEY_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+});
+
 /** ET calendar date (YYYY-MM-DD) for an instant. */
 export function etDateKey(at: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(at);
+  return ET_DATE_KEY_FMT.format(at);
 }

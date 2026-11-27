@@ -651,15 +651,19 @@ function measureBounceQuality(symbol: string, current: SnapshotFrame): {
   };
 }
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_HM_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false,
+});
+
 function rthVolumeProgress(): number {
   // Fraction of the RTH session elapsed (0.05–1.0). Used to compare cumulative
   // volume vs full-day average volume so morning setups aren't rejected.
-  const et = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-  }).formatToParts(new Date());
+  const et = ET_HM_FMT.formatToParts(new Date());
   const h = parseInt(et.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(et.find((p) => p.type === "minute")?.value ?? "0", 10);
   const mins = h * 60 + m;

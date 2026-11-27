@@ -28,18 +28,22 @@ let pmBaseline: SegmentBaseline | null = null;
 let savedSegmentsToday = new Set<string>();
 let currentTradingDate = "";
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_PARTS_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: ET,
+  hour: "numeric",
+  minute: "numeric",
+  weekday: "short",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour12: false,
+});
+
 function getETMinutes(): { minutes: number; date: string; weekday: number } {
   const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: ET,
-    hour: "numeric",
-    minute: "numeric",
-    weekday: "short",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
+  const parts = ET_PARTS_FMT.formatToParts(now);
 
   const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
