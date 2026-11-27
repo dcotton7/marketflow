@@ -24,6 +24,7 @@ import { expectedLastSession, loadBarUniverse, loadNewestBars, loadThemeUniverse
 import { guardState, guardTrippedToday, lockHolder, logPhase, overLimit, tryAcquire, withJobLock } from "../infra/job-guard";
 import { isMemoryPressureHigh, isNightMode } from "../infra/memory-gate";
 import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
+import { invalidateSessionMaPriorBars } from "./session-adjusted-ma";
 
 const REFRESH_LOOKBACK_DAYS = 10;
 
@@ -266,6 +267,8 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
           },
         });
         totalUpserted += chunk.length;
+        // the session MA keeps prior bars between passes; these names now have new ones
+        invalidateSessionMaPriorBars([...new Set(chunk.map((r) => r.symbol))]);
       } catch (err) {
         totalFailed += new Set(chunk.map((r) => r.symbol)).size;
         console.warn("[DailyBarRefresh] batch write failed:", String(err).slice(0, 120));

@@ -11,7 +11,6 @@ import {
   type TickerMaLevels,
 } from "../shared/daily-ma-from-bars";
 import { shouldRunHeavyBackgroundWork, trackJob } from "../infra/memory-gate";
-import type { DailyBar } from "./types";
 
 export type MaDataEntry = {
   ema10d: number | null;
@@ -130,35 +129,86 @@ export function getMaShardProgress(): MaShardProgress {
   };
 }
 
-async function loadDailyBarsForSymbols(
-  symbols: string[],
-  snapshots: Map<string, SessionMaSnapshotInput>,
-  days = 250
-): Promise<Map<string, DailyBar[]>> {
-  const db = getDb();
-  const result = new Map<string, DailyBar[]>();
-  if (!db || symbols.length === 0) return result;
+/**
+ * Prior daily bars per symbol, read from historical_bars and kept (compact) between MA chains.
+ *
+ * The chain runs every minute in market hours over the whole universe (about 1,750 names). It used to read every
+ * name's last ~440 calendar days of bars (all columns, ~300 rows a name, ~500k rows a minute) from Postgres on every
+ * pass, although only today's live bar changes during the day: that was the largest steady allocation in the process
+ * (pg row objects, numeric strings and Dates, freed a minute later). Now the prior bars are read once and kept for
+ * PRIOR_BARS_TTL_MS as three Float64Arrays a name (close, high, low; ~6 KB a name, ~11 MB for 1,750), and each pass
+ * puts today's live bar on top exactly as before. The cache is dropped when the date changes, when the daily bar job
+ * writes bars (invalidateSessionMaPriorBars), and is capped at PRIOR_BARS_MAX names.
+ */
+interface PriorBars {
+  loadedAt: number;
+  /** Newest stored bar date, or null when the name has no bar in the lookback. */
+  mostRecentDbDate: string | null;
+  /** Fewer than MIN_BARS_FOR_SESSION_MA bars in the lookback: no MA (as before). */
+  tooFew: boolean;
+  /** A gap of more than 7 days between two of the newest days+5 bars: skipped as stale (as before). */
+  hasLargeGap: boolean;
+  /** Newest first, at most days+5 bars. */
+  closes: Float64Array;
+  highs: Float64Array;
+  lows: Float64Array;
+}
 
-  const upperSymbols = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
+const PRIOR_BARS_TTL_MS = 30 * 60 * 1000;
+const PRIOR_BARS_MAX = 6_000;
+const priorBars = new Map<string, PriorBars>();
+let priorBarsDays = 0;
+let priorBarsDate = "";
+
+/** Drop the kept prior bars (all, or the given names): the next pass reads them again from the database. */
+export function invalidateSessionMaPriorBars(symbols?: string[]): void {
+  if (!symbols) {
+    priorBars.clear();
+    return;
+  }
+  for (const s of symbols) priorBars.delete(s.toUpperCase());
+}
+
+/** For the repro script and tests: how many names have prior bars kept. */
+export function sessionMaPriorBarsSize(): number {
+  return priorBars.size;
+}
+
+async function ensurePriorBars(upperSymbols: string[], days: number, today: string): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  if (priorBarsDate !== today || priorBarsDays !== days) {
+    priorBars.clear();
+    priorBarsDate = today;
+    priorBarsDays = days;
+  }
+  const now = Date.now();
+  const missing = upperSymbols.filter((s) => {
+    const e = priorBars.get(s);
+    return !e || now - e.loadedAt >= PRIOR_BARS_TTL_MS;
+  });
+  if (missing.length === 0) return;
+  if (priorBars.size + missing.length > PRIOR_BARS_MAX) priorBars.clear();
+
   // Calendar lookback must cover ~days trading sessions (weekends/holidays).
   // 250 calendar days ≈ 170 sessions — too short for SMA200. Use ~1.6× + buffer.
   const calendarLookbackDays = Math.ceil(days * 1.65) + 30;
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - calendarLookbackDays);
   const cutoffStr = cutoffDate.toISOString().split("T")[0];
-  const today = new Date().toISOString().split("T")[0];
 
-  const MAX_STALE_DAYS = 5;
-  let staleSkipCount = 0;
-
-  // Process DB in chunks — critically, process each chunk's bars immediately
-  // and discard the raw DB rows so they can be GC'd, instead of accumulating
-  // 170K+ rows in a single array.
+  // Chunks of 50 names; each chunk's rows are reduced to arrays at once and dropped.
   const DB_CHUNK_SIZE = 50;
-  for (let i = 0; i < upperSymbols.length; i += DB_CHUNK_SIZE) {
-    const chunk = upperSymbols.slice(i, i + DB_CHUNK_SIZE);
+  for (let i = 0; i < missing.length; i += DB_CHUNK_SIZE) {
+    const chunk = missing.slice(i, i + DB_CHUNK_SIZE);
     const chunkBars = await db
-      .select()
+      .select({
+        symbol: historicalBars.symbol,
+        barDate: historicalBars.barDate,
+        high: historicalBars.high,
+        low: historicalBars.low,
+        close: historicalBars.close,
+      })
       .from(historicalBars)
       .where(
         and(
@@ -168,7 +218,6 @@ async function loadDailyBarsForSymbols(
       )
       .orderBy(historicalBars.symbol, desc(historicalBars.barDate));
 
-    // Group by symbol within this chunk only
     const barsBySymbol = new Map<string, typeof chunkBars>();
     for (const bar of chunkBars) {
       const existing = barsBySymbol.get(bar.symbol) || [];
@@ -176,21 +225,12 @@ async function loadDailyBarsForSymbols(
       barsBySymbol.set(bar.symbol, existing);
     }
 
+    const loadedAt = Date.now();
     for (const symbol of chunk) {
       const symbolBars = barsBySymbol.get(symbol) || [];
-      if (symbolBars.length < MIN_BARS_FOR_SESSION_MA) continue;
-
-      const mostRecentDbDate = symbolBars[0]?.barDate;
-      if (mostRecentDbDate) {
-        const dbDate = new Date(mostRecentDbDate + "T00:00:00Z");
-        const ageDays = (Date.now() - dbDate.getTime()) / (1000 * 60 * 60 * 24);
-        if (ageDays > MAX_STALE_DAYS) {
-          staleSkipCount++;
-          continue;
-        }
-      }
-
-      const barSlice = symbolBars.slice(0, days + 5);
+      const mostRecentDbDate = symbolBars[0]?.barDate ?? null;
+      const tooFew = symbolBars.length < MIN_BARS_FOR_SESSION_MA;
+      const barSlice = tooFew ? [] : symbolBars.slice(0, days + 5);
       let hasLargeGap = false;
       for (let j = 0; j < barSlice.length - 1; j++) {
         const d1 = new Date(barSlice[j]!.barDate + "T00:00:00Z").getTime();
@@ -200,53 +240,87 @@ async function loadDailyBarsForSymbols(
           break;
         }
       }
-      if (hasLargeGap) {
+      const keep = hasLargeGap ? [] : barSlice;
+      priorBars.set(symbol, {
+        loadedAt,
+        mostRecentDbDate,
+        tooFew,
+        hasLargeGap,
+        closes: Float64Array.from(keep, (b) => Number(b.close)),
+        highs: Float64Array.from(keep, (b) => Number(b.high)),
+        lows: Float64Array.from(keep, (b) => Number(b.low)),
+      });
+    }
+
+    // Yield between chunks so GC can reclaim the chunk's rows
+    if (i + DB_CHUNK_SIZE < missing.length) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+}
+
+/** Session bars newest first (today's live bar on top when there is a snapshot), as close/high/low arrays. */
+interface SessionSeries {
+  closes: number[];
+  highs: number[];
+  lows: number[];
+}
+
+async function loadDailyBarsForSymbols(
+  symbols: string[],
+  snapshots: Map<string, SessionMaSnapshotInput>,
+  days = 250
+): Promise<Map<string, SessionSeries>> {
+  const result = new Map<string, SessionSeries>();
+  if (!getDb() || symbols.length === 0) return result;
+
+  const upperSymbols = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
+  const today = new Date().toISOString().split("T")[0];
+  await ensurePriorBars(upperSymbols, days, today);
+
+  const MAX_STALE_DAYS = 5;
+  let staleSkipCount = 0;
+
+  for (const symbol of upperSymbols) {
+    const prior = priorBars.get(symbol);
+    if (!prior || prior.tooFew) continue;
+
+    const mostRecentDbDate = prior.mostRecentDbDate;
+    if (mostRecentDbDate) {
+      const dbDate = new Date(mostRecentDbDate + "T00:00:00Z");
+      const ageDays = (Date.now() - dbDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > MAX_STALE_DAYS) {
         staleSkipCount++;
         continue;
       }
+    }
+    if (prior.hasLargeGap) {
+      staleSkipCount++;
+      continue;
+    }
 
-      const candles: DailyBar[] = barSlice.map((b) => ({
-        date: b.barDate,
-        open: Number(b.open),
-        high: Number(b.high),
-        low: Number(b.low),
-        close: Number(b.close),
-        volume: Number(b.volume),
-        vwap: b.vwap ? Number(b.vwap) : undefined,
-      }));
+    const closes = Array.from(prior.closes);
+    const highs = Array.from(prior.highs);
+    const lows = Array.from(prior.lows);
 
-      const snapshot = snapshots.get(symbol);
-      if (snapshot && snapshot.open > 0) {
-        if (!mostRecentDbDate || today > mostRecentDbDate) {
-          candles.unshift({
-            date: today,
-            open: snapshot.open,
-            high: snapshot.high,
-            low: snapshot.low,
-            close: snapshot.price,
-            volume: snapshot.volume,
-            vwap: snapshot.vwap,
-          });
-        } else if (mostRecentDbDate === today) {
-          candles[0] = {
-            date: today,
-            open: snapshot.open,
-            high: snapshot.high,
-            low: snapshot.low,
-            close: snapshot.price,
-            volume: snapshot.volume,
-            vwap: snapshot.vwap,
-          };
-        }
+    const snapshot = snapshots.get(symbol);
+    if (snapshot && snapshot.open > 0) {
+      if (!mostRecentDbDate || today > mostRecentDbDate) {
+        closes.unshift(snapshot.price);
+        highs.unshift(snapshot.high);
+        lows.unshift(snapshot.low);
+      } else if (mostRecentDbDate === today) {
+        closes[0] = snapshot.price;
+        highs[0] = snapshot.high;
+        lows[0] = snapshot.low;
       }
-
-      result.set(symbol, candles.slice(0, days));
     }
 
-    // Yield between chunks so GC can reclaim the chunkBars memory
-    if (i + DB_CHUNK_SIZE < upperSymbols.length) {
-      await new Promise((r) => setTimeout(r, 5));
-    }
+    result.set(symbol, {
+      closes: closes.slice(0, days),
+      highs: highs.slice(0, days),
+      lows: lows.slice(0, days),
+    });
   }
 
   if (staleSkipCount > 0) {
@@ -257,12 +331,11 @@ async function loadDailyBarsForSymbols(
 }
 
 /** Average (high−low) over the newest `period` sessions. Bars are newest-first. */
-function computeAdr20(barsNewestFirst: DailyBar[], period = 20): number | null {
-  if (barsNewestFirst.length < period) return null;
+function computeAdr20(highs: number[], lows: number[], period = 20): number | null {
+  if (highs.length < period) return null;
   let sum = 0;
   for (let i = 0; i < period; i++) {
-    const b = barsNewestFirst[i]!;
-    sum += Math.max(0, b.high - b.low);
+    sum += Math.max(0, highs[i]! - lows[i]!);
   }
   const adr = sum / period;
   return adr > 0 ? adr : null;
@@ -279,13 +352,12 @@ async function computeMaEntriesForSymbols(
 
   for (const symbol of unique) {
     const bars = barsMap.get(symbol);
-    if (!bars || bars.length < MIN_BARS_FOR_SESSION_MA) continue;
+    if (!bars || bars.closes.length < MIN_BARS_FOR_SESSION_MA) continue;
 
-    const closes = bars.map((b) => b.close);
-    const levels = computeTickerMasFromClosesNewestFirst(closes);
+    const levels = computeTickerMasFromClosesNewestFirst(bars.closes);
     if (!levels) continue;
 
-    result.set(symbol, levelsToEntry(levels, computeAdr20(bars, 20)));
+    result.set(symbol, levelsToEntry(levels, computeAdr20(bars.highs, bars.lows, 20)));
   }
 
   return result;
