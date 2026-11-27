@@ -10,7 +10,7 @@ import {
   MIN_BARS_FOR_SESSION_MA,
   type TickerMaLevels,
 } from "../shared/daily-ma-from-bars";
-import { shouldRunHeavyBackgroundWork } from "../infra/memory-gate";
+import { shouldRunHeavyBackgroundWork, trackJob } from "../infra/memory-gate";
 import type { DailyBar } from "./types";
 
 export type MaDataEntry = {
@@ -440,11 +440,13 @@ export function kickSessionMaBatchChain(
   lastChainElapsedMs = null;
 
   void (async () => {
+    const untrack = trackJob("session MA chain");
     try {
       await runSessionMaBatchChain(universe, snapshots, onBatchMerged);
     } catch (err) {
       console.error("[SessionMA] Batch chain failed:", err);
     } finally {
+      untrack();
       maRefreshInFlight = false;
       maIsPausing = false;
     }

@@ -331,6 +331,8 @@ const FIVE_DAY_REFRESH_INTERVAL = 6 * 60 * 60_000; // every 6 hours
 
 async function refreshFiveDayLevels(): Promise<void> {
   if (Date.now() - lastFiveDayRefresh < FIVE_DAY_REFRESH_INTERVAL) return;
+  const { trackJob } = await import("../infra/memory-gate");
+  const untrack = trackJob("5-day levels");
 
   try {
     const { getAlpacaProvider } = await import("../market-condition/providers/alpaca");
@@ -369,6 +371,8 @@ async function refreshFiveDayLevels(): Promise<void> {
     }
   } catch (err) {
     console.error("[Scanner] Failed to refresh 5-day levels:", err);
+  } finally {
+    untrack();
   }
 }
 

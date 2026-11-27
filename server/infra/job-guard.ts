@@ -9,6 +9,7 @@
  * refresh and the bar job overlapping; the cause is not yet explained, these make the next run safe and readable.
  */
 import { getEtClock } from "@shared/usEquityMarketSession";
+import { trackJob } from "./memory-gate";
 
 export const DEFAULT_RSS_LIMIT_MB = 1300;
 /** One key for every heavy data job; session-level, so it dies with the connection. */
@@ -47,6 +48,7 @@ export async function tryAcquire(name: string, db?: any): Promise<(() => Promise
     return null;
   }
   holder = name; // in-process: taken before any await, so two ticks cannot both pass
+  const untrack = trackJob(name);
   let client: typeof heldClient = null;
   try {
     const pool = db?.$client ?? db?.session?.client;
@@ -56,6 +58,7 @@ export async function tryAcquire(name: string, db?: any): Promise<(() => Promise
       if (!r.rows?.[0]?.ok) {
         client!.release();
         holder = null;
+        untrack();
         console.log(`[JobGuard] ${name} not started: another process holds the data-job lock (a backfill or another instance)`);
         return null;
       }
@@ -77,6 +80,7 @@ export async function tryAcquire(name: string, db?: any): Promise<(() => Promise
     } finally {
       heldClient = null;
       holder = null;
+      untrack();
     }
   };
 }

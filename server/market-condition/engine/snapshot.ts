@@ -34,7 +34,7 @@ import {
   getMaShardProgress,
   type MaMode,
 } from "../../data-layer";
-import { getNightModeWindow, shouldRunHeavyBackgroundWork } from "../../infra/memory-gate";
+import { getNightModeWindow, shouldRunHeavyBackgroundWork, trackJob } from "../../infra/memory-gate";
 import { dropStaleSnapshots } from "../utils/stale-guard";
 
 // =============================================================================
@@ -187,6 +187,7 @@ export async function refreshSnapshot(
   }
   
   state.isPolling = true;
+  const untrack = trackJob("MC snapshot refresh");
   const startTime = Date.now();
   const memBefore = process.memoryUsage();
   console.log(`[MC-Snapshot] Heap before refresh: ${Math.round(memBefore.heapUsed / 1024 / 1024)}MB / ${Math.round(memBefore.rss / 1024 / 1024)}MB RSS`);
@@ -354,6 +355,7 @@ export async function refreshSnapshot(
       console.error(`[MC-Snapshot] ⚠️ ${state.errorCount} consecutive errors - system may be unstable`);
     }
   } finally {
+    untrack();
     state.isPolling = false;
   }
 }

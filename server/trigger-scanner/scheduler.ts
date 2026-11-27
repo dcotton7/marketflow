@@ -321,7 +321,12 @@ export async function startTriggerScanner(env: NodeJS.ProcessEnv = process.env):
     },
     rssMb: () => Math.round(process.memoryUsage().rss / 1048576),
   });
-  timer = setInterval(() => void instance?.tick(), 30_000);
+  const { trackJob } = await import("../infra/memory-gate");
+  timer = setInterval(() => {
+    if (!instance) return;
+    const untrack = trackJob("trigger scanner");
+    void instance.tick().finally(untrack);
+  }, 30_000);
   console.log(`[TriggerScanner] started (tier ${settings.tier}, ${RULE_VERSION})`);
 }
 

@@ -772,9 +772,12 @@ async function runOutcomeCycle(): Promise<void> {
     return;
   }
   cycleStartedAt = Date.now();
+  const { trackJob } = await import("../infra/memory-gate");
+  const untrack = trackJob("outcome tracker");
   try {
     await processOutcomes();
   } finally {
+    untrack();
     cycleStartedAt = null;
   }
 }
