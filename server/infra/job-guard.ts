@@ -9,6 +9,7 @@
  * refresh and the bar job overlapping; the cause is not yet explained, these make the next run safe and readable.
  */
 import { getEtClock } from "@shared/usEquityMarketSession";
+import { trackJob } from "./memory-gate";
 
 export const DEFAULT_RSS_LIMIT_MB = 1300;
 /** One key for every heavy data job; session-level, so it dies with the connection. */
@@ -47,6 +48,7 @@ export async function tryAcquire(name: string, db?: any): Promise<(() => Promise
     return null;
   }
   holder = name; // in-process: taken before any await, so two ticks cannot both pass
+  const untrack = trackJob(name);
   let client: typeof heldClient = null;
   try {
     const pool = db?.$client ?? db?.session?.client;
@@ -56,6 +58,7 @@ export async function tryAcquire(name: string, db?: any): Promise<(() => Promise
       if (!r.rows?.[0]?.ok) {
         client!.release();
         holder = null;
+        untrack();
         console.log(`[JobGuard] ${name} not started: another process holds the data-job lock (a backfill or another instance)`);
         return null;
       }
@@ -77,6 +80,7 @@ export async function tryAcquire(name: string, db?: any): Promise<(() => Promise
     } finally {
       heldClient = null;
       holder = null;
+      untrack();
     }
   };
 }
@@ -109,6 +113,20 @@ export function overLimit(tag: string, where: string, limitMb = rssLimitMb()): b
   if (rss <= limitMb) return false;
   tripped = { day: today(), where: `${tag}: ${where}`, rssMb: rss };
   console.warn(`[${tag}] STOPPED at ${where}: rss ${rss} MB is over the ${limitMb} MB limit (JOB_RSS_LIMIT_MB); heavy data jobs stay off until tomorrow. ${memLine()}`);
+  return true;
+}
+
+/**
+ * Call before a heavy job starts. True = RSS is already over the limit, so do not start now; the guard is NOT tripped
+ * (the job has not run, so it did not cause it) and the next scheduled check tries again.
+ * Why: on 27 Nov the bar job started with RSS ~1,400 MB (over 1,300 but under the 1,474 MB pressure line), fetched
+ * 6 names, and overLimit after that first batch tripped the guard for the day: the trigger scanner, bar job and pool
+ * refresh all stayed off until the next day for memory the 6-name batch did not use.
+ */
+export function overLimitBeforeStart(tag: string, limitMb = rssLimitMb()): boolean {
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  if (rss <= limitMb) return false;
+  console.warn(`[${tag}] not started: rss ${rss} MB is already over the ${limitMb} MB limit (JOB_RSS_LIMIT_MB) before the job; the guard is not tripped, the next check tries again. ${memLine()}`);
   return true;
 }
 

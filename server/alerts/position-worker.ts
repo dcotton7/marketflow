@@ -35,12 +35,16 @@ let started = false;
 let running = false;
 let lastSetupRun = 0;
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_CLOCK_FMT = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short",
+  });
+
 export function etClock(now = new Date()) {
   const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short",
-    }).formatToParts(now).map((p) => [p.type, p.value]),
+    ET_CLOCK_FMT.formatToParts(now).map((p) => [p.type, p.value]),
   );
   return {
     day: `${parts.year}-${parts.month}-${parts.day}`,

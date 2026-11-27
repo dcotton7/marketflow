@@ -72,15 +72,19 @@ export function setScannerMode(mode: ScannerMode): void {
   console.log(`[Scanner] Mode changed: ${prev} → ${mode}`);
 }
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_SESSION_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "numeric",
+  weekday: "short",
+  hour12: false,
+});
+
 function getCurrentSession(): MarketSession {
   const now = new Date();
-  const et = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "numeric",
-    weekday: "short",
-    hour12: false,
-  }).formatToParts(now);
+  const et = ET_SESSION_FMT.formatToParts(now);
 
   const h = parseInt(et.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(et.find((p) => p.type === "minute")?.value ?? "0", 10);
@@ -327,10 +331,17 @@ async function onSnapshotRefreshed(
 // ── 5-day high/low data refresh ─────────────────────────────────────────────
 
 let lastFiveDayRefresh = 0;
+let fiveDayInFlight = false;
 const FIVE_DAY_REFRESH_INTERVAL = 6 * 60 * 60_000; // every 6 hours
 
 async function refreshFiveDayLevels(): Promise<void> {
   if (Date.now() - lastFiveDayRefresh < FIVE_DAY_REFRESH_INTERVAL) return;
+  // One at a time: lastFiveDayRefresh is set only when a run ends, and this is called on every MC refresh (each
+  // minute), so a run that takes longer than a minute used to be started again, and again, on top of itself.
+  if (fiveDayInFlight) return;
+  fiveDayInFlight = true;
+  const { trackJob } = await import("../infra/memory-gate");
+  const untrack = trackJob("5-day levels");
 
   try {
     const { getAlpacaProvider } = await import("../market-condition/providers/alpaca");
@@ -369,6 +380,9 @@ async function refreshFiveDayLevels(): Promise<void> {
     }
   } catch (err) {
     console.error("[Scanner] Failed to refresh 5-day levels:", err);
+  } finally {
+    untrack();
+    fiveDayInFlight = false;
   }
 }
 

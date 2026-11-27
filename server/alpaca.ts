@@ -176,6 +176,11 @@ export async function fetchAlpacaActiveSymbols(): Promise<string[]> {
  * Fetch intraday bars from Alpaca Market Data API v2
  * Supports extended hours (pre-market + after-hours)
  */
+// Built once, used per bar: d.toLocaleString(..., { timeZone }) builds a new ICU formatter on every call (native memory
+// outside the JS heap). Same output as those calls (checked every 7 minutes over 2026).
+const ET_HOUR_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false });
+const ET_MINUTE_FMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", minute: "2-digit" });
+
 export async function fetchAlpacaIntradayBars(
   ticker: string,
   startDate: Date,
@@ -296,8 +301,8 @@ export async function fetchAlpacaIntradayBars(
     if (!includeExtendedHours) {
       const filteredBars = intervalBars.filter((bar) => {
         const d = new Date(bar.date);
-        const etHour = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
-        const etMin = parseInt(d.toLocaleString("en-US", { timeZone: "America/New_York", minute: "2-digit" }));
+        const etHour = parseInt(ET_HOUR_FMT.format(d));
+        const etMin = parseInt(ET_MINUTE_FMT.format(d));
         const etTotalMin = etHour * 60 + etMin;
         
         // Regular hours: 9:30 AM (570 min) to 4:00 PM (960 min) ET

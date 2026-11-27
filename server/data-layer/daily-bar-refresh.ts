@@ -21,9 +21,10 @@ import { sql } from "drizzle-orm";
 import { fetchAlpacaMultiSymbolDailyBars } from "../alpaca";
 import { getAllUniverseTickers } from "../market-condition/universe";
 import { expectedLastSession, loadBarUniverse, loadNewestBars, loadThemeUniverse, splitStale } from "./bar-universe";
-import { guardState, guardTrippedToday, lockHolder, logPhase, overLimit, tryAcquire, withJobLock } from "../infra/job-guard";
+import { guardState, guardTrippedToday, lockHolder, logPhase, overLimit, overLimitBeforeStart, tryAcquire, withJobLock } from "../infra/job-guard";
 import { isMemoryPressureHigh, isNightMode } from "../infra/memory-gate";
 import { getEtClock, getUsEquityMarketSession } from "@shared/usEquityMarketSession";
+import { invalidateSessionMaPriorBars } from "./session-adjusted-ma";
 
 const REFRESH_LOOKBACK_DAYS = 10;
 
@@ -135,6 +136,9 @@ async function runCheck(): Promise<boolean> {
     logOncePerDay(`pressure-${new Date().getHours()}`, "[DailyBarRefresh] Memory pressure high - deferring refresh, retry in 30 min.");
     return true;
   }
+  // The job guard's limit (JOB_RSS_LIMIT_MB, 1,300) is below the pressure line above (72% of 2,048 = 1,474): with RSS
+  // in between, the job used to start, and the check after its first batch tripped the guard for the whole day.
+  if (overLimitBeforeStart("DailyBarRefresh")) return true;
 
   const { staleSymbols, freshCount, expected, newest } = await getStaleSymbols();
   const total = staleSymbols.length + freshCount;
@@ -266,6 +270,8 @@ async function refreshDailyBars(symbols: string[], expected: string, universeSiz
           },
         });
         totalUpserted += chunk.length;
+        // the session MA keeps prior bars between passes; these names now have new ones
+        invalidateSessionMaPriorBars([...new Set(chunk.map((r) => r.symbol))]);
       } catch (err) {
         totalFailed += new Set(chunk.map((r) => r.symbol)).size;
         console.warn("[DailyBarRefresh] batch write failed:", String(err).slice(0, 120));

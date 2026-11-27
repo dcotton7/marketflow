@@ -33,15 +33,19 @@ function alpacaHeaders(): Record<string, string> {
   };
 }
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_HM_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
 function isRegularSessionBar(iso: string): boolean {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return false;
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(d);
+  const parts = ET_HM_FMT.formatToParts(d);
   const hour = Number(parts.find((p) => p.type === "hour")?.value);
   const minute = Number(parts.find((p) => p.type === "minute")?.value);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;

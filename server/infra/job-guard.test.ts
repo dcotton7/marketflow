@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { ADVISORY_KEY, guardState, guardTrippedToday, lockHolder, memLine, overLimit, resetGuardForTests, rssLimitMb, tryAcquire, withJobLock } from "./job-guard";
+import { ADVISORY_KEY, guardState, guardTrippedToday, lockHolder, memLine, overLimit, overLimitBeforeStart, resetGuardForTests, rssLimitMb, tryAcquire, withJobLock } from "./job-guard";
 import { chunkRows, maFromClosesDesc, recalculateTickerMAs, startManualBarCycle } from "../data-layer/daily-bar-refresh";
 
 const logs: string[] = [];
@@ -52,6 +52,10 @@ const quiet = () => { console.log = origLog; console.warn = origWarn; };
 
   // ---- the memory guard ----------------------------------------------------------------------------------------------
   resetGuardForTests();
+  assert.equal(overLimitBeforeStart("DailyBarRefresh", 100000), false, "under the limit before the start: start");
+  assert.equal(overLimitBeforeStart("DailyBarRefresh", 1), true, "already over before the start: do not start");
+  assert.equal(guardTrippedToday(), false, "but the guard is not tripped: the job did not run, the next check retries");
+  assert.ok(logs.some((l) => /not started: rss \d+ MB is already over the 1 MB limit/.test(l)), "and the log says so");
   assert.equal(overLimit("DailyBarRefresh", "batch 1", 100000), false, "under the limit: keep going");
   assert.equal(guardTrippedToday(), false);
   assert.equal(overLimit("DailyBarRefresh", "batch 7, name 700 of 1752", 1), true, "over the limit: stop");

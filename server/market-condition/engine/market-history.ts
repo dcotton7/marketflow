@@ -52,12 +52,16 @@ export interface ThemeInput {
 }
 export interface RegimeInput { score: number; label: string; riskMultiplier?: number | null; components: object }
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_CLOCK_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23",
+});
+
 /** ET calendar date, weekday (0 = Sunday) and minutes since midnight for an instant. */
 export function etClock(now: Date): { date: string; weekday: number; minutes: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", weekday: "short", hourCycle: "h23",
-  }).formatToParts(now);
+  const parts = ET_CLOCK_FMT.formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return {

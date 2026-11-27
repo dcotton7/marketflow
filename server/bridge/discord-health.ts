@@ -60,11 +60,15 @@ export function discordProblemText(p: DiscordHealthProblem, d: DiscordHealth["di
   }
 }
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_SESSION_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
 /** Weekday regular session in New York, holidays and early closes included. */
 export function isUsMarketHours(at: Date): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).formatToParts(at);
+  const parts = ET_SESSION_FMT.formatToParts(at);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   if (get("weekday") === "Sat" || get("weekday") === "Sun") return false;
   const day = etDateKey(at);

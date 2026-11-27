@@ -8,19 +8,24 @@ const ET = "America/New_York";
 const RTH_OPEN_MIN = 9 * 60 + 30;
 const RTH_CLOSE_MIN = 16 * 60;
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_WEEKDAY_FMT = new Intl.DateTimeFormat("en-US", { timeZone: ET, weekday: "short" });
+const ET_HM_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: ET,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 /** `timestampSec` = UNIX seconds (chart candle time). */
 export function isUsEquityRegularSessionEt(timestampSec: number): boolean {
   const ms = timestampSec * 1000;
   const d = new Date(ms);
-  const wd = new Intl.DateTimeFormat("en-US", { timeZone: ET, weekday: "short" }).format(d);
+  const wd = ET_WEEKDAY_FMT.format(d);
   if (wd === "Sat" || wd === "Sun") return false;
 
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: ET,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(d);
+  const parts = ET_HM_FMT.formatToParts(d);
 
   let h = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
   if (h === 24) h = 0;

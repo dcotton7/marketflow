@@ -14,7 +14,7 @@
 
 import { db } from "../db";
 import { scannerDiscoveries } from "@shared/schema";
-import { eq, and, isNull, sql, inArray, notInArray, lt } from "drizzle-orm";
+import { eq, and, isNull, sql, inArray, notInArray, lt, getTableColumns } from "drizzle-orm";
 import { FLOOD_TRACK_ONCE_PER_DAY } from "@shared/scanner-outcome-queue";
 import { currentFrame } from "./signal-producer";
 import { getClusterById, type ClusterId } from "../market-condition/universe";
@@ -28,6 +28,13 @@ import {
 } from "@shared/scanner-outcome-v3";
 
 const INTERVAL_MS = 3 * 60_000;
+
+/**
+ * The columns a cycle reads: every column but the card text and context (headline, narrative, tickers, context_json),
+ * which the tracker never uses. A cycle selects up to ~3,400 rows every 3 minutes; context_json was most of each row.
+ */
+const { headline: _headline, narrative: _narrative, tickers: _tickers, contextJson: _contextJson, ...TRACKER_COLUMNS } =
+  getTableColumns(scannerDiscoveries);
 
 const SKIP_SIGNAL_TYPES = new Set(["news_alert"]);
 
@@ -90,17 +97,21 @@ const MARKET_LEVEL_SIGNAL_TYPES = new Set([
 const BROAD_MARKET_PROXIES = ["SPY", "QQQ", "IWM"];
 const MARKET_STRENGTH_PROXIES = ["QQQ", "SPY"];
 
+// Built once: a new Intl.DateTimeFormat per call allocates ICU objects (~KBs each, outside the JS heap and freed
+// only when GC gets to them); the outcome tracker's per-row calls grew RSS by 200+ MB in one second (27 Nov repro).
+const ET_PARTS_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false,
+  weekday: "short",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function getEtParts(date: Date): { h: number; m: number; dayOfWeek: number; dateStr: string } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-    weekday: "short",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = ET_PARTS_FMT.formatToParts(date);
 
   const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
@@ -334,10 +345,10 @@ async function processOutcomes(): Promise<void> {
     );
 
     const selectStart = Date.now();
-    type Row = typeof scannerDiscoveries.$inferSelect;
+    type Row = Omit<typeof scannerDiscoveries.$inferSelect, "headline" | "narrative" | "tickers" | "contextJson">;
     const newestPending: Row[] = await timedSelect("newest", [] as Row[], (tx) =>
       tx
-        .select()
+        .select(TRACKER_COLUMNS)
         .from(scannerDiscoveries)
         .where(eligibleWhere)
         .orderBy(sql`id DESC`)
@@ -364,7 +375,7 @@ async function processOutcomes(): Promise<void> {
     const oldestOverdue: typeof newestPending = [];
     for (const signalType of OVERDUE_SIGNAL_TYPES) {
       const partialRows: Row[] = await timedSelect(`partial ${signalType}`, [] as Row[], (tx) => tx
-        .select()
+        .select(TRACKER_COLUMNS)
         .from(scannerDiscoveries)
         .where(
           and(
@@ -380,7 +391,7 @@ async function processOutcomes(): Promise<void> {
       partialOverdue.push(...partialRows);
 
       const oldestRows: Row[] = await timedSelect(`oldest ${signalType}`, [] as Row[], (tx) => tx
-        .select()
+        .select(TRACKER_COLUMNS)
         .from(scannerDiscoveries)
         .where(
           and(
@@ -772,9 +783,12 @@ async function runOutcomeCycle(): Promise<void> {
     return;
   }
   cycleStartedAt = Date.now();
+  const { trackJob } = await import("../infra/memory-gate");
+  const untrack = trackJob("outcome tracker");
   try {
     await processOutcomes();
   } finally {
+    untrack();
     cycleStartedAt = null;
   }
 }
