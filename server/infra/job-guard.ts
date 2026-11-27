@@ -116,6 +116,20 @@ export function overLimit(tag: string, where: string, limitMb = rssLimitMb()): b
   return true;
 }
 
+/**
+ * Call before a heavy job starts. True = RSS is already over the limit, so do not start now; the guard is NOT tripped
+ * (the job has not run, so it did not cause it) and the next scheduled check tries again.
+ * Why: on 27 Nov the bar job started with RSS ~1,400 MB (over 1,300 but under the 1,474 MB pressure line), fetched
+ * 6 names, and overLimit after that first batch tripped the guard for the day: the trigger scanner, bar job and pool
+ * refresh all stayed off until the next day for memory the 6-name batch did not use.
+ */
+export function overLimitBeforeStart(tag: string, limitMb = rssLimitMb()): boolean {
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  if (rss <= limitMb) return false;
+  console.warn(`[${tag}] not started: rss ${rss} MB is already over the ${limitMb} MB limit (JOB_RSS_LIMIT_MB) before the job; the guard is not tripped, the next check tries again. ${memLine()}`);
+  return true;
+}
+
 export function resetGuardForTests(): void {
   tripped = null;
   holder = null;
