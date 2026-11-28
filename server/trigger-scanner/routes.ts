@@ -60,6 +60,8 @@ function present(c: StoredCandidate) {
     dedupe_key: c.dedupeKey,
     market_date: c.marketDate,
     rule_version: c.ruleVersion,
+    // trend facts (trend.ts), measured, never a filter; null on rows stored before 031
+    trend: c.trend ?? null,
   };
 }
 

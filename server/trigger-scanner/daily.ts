@@ -16,6 +16,7 @@
 import { smaAt } from "../setups/daily-math";
 import { precomputeGapGo, type PriorFire } from "./gap";
 import { DEFAULTS, type ScannerSettings } from "./settings";
+import { dailyTrend } from "./trend";
 import type { DailyBar, DailyContext, GapLevel } from "./types";
 
 
@@ -109,6 +110,7 @@ export function buildDailyContext(symbol: string, bars: DailyBar[], extras: Cont
     sector: extras.sector ?? null,
     nextEarnings: extras.nextEarnings ?? null,
     earningsKnown: !!extras.earningsKnown,
+    trend: dailyTrend(b, adr, settings),
   };
 }
 
