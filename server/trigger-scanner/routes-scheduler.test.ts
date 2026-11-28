@@ -208,11 +208,15 @@ try {
   pause = "night mode";
   now = new Date("2026-11-25T02:00:00Z"); // 21:00 ET
   assert.equal(await sc.tick(), "closed", "outside the session");
-  // a guard trip: paused until tomorrow
-  const sc2 = new TriggerScanner({ ...deps, pauseReason: () => "memory guard tripped today (BarJob: batch 4); paused until tomorrow" });
+  // memory pressure pauses it, and it runs again on the next check once the pressure is gone
+  let pressure: string | null = "memory pressure";
+  const sc2 = new TriggerScanner({ ...deps, store: memoryTriggerStore(), pauseReason: () => pressure });
   now = new Date("2026-11-24T15:10:30Z");
+  failing = false;
   assert.equal(await sc2.tick(), "paused");
-  assert.match(sc2.status.why!, /until tomorrow/);
+  assert.equal(sc2.status.why, "memory pressure");
+  pressure = null;
+  assert.match(await sc2.tick(), /^pass:/, "resumes when the pressure is gone");
 }
 
 // the live pause reasons read the app's own guards
@@ -222,8 +226,9 @@ try {
   assert.equal(reason(new Date("2026-11-28T15:00:00Z")), "night mode", "a Saturday");
   const { resetGuardForTests, overLimit } = await import("../infra/job-guard");
   resetGuardForTests();
-  overLimit("Test", "batch 1", 1); // trips the guard (RSS is over 1 MB)
-  assert.match(reason(new Date())!, /night mode|memory guard tripped today/);
+  overLimit("Test", "batch 1", 1); // trips the day's job guard (RSS is over 1 MB)
+  const weekday = reason(new Date("2026-11-24T15:10:30Z")); // a Tuesday in the session
+  assert.ok(weekday === null || weekday === "memory pressure", "a tripped job guard does not pause the scanner: only live pressure does");
   resetGuardForTests();
 }
 

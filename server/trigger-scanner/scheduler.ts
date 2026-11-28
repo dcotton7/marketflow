@@ -6,7 +6,10 @@
  * It pauses, and says why in its status (and a run row), when:
  *   - night mode or the weekend (server/infra/memory-gate isNightMode), or outside the regular session: "closed";
  *   - memory pressure (memory-gate isMemoryPressureHigh: heap > 70% of HEAP_LIMIT_MB or RSS > 72% of RSS_BUDGET_MB);
- *   - a heavy data job hit the RSS limit today (infra/job-guard guardTrippedToday): paused until tomorrow.
+ * A heavy data job tripping the day's RSS guard (infra/job-guard guardTrippedToday) does NOT pause it: that guard
+ * keeps heavy data jobs from starting again; the scanner is light and already pauses on live memory pressure, so it
+ * runs again as soon as memory is back under the line (Don, 28 Nov: "Of course resume the scanner"; on 27 Nov one
+ * job's trip at 10:45 ET had stopped scanning for the rest of the session).
  * A paused pass fetches nothing; the next pass after the pause fetches every bar since the last fetch, so nothing is
  * lost, only late. Two failed bar fetches in a day drop it to the shortlist tier (shortlist.ts) for the rest of the day.
  */
@@ -274,10 +277,8 @@ export function getScanner(): TriggerScanner | null {
 /** Pause reasons from the app's own guards. */
 export async function livePauseReason(): Promise<(now: Date) => string | null> {
   const { isNightMode, isMemoryPressureHigh } = await import("../infra/memory-gate");
-  const { guardTrippedToday, guardState } = await import("../infra/job-guard");
   return (now: Date) => {
     if (isNightMode(now)) return "night mode";
-    if (guardTrippedToday()) return `memory guard tripped today (${guardState()?.where ?? "a data job"}); paused until tomorrow`;
     if (isMemoryPressureHigh()) return "memory pressure";
     return null;
   };

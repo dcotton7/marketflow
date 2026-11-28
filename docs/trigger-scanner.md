@@ -50,7 +50,7 @@ so a later change to a threshold never changes the meaning of stored rows.
 | Size / sector | `tickers.market_cap_size` (`utils/cap-size.ts`), `tickers.sector`, `scan_pool.sector` / `market_cap` | Loaded once a day |
 | Earnings | `earnings/upcoming.ts`: `earnings_estimates_daily`, a market-wide Finnhub calendar pulled daily for 91 days | The next report date per name, used when the newest pull is at most 7 days old; otherwise "earnings date not checked: 0" |
 | Daily setups | `setups/*`: Leader Shakeout hits in `setup_leader_shakeout` (after the close) | Hits of the last 5 sessions are watched for "coming into range" |
-| Guards | `infra/memory-gate.ts` (night mode 20:00-04:00 ET and weekends; pressure = heap over 70% of `HEAP_LIMIT_MB` or RSS over 72% of `RSS_BUDGET_MB`), `infra/job-guard.ts` (`guardTrippedToday` after a heavy job hit `JOB_RSS_LIMIT_MB`) | The scanner pauses on any of them and says so |
+| Guards | `infra/memory-gate.ts` (night mode 20:00-04:00 ET and weekends; pressure = heap over 70% of `HEAP_LIMIT_MB` or RSS over 72% of `RSS_BUDGET_MB`), `infra/job-guard.ts` (`guardTrippedToday` after a heavy job hit `JOB_RSS_LIMIT_MB`) | The scanner pauses on night mode and on live memory pressure and says so; the job guard's day-long trip does not pause it (28 Nov) |
 | Reused code | `setups/daily-math.ts` `smaAt` (SMAs); `setups/grades.ts` `gradesWanted` (the `grade=` filter); BigIdea `INDICATOR_LIBRARY` (user setups, daily only); `shared/chart-indicators.ts` `calculateSessionVwap` | VWAP uses the same formula. A test checks the two agree; it is not called directly because it formats an ET date per bar, too slow for 136k bars a pass |
 
 The Alpaca plan limits were **not verified**: there are no keys here. The app already uses `feed=sip` for snapshots
@@ -109,7 +109,7 @@ day (for that day).
 the reason in `/status`, when:
 - night mode or the weekend is on (state `closed` outside the regular session);
 - memory pressure is high;
-- a heavy job tripped the RSS guard today (paused until tomorrow).
+- (not on a heavy job tripping the day's RSS guard: since 28 Nov the scanner resumes once memory is back under the pressure line.)
 
 While paused it fetches nothing. The next pass fetches every bar since the last fetch, so nothing is lost, only late.
 The scanner does not take the heavy-job lock (`withJobLock`): it is light and must not block the daily jobs or be
