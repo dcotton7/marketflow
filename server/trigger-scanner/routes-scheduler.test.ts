@@ -176,9 +176,11 @@ try {
   assert.ok(st.candidates.some((c) => c.setupKey === "orb_breakout"), "the ORB was raised from the fetched bars");
   assert.equal(await sc.tick(), "up_to_date", "nothing new until the next bar closes");
   assert.equal(sc.status.storedToday, st.candidates.length);
-  // the daily cap: a scanner with room for 1 keeps the best one and counts the rest
+  // the daily cap: a scanner with room for 1 keeps the best one and counts the rest (two names: since v3 one name's
+  // ORB and new high on the same bar are one candidate)
   const capped = memoryTriggerStore();
-  const sc3 = new TriggerScanner({ ...deps, store: capped, settings: { ...DEFAULTS, maxStoredPerDay: 1 } });
+  const day2: DayData = { ...day, universe: ["AAA", "BBB"], contexts: new Map(["AAA", "BBB"].map((s) => [s, ctx({ symbol: s })])) };
+  const sc3 = new TriggerScanner({ ...deps, store: capped, loadDay: async () => day2, fetchBars: async (symbols) => ({ bars: new Map(symbols.map((s) => [s, bars(rows)])), requests: 1 }), settings: { ...DEFAULTS, maxStoredPerDay: 1 } });
   assert.match(await sc3.tick(), /^pass:1$/);
   assert.equal(capped.candidates.length, 1);
   assert.ok(sc3.status.overCapToday >= 1 && capped.runs[0].skipped.over_daily_cap >= 1, "over the cap: counted, not stored");

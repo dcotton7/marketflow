@@ -7,10 +7,11 @@ import assert from "node:assert/strict";
 import { calculateSessionVwap } from "@shared/chart-indicators";
 import { bars, ctx, DATE, noRotation, regime, settings } from "./fixtures";
 import { buildDailyContext, classifyGaps } from "./daily";
-import { gradeCandidate } from "./grade";
+import { gradeCandidate, riskPoints } from "./grade";
 import { dailyLevels, levelsAt, pickStop } from "./levels";
 import { readRotation, groupLeading, sectorEtf } from "./rotation";
-import { Dedupe, runPass, sessionsUntil } from "./scan";
+import { Dedupe, runPass, sessionsUntil, settleBar, type Ready } from "./scan";
+import { setupInfo } from "./registry";
 import { buildSession, relVol, sessionBars, sessionOpenMs } from "./session";
 import { memoryTriggerStore, type UserSetupRow } from "./store";
 import type { TriggerInput } from "./triggers/common";
@@ -90,13 +91,24 @@ assert.equal(new Date(sessionOpenMs("2026-07-14")).toISOString(), "2026-07-14T13
   assert.deepEqual(levelHold(at([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.5, 99.8, 50000]], c).inp), [], "did not reach the level");
   assert.deepEqual(levelHold(at([[99.3, 99.6, 99.1, 99.4, 50000], [99.4, 99.5, 99.05, 99.3, 50000]], c).inp), [], "chop on the level: never 0.3 ADR above it");
   assert.deepEqual(levelHold(at([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 98.5, 98.8, 50000]], c).inp), [], "closed through it");
-  const r = levelHold(at([[100, 100.3, 99.9, 100, 50000], [100, 100.9, 99.9, 100.3, 50000]], ctx({ sma50: 101 })).inp);
+  const r = levelHold(at([[100, 100.3, 99.9, 100, 50000], [100, 100.95, 99.9, 100.3, 50000]], ctx({ sma50: 101 })).inp);
   assert.deepEqual(r.map((h) => [h.setupKey, h.variant]), [["level_reject", "sma50"]]);
   // a failed gap up is resistance, so a long never holds off it; a held one is support
   const gapFailed = ctx({ gaps: [{ date: "2026-11-10", dir: "up", edge: 99, far: 99.5, state: "failed", role: "resistance" }] });
   assert.deepEqual(levelHold(at([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.05, 99.8, 50000]], gapFailed).inp), []);
   const gapHeld = ctx({ gaps: [{ date: "2026-11-10", dir: "up", edge: 99, far: 99.5, state: "filled_held", role: "support" }] });
   assert.deepEqual(levelHold(at([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.05, 99.8, 50000]], gapHeld).inp).map((h) => h.variant), ["gap:2026-11-10"]);
+  // v3, a real test: a touch is refused (named, counted) when the bar is a few cents, closes weak, or trades thin
+  const ref = (rows: Row[], cc = c) => levelHold(at(rows, cc).inp).map((h) => [h.variant, h.refused ?? "kept"]);
+  assert.deepEqual(ref([[100, 100.5, 99.9, 100.2, 50000], [99.1, 99.12, 99.0, 99.1, 50000]]), [["sma20", "small_bar"]], "a 12-cent bar on a $3 ADR: noise");
+  assert.deepEqual(ref([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.05, 99.2, 50000]]), [["sma20", "weak_close"]], "closed in the bottom of the bar");
+  assert.deepEqual(ref([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.05, 99.8, 5000]]), [["sma20", "low_volume"]], "0.15x the slot's volume");
+  assert.deepEqual(ref([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.05, 99.8, 50000]]), [["sma20", "kept"]], "a real test: 0.42 ADR bar, close in the top 60% (at least 40%), 1.5x");
+  assert.deepEqual(ref([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.2, 99.8, 50000]]), [], "20 cents short of the level is not a tag (tolerance min(0.15% = 14.85 cents, 0.07 ADR = 21 cents))");
+  assert.deepEqual(levelHold(at([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.12, 99.8, 50000]], ctx({ sma20: 99, adr: 1.5, adrPct: 1.5 })).inp), [], "on a 1.5% ADR name 0.07 ADR (10.5 cents) binds: 12 cents short is no tag");
+  assert.deepEqual(ref([[100, 100.5, 99.9, 100.2, 50000], [100.2, 100.3, 99.05, 99.8, 50000]], ctx({ sma5: 99.1, sma20: 99 })), [["sma20", "kept"]], "the 20-day over the nearer 5-day");
+  assert.equal(setupInfo("level_hold")!.dedupeMin, 24 * 60, "one per symbol per level per day");
+  assert.equal(setupInfo("level_reject")!.dedupeMin, 24 * 60);
 }
 
 // ---- low / high of day reversal -----------------------------------------------------------------------------------
@@ -182,20 +194,37 @@ assert.equal(new Date(sessionOpenMs("2026-07-14")).toISOString(), "2026-07-14T13
   assert.equal(buildDailyContext("x", series.slice(0, 10)), null, "too few bars");
 }
 
-// ---- grade arithmetic ----------------------------------------------------------------------------------------------
+// ---- grade arithmetic (v3: risk in ADR, the level's weight, volume; docs "Grade") --------------------------------------
 {
   const gs = settings;
-  const A = gradeCandidate({ side: "long", riskPct: 1.2, riskAdr: 0.4, hasCompany: true, setupKind: "tested", regime: regime("AGGRESSIVE"), groupLeading: true, dollarVol20: 150e6, earningsInSessions: null }, gs);
-  assert.deepEqual([A.grade, A.points, A.components.risk, A.components.regime], ["A", 11, 4, 2]);
-  const C = gradeCandidate({ side: "long", riskPct: 2.5, riskAdr: 1.2, hasCompany: false, setupKind: "builtin", regime: regime("NEUTRAL"), groupLeading: false, dollarVol20: 150e6, earningsInSessions: 2 }, gs);
-  assert.deepEqual([C.grade, C.points, C.components.risk, C.components.earnings], ["C", 3, 2, -2]);
-  const B = gradeCandidate({ side: "long", riskPct: 1.4, riskAdr: 0.9, hasCompany: false, setupKind: "builtin", regime: regime("DEFENSIVE"), groupLeading: false, dollarVol20: 150e6, earningsInSessions: 9 }, gs);
-  assert.deepEqual([B.grade, B.points], ["B", 6]);
+  const base = { side: "long" as const, riskPct: 1.2, riskAdr: 0.6, hasCompany: true, setupKind: "builtin" as const, regime: regime("NEUTRAL"), groupLeading: false, dollarVol20: 150e6, earningsInSessions: null, relVol: 2, levelName: "sma20" };
+  const A = gradeCandidate({ ...base, setupKind: "tested", regime: regime("AGGRESSIVE"), groupLeading: true }, gs);
+  assert.deepEqual([A.grade, A.points, A.components.risk, A.components.level, A.components.volume, A.components.regime, A.components.liquidity], ["A", 11, 3, 2, 2, 1, 0], "the most there is: 11");
+  // Friday's noise A (VRNS: a tag of the 5-day on 0.18x volume, a stop 0.43 ADR and 0.19% away) was A 8; now C
+  const noise = gradeCandidate({ ...base, riskPct: 0.19, riskAdr: 0.36, relVol: 0.18, levelName: "sma5" }, gs);
+  assert.deepEqual([noise.grade, noise.points, noise.components.risk, noise.components.level, noise.components.volume], ["C", 3, 1, 0, 0]);
+  // the risk band, in ADR
+  const rp = (adr: number, pct = 1) => riskPoints(pct, adr, gs);
+  assert.deepEqual([rp(0.36), rp(0.44), rp(0.45), rp(0.75), rp(1), rp(1.01), rp(1.5), rp(1.6), rp(2), rp(2.1)], [1, 1, 3, 3, 3, 2, 2, 1, 1, 0]);
+  assert.equal(rp(0.6, 4), 2, "a stop past 3% scores at most 2");
+  // volume and level weight count
+  const vol = (rv: number | null) => gradeCandidate({ ...base, relVol: rv }, gs).components.volume;
+  assert.deepEqual([vol(0.5), vol(0.75), vol(1.49), vol(1.5), vol(null)], [0, 1, 1, 2, 0]);
+  const lvl = (n: string) => gradeCandidate({ ...base, levelName: n }, gs).components.level;
+  assert.deepEqual([lvl("sma50"), lvl("prev_low"), lvl("gap"), lvl("vwap"), lvl("range_low"), lvl("sma5"), lvl("ema10")], [2, 2, 2, 1, 1, 0, 0]);
+  // an A on points with no volume point is a B, noted
+  const quiet = gradeCandidate({ ...base, setupKind: "tested", groupLeading: true, relVol: 0.5 }, gs);
+  assert.deepEqual([quiet.points, quiet.grade], [9, "B"]);
+  assert.ok(quiet.components.notes.some((n) => n.includes("volume")));
+  const B = gradeCandidate({ ...base, regime: regime("DEFENSIVE"), relVol: 1 }, gs);
+  assert.deepEqual([B.grade, B.points, B.components.regime], ["B", 7, 0]);
   assert.ok(B.components.notes.some((n) => n.includes("against the regime")));
-  const S = gradeCandidate({ side: "short", riskPct: 4, riskAdr: 1.5, hasCompany: false, setupKind: "user", regime: regime("DEFENSIVE"), groupLeading: false, dollarVol20: 50e6, earningsInSessions: undefined }, gs);
-  assert.deepEqual([S.points, S.components.setup, S.components.regime], [2, 0, 2], "short in DEFENSIVE gets the regime points");
+  const S = gradeCandidate({ ...base, side: "short", setupKind: "user", regime: regime("DEFENSIVE"), dollarVol20: 50e6, earningsInSessions: undefined, hasCompany: false }, gs);
+  assert.deepEqual([S.points, S.components.setup, S.components.regime, S.components.liquidity], [7, 0, 1, -1], "short in DEFENSIVE: the regime point; thin: -1");
   assert.ok(S.components.notes.includes("earnings date not checked: 0"));
-  const U = gradeCandidate({ side: "long", riskPct: 1, riskAdr: 0.3, hasCompany: false, setupKind: "builtin", regime: { label: null, score: null, asOf: null }, groupLeading: false, dollarVol20: 1e6, earningsInSessions: null }, gs);
+  const E = gradeCandidate({ ...base, earningsInSessions: 2 }, gs);
+  assert.deepEqual([E.points, E.components.earnings], [7, -2]);
+  const U = gradeCandidate({ ...base, regime: { label: null, score: null, asOf: null } }, gs);
   assert.ok(U.components.notes.includes("regime unknown: 0"));
   assert.equal(sessionsUntil("2026-11-24", "2026-11-27"), 3);
   assert.equal(sessionsUntil("2026-11-27", "2026-11-30"), 1, "over a weekend");
@@ -254,9 +283,54 @@ assert.equal(new Date(sessionOpenMs("2026-07-14")).toISOString(), "2026-07-14T13
   const p3 = runPass({ date: DATE, contexts, bars: barsBy, watch: new Map(), regime: regime(), rotation: noRotation, settings, dedupe: new Dedupe(), evaluated: ev });
   assert.equal(p3.barsEvaluated, 0, "no bar is evaluated twice");
   // a refused stop is counted, not raised
-  const thin = runPass({ date: DATE, contexts: new Map([["CCC", ctx({ symbol: "CCC", adr: 0.05, adrPct: 0.05 })]]), bars: new Map([["CCC", bars([...RANGE, [100.8, 108, 100.7, 107.9, 80000]])]]), watch: new Map(), regime: regime(), rotation: noRotation, settings, dedupe: new Dedupe(), evaluated: new Map() });
+  const thin = runPass({ date: DATE, contexts: new Map([["CCC", ctx({ symbol: "CCC", adr: 0.05, adrPct: 0.05 })]]), bars: new Map([["CCC", bars([...RANGE, [100.8, 108, 100.7, 107.9, 80000]])]]), watch: new Map(), regime: regime(), rotation: noRotation, settings: { ...settings, minAdrPct: 0 }, dedupe: new Dedupe(), evaluated: new Map() });
   assert.equal(thin.candidates.filter((c) => c.setupKey === "orb_breakout").length, 0);
   assert.equal(thin.refused["orb_breakout:no_level_inside_max"], 1);
+
+  // v3 noise rules on one pass. AAA's ORB at 9:50: entry 101.5, stop under VWAP, 0.39 ADR; its new session high on the
+  // same bar is the same trade: one candidate, the other named in facts.also and counted
+  assert.equal(a.facts.also, "new_high_volume");
+  assert.equal(p1.refused["new_high_volume:same_bar"], 2, "AAA and BBB");
+  assert.ok(Math.abs(a.riskAdr - 0.3861) < 1e-3, String(a.riskAdr));
+  // a stop under minRiskAdr is inside the noise: refused, named, counted
+  const strict = runPass({ date: DATE, contexts, bars: barsBy, watch: new Map(), regime: regime(), rotation: noRotation, settings: { ...settings, minRiskAdr: 0.5 }, dedupe: new Dedupe(), evaluated: new Map() });
+  assert.equal(strict.candidates.filter((c) => c.setupKey === "orb_breakout").length, 0);
+  assert.equal(strict.refused["orb_breakout:stop_inside_noise"], 2);
+  // a name whose ADR is under minAdrPct (1%) is not scanned (Friday: TECH 0.17%, MKTX 0.20%: trades of cents)
+  const pinned = runPass({ date: DATE, contexts: new Map([["PIN", ctx({ symbol: "PIN", adr: 0.5, adrPct: 0.5 })]]), bars: new Map([["PIN", bars(rows)]]), watch: new Map(), regime: regime(), rotation: noRotation, settings, dedupe: new Dedupe(), evaluated: new Map() });
+  assert.deepEqual([pinned.candidates.length, pinned.skipped.adr_under_min, pinned.symbolsScanned], [0, 1, 0]);
+}
+
+// ---- v3: a long and a short on the same name (settleBar) --------------------------------------------------------------
+{
+  const T = Date.parse("2026-11-24T15:00:00.000Z");
+  const mk = (side: "long" | "short", points: number, key = side === "long" ? "level_hold" : "level_reject"): Ready =>
+    ({ h: { setupKey: key, side, variant: "x", why: "", facts: {} }, setupOwner: "builtin", base: `${DATE}|SYM|${side}|${key}|builtin|x`, window: 60, g: { points } } as unknown as Ready);
+  const run = (rs: Ready[], at: number, d: Dedupe, refused: Record<string, number> = {}) => ({ kept: settleBar(rs, "SYM", at, DATE, settings, d, refused).map((r) => `${r.h.side}:${r.g.points}`), refused });
+  // the same bar, 8 against 7: price pinned between a support and a resistance; neither
+  const same = run([mk("long", 8), mk("short", 7)], T, new Dedupe());
+  assert.deepEqual([same.kept, same.refused], [[], { "level_hold:conflict": 1, "level_reject:conflict": 1 }]);
+  // the same bar, 9 against 6: the long is clearly better and kept
+  assert.deepEqual(run([mk("long", 9), mk("short", 6)], T, new Dedupe()).kept, ["long:9"]);
+  // a later bar: a short 10 minutes after a 6-point long is refused unless 2 points better; after 30 minutes it stands
+  const d = new Dedupe();
+  assert.deepEqual(run([mk("long", 6)], T, d).kept, ["long:6"]);
+  assert.deepEqual(run([mk("short", 7)], T + 10 * 60_000, d).kept, [], "inside the window, not clearly better");
+  assert.deepEqual(run([mk("long", 6)], T + 15 * 60_000, d).kept, [], "a refused short still marks the chop");
+  const d2 = new Dedupe();
+  run([mk("long", 6)], T, d2);
+  assert.deepEqual(run([mk("short", 8)], T + 10 * 60_000, d2).kept, ["short:8"], "2 points better: kept");
+  const d3 = new Dedupe();
+  run([mk("long", 6)], T, d3);
+  assert.deepEqual(run([mk("short", 6)], T + 31 * 60_000, d3).kept, ["short:6"], "past conflictWindowMin");
+  // after a restart the stored long seeds the side with unknown points: a short inside the window is refused
+  const d4 = new Dedupe();
+  d4.seed(`${DATE}|SYM|long|level_hold|builtin|sma20`, T);
+  assert.deepEqual(run([mk("short", 11)], T + 5 * 60_000, d4).kept, []);
+  // several setups on one side and bar: one, the most points; a named setup (gap and go) is never merged away
+  const m = run([mk("long", 6, "vwap_reclaim"), mk("long", 7, "orb_reversal")], T, new Dedupe());
+  assert.deepEqual([m.kept, m.refused], [["long:7"], { "vwap_reclaim:same_bar": 1 }]);
+  assert.deepEqual(run([mk("long", 8, "orb_breakout"), mk("long", 6, "gap_and_go")], T, new Dedupe()).kept, ["long:6"]);
 }
 
 // ---- user setups: stored as data per account, BigIdea criteria on daily bars, served to their owner only ---------------

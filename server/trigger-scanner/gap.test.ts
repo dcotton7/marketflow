@@ -187,7 +187,7 @@ const fire = (c: DailyContext, rows: Row[]) => {
   assert.ok(keys.includes("gap_and_go"), keys.join());
   assert.ok(!keys.includes("orb_breakout"), "only gap_and_go is raised on that bar");
   const g0 = res.candidates.find((x) => x.setupKey === "gap_and_go")!;
-  assert.deepEqual([g0.facts.days_since_gap, g0.facts.pivot_kind, g0.facts.pivot, g0.facts.also], [0, "opening_range", 107.5, "orb_breakout"]);
+  assert.deepEqual([g0.facts.days_since_gap, g0.facts.pivot_kind, g0.facts.pivot, g0.facts.also], [0, "opening_range", 107.5, "orb_breakout,new_high_volume"], "v3: the new high on the same bar is one candidate too");
   const noGap = ctx({ symbol: "NOGP", adr: 2, adrPct: 2, prevClose: 105.5, prevHigh: 106, prevLow: 104, avgVol50: 1_000_000 });
   const plain = pass(noGap, day0);
   assert.ok(plain.candidates.some((x) => x.setupKey === "orb_breakout") && !plain.candidates.some((x) => x.setupKey === "gap_and_go"), "no gap: ORB as usual");

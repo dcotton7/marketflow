@@ -5,7 +5,7 @@
  * a later settings row can replace. A changed default gets a new RULE_VERSION so stored rows keep their meaning.
  */
 
-export const RULE_VERSION = "ts-2026-11-26-v2"; // v2: gap_and_go / gap_down_and_go added
+export const RULE_VERSION = "ts-2026-11-28-v3"; // v2: gap_and_go / gap_down_and_go added; v3: tightened (noise floors, level test, conflict, new grade)
 
 export function scannerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.TRIGGER_SCANNER ?? "").trim().toLowerCase() === "on";
@@ -52,6 +52,23 @@ export interface ScannerSettings {
   inRangeAdr: number;
   /** Leader Shakeout hits from this many sessions back are watched. */
   shakeoutLookbackSessions: number;
+  /** Tightening (Don, 28 Nov: "scanner loose: Tighten"; docs/trigger-scanner.md "Noise rules"). A name whose 20-day
+   *  ADR is under minAdrPct % is not scanned (a pinned or broken name: its "trades" are cents). */
+  minAdrPct: number;
+  /** A candidate whose stop is closer than minRiskAdr ADR to the entry is refused (stop_inside_noise). */
+  minRiskAdr: number;
+  /** Level hold / reject, a real test: the bar reaches the level within min(touchTolPct %, touchTolAdr ADR), its range
+   *  is at least levelMinRangeAdr ADR, it closes in the top (short: bottom) levelCloseShare of its range, on at
+   *  least levelMinRelVol x the slot's volume. */
+  touchTolAdr: number;
+  levelMinRangeAdr: number;
+  levelCloseShare: number;
+  levelMinRelVol: number;
+  /** A long and a short on the same name within conflictWindowMin minutes: on the same bar the side ahead by
+   *  conflictKeepPoints grade points is kept, else neither; a later opposite one is refused unless it is that far
+   *  ahead of the earlier one. */
+  conflictWindowMin: number;
+  conflictKeepPoints: number;
   /** Stop rule. */
   maxRiskPct: number;
   minStopAdr: number;
@@ -65,6 +82,18 @@ export interface ScannerSettings {
   earningsWithinSessions: number;
   gradeA: number;
   gradeB: number;
+  /** Grade, risk in ADR: best band [riskBestLoAdr, riskBestHiAdr] 3, up to riskOkHiAdr 2, under the band or up to
+   *  riskWideAdr 1, wider 0; a stop past riskCapPct % scores at most riskCapPoints. */
+  riskBestLoAdr: number;
+  riskBestHiAdr: number;
+  riskOkHiAdr: number;
+  riskWideAdr: number;
+  riskCapPct: number;
+  riskCapPoints: number;
+  /** Grade, the trigger bar's relative volume: >= volStrong 2, >= volOk 1. An A needs at least gradeAMinVolume of them. */
+  volStrong: number;
+  volOk: number;
+  gradeAMinVolume: number;
   /** Rotation: "hot" when ahead of SPY by this much today, or over 5 sessions. */
   hotTodayPct: number;
   hot5dPct: number;
@@ -132,6 +161,14 @@ export const DEFAULTS: ScannerSettings = {
   newExtremeMinRelVol: 1.5,
   inRangeAdr: 0.5,
   shakeoutLookbackSessions: 5,
+  minAdrPct: 1,
+  minRiskAdr: 0.35,
+  touchTolAdr: 0.07,
+  levelMinRangeAdr: 0.05,
+  levelCloseShare: 0.4,
+  levelMinRelVol: 0.5,
+  conflictWindowMin: 30,
+  conflictKeepPoints: 2,
   maxRiskPct: 5,
   minStopAdr: 0.25,
   stopBufferAdr: 0.1,
@@ -142,6 +179,15 @@ export const DEFAULTS: ScannerSettings = {
   earningsWithinSessions: 3,
   gradeA: 8,
   gradeB: 5,
+  riskBestLoAdr: 0.45,
+  riskBestHiAdr: 1,
+  riskOkHiAdr: 1.5,
+  riskWideAdr: 2,
+  riskCapPct: 3,
+  riskCapPoints: 2,
+  volStrong: 1.5,
+  volOk: 0.75,
+  gradeAMinVolume: 1,
   hotTodayPct: 0.75,
   hot5dPct: 2,
   gapFrom: "prior_high",
@@ -185,6 +231,12 @@ const num = (v: unknown, d: number, min = 0) => {
   return v !== undefined && v !== "" && Number.isFinite(n) && n > min ? n : d;
 };
 
+/** The same, but 0 is allowed (it switches that rule off). */
+const num0 = (v: unknown, d: number) => {
+  const n = Number(v);
+  return v !== undefined && v !== "" && Number.isFinite(n) && n >= 0 ? n : d;
+};
+
 /** Defaults with the environment's overrides. A bad value keeps the default. */
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): ScannerSettings {
   const tier = (env.TRIGGER_SCANNER_TIER ?? "").trim().toLowerCase();
@@ -197,6 +249,11 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ScannerSetti
     shortlistMax: Math.round(num(env.TRIGGER_SCANNER_SHORTLIST_MAX, DEFAULTS.shortlistMax)),
     gapFrom: (env.TRIGGER_SCANNER_GAP_FROM ?? "").trim().toLowerCase() === "prior_close" ? "prior_close" : "prior_high",
     goMaxDays: Math.round(num(env.TRIGGER_SCANNER_GO_MAX_DAYS, DEFAULTS.goMaxDays)),
+    minAdrPct: num0(env.TRIGGER_SCANNER_MIN_ADR_PCT, DEFAULTS.minAdrPct),
+    minRiskAdr: num0(env.TRIGGER_SCANNER_MIN_RISK_ADR, DEFAULTS.minRiskAdr),
+    levelMinRelVol: num0(env.TRIGGER_SCANNER_LEVEL_MIN_REL_VOL, DEFAULTS.levelMinRelVol),
+    conflictWindowMin: num0(env.TRIGGER_SCANNER_CONFLICT_MIN, DEFAULTS.conflictWindowMin),
+    gradeA: Math.round(num(env.TRIGGER_SCANNER_GRADE_A, DEFAULTS.gradeA)),
     maxStoredPerDay: Math.round(num(env.TRIGGER_SCANNER_MAX_PER_DAY, DEFAULTS.maxStoredPerDay)),
     feed: feed === "iex" ? "iex" : "sip",
   };

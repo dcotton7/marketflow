@@ -44,6 +44,18 @@ export function levelsAt(ctx: DailyContext, s: SessionState, i: number): Level[]
   return out;
 }
 
+/**
+ * How much a level matters (Don: "a very logical exit at an sma, vwap etc"; the brief: weigh the 20/50-day, the
+ * prior day's high/low and gap edges over the 5 and 10-day). heavy 2: the 20 and 50-day SMA, the 20-day EMA, the
+ * previous high/low, a gap edge, a post-gap consolidation edge; intraday 1: VWAP, the opening range, the day's
+ * low/high; light 0: the 5 and 10-day SMA and the 10-day EMA (they sit inside a few days' noise).
+ */
+const HEAVY = new Set<string>(["sma20", "sma50", "ema20", "prev_low", "prev_high", "gap", "consolidation_low", "consolidation_high"]);
+const INTRADAY = new Set<string>(["vwap", "range_low", "range_high", "low_of_day", "high_of_day"]);
+export function levelWeight(name: string): 0 | 1 | 2 {
+  return HEAVY.has(name) ? 2 : INTRADAY.has(name) ? 1 : 0;
+}
+
 export interface StopRule {
   maxRiskPct: number;
   minStopAdr: number;

@@ -27,9 +27,15 @@ The flag is `TRIGGER_SCANNER=on`. It is unset in the repo.
 | `TRIGGER_SCANNER_MIN_DOLLAR_VOL` | 30000000 | Universe floor: 20-day average dollar volume |
 | `TRIGGER_SCANNER_SHORTLIST_MAX` | 300 | Names given bars in the shortlist tier |
 | `TRIGGER_SCANNER_MAX_PER_DAY` | 5000 | Candidates stored a day |
+| `TRIGGER_SCANNER_MIN_ADR_PCT` | 1 | Names with a 20-day ADR under this % are not scanned (noise rules, below; 0 turns it off) |
+| `TRIGGER_SCANNER_MIN_RISK_ADR` | 0.35 | A stop closer than this (ADR) to the entry is refused as inside the noise (0 off) |
+| `TRIGGER_SCANNER_LEVEL_MIN_REL_VOL` | 0.5 | Level hold / reject: the bar's least relative volume (0 off) |
+| `TRIGGER_SCANNER_CONFLICT_MIN` | 30 | A long and a short on one name within this many minutes conflict (0 off) |
+| `TRIGGER_SCANNER_GRADE_A` | 8 | Points for an A |
 
-Every trigger threshold is in `settings.ts` `DEFAULTS`. `RULE_VERSION` (`ts-2026-11-26-v2`; v2 added gap and go) is stored on every row,
-so a later change to a threshold never changes the meaning of stored rows.
+Every trigger threshold is in `settings.ts` `DEFAULTS`. `RULE_VERSION` (`ts-2026-11-28-v3`; v2 added gap and go; v3 the noise rules and the
+new grade, below) is stored on every row, so a later change to a threshold never changes the meaning of stored rows.
+Rows of `ts-2026-11-26-v2` and before carry the old grade (11 points, 4 of them for any stop within 1.5%).
 
 **Lines changed outside the new folder:**
 - `server/routes.ts`: mounts `/api/triggers`.
@@ -134,7 +140,7 @@ measured. A measured per-name curve needs about 20 days of stored 5-minute histo
 | `orb_breakout` / `orb_breakdown` | long / short | The range is the first `orMinutes` 15 (three bars). This bar is after the range and closes within `orbUntilMin` 120 minutes of the open. It is the **first** close above the range high (or under the low). Its volume is at least `orbMinRelVol` 1.5x the slot's norm | 1 day |
 | `failed_orb` / `orb_reversal` | short / long | An earlier bar after the range closed beyond the high (low). The break reached at least `failedBreakMinAdr` 0.1 ADR beyond the range. This bar is the first close back inside | 90 min |
 | `vwap_reclaim` / `vwap_loss` | long / short | Session VWAP. This bar closes across VWAP by at least `vwapMinCrossAdr` 0.05 ADR, and each of the `vwapPriorBars` 3 bars before it closed on the other side | 60 min |
-| `level_hold` / `level_reject` | long / short | Daily levels: SMA 5/10/20/50, EMA 10/20, previous low/high, and gap edges whose role fits. Earlier today price was at least `levelApproachAdr` 0.3 ADR on the right side. The previous bar closed on the right side. This bar tags the level within `touchTolPct` 0.15% and closes back. One hit a bar: the level nearest the close. The variant is the level name | 120 min per level |
+| `level_hold` / `level_reject` | long / short | Daily levels: SMA 5/10/20/50, EMA 10/20, previous low/high, and gap edges whose role fits. Earlier today price was at least `levelApproachAdr` 0.3 ADR on the right side. The previous bar closed on the right side. This bar reaches the level within min(`touchTolPct` 0.15%, `touchTolAdr` 0.07 ADR) and closes back. **A real test (v3):** the bar's range is at least `levelMinRangeAdr` 0.05 ADR, it closes in the top (short: bottom) `levelCloseShare` 40% of that range, on at least `levelMinRelVol` 0.5x its slot's volume; a touch that fails is counted as `small_bar`, `weak_close` or `low_volume`. One hit a bar and side: the **heaviest** level touched (20/50-day SMA, 20-day EMA, previous high/low, gap edge before the 5/10-day SMA and 10-day EMA), the nearest to the close among equals. The variant is the level name | **1 day** per level (v3; was 120 min) |
 | `lod_reversal` / `hod_reversal` | long / short | This bar or the one before set a new session low (high), not on the first bar. The open is at least `reversalMinMoveAdr` 0.5 ADR from that extreme. This bar closes up (down), in the top (bottom) `reversalCloseShare` 60% of its range, past the previous close | 60 min |
 | `new_high_volume` / `new_low_volume` | long / short | After the range, a close above every earlier high (under every earlier low). The bar's volume and the day's volume so far are both at least `newExtremeMinRelVol` 1.5x their norms | 60 min |
 | `gap_and_go` / `gap_down_and_go` | long / short | A true gap (open beyond the prior high / low) on volume that has held, within `goMaxDays` 10 sessions (the gap day is day 0). The first close beyond the **pivot**: the top (bottom) of the post-gap consolidation, which may be below the gap-day high. Days 1-2 use today's opening-range high (or the gap-day high); day 0 uses the opening-range high. The close must clear it by `goBreakAdr` 0.05 ADR, on `goRelVol` 1.5x. A later close beyond the gap-day high is a second variant, `gap_high_break`. On day 0 it replaces `orb_breakout` / `orb_breakdown` on the same bar (`facts.also`). The full rule is in the next section | once per gap and variant per day; at most `goMaxFires` 2 per gap |
@@ -261,6 +267,45 @@ It differs in that it:
 - needs no close > open;
 - adds the held / n-day / pivot logic.
 
+## Noise rules (v3, 28 Nov: Don, "scanner loose: Tighten")
+
+The first live session (Friday 27 Nov, a half day, 9:52 to 10:45 ET, 1,587 names) stored 2,211 candidates, 1,048 of
+them A. Its first pass alone stored 519 (212 A). Most were noise: 1,075 level holds/rejects in 53 minutes, a median
+trigger bar of 0.14 ADR on 0.36x its slot's volume, more than half of the "tags" never reaching the level, and every
+single A was a stop of 0.30 to 0.75 ADR that got the grade's 4 risk points for being within 1.5%. Each rule below is a
+setting; the numbers are Friday's whole session replayed (see "Friday, before and after").
+
+| Rule | Setting (default) | Refusal counted in the run row | Friday |
+|---|---|---|---|
+| A name moving under 1% a day is not scanned: its "trades" are cents (TECH 0.17%, MKTX 0.20%, AES 0.27% on Friday: pinned or bad daily data) | `minAdrPct` 1 | `skipped.adr_under_min` | 43 |
+| A stop closer than 0.35 ADR to the entry is inside the noise (a 5-minute bar was 0.14 ADR, the day's range at the trigger 0.53 ADR) | `minRiskAdr` 0.35 | `<setup>:stop_inside_noise` | 481 |
+| Level hold / reject: a real test (range, close, volume, touch; above) | `levelMinRangeAdr` 0.05, `levelCloseShare` 0.4, `levelMinRelVol` 0.5, `touchTolAdr` 0.07 | `level_hold:small_bar`, `:weak_close`, `:low_volume` | 58, 470, 303 (+19 no touch) |
+| Level hold / reject: one per symbol per level per day | registry `dedupeMin` 1 day | `deduped` | 0 (the session was 53 minutes; the old window was 120) |
+| Several built-in setups on one name, one side, one bar are one trade (an ORB and a new high): one candidate, the most points; the others named in `facts.also`. Gap and go and a daily setup in range take them in and are never merged away; a user's own setup is left alone | none | `<setup>:same_bar` | 73 |
+| A long and a short on one name: on the same bar the side ahead by 2 points is kept, else neither (price pinned between a support and a resistance); on a later bar inside 30 minutes the new side is refused unless 2 points ahead of the earlier one, which is already served and stands. A refused side still counts as the latest, so a name that keeps flipping stays out. After a restart the stored side has unknown points, so the other side is refused inside the window | `conflictWindowMin` 30, `conflictKeepPoints` 2 | `<setup>:conflict` | 40 |
+
+Not done, on purpose: the trend facts stay facts (no filter, no grade); gap and go's rules are unchanged; the scanner
+has no 200-day level (the 200-day is only in the trend facts, which by Don's word must not feed the rules), so "weigh
+the 200-day" waits for a decision to add it as a level.
+
+### Friday, before and after (stored v2 candidates replayed under v3)
+
+| | Old candidates | Old A / B / C | New candidates | New A / B / C | Names (old / new) | A names (old / new) |
+|---|---|---|---|---|---|---|
+| First pass (9:52, bars 9:30-9:50) | 519 | 212 / 256 / 51 | 84 | 5 / 53 / 26 | 418 / 79 | 181 / 5 |
+| Whole session (to 10:45) | 2,211 | 1,048 / 994 / 169 | 724 | 32 / 434 / 258 | 1,084 / 600 | 588 / 31 |
+
+By setup, the whole session: level_hold 676 (275 A) to 67 (8 A); level_reject 399 (173 A) to 40 (3 A); vwap_reclaim
+356 (204 A) to 153 (4 A); orb_reversal 329 (157 A) to 216 (7 A); lod_reversal 146 (67 A) to 81 (3 A); vwap_loss 137
+(82 A) to 69 (0 A); the rest 168 (90 A) to 98 (7 A). Long and short on one name within 15 minutes: 309 pairs to 7.
+
+What the replay could and could not do: the rules that read the trigger bar, the stop and the stored fields (ADR,
+stop distance, the level test, the dedupe, same bar, conflict, the grade) ran through the scanner's own functions
+(`levelTest`, `levelTouched`, `settleBar`, `gradeCandidate`, `Dedupe`) on the stored rows. Not replayable without
+the bars: the heaviest-level pick (a bar that tagged a 5-day and a 20-day stored only the nearer one), a level touch
+that v2 deduped inside 120 minutes but v3 would raise after an earlier touch failed the test, and the candidates v2
+refused for its stop (254 `no_level_inside_max` in the first pass), which v3 refuses too.
+
 ## The stop rule
 
 **Which level** (`levels.ts`):
@@ -273,7 +318,9 @@ It differs in that it:
 
 **Risk** is measured from the entry (the trigger bar's close) to the stop, in % and in ADR. When the nearest usable
 level puts the risk over `maxRiskPct` **5%**, the candidate is **refused**. Refusals are counted per setup in the run
-row, as `no_level_inside_max` (or `no_level` when there is nothing on that side at all).
+row, as `no_level_inside_max` (or `no_level` when there is nothing on that side at all). A stop that lands closer than
+`minRiskAdr` 0.35 ADR to the entry (the level at 0.25 ADR or more plus its buffer can still be that close) is refused
+as `stop_inside_noise` (v3).
 
 **Gaps** (Don: "Filled (green) is support tested and failed (red) is resistance"; "support becomes resistance and
 vice versa"). Gaps on daily bars over 60 sessions:
@@ -293,23 +340,26 @@ Every other level's role comes from where it sits against the entry, so a broken
 in Don's order within 5%". The brief asks for the nearest valid level. Its definitions are kept: SMAs of closes
 through the bar, and the previous day's low.
 
-## Grade (Anitir spec 5.e, 11 points)
+## Grade (Anitir spec 5.e, 11 points; v3)
 
 | Component | Points |
 |---|---|
-| `risk` | stop at most 1.5% or 0.5 ADR: **4**; at most 3% or 1 ADR: **2**; at most 5%: **0** |
-| `exitLogic` | the stop level has company: 1 |
-| `setup` | tested (Leader Shakeout): 2; built-in, untested: 1; a user's setup: 0 (until it has a record) |
-| `regime` | AGGRESSIVE long or DEFENSIVE short: 2; NEUTRAL: 1; against: 0, noted; unknown: 0, noted |
+| `risk` | the stop's distance in ADR: 0.45 to 1.0 ADR (`riskBestLoAdr`, `riskBestHiAdr`): **3**; over 1.0 to 1.5 (`riskOkHiAdr`): **2**; 0.35 to 0.45, or over 1.5 to 2.0 (`riskWideAdr`): **1**; wider: **0**. A stop past `riskCapPct` 3% scores at most `riskCapPoints` 2 (noted). Under 0.35 ADR never reaches the grade (`stop_inside_noise`) |
+| `level` | the weight of the level the trade is about (a level hold's tagged level, every other setup's stop level): the 20/50-day SMA, 20-day EMA, previous high/low, a gap edge, a post-gap consolidation edge: **2**; VWAP, the opening range, the day's low/high: **1**; the 5/10-day SMA, 10-day EMA: **0** |
+| `volume` | the trigger bar against its slot's norm: at least `volStrong` 1.5x: **2**; at least `volOk` 0.75x: **1**; less or unknown: 0 |
+| `exitLogic` | the stop level has company (another level within 0.3 ADR): 1 |
+| `setup` | tested (Leader Shakeout): 1; built-in untested, or a user's setup: 0 |
+| `regime` | not against it (AGGRESSIVE long, DEFENSIVE short, or NEUTRAL): 1; against: 0, noted; unknown: 0, noted |
 | `rotation` | the name's size bucket or sector is leading: 1 |
-| `liquidity` | 20-day dollar volume at least $100M: 1 |
+| `liquidity` | 20-day dollar volume under $100M: **-1** |
 | `earnings` | a report within 3 sessions: -2; calendar unavailable: 0, noted "earnings date not checked" |
 
-**A** is 8 or more, **B** 5-7, **C** 4 or less. The components are stored on every row (`grade_components`), so a
-retune can regrade stored rows at read time.
-
-Note: in a NEUTRAL tape, any built-in trigger on a liquid name reaches **A** when its stop is within 1.5% and has
-company. Expect many A's until `gradeA` moves or setup records exist.
+**A** is 8 or more **and** a volume point of at least `gradeAMinVolume` 1 (an A on points on a bar under 0.75x its
+norm is a B, noted); **B** 5-7; **C** 4 or less. At most 11 (a tested setup); a built-in setup tops out at 10, so its A
+needs most of risk, level and volume. The components are stored on every row (`grade_components`, now with `level` and
+`volume`), so a retune can regrade stored rows at read time. v2 (rows before `ts-2026-11-28-v3`): risk 4/2/0 by %, setup
+2/1/0, regime 2/1/0, liquidity +1, no level or volume; in a NEUTRAL tape every liquid built-in trigger with a stop
+within 1.5% and company was an A, which is why Friday had 1,048 of them.
 
 **Rotation** (`rotation.ts`) uses the scanner's own bars and daily closes:
 - **Size:** MGK, MDY, IWM and QQQ against SPY, today and over 5 sessions. "Hot" means ahead by at least 0.75% today

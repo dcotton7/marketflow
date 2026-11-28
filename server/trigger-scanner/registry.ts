@@ -56,8 +56,8 @@ export const TRIGGERS: TriggerModule[] = [
     b("vwap_loss", "short", "Close back under session VWAP after N closes over it", ["vwapPriorBars", "vwapMinCrossAdr"], 60),
   ] },
   { key: "level", fn: levelHold, setups: [
-    b("level_hold", "long", "Tagged a daily level (SMA/EMA, previous low/high, support gap) and closed back above", ["touchTolPct", "levelApproachAdr"], 120),
-    b("level_reject", "short", "Tagged a daily level (resistance) from below and closed back under", ["touchTolPct", "levelApproachAdr"], 120),
+    b("level_hold", "long", "Tagged a daily level (SMA/EMA, previous low/high, support gap) and closed back above, on a real test (range, close, volume)", ["touchTolPct", "touchTolAdr", "levelApproachAdr", "levelMinRangeAdr", "levelCloseShare", "levelMinRelVol"], DAY),
+    b("level_reject", "short", "Tagged a daily level (resistance) from below and closed back under, on a real test (range, close, volume)", ["touchTolPct", "touchTolAdr", "levelApproachAdr", "levelMinRangeAdr", "levelCloseShare", "levelMinRelVol"], DAY),
   ] },
   { key: "day_extreme", fn: dayExtremeReversal, setups: [
     b("lod_reversal", "long", "New low of day after a flush, then a strong up close", ["reversalMinMoveAdr", "reversalCloseShare"], 60),

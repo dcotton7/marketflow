@@ -134,6 +134,9 @@ export interface TriggerHit {
   companyIf?: { level: LevelName; reason: string };
   /** Another setup's hit on the same bar and side that this one replaces (noted in facts.also). */
   replaces?: string;
+  /** The trigger saw its pattern but the bar failed a noise test (level hold: no real test): counted in the run row
+   *  as `<setup>:<reason>`, never raised. */
+  refused?: string;
 }
 
 export interface StopPick {
@@ -151,6 +154,10 @@ export interface StopPick {
 
 export interface GradeComponents {
   risk: number;
+  /** The weight of the level the trade is about (v3): heavy 2, intraday 1, light 0. Absent on rows before v3. */
+  level?: number;
+  /** The trigger bar's relative volume (v3): 0-2. Absent on rows before v3. */
+  volume?: number;
   exitLogic: number;
   setup: number;
   regime: number;
